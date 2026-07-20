@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "computedHash": "253570c46990ea018dd4520dba80cd77c35f9e5a8654057da1812face7be30cd"
+    },
+    "business-model": {
+      "source": "phuryn/pm-skills",
+      "sourceType": "github",
+      "skillPath": "pm-product-strategy/skills/business-model/SKILL.md",
+      "computedHash": "c6eee0cd2d102bb2982a41c7e6ec49515146be622858f76d5a5e1977e144e755"
+    },
+    "clean-code-guard": {
+      "source": "amElnagdy/guard-skills",
+      "sourceType": "github",
+      "skillPath": "skills/clean-code-guard/SKILL.md",
+      "computedHash": "a037fd57c8fa0b7bd84cb274b2ea816e16622edb0245a5c2c6f23d8244eeb634"
+    },
+    "docs-guard": {
+      "source": "amElnagdy/guard-skills",
+      "sourceType": "github",
+      "skillPath": "skills/docs-guard/SKILL.md",
+      "computedHash": "aa78378b4e172bfc0ada76edc6b000782a7e352d240a3d51cd8da8e05102b449"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "781bd6d3f9b19f8c9af6b53d8d0e4876d0183841b565db34ca7092ffa412d111"
+    },
+    "gsd-mvp-phase": {
+      "source": "open-gsd/gsd-core",
+      "sourceType": "github",
+      "skillPath": "skills/gsd-mvp-phase/SKILL.md",
+      "computedHash": "a22e370d9f340e3336197546ed83187d777b7bdefb8d719ad79b4d3cf84a6bc7"
+    },
+    "product-brainstorming": {
+      "source": "anthropics/knowledge-work-plugins",
+      "sourceType": "github",
+      "skillPath": "product-management/skills/product-brainstorming/SKILL.md",
+      "computedHash": "37ee877a45c2dba5a5f68d51bed1593d421ece51db81fcf14f7ffb22ce74710e"
+    },
+    "test-guard": {
+      "source": "amElnagdy/guard-skills",
+      "sourceType": "github",
+      "skillPath": "skills/test-guard/SKILL.md",
+      "computedHash": "1b16faf306e977fefe738c5b0c2cace6c3759b848ca92aa3bf1de549814ef241"
+    }
+  }
+}

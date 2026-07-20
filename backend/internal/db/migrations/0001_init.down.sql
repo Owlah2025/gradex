@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS fake_entitlements;
+DROP TABLE IF EXISTS progress;
+DROP TABLE IF EXISTS videos;
+DROP TABLE IF EXISTS lessons;
+DROP TABLE IF EXISTS sections;
+DROP TABLE IF EXISTS courses;
+DROP TYPE IF EXISTS video_status;

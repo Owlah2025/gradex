@@ -1,0 +1,5 @@
+# Local secrets / environment config — never commit, use .env.example instead
+.env
+
+# Personal Claude Code permissions/config — machine-local, not shared
+.claude/settings.local.json
