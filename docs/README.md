@@ -73,7 +73,10 @@ Create the best online learning experience for university students by delivering
 | PROJECT_VISION.md | Product vision |
 | PRD.md | Product requirements |
 | BUSINESS_RULES.md | Business logic |
+| DECISIONS.md | Decision log |
 | CODING_STANDARDS.md | Coding guidelines |
+| GLOSSARY.md | Domain glossary |
+| superpowers/specs/ | Technical design specs |
 
 ---
 
