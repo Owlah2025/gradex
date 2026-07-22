@@ -33,7 +33,7 @@ Gradex exists to give Gulf university students a course platform that treats the
 
 ## Student
 
-Gulf university students (primarily Kuwait) seeking to master their coursework and build industry-ready skills. Primary persona: Fahd, 19, Kuwait, Computer Science, wants A's in first-year courses, frustrated by overpriced platforms with no mentorship. Secondary: bootcamp/self-taught learners (e.g. Ali, wants a systematic CS curriculum) and high schoolers prepping for university (e.g. Amjad, prepping for the CS placement test).
+Gulf university students (primarily Kuwait) seeking to master their coursework and build industry-ready skills. Primary persona: Fahd, 19, Kuwait, Computer Science, wants A's in first-year courses, frustrated by overpriced platforms with no mentorship. A second primary persona is intentionally left blank pending further research (see §12 Open Questions). Distinct from those primary personas, Secondary Users are a lower-priority tier: bootcamp/self-taught learners (e.g. Ali, wants a systematic CS curriculum) and high schoolers prepping for university (e.g. Amjad, prepping for the CS placement test).
 
 ## Instructor
 
@@ -53,10 +53,13 @@ Gradex team members responsible for course approval/moderation, user management,
 - Purchase flow (single course or single chapter)
 - Video upload, processing, and HLS playback (see video-streaming-design.md)
 - Per-lesson progress tracking
-- Downloadable lab materials (project files + guide)
+- Downloadable lesson resources (slides, notes, readings) and lab materials (project files + guide) — two separate per-lesson categories (see [DECISIONS.md](DECISIONS.md) D-011)
 - Instructor course/section/lesson builder (own courses only)
 - Instructor analytics view (earnings/payouts are admin-managed, not instructor-facing in v1)
 - Admin user management, course approval, revenue dashboard, instructor payouts, refunds, moderation
+- Transactional notifications (email + in-app center) — course approval/rejection, purchase receipt, password reset (see §5 Notifications)
+- Coupons — admin-managed discount codes (percentage/fixed, optional free-access), applied at checkout before the gateway (see [DECISIONS.md](DECISIONS.md) D-012, [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md))
+- Live office hours — one-off scheduled sessions on an external link (Zoom/Meet/Discord); Gradex owns scheduling + access control + event-driven notice, not the video (see [DECISIONS.md](DECISIONS.md) D-013, [live-office-hours-design.md](superpowers/specs/2026-07-22-live-office-hours-design.md))
 
 ## V1 / Fast-Follow
 
@@ -65,9 +68,10 @@ Gradex team members responsible for course approval/moderation, user management,
 
 ## Future Features
 
-- Live mentorship / live sessions
+- Full live mentorship / in-platform live streaming (WebRTC/SFU or live-HLS) — the lightweight *external-link* office hours are now in MVP (see D-013); what stays future is Gradex-hosted live video, recurring series, RSVP/capacity, and timed reminders
 - TAs / follow-up sessions (scales with student volume)
 - Course completion certificates
+- Lifecycle & marketing notifications (re-engagement, expiry reminders, promo broadcasts) — see §5 Notifications
 
 ---
 
@@ -85,17 +89,22 @@ Gradex team members responsible for course approval/moderation, user management,
 - View purchase history
 - Video playback (HLS adaptive bitrate, resume progress) — per video-streaming-design.md
 - Mark lesson complete / track progress per lesson
+- Download lesson resources (slides, notes, readings) per lesson
 - Download lab materials (project files + guide) per lesson/course
 - Link to course community (external Discord/Telegram)
+- Redeem a coupon code at checkout (discount or free access) — see §Payments
+- View and join upcoming live office hours they're entitled to (join link revealed near start time)
 - Manage profile
 
 ## Instructor Features
 
 - Create/edit course → section → lesson structure
 - Upload lesson video (raw upload, async transcode — per video-streaming-design.md)
+- Upload lesson resources (slides, notes, readings) — reference material, separate from lab materials
 - Upload lab materials (downloadable project files + guide)
 - View per-course analytics (enrollments, completion rate)
 - View student roster per course
+- Schedule one-off live office hours on own PUBLISHED courses (external link; entitled students only)
 
 ## Admin Features
 
@@ -105,11 +114,13 @@ Gradex team members responsible for course approval/moderation, user management,
 - Manage and process instructor payouts (no instructor-facing earnings view in v1)
 - Process refunds
 - Moderate reported content
+- Manage coupons (create/list/edit/deactivate discount codes; view redemption stats) — admin-only
+- Schedule platform-wide live office hours (or on any course); cancel any session (moderation)
 
 ## Course Management
 
 - Course → Section → Lesson hierarchy (per video-streaming-design.md)
-- Video status lifecycle: DRAFT → UPLOADING → UPLOADED → QUEUED → PROCESSING → READY → PUBLISHED
+- Video status lifecycle: `DRAFT → UPLOADING → UPLOADED → QUEUED → PROCESSING → READY → PUBLISHED`, with a `FAILED` branch from `PROCESSING` (auto-retry up to 3x, then manual retry via the instructor dashboard — see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-091)
 
 ## Payments
 
@@ -118,11 +129,26 @@ Gradex team members responsible for course approval/moderation, user management,
 - **Fallback: MyFatoorah** (via Tamara) if Tap/Deema doesn't clear for digital goods or fails to activate in time — but only after confirming in writing that Tamara accepts digital/e-learning products and that Gradex's 30–49 KWD tier isn't excluded by Tamara's reported 50 KWD Kuwait minimum.
 - **Ruled out: PayTabs** — its Kuwait "installment" offering is just a reseller layer over the same Deema product Tap offers directly, with no upside and added integration overhead.
 - No official Go SDK exists for any of the three — plan to hand-roll a thin internal Go client wrapping the REST API + HMAC-SHA256 webhook verification (normal, bounded work, not a blocker).
-- Refund handling (admin-initiated), consistent with the Kuwait Consumer Protection Law 14-day refund right (see Legal Constraints) and its digital-content-once-accessed exemption.
+- Refund handling (admin-initiated), consistent with the Kuwait Consumer Protection Law 14-day refund right (see Legal Constraints) and its digital-content-once-accessed exemption. A refund on a coupon order returns the actually-charged amount, not the pre-discount subtotal (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-131).
+- **Coupons** — an admin-issued discount code is validated and applied server-side *before* the Tap payment session is created: the discount reduces the order amount (integer fils; percentage or fixed), and a code that reduces the order to 0 KWD grants enrollment directly with no gateway call. Coupons never alter a course's listed price — the discount is per-order only (see [DECISIONS.md](DECISIONS.md) D-012, [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-124–BR-133).
 
 ## Notifications
 
--
+MVP ships **transactional notifications only** — event-driven, 1:1 messages the existing flows already imply. Delivered via **email + an in-app notification center** (unread badge + list), best-effort, not guaranteed-delivery (consistent with the delivery contract in §11 Admin Moderation & Payouts).
+
+MVP transactional events:
+
+- **Instructor — course approved / rejected** (rejection includes the reason) — see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-071, BR-072.
+- **Student — purchase confirmed / receipt** — sent after the gateway success webhook grants enrollment (BR-020), never on client redirect alone.
+- **Auth — password reset** — token-based reset link (email channel only).
+
+Build note: the in-app center is a real addition (a `notifications` table + list/unread-count endpoints + a frontend badge), kept deliberately minimal for MVP — no per-type preference settings, no read receipts beyond unread/read.
+
+**Post-launch (documented here, not built for launch):**
+
+- **Lifecycle / behavioral** — registered-but-no-purchase re-engagement, enrollment-expiry reminder (softens the silent expiry in [DECISIONS.md](DECISIONS.md) D-009 — reconcile before shipping), course-not-started nudge, abandoned checkout.
+- **Marketing / broadcast** — admin-authored new-course/promo blasts. Requires explicit opt-in consent at signup + unsubscribe, per Kuwait PDPL No. 26/2024 (§7 Legal Constraints); the transactional mail above does not require marketing consent.
+- **Additional channels** — WhatsApp/SMS (high GCC reach, paid per message, WhatsApp Business API approval overhead) and web/mobile push (needs service-worker/mobile infra).
 
 ---
 
@@ -139,11 +165,11 @@ Gradex team members responsible for course approval/moderation, user management,
 
 ## Security
 
-- **Auth tokens**: Short-lived JWT access tokens (signed, e.g. RS256/HS256) + longer-lived rotating refresh tokens; refresh tokens stored server-side (revocable) and access tokens never persisted in localStorage on the frontend to limit XSS-driven token theft; all endpoints validate JWT signature/expiry/claims on every request.
-- **Signed CDN URLs (purchaser-only access)**: Every HLS manifest/segment and lab-material download request is authorized against the student's purchase record before a short-TTL signed CDN URL is issued (per video-streaming-design.md); URLs are single-use/IP- or session-scoped where the CDN supports it, never long-lived or shareable, and re-issued per playback session rather than cached client-side long-term.
-- **Payment data handling**: Gradex never collects, transmits, or stores raw card/PAN data — checkout is fully delegated to the PCI-DSS-compliant regional gateway (MyFatoorah/Tap/PayTabs) via hosted payment page/redirect or tokenized SDK; Gradex only persists gateway transaction/token references, payment status, and amounts, and validates all payment webhooks via signature verification to prevent spoofed "payment succeeded" callbacks.
+- **Auth tokens**: Short-lived JWT access tokens (signed, e.g. RS256/HS256) + longer-lived rotating refresh tokens. Refresh tokens are the revocable artifact — stored server-side in Redis and checked on every refresh call, so logout/admin revocation takes effect there. Access tokens are stateless: validated by signature/expiry/claims only, with no per-request Redis lookup, so an already-issued access token keeps working until its own short TTL naturally expires — revocation is bounded by that TTL, not instant on every protected-API call (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-006). Access tokens are never persisted in localStorage on the frontend, to limit XSS-driven token theft.
+- **Signed CDN URLs (purchaser-only access)**: Every HLS manifest/segment and lab-material download request is authorized against the student's purchase record before a short-TTL signed URL is issued (per video-streaming-design.md). Video manifest/segment URLs are session-scoped and short-lived rather than single-use — HLS playback needs repeated access to the same segment within a session (seeking, rebuffering, ABR rendition switches), which true single-use would break. Lab-material download URLs MAY be single-use where the storage/CDN layer supports it, since a one-time file download has no repeat-access requirement. Neither is ever long-lived by design — but while a signed URL is valid it's still a replayable bearer credential, not cryptographically bound to the requesting device, so short TTLs plus per-user/IP rate-limiting and monitoring (see Anti-piracy below) are the actual deterrence, not a guarantee that sharing is impossible. Both are re-issued per session rather than cached client-side long-term. *(See [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-100.)*
+- **Payment data handling**: Gradex never collects, transmits, or stores raw card/PAN data — checkout is fully delegated to the PCI-DSS-compliant gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments; PayTabs ruled out) via hosted payment page/redirect or tokenized SDK; Gradex only persists gateway transaction/token references, payment status, and amounts, and validates all payment webhooks via signature verification to prevent spoofed "payment succeeded" callbacks.
 - **Student PII protection**: Encrypt sensitive PII (national ID/civil ID if collected, phone, address) at rest; enforce TLS everywhere in transit; apply role-based access control so only authorized admin roles can view student PII; minimize PII collection to what's needed for enrollment/invoicing/GCC compliance.
-- **Anti-piracy / anti-scraping for video and lab materials**: Rate-limit and monitor signed-URL issuance and download endpoints per user/IP to detect bulk-scraping or credential-sharing patterns; watermark or fingerprint downloadable lab materials (e.g. embedded student ID) to trace leaks back to source, acknowledging v1 has no DRM (per non-goals) so protection is deterrence-based, not encryption-based.
+- **Anti-piracy / anti-scraping for video, lesson resources, and lab materials**: Rate-limit and monitor signed-URL issuance and download endpoints per user/IP to detect bulk-scraping or credential-sharing patterns across all downloadable content. Watermark or fingerprint downloadable **lab materials** (e.g. embedded student ID) to trace leaks back to source; **lesson resources** (slides/notes) are entitlement-gated and rate-limited but not individually watermarked — lower-value, and slide/image formats tag poorly (see [DECISIONS.md](DECISIONS.md) D-011). v1 has no DRM (per non-goals), so protection is deterrence-based, not encryption-based.
 - **General platform hardening**: Enforce HTTPS/TLS across all services, hash passwords with a strong adaptive algorithm (bcrypt/argon2), rate-limit auth and purchase endpoints against brute-force/abuse, and apply standard input validation/parameterized queries against injection on the Go/Gin + PostgreSQL stack.
 
 ## Scalability
@@ -152,17 +178,17 @@ Gradex team members responsible for course approval/moderation, user management,
 - **Video pipeline (dependency on video-streaming-design.md)**: transcode jobs are dispatched via a Redis-backed queue to a worker pool (ffmpeg); worker count scales horizontally and independently of the API tier based on queue depth, so instructor upload spikes (e.g. bulk course launches) don't degrade student-facing request latency. Playback itself scales via CDN-delivered signed HLS URLs, not app-server bandwidth — see that spec for the transcode/packaging/playback design, not restated here.
 - **Redis**: used for job queues, session/rate-limit state, and hot-path caching (catalog listings, course/lesson metadata, signed-URL issuance checks); start single-instance, move to Redis with replica(s) once queue throughput or cache hit-rate volume requires it — no architectural change needed to introduce replicas later.
 - **PostgreSQL**: single primary is sufficient through the 1-year target (~1.5K–3K paid students); plan for read replicas for catalog/analytics/reporting queries ahead of the 3-year target, keeping writes (purchases, progress events) on the primary. Add indexes on high-traffic access patterns (course/section/lesson lookups, per-user progress, enrollment checks) and revisit progress-event write volume (frequent per-lesson updates) as a candidate for batching/async writes if it becomes a hot path.
-- **Storage/CDN**: video assets and lab material downloads are served from S3-compatible storage via CDN, so storage/bandwidth scaling is offloaded to the CDN/object-store provider and doesn't bottleneck the app tier as catalog size grows toward 100+ courses.
-- **Payments**: installment/BNPL risk and processing scale is carried by the gateway (MyFatoorah/Tap/PayTabs), not Gradex infrastructure; Gradex only scales its own webhook/callback handling and payment-state persistence in Postgres as transaction volume grows.
+- **Storage/CDN**: video assets, lesson resources, and lab material downloads are served from S3-compatible storage via CDN, so storage/bandwidth scaling is offloaded to the CDN/object-store provider and doesn't bottleneck the app tier as catalog size grows toward 100+ courses.
+- **Payments**: installment/BNPL risk and processing scale is carried by the gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments), not Gradex infrastructure; Gradex only scales its own webhook/callback handling and payment-state persistence in Postgres as transaction volume grows.
 
 ## Reliability
 
 - **Uptime target:** 99.5% monthly uptime for catalog browsing, purchase, and video playback (core revenue paths) during v1 — appropriate for an early-stage, single-region (Kuwait) platform at 100–500 paid students; re-evaluate toward 99.9% as usage scales toward the 1-year target (~1,500–3,000 paid students) and multi-country GCC presence (3-year horizon) increases the cost of downtime.
 - **Video processing failures:** handled per the approved video-streaming design spec — transcode failures move a lesson to `FAILED`, auto-retry up to 3x with exponential backoff, then fall back to manual retry via the instructor dashboard; no additional reliability design needed here beyond depending on that spec's retry/backoff and stale-`UPLOADING` reaper behavior.
 - **PostgreSQL backup strategy (source of truth for course, purchase, and progress data):** automated daily full backups + continuous WAL archiving for point-in-time recovery (target: restore to within 5 minutes of failure); backups retained 30 days, stored off-provider (e.g. separate region/account from primary DB) to survive a single-provider incident; monthly restore-drill to a staging environment to verify backups are actually restorable, not just taken.
-- **Payment/installment reliability:** the regional gateway (MyFatoorah/Tap/PayTabs, vendor TBD) is the system of record for installment/BNPL risk and scheduling, so Gradex's reliability obligation is narrower — reconcile via idempotent webhook handling (safe to receive duplicate/out-of-order events) plus a scheduled polling job as fallback if a webhook is missed; on gateway timeout/5xx during checkout, fail safe (no course access granted, no double-charge) and surface a retryable error to the student rather than a silent failure.
+- **Payment/installment reliability:** the gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments) is the system of record for installment/BNPL risk and scheduling, so Gradex's reliability obligation is narrower — reconcile via idempotent webhook handling (safe to receive duplicate/out-of-order events) plus a scheduled polling job as fallback if a webhook is missed; on gateway timeout/5xx during checkout, fail safe (no course access granted, no double-charge) and surface a retryable error to the student rather than a silent failure.
 - **Payment data consistency:** purchase/entitlement state changes (grant course access, mark installment paid) are written transactionally in Postgres keyed by the gateway's idempotency/transaction ID, so a retried webhook or duplicate client request cannot double-grant access or double-record a payment.
-- **Graceful degradation:** Redis (sessions/caching) outage degrades performance but must not block core purchase or playback flows — no hard dependency on Redis for correctness, only for speed; CDN/storage outage on the playback path returns a distinguishable error (per video-streaming spec) rather than a generic failure.
+- **Graceful degradation:** a Redis outage must not block core purchase or playback flows for already-authenticated users — access tokens are stateless (signature/expiry only, see §6 Security Auth tokens), so in-flight browsing/playback/purchase requests keep working. Login, token refresh, explicit logout/revocation, and any Redis-backed rate-limit state are Redis-dependent and fail explicitly (a clear retryable error) during an outage rather than silently degrading. CDN/storage outage on the playback path returns a distinguishable error (per video-streaming spec) rather than a generic failure.
 
 ## Accessibility
 
@@ -209,7 +235,7 @@ Researched 2026-07-20 (preliminary scan, not legal advice — confirm with a Kuw
 
 # 8. Assumptions
 
-- **Payment gateway installment/BNPL suitability** — assumes MyFatoorah/Tap/PayTabs (vendor TBD) can support installments for one-time digital purchases (30–60 KWD) in Kuwait without Gradex building its own risk/underwriting logic. Unvalidated: no vendor confirmed for consumer BNPL on this ticket size/product type yet.
+- **Payment gateway installment/BNPL suitability** — assumes Tap's Deema BNPL product (MyFatoorah/Tamara as fallback, per §5 Payments) can support installments for one-time digital purchases (30–60 KWD) in Kuwait without Gradex building its own risk/underwriting logic. Unvalidated: Deema's digital-goods merchant-category eligibility isn't yet confirmed in writing by Tap (see §9 Risk 1).
 - **Discord/Telegram as a retention/mentorship substitute** — assumes an unmoderated, unpaid, off-platform community is enough to deliver on the "no follow-up" differentiator. Unvalidated: no owner/process defined for who staffs it in v1.
 - **Linear/affordable storage + CDN egress costs at scale** — assumes GB-per-course-hour and GCC CDN egress costs stay affordable at 30–60 KWD price points as the catalog and rewatch volume grow. Unvalidated: no real cost data yet (pre-launch).
 - **Downloadable (non-sandboxed) labs are an acceptable proxy for "hands-on experience"** — assumes students can self-serve environment setup without support. Unvalidated: environment-setup friction is a common drop-off point for this format.
@@ -268,22 +294,26 @@ Each item below implements one or more rules from [BUSINESS_RULES.md](BUSINESS_R
 - Given a registered student submits the correct email and password on login, when the credentials are verified against the stored hash, then Gradex returns a new JWT access token (short expiry, e.g. 15 min) and a new/rotated refresh token, and records the session in Redis so it can be revoked independently of token expiry. *(Implements BR-004)*
 - Given a logged-in student's JWT access token has expired but their refresh token is still valid and unrevoked, when the client calls the token refresh endpoint, then Gradex issues a new access token (and rotates the refresh token) without requiring re-entry of credentials, and rejects the request with 401 if the refresh token is expired, revoked, or reused after rotation. *(Implements BR-005)*
 - Given a signup or login request uses an email that is already registered, or invalid credentials, when the backend processes the request, then Gradex returns a clear 4xx error (409 for duplicate email, 401 for bad credentials) without revealing whether the email exists on the login path, and without issuing any token. *(Implements BR-001, BR-003)*
-- Given a student explicitly logs out or an admin revokes a session, when the refresh token's session entry is invalidated in Redis, then subsequent refresh or protected-API calls using that token are rejected with 401. *(Implements BR-006)*
+- Given a student explicitly logs out or an admin revokes a session, when the refresh token's session entry is invalidated in Redis, then subsequent refresh calls using that refresh token are rejected with 401; any access token already issued before revocation keeps working (signature/expiry-only validation) until its own short TTL naturally expires. *(Implements BR-006)*
 
-## Purchase & Payment
+## Purchase & Payment (MVP — single course/chapter, card/KNET only)
 
-- Given a logged-in student viewing a published course, chapter, or bundle with a price, when they select an installment plan and complete the first payment via the GCC gateway's hosted checkout, then Gradex grants access only after receiving the gateway's payment-success callback/webhook (not on client-side redirect), and creates an enrollment record tied to that specific course/chapter/bundle scope. *(Implements BR-020, BR-021)*
-- Given a student mid-checkout for a paid item, when the gateway reports a declined, cancelled, or timed-out payment (including installment setup failure), then no enrollment or access is granted, the order is marked failed, and the student is shown a clear retry path without being double-charged on resubmission (idempotent order reference). *(Implements BR-022)*
+- Given a logged-in student viewing a published course or chapter with a price, when they complete a single card/KNET payment via the gateway's hosted checkout, then Gradex grants access only after receiving the gateway's payment-success callback/webhook (not on client-side redirect), and creates an enrollment record tied to that specific course/chapter scope. Every checkout attempt carries a stable idempotency key reused across retries of the same order. *(Implements BR-020, BR-021)*
+- Given a student mid-checkout, when the gateway reports a declined, cancelled, or timed-out payment, then no enrollment or access is granted and the order is marked failed; the student is shown a clear retry path — a transport-level retry of the same attempt reuses that attempt's idempotency key, while a new payment attempt after a definitive decline/cancellation/timeout is issued a fresh idempotency key linked to the same order — and if the outcome is ambiguous (gateway timeout with no definitive response) Gradex reconciles the order's true status with the gateway before permitting another attempt on that order. *(Implements BR-022)*
+- Given an enrolled student who purchased a course or chapter, when they open a lesson within their purchased scope, then the platform verifies entitlement against the enrollment record — including that the enrollment's term hasn't expired — before issuing a signed playback URL and before allowing download of that lesson's resources or lab materials, and denies access to lessons outside the purchased scope or past the enrollment's expiry. *(Implements BR-023, BR-025)*
+- Given an admin viewing the revenue/payment dashboard, when a completed purchase — eligible per the refund policy in BR-044 (14-day right, exempted once a lesson has been streamed or a lab file opened) — is refunded through Gradex's refund workflow, then Gradex calls the gateway's refund API and updates the order/enrollment status to reflect revoked access only after the gateway confirms the refund (flagging a pending-refund state in the meantime if confirmation is delayed), and logs the refund event for audit without requiring manual reconciliation of gateway records. A partial refund follows the same gateway-confirmation-before-revocation rule, scoped to the partially refunded item. *(Implements BR-040, BR-041, BR-042, BR-044)*
+
+## Purchase & Payment (V1 / Fast-Follow — bundles & BNPL installments, per [DECISIONS.md](DECISIONS.md) D-008)
+
+- Given a logged-in student viewing a published bundle, when they purchase it — either a single payment or a Deema installment plan, if Deema clears for digital goods per §5 Payments — via the gateway's hosted checkout, then Gradex grants access only after the gateway's payment-success callback/webhook, and creates enrollment records covering every course in the bundle's scope, using the same idempotency-key and reconciliation guarantees as the MVP single-purchase flow above. *(Implements BR-020, BR-021, BR-022)*
 - Given a student who purchased via an installment plan and an upcoming installment is due, when the gateway attempts and fails to collect that installment per its own retry/dunning policy, then Gradex reflects the gateway's reported status change (e.g. past-due or plan-cancelled) by restricting access to the paid content per the agreed access policy, without Gradex re-implementing retry/risk logic itself. *(Implements BR-032)*
-- Given an enrolled student who purchased a course, chapter, or bundle, when they open a lesson within their purchased scope, then the platform verifies entitlement against the enrollment record — including that the enrollment's term hasn't expired — before issuing a signed HLS playback URL and before allowing download of that lesson's lab materials, and denies access to lessons outside the purchased scope or past the enrollment's expiry. *(Implements BR-023, BR-025)*
-- Given an admin viewing the revenue/payment dashboard, when a completed purchase (single payment or any installment) is refunded through Gradex's refund workflow, then Gradex calls the gateway's refund API, updates the order/enrollment status to reflect revoked or partial access per policy, and logs the refund event for audit without requiring manual reconciliation of gateway records. *(Implements BR-040, BR-041, BR-042)*
 
 ## Video Playback & Progress
 
 - Given a student who has purchased the course containing a PUBLISHED lesson, when they request that lesson's video, then the backend returns a signed CDN playback URL (short expiry) for the HLS master manifest, and the CDN serves subsequent segment requests only while that signature remains valid. *(Implements BR-050)*
 - Given a student who has NOT purchased/enrolled in the course (or an unauthenticated user), when they request a lesson's playback URL directly or via API, then the backend returns 403 without issuing a signed URL, regardless of whether the lesson's video file exists in storage. *(Implements BR-050)*
 - Given a student reopening a lesson they previously watched partway through, when the player loads the lesson, then the backend returns `last_position_seconds` alongside the playback URL and the player resumes from that position rather than starting at 0:00. *(Implements BR-052)*
-- Given a student actively watching a lesson, when the player posts progress (~every 10s) with `position_seconds`, then the backend updates `max_position_seconds = max(existing, new)` and `last_position_seconds = new`, and marks `completed = true` (once, permanently) once `max_position_seconds` reaches ≥90% of the lesson duration, with completion never regressing on seek-back. *(Implements BR-051)*
+- Given a student actively watching a lesson, when the player posts progress (~every 10s) with `position_seconds`, then the backend clamps/rejects any value outside `[0, lesson.duration_seconds]` before persisting it, updates `max_position_seconds = max(existing, new)` and `last_position_seconds = new`, and marks `completed = true` (once, permanently) once `max_position_seconds` reaches ≥90% of the lesson duration, with completion never regressing on seek-back. Completion here is a client-reported progress signal, not proof of playback — acceptable for v1 since nothing is currently gated on it (certificates are a Future Feature per §4 Scope; instructor payouts are itemized by purchase per BR-073, not by completion). If certificates are un-deferred in a later version, completion must be backed by server-observed playback evidence before it's certificate-eligible. *(Implements BR-051)*
 - Given a signed playback URL expires mid-session or a progress POST fails, when the frontend receives a 403 on a segment/manifest request or a progress-write error, then the player transparently refreshes the playback token and retries once (403 case) or silently retries progress on the next tick (progress-write case) without interrupting playback or surfacing an error to the student. *(Implements BR-053)*
 
 ## Instructor Course Builder
@@ -291,13 +321,14 @@ Each item below implements one or more rules from [BUSINESS_RULES.md](BUSINESS_R
 - Given an authenticated instructor creating a new course, when they save a course with a title, description, and at least one section containing one lesson, then the course is created in draft status and remains invisible to students until it passes the admin approval/publish gate. *(Implements BR-011)*
 - Given an instructor building a course outline, when they add, reorder, or delete sections and lessons within a course, then the Course-Section-Lesson hierarchy and ordering persist correctly and are reflected immediately in the builder UI. *(Implements BR-010)*
 - Given an instructor on a lesson's video tab, when they upload a video file for that lesson, then the file is handed off to the existing upload/transcode/HLS pipeline and the lesson shows a processing status until the transcoded asset is ready, without the builder re-implementing transcoding logic. *(Implements BR-062)*
-- Given an instructor on a lesson's lab materials tab, when they upload one or more downloadable files (project files, PDF guide) within the platform's size/type limits, then the files are stored in S3-compatible storage and listed on the lesson as downloadable resources accessible to enrolled students via signed URLs, with no code execution or sandboxing involved. *(Implements BR-063)*
+- Given an instructor on a lesson's resources tab, when they upload one or more supplementary reference files (slides, notes, readings) within the allowed resource types and size caps (PDF, slides, images — see [DECISIONS.md](DECISIONS.md) D-011), then the files are stored in S3-compatible storage and listed on the lesson as downloadable resources accessible to enrolled students via signed URLs; resources are not watermarked. *(Implements BR-063, BR-067)*
+- Given an instructor on a lesson's lab materials tab, when they upload one or more hands-on files (project archives, code, a PDF/Markdown guide) within the allowed lab types and size caps (see [DECISIONS.md](DECISIONS.md) D-011), then the files are stored in S3-compatible storage, get a per-purchase identifier embedded at download time (per BR-103), and are listed on the lesson as downloadable lab materials accessible to enrolled students via signed URLs, with no code execution or sandboxing involved. *(Implements BR-063, BR-103)*
 - Given an instructor attempts to submit a course for admin review, when any lesson is missing its required video or the course has zero sections/lessons, then submission is blocked and the instructor sees a validation message identifying the missing content before the course can enter the approval queue. *(Implements BR-012)*
 
 ## Admin Moderation & Payouts
 
-- Given a course has at least one published section with at least one lesson containing a successfully transcoded video, when the instructor submits the course for review, then the course status changes to "Pending Approval" and becomes visible in the admin approval queue but remains hidden from the student catalog. *(Implements BR-013, BR-070)*
-- Given a course is in "Pending Approval" status, when an admin reviews it and clicks "Approve & Publish," then the course status changes to "Published," it becomes visible in the student catalog, and the instructor receives a notification of approval. *(Implements BR-071)*
+- Given a course has at least one section containing at least one lesson with a successfully transcoded (READY-status) video — the same readiness bar BR-012 blocks submission on — when the instructor submits the course for review, then the course status changes to "Pending Approval" and becomes visible in the admin approval queue but remains hidden from the student catalog. *(Implements BR-012, BR-013, BR-070)*
+- Given a course is in "Pending Approval" status, when an admin reviews it and clicks "Approve & Publish," then the course status changes to "Published," it becomes visible in the student catalog, and the instructor receives a notification of approval, delivered via email and the in-app notification center (best-effort, not guaranteed-delivery — see §5 Notifications). *(Implements BR-071)*
 - Given a course is in "Pending Approval" status, when an admin rejects it with a required rejection reason/comment, then the course status reverts to "Draft," the course stays hidden from the catalog, and the instructor sees the reason to revise and resubmit. *(Implements BR-072)*
 - Given a student's purchase (single payment or installment/BNPL) has been confirmed as collected by the payment gateway and reconciled in Gradex, when an admin opens the payouts screen for an instructor, then the admin sees that revenue itemized by course/purchase with gateway fees and refunds already deducted, and can mark it "Payout Approved" and later "Paid" with a reference/transaction note, without any earnings figures being exposed on the instructor-facing UI. *(Implements BR-073, BR-074)*
 - Given a refund is processed by an admin for a student purchase, when the associated instructor payout for that purchase has not yet been marked "Paid," then the refunded amount is automatically excluded from that instructor's payable balance; if the payout was already marked "Paid," then the system flags the payout record for manual admin adjustment/clawback in a future payout cycle. *(Implements BR-043)*
@@ -312,4 +343,6 @@ Each item below implements one or more rules from [BUSINESS_RULES.md](BUSINESS_R
 - Kuwait Commercial Registration status — is one already in place, or does this need starting immediately given the 7–15 day KNET activation lead time against the 2026-08-15 launch date?
 - Education-content licensing — does Gradex's non-degree supplementary-course model need any MOHE/Private Universities Council license, or does ordinary MOCI commercial registration suffice? (unconfirmed, consult a lawyer)
 - Digital Commerce Law (Decree-Law 10/2026) registration mechanism — not yet live as of research date, track for when it opens
+- ~~Instructor-approval notification channel (email vs. in-app vs. both) and delivery guarantee~~ — resolved 2026-07-21: email + in-app notification center, best-effort delivery. See §5 Notifications
+- ~~Lesson-attachment allowed file types and size caps~~ — resolved 2026-07-21 (D-011): lesson resources = PDF, slides (PPT/PPTX), images (PNG/JPG), 50 MB per file / 200 MB per lesson; lab materials = archives (ZIP), common project files, plus a PDF/Markdown guide, 250 MB per file / 1 GB per lesson. (Distinct from video's `MAX_UPLOAD_SIZE_BYTES`, which is video-only.)
 - ~~v1 scope vs. 2026-08-15 launch date~~ — resolved 2026-07-20, see [DECISIONS.md](DECISIONS.md) D-008
