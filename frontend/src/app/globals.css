@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Semantic tokens (shadcn convention) expressed as HSL channels so Tailwind
+ * opacity modifiers and dark mode both work. Values are derived from the
+ * Gradex design system (docs/design-system/tokens/colors.css).
+ *
+ * WCAG AA notes:
+ *  - --primary is blue-600 (#1e4ed8), not blue-500, so white text on primary
+ *    clears 4.5:1. blue-500 stays the focus-ring / decorative accent.
+ *  - The orange brand accent uses navy text (see Button `accent` variant),
+ *    because white-on-orange fails AA.
+ */
+@layer base {
+  :root {
+    --background: 210 40% 98%; /* ink-50  #f8fafc */
+    --foreground: 211 53% 11%; /* ink-900 #0d1b2a */
+
+    --card: 0 0% 100%;
+    --card-foreground: 211 53% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 211 53% 11%;
+
+    --primary: 225 76% 48%; /* blue-600 #1e4ed8 — AA-safe with white text */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 30% 95%; /* ink-100 */
+    --secondary-foreground: 211 53% 11%;
+
+    --muted: 210 30% 95%;
+    --muted-foreground: 215 16% 47%; /* ink-500 */
+
+    /* shadcn `accent` = subtle neutral used for component hovers (NOT brand orange) */
+    --accent: 210 30% 95%;
+    --accent-foreground: 211 53% 11%;
+
+    --destructive: 9 85% 43%; /* danger #c92c10 */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 91%; /* ink-200 */
+    --input: 214 32% 91%;
+    --ring: 225 100% 65%; /* blue-500 focus */
+
+    --radius: 0.625rem; /* 10px */
+  }
+
+  .dark {
+    --background: 210 55% 8%; /* deepened navy */
+    --foreground: 210 40% 98%;
+
+    --card: 213 32% 15%; /* ink-800-ish raised */
+    --card-foreground: 210 40% 98%;
+
+    --popover: 213 32% 15%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 225 100% 71%; /* lifted blue for contrast on dark */
+    --primary-foreground: 211 60% 12%;
+
+    --secondary: 213 25% 22%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 213 25% 22%;
+    --muted-foreground: 214 25% 74%; /* ink-300 */
+
+    --accent: 213 25% 22%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 8 74% 57%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 213 25% 24%;
+    --input: 213 25% 24%;
+    --ring: 225 100% 71%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    line-height: 1.6;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    @apply font-display text-foreground;
+    font-weight: 700;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    @apply bg-gx-blue-100 text-gx-ink-900;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* Utility: LTR island for course codes, prices, code samples, the wordmark. */
+@layer utilities {
+  .dir-ltr {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+}

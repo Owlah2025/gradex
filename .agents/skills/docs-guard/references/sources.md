@@ -9,10 +9,10 @@ Central bibliography. Operational guidance lives in the other references; read t
 
 ## Research on AI-generated documentation defects
 
-- Kabir et al., "Is Stack Overflow Obsolete? An Empirical Study of the Characteristics of ChatGPT Answers to Stack Overflow Questions", CHI 2024 — 52% of answers contained incorrect information; evaluators missed AI errors 39% of the time: https://dl.acm.org/doi/10.1145/3613904.3642596
-- CloudAPIBench, "On Mitigating Code LLM Hallucinations with API Documentation" (AWS, 2024) — 38.58% valid invocations for low-frequency APIs: https://arxiv.org/abs/2407.09726
-- De-Hallucinator (2024) — LLMs routinely invent non-existent APIs; project-API grounding fixed 63.2% of hallucination-caused failures: https://arxiv.org/abs/2401.01701
-- Spracklen et al., "We Have a Package for You!" (USENIX Security 2025) — package hallucination averages 19.6% across 16 models: https://www.usenix.org/conference/usenixsecurity25/presentation/spracklen
+- Kabir et al., "Is Stack Overflow Obsolete? An Empirical Study of the Characteristics of ChatGPT Answers to Stack Overflow Questions", CHI 2024 — 52% of answers contained incorrect information; user-study participants overlooked misinformation 39% of the time: https://dl.acm.org/doi/10.1145/3613904.3642596
+- CloudAPIBench, "On Mitigating Code LLM Hallucinations with API Documentation" (Jain et al., arXiv 2024 / SEIP@ICSE 2025) — 38.58% valid invocations for low-frequency APIs: https://arxiv.org/abs/2407.09726
+- De-Hallucinator (2024) — LLMs routinely invent non-existent APIs; project-API grounding improved hallucination-caused failing tests fixed by 63.2%: https://arxiv.org/abs/2401.01701
+- Spracklen et al., "We Have a Package for You!" (USENIX Security 2025) — package hallucination rates of at least 5.2% for commercial models and 21.7% for open-source models; 19.7% of all recommended packages were hallucinated overall, across 576,000 code samples from 16 LLMs: https://www.usenix.org/conference/usenixsecurity25/presentation/spracklen
 
 ## Documentation craft references
 

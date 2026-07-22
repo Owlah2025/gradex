@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gradex — Graduate with excellence</title>
+<meta name="description" content="University courses for GCC students. Real lectures, notes, and labs — with instructors who stay with you after you enroll." />
+
+<!-- Gradex webfonts — Google Fonts CDN (design-system tokens/fonts.css) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+/* =====================================================================
+   Gradex Design System tokens — inlined verbatim from the exported
+   project (_ds/gradex-design-system-f4d3887e…/tokens/*.css). DO NOT edit
+   these values here; they are the source-of-truth design system.
+   ===================================================================== */
+:root{
+  /* colors.css */
+  --gradex-blue:#4f7cff; --gradex-blue-deep:#1e4ed8; --gradex-navy:#0d1b2a; --gradex-ink:#0d1b2a;
+  --gradient-brand:linear-gradient(135deg,#1e4ed8 0%,#4f7cff 100%);
+  --gradient-brand-soft:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%);
+  --blue-50:#eef2ff; --blue-100:#dce5ff; --blue-200:#a8c1ff; --blue-300:#7fa2ff; --blue-500:#4f7cff; --blue-600:#1e4ed8; --blue-900:#0d1b2a;
+  --orange-50:#fff1ec; --orange-100:#ffd6cc; --orange-200:#ffaa8f; --orange-500:#ff7e4d; --orange-600:#f64a1f; --orange-700:#c92c10;
+  --accent:#ff7e4d; --accent-hover:#f64a1f; --accent-soft:#fff1ec; --accent-text:#c92c10;
+  --ink-900:#0d1b2a; --ink-800:#1e2a3a; --ink-700:#364453; --ink-600:#4c5a6b; --ink-500:#64748b; --ink-400:#94a3b8; --ink-300:#c3ceda; --ink-200:#e2e8f0; --ink-100:#eef2f6; --ink-50:#f8fafc; --white:#ffffff;
+  --success:#178a50; --success-soft:#e8f6ef; --warning:#b45309; --warning-soft:#fcf4e6; --danger:#c92c10; --danger-soft:#fdede8; --info:#4f7cff; --info-soft:#eef2ff;
+  --text-heading:var(--ink-900); --text-body:var(--ink-700); --text-muted:var(--ink-500); --text-on-brand:#fff; --text-link:var(--blue-500); --text-link-hover:var(--blue-600);
+  --surface-page:#f8fafc; --surface-card:#fff; --surface-raised:#fff; --surface-brand-tint:var(--blue-50); --surface-inverse:var(--ink-900);
+  --border-default:var(--ink-200); --border-strong:var(--ink-300); --border-focus:var(--blue-500);
+  --action-primary:var(--blue-500); --action-primary-hover:var(--blue-600); --action-secondary:var(--accent); --action-secondary-hover:var(--accent-hover);
+  /* typography.css */
+  --font-display:"Alexandria","IBM Plex Sans Arabic",ui-sans-serif,system-ui,sans-serif;
+  --font-body:"IBM Plex Sans Arabic","Alexandria",ui-sans-serif,system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",monospace;
+  --text-xs:12px; --text-sm:14px; --text-base:16px; --text-lg:18px; --text-xl:22px; --text-2xl:28px; --text-3xl:36px; --text-4xl:48px; --text-5xl:64px;
+  --weight-regular:400; --weight-medium:500; --weight-semibold:600; --weight-bold:700; --weight-extrabold:800;
+  --leading-tight:1.15; --leading-snug:1.35; --leading-normal:1.6; --leading-loose:1.85;
+  /* spacing.css */
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px; --space-16:64px; --space-20:80px;
+  --radius-sm:6px; --radius-md:10px; --radius-lg:16px; --radius-xl:24px; --radius-pill:999px; --container-max:1200px; --sidebar-width:264px;
+  /* effects.css */
+  --shadow-sm:0 1px 2px rgba(13,27,42,0.06); --shadow-md:0 4px 12px rgba(13,27,42,0.08); --shadow-lg:0 12px 32px rgba(13,27,42,0.12);
+  --shadow-brand:0 8px 24px rgba(79,124,255,0.28); --shadow-stack:0 -20px 44px rgba(13,27,42,0.22); --ring-focus:0 0 0 3px rgba(79,124,255,0.25);
+  --ease-out:cubic-bezier(0.16,1,0.3,1); --duration-fast:120ms; --duration-base:200ms; --duration-slow:320ms;
+}
+
+/* base.css */
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-page);color:var(--text-body);font-family:var(--font-body);font-size:var(--text-base);line-height:var(--leading-normal);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{font-family:var(--font-display);font-weight:var(--weight-bold);color:var(--text-heading);line-height:var(--leading-tight);text-wrap:balance;margin:0}
+p{margin:0}
+a{color:var(--text-link);text-decoration:none}
+a:hover{color:var(--text-link-hover);text-decoration:underline}
+img,svg{display:block;max-width:100%}
+::selection{background:var(--blue-100)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--ink-100)}
+::-webkit-scrollbar-thumb{background:var(--ink-300);border-radius:9999px}
+:focus-visible{outline:none;box-shadow:var(--ring-focus);border-radius:var(--radius-sm)}
+
+.gx-container{max-width:var(--container-max);margin-inline:auto;padding-inline:24px}
+.gx-eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:var(--blue-600)}
+.gx-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(40px,6vw,68px);line-height:1.12;color:var(--text-heading);text-wrap:balance}
+.gx-h2{font-family:var(--font-display);font-weight:700;font-size:clamp(28px,3.4vw,40px);color:var(--text-heading);text-wrap:balance}
+.gx-h3{font-family:var(--font-display);font-weight:700;font-size:clamp(24px,2.6vw,30px);color:var(--text-heading);text-wrap:balance}
+.gx-h4{font-family:var(--font-display);font-weight:700;font-size:19px;color:var(--text-heading)}
+.gx-body{font-size:16.5px;color:var(--ink-800);line-height:1.7}
+.gx-lead{font-size:clamp(17px,1.6vw,20px);color:var(--ink-700);line-height:1.7}
+.gx-mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* Scroll reveal — IntersectionObserver adds .gx-in at threshold 0.15 */
+.gx-reveal{opacity:1}
+@media (prefers-reduced-motion:no-preference){
+  .gx-reveal{opacity:0;transform:translateY(18px);transition:opacity var(--duration-slow) var(--ease-out),transform var(--duration-slow) var(--ease-out)}
+  .gx-reveal.gx-in{opacity:1;transform:none}
+  .gx-reveal[data-delay="1"]{transition-delay:70ms}
+  .gx-reveal[data-delay="2"]{transition-delay:140ms}
+  .gx-reveal[data-delay="3"]{transition-delay:210ms}
+}
+
+/* =====================================================================
+   Components — assembled ONLY from the design-system component families
+   (Button, Badge, Tag, Card, CourseCard, Avatar, ProgressBar, Icon).
+   No new visual families introduced.
+   ===================================================================== */
+
+/* Buttons */
+.btn{--btn-bg:transparent;--btn-fg:var(--ink-800);display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font-display);font-weight:700;font-size:15px;line-height:1;padding:13px 22px;border-radius:var(--radius-pill);border:1.5px solid transparent;background:var(--btn-bg);color:var(--btn-fg);cursor:pointer;transition:transform var(--duration-fast) var(--ease-out),background var(--duration-base) var(--ease-out),box-shadow var(--duration-base) var(--ease-out),border-color var(--duration-base) var(--ease-out);white-space:nowrap;text-decoration:none}
+.btn:hover{text-decoration:none}
+.btn:active{transform:scale(0.98)}
+.btn svg{width:18px;height:18px}
+.btn-sm{padding:9px 16px;font-size:14px}
+.btn-lg{padding:16px 28px;font-size:16.5px}
+.btn-primary{--btn-bg:var(--blue-500);--btn-fg:#fff;box-shadow:var(--shadow-brand)}
+.btn-primary:hover{--btn-bg:var(--blue-600)}
+.btn-accent{--btn-bg:var(--accent);--btn-fg:#fff;box-shadow:0 8px 24px rgba(255,126,77,0.30)}
+.btn-accent:hover{--btn-bg:var(--accent-hover)}
+.btn-outline{--btn-bg:transparent;--btn-fg:var(--ink-800);border-color:var(--border-strong)}
+.btn-outline:hover{--btn-bg:var(--ink-100)}
+.btn-ghost{--btn-bg:transparent;--btn-fg:var(--ink-700)}
+.btn-ghost:hover{--btn-bg:var(--ink-100)}
+.btn-on-dark{--btn-fg:#fff;border-color:rgba(255,255,255,0.35)}
+.btn-on-dark:hover{--btn-bg:rgba(255,255,255,0.10)}
+.btn-block{width:100%}
+
+/* Icon button */
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:var(--radius-pill);border:1.5px solid var(--border-default);background:#fff;color:var(--ink-700);cursor:pointer;transition:background var(--duration-base) var(--ease-out),border-color var(--duration-base)}
+.iconbtn:hover{background:var(--ink-100)}
+.iconbtn svg{width:20px;height:20px}
+
+/* Badge + Tag (pills) */
+.badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-display);font-weight:700;font-size:12px;letter-spacing:0.02em;padding:5px 11px;border-radius:var(--radius-pill);background:var(--blue-50);color:var(--blue-600)}
+.badge-accent{background:var(--accent-soft);color:var(--accent-text)}
+.badge-success{background:var(--success-soft);color:var(--success)}
+.tag{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-body);font-weight:600;font-size:12.5px;padding:5px 11px;border-radius:var(--radius-pill);background:var(--ink-100);color:var(--ink-700)}
+.tag svg{width:14px;height:14px}
+
+/* Card */
+.card{background:var(--surface-card);border:1px solid var(--border-default);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);padding:24px;transition:box-shadow var(--duration-base) var(--ease-out),transform var(--duration-base) var(--ease-out)}
+.card-hover:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+
+/* Avatar */
+.avatar{width:44px;height:44px;border-radius:var(--radius-pill);display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;color:#fff;background:var(--gradient-brand);flex:none;font-size:16px}
+.avatar-lg{width:72px;height:72px;font-size:26px}
+
+/* Icon chip (blue tint circle behind a Lucide glyph) */
+.iconchip{width:48px;height:48px;border-radius:var(--radius-md);display:inline-flex;align-items:center;justify-content:center;background:var(--blue-50);color:var(--blue-600);flex:none}
+.iconchip svg{width:24px;height:24px}
+.iconchip.accent{background:var(--accent-soft);color:var(--accent-text)}
+
+/* Lucide defaults */
+.lu{stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* Section rhythm */
+.section{padding-block:clamp(64px,9vw,96px)}
+.section-tight{padding-block:clamp(48px,7vw,72px)}
+.section-head{max-width:640px;margin-bottom:44px}
+.section-head .gx-h2{margin-top:12px}
+.section-head p{margin-top:14px}
+
+/* Scribble underline (orange gradient, hand-drawn) — accents ONE word */
+.scribble{position:relative;display:inline-block;white-space:nowrap}
+.scribble svg{position:absolute;left:-2%;bottom:-0.28em;width:104%;height:0.42em;overflow:visible}
+.scribble path{stroke:url(#scribbleGrad);stroke-width:5;fill:none;stroke-linecap:round}
+@media (prefers-reduced-motion:no-preference){
+  .scribble path{stroke-dasharray:340;stroke-dashoffset:340;animation:draw 900ms var(--ease-out) 1.9s forwards}
+}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* =====================================================================
+   HEADER
+   ===================================================================== */
+.header{position:sticky;top:0;z-index:50;height:64px;display:flex;align-items:center;background:rgba(255,255,255,0.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border-default)}
+.header .gx-container{display:flex;align-items:center;gap:20px;width:100%}
+.brand{display:inline-flex;align-items:center;gap:10px;flex:none}
+.brand .wordmark{font-family:var(--font-display);font-weight:800;font-size:22px;color:var(--ink-900);letter-spacing:-0.01em}
+.brand .wordmark .x{color:var(--accent)}
+.nav{display:flex;align-items:center;gap:4px;margin-inline-start:12px}
+.nav a{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--ink-700);padding:8px 12px;border-radius:var(--radius-md)}
+.nav a:hover{background:var(--ink-100);color:var(--ink-900);text-decoration:none}
+.header-actions{margin-inline-start:auto;display:flex;align-items:center;gap:10px}
+.lang-toggle{font-family:var(--font-display);font-weight:700;font-size:13px;min-width:44px;height:40px;padding-inline:12px;border-radius:var(--radius-pill);border:1.5px solid var(--border-default);background:#fff;color:var(--ink-700);cursor:pointer}
+.lang-toggle:hover{background:var(--ink-100)}
+.menu-btn{display:none}
+.avatar-menu{display:flex;align-items:center;gap:10px}
+
+/* Mobile nav sheet */
+.sheet{position:fixed;inset:0;z-index:60;display:none}
+.sheet.open{display:block}
+.sheet-scrim{position:absolute;inset:0;background:rgba(13,27,42,0.45)}
+.sheet-panel{position:absolute;inset-block:0;inset-inline-end:0;width:min(86vw,340px);background:#fff;padding:20px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--shadow-lg)}
+.sheet-panel a{font-family:var(--font-display);font-weight:600;font-size:17px;color:var(--ink-800);padding:12px 10px;border-radius:var(--radius-md)}
+.sheet-panel a:hover{background:var(--ink-100);text-decoration:none}
+.sheet-divider{height:1px;background:var(--border-default);margin:8px 0}
+
+/* =====================================================================
+   HERO
+   ===================================================================== */
+.hero{position:relative;min-height:88vh;display:flex;align-items:center;background:var(--ink-900);color:#fff;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 85% 10%,rgba(79,124,255,0.28) 0%,rgba(13,27,42,0) 55%),radial-gradient(90% 80% at 10% 100%,rgba(255,126,77,0.12) 0%,rgba(13,27,42,0) 50%);pointer-events:none}
+.hero .gx-container{position:relative;display:grid;grid-template-columns:1.05fr 0.95fr;gap:56px;align-items:center;padding-block:88px}
+.hero-eyebrow{color:var(--blue-200)}
+.hero h1{color:#fff;font-family:var(--font-display);font-weight:800;font-size:clamp(40px,6vw,68px);line-height:1.1;margin:18px 0 0}
+.hero .sub{margin-top:22px;max-width:30em;font-size:clamp(16.5px,1.7vw,20px);line-height:1.7;color:rgba(255,255,255,0.82)}
+.hero-cta{margin-top:32px;display:flex;flex-wrap:wrap;gap:14px}
+.trust-row{margin-top:34px;display:flex;flex-wrap:wrap;gap:10px 22px}
+.trust-item{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:rgba(255,255,255,0.80)}
+.trust-item svg{width:17px;height:17px;color:var(--orange-200)}
+
+/* Hero visual — origami bird ascending past a course-card mock + code island */
+.hero-visual{position:relative;height:440px}
+.hero-card{position:absolute;top:24px;inset-inline-start:0;width:270px;background:#fff;color:var(--ink-900);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:16px}
+.hero-card .thumb{height:110px;border-radius:var(--radius-md);background:var(--gradient-brand);position:relative;overflow:hidden;display:flex;align-items:flex-end;padding:10px}
+.hero-card .thumb .code{font-family:var(--font-mono);font-size:12px;font-weight:600;color:#fff;background:rgba(13,27,42,0.35);padding:3px 8px;border-radius:var(--radius-sm)}
+.hero-card h4{margin:12px 0 4px;font-size:16px}
+.hero-card .meta{font-size:13px;color:var(--ink-500)}
+.hero-card .price{margin-top:12px;font-family:var(--font-mono);font-weight:600;color:var(--ink-900)}
+.hero-code{position:absolute;bottom:8px;inset-inline-end:0;width:250px;background:#0b1622;border:1px solid rgba(255,255,255,0.10);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:14px 16px;font-family:var(--font-mono);font-size:12.5px;line-height:1.7;direction:ltr;text-align:left}
+.hero-code .cm{color:var(--ink-400)} .hero-code .kw{color:var(--blue-300)} .hero-code .st{color:var(--orange-200)} .hero-code .fn{color:#8fd3b6}
+.bird-fly{position:absolute;inset-inline-end:34px;top:0;width:120px;height:120px}
+@media (prefers-reduced-motion:no-preference){
+  .bird-fly{animation:float 6s var(--ease-out) infinite}
+}
+@keyframes float{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-16px) rotate(-1deg)}}
+
+/* =====================================================================
+   FEATURED COURSES
+   ===================================================================== */
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.coursecard{padding:0;overflow:hidden;display:flex;flex-direction:column}
+.coursecard .cc-thumb{height:150px;position:relative;display:flex;align-items:flex-start;justify-content:space-between;padding:14px}
+.cc-thumb.v1{background:linear-gradient(135deg,#1e4ed8,#4f7cff)}
+.cc-thumb.v2{background:linear-gradient(135deg,#0d1b2a,#364453)}
+.cc-thumb.v3{background:linear-gradient(135deg,#4f7cff,#7fa2ff)}
+.cc-thumb .cc-code{font-family:var(--font-mono);font-weight:600;font-size:12.5px;color:#fff;background:rgba(13,27,42,0.38);padding:4px 9px;border-radius:var(--radius-sm)}
+.coursecard .cc-body{padding:18px 20px 20px;display:flex;flex-direction:column;gap:12px;flex:1}
+.cc-tags{display:flex;gap:8px;flex-wrap:wrap}
+.coursecard h4{font-size:18px;line-height:1.3}
+.cc-instructor{display:flex;align-items:center;gap:10px;color:var(--ink-600);font-size:14px}
+.cc-instructor .avatar{width:32px;height:32px;font-size:13px}
+.cc-meta{display:flex;gap:16px;color:var(--ink-500);font-size:13.5px;flex-wrap:wrap}
+.cc-meta span{display:inline-flex;align-items:center;gap:6px}
+.cc-meta svg{width:15px;height:15px}
+.cc-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--border-default);display:flex;align-items:center;justify-content:space-between}
+.cc-price{font-family:var(--font-mono);font-weight:600;font-size:17px;color:var(--ink-900)}
+.section-foot{margin-top:36px;display:flex;justify-content:center}
+
+/* =====================================================================
+   WHY GRADEX
+   ===================================================================== */
+.why{background:var(--gradient-brand-soft)}
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.pillar h4{margin:16px 0 8px}
+.pillar p{color:var(--ink-700);line-height:1.7}
+.why-note{margin-top:32px;display:flex;align-items:center;gap:12px;justify-content:center;color:var(--ink-600);font-size:14.5px;text-align:center}
+.why-note svg{width:18px;height:18px;color:var(--accent);flex:none}
+
+/* =====================================================================
+   LEARNING EXPERIENCE (numbered — a genuine sequence)
+   ===================================================================== */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;counter-reset:step}
+.step{position:relative}
+.step .step-n{font-family:var(--font-mono);font-weight:600;font-size:13px;color:var(--blue-600);letter-spacing:0.05em}
+.step .iconchip{margin:14px 0 16px}
+.step h4{margin-bottom:8px}
+.step p{color:var(--ink-700);font-size:15px;line-height:1.65}
+.step-rail{position:absolute;top:9px;inset-inline-start:34px;inset-inline-end:-20px;height:2px;background:linear-gradient(90deg,var(--blue-200),transparent)}
+.step:last-child .step-rail{display:none}
+
+/* =====================================================================
+   INSTRUCTOR SPOTLIGHT
+   ===================================================================== */
+.spotlight{display:grid;grid-template-columns:0.9fr 1.1fr;gap:48px;align-items:center}
+.instr-card{position:relative}
+.instr-head{display:flex;align-items:center;gap:16px}
+.instr-head .name{font-family:var(--font-display);font-weight:700;font-size:20px;color:var(--ink-900)}
+.instr-head .role{color:var(--ink-500);font-size:14px}
+.instr-quote{margin-top:20px;font-size:17px;line-height:1.7;color:var(--ink-800)}
+.instr-creds{margin-top:20px;display:flex;gap:8px;flex-wrap:wrap}
+.instr-stats{margin-top:20px;display:flex;gap:28px;padding-top:20px;border-top:1px solid var(--border-default)}
+.instr-stats .n{font-family:var(--font-display);font-weight:800;font-size:24px;color:var(--ink-900)}
+.instr-stats .l{font-size:13px;color:var(--ink-500)}
+.spotlight-copy .gx-h2{margin-bottom:16px}
+.spotlight-copy p{color:var(--ink-700);line-height:1.7;margin-bottom:16px}
+
+/* =====================================================================
+   TESTIMONIALS
+   ===================================================================== */
+.tgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.tcard .quote{font-size:16px;line-height:1.7;color:var(--ink-800)}
+.tcard .who{margin-top:18px;display:flex;align-items:center;gap:12px}
+.tcard .who .n{font-family:var(--font-display);font-weight:700;font-size:15px;color:var(--ink-900)}
+.tcard .who .m{font-size:13px;color:var(--ink-500)}
+
+/* =====================================================================
+   FAQ (accessible native disclosure, styled as cards)
+   ===================================================================== */
+.faq-wrap{max-width:760px;margin-inline:auto;display:flex;flex-direction:column;gap:12px}
+.faq{background:#fff;border:1px solid var(--border-default);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden}
+.faq summary{list-style:none;cursor:pointer;padding:20px 22px;display:flex;align-items:center;justify-content:space-between;gap:16px;font-family:var(--font-display);font-weight:700;font-size:17px;color:var(--ink-900)}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary .chev{transition:transform var(--duration-base) var(--ease-out);color:var(--blue-500);flex:none}
+.faq[open] summary .chev{transform:rotate(180deg)}
+.faq .answer{padding:0 22px 20px;color:var(--ink-700);line-height:1.7}
+
+/* =====================================================================
+   FINAL CTA
+   ===================================================================== */
+.finalcta{position:relative;background:var(--ink-900);color:#fff;overflow:hidden}
+.finalcta::before{content:"";position:absolute;inset:0;background:radial-gradient(80% 120% at 50% -10%,rgba(79,124,255,0.28),rgba(13,27,42,0) 60%);pointer-events:none}
+.finalcta .inner{position:relative;text-align:center;max-width:640px;margin-inline:auto}
+.finalcta h2{color:#fff;font-size:clamp(30px,4vw,46px)}
+.finalcta p{margin-top:16px;color:rgba(255,255,255,0.80);font-size:18px}
+.finalcta .cta-row{margin-top:30px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+
+/* =====================================================================
+   FOOTER
+   ===================================================================== */
+.footer{background:var(--ink-900);color:rgba(255,255,255,0.72);padding-block:64px 32px}
+.footer a{color:rgba(255,255,255,0.72)}
+.footer a:hover{color:#fff}
+.footer-grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:40px}
+.footer .wordmark{font-family:var(--font-display);font-weight:800;font-size:22px;color:#fff}
+.footer .wordmark .x{color:var(--accent)}
+.footer .tagline{margin-top:14px;max-width:26em;color:rgba(255,255,255,0.62);line-height:1.7}
+.footer .socials{margin-top:18px;display:flex;gap:10px}
+.footer .socials .iconbtn{background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.14);color:#fff}
+.footer .socials .iconbtn:hover{background:rgba(255,255,255,0.12)}
+.footer-col h5{font-family:var(--font-display);font-weight:700;font-size:14px;color:#fff;margin-bottom:14px;text-transform:uppercase;letter-spacing:0.06em}
+.footer-col ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px;font-size:15px}
+.footer-bottom{margin-top:44px;padding-top:24px;border-top:1px solid rgba(255,255,255,0.12);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:13.5px;color:rgba(255,255,255,0.55)}
+
+/* =====================================================================
+   LOADER — origami bird taking flight (brand signature); stand-in for the
+   referenced Animated Logo Hero asset until the claude_design import runs.
+   ===================================================================== */
+#loader{position:fixed;inset:0;z-index:100;background:var(--ink-900);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity 520ms var(--ease-out),visibility 520ms}
+#loader.done{opacity:0;visibility:hidden}
+#loader .bird-mark{width:96px;height:96px}
+#loader .load-word{font-family:var(--font-display);font-weight:800;font-size:30px;color:#fff;opacity:0;letter-spacing:-0.01em}
+#loader .load-word .x{color:var(--accent)}
+@media (prefers-reduced-motion:no-preference){
+  #loader .bird-mark .wing{transform-box:fill-box;transform-origin:center;animation:flap 1400ms var(--ease-out) infinite}
+  #loader .bird-mark{animation:rise 1600ms var(--ease-out) forwards}
+  #loader .load-word{animation:fadein 600ms var(--ease-out) 700ms forwards}
+}
+@media (prefers-reduced-motion:reduce){
+  #loader .load-word{opacity:1}
+}
+@keyframes flap{0%,100%{transform:rotate(0deg)}50%{transform:rotate(-14deg)}}
+@keyframes rise{0%{transform:translateY(24px) scale(0.9);opacity:0}40%{opacity:1}100%{transform:translateY(-6px) scale(1);opacity:1}}
+@keyframes fadein{to{opacity:1}}
+
+/* =====================================================================
+   RESPONSIVE
+   ===================================================================== */
+@media (max-width:1024px){
+  .hero .gx-container{grid-template-columns:1fr;gap:36px;padding-block:64px}
+  .hero-visual{height:360px;max-width:480px}
+  .spotlight{grid-template-columns:1fr;gap:32px}
+  .steps{grid-template-columns:repeat(2,1fr);gap:28px}
+  .step-rail{display:none}
+}
+@media (max-width:860px){
+  .nav{display:none}
+  .header-actions .desktop-auth{display:none}
+  .menu-btn{display:inline-flex}
+  .grid-3,.pillars,.tgrid{grid-template-columns:1fr}
+  .footer-grid{grid-template-columns:1fr 1fr}
+}
+@media (max-width:560px){
+  .gx-container{padding-inline:18px}
+  .hero-cta{flex-direction:column;align-items:stretch}
+  .hero-cta .btn{width:100%}
+  .steps{grid-template-columns:1fr}
+  .footer-grid{grid-template-columns:1fr}
+  .instr-stats{gap:20px}
+  .hero-visual{display:none} /* keep hero copy uncrowded on the smallest screens */
+}
+
+/* Preview-only control (NOT part of the shipped page) */
+#preview-toggle{position:fixed;z-index:80;bottom:16px;inset-inline-start:16px;display:flex;gap:8px;align-items:center;background:rgba(13,27,42,0.92);color:#fff;padding:8px 12px;border-radius:var(--radius-pill);font-family:var(--font-mono);font-size:12px;box-shadow:var(--shadow-lg)}
+#preview-toggle button{font-family:var(--font-mono);font-size:12px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;border-radius:var(--radius-pill);padding:4px 10px;cursor:pointer}
+#preview-toggle button.on{background:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<!-- Shared SVG defs (scribble gradient) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="scribbleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff7e4d"/><stop offset="100%" stop-color="#f64a1f"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<!-- ============================ LOADER ============================ -->
+<div id="loader" role="status" aria-live="polite" aria-label="Loading Gradex">
+  <svg class="bird-mark" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+    <!-- origami bird: folded triangles, orange beak -->
+    <path class="body" d="M50 20 L74 60 L50 52 L26 60 Z" fill="#4f7cff"/>
+    <path class="wing" d="M50 20 L26 60 L50 52 Z" fill="#7fa2ff"/>
+    <path d="M50 52 L74 60 L58 78 Z" fill="#1e4ed8"/>
+    <path d="M50 52 L26 60 L42 78 Z" fill="#364453"/>
+    <path d="M74 60 L86 56 L78 66 Z" fill="#ff7e4d"/>
+  </svg>
+  <div class="load-word">Grade<span class="x">x</span></div>
+</div>
+
+<!-- ============================ HEADER ============================ -->
+<header class="header" role="banner">
+  <div class="gx-container">
+    <a class="brand" href="#top" aria-label="Gradex home">
+      <svg width="30" height="30" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+        <path d="M50 22 L72 58 L50 51 L28 58 Z" fill="#4f7cff"/>
+        <path d="M50 51 L72 58 L57 76 Z" fill="#1e4ed8"/>
+        <path d="M50 51 L28 58 L43 76 Z" fill="#0d1b2a"/>
+        <path d="M72 58 L84 55 L77 64 Z" fill="#ff7e4d"/>
+      </svg>
+      <span class="wordmark" dir="ltr">Grade<span class="x">x</span></span>
+    </a>
+
+    <nav class="nav" aria-label="Primary">
+      <a href="#courses" class="t" data-en="Courses" data-ar="المقررات">Courses</a>
+      <a href="#why" class="t" data-en="Why Gradex" data-ar="لماذا Gradex">Why Gradex</a>
+      <a href="#instructors" class="t" data-en="Instructors" data-ar="المدرّسون">Instructors</a>
+      <a href="#faq" class="t" data-en="FAQ" data-ar="الأسئلة">FAQ</a>
+    </nav>
+
+    <div class="header-actions">
+      <button class="lang-toggle" id="langBtn" aria-label="Switch language to Arabic" dir="ltr">ع</button>
+
+      <!-- Guest state -->
+      <div class="desktop-auth guest-only" style="display:flex;gap:10px;align-items:center">
+        <a class="btn btn-ghost btn-sm t" href="#login" data-en="Log in" data-ar="تسجيل الدخول">Log in</a>
+        <a class="btn btn-outline btn-sm t" href="#register" data-en="Create account" data-ar="إنشاء حساب">Create account</a>
+        <a class="btn btn-primary btn-sm t" href="#courses" data-en="Browse courses" data-ar="تصفّح المقررات">Browse courses</a>
+      </div>
+
+      <!-- Returning state (hidden by default; preview toggle swaps it in) -->
+      <div class="desktop-auth returning-only" style="display:none;gap:10px;align-items:center">
+        <button class="iconbtn" aria-label="Notifications">
+          <svg class="lu" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        </button>
+        <a class="btn btn-primary btn-sm t" href="#dashboard" data-en="Go to dashboard" data-ar="لوحتي">Go to dashboard</a>
+        <span class="avatar" title="Fahd">F</span>
+      </div>
+
+      <button class="iconbtn menu-btn" id="menuBtn" aria-label="Open menu" aria-expanded="false">
+        <svg class="lu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- Mobile sheet -->
+<div class="sheet" id="sheet" aria-hidden="true">
+  <div class="sheet-scrim" data-close></div>
+  <nav class="sheet-panel" aria-label="Mobile">
+    <a href="#courses" data-close class="t" data-en="Courses" data-ar="المقررات">Courses</a>
+    <a href="#why" data-close class="t" data-en="Why Gradex" data-ar="لماذا Gradex">Why Gradex</a>
+    <a href="#instructors" data-close class="t" data-en="Instructors" data-ar="المدرّسون">Instructors</a>
+    <a href="#faq" data-close class="t" data-en="FAQ" data-ar="الأسئلة">FAQ</a>
+    <div class="sheet-divider"></div>
+    <a href="#login" data-close class="t" data-en="Log in" data-ar="تسجيل الدخول">Log in</a>
+    <a class="btn btn-outline btn-block" href="#register" data-close style="margin-top:4px"><span class="t" data-en="Create account" data-ar="إنشاء حساب">Create account</span></a>
+    <a class="btn btn-primary btn-block" href="#courses" data-close style="margin-top:8px"><span class="t" data-en="Browse courses" data-ar="تصفّح المقررات">Browse courses</span></a>
+  </nav>
+</div>
+
+<main id="top">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero" aria-labelledby="hero-title">
+  <div class="gx-container">
+    <div class="hero-text">
+      <span class="gx-eyebrow hero-eyebrow t" data-en="University courses · Kuwait" data-ar="مقررات جامعية · الكويت">University courses · Kuwait</span>
+      <h1 id="hero-title">
+        <span class="t" data-en="Graduate with" data-ar="تخرّج">Graduate with</span>
+        <span class="scribble">
+          <span class="t" data-en="excellence." data-ar="بتفوّق.">excellence.</span>
+          <svg viewBox="0 0 300 20" preserveAspectRatio="none" aria-hidden="true"><path d="M4 13 C 70 4, 150 4, 210 10 C 250 14, 280 12, 296 7"/></svg>
+        </span>
+      </h1>
+      <p class="sub t" data-en="Your courses, your pace, your language. Real lectures, notes, and labs — with instructors who stay with you after you enroll." data-ar="مقرراتك، بوتيرتك، وبلغتك. محاضرات وملخصات ومعامل حقيقية — ومدرّسون يبقون معك بعد التسجيل.">Your courses, your pace, your language. Real lectures, notes, and labs — with instructors who stay with you after you enroll.</p>
+
+      <div class="hero-cta">
+        <a class="btn btn-accent btn-lg t" href="#courses" data-en="Browse courses" data-ar="تصفّح المقررات">Browse courses</a>
+        <a class="btn btn-on-dark btn-lg t" href="#register" data-en="Create account" data-ar="إنشاء حساب">Create account</a>
+      </div>
+
+      <ul class="trust-row" aria-label="What every Gradex course includes" style="list-style:none;padding:0;margin-top:34px">
+        <li class="trust-item"><svg class="lu" viewBox="0 0 24 24"><path d="M5 8h14M5 8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/></svg><span class="t" data-en="Arabic & English" data-ar="العربية والإنجليزية">Arabic &amp; English</span></li>
+        <li class="trust-item"><svg class="lu" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="t" data-en="Labs in every course" data-ar="معمل في كل مقرر">Labs in every course</span></li>
+        <li class="trust-item"><svg class="lu" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg><span class="t" data-en="Fair KWD pricing" data-ar="أسعار عادلة بالدينار">Fair KWD pricing</span></li>
+        <li class="trust-item"><svg class="lu" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg><span class="t" data-en="Instructor follow-up" data-ar="متابعة من المدرّس">Instructor follow-up</span></li>
+      </ul>
+    </div>
+
+    <!-- Hero visual: bird + course-card mock + code island (no stock photos, per DS) -->
+    <div class="hero-visual" aria-hidden="true">
+      <div class="hero-card">
+        <div class="thumb"><span class="code" dir="ltr">CS 101</span></div>
+        <h4 class="t" data-en="Intro to programming" data-ar="مقدمة في البرمجة">Intro to programming</h4>
+        <div class="meta"><span dir="ltr">42 lessons · Beginner</span></div>
+        <div class="price" dir="ltr">38.000 KWD</div>
+      </div>
+      <div class="hero-code" dir="ltr">
+<span class="cm">// lab 03 — arrays</span><br>
+<span class="kw">function</span> <span class="fn">average</span>(xs){<br>
+&nbsp;&nbsp;<span class="kw">return</span> sum(xs) / xs.<span class="fn">length</span>;<br>
+}<br>
+<span class="cm">// grade: passed ✓</span>
+      </div>
+      <svg class="bird-fly" viewBox="0 0 100 100" fill="none">
+        <path d="M50 18 L76 60 L50 51 L24 60 Z" fill="#4f7cff"/>
+        <path d="M50 51 L76 60 L59 80 Z" fill="#1e4ed8"/>
+        <path d="M50 51 L24 60 L41 80 Z" fill="#a8c1ff"/>
+        <path d="M76 60 L90 55 L81 66 Z" fill="#ff7e4d"/>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FEATURED COURSES ============================ -->
+<section class="section" id="courses" aria-labelledby="courses-title">
+  <div class="gx-container">
+    <div class="section-head gx-reveal">
+      <span class="gx-eyebrow t" data-en="Courses" data-ar="المقررات">Courses</span>
+      <h2 class="gx-h2" id="courses-title"><span class="t" data-en="Start where your semester is." data-ar="ابدأ من حيث أنت في فصلك.">Start where your semester is.</span></h2>
+      <p class="gx-body t" data-en="A focused launch catalog for first-year computer science. Every course ships with notes and a hands-on lab." data-ar="كتالوج مركّز لأول سنة علوم حاسب. كل مقرر يأتي بملخصات ومعمل تطبيقي.">A focused launch catalog for first-year computer science. Every course ships with notes and a hands-on lab.</p>
+    </div>
+
+    <div class="grid-3">
+      <!-- Course 1 -->
+      <article class="card card-hover coursecard gx-reveal">
+        <div class="cc-thumb v1"><span class="cc-code" dir="ltr">CS 101</span><span class="badge badge-accent t" data-en="New" data-ar="جديد">New</span></div>
+        <div class="cc-body">
+          <div class="cc-tags"><span class="tag t" data-en="Beginner" data-ar="مبتدئ">Beginner</span><span class="tag"><svg class="lu" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="t" data-en="Labs included" data-ar="مع معمل">Labs included</span></span></div>
+          <h4 class="t" data-en="Intro to programming" data-ar="مقدمة في البرمجة">Intro to programming</h4>
+          <div class="cc-instructor"><span class="avatar">S</span><span dir="auto">Dr. Sara Al-Mutairi</span></div>
+          <div class="cc-meta"><span dir="ltr">42 lessons</span><span dir="ltr">18h</span></div>
+          <div class="cc-foot"><span class="cc-price" dir="ltr">38.000 KWD</span><a class="btn btn-ghost btn-sm t" href="#course" data-en="View" data-ar="عرض">View</a></div>
+        </div>
+      </article>
+
+      <!-- Course 2 -->
+      <article class="card card-hover coursecard gx-reveal" data-delay="1">
+        <div class="cc-thumb v2"><span class="cc-code" dir="ltr">CS 201</span></div>
+        <div class="cc-body">
+          <div class="cc-tags"><span class="tag t" data-en="Intermediate" data-ar="متوسط">Intermediate</span><span class="tag"><svg class="lu" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="t" data-en="Labs included" data-ar="مع معمل">Labs included</span></span></div>
+          <h4><span class="t" data-en="Data structures in" data-ar="هياكل البيانات بلغة">Data structures in</span> <span dir="ltr">Java</span></h4>
+          <div class="cc-instructor"><span class="avatar">Y</span><span dir="auto">Yousef Al-Enezi</span></div>
+          <div class="cc-meta"><span dir="ltr">55 lessons</span><span dir="ltr">24h</span></div>
+          <div class="cc-foot"><span class="cc-price" dir="ltr">45.000 KWD</span><a class="btn btn-ghost btn-sm t" href="#course" data-en="View" data-ar="عرض">View</a></div>
+        </div>
+      </article>
+
+      <!-- Course 3 -->
+      <article class="card card-hover coursecard gx-reveal" data-delay="2">
+        <div class="cc-thumb v3"><span class="cc-code" dir="ltr">MATH 110</span><span class="badge badge-accent t" data-en="New" data-ar="جديد">New</span></div>
+        <div class="cc-body">
+          <div class="cc-tags"><span class="tag t" data-en="Beginner" data-ar="مبتدئ">Beginner</span><span class="tag"><svg class="lu" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span class="t" data-en="Labs included" data-ar="مع معمل">Labs included</span></span></div>
+          <h4 class="t" data-en="Calculus I, made survivable" data-ar="تفاضل وتكامل ١ ببساطة">Calculus I, made survivable</h4>
+          <div class="cc-instructor"><span class="avatar">N</span><span dir="auto">Dr. Noura Al-Sabah</span></div>
+          <div class="cc-meta"><span dir="ltr">30 lessons</span><span dir="ltr">14h</span></div>
+          <div class="cc-foot"><span class="cc-price" dir="ltr">32.000 KWD</span><a class="btn btn-ghost btn-sm t" href="#course" data-en="View" data-ar="عرض">View</a></div>
+        </div>
+      </article>
+    </div>
+
+    <div class="section-foot">
+      <a class="btn btn-outline t" href="#courses" data-en="Browse all courses" data-ar="تصفّح كل المقررات">Browse all courses</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHY GRADEX ============================ -->
+<section class="section why" id="why" aria-labelledby="why-title">
+  <div class="gx-container">
+    <div class="section-head gx-reveal" style="margin-inline:auto;text-align:center">
+      <span class="gx-eyebrow t" data-en="Why Gradex" data-ar="لماذا Gradex">Why Gradex</span>
+      <h2 class="gx-h2" id="why-title"><span class="t" data-en="Built to get you through the semester — and past it." data-ar="مصمّم يوصّلك آخر الفصل — وأبعد.">Built to get you through the semester — and past it.</span></h2>
+    </div>
+
+    <div class="pillars">
+      <div class="card pillar gx-reveal">
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg></span>
+        <h4 class="t" data-en="Labs, not just lectures" data-ar="معامل، لا محاضرات فقط">Labs, not just lectures</h4>
+        <p class="t" data-en="Every course ends in a downloadable project with a guide. You finish able to build the thing, not just recognize it on an exam." data-ar="كل مقرر ينتهي بمشروع قابل للتنزيل مع دليل. تُنهي المقرر وأنت قادر على البناء، لا مجرد التعرّف على المصطلح في الامتحان.">Every course ends in a downloadable project with a guide. You finish able to build the thing, not just recognize it on an exam.</p>
+      </div>
+      <div class="card pillar gx-reveal" data-delay="1">
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        <h4 class="t" data-en="A community that answers" data-ar="مجتمع يردّ عليك">A community that answers</h4>
+        <p class="t" data-en="Enrol and you join the course community the same day. Ask, compare, and get unstuck alongside people taking the exact same course." data-ar="بمجرد التسجيل تنضم لمجتمع المقرر في نفس اليوم. اسأل، قارن، وتخطَّ العقبات مع زملاء يدرسون نفس المقرر.">Enrol and you join the course community the same day. Ask, compare, and get unstuck alongside people taking the exact same course.</p>
+      </div>
+      <div class="card pillar gx-reveal" data-delay="2">
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M9 12l2 2 4-4"/></svg></span>
+        <h4 class="t" data-en="Follow-up that shows up" data-ar="متابعة تحضر فعلاً">Follow-up that shows up</h4>
+        <p class="t" data-en="Support doesn't end at checkout. Instructors and the community stay reachable while you work through the course." data-ar="الدعم لا ينتهي عند الدفع. المدرّسون والمجتمع يبقون في متناولك طوال المقرر.">Support doesn't end at checkout. Instructors and the community stay reachable while you work through the course.</p>
+      </div>
+    </div>
+
+    <p class="why-note gx-reveal"><svg class="lu" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg><span class="t" data-en="Fair price, not the cheapest — we compete on what you can build, never a race to the bottom." data-ar="سعر عادل، لا الأرخص — نتنافس على ما تستطيع بناءه، لا على السباق نحو القاع.">Fair price, not the cheapest — we compete on what you can build, never a race to the bottom.</span></p>
+  </div>
+</section>
+
+<!-- ============================ LEARNING EXPERIENCE ============================ -->
+<section class="section" id="learn" aria-labelledby="learn-title">
+  <div class="gx-container">
+    <div class="section-head gx-reveal">
+      <span class="gx-eyebrow t" data-en="How it works" data-ar="كيف يعمل">How it works</span>
+      <h2 class="gx-h2" id="learn-title"><span class="t" data-en="How a Gradex course works" data-ar="كيف يعمل مقرر Gradex">How a Gradex course works</span></h2>
+      <p class="gx-body t" data-en="Four steps, in order. Each one builds on the last — watching is where you start, not where you stop." data-ar="أربع خطوات بالترتيب. كل واحدة تبني على السابقة — المشاهدة بداية الطريق لا نهايته.">Four steps, in order. Each one builds on the last — watching is where you start, not where you stop.</p>
+    </div>
+
+    <ol class="steps" style="list-style:none;margin:0;padding:0">
+      <li class="step gx-reveal">
+        <div class="step-rail"></div>
+        <div class="step-n" dir="ltr">01</div>
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M10 8l4 2.5-4 2.5Z" fill="currentColor" stroke="none"/></svg></span>
+        <h4 class="gx-h4 t" data-en="Watch the lecture" data-ar="شاهد المحاضرة">Watch the lecture</h4>
+        <p class="t" data-en="Clear, exam-focused videos. Resume from where you left off, on any device." data-ar="فيديوهات واضحة تركّز على الامتحان. أكمل من حيث توقفت على أي جهاز.">Clear, exam-focused videos. Resume from where you left off, on any device.</p>
+      </li>
+      <li class="step gx-reveal" data-delay="1">
+        <div class="step-rail"></div>
+        <div class="step-n" dir="ltr">02</div>
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M9 13h6M9 17h4"/></svg></span>
+        <h4 class="gx-h4 t" data-en="Study the notes" data-ar="ذاكر الملخص">Study the notes</h4>
+        <p class="t" data-en="Download slides and notes that get to the point — made to revise from, not to pad the runtime." data-ar="نزّل الشرائح والملخصات التي تختصر الطريق — للمراجعة، لا لملء الوقت.">Download slides and notes that get to the point — made to revise from, not to pad the runtime.</p>
+      </li>
+      <li class="step gx-reveal" data-delay="2">
+        <div class="step-rail"></div>
+        <div class="step-n" dir="ltr">03</div>
+        <span class="iconchip"><svg class="lu" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M8 12l2 2 4-5M14.5 4.5l5 5L22 7l-5-5Z"/></svg></span>
+        <h4 class="gx-h4 t" data-en="Build the lab" data-ar="طبّق المعمل">Build the lab</h4>
+        <p class="t" data-en="Download the project files and guide, and build something real with what you just learned." data-ar="نزّل ملفات المشروع والدليل، وابنِ شيئاً حقيقياً بما تعلمته للتو.">Download the project files and guide, and build something real with what you just learned.</p>
+      </li>
+      <li class="step gx-reveal" data-delay="3">
+        <div class="step-n" dir="ltr">04</div>
+        <span class="iconchip accent"><svg class="lu" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        <h4 class="gx-h4 t" data-en="Ask in the community" data-ar="اسأل في المجتمع">Ask in the community</h4>
+        <p class="t" data-en="Stuck on the lab? Ask in the course community and keep the follow-up going until it clicks." data-ar="واجهت مشكلة في المعمل؟ اسأل في مجتمع المقرر واستمر في المتابعة حتى تفهم.">Stuck on the lab? Ask in the course community and keep the follow-up going until it clicks.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================ INSTRUCTOR SPOTLIGHT ============================ -->
+<section class="section" id="instructors" aria-labelledby="instr-title" style="background:var(--surface-brand-tint)">
+  <div class="gx-container">
+    <div class="spotlight">
+      <article class="card instr-card gx-reveal">
+        <div class="instr-head">
+          <span class="avatar avatar-lg">S</span>
+          <div>
+            <div class="name" dir="auto">Dr. Sara Al-Mutairi</div>
+            <div class="role t" data-en="CS Lecturer · Kuwait University" data-ar="محاضِرة علوم حاسب · جامعة الكويت">CS Lecturer · Kuwait University</div>
+          </div>
+        </div>
+        <p class="instr-quote t" data-en="&ldquo;I teach the way I wish someone had taught me in first year — build first, and never leave a student stuck alone.&rdquo;" data-ar="«أُدرّس بالطريقة التي تمنيت أن يُدرّسني بها أحد في أول سنة — ابنِ أولاً، ولا تترك طالباً عالقاً وحده.»">&ldquo;I teach the way I wish someone had taught me in first year — build first, and never leave a student stuck alone.&rdquo;</p>
+        <div class="instr-creds">
+          <span class="badge t" data-en="10+ years teaching" data-ar="+١٠ سنوات تدريس">10+ years teaching</span>
+          <span class="badge t" data-en="Data structures" data-ar="هياكل البيانات">Data structures</span>
+          <span class="badge t" data-en="Algorithms" data-ar="الخوارزميات">Algorithms</span>
+        </div>
+        <div class="instr-stats">
+          <div><div class="n" dir="ltr">3</div><div class="l t" data-en="courses" data-ar="مقررات">courses</div></div>
+          <div><div class="n" dir="ltr">120+</div><div class="l t" data-en="lessons" data-ar="درس">lessons</div></div>
+          <div><div class="n t" data-en="AR·EN" data-ar="عربي·إنجليزي" dir="ltr">AR·EN</div><div class="l t" data-en="languages" data-ar="لغتان">languages</div></div>
+        </div>
+      </article>
+
+      <div class="spotlight-copy gx-reveal" data-delay="1">
+        <span class="gx-eyebrow t" data-en="Instructors" data-ar="المدرّسون">Instructors</span>
+        <h2 class="gx-h2"><span class="t" data-en="Learn from instructors who stay." data-ar="تعلّم من مدرّسين يبقون معك.">Learn from instructors who stay.</span></h2>
+        <p class="t" data-en="Gradex instructors are working lecturers and engineers from the region — teaching the courses they actually know, in the language you actually study in." data-ar="مدرّسو Gradex محاضرون ومهندسون من المنطقة — يدرّسون ما يتقنونه فعلاً، وباللغة التي تدرس بها فعلاً.">Gradex instructors are working lecturers and engineers from the region — teaching the courses they actually know, in the language you actually study in.</p>
+        <p class="t" data-en="They don't disappear after you enrol. Follow-up in the course community is part of the course — not an upsell." data-ar="لا يختفون بعد التسجيل. المتابعة في مجتمع المقرر جزء من المقرر — لا خدمة إضافية مدفوعة.">They don't disappear after you enrol. Follow-up in the course community is part of the course — not an upsell.</p>
+        <a class="btn btn-primary t" href="#instructors" data-en="Meet the instructors" data-ar="تعرّف على المدرّسين">Meet the instructors</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ TESTIMONIALS ============================ -->
+<section class="section" id="testimonials" aria-labelledby="tst-title">
+  <div class="gx-container">
+    <div class="section-head gx-reveal">
+      <span class="gx-eyebrow t" data-en="Students" data-ar="الطلاب">Students</span>
+      <h2 class="gx-h2" id="tst-title"><span class="t" data-en="What early students tell us" data-ar="ماذا يقول أوائل الطلاب">What early students tell us</span></h2>
+      <p class="gx-body t" data-en="Voices from our pilot cohort. We'll only ever show reviews from students who actually took the course." data-ar="أصوات من مجموعتنا التجريبية. لن نعرض إلا مراجعات من طلاب أخذوا المقرر فعلاً.">Voices from our pilot cohort. We'll only ever show reviews from students who actually took the course.</p>
+    </div>
+
+    <div class="tgrid">
+      <figure class="card tcard gx-reveal" style="margin:0">
+        <blockquote class="quote t" data-en="&ldquo;The lab was the difference. I'd watched the same topic on another site and still couldn't do it — here I actually built it.&rdquo;" data-ar="«المعمل هو الفرق. كنت شاهدت نفس الموضوع على موقع ثاني وما قدرت أطبّقه — هنا فعلاً بنيته.»">&ldquo;The lab was the difference. I'd watched the same topic on another site and still couldn't do it — here I actually built it.&rdquo;</blockquote>
+        <figcaption class="who"><span class="avatar">F</span><div><div class="n" dir="auto">Fahd A.</div><div class="m t" data-en="Computer Science · Year 1" data-ar="علوم حاسب · سنة أولى">Computer Science · Year 1</div></div></figcaption>
+      </figure>
+      <figure class="card tcard gx-reveal" data-delay="1" style="margin:0">
+        <blockquote class="quote t" data-en="&ldquo;Asking a question at 1am and getting a real answer from the community got me through the week before finals.&rdquo;" data-ar="«سؤال الساعة ١ بالليل ورد حقيقي من المجتمع نجّاني الأسبوع اللي قبل الفاينل.»">&ldquo;Asking a question at 1am and getting a real answer from the community got me through the week before finals.&rdquo;</blockquote>
+        <figcaption class="who"><span class="avatar">A</span><div><div class="n" dir="auto">Ali R.</div><div class="m t" data-en="Business · switching to CS" data-ar="إدارة أعمال · متحوّل لعلوم حاسب">Business · switching to CS</div></div></figcaption>
+      </figure>
+      <figure class="card tcard gx-reveal" data-delay="2" style="margin:0">
+        <blockquote class="quote t" data-en="&ldquo;Studying in Arabic with the code in English is exactly how my brain works. Nothing else does this well.&rdquo;" data-ar="«المذاكرة بالعربي والكود بالإنجليزي هي بالضبط طريقة تفكيري. ما فيه شي ثاني يسوّيها بنفس الإتقان.»">&ldquo;Studying in Arabic with the code in English is exactly how my brain works. Nothing else does this well.&rdquo;</blockquote>
+        <figcaption class="who"><span class="avatar">M</span><div><div class="n" dir="auto">Amjad K.</div><div class="m t" data-en="Prepping for university" data-ar="يستعد للجامعة">Prepping for university</div></div></figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FAQ ============================ -->
+<section class="section" id="faq" aria-labelledby="faq-title" style="background:var(--surface-brand-tint)">
+  <div class="gx-container">
+    <div class="section-head gx-reveal" style="margin-inline:auto;text-align:center">
+      <span class="gx-eyebrow t" data-en="FAQ" data-ar="الأسئلة">FAQ</span>
+      <h2 class="gx-h2" id="faq-title"><span class="t" data-en="Questions, answered." data-ar="أسئلتك، مُجابة.">Questions, answered.</span></h2>
+    </div>
+
+    <div class="faq-wrap">
+      <details class="faq gx-reveal" open>
+        <summary><span class="t" data-en="What do I actually get when I buy a course?" data-ar="ماذا أحصل فعلاً عند شراء المقرر؟">What do I actually get when I buy a course?</span><svg class="lu chev" viewBox="0 0 24 24" width="20" height="20"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="answer t" data-en="Lifetime access to the course videos, downloadable notes and slides, the hands-on lab files with a guide, and an invite to the course community." data-ar="وصول دائم لفيديوهات المقرر، وملخصات وشرائح قابلة للتنزيل، وملفات المعمل التطبيقي مع دليل، ودعوة لمجتمع المقرر.">Lifetime access to the course videos, downloadable notes and slides, the hands-on lab files with a guide, and an invite to the course community.</div>
+      </details>
+      <details class="faq gx-reveal">
+        <summary><span class="t" data-en="Can I pay in instalments?" data-ar="أقدر أدفع على أقساط؟">Can I pay in instalments?</span><svg class="lu chev" viewBox="0 0 24 24" width="20" height="20"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="answer t" data-en="Single courses and chapters are available now, priced in KWD. Instalments are coming shortly after launch — you'll see the option at checkout when it's live." data-ar="المقررات والفصول متاحة الآن بأسعار بالدينار. الأقساط قادمة بعد الإطلاق بفترة قصيرة — سيظهر الخيار عند الدفع فور توفره.">Single courses and chapters are available now, priced in KWD. Instalments are coming shortly after launch — you'll see the option at checkout when it's live.</div>
+      </details>
+      <details class="faq gx-reveal">
+        <summary><span class="t" data-en="Are the courses in Arabic or English?" data-ar="المقررات بالعربي أو الإنجليزي؟">Are the courses in Arabic or English?</span><svg class="lu chev" viewBox="0 0 24 24" width="20" height="20"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="answer t" data-en="The platform is fully bilingual. Instruction is in Arabic and English; code and course codes stay in English so what you learn matches the industry." data-ar="المنصة ثنائية اللغة بالكامل. الشرح بالعربية والإنجليزية؛ والكود ورموز المقررات تبقى بالإنجليزية ليطابق ما تتعلمه سوق العمل.">The platform is fully bilingual. Instruction is in Arabic and English; code and course codes stay in English so what you learn matches the industry.</div>
+      </details>
+      <details class="faq gx-reveal">
+        <summary><span class="t" data-en="What happens after I finish a course?" data-ar="ماذا يحدث بعد إنهاء المقرر؟">What happens after I finish a course?</span><svg class="lu chev" viewBox="0 0 24 24" width="20" height="20"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="answer t" data-en="Access doesn't expire and the community stays open. Come back to the labs and notes whenever a topic comes up again in your degree." data-ar="الوصول لا ينتهي والمجتمع يبقى مفتوحاً. ارجع للمعامل والملخصات كلما تكرر الموضوع في دراستك.">Access doesn't expire and the community stays open. Come back to the labs and notes whenever a topic comes up again in your degree.</div>
+      </details>
+      <details class="faq gx-reveal">
+        <summary><span class="t" data-en="Can I watch on my phone?" data-ar="أقدر أشاهد على الجوال؟">Can I watch on my phone?</span><svg class="lu chev" viewBox="0 0 24 24" width="20" height="20"><path d="M6 9l6 6 6-6"/></svg></summary>
+        <div class="answer t" data-en="Yes. Video adapts to your connection and resumes from your last position across phone, tablet, and laptop." data-ar="نعم. الفيديو يتكيّف مع اتصالك ويكمل من آخر موضع توقفت عنده على الجوال والتابلت واللابتوب.">Yes. Video adapts to your connection and resumes from your last position across phone, tablet, and laptop.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FINAL CTA ============================ -->
+<section class="section finalcta" aria-labelledby="final-title">
+  <div class="gx-container">
+    <div class="inner gx-reveal">
+      <h2 id="final-title"><span class="t" data-en="Ready to graduate with excellence?" data-ar="جاهز تتخرّج بتفوّق؟">Ready to graduate with excellence?</span></h2>
+      <p class="t" data-en="Browse the launch catalogue, or create a free account and pick up where your semester is." data-ar="تصفّح كتالوج الإطلاق، أو أنشئ حساباً مجانياً وابدأ من حيث أنت في فصلك.">Browse the launch catalogue, or create a free account and pick up where your semester is.</p>
+      <div class="cta-row">
+        <a class="btn btn-accent btn-lg t" href="#courses" data-en="Browse courses" data-ar="تصفّح المقررات">Browse courses</a>
+        <a class="btn btn-on-dark btn-lg t" href="#register" data-en="Create free account" data-ar="أنشئ حساباً مجانياً">Create free account</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================ FOOTER ============================ -->
+<footer class="footer" role="contentinfo">
+  <div class="gx-container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="brand" style="gap:10px">
+          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+            <path d="M50 22 L72 58 L50 51 L28 58 Z" fill="#4f7cff"/>
+            <path d="M50 51 L72 58 L57 76 Z" fill="#1e4ed8"/>
+            <path d="M50 51 L28 58 L43 76 Z" fill="#a8c1ff"/>
+            <path d="M72 58 L84 55 L77 64 Z" fill="#ff7e4d"/>
+          </svg>
+          <span class="wordmark" dir="ltr">Grade<span class="x">x</span></span>
+        </div>
+        <p class="tagline t" data-en="Graduate with excellence. University courses for GCC students — real labs, real community, real follow-up." data-ar="تخرّج بتفوّق. مقررات جامعية لطلبة الخليج — معامل حقيقية، مجتمع حقيقي، ومتابعة حقيقية.">Graduate with excellence. University courses for GCC students — real labs, real community, real follow-up.</p>
+        <div class="socials">
+          <a class="iconbtn" href="#" aria-label="Discord"><svg class="lu" viewBox="0 0 24 24"><path d="M18 4a18 18 0 0 1 3 14 15 15 0 0 1-4 2l-1-2M6 4a18 18 0 0 0-3 14 15 15 0 0 0 4 2l1-2"/><path d="M9 12h.01M15 12h.01"/></svg></a>
+          <a class="iconbtn" href="#" aria-label="X"><svg class="lu" viewBox="0 0 24 24"><path d="M4 4l16 16M20 4L4 20"/></svg></a>
+          <a class="iconbtn" href="#" aria-label="Instagram"><svg class="lu" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17 7h.01"/></svg></a>
+        </div>
+      </div>
+
+      <div class="footer-col">
+        <h5 class="t" data-en="Explore" data-ar="استكشف">Explore</h5>
+        <ul>
+          <li><a href="#courses" class="t" data-en="Courses" data-ar="المقررات">Courses</a></li>
+          <li><a href="#why" class="t" data-en="Why Gradex" data-ar="لماذا Gradex">Why Gradex</a></li>
+          <li><a href="#instructors" class="t" data-en="Instructors" data-ar="المدرّسون">Instructors</a></li>
+          <li><a href="#faq" class="t" data-en="FAQ" data-ar="الأسئلة">FAQ</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h5 class="t" data-en="Company" data-ar="الشركة">Company</h5>
+        <ul>
+          <li><a href="#" class="t" data-en="About" data-ar="من نحن">About</a></li>
+          <li><a href="#" class="t" data-en="Teach on Gradex" data-ar="درّس على Gradex">Teach on Gradex</a></li>
+          <li><a href="#" class="t" data-en="Contact" data-ar="تواصل">Contact</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h5 class="t" data-en="Legal" data-ar="قانوني">Legal</h5>
+        <ul>
+          <li><a href="#" class="t" data-en="Terms" data-ar="الشروط">Terms</a></li>
+          <li><a href="#" class="t" data-en="Privacy" data-ar="الخصوصية">Privacy</a></li>
+          <li><a href="#" class="t" data-en="Refund policy" data-ar="سياسة الاسترجاع">Refund policy</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span class="t" data-en="© 2026 Gradex. Built in Kuwait." data-ar="© ٢٠٢٦ Gradex. صُنع في الكويت.">© 2026 Gradex. Built in Kuwait.</span>
+      <span class="t" data-en="Prices in KWD, VAT where applicable." data-ar="الأسعار بالدينار الكويتي، وتُضاف الضريبة عند اللزوم.">Prices in KWD, VAT where applicable.</span>
+    </div>
+  </div>
+</footer>
+
+<!-- Preview-only control — demonstrates guest vs returning header + is not part of the shipped page -->
+<div id="preview-toggle" dir="ltr" aria-hidden="true">
+  <span>header:</span>
+  <button id="pvGuest" class="on">guest</button>
+  <button id="pvReturning">returning</button>
+</div>
+
+<script>
+(function(){
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* Loader dismiss */
+  var loader = document.getElementById('loader');
+  function dismiss(){ if(loader){ loader.classList.add('done'); setTimeout(function(){ loader.style.display='none'; }, 560); } }
+  if(reduce){ dismiss(); } else { window.addEventListener('load', function(){ setTimeout(dismiss, 1700); }); setTimeout(dismiss, 3000); }
+
+  /* Scroll reveal */
+  var reveals = document.querySelectorAll('.gx-reveal');
+  if(reduce || !('IntersectionObserver' in window)){
+    reveals.forEach(function(el){ el.classList.add('gx-in'); });
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('gx-in'); io.unobserve(e.target); } });
+    }, { threshold: 0.15 });
+    reveals.forEach(function(el){ io.observe(el); });
+  }
+
+  /* Mobile sheet */
+  var sheet = document.getElementById('sheet'), menuBtn = document.getElementById('menuBtn');
+  function openSheet(){ sheet.classList.add('open'); sheet.setAttribute('aria-hidden','false'); menuBtn.setAttribute('aria-expanded','true'); }
+  function closeSheet(){ sheet.classList.remove('open'); sheet.setAttribute('aria-hidden','true'); menuBtn.setAttribute('aria-expanded','false'); }
+  if(menuBtn){ menuBtn.addEventListener('click', openSheet); }
+  sheet.addEventListener('click', function(e){ if(e.target.hasAttribute('data-close') || e.target.closest('[data-close]')) closeSheet(); });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeSheet(); });
+
+  /* EN / AR toggle */
+  var lang = 'en', langBtn = document.getElementById('langBtn');
+  function applyLang(){
+    var ar = lang === 'ar';
+    document.documentElement.lang = ar ? 'ar' : 'en';
+    document.documentElement.dir = ar ? 'rtl' : 'ltr';
+    document.querySelectorAll('.t').forEach(function(el){
+      var v = el.getAttribute(ar ? 'data-ar' : 'data-en');
+      if(v != null) el.textContent = v;
+    });
+    langBtn.textContent = ar ? 'EN' : 'ع';
+    langBtn.setAttribute('aria-label', ar ? 'Switch language to English' : 'Switch language to Arabic');
+  }
+  langBtn.addEventListener('click', function(){ lang = lang === 'en' ? 'ar' : 'en'; applyLang(); });
+
+  /* Preview-only: guest vs returning header */
+  var g = document.getElementById('pvGuest'), r = document.getElementById('pvReturning');
+  function setHeader(mode){
+    var guest = mode === 'guest';
+    document.querySelectorAll('.guest-only').forEach(function(el){ el.style.display = guest ? 'flex' : 'none'; });
+    document.querySelectorAll('.returning-only').forEach(function(el){ el.style.display = guest ? 'none' : 'flex'; });
+    g.classList.toggle('on', guest); r.classList.toggle('on', !guest);
+  }
+  g.addEventListener('click', function(){ setHeader('guest'); });
+  r.addEventListener('click', function(){ setHeader('returning'); });
+})();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Docs Guard — Code Sample Rules
 
-A code sample is the most-trusted part of any documentation: readers paste it. That trust makes a broken sample worse than no sample.
+Readers copy code samples directly into their own projects. That makes a broken sample worse than no sample.
 
 ## Contents
 
@@ -34,7 +34,7 @@ Use data that exposes the API's shape honestly: realistic field names, plausible
 
 ## Error-path examples
 
-For any API that can fail in normal operation, show one failure: what the error object/exception/status looks like and the minimal correct response to it — using the error types the code actually raises (verify the raise site). Happy-path-only documentation produces catch-all error swallowing downstream, the exact failure clean-code-guard exists to stop.
+For any API that can fail in normal operation, show one failure: what the error object/exception/status looks like and the minimal correct response to it — using the error types the code actually raises (verify the raise site). Happy-path-only documentation omits recovery behavior and encourages callers to ignore errors — the exact failure docs-guard exists to stop.
 
 ## Language and environment tags
 

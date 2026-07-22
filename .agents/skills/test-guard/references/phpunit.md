@@ -19,7 +19,11 @@ Unjustified mocks:
 
 ## Rule 3: Data providers
 
+PHPUnit 10+ (attribute syntax, requires the import below):
+
 ```php
+use PHPUnit\Framework\Attributes\DataProvider;
+
 /**
  * @see Rule 3 — variants of one scenario belong in a data provider.
  */
@@ -36,6 +40,8 @@ public static function provideSlugCases(): array {
     );
 }
 ```
+
+PHPUnit &lt;10 (legacy docblock syntax): replace the `#[DataProvider(...)]` attribute with `/** @dataProvider provideSlugCases */` above the test method.
 
 Pest equivalent: `it('normalizes slug', ...)->with([...])`.
 

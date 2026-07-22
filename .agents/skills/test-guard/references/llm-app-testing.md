@@ -29,12 +29,14 @@ For agent frameworks and state machines: test that given a state plus an event, 
 
 Test: state in → state out.
 
-Don't test: the exact prompt string passed to the LLM, the number of LLM calls made, or internal retry logic — those are implementation details (Rule 1) that change with every model upgrade.
+Don't test: the exact prompt string passed to the LLM, or incidental LLM call counts tied to internal implementation details (e.g., "the summarizer calls the LLM twice") — those are implementation details (Rule 1) that change with every model or prompt upgrade.
+
+Do test contractual retry/side-effect behavior when it's part of the spec: explicit maximum-attempt limits, stop conditions, idempotency, rate-limit handling, and duplicate-side-effect prevention (e.g., "never charges a customer twice on retry"). These are behavioral guarantees, not incidental wiring — assert them like any other contract.
 
 A useful pattern is a table of transition cases (data-driven, Rule 3): starting state, mocked LLM response, expected resulting state.
 
 ## Severity
 
-- **Must fix:** Rule 12 violations that assert prompt strings or call counts — they break on every model/prompt change
+- **Must fix:** Rule 12 violations that assert prompt strings or incidental, non-contractual call counts — they break on every model/prompt change. Explicit max-attempt limits, stop conditions, idempotency, rate-limit behavior, and duplicate-side-effect prevention are contractual and should still be tested.
 - **Should fix:** Rule 10 wording assertions
 - **Worth noting:** Rule 11 — flag it, but don't block a small change on it

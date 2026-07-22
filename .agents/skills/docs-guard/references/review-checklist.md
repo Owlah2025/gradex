@@ -17,8 +17,8 @@ Run the full procedure in [verification.md](verification.md):
 
 - Extract every symbol, flag, endpoint, config key, path, version, and behavioral claim.
 - Verify each against its source of truth (definition site, parser, route table, changelog).
-- Every unverified or contradicted claim is a Rule 1/3 finding with the contradicting file:line.
-- Numbers and superlatives without a repo source are Rule 4 findings.
+- Every unverified or contradicted claim is a finding under whichever rule applies, citing the contradicting file:line.
+- Numbers and superlatives without a repo source are Rule 4 findings; version drift is a Rule 5 finding.
 
 ## Pass 2: Code samples (must fix)
 

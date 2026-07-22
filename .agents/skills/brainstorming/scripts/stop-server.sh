@@ -78,6 +78,12 @@ if [[ -f "$PID_FILE" ]]; then
   if ! is_brainstorm_server "$pid"; then
     rm -f "$PID_FILE" "$SERVER_ID_FILE"
     mark_stopped "stale_pid"
+
+    # Only delete ephemeral /tmp directories
+    if [[ "$SESSION_DIR" == /tmp/* ]]; then
+      rm -rf "$SESSION_DIR"
+    fi
+
     echo '{"status": "stale_pid"}'
     exit 0
   fi
@@ -106,7 +112,7 @@ if [[ -f "$PID_FILE" ]]; then
     exit 1
   fi
 
-  rm -f "$PID_FILE" "$SERVER_ID_FILE" "${STATE_DIR}/server.log"
+  rm -f "$PID_FILE" "$SERVER_ID_FILE"
   mark_stopped "stop-server.sh"
 
   # Only delete ephemeral /tmp directories

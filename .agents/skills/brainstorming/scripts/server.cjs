@@ -405,9 +405,14 @@ function handleRequest(req, res) {
     res.end(bootstrapPage(keyFromQuery));
   } else if (req.method === 'GET' && pathname === '/') {
     const screenFile = getNewestScreen();
-    let html = screenFile
-      ? (raw => isFullDocument(raw) ? raw : wrapInFrame(raw))(fs.readFileSync(screenFile, 'utf-8'))
-      : waitingPage();
+    let html;
+    try {
+      html = screenFile
+        ? (raw => isFullDocument(raw) ? raw : wrapInFrame(raw))(fs.readFileSync(screenFile, 'utf-8'))
+        : waitingPage();
+    } catch (e) {
+      html = waitingPage(); // screen file vanished mid-request
+    }
 
     if (html.includes('</body>')) {
       html = html.replace('</body>', helperInjection + '\n</body>');

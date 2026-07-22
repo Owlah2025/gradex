@@ -17,7 +17,7 @@ type repo interface {
 	getVideoByLesson(ctx context.Context, lessonID string) (Video, error)
 	getVideoByID(ctx context.Context, videoID string) (Video, error)
 	insertVideo(ctx context.Context, lessonID, rawKey string, status Status) (Video, error)
-	updateVideoForReupload(ctx context.Context, videoID, rawKey string) error
+	updateVideoForReupload(ctx context.Context, videoID, rawKey string) (bool, error)
 	transitionVideoStatus(ctx context.Context, videoID string, from, to Status) (bool, error)
 	setVideoFailed(ctx context.Context, videoID, reason string) (bool, error)
 	updateVideoMetadata(ctx context.Context, videoID string, resolution string, bitrate int, codec string, fps float64, fileSize int64) error
@@ -107,13 +107,16 @@ func (r *pgRepo) insertVideo(ctx context.Context, lessonID, rawKey string, statu
 	return r.getVideoByID(ctx, videoID)
 }
 
-// updateVideoForReupload sets a fresh raw_key and moves to UPLOADING. Called
-// only after the caller has already validated no in-flight video is present,
-// so this is an unconditional write rather than a CAS.
-func (r *pgRepo) updateVideoForReupload(ctx context.Context, videoID, rawKey string) error {
+// updateVideoForReupload sets a fresh raw_key and moves to UPLOADING. The
+// WHERE status IN (...) clause is a CAS guard against inFlightStatuses
+// (upload.go) — the caller checks status is DRAFT/FAILED/READY/PUBLISHED
+// before calling this, but that check-then-act gap must still be closed here
+// in case a concurrent worker/request moved the video into an in-flight
+// status in between. Returns false (not an error) if the guard didn't apply.
+func (r *pgRepo) updateVideoForReupload(ctx context.Context, videoID, rawKey string) (bool, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("updateVideoForReupload begin: %w", err)
+		return false, fmt.Errorf("updateVideoForReupload begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -121,16 +124,22 @@ func (r *pgRepo) updateVideoForReupload(ctx context.Context, videoID, rawKey str
 	err = tx.QueryRow(ctx, `
 		UPDATE videos SET raw_key = $1, provider_asset_id = $1, status = $2, failed_reason = NULL,
 		       hls_master_key = NULL, updated_at = now()
-		WHERE id = $3::uuid
+		WHERE id = $3::uuid AND status IN ($4, $5, $6, $7)
 		RETURNING lesson_id
-	`, rawKey, StatusUploading, videoID).Scan(&lessonID)
+	`, rawKey, StatusUploading, videoID, StatusDraft, StatusFailed, StatusReady, StatusPublished).Scan(&lessonID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil // CAS didn't apply — video moved to an in-flight status concurrently
+	}
 	if err != nil {
-		return fmt.Errorf("updateVideoForReupload: %w", err)
+		return false, fmt.Errorf("updateVideoForReupload: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE lessons SET status = $1, updated_at = now() WHERE id = $2::uuid`, StatusUploading, lessonID); err != nil {
-		return fmt.Errorf("updateVideoForReupload lesson update: %w", err)
+		return false, fmt.Errorf("updateVideoForReupload lesson update: %w", err)
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("updateVideoForReupload commit: %w", err)
+	}
+	return true, nil
 }
 
 // transitionVideoStatus is the idempotency guard every status change goes
@@ -293,10 +302,14 @@ func (r *pgRepo) resetStaleUploads(ctx context.Context) (int64, error) {
 		}
 		lessonIDs = append(lessonIDs, id)
 	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("resetStaleUploads rows: %w", err)
+	}
 	rows.Close()
 
-	for _, id := range lessonIDs {
-		if _, err := tx.Exec(ctx, `UPDATE lessons SET status = $1, updated_at = now() WHERE id = $2::uuid`, StatusDraft, id); err != nil {
+	if len(lessonIDs) > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE lessons SET status = $1, updated_at = now() WHERE id = ANY($2::uuid[])`, StatusDraft, lessonIDs); err != nil {
 			return 0, fmt.Errorf("resetStaleUploads lesson update: %w", err)
 		}
 	}

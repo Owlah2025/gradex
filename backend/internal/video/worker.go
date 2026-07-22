@@ -133,8 +133,12 @@ func (w *Worker) HandleTranscode(ctx context.Context, t *asynq.Task) error {
 		return nil // already handled — safe no-op
 	}
 	if v.Status == StatusQueued {
-		if _, err := w.repo.transitionVideoStatus(ctx, v.ID, StatusQueued, StatusProcessing); err != nil {
+		applied, err := w.repo.transitionVideoStatus(ctx, v.ID, StatusQueued, StatusProcessing)
+		if err != nil {
 			return fmt.Errorf("transitioning video %s to PROCESSING: %w", v.ID, err)
+		}
+		if !applied {
+			return nil // lost the race — another delivery is already handling it
 		}
 	}
 
@@ -218,21 +222,5 @@ func (w *Worker) markFailed(ctx context.Context, videoID, reason string) {
 }
 
 func (w *Worker) downloadToTemp(ctx context.Context, key string) (path string, cleanup func(), err error) {
-	data, err := w.storage.DownloadObject(ctx, key)
-	if err != nil {
-		return "", nil, fmt.Errorf("downloading %s: %w", key, err)
-	}
-
-	f, err := os.CreateTemp("", "gradex-video-*.mp4")
-	if err != nil {
-		return "", nil, fmt.Errorf("creating temp file: %w", err)
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", nil, fmt.Errorf("writing temp file: %w", err)
-	}
-	f.Close()
-
-	return f.Name(), func() { os.Remove(f.Name()) }, nil
+	return w.storage.DownloadToFile(ctx, key)
 }

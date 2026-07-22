@@ -1,0 +1,103 @@
+<svg width="100%" viewBox="0 0 680 756" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Student task flow: buy and watch a course</title>
+<desc>Eight-task student journey from discovering a course through paying, watching lessons, practicing, and returning to resume, with a learning loop and edge-case notes for payment failure and silent access expiry.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+.t{font-size:14px;font-weight:400}.ts{font-size:12px;font-weight:400}.th{font-size:14px;font-weight:500}
+.arr{stroke:#888780;stroke-width:1.5;fill:none;marker-end:url(#ah)}
+.leader{stroke:#B4B2A9;stroke-width:1;fill:none;stroke-dasharray:3 3}
+.c-teal&gt;rect,rect.c-teal{fill:#E1F5EE;stroke:#0F6E56;stroke-width:1}
+.c-teal .th,.c-teal .t{fill:#085041}.c-teal .ts{fill:#0F6E56}
+.c-purple&gt;rect,rect.c-purple{fill:#EEEDFE;stroke:#534AB7;stroke-width:1}
+.c-purple .th,.c-purple .t{fill:#3C3489}.c-purple .ts{fill:#534AB7}
+.c-gray&gt;rect,rect.c-gray{fill:#F1EFE8;stroke:#5F5E5A;stroke-width:1}
+.c-gray .th,.c-gray .t{fill:#2C2C2A}.c-gray .ts{fill:#444441}
+</style>
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6" fill="none" stroke="#888780" stroke-width="1.3"/></marker></defs>
+
+<rect class="c-teal" x="40" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="60" y="47" text-anchor="start" fill="#5F5E5A">Buy and decide</text>
+<rect class="c-purple" x="190" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="210" y="47" text-anchor="start" fill="#5F5E5A">Learn and practice</text>
+<rect class="c-gray" x="380" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="400" y="47" text-anchor="start" fill="#5F5E5A">Edge / branch</text>
+
+<g class="c-teal">
+<rect x="190" y="70" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="94" text-anchor="middle">1 · Discover</text>
+<text class="ts" x="340" y="112" text-anchor="middle">browse and search catalog</text>
+</g>
+<line class="arr" x1="340" y1="124" x2="340" y2="154"/>
+
+<g class="c-teal">
+<rect x="190" y="154" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="178" text-anchor="middle">2 · Evaluate and decide</text>
+<text class="ts" x="340" y="196" text-anchor="middle">course or chapter?</text>
+</g>
+<line class="arr" x1="340" y1="208" x2="340" y2="238"/>
+
+<g class="c-teal">
+<rect x="190" y="238" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="262" text-anchor="middle">3 · Sign up or sign in</text>
+<text class="ts" x="340" y="280" text-anchor="middle">keep the selection</text>
+</g>
+<line class="arr" x1="340" y1="292" x2="340" y2="322"/>
+
+<g class="c-teal">
+<rect x="190" y="322" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="346" text-anchor="middle">4 · Pay and get access</text>
+<text class="ts" x="340" y="364" text-anchor="middle">unlock on webhook</text>
+</g>
+<line class="arr" x1="340" y1="376" x2="340" y2="406"/>
+
+<g class="c-purple">
+<rect x="190" y="406" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="430" text-anchor="middle">5 · Orient</text>
+<text class="ts" x="340" y="448" text-anchor="middle">course map, start here</text>
+</g>
+<line class="arr" x1="340" y1="460" x2="340" y2="490"/>
+
+<g class="c-purple">
+<rect x="190" y="490" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="514" text-anchor="middle">6 · Watch a lesson</text>
+<text class="ts" x="340" y="532" text-anchor="middle">adaptive video, auto-resume</text>
+</g>
+<line class="arr" x1="340" y1="544" x2="340" y2="574"/>
+
+<g class="c-purple">
+<rect x="190" y="574" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="598" text-anchor="middle">7 · Practice</text>
+<text class="ts" x="340" y="616" text-anchor="middle">resources, labs, community</text>
+</g>
+<line class="arr" x1="340" y1="628" x2="340" y2="658"/>
+
+<g class="c-purple">
+<rect x="190" y="658" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="682" text-anchor="middle">8 · Return and resume</text>
+<text class="ts" x="340" y="700" text-anchor="middle">continue or renew</text>
+</g>
+
+<path class="arr" d="M190,685 H150 V517 H190"/>
+<text class="ts" x="97" y="597" text-anchor="middle" fill="#5F5E5A">keep learning</text>
+
+<line class="leader" x1="490" y1="181" x2="500" y2="178"/>
+<g class="c-gray">
+<rect x="500" y="158" width="150" height="42" rx="8"/>
+<text class="th" x="575" y="180" text-anchor="middle">Not ready</text>
+<text class="ts" x="575" y="196" text-anchor="middle">browse away</text>
+</g>
+
+<line class="leader" x1="490" y1="349" x2="500" y2="349"/>
+<g class="c-gray">
+<rect x="500" y="326" width="150" height="46" rx="8"/>
+<text class="th" x="575" y="348" text-anchor="middle">Payment fails</text>
+<text class="ts" x="575" y="364" text-anchor="middle">retry, reconcile</text>
+</g>
+
+<line class="leader" x1="490" y1="685" x2="500" y2="685"/>
+<g class="c-gray">
+<rect x="500" y="662" width="150" height="46" rx="8"/>
+<text class="th" x="575" y="684" text-anchor="middle">Silent expiry</text>
+<text class="ts" x="575" y="700" text-anchor="middle">no reminder (D-009)</text>
+</g>
+</svg>

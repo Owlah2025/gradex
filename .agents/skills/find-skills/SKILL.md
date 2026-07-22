@@ -65,11 +65,13 @@ For example:
 
 ### Step 4: Verify Quality Before Recommending
 
-**Do not recommend a skill based solely on search results.** Always verify:
+**Do not recommend a skill based solely on search results.** Before recommending installation, perform an actual security review:
 
-1. **Install count** — Prefer skills with 1K+ installs. Be cautious with anything under 100.
-2. **Source reputation** — Official sources (`vercel-labs`, `anthropics`, `microsoft`) are more trustworthy than unknown authors.
-3. **GitHub stars** — Check the source repository. A skill from a repo with <100 stars should be treated with skepticism.
+1. **Inspect the source** — Read the skill's full source (`SKILL.md`) and any bundled scripts it ships with. Look for anything that exfiltrates data, runs unexpected network calls, or executes untrusted code.
+2. **Pin the revision** — Note the specific commit/tag being installed rather than trusting a moving branch.
+3. **Prefer scoped evaluation first** — Suggest the user try the skill project-scoped, or run it via `skills use` for a one-off invocation, before installing it globally with `-g -y`.
+
+Install count, source reputation, and GitHub stars are useful supplementary signals, but they are **not a substitute for review** — treat them as a way to prioritize which skills to inspect, not as validation on their own.
 
 ### Step 5: Present Options to the User
 

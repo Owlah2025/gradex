@@ -20,6 +20,7 @@ In-code documentation has one extra constraint the other surfaces lack: it sits 
 Delete any docstring whose entire information content is recoverable from the signature:
 
 ```php
+// Illustrative anti-example only — deliberately bad, not runnable, not to be copied.
 // Fails the test — restates the obvious, documents nothing.
 /**
  * Gets the user by ID.
@@ -30,7 +31,7 @@ Delete any docstring whose entire information content is recoverable from the si
 function get_user_by_id( $user_id ) { /* … */ }
 ```
 
-AI generators emit these by the thousand; they are comment pollution wearing a suit. Either say something the signature cannot, or say nothing.
+AI generators emit these frequently; they are comment pollution wearing a suit. Either say something the signature cannot, or say nothing.
 
 ## What a good docstring contains
 

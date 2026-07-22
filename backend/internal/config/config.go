@@ -59,7 +59,7 @@ func Load() (*Config, error) {
 	if cfg.S3UsePathStyle, err = boolEnv("S3_USE_PATH_STYLE", true); err != nil {
 		return nil, err
 	}
-	if cfg.AuthFakeMode, err = boolEnv("AUTH_FAKE_MODE", true); err != nil {
+	if cfg.AuthFakeMode, err = boolEnv("AUTH_FAKE_MODE", false); err != nil {
 		return nil, err
 	}
 	if cfg.UploadURLExpiryMinutes, err = intEnv("UPLOAD_URL_EXPIRY_MINUTES", 15); err != nil {
@@ -70,6 +70,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.MaxUploadSizeBytes, err = int64Env("MAX_UPLOAD_SIZE_BYTES", 5*1024*1024*1024); err != nil {
 		return nil, err
+	}
+	if cfg.UploadURLExpiryMinutes <= 0 {
+		return nil, fmt.Errorf("UPLOAD_URL_EXPIRY_MINUTES must be positive")
+	}
+	if cfg.PlaybackURLExpiryMinutes <= 0 {
+		return nil, fmt.Errorf("PLAYBACK_URL_EXPIRY_MINUTES must be positive")
+	}
+	if cfg.MaxUploadSizeBytes <= 0 {
+		return nil, fmt.Errorf("MAX_UPLOAD_SIZE_BYTES must be positive")
 	}
 
 	if cfg.DatabaseURL == "" {

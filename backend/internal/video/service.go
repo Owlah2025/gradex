@@ -6,6 +6,7 @@ package video
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -52,5 +53,15 @@ func NewService(db *pgxpool.Pool, storageClient *storage.Client, queueClient *as
 		storage: storageClient,
 		queue:   queueClient,
 		cfg:     cfg,
+	}
+}
+
+// markFailedOnEnqueueError pushes a video that just transitioned into an
+// in-flight status (QUEUED) to FAILED after its follow-up job enqueue call
+// failed, so it doesn't get stranded QUEUED-with-no-job — see CompleteUpload
+// and Retranscode. Best-effort: FAILED is itself recoverable via Retranscode.
+func (s *videoService) markFailedOnEnqueueError(ctx context.Context, videoID string, enqueueErr error) {
+	if _, err := s.repo.setVideoFailed(ctx, videoID, fmt.Sprintf("enqueueing job: %v", enqueueErr)); err != nil {
+		fmt.Printf("videoService: failed to mark video %s FAILED after enqueue error %q: %v\n", videoID, enqueueErr, err)
 	}
 }

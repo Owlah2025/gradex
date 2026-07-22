@@ -75,6 +75,9 @@ CREATE TABLE progress (
     completed_at          TIMESTAMPTZ,
     last_watched_at       TIMESTAMPTZ,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (max_position_seconds >= 0),
+    CHECK (last_position_seconds >= 0),
+    CHECK (max_position_seconds >= last_position_seconds),
     UNIQUE (user_id, lesson_id)
 );
 

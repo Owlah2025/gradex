@@ -115,7 +115,7 @@ By frequency observed (engineering-blog-grade, not from a controlled study):
 4. **Try/catch wrappers that change nothing** — adds lines, hides tracebacks.
 5. **Speculative config surface** — settings objects with 15 fields where 3 are read.
 6. **Plugin / registry scaffolding for two cases.**
-7. **`utils.py` / `common.py` modules** — magnets for unrelated functions; violate DRY's "single authoritative representation" by location.
+7. **`utils.py` / `common.py` modules** — magnets for unrelated functions; a cohesion and discoverability problem, not a DRY violation by itself (DRY is about a single authoritative representation of *knowledge*, not where a file lives).
 8. **Re-implementing what the platform already gives you** — custom retry loops, enums, or record-like types the standard library provides; hand-rolled validation a database/schema constraint, the type system, or a framework's declarative rule would enforce; a native platform feature replaced by hand-written app code. Prefer the cheapest existing solution: stdlib or native feature over new code, a declarative constraint over an imperative check. The flip side is mode 15 in [ai-failure-modes.md](ai-failure-modes.md) — don't reach for a *new* dependency for what a few lines already cover either.
 9. **Excessive layering** (Controller → Service → Manager → Repository) for CRUD — four files to read one row.
 10. **Wrapping libraries "to make them swappable"** — thin pass-through adapters around an HTTP, database, or SDK client you will never swap.

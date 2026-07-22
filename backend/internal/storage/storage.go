@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -111,8 +112,9 @@ func (c *Client) PutObject(ctx context.Context, key string, body []byte, content
 	return nil
 }
 
-// DownloadObject fetches an object's full bytes — used by the metadata/transcode
-// workers to pull the raw upload down to local disk before shelling out to ffmpeg.
+// DownloadObject fetches an object's full bytes — used by ServeManifest for
+// small text manifests (m3u8), where in-memory rewriting is required anyway.
+// For large binary objects (raw uploads), use DownloadToFile instead.
 func (c *Client) DownloadObject(ctx context.Context, key string) ([]byte, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
@@ -123,4 +125,36 @@ func (c *Client) DownloadObject(ctx context.Context, key string) ([]byte, error)
 	}
 	defer out.Body.Close()
 	return io.ReadAll(out.Body)
+}
+
+// DownloadToFile streams an object directly to a temp file instead of
+// buffering it in memory — used by the metadata/transcode workers to pull
+// multi-GB raw uploads down to local disk before shelling out to ffmpeg.
+// Caller must invoke cleanup() once done with the file.
+func (c *Client) DownloadToFile(ctx context.Context, key string) (path string, cleanup func(), err error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("getting object %q: %w", key, err)
+	}
+	defer out.Body.Close()
+
+	f, err := os.CreateTemp("", "gradex-download-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp file for %q: %w", key, err)
+	}
+	cleanup = func() { os.Remove(f.Name()) }
+
+	if _, err := io.Copy(f, out.Body); err != nil {
+		f.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("streaming object %q to disk: %w", key, err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("closing temp file for %q: %w", key, err)
+	}
+	return f.Name(), cleanup, nil
 }

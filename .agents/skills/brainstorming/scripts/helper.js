@@ -151,10 +151,13 @@
     }
     if (multi) {
       el.classList.toggle('selected');
+      window.selectedChoices = container
+        ? Array.from(container.querySelectorAll('.option.selected, .card.selected')).map(o => o.dataset.choice)
+        : [];
     } else {
       el.classList.add('selected');
+      window.selectedChoice = el.dataset.choice;
     }
-    window.selectedChoice = el.dataset.choice;
   };
 
   // Expose API for explicit use

@@ -162,11 +162,11 @@ recordExists(recordId) -> boolean
 
 ### F8. No side effects in queries
 
-A getter-style, finder-style, or predicate-style function must not mutate state. If it caches, log the cache write at debug level; do not change observable behavior.
+A getter-style, finder-style, or predicate-style function must not mutate domain state. If memoization is used, document it explicitly and require bounded, thread-safe cache behavior; do not require logging cache writes.
 
-### F9. Prefer exceptions to return codes
+### F9. Prefer exceptions for failure, typed results for expected outcomes
 
-`if save(x):` is a code smell. Either save succeeds (returns nothing) or it raises (`InvoiceSaveError`). Return codes proliferate up the call stack and get forgotten; exceptions can't be ignored silently.
+`if save(x):` is a code smell for an operation that should always succeed or fail loudly — prefer save either succeeding (returns nothing) or raising (`InvoiceSaveError`) over a boolean return that's easy to forget to check. This is a preference for explicit failure propagation, not a claim that exceptions can't be silently swallowed — a bare `except:` ignores them just as easily as an unchecked return code. For expected absence or an ordinary branch outcome (not found, validation failed), as opposed to an unexpected failure, a typed result (`Option`, `Result`, a discriminated union) often communicates intent better than an exception.
 
 ### F10. Duplication is the root evil
 

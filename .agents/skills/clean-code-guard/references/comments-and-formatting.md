@@ -18,7 +18,7 @@ Source: Robert C. Martin, *Clean Code*. Summaries: Vivek Khatri Ch. 4, Vivek Kha
 
 ## Comments
 
-The foundational rule: **"Don't comment bad code — rewrite it."** Comments are failures to express intent in code. Every comment is a candidate for rename or extract.
+The foundational rule: **"Don't comment bad code — rewrite it."** Comments that merely explain what code does are candidates for rename or extraction; retain comments that document intent, contracts, warnings, or legal requirements.
 
 ### C1. Acceptable comments
 
@@ -107,7 +107,7 @@ Team rules override personal preference. Read the file, then write.
 
 Before you ship code:
 
-1. Walk every comment you added. For each, ask: does it explain *why*? If it explains *what*, delete it.
+1. Walk every comment you added. If it only restates what the code already says, delete it; retain comments explaining intent, consequences, amplification, or contract.
 2. Walk every documentation comment you added. Is it paraphrasing the signature? Delete the paraphrase; keep only contract documentation.
 3. Any commented-out code? Delete it.
 4. Any `Step 1`, `Step 2`, `First, ...`, or `Then, ...` scaffolding comments? Delete.

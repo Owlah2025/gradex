@@ -1,0 +1,27 @@
+/* Gradex typography tokens — Alexandria (display, Arabic+Latin geometric Kufi-influenced) + IBM Plex Sans Arabic (body) + IBM Plex Mono (code, course codes) */
+:root{
+--font-display:"Alexandria","IBM Plex Sans Arabic",ui-sans-serif,system-ui,sans-serif;
+--font-body:"IBM Plex Sans Arabic","Alexandria",ui-sans-serif,system-ui,sans-serif;
+--font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",monospace;
+/* Type scale */
+--text-xs:12px;
+--text-sm:14px;
+--text-base:16px;
+--text-lg:18px;
+--text-xl:22px;
+--text-2xl:28px;
+--text-3xl:36px;
+--text-4xl:48px;
+--text-5xl:64px;
+/* Weights — headings always 700+, never light */
+--weight-regular:400;
+--weight-medium:500;
+--weight-semibold:600;
+--weight-bold:700;
+--weight-extrabold:800;
+/* Line heights — body is generous because Arabic script needs taller lines */
+--leading-tight:1.15;
+--leading-snug:1.35;
+--leading-normal:1.6;
+--leading-loose:1.85;
+}

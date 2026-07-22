@@ -33,8 +33,11 @@ The server watches a directory for HTML files and serves the newest one to the b
 ## Starting a Session
 
 ```bash
-# Start AFTER the user approves the companion. --open auto-opens their browser on
-# the first screen; --project-dir persists mockups and enables same-port restart.
+# Run from the brainstorming skill directory (cd into it first, or use paths
+# relative to it). Start AFTER the user approves the companion. --open auto-opens
+# their browser on the first screen; --project-dir persists mockups and enables
+# same-port restart.
+cd .agents/skills/brainstorming
 scripts/start-server.sh --project-dir /path/to/project --open
 
 # Returns: {"type":"server-started","port":52341,
@@ -61,7 +64,8 @@ without repeating it.
 
 **Claude Code:**
 ```bash
-# Default mode works — the script backgrounds the server itself.
+# Run from .agents/skills/brainstorming. Default mode works — the script
+# backgrounds the server itself.
 scripts/start-server.sh --project-dir /path/to/project --open
 ```
 
@@ -69,16 +73,18 @@ On Windows, the script auto-detects and switches to foreground mode (which block
 
 **Codex:**
 ```bash
-# Codex reaps background processes. The script auto-detects CODEX_CI and
-# switches to foreground mode. Run it normally — no extra flags needed.
+# Run from .agents/skills/brainstorming. Codex reaps background processes.
+# The script auto-detects CODEX_CI and switches to foreground mode. Run it
+# normally — no extra flags needed.
 scripts/start-server.sh --project-dir /path/to/project --open
 ```
 
 **Copilot CLI:**
 ```bash
-# Use --foreground and start the server via the bash tool with mode: "async"
-# so the process survives across turns. Capture the returned shellId for
-# read_bash / stop_bash if you need to interact with it later.
+# Run from .agents/skills/brainstorming. Use --foreground and start the server
+# via the bash tool with mode: "async" so the process survives across turns.
+# Capture the returned shellId for read_bash / stop_bash if you need to
+# interact with it later.
 scripts/start-server.sh --project-dir /path/to/project --open --foreground
 ```
 
@@ -87,10 +93,13 @@ scripts/start-server.sh --project-dir /path/to/project --open --foreground
 If the URL is unreachable from your browser (common in remote/containerized setups), bind a non-loopback host:
 
 ```bash
+# Run from .agents/skills/brainstorming. Replace remote-host with the machine's
+# actual reachable hostname or IP — localhost only works here if you've set up
+# port forwarding from your browser's machine to this one.
 scripts/start-server.sh \
   --project-dir /path/to/project \
   --host 0.0.0.0 \
-  --url-host localhost
+  --url-host remote-host
 ```
 
 Use `--url-host` to control what hostname is printed in the returned URL JSON.
@@ -280,6 +289,7 @@ If `$STATE_DIR/events` doesn't exist, the user didn't interact with the browser 
 ## Cleaning Up
 
 ```bash
+# Run from .agents/skills/brainstorming
 scripts/stop-server.sh $SESSION_DIR
 ```
 

@@ -150,6 +150,8 @@ if counter > daily_limit:
 
 **Rule.** Before writing a function, search the codebase for a similar existing one. If a block of ≥5 lines matches existing code in the repo, extract or call the existing function.
 
+**Scope note.** This is about *reuse*, not premature abstraction: if a ≥5-line match already exists in the repo, extract or call it immediately — that's copy-paste of known code, not new design. This doesn't conflict with the Rule of 3 in `dry-kiss-yagni.md`, which governs a different decision: whether to *build a new general-purpose abstraction* for logic you're about to duplicate for the first or second time. Wait for the third occurrence before designing an abstraction; don't wait to reuse code that already exists.
+
 ---
 
 ## 6. Hallucinated APIs and packages

@@ -48,8 +48,12 @@ func (s *videoService) RequestUpload(ctx context.Context, lessonID, filename, co
 		// full dual-live-until-swap preservation of the old hls_master_key is
 		// hardened in the Phase 6 pass; this call already leaves the old
 		// hls_master_key in place until a new one is written in transcode.go).
-		if err := s.repo.updateVideoForReupload(ctx, existing.ID, rawKey); err != nil {
+		applied, err := s.repo.updateVideoForReupload(ctx, existing.ID, rawKey)
+		if err != nil {
 			return UploadTicket{}, err
+		}
+		if !applied {
+			return UploadTicket{}, fmt.Errorf("%w: video for lesson %s changed state concurrently, retry", ErrConflict, lessonID)
 		}
 	case err == ErrNotFound:
 		if _, err := s.repo.insertVideo(ctx, lessonID, rawKey, StatusUploading); err != nil {
@@ -114,7 +118,14 @@ func (s *videoService) CompleteUpload(ctx context.Context, lessonID string) erro
 		return nil // lost a race with another completion call — already handled
 	}
 
-	return s.enqueueMetadataExtract(ctx, v.ID, lessonID, *v.RawKey)
+	if err := s.enqueueMetadataExtract(ctx, v.ID, lessonID, *v.RawKey); err != nil {
+		// Video is already QUEUED but no job is enqueued — leaving it there
+		// would strand it forever. Push it to FAILED so it's recoverable via
+		// Retranscode (instructor retry) without direct DB intervention.
+		s.markFailedOnEnqueueError(ctx, v.ID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *videoService) enqueueMetadataExtract(ctx context.Context, videoID, lessonID, rawKey string) error {

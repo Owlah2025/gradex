@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 func testOptions() Options {
 	return Options{
 		Endpoint:     "http://localhost:9000",
@@ -42,7 +44,7 @@ func TestPresignPutAndGet_RealMinIO(t *testing.T) {
 		t.Fatalf("building PUT request: %v", err)
 	}
 	req.Header.Set("Content-Type", "text/plain")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		t.Fatalf("PUT to presigned URL failed: %v", err)
 	}
@@ -67,7 +69,11 @@ func TestPresignPutAndGet_RealMinIO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PresignGetURL: %v", err)
 	}
-	getResp, err := http.Get(getURL)
+	getReq, err := http.NewRequest(http.MethodGet, getURL, nil)
+	if err != nil {
+		t.Fatalf("building GET request: %v", err)
+	}
+	getResp, err := httpClient.Do(getReq)
 	if err != nil {
 		t.Fatalf("GET presigned URL failed: %v", err)
 	}

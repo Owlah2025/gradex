@@ -1,4 +1,4 @@
 interface:
   display_name: "Clean Code Guard"
   short_description: "Clean-code guardrails for AI agents"
-  default_prompt: "Use $clean-code-guard after code is written or changed to review it for clean-code and LLM-failure issues."
+  default_prompt: "Use $clean-code-guard after non-trivial production code is written or changed; do not use it for test-code review or CI/tooling configuration."

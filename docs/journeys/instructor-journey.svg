@@ -1,0 +1,103 @@
+<svg width="100%" viewBox="0 0 680 756" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Instructor task flow: build, publish, get paid</title>
+<desc>Eight-task instructor journey from joining through building a course, uploading videos and materials, submitting for review, going live with analytics, and getting paid, with a rejection loop back to submission and edge-case notes for transcode failure, rejection reasons, and no instructor-facing earnings.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+.t{font-size:14px;font-weight:400}.ts{font-size:12px;font-weight:400}.th{font-size:14px;font-weight:500}
+.arr{stroke:#888780;stroke-width:1.5;fill:none;marker-end:url(#ah)}
+.leader{stroke:#B4B2A9;stroke-width:1;fill:none;stroke-dasharray:3 3}
+.c-teal&gt;rect,rect.c-teal{fill:#E1F5EE;stroke:#0F6E56;stroke-width:1}
+.c-teal .th,.c-teal .t{fill:#085041}.c-teal .ts{fill:#0F6E56}
+.c-purple&gt;rect,rect.c-purple{fill:#EEEDFE;stroke:#534AB7;stroke-width:1}
+.c-purple .th,.c-purple .t{fill:#3C3489}.c-purple .ts{fill:#534AB7}
+.c-gray&gt;rect,rect.c-gray{fill:#F1EFE8;stroke:#5F5E5A;stroke-width:1}
+.c-gray .th,.c-gray .t{fill:#2C2C2A}.c-gray .ts{fill:#444441}
+</style>
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6" fill="none" stroke="#888780" stroke-width="1.3"/></marker></defs>
+
+<rect class="c-teal" x="40" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="60" y="47" text-anchor="start" fill="#5F5E5A">Build</text>
+<rect class="c-purple" x="150" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="170" y="47" text-anchor="start" fill="#5F5E5A">Review and live</text>
+<rect class="c-gray" x="330" y="36" width="14" height="14" rx="3"/>
+<text class="ts" x="350" y="47" text-anchor="start" fill="#5F5E5A">Edge / branch</text>
+
+<g class="c-teal">
+<rect x="190" y="70" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="94" text-anchor="middle">1 · Join and sign in</text>
+<text class="ts" x="340" y="112" text-anchor="middle">learn the deal</text>
+</g>
+<line class="arr" x1="340" y1="124" x2="340" y2="154"/>
+
+<g class="c-teal">
+<rect x="190" y="154" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="178" text-anchor="middle">2 · Create course structure</text>
+<text class="ts" x="340" y="196" text-anchor="middle">sections and lessons</text>
+</g>
+<line class="arr" x1="340" y1="208" x2="340" y2="238"/>
+
+<g class="c-teal">
+<rect x="190" y="238" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="262" text-anchor="middle">3 · Upload videos</text>
+<text class="ts" x="340" y="280" text-anchor="middle">raw upload, transcode</text>
+</g>
+<line class="arr" x1="340" y1="292" x2="340" y2="322"/>
+
+<g class="c-teal">
+<rect x="190" y="322" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="346" text-anchor="middle">4 · Add resources and labs</text>
+<text class="ts" x="340" y="364" text-anchor="middle">two buckets, size caps</text>
+</g>
+<line class="arr" x1="340" y1="376" x2="340" y2="406"/>
+
+<g class="c-teal">
+<rect x="190" y="406" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="430" text-anchor="middle">5 · Validate and submit</text>
+<text class="ts" x="340" y="448" text-anchor="middle">checklist blocks gaps</text>
+</g>
+<line class="arr" x1="340" y1="460" x2="340" y2="490"/>
+
+<g class="c-purple">
+<rect x="190" y="490" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="514" text-anchor="middle">6 · Review outcome</text>
+<text class="ts" x="340" y="532" text-anchor="middle">approved or rejected</text>
+</g>
+<line class="arr" x1="340" y1="544" x2="340" y2="574"/>
+
+<g class="c-purple">
+<rect x="190" y="574" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="598" text-anchor="middle">7 · Go live and analytics</text>
+<text class="ts" x="340" y="616" text-anchor="middle">enrollments, completion</text>
+</g>
+<line class="arr" x1="340" y1="628" x2="340" y2="658"/>
+
+<g class="c-purple">
+<rect x="190" y="658" width="300" height="54" rx="10"/>
+<text class="th" x="340" y="682" text-anchor="middle">8 · Edit and get paid</text>
+<text class="ts" x="340" y="700" text-anchor="middle">revisions live-safe</text>
+</g>
+
+<path class="arr" d="M190,517 H150 V433 H190"/>
+<text class="ts" x="96" y="479" text-anchor="middle" fill="#5F5E5A">rejected, revise</text>
+
+<line class="leader" x1="490" y1="265" x2="500" y2="265"/>
+<g class="c-gray">
+<rect x="500" y="242" width="150" height="46" rx="8"/>
+<text class="th" x="575" y="264" text-anchor="middle">Transcode fails</text>
+<text class="ts" x="575" y="280" text-anchor="middle">auto-retry 3×</text>
+</g>
+
+<line class="leader" x1="490" y1="517" x2="500" y2="517"/>
+<g class="c-gray">
+<rect x="500" y="494" width="150" height="46" rx="8"/>
+<text class="th" x="575" y="516" text-anchor="middle">Rejection</text>
+<text class="ts" x="575" y="532" text-anchor="middle">needs a reason</text>
+</g>
+
+<line class="leader" x1="490" y1="685" x2="500" y2="685"/>
+<g class="c-gray">
+<rect x="500" y="662" width="150" height="46" rx="8"/>
+<text class="th" x="575" y="684" text-anchor="middle">No earnings UI</text>
+<text class="ts" x="575" y="700" text-anchor="middle">admin-only (D-006)</text>
+</g>
+</svg>

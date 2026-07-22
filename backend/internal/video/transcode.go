@@ -32,5 +32,12 @@ func (s *videoService) Retranscode(ctx context.Context, lessonID string) error {
 		return nil // lost a race with another retry call — already handled
 	}
 
-	return s.enqueueMetadataExtract(ctx, v.ID, lessonID, *v.RawKey)
+	if err := s.enqueueMetadataExtract(ctx, v.ID, lessonID, *v.RawKey); err != nil {
+		// Same gap as CompleteUpload: video is already QUEUED but no job is
+		// enqueued. Push back to FAILED so a further Retranscode call can
+		// pick it up, instead of stranding it silently.
+		s.markFailedOnEnqueueError(ctx, v.ID, err)
+		return err
+	}
+	return nil
 }

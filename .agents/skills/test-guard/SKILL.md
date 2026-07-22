@@ -1,6 +1,6 @@
 ---
 name: test-guard
-description: "Review generated or changed test code against universal testing rules before it ships. Best used reactively after an agent writes, edits, generates, or refactors tests, before presenting, committing, or merging them. Use for pytest (test_*.py, *_test.py), PHPUnit/Pest (*Test.php), Jest/Vitest (*.test.ts, *.spec.js), Go (*_test.go), files under tests/, __tests__/, or spec/, and review requests like 'write tests for X', 'add tests', 'test this', 'review these tests', or PR diffs containing tests. Can also guide test writing when explicitly invoked before the work. This skill is the quality gate that prevents AI-generated test bloat. DO NOT USE for production or implementation code review (use clean-code-guard), CI or test-runner configuration, running or debugging tests, or general architecture discussion."
+description: "Review generated or changed test code against universal testing rules before it ships. Best used reactively after an agent writes, edits, generates, or refactors tests, before presenting, committing, or merging them. Use for pytest (test_*.py, *_test.py), PHPUnit/Pest (*Test.php), Jest/Vitest (*.test.*, *.spec.*), Go (*_test.go), files under tests/, __tests__/, or spec/, and review requests like 'write tests for X', 'add tests', 'test this', 'review these tests', or PR diffs containing tests. Can also guide test writing when explicitly invoked before the work. This skill is the quality gate that prevents AI-generated test bloat. DO NOT USE for production or implementation code review (use clean-code-guard), CI or test-runner configuration, running or debugging tests, or general architecture discussion."
 ---
 
 # Test Guard
@@ -25,6 +25,7 @@ These rules are universal, but their application is not. Before reviewing:
    - Python / pytest → [references/pytest.md](references/pytest.md)
    - PHP / PHPUnit / Pest / WordPress → [references/phpunit.md](references/phpunit.md)
    - JavaScript / TypeScript / Jest / Vitest → [references/jest.md](references/jest.md)
+   - Go → references/go.md (not yet written; apply the universal rules below until it exists)
 3. If the project calls LLM APIs, uses agent frameworks, or wires up observability/telemetry, also read [references/llm-app-testing.md](references/llm-app-testing.md) — it adds three rules specific to LLM applications.
 4. Map the project's system boundaries: network calls, databases, filesystem, clock and randomness, third-party SDKs, LLM APIs. Existing fixtures and test helpers usually reveal where the project already draws these lines.
 
@@ -40,7 +41,7 @@ When writing new tests, ask for each test: "What specific bug does this catch th
 ## The Nine Rules
 
 ### Rule 1: Test behavior, not implementation
-Test what code does from the caller's perspective. Assert return values and observable side effects. Never assert that an internal helper was called with specific arguments — that test breaks on every refactor while catching nothing.
+Test what code does from the caller's perspective. Assert return values and observable side effects. Avoid asserting incidental calls to internal helpers; that test breaks on every refactor while catching nothing.
 
 **Violation pattern:** asserting a mock of an internal function was called, where that function is not a system boundary.
 **Fix:** assert the return value or the state change the caller observes.
@@ -48,7 +49,7 @@ Test what code does from the caller's perspective. Assert return values and obse
 ### Rule 2: Every mock must be justified
 Mock only at system boundaries: network and HTTP calls, LLM APIs, databases, filesystem I/O on external files, clock and randomness, third-party SDKs. Never mock internal classes or helper functions to isolate a "unit" — the seams you create hide the integration bugs worth catching.
 
-When you mock a boundary, assert what the caller *does with the response*, not that the mock received specific arguments.
+When you mock a boundary, assert how the caller handles the response and, when request shape is part of the contract, the relevant method, URL, headers, or payload.
 
 ### Rule 3: One scenario per test, data-driven for variants
 If two or more tests share identical setup and differ only in input/output values, merge them into one data-driven test (`@pytest.mark.parametrize`, PHPUnit `#[DataProvider]`, Jest `test.each`).

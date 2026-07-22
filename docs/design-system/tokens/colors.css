@@ -1,0 +1,73 @@
+/* Gradex color tokens — from uploads/color-palette.png (60/30/10 rule). Blue = primary (30%), orange = accent (10%), light slate = background (60%). Supersedes the legacy teal/sand palette in the repo. */
+:root{
+/* Brand core */
+--gradex-blue:#4f7cff;
+--gradex-blue-deep:#1e4ed8;
+--gradex-navy:#0d1b2a;
+--gradex-ink:#0d1b2a;
+/* Brand gradient — one gradient element per view, max */
+--gradient-brand:linear-gradient(135deg,#1e4ed8 0%,#4f7cff 100%); /* @kind color */
+--gradient-brand-soft:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%); /* @kind color */
+/* Primary blue ramp (palette: DCE5FF, A8C1FF, 4F7CFF, 1E4ED8, 0D1B2A; 50 + 300 derived) */
+--blue-50:#eef2ff;
+--blue-100:#dce5ff;
+--blue-200:#a8c1ff;
+--blue-300:#7fa2ff;
+--blue-500:#4f7cff;
+--blue-600:#1e4ed8;
+--blue-900:#0d1b2a;
+/* Accent orange ramp (palette: FFD6CC, FFAA8F, FF7E4D, F64A1F, C92C10; 50 derived) */
+--orange-50:#fff1ec;
+--orange-100:#ffd6cc;
+--orange-200:#ffaa8f;
+--orange-500:#ff7e4d;
+--orange-600:#f64a1f;
+--orange-700:#c92c10;
+--accent:#ff7e4d;
+--accent-hover:#f64a1f;
+--accent-soft:#fff1ec;
+--accent-text:#c92c10;
+/* Neutrals — cool slate anchored on navy #0d1b2a and page #f8fafc */
+--ink-900:#0d1b2a;
+--ink-800:#1e2a3a;
+--ink-700:#364453;
+--ink-600:#4c5a6b;
+--ink-500:#64748b;
+--ink-400:#94a3b8;
+--ink-300:#c3ceda;
+--ink-200:#e2e8f0;
+--ink-100:#eef2f6;
+--ink-50:#f8fafc;
+--white:#ffffff;
+/* Semantic */
+--success:#178a50;
+--success-soft:#e8f6ef;
+--warning:#b45309;
+--warning-soft:#fcf4e6;
+--danger:#c92c10;
+--danger-soft:#fdede8;
+--info:#4f7cff;
+--info-soft:#eef2ff;
+/* Text aliases */
+--text-heading:var(--ink-900);
+--text-body:var(--ink-700);
+--text-muted:var(--ink-500);
+--text-on-brand:#ffffff;
+--text-link:var(--blue-500);
+--text-link-hover:var(--blue-600);
+/* Surfaces */
+--surface-page:#f8fafc;
+--surface-card:#ffffff;
+--surface-raised:#ffffff;
+--surface-brand-tint:var(--blue-50);
+--surface-inverse:var(--ink-900);
+/* Borders */
+--border-default:var(--ink-200);
+--border-strong:var(--ink-300);
+--border-focus:var(--blue-500);
+/* Actions */
+--action-primary:var(--blue-500);
+--action-primary-hover:var(--blue-600);
+--action-secondary:var(--accent);
+--action-secondary-hover:var(--accent-hover);
+}

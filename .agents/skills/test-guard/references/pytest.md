@@ -55,7 +55,7 @@ If a model needs many fields, add a factory fixture or use `factory_boy` — don
 
 ## Rule 9: Real database via fixtures
 
-Use a fixture that applies real migrations (e.g., a session-scoped test database with `alembic upgrade head`), and function-scoped transactions rolled back per test. `pytest-postgresql`, `testcontainers`, or an SQLite-compatible fallback all work; the point is real schema, not a mocked session, whenever query or persistence logic is the subject.
+Use a fixture that applies real migrations (e.g., a session-scoped test database with `alembic upgrade head`), and function-scoped transactions rolled back per test. `pytest-postgresql` or `testcontainers` against the production database engine is the default; an SQLite-compatible fallback is only acceptable when the code under test is genuinely cross-dialect and doesn't rely on Postgres-specific SQL, types, isolation levels, or locking behavior — if it does, use the real engine via container/test service, not SQLite. The point is real schema, not a mocked session, whenever query or persistence logic is the subject.
 
 ## pytest-specific smells
 

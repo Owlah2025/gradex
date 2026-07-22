@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +17,14 @@ var (
 	errNoAccess      = errors.New("no access to this lesson")
 )
 
+// errorResponse never leaks err.Error() to the client on 5xx — that path can
+// carry raw DB/storage errors. It's logged server-side instead.
 func errorResponse(c *gin.Context, status int, err error) {
+	if status >= http.StatusInternalServerError {
+		log.Printf("httpapi: %d error for %s %s: %v", status, c.Request.Method, c.Request.URL.Path, err)
+		c.AbortWithStatusJSON(status, gin.H{"error": "internal server error"})
+		return
+	}
 	c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
 }
 

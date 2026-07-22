@@ -2,7 +2,7 @@
 
 > Version: 0.1
 > Status: Draft
-> Last Updated: 2026-07-20
+> Last Updated: 2026-07-21
 > Author(s):
 
 ---
@@ -23,14 +23,15 @@
 
 ## Mission Statement
 
--Solve student problems with other platforms
--Qualify students for the industry market
+- Solve student problems with other platforms
+- Qualify students for the industry market
 
 ---
 
 ## Vision Statement
 
-In 5-10  we are with top 3 leading GCC unvirsity courses plaforms
+Within 5–10 years, Gradex will be among the top 3 leading GCC university course platforms.
+
 ---
 
 # 3. The Problem
@@ -62,8 +63,8 @@ Existing GCC course platforms treat revenue as the priority over students — st
 
 ### Market Problems
 
-- other platforms focus on finantials over quality and students problems 
-- they focus on academics and theory over hands on experience
+- other platforms focus on financials over quality and students' problems
+- they focus on academics and theory over hands-on experience
 -
 -
 
@@ -72,14 +73,14 @@ Existing GCC course platforms treat revenue as the priority over students — st
 # 4. Our Solution
 
 Describe how Gradex solves these problems.
-- focus on labs and hands on experience.
-- focus on students problems over finantials
+- focus on labs and hands-on experience.
+- focus on students' problems over financials
 
 ---
 
 ## Key Benefits
 
-## For gradex bussiness
+## For Gradex Business
 
 - word of mouth
 
@@ -159,23 +160,21 @@ Existing platforms overpriced; no mentorship/follow-up support
 
 # 6. Value Proposition
 
-Complete this sentence.
-
-> Students choose Gradex because... (discussed above)
+> Students choose Gradex because it's the one Gulf platform that doesn't disappear after they pay — fair-priced, hands-on courses with real labs and an active peer community, built to make them industry-ready, not just get them through the exam.
 
 ---
 
 ## Unique Selling Points (USP)
 
-1. Communtiy
+1. Community
 
-2. price && installments
+2. Price and installments
 
-3. labs and real experience
+3. Labs and real experience
 
-4. mentorship && live sessions to solve students problems
+4. Mentorship and live sessions to solve students' problems (future)
 
-5. TAs (follow up sessions) [future] based on number of students 
+5. TAs (follow-up sessions) [future], based on number of students
 
 
 ---
@@ -210,6 +209,7 @@ Complete this sentence.
 - [ ] Purchase single course or single chapter
 - [ ] Video playback (HLS adaptive bitrate, resume from last position)
 - [ ] Progress tracking (mark lesson complete, resume position)
+- [ ] Download lesson resources (slides, notes, readings) per lesson
 - [ ] Download lab materials (project files + guide) per lesson/course
 - [ ] Link out to course community (external Discord/Telegram)
 - [ ] Profile management + purchase history
@@ -220,6 +220,7 @@ Complete this sentence.
 
 - [ ] Course → section → lesson builder (create/edit structure)
 - [ ] Upload lesson video (raw upload, async transcode)
+- [ ] Upload lesson resources (slides, notes, readings) — reference material, separate from labs
 - [ ] Upload lab materials (downloadable project files + guide)
 - [ ] Per-course analytics (enrollments, completion rate)
 
@@ -330,25 +331,19 @@ Things we intentionally will NOT build.
 
 ## Brand Values
 
--
-
--
-
--
-
--
+- **Students over revenue** — every tradeoff resolves in the student's favor.
+- **Hands-on over theory** — value is proven by what a student can build, not what they watched.
+- **Honesty over hype** — fair price, plain claims, no inflated promises.
+- **Follow-through** — support after purchase is the product, not a bonus.
 
 ---
 
 ## Tone of Voice
 
--
-
--
-
--
-
--
+- **Plain and direct** — no jargon, no marketing fluff.
+- **Peer, not institution** — talk like a helpful senior student, not a university bulletin.
+- **Practical** — show the how, don't lecture the why.
+- **Honest about tradeoffs** — say what a course does and doesn't cover.
 
 ---
 
@@ -376,46 +371,18 @@ Things we believe to be true but haven't validated yet.
 
 # 15. Risks
 
-Potential business risks.
-
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| | | |
-| | | |
-| | | |
+Business risks are tracked in the PRD to avoid drift — see [PRD.md §9 Risks](PRD.md) for the full list (gateway dependency, external-community control, lab-material piracy, Baims price competition, transcode load, payout visibility, solo-dev timeline), each with impact and mitigation.
 
 ---
 
 # 16. Constraints
 
-## Budget
-
----
-
-## Team
-
----
-
-## Timeline
-
----
-
-## Technology Constraints
-
----
-
-## Legal Constraints
-
----
+Constraints are owned by the PRD to avoid drift — see [PRD.md §7 Constraints](PRD.md) for Budget (bootstrapped/self-funded), Team (solo developer + 2 founders), Timeline (launch 2026-08-15), Technology (locked stack per README.md), and Legal (Kuwait CR, Digital Commerce Law, consumer/refund law, BNPL licensing, data protection).
 
 # 17. Stakeholders
 
 | Role | Name | Responsibilities |
 |------|------|------------------|
-| Founder | Tohamy | Logistics |
-| Founder | Mokhtar | Marketing & social media advertising |
-| Founder | Ahmed Hazem | Product Owner / Developer | Product vision, full-stack development (AI-assisted: Claude Code, antigravity-cli) |
-| Instructor | Not yet recruited | Course content creation |
 
 ---
 
@@ -438,33 +405,28 @@ Ideas for future versions.
 
 ## Version 2
 
--
+Near-term, once the core video-course product is validated (mirrors [PRD.md §4 Future Features](PRD.md)):
 
--
-
--
+- Live mentorship / live sessions
+- TAs / follow-up sessions (scales with student volume)
+- Course completion certificates (requires server-verified playback — see [PRD.md §11](PRD.md))
 
 ---
 
 ## Version 3
 
--
+Longer-horizon expansion (mirrors §7 Future Revenue Opportunities):
 
--
-
--
+- Summer bootcamps
+- Private mentorship marketplace
+- Multi-country GCC expansion beyond Kuwait
+- In-platform community, if the external Discord/Telegram validates demand (see [DECISIONS.md](DECISIONS.md) D-005)
 
 ---
 
 # 20. Questions to Answer
 
-Open questions before development begins.
-
--
--
--
--
--
+Open questions are tracked in [PRD.md §12 Open Questions](PRD.md) — Persona 2, Baims weaknesses, Deema digital-goods eligibility, Kuwait CR status, education-content licensing, Digital Commerce Law registration, notification channel, and lab-material upload limits.
 
 ---
 

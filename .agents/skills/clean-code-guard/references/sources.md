@@ -1,6 +1,6 @@
 # Sources
 
-Central bibliography for `clean-code-guard`. Other reference files use source
+Selected bibliography for `clean-code-guard`. Other reference files use source
 names instead of inline URLs so rule guidance stays readable.
 
 ## Contents
@@ -17,7 +17,7 @@ names instead of inline URLs so rule guidance stays readable.
 - **YAGNI, Fowler**: https://martinfowler.com/bliki/Yagni.html
 - **DRY, The Pragmatic Programmer excerpt**: https://media.pragprog.com/titles/tpp20/dry.pdf
 - **The Wrong Abstraction, Sandi Metz**: https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction
-- **SOLID principles, Uncle Bob archive**: http://butunclebob.com/ArticleS.UncleBob.PrinciplesOfOod
+- **SOLID principles, Uncle Bob archive**: https://web.archive.org/web/20150906155800/http://butunclebob.com/ArticleS.UncleBob.PrinciplesOfOod
 - **SRP, Uncle Bob**: https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html
 - **OCP, Uncle Bob**: https://blog.cleancoder.com/uncle-bob/2014/05/12/TheOpenClosedPrinciple.html
 - **LSP, Liskov/Wing paper mirror**: https://www.labri.fr/perso/clement/enseignements/ao/LSP.pdf

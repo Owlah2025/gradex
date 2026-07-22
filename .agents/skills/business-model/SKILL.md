@@ -21,6 +21,8 @@ Your task is to create a comprehensive Business Model Canvas that outlines how t
 - Current business operations or assumptions
 - Competitive context or industry dynamics
 
+If $ARGUMENTS lacks required information above, ask targeted clarifying questions before generating the canvas. If proceeding anyway with incomplete inputs, explicitly label every inferred value as an assumption/unknown rather than presenting it as established fact.
+
 ## Business Model Canvas Template
 
 ### Left Side: Creating Value
@@ -97,7 +99,7 @@ Your task is to create a comprehensive Business Model Canvas that outlines how t
 6. Outline cost structure
 7. Define revenue streams
 8. Ensure all 9 blocks align and support each other
-9. Test economic viability (LTV > 3x CAC)
+9. Assess economic viability using LTV/CAC when the underlying assumptions and data are available (lifetime, churn, margins, acquisition cost, measurement horizon); treat 3x as a context-dependent benchmark, not a universal requirement. Report "insufficient data" if these inputs aren't available.
 10. Identify key assumptions and risks
 
 ### Domain Context

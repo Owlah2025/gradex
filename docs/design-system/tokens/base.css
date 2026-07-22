@@ -1,0 +1,25 @@
+/* Gradex base styles + layout/motion utility classes (.gx-*) */
+body{margin:0;background:var(--surface-page);color:var(--text-body);font-family:var(--font-body);font-size:var(--text-base);line-height:var(--leading-normal)}
+h1,h2,h3,h4,h5{font-family:var(--font-display);font-weight:var(--weight-bold);color:var(--text-heading);line-height:var(--leading-tight);text-wrap:balance}
+a{color:var(--text-link);text-decoration:none}
+a:hover{color:var(--text-link-hover);text-decoration:underline}
+::selection{background:var(--blue-100)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--ink-100)}
+::-webkit-scrollbar-thumb{background:var(--ink-300);border-radius:9999px}
+.gx-container{max-width:var(--container-max);margin-inline:auto;padding-inline:24px}
+.gx-eyebrow{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:700;font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:var(--blue-600)}
+.gx-h1{font-family:var(--font-display);font-weight:800;font-size:clamp(40px,6vw,68px);line-height:1.12;color:var(--text-heading);text-wrap:balance}
+.gx-h2{font-family:var(--font-display);font-weight:700;font-size:clamp(28px,3.4vw,40px);color:var(--text-heading);text-wrap:balance}
+.gx-h3{font-family:var(--font-display);font-weight:700;font-size:clamp(24px,2.6vw,30px);color:var(--text-heading);text-wrap:balance}
+.gx-h4{font-family:var(--font-display);font-weight:700;font-size:19px;color:var(--text-heading)}
+.gx-body{font-size:16.5px;color:var(--ink-800);line-height:1.7}
+/* Scroll reveal — IntersectionObserver adds .gx-in at threshold 0.15 */
+.gx-reveal{opacity:1}
+@media (prefers-reduced-motion:no-preference){
+.gx-reveal{opacity:0;transform:translateY(18px);transition:opacity var(--duration-slow) var(--ease-out),transform var(--duration-slow) var(--ease-out)}
+.gx-reveal.gx-in{opacity:1;transform:none}
+}
+/* Cover-scroll stack: each full-height section sticks at top:0 and the next slides over it */
+.gx-stack>*{position:sticky;top:0}
+.gx-stack>*+*{box-shadow:var(--shadow-stack)}

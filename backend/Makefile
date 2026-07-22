@@ -1,4 +1,4 @@
-include .env
+-include .env
 export
 
 MIGRATE := $(shell go env GOPATH)/bin/migrate

@@ -19,6 +19,12 @@
       "skillPath": "skills/clean-code-guard/SKILL.md",
       "computedHash": "a037fd57c8fa0b7bd84cb274b2ea816e16622edb0245a5c2c6f23d8244eeb634"
     },
+    "codex-delegate": {
+      "source": "amElnagdy/delegate-skills",
+      "sourceType": "github",
+      "skillPath": "skills/codex-delegate/SKILL.md",
+      "computedHash": "e854fa45f1937783b6577da806c587cf62fc6cabb0a38bb24f5ccfec72cda9da"
+    },
     "docs-guard": {
       "source": "amElnagdy/guard-skills",
       "sourceType": "github",

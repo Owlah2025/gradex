@@ -74,8 +74,13 @@ Create the best online learning experience for university students by delivering
 | PRD.md | Product requirements |
 | BUSINESS_RULES.md | Business logic |
 | DECISIONS.md | Decision log |
-| CODING_STANDARDS.md | Coding guidelines |
-| GLOSSARY.md | Domain glossary |
+| USER_JOURNEYS.md | Task-based journeys (student, instructor, admin) |
+| SCREENS.md | IA source of truth — 34 MVP screens, per-screen contract |
+| NAVIGATION_MAP.md | Per-role navigation trees (student, instructor, admin) |
+| NAVIGATION_RULES.md | Chrome, responsive targets, URL-guard / unsaved / back-semantics rules |
+| WIREFRAMES.md | Low-fi ASCII wireframes — all 34 MVP screens |
+| CODING_STANDARDS.md | Coding guidelines *(planned)* |
+| GLOSSARY.md | Domain glossary *(planned)* |
 | superpowers/specs/ | Technical design specs |
 
 ---

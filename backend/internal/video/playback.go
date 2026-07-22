@@ -4,12 +4,32 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const completionThreshold = 0.9
 const manifestContentType = "application/vnd.apple.mpegurl"
+
+// manifestChildPathPattern matches the only legitimate non-master manifest
+// paths ffmpeg.go's HLS ladder produces: "<resolution>/playlist.m3u8" or
+// "<resolution>/<segment>.ts". Anything else — including ".." or an absolute
+// path — must be rejected before it's concatenated into an object key, or a
+// caller could read/presign objects outside the video's own HLS prefix.
+var manifestChildPathPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+\.(m3u8|ts)$`)
+
+func isValidManifestPath(path string) bool {
+	if path == "master.m3u8" {
+		return true
+	}
+	return manifestChildPathPattern.MatchString(path) && !strings.Contains(path, "..")
+}
+
+// segmentFilenamePattern confines child-playlist segment references the same
+// way — those come from the HLS content itself, but are still attacker-
+// reachable if a rendition dir is ever seeded from less-trusted content.
+var segmentFilenamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+\.ts$`)
 
 // GetPlaybackURL returns a URL to Gradex's own manifest-proxy endpoint
 // (ServeManifest), not a raw presigned S3 URL for hls_master_key. A plain S3
@@ -69,11 +89,14 @@ func (s *videoService) ServeManifest(ctx context.Context, videoID, path, token s
 	if v.Status != StatusPublished || v.HLSMasterKey == nil {
 		return nil, "", fmt.Errorf("%w: video %s is not playable", ErrConflict, videoID)
 	}
+	if !isValidManifestPath(path) {
+		return nil, "", fmt.Errorf("%w: invalid manifest path %q", ErrNotFound, path)
+	}
 	hlsPrefix := strings.TrimSuffix(*v.HLSMasterKey, "master.m3u8")
 
 	content, err := s.storage.DownloadObject(ctx, hlsPrefix+path)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: manifest file %s not found", ErrNotFound, path)
+		return nil, "", fmt.Errorf("%w: manifest file %s not found: %v", ErrNotFound, path, err)
 	}
 
 	if path == "master.m3u8" {
@@ -113,6 +136,9 @@ func (s *videoService) rewriteChildPlaylist(ctx context.Context, content []byte,
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
+		if !segmentFilenamePattern.MatchString(trimmed) {
+			return nil, fmt.Errorf("%w: invalid segment reference %q in child playlist", ErrConflict, trimmed)
+		}
 		segmentKey := hlsPrefix + renditionDir + "/" + trimmed
 		signedURL, err := s.storage.PresignGetURL(ctx, segmentKey, expiry)
 		if err != nil {
@@ -135,6 +161,14 @@ func (s *videoService) UpdateProgress(ctx context.Context, lessonID, viewerID st
 	lesson, err := s.repo.getLesson(ctx, lessonID)
 	if err != nil {
 		return Progress{}, err
+	}
+
+	// Clamp rather than reject: a client posting slightly past the known
+	// duration (float rounding, a duration written after the client already
+	// buffered) shouldn't error out of progress tracking — see
+	// docs/PRD.md §11 Video Playback & Progress.
+	if lesson.DurationSeconds != nil && positionSeconds > *lesson.DurationSeconds {
+		positionSeconds = *lesson.DurationSeconds
 	}
 
 	completed := false
