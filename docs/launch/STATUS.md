@@ -116,6 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Clarify the provisional data-residency/hosting-region constraint, then compare managed production
-topologies and obtain the developer/product owner's explicit selection before documenting module
-and container boundaries.
+Compare managed production topologies and obtain the developer/product owner's explicit selection
+before documenting module and container boundaries.
