@@ -1,22 +1,23 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-24 — advanced by user
-> Last repository reconciliation: 2026-07-23 18:46 EEST
-> Scheduled day: Day 2 — Closed
+> Current schedule date: 2026-07-25 — advanced by user
+> Last repository reconciliation: 2026-07-25 — user-advanced schedule
+> Scheduled day: Day 3 — Platform architecture in progress
 > Target public go-live: 2026-08-15
-> Days remaining after today: 22 calendar days
+> Days remaining after today: 21 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The Day 1 documentation baseline
-is approved, but system design has not started and the founder deliberately deferred all
-external-owner outreach to August 6. All 20 required entries in
+is approved and platform architecture has started, but its operating envelope remains provisional
+and the founder deliberately deferred all external-owner outreach to August 6. All 20 required
+entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 2 is closed. The protected recovery day introduced no feature or architecture work and no
-implementation carryover. Platform architecture starts July 25.
+Day 3 is in progress. The protected July 24 recovery day introduced no feature or architecture work
+and no implementation carryover. The July 25 platform-architecture approval loop is active.
 
 Repository evidence at the latest reconciliation:
 
@@ -34,15 +35,16 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Begin the July 25 platform-architecture slice: architecture drivers, provisional operating
-envelope, module boundaries, system context, containers, runtime topology, and deployment model.
+Approve the July 25 platform architecture: drivers, provisional operating envelope, module
+boundaries, system context, containers, runtime topology, and deployment model. Keep every
+unresolved provider/policy choice configurable and explicitly provisional.
 
 ## Milestones
 
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | Not started | Required system-design artifacts and reviews |
+| M1 — Platform architecture baseline | July 28 | In progress | July 25 architecture approval loop and required system-design artifacts |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -61,7 +63,7 @@ scheduled for August 6 by founder decision and do not create recovery-day work.
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Full MVP is not yet decomposed behind an architecture baseline | Developer + Codex | Complete Days 2–5 of the system-design schedule | July 28 | Approved architecture and dependency-ordered delivery slices |
+| Full MVP is not yet decomposed behind an architecture baseline | Developer + Codex | Complete the July 25–28 system-design schedule | July 28 | Approved architecture and dependency-ordered delivery slices |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
 ## Required Launch Gates
@@ -112,8 +114,8 @@ actionability.
 - Founder decision on 2026-07-23: external/provider outreach is deferred to August 6. Required
   gate statuses and production exit criteria are unchanged.
 
-## Tomorrow's First Task
+## Current Next Task
 
-On July 25, start platform architecture:
-drivers, provisional launch load/availability/recovery envelope, module boundaries, system context,
-containers, runtime topology, and deployment model.
+Clarify the provisional cost-versus-operations constraint, compare viable production topologies,
+and obtain the developer/product owner's explicit selection before documenting module and container
+boundaries.
