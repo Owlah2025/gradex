@@ -116,5 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Review and approve the runtime topology, deployment model, scaling rules, and environment isolation
+Review and approve critical transaction, asynchronous-work, provider-failure, and recovery behavior
 for the selected split-managed-PaaS architecture.
