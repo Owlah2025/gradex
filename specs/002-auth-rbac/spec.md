@@ -58,7 +58,7 @@ role, and prove public registration cannot produce that role.
 
 1. **Given** an authorized Admin sends an invitation for Instructor/Admin role, **when** the
    recipient consumes a valid unused invitation and sets a valid display name and password,
-   **then** Gradex creates or activates the Account with that display name, exactly the assigned
+   **then** Gradex creates the Account with that display name, exactly the assigned
    role, and verified email. *(BR-002, BR-009, BR-105)*
 2. **Given** an invitation is expired, revoked, or already used, **when** it is submitted, **then**
    Gradex creates no privileged access and returns a safe actionable status. *(BR-009)*
@@ -161,6 +161,9 @@ next protected request, refresh, fresh login, playback, and download are denied.
   boundary.
 - An invitation to an already-registered address is rejected and never changes role, merges
   identity, or creates a second role. A future conversion/multi-role workflow is outside MVP.
+- Creating an invitation creates no placeholder Account. The Account and credential are created
+  atomically only after a valid invitation/token is locked, validated, and consumed.
+- `accounts.role` is assigned at Account creation and is not an editable MVP field.
 
 ## Requirements
 
@@ -176,10 +179,14 @@ next protected request, refresh, fresh login, playback, and download are denied.
 - **FR-004**: Verification, invitation, and reset tokens MUST expire, be single-use, and be stored in
   a form that does not expose the bearer secret. *(BR-008, BR-009, PRD §6 Security)*
 - **FR-005**: Existing Admins alone MUST invite Instructor/additional Admin Accounts; the recipient
-  MUST receive exactly the assigned role and MUST NOT self-select a role. An email already attached
-  to any Account MUST be rejected without role change or identity merge. *(BR-009, BR-080)*
+  MUST receive exactly the assigned immutable role and MUST NOT self-select a role. Invitation
+  creation MUST NOT create a placeholder Account. An email already attached to any Account MUST be
+  rejected without role change or identity merge. *(BR-009, BR-080)*
 - **FR-006**: The bootstrap Admin MUST be created exactly once through a secure out-of-band deployment
   operation, MUST have no repository credential, and MUST change the initial password. *(BR-009)*
+- **FR-006A**: Only Student Accounts MAY place Orders, receive ordinary Entitlements, create
+  Enrollments, or record Progress. Instructor Accounts have no Student consumption capability;
+  Admin protected-content access MUST use the separate audited preview path. *(BR-081/082)*
 - **FR-007**: Successful login MUST create an independently revocable session with a short-lived
   access token and rotating refresh token. *(BR-004)*
 - **FR-008**: Expired, revoked, or reused refresh tokens MUST be rejected without new credentials.
@@ -206,9 +213,9 @@ next protected request, refresh, fresh login, playback, and download are denied.
 
 ### Key Entities
 
-- **Account**: Unique normalized email, internal identifier, password hash, exactly one role,
-  verification/status fields, non-unique BR-105 display name, language/profile metadata, and
-  security timestamps.
+- **Account**: Unique normalized email, internal identifier, password hash, exactly one immutable
+  MVP role, verification/status fields, non-unique BR-105 display name, language/profile metadata,
+  and security timestamps.
 - **Session**: Independently revocable login session associated with one Account and refresh-token
   rotation state.
 - **Email Verification**: Expiring single-use proof that activates a pending Student or verifies a

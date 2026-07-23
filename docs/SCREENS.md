@@ -84,8 +84,8 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 - **Content:** Inviting organization, assigned role, email, policy links.
 - **Fields:** Display name, initial password, and confirmation.
 - **Display-name guidance:** Same BR-105 validation as Student registration; it defaults the
-  invited Account profile and remains editable after activation.
-- **States:** Valid, expired, revoked, already used, suspended/deactivated target.
+  newly created Account profile and remains editable after activation.
+- **States:** Valid, expired, revoked, already used, conflicting registered address.
 - **Exit:** Login; no public role selector or role upgrade.
 
 ## S07 — Notification Center

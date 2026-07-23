@@ -157,7 +157,12 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Verification must succeed before Student sign-in. Changing an email requires verifying the
   new address.
 - Existing Admins invite Instructors/Admins; public privileged-role registration does not exist.
-  An address already attached to an Account cannot be invited or silently converted to another role.
+  Sending an invitation does not create an Account; acceptance creates it with the assigned role.
+  An address already attached to an Account cannot be invited or converted to another role.
+- Every Account has exactly one role assigned at creation and immutable during MVP. Students alone
+  may purchase, receive Entitlements, and record Progress. Instructors author assigned content
+  without Student learning capability; Admins use the separate audited preview path. A person
+  needing another capability uses a separate Account with another normalized email.
 - The bootstrap Admin has no credential in the repository and must change the initial password.
 - Passwords accept 15–128 Unicode characters, reject common/compromised values, use Argon2id,
   and do not require character-class composition or scheduled rotation.

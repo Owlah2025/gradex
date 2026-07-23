@@ -32,9 +32,16 @@ Ownership and rules:
   field an Instructor roster exposes, and an Admin may reset an abusive value through the audited
   moderation path.
 - Public registration can assign only `STUDENT`.
-- `INSTRUCTOR` and additional `ADMIN` roles come from an Admin invitation.
+- `INSTRUCTOR` and additional `ADMIN` roles are assigned when an Admin invitation is accepted;
+  sending an invitation does not create an Account.
 - An email already attached to an Account cannot be invited into a different role; MVP Accounts
-  have exactly one role and no automatic role conversion/identity merge.
+  have exactly one role assigned at creation and immutable during MVP, with no role conversion,
+  multi-role membership, or identity merge.
+- Only Student Accounts can place Orders, receive ordinary Entitlements, create Enrollments, and
+  record Progress. Instructors author assigned content without Student consumption capability.
+  Admin content access uses the distinct audited preview path and creates no Entitlement or Progress.
+- A person needing separate role capabilities uses a separate Account with a different normalized
+  email during MVP.
 - One bootstrap Admin is created through secure deployment.
 - Suspension is an Account restriction; it does not delete purchases, Course ownership, or audit
   history.
@@ -43,8 +50,12 @@ Lifecycle:
 
 ```text
 Student:    PENDING_VERIFICATION → ACTIVE ↔ SUSPENDED → DEACTIVATED
-Staff:      PENDING_INVITATION   → ACTIVE ↔ SUSPENDED → DEACTIVATED
+Staff:                             ACTIVE ↔ SUSPENDED → DEACTIVATED
 Bootstrap:                         ACTIVE ↔ SUSPENDED → DEACTIVATED
+
+Invitation: PENDING → ACCEPTED
+                  ├→ EXPIRED
+                  └→ REVOKED
 ```
 
 `SUSPENDED` immediately blocks protected actions. Reactivation restores role-authorized access
