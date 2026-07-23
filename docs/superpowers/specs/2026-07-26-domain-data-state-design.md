@@ -1,6 +1,6 @@
 # Gradex Domain, Data, and State Design
 
-> Status: Owner-approved complete design — pending independent review
+> Status: Independently approved — advisory dispositions pending exact-commit verification
 > Date: 2026-07-26
 > Scope: Complete MVP authoritative domain state and PostgreSQL model
 > Change boundary: Design only; this record does not implement migrations or application behavior
@@ -381,7 +381,7 @@ Versions and the PostgreSQL outbox.
 
 | Table | Purpose and important constraints |
 |---|---|
-| `orders` | One Student, commercial lifecycle, accepted policy/version, currency/totals, revision, distinct `created_at`, `accepted_at`, `payment_deadline_at`, `completed_at`, `expired_at`, `cancelled_at` |
+| `orders` | One Student, commercial lifecycle, accepted policy/version, currency/totals, revision, distinct `created_at`, `accepted_at`, nullable `payment_deadline_at`, `completed_at`, `expired_at`, `cancelled_at` |
 | `order_items` | Exactly one immutable Course/Section snapshot per Order, target IDs, containing Course, acquired approved revision, title/scope evidence, `access_ends_at`, subtotal/discount/total |
 | `payment_attempts` | Order, scoped idempotency reference, provider account/reference, mutable lifecycle, requested amount/currency, verified capture/occurrence and receipt times |
 | `payment_attempt_state_history` | Immutable old/new Attempt state, source provider event/local observation, reason, timestamp |
@@ -406,17 +406,21 @@ subtotal_amount - discount_amount = total_amount
 
 `order_items.access_ends_at`, target identity, acquired revision, catalog price, Coupon snapshot,
 accepted policies, amount, and currency never change after Order creation.
-`payment_deadline_at < order_items.access_ends_at` is required.
+`payment_deadline_at` is required for `PENDING_PAYMENT` Orders and must satisfy
+`payment_deadline_at < order_items.access_ends_at`; it is `NULL` for a directly completed
+`FREE_GRANTED` Order. The status-specific nullability and inequality are enforced together.
 
 ### 8.2 Order and Payment Attempt lifecycles
 
 ```text
 Order:
-PENDING_PAYMENT → PAID → PARTIALLY_REFUNDED → REFUNDED
-       ├────────→ CANCELLED
-       ├────────→ EXPIRED
-       ├────────→ RECONCILIATION_REQUIRED
-       └────────→ FREE_GRANTED
+PENDING_PAYMENT → PAID
+PAID → PARTIALLY_REFUNDED → REFUNDED
+PAID ─────────────────────→ REFUNDED
+PENDING_PAYMENT → CANCELLED
+PENDING_PAYMENT → EXPIRED
+PENDING_PAYMENT → RECONCILIATION_REQUIRED
+accepted zero-value Order → FREE_GRANTED
 
 CANCELLED/EXPIRED ── verified evidence money moved ─→ RECONCILIATION_REQUIRED
 
@@ -508,8 +512,8 @@ deactivates rather than deletes.
 - `UNIQUE(order_id)` ensures one Redemption per Order.
 - A partial unique index on `(coupon_id, student_id)` for `RESERVED/CONSUMED` enforces one
   capacity-affecting use per Student.
-- Capacity is exact under a Coupon row lock:
-  `reserved_count + consumed_count < max_redemptions`.
+- Capacity is exact under a Coupon row lock. `max_redemptions IS NULL` means unlimited; otherwise
+  acceptance requires `reserved_count + consumed_count < max_redemptions`.
 - Paid Order acceptance increments `reserved_count` and inserts `RESERVED` with
   `reservation_expires_at = order.payment_deadline_at`.
 - Timely paid success atomically changes `RESERVED → CONSUMED`, decrements `reserved_count`, and
@@ -645,11 +649,13 @@ transaction. One PostgreSQL transaction then:
 5. invokes Entitlements to create exactly one `UNIQUE(source_order_id)` Entitlement from the
    immutable Order Item, copying `accepted_at → retirement_eligibility_at` and recording separate
    `acquired_at`, then invokes Learning to create/reuse Enrollment;
-6. invokes Reporting's earning-intent contract to obtain the effective share version and freeze the
-   completion-time Course owner, commissionable base, discount-funding treatment, currency, source
-   Order Item, and stable earning-operation ID;
-7. writes required Audit evidence and stable-ID outbox events containing immutable receipt,
-   earning, and notification inputs.
+6. invokes Reporting's earning-snapshot contract, which locks/validates the effective share
+   configuration and returns a typed completion-time snapshot containing Course owner,
+   commissionable base, discount-funding treatment, currency, source Order Item, share version, and
+   stable earning-operation ID;
+7. writes required Audit evidence and stable-ID outbox events. The reporting event is the
+   authoritative pending carrier of that immutable earning snapshot until Reporting creates the
+   source-linked ledger entry; receipt and notification events carry their own immutable inputs.
 
 Any invariant failure rolls back all authoritative grant effects. A duplicate callback returns the
 existing result. A second successful payment that now conflicts, or any late/unsafe capture, retains
@@ -894,6 +900,15 @@ state and next-attempt time.
 The numeric share remains blocked on `LG-001`; no earning can be calculated without one effective,
 non-overlapping approved configuration. Tax, fee, invoice, and statement-field treatment remains
 blocked on `LG-016`. Dispute/chargeback effects remain blocked on `LG-017`.
+
+Gradex uses the approved durable-outbox alternative for pending earnings rather than a separate
+`earning_intents` table. During paid completion, Reporting's transaction-aware command locks and
+validates the effective `revenue_share_configurations` row and returns the typed immutable snapshot;
+the source transaction persists that snapshot in the stable-ID reporting outbox event. That event
+is the authoritative pending earning carrier until an idempotent Reporting consumer creates the
+source-linked ledger entry and receipt. The event may be minimized only after those authoritative
+records and source references satisfy §28. Reporting owns the snapshot/event contract; Shared Work
+owns the outbox row.
 
 Each paid Order completion creates exactly one positive ledger entry, deduplicated by stable source
 event ID. It snapshots:
@@ -1240,13 +1255,16 @@ location.
 
 ### 22.5 Identity and Learning shadow conversion
 
-Authentic existing Accounts preserve compatible UUIDs. A Course owner, Progress user, or
-`fake_entitlements` UUID reference alone does not prove Account existence or role. Duplicate
-normalized emails, malformed/unverified Accounts, and ambiguous staff roles enter review.
-Compatible password hashes are preserved only when their algorithm/parameters meet the new
-credential contract. Legacy refresh Sessions are revoked unless token-family, hashing, rotation,
-and reuse-detection semantics are proven compatible. Identity cutover initializes/increments
-`session_epoch` and requires reauthentication where Sessions cannot migrate safely.
+The current `0001_init` schema contains no Account, credential, or Session table, so Identity is
+greenfield and its authentic legacy conversion inventory is empty today. A Course owner, Progress
+user, or `fake_entitlements` UUID reference alone does not prove Account existence or role. The
+following compatibility rules apply only if an authentic transitional Identity source exists before
+the recorded cutover: preserve compatible Account UUIDs; send duplicate normalized emails,
+malformed/unverified Accounts, and ambiguous staff roles to review; preserve password hashes only
+when their algorithm/parameters meet the new credential contract; and revoke refresh Sessions
+unless token-family, hashing, rotation, and reuse-detection semantics are proven compatible.
+Identity cutover initializes/increments `session_epoch` and requires reauthentication wherever
+Sessions cannot migrate safely.
 
 Progress converts only when Student Account, containing Course, stable Lesson, Enrollment
 create/reuse, position, and completion evidence resolve authentically. Values convert to bounded
@@ -1312,7 +1330,7 @@ later destructive but forward-only migrations. There are no destructive down mig
 
 | Context | Legacy authority and convergence | Fence/promotion blockers | Post-cutover authority and exit |
 |---|---|---|---|
-| Identity | Authentic legacy Account/credential source; UUID refs alone are not identity. Map revisions/fingerprints; preserve compatible passwords; review email/role/status ambiguity; revoke incompatible Sessions. | Final identity delta; email/role/credential/status constraints; password-reset, verification-token, suspended-Account, revocation, and reauthentication tests. | New Identity only. Compatible rollback versions use it. No unresolved authentication/authorization ambiguity. |
+| Identity | Greenfield under current `0001_init`: no authentic Account/credential/Session rows. UUID refs alone are not identity. If a transitional source exists before cutover, map revisions/fingerprints, preserve only compatible credentials, review email/role/status ambiguity, and revoke incompatible Sessions. | Empty current-source reconciliation or final transitional identity delta; email/role/credential/status constraints; password-reset, verification-token, suspended-Account, revocation, and reauthentication tests. | New Identity only. Compatible rollback versions use it. No unresolved authentication/authorization ambiguity. |
 | Work Delivery | Direct Redis/asynq producer plus legacy operation state. Map payload/task IDs to stable operation IDs; shadow outbox does not dispatch. | Disable producers; inventory every queue location/lease; validate event, lease, attempt, receipt, and epoch constraints; reconcile external ambiguity. | PostgreSQL work authority. Compatibility workers only drain mapped legacy work. Exit after the full drain rule in §22.6. |
 | Catalog | Legacy Course/Section/Lesson columns; temporary journal/repeated fingerprint convergence; stable IDs map to non-public Draft graphs. | Final authoring delta; owner/disposition resolution; same-Course pointer, graph, ordering, Draft, taxonomy, and ownership constraints. | Revision graph authority. Legacy columns become read-only projections. Contract waits for post-migration review of content intended for publication and dependent adapter release. |
 | Media | Legacy `videos`, keys, status, `sync_version`, Lesson status/duration, and object identity; external verification workers converge row/object deltas. | Fence upload/replacement/retranscode/publish; settle/map work; final identity recheck; promote exact owner/version/object/attempt/state constraints. | Media Asset/Version authority. Old endpoints call Media. Unverified content stays quarantined; old objects remain until relocation/retention exit evidence. |
@@ -1357,8 +1375,10 @@ For every source type:
 converted source records + explicitly disposed source records = inventoried source records
 ```
 
-- Identity: every authentic Account maps once or has disposition; compatible credential maps at
-  most once; email/role ambiguity affecting authorization is zero; Sessions are mapped or revoked.
+- Identity: the current `0001_init` authentic Account/credential/Session inventory is exactly zero.
+  If a transitional source exists before cutover, every authentic Account maps once or has
+  disposition, each compatible credential maps at most once, email/role ambiguity affecting
+  authorization is zero, and Sessions are mapped or revoked.
 - Work: every pre-fence operation is terminal/cancelled/mapped once; every queue location/lease is
   reconciled; no ambiguous external side effect remains.
 - Catalog: every Course maps to one stable identity/Draft or one approved disposition; every
@@ -1463,7 +1483,7 @@ Identity/reference
 → Commerce Order/Payment/Coupon
 → Entitlement access guard
 → Learning Enrollment
-→ Reporting earning intent
+→ Reporting share configuration / earning snapshot
 → Moderation / Office Hours / Retention / Migration owner records
 → Audit
 → Outbox
@@ -1512,7 +1532,7 @@ security alerts, or other mandatory notices.
 | Readiness promotion | Idempotent successful scan/processing result locks exact Version/Attempt, validates every required Attempt, reconfirms immutable provider identity, moves Version to `READY`, writes Audit/outbox. | Ambiguous/missing evidence stays quarantined/failed/reviewed. |
 | Paid Order acceptance | Account exists with immutable Student role, is active/eligible/not checkout-suspended; Catalog graph/price/future expiry/retirement valid; no conflicting live Order/Entitlement; Coupon reservation available. Create immutable Order Item/reservation plus Audit/outbox. | Provider checkout session is created only after commit. |
 | Verified paid completion | Verify provider capture first; lock Order/Attempt/Coupon, Entitlement guard, Enrollment; complete Order, consume Redemption, create source-linked Entitlement, create/reuse Enrollment, write Audit and immutable earning/receipt/notification intents. | Duplicate/conflict/late capture enters reconciliation without duplicate access. |
-| Earning intent | Snapshot completion-time Course owner, revenue-share version, commissionable base, discount-funding treatment, currency, Order Item, stable earning-operation ID. | Reporting consumes snapshot idempotently; it never queries current owner/share for history. |
+| Earning snapshot/outbox intent | Reporting locks/validates the effective share configuration and returns the completion-time Course owner, revenue-share version, commissionable base, discount-funding treatment, currency, Order Item, and stable earning-operation ID. The source transaction persists it in the stable reporting outbox event; no separate `earning_intents` table exists. | Reporting consumes the authoritative pending snapshot idempotently into the ledger; it never queries current owner/share for history. |
 | Confirmed Refund | Verify provider result; update Refund/Order; on cumulative full success revoke only source Entitlement, release Student Coupon eligibility without decrementing historical consumption, preserve Enrollment/Progress, emit original-Instructor negative adjustment, Audit/notice. | Later ledger entry links original earning/Instructor. |
 | Verified dispute/chargeback | Commerce records/deduplicates provider evidence and dispute lifecycle/fees, then invokes only configured approved access/financial consequences. | Not an Admin Refund. Until `LG-016`/`LG-017`, automatic revocation/recovery stays blocked or reconciliation-driven. |
 | Progress checkpoint | Trusted authorization decision; Learning validates Enrollment/Lesson/Media evidence/duration/bounds and performs monotonic CAS. | Retry cannot reduce Progress or fabricate completion. |
@@ -1592,4 +1612,27 @@ The developer/product owner approved:
   Statement uniqueness, and classified database protections;
 - permanent append-only financial/Audit provenance and configurable fail-closed retention.
 
-The complete owner-approved design is ready for documentation self-review and independent review.
+The complete owner-approved design passed documentation self-review and proceeded to the
+independent review recorded below.
+
+## 30. Independent Review Record
+
+Claude Code 2.1.218 independently reviewed exact commit `5ba126c` read-only against the canonical
+rules, platform architecture, launch gates, and current schema/code seams. It confirmed no tracked
+worktree modifications during review and returned:
+
+- Critical: 0;
+- High: 0;
+- Medium: 1;
+- Low: 4;
+- verdict: **APPROVE DOMAIN DESIGN**.
+
+All advisory precision findings are incorporated:
+
+- the stable reporting outbox event is explicitly the authoritative pending earning-snapshot
+  carrier; no unowned `earning_intents` record is implied;
+- the Order lifecycle shows direct full Refund from `PAID`;
+- Identity migration is explicitly greenfield under current `0001_init`, with compatibility rules
+  conditional on an authentic transitional source;
+- uncapped Coupon capacity uses `max_redemptions IS NULL`;
+- paid versus `FREE_GRANTED` Order deadline nullability is explicit.

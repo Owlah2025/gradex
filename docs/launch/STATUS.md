@@ -21,7 +21,8 @@ July 25 architecture, canonical rules, existing feature designs, and current vid
 Design Sections 1–6 are owner-approved: shared foundations; Identity/Catalog/Media;
 Commerce/Coupons/Entitlements/Learning; operational modules/Audit/outbox/retention; preservation-
 safe migration; and final ownership/transition/protection/retention matrices. Documentation
-self-review and the required independent read-only review remain. There is no incomplete July 25
+self-review and the first independent read-only review are complete with zero critical/high
+findings; advisory precision corrections are being finalized. There is no incomplete July 25
 `Must` work.
 
 Repository evidence at the latest reconciliation:
@@ -100,10 +101,12 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-Claude completed four independent read-only architecture passes. The latest reviewed exact commit
-was `c9c2238`; all prior dispositions were verified closed and the verdict was
-**APPROVE ARCHITECTURE**, with zero critical/high findings. The earlier M0 baseline verdict remains
-**APPROVE BASELINE** with zero critical/high findings.
+Claude independently reviewed exact domain-design commit `5ba126c` read-only against the canonical
+rules, launch gates, architecture, and current schema/code seams. Counts: 0 critical, 0 high,
+1 medium, and 4 low; verdict: **APPROVE DOMAIN DESIGN**. The advisory findings clarified the
+pending earning-snapshot carrier, direct-full-Refund diagram, greenfield Identity migration,
+uncapped Coupon capacity, and free-grant payment-deadline nullability. A final exact-commit
+verification will confirm those dispositions.
 
 ## Decisions in Force
 
@@ -132,5 +135,5 @@ was `c9c2238`; all prior dispositions were verified closed and the verdict was
 
 ## Current Next Task
 
-Run the final domain-design self-review/documentation guard, commit the owner-approved
-specification, then obtain independent read-only review and resolve every critical/high finding.
+Commit the independent-review dispositions, run their documentation guard, and obtain final
+exact-commit verification before implementation planning.
