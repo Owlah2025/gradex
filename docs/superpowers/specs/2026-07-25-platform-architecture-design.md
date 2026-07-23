@@ -173,19 +173,19 @@ email, and malware scanning remain external systems accessed only through adapte
 
 ## 6. Modular-Monolith Boundaries
 
-| Module | Owned responsibility |
-|---|---|
-| Identity and Access | Accounts, credentials, sessions, invitations, roles, ownership checks, and suspension |
-| Catalog and Authoring | Courses, Sections, Lessons, taxonomy, pricing, Course-facing review feedback, revisions, and publication |
-| Media and Assets | Upload intent, quarantine, validation/scanning workflow, video processing, resources, lab materials, previews, and signed delivery |
-| Commerce | Coupons, Orders, Tap payment attempts, refunds, reconciliation, receipts, and financial state |
-| Entitlements | Grant records, validity, scope evaluation, expiry, and revocation |
-| Learning | Durable Enrollment create/reuse, Instructor Course-scoped roster/learning analytics, progress, completion, and Student learning history |
-| Office Hours and Community | Session schedules, meeting-link disclosure, lifecycle, and external support/community links |
-| Moderation | Student Content Reports, triage, resolution, and Admin enforcement orchestration |
-| Notifications | Durable per-recipient in-app records/read state, transactional templates, deduplication, email attempts, and suppression |
-| Reporting and Payouts | Admin commercial/operational projections, Instructor payout statements, revenue shares, and payout records |
-| Audit | Append-only evidence for privileged and financially sensitive actions |
+| Module | Primary responsibility | Must not own |
+|---|---|---|
+| Identity and Access | Accounts, credentials, sessions, invitations, roles, ownership checks, and suspension | Course/content, commerce, Entitlement, or learning state |
+| Catalog and Authoring | Courses, Sections, Lessons, taxonomy, pricing, per-Course community link, Course-facing review feedback, revisions, and publication | Payments, Entitlements, Student Content Reports, media bytes/processing, or Audit evidence |
+| Media and Assets | Upload intent, quarantine, validation/scanning workflow, video processing, resources, lab materials, previews, and signed delivery | Course publication, Entitlement grants, payments, or moderation outcomes |
+| Commerce | Coupons, Orders, Tap payment attempts, refunds, reconciliation, receipts, and financial state | Raw card/PAN data, catalog-price authority, Enrollment/progress, or invented provider/policy defaults |
+| Entitlements | Grant records, validity, scope evaluation, expiry, and revocation | Account/session, Catalog lifecycle, Enrollment/progress, or payment/refund state |
+| Learning | Durable Enrollment create/reuse, Instructor Course-scoped roster/learning analytics, progress, completion, and Student learning history | Account contact/credentials, commerce, Catalog authoring, or Entitlement validity |
+| Office Hours | Session schedules, meeting-link disclosure, lifecycle, and external meeting-provider references | Per-Course community links, built-in conferencing, Account state, or Entitlement authority |
+| Moderation | Student Content Reports, triage, resolution, and Admin enforcement orchestration | Catalog/Account source records, Course review workflow, or Audit evidence |
+| Notifications | Durable per-recipient in-app records/read state, transactional templates, deduplication, email attempts, and suppression | Originating business transactions, Account contact ownership, or marketing automation |
+| Reporting and Payouts | Admin commercial/operational projections, Instructor payout statements, revenue shares, and payout records | Source commerce/learning state, Instructor roster PII, or automated settlement |
+| Audit | Append-only evidence for privileged and financially sensitive actions | Mutable workflows or source business state |
 
 Catalog owns only Course-facing review state and feedback. Student reports, moderation decisions,
 and enforcement are Admin workflows owned by Moderation; their privileged actions are recorded by
@@ -219,7 +219,7 @@ flowchart TD
     Entitlements[Entitlements]
     Media[Media and Assets]
     Learning[Learning]
-    Office[Office Hours and Community]
+    Office[Office Hours]
     Moderation[Moderation]
     Notify[Notifications]
     Reports[Reporting and Payouts]
@@ -227,7 +227,7 @@ flowchart TD
     Outbox[(Transactional outbox)]
 
     Commerce -->|price and scope contract| Catalog
-    Commerce -->|atomic grant or revoke command| Entitlements
+    Commerce -->|eligibility query and atomic grant or revoke| Entitlements
     Commerce -->|atomic Enrollment create or reuse| Learning
     Entitlements -->|Course and Section scope| Catalog
     Media -->|Lesson and revision contract| Catalog
@@ -245,6 +245,8 @@ flowchart TD
     Moderation -->|unpublish or change-request command| Catalog
     Moderation -->|reported asset| Media
     Moderation -->|reporter eligibility| Entitlements
+    Notify -->|recipient, locale, and contact resolution| Identity
+    Reports -->|Instructor identity for statements| Identity
     Identity --> Outbox
     Catalog --> Outbox
     Commerce --> Outbox
@@ -254,7 +256,7 @@ flowchart TD
     Moderation --> Outbox
     Reports --> Outbox
     Outbox --> Notify
-    Outbox --> Reports
+    Outbox -->|Commerce and Learning domain events| Reports
     Identity --> Audit
     Catalog --> Audit
     Media --> Audit
@@ -267,7 +269,8 @@ flowchart TD
 
 The arrows represent use of an explicit contract, not permission to write another module's tables.
 Audit calls participate in the originating transaction for actions whose evidence must be atomic
-with the state change.
+with the state change. Reporting projections use published domain events rather than reading source
+module tables; Identity resolves the minimum Instructor contact needed for statement delivery.
 
 ## 7. Runtime Topology
 
@@ -404,7 +407,7 @@ They are not required for reads or every ordinary API request.
 
 This preserves Constitution Principle IV and the detailed behavior in the
 [Coupons design](2026-07-22-coupons-system-design.md).
-*(BR-020/022/031/033/121/126/129)*
+*(BR-020/BR-022/BR-031/BR-033/BR-047/BR-121/BR-126/BR-129/BR-131)*
 
 ### 9.3 Media and downloadable assets
 
@@ -423,6 +426,11 @@ This platform boundary supersedes none of the known gaps recorded in the
 [existing video design](2026-07-17-video-streaming-design.md); those gaps remain implementation
 work. Course revision, Entitlement, Admin preview, and public-preview behaviors remain governed by
 the canonical rules. *(BR-017/023/050/081/143/144)*
+
+The current [`CompleteUpload` implementation](../../../backend/internal/video/upload.go) commits
+video state and then enqueues directly to asynq. The July 28 delivery foundation must migrate that
+handoff to the transactional-outbox/dispatcher path, with reconciliation for any transition period.
+Preserving the working video behavior does not preserve this non-transactional enqueue boundary.
 
 ## 10. Failure and Recovery Behavior
 
@@ -508,7 +516,8 @@ foundation and later operational runbooks.
   unsafe uploads, signed-access abuse, secret leakage, and rate limits.
 - Accessibility validation covers WCAG 2.2 AA for platform-owned responsive Arabic/English
   interfaces and player controls, including RTL/LTR behavior; hosted-checkout and caption gaps are
-  assessed and disclosed under `LG-015`.
+  assessed and disclosed under `LG-015`. Gradex must not claim complete product-level WCAG
+  conformance while the approved media-accessibility gap remains.
 - Load tests exercise the provisional envelope without routing media bytes through the API.
 - Recovery drills cover Redis loss, interrupted workers, duplicate callbacks, PostgreSQL restore,
   source-media backup recovery, derived-media regeneration, and deployment rollback.
