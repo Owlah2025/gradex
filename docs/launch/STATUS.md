@@ -116,5 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Compare managed production topologies and obtain the developer/product owner's explicit selection
-before documenting module and container boundaries.
+Review and approve the architecture drivers and provisional operating envelope for the selected
+split-managed-PaaS topology before documenting module and container boundaries.
