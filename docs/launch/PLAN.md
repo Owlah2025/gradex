@@ -194,8 +194,9 @@ for recovery if the baseline is complete.
 - Define module boundaries, system context, containers, runtime topology, and deployment model.
 - Confirm PostgreSQL authority and the Redis/worker, object-storage/CDN, email, and Tap boundaries.
 
-**Exit evidence:** every component and module has one responsibility; dependencies are explicit;
-open policy/provider choices remain configurable rather than hard-coded.
+**Exit evidence:** every component and module has one primary responsibility and an explicit
+must-not-own boundary; dependencies are explicit; open policy/provider choices remain configurable
+rather than hard-coded.
 
 #### Sunday, July 26 — Domain, data, and state design
 

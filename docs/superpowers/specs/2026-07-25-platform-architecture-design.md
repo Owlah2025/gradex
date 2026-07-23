@@ -1,6 +1,6 @@
 # Gradex Platform Architecture — Design Record
 
-> Status: Design content approved; independent re-review pending
+> Status: Original design approved; final corrections awaiting independent and owner acceptance
 > Date: 2026-07-25
 > Scope: MVP platform architecture and provisional production topology
 > Change boundary: Design only; no production infrastructure or application behavior is
@@ -179,12 +179,12 @@ email, and malware scanning remain external systems accessed only through adapte
 | Catalog and Authoring | Courses, Sections, Lessons, taxonomy, pricing, Course-facing review feedback, revisions, and publication |
 | Media and Assets | Upload intent, quarantine, validation/scanning workflow, video processing, resources, lab materials, previews, and signed delivery |
 | Commerce | Coupons, Orders, Tap payment attempts, refunds, reconciliation, receipts, and financial state |
-| Entitlements | Grants, expiry, revocation, and authoritative protected-access decisions |
-| Learning | Durable Enrollment create/reuse, Course-scoped roster projection, progress, completion, and Student learning history |
+| Entitlements | Grant records, validity, scope evaluation, expiry, and revocation |
+| Learning | Durable Enrollment create/reuse, Instructor Course-scoped roster/learning analytics, progress, completion, and Student learning history |
 | Office Hours and Community | Session schedules, meeting-link disclosure, lifecycle, and external support/community links |
 | Moderation | Student Content Reports, triage, resolution, and Admin enforcement orchestration |
-| Notifications | Transactional events, templates, deduplication, delivery attempts, and suppression |
-| Reporting and Payouts | Operational projections, Instructor statements, revenue shares, and payout records |
+| Notifications | Durable per-recipient in-app records/read state, transactional templates, deduplication, email attempts, and suppression |
+| Reporting and Payouts | Admin commercial/operational projections, Instructor payout statements, revenue shares, and payout records |
 | Audit | Append-only evidence for privileged and financially sensitive actions |
 
 Catalog owns only Course-facing review state and feedback. Student reports, moderation decisions,
@@ -192,6 +192,12 @@ and enforcement are Admin workflows owned by Moderation; their privileged action
 Audit. Learning owns Enrollment so Entitlement expiry can end access without deleting the durable
 Course relationship, progress, or least-privilege Instructor roster projection.
 *(BR-025/064/105/114/145/146)*
+
+Learning is the sole owner of the Instructor's Course-scoped roster and enrollment/progress
+analytics. Reporting may consume aggregate Learning events for Admin operations but does not own
+the roster or expose additional Student identity. Notifications writes the durable in-app record;
+email remains a best-effort mirror and never defines whether a Notification exists.
+*(BR-064/101/120/122/123)*
 
 ### 6.1 Dependency rules
 
@@ -223,6 +229,7 @@ flowchart TD
     Commerce -->|price and scope contract| Catalog
     Commerce -->|atomic grant or revoke command| Entitlements
     Commerce -->|atomic Enrollment create or reuse| Learning
+    Entitlements -->|Course and Section scope| Catalog
     Media -->|Lesson and revision contract| Catalog
     Media -->|delivery authorization| Entitlements
     Media -->|Admin review authorization| Identity
@@ -233,8 +240,11 @@ flowchart TD
     Office -->|Course scope| Catalog
     Office -->|meeting-link Entitlement| Entitlements
     Moderation -->|actor and Admin authorization| Identity
+    Moderation -->|account enforcement command| Identity
     Moderation -->|reported Course or Lesson| Catalog
+    Moderation -->|unpublish or change-request command| Catalog
     Moderation -->|reported asset| Media
+    Moderation -->|reporter eligibility| Entitlements
     Identity --> Outbox
     Catalog --> Outbox
     Commerce --> Outbox
@@ -389,7 +399,8 @@ They are not required for reads or every ordinary API request.
   Enrollment create-or-reuse, and Entitlement grant in one Order-keyed idempotent transaction.
 - Duplicate, delayed, reordered, or conflicting callbacks cannot double-grant access.
 - An unknown result remains pending and enters reconciliation.
-- Confirmed refund state and its Entitlement effect commit atomically under the approved policy.
+- Confirmed refund state, its Entitlement effect, and any cumulative-full-refund release of the
+  Student's Coupon eligibility commit atomically under the approved policy.
 
 This preserves Constitution Principle IV and the detailed behavior in the
 [Coupons design](2026-07-22-coupons-system-design.md).
@@ -495,6 +506,9 @@ foundation and later operational runbooks.
   and immediate suspension.
 - Security tests cover authorization bypass, session invalidation, forged/replayed callbacks,
   unsafe uploads, signed-access abuse, secret leakage, and rate limits.
+- Accessibility validation covers WCAG 2.2 AA for platform-owned responsive Arabic/English
+  interfaces and player controls, including RTL/LTR behavior; hosted-checkout and caption gaps are
+  assessed and disclosed under `LG-015`.
 - Load tests exercise the provisional envelope without routing media bytes through the API.
 - Recovery drills cover Redis loss, interrupted workers, duplicate callbacks, PostgreSQL restore,
   source-media backup recovery, derived-media regeneration, and deployment rollback.
@@ -518,6 +532,7 @@ temporary mitigation, accountable owner, approver, and expiry or next review dat
 | Refund capability | `LG-009` | Model asynchronous/unsupported behavior; accept only validated production methods |
 | Webhook authenticity | `LG-010` | Verification contract and test vectors are required before adapter acceptance |
 | Malware scanner | `LG-014` | Quarantine-first interface fails closed; no provider is named |
+| Accessibility boundary and public claims | `LG-015` | Validate platform-owned UI/player controls and disclose hosted-checkout/caption boundaries before making public claims |
 | Tax, invoice, receipt, and accounting treatment | `LG-016` | Commerce/Reporting preserve extensible immutable transaction fields without assuming tax or document rules |
 | Disputes and chargebacks | `LG-017` | Commerce records immutable dispute events; Entitlement, revenue, payout, notification, and evidence effects remain policy-driven |
 | Transactional email | `LG-018` | Delivery adapter, attempts, suppression, monitoring, and sender configuration remain replaceable |
@@ -531,7 +546,8 @@ Other legal, commercial, content, accessibility, support, accounting, and produc
 
 This design meets the July 25 architecture exit when its independent review is complete:
 
-- every runtime container and module has one responsibility;
+- every runtime container and module has one primary responsibility and an explicit must-not-own
+  boundary;
 - module ownership and dependency directions are explicit;
 - PostgreSQL authority and Redis reconstruction are explicit;
 - object storage/CDN, Tap, email, scanning, secrets, and monitoring have replaceable boundaries;
