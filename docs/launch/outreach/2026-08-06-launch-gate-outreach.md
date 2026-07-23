@@ -1,8 +1,9 @@
-# Launch-Gate Outreach Pack — 2026-07-24
+# Launch-Gate Outreach Pack — 2026-08-06
 
 > Status: DRAFT — replace placeholders before sending
 > Public go-live target: 2026-08-15
 > Prepared: 2026-07-23
+> Send date: 2026-08-06 — explicitly deferred by the founder on 2026-07-23
 
 These four messages consolidate the external and operational requests that can block the Gradex
 launch. They ask recipients to verify unresolved policy/provider questions; they do not present an
@@ -36,10 +37,10 @@ Do not change a message to `SENT` until it has actually left the sender's accoun
 
 | Request | Gates | Recipient | Status | Sent at | Reply due | Follow-up |
 |---|---|---|---|---|---|---|
-| Legal and policy | LG-002, LG-004–006, LG-011, LG-020 | `[COUNSEL_NAME]` | DRAFT | — | 2026-07-28 | 2026-07-29 |
-| Finance and accounting | LG-001, LG-007, LG-016–017 | `[ACCOUNTING_CONTACT_NAME]` | DRAFT | — | 2026-07-28 | 2026-07-29 |
-| Tap activation and technical contract | LG-007–010, LG-017 | `[TAP_CONTACT_NAME]` | DRAFT | — | 2026-07-28 | 2026-07-29 |
-| Operations and infrastructure | LG-013–015, LG-018–019 | `[OPERATIONS_CONTACT_NAME]` | DRAFT | — | 2026-07-27 | 2026-07-28 |
+| Legal and policy | LG-002, LG-004–006, LG-011, LG-020 | `[COUNSEL_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
+| Finance and accounting | LG-001, LG-007, LG-016–017 | `[ACCOUNTING_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
+| Tap activation and technical contract | LG-007–010, LG-017 | `[TAP_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
+| Operations and infrastructure | LG-013–015, LG-018–019 | `[OPERATIONS_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
 
 ## Message 1 — Kuwaiti Counsel
 
@@ -69,9 +70,9 @@ Please provide written guidance on the following launch items:
    share, payout/tax responsibilities, warranties, takedown/moderation, termination, and Course
    asset handoff.
 
-Please acknowledge receipt by 24 July, identify any missing information immediately, and provide
-initial risk guidance by 28 July. We are targeting final approved policies and agreements no later
-than 8 August so they can be validated before production release.
+Please acknowledge receipt on 6 August, identify any missing information immediately, and provide
+initial risk guidance by 8 August. We are targeting final approved policies and agreements by
+9 August so they can be validated before production release.
 
 Please cite the official authority or contract source behind each conclusion and distinguish a
 confirmed requirement from a recommendation.
@@ -102,8 +103,8 @@ and finance decisions for the following:
 5. Identify the financial records that must be retained and the required retention period, subject
    to reconciliation with counsel's legal guidance.
 
-Please acknowledge receipt by 24 July, list any required source documents, and provide initial
-decisions by 28 July. We are targeting final accounting sign-off by 6 August.
+Please acknowledge receipt on 6 August, list any required source documents, and provide initial
+decisions by 8 August. We are targeting final accounting sign-off by 9 August.
 
 Please separate mandatory accounting/legal treatment from internal operational recommendations.
 
@@ -134,8 +135,9 @@ confirmation of the production and technical requirements below:
 6. The expected activation timeline and any dependency that could prevent production payments by
    14 August.
 
-Please acknowledge receipt by 24 July and provide the relevant official documentation, sandbox
-steps, and initial technical answers by 28 July. Do not request secrets or credentials by email;
+Please acknowledge receipt on 6 August and provide the relevant official documentation, sandbox
+steps, and initial technical answers by 8 August. Please identify immediately if production
+activation cannot complete by 12 August. Do not request secrets or credentials by email;
 please direct us to the approved secure channel for any account-specific material.
 
 Regards,
@@ -168,9 +170,9 @@ execute the following operational inputs:
    without claiming complete product-level conformance while captions/transcripts remain outside
    MVP.
 
-Please acknowledge ownership by 24 July. The load, budget, availability, and recovery inputs are
-needed for the 25 July architecture session; provider shortlists are needed by 27 July. Production
-validation evidence remains required before release.
+Please acknowledge ownership on 6 August. Provide load, budget, availability, recovery, and
+provider-shortlist inputs by 8 August. Production validation evidence remains required by
+12 August.
 
 Regards,
 
@@ -178,7 +180,8 @@ Regards,
 
 ## Founder Architecture Inputs
 
-Complete these before the 25 July platform-architecture session:
+Complete these on 6 August. Until then, system design must label its operating-envelope values as
+provisional, keep them configurable, and replace them before production architecture sign-off:
 
 | Input | Value |
 |---|---|

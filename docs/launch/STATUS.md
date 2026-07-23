@@ -1,21 +1,22 @@
 # Gradex Launch Status
 
-> Last reconciled: 2026-07-23 18:41 EEST
-> Scheduled day: Day 1 — Establish launch control
+> Last reconciled: 2026-07-23 18:46 EEST
+> Scheduled day: Day 1 — Closed
 > Target public go-live: 2026-08-15
 > Days remaining after today: 23 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The Day 1 documentation baseline
-is approved, but system design has not started, all 20 required entries in
-[LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, and external-owner outreach has not yet been
-confirmed. This is a forecast, not a rejection of the approved baseline.
+is approved, but system design has not started and the founder deliberately deferred all
+external-owner outreach to August 6. All 20 required entries in
+[LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
+This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Product, experience, and feature documentation is reconciled, independently reviewed, committed,
-and approved for platform system design. The July 24 recovery day is reserved for external-gate
-outreach; platform architecture starts July 25.
+Day 1 is closed. Product, experience, and feature documentation is reconciled, independently
+reviewed, committed, and approved for platform system design. July 24 remains a protected recovery
+day with no planned work; platform architecture starts July 25.
 
 Repository evidence at the latest reconciliation:
 
@@ -33,9 +34,9 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Confirm the named external contacts and initiate the July 24 actions in
-[LAUNCH_GATES.md](../LAUNCH_GATES.md), while preserving the approved baseline for the July 25
-architecture session.
+Begin the July 25 platform-architecture slice. Treat unresolved budget, load, availability,
+provider, legal, and accounting inputs as explicit configurable assumptions; do not represent them
+as approved production policy.
 
 ## Milestones
 
@@ -53,16 +54,16 @@ architecture session.
 
 ## Carryover
 
-No documentation-remediation carryover. Founder confirmation of named external contacts and
-outreach moves to the July 24 recovery day.
+No Day 1 implementation carryover. External-gate contact confirmation and outreach are deliberately
+scheduled for August 6 by founder decision.
 
 ## Current Blockers and Risks
 
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
-| Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders in the prepared outreach pack, confirm named contacts, and send the dated requests | July 24 | Named contacts plus acknowledged requests/delivery dates |
+| Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
 | Full MVP is not yet decomposed behind an architecture baseline | Developer + Codex | Complete Days 2–5 of the system-design schedule | July 28 | Approved architecture and dependency-ordered delivery slices |
-| External lead times can outlast the build | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners on the recovery day | July 24 | Acknowledged requests with delivery dates |
+| External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
 ## Required Launch Gates
 
@@ -105,11 +106,13 @@ actionability.
 - Codex is the default SpecKit integration; both Codex and Claude integrations remain installed.
 - Local `gradex-spec-review.zip` bundles are generated review artifacts and are ignored.
 - The four consolidated external/operations messages are prepared as drafts in the
-  [July 24 outreach pack](outreach/2026-07-24-launch-gate-outreach.md); `DRAFT` never counts as
+  [August 6 outreach pack](outreach/2026-08-06-launch-gate-outreach.md); `DRAFT` never counts as
   sent evidence.
+- Founder decision on 2026-07-23: external/provider outreach is deferred to August 6. Required
+  gate statuses and production exit criteria are unchanged.
 
 ## Tomorrow's First Task
 
-On July 24, confirm named contacts and send the due external-gate requests. If those actions are
-already acknowledged, prepare the load, budget, availability, and recovery inputs for the July 25
-platform-architecture session; do not pull new feature scope into the recovery day.
+July 24 is protected recovery with no planned work. On July 25, start platform architecture:
+drivers, provisional launch load/availability/recovery envelope, module boundaries, system context,
+containers, runtime topology, and deployment model.
