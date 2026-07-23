@@ -1,5 +1,14 @@
 # Product Requirements Document (PRD)
 
+> Version: 1.0
+> Status: Approved baseline for system design
+> Last Updated: 2026-07-23
+
+This document owns Gradex product scope and acceptance criteria. Product decisions are recorded
+in [DECISIONS.md](DECISIONS.md), invariants in [BUSINESS_RULES.md](BUSINESS_RULES.md), canonical
+entities and states in [DOMAIN_MODEL.md](DOMAIN_MODEL.md), and unresolved production dependencies
+in [LAUNCH_GATES.md](LAUNCH_GATES.md).
+
 ---
 
 # 1. Introduction
@@ -10,7 +19,10 @@ Gradex
 
 ## Purpose
 
-Gradex exists to give Gulf university students a course platform that treats them as the priority, not the revenue source — students get structured, high-quality video courses, hands-on labs, and real follow-up support instead of being left alone once they've paid. It also gives instructors a way to monetize their expertise and reach students at scale, at a fair price point.
+Gradex is a responsive bilingual course platform for Gulf university students, initially focused
+on Kuwait. It combines structured video lessons, protected resources, hands-on lab materials,
+external community, and lightweight live office hours. It also gives subject-matter experts an
+Admin-governed way to publish courses and earn revenue from their expertise.
 
 ---
 
@@ -18,14 +30,20 @@ Gradex exists to give Gulf university students a course platform that treats the
 
 ## Business Goals
 
-- Reach 50K–200K registered users and 100+ courses within 3 years, positioning Gradex among the top 3 GCC university course platforms
-- Launch v1 with 8–12 courses and 100–500 paid students in the first 6 months
-- Build sustainable revenue through course/chapter/bundle sales, plus future bootcamps, live sessions, and private mentorship
+- Launch with 8–12 approved Courses and reach 100–500 paid Students in the first six months.
+- Build sustainable revenue through full-Course and single-Section purchases.
+- Expand toward 100+ Courses and 50,000–200,000 registered users within three years.
+- Validate Student outcomes, Instructor supply, and Kuwait-first operations before adding
+  bundles, BNPL, native applications, or automated marketplace settlement.
 
 ## User Goals
 
-- Students: master their coursework, get real hands-on/lab experience, get follow-up support instead of being left alone after purchase, at a fair price
-- Instructors: monetize their expertise, build a personal brand/reach, work in a supportive platform environment
+- **Students:** understand university coursework, practise with real materials, receive
+  follow-up after purchase, and learn on phones, tablets, laptops, or desktops at a fair price.
+- **Instructors:** publish high-quality Courses, reach Students, track learning outcomes, and
+  receive transparent monthly payout statements without operating payment infrastructure.
+- **Admins:** control access, pricing, publishing, moderation, refunds, coupons, and payout
+  operations with complete auditability.
 
 ---
 
@@ -33,122 +51,242 @@ Gradex exists to give Gulf university students a course platform that treats the
 
 ## Student
 
-Gulf university students (primarily Kuwait) seeking to master their coursework and build industry-ready skills. Primary persona: Fahd, 19, Kuwait, Computer Science, wants A's in first-year courses, frustrated by overpriced platforms with no mentorship. A second primary persona is intentionally left blank pending further research (see §12 Open Questions). Distinct from those primary personas, Secondary Users are a lower-priority tier: bootcamp/self-taught learners (e.g. Ali, wants a systematic CS curriculum) and high schoolers prepping for university (e.g. Amjad, prepping for the CS placement test).
+Gulf university Students, initially in Kuwait, seeking structured academic support and practical
+skills. Public self-registration is limited to this role.
 
 ## Instructor
 
-Subject-matter experts who want to monetize their expertise, reach students at scale, and build a personal brand — currently underserved by low pay and no platform/reach.
+Subject-matter experts invited by an Admin to create and maintain their own Course content.
+Instructors do not control catalog prices, refunds, or payouts.
 
 ## Administrator
 
-Gradex team members responsible for course approval/moderation, user management, revenue/payment oversight, and instructor payouts.
+Gradex operators responsible for staff provisioning, pricing, publishing, user management,
+payment/refund oversight, content moderation, coupons, and Instructor payouts.
 
 ---
 
 # 4. Scope
 
-## MVP (Launch — 2026-08-15)
+This register is the authoritative release boundary. A downstream document cannot move an item
+between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
-- Course catalog browsing (courses, chapters)
-- Purchase flow (single course or single chapter)
-- Video upload, processing, and HLS playback (see video-streaming-design.md)
-- Per-lesson progress tracking
-- Downloadable lesson resources (slides, notes, readings) and lab materials (project files + guide) — two separate per-lesson categories (see [DECISIONS.md](DECISIONS.md) D-011)
-- Instructor course/section/lesson builder (own courses only)
-- Instructor analytics view (earnings/payouts are admin-managed, not instructor-facing in v1)
-- Admin user management, course approval, revenue dashboard, instructor payouts, refunds, moderation
-- Transactional notifications (email + in-app center) — course approval/rejection, purchase receipt, password reset (see §5 Notifications)
-- Coupons — admin-managed discount codes (percentage/fixed, optional free-access), applied at checkout before the gateway (see [DECISIONS.md](DECISIONS.md) D-012, [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md))
-- Live office hours — one-off scheduled sessions on an external link (Zoom/Meet/Discord); Gradex owns scheduling + access control + event-driven notice, not the video (see [DECISIONS.md](DECISIONS.md) D-013, [live-office-hours-design.md](superpowers/specs/2026-07-22-live-office-hours-design.md))
+## MVP
 
-## V1 / Fast-Follow
+### Identity and access
 
-- Bundle catalog browsing + purchase (pricing, checkout, cross-course entitlement)
-- BNPL installment payments (Deema, if merchant-category approval clears in time — see §5 Payments and [DECISIONS.md](DECISIONS.md) D-008)
+- Student-only public registration with mandatory email verification.
+- Email/password login, rotating refresh sessions, password reset, and logout.
+- Admin invitation and initial-password setup for Instructors and additional Admins.
+- One out-of-band bootstrap Admin created during secure deployment.
+- Immediate enforcement of account suspension across protected actions.
 
-## Future Features
+### Catalog, learning, and content
 
-- Full live mentorship / in-platform live streaming (WebRTC/SFU or live-HLS) — the lightweight *external-link* office hours are now in MVP (see D-013); what stays future is Gradex-hosted live video, recurring series, RSVP/capacity, and timed reminders
-- TAs / follow-up sessions (scales with student volume)
-- Course completion certificates
-- Lifecycle & marketing notifications (re-engagement, expiry reminders, promo broadcasts) — see §5 Notifications
+- Public Course catalog and Course detail pages.
+- Course classification on Major, Subject, and Study Year, with Admin-managed vocabulary, catalog
+  filtering, and bilingual Arabic-normalized search.
+- Canonical `Course → Section → Lesson` structure; “Chapter” may be a UI label for Section only.
+- Adaptive HLS video playback, resume position, and per-Lesson completion tracking.
+- Entitlement-protected Lesson resources and downloadable lab materials.
+- Optional separate public Course preview asset.
+- External Discord/Telegram Course community link.
+- Student content reporting and Admin resolution.
+
+### Instructor and Admin operations
+
+- Instructor-owned Course/Section/Lesson builder, video/resource/lab upload, submission, and
+  revision workflow.
+- Instructor Course analytics and a minimal Course-scoped Student roster; price visibility is
+  read-only.
+- Admin-only Course/Section pricing with audit history.
+- Admin Course review, publish, unpublish, archive, and reported-content moderation.
+- Admin user provisioning, suspension, coupons, refunds, revenue reporting, and payout records.
+
+### Commerce and communication
+
+- One full Course or one Section per order.
+- Tap-hosted card/KNET checkout; webhook/API confirmation controls successful payment.
+- Admin coupons: percentage/fixed, optional Course/Section scope, global cap, one consuming
+  redemption per Student, and zero-value grants.
+- Full and partial refunds, subject to gateway capability and the counsel-approved policy.
+- 150-day Course/Section entitlement from purchase/grant, using the approved Kuwait-time
+  boundary.
+- Manual monthly Instructor payout process with system-recorded accounting and emailed statement.
+- Course-scoped one-off live office hours using an entitlement-protected external meeting link.
+- Fixed transactional in-app/email notifications.
+
+### Experience and compliance baseline
+
+- Responsive website supporting the complete Student experience on phones, tablets/iPads,
+  laptops, and desktops.
+- Arabic and English UI for every role; Arabic default, persistent preference, full RTL/LTR.
+- Platform-owned UI/player controls target WCAG 2.2 AA within the boundary in §6.
+- Bilingual Privacy Notice, Terms, Refund Policy, and checkout disclosures before production.
+
+## Fast-Follow
+
+- Bundle browsing, pricing, checkout, and cross-Course entitlement.
+- Deema BNPL after written digital-goods approval and a separate entitlement/payment-state review.
+- Captions/subtitles/transcripts and a complete product-level accessibility claim.
+- Instructor earnings dashboard and automated settlement.
+- MFA and social login.
+- Lifecycle/marketing notifications with consent, preferences, and unsubscribe management.
+
+## Out of MVP
+
+- Native iOS/Android applications.
+- In-platform conferencing/live streaming, recordings, attendance, recurring office hours,
+  RSVP/capacity, timed reminders, and calendar integration.
+- In-platform community/forum.
+- Sandboxed code execution for labs.
+- Course certificates.
+- Reviews, ratings, recommendation engines, and fabricated testimonials.
+- Marketing/broadcast, SMS, WhatsApp, and push notifications.
+- Instructor-controlled prices, coupons, refunds, or withdrawals.
 
 ---
 
 # 5. Functional Requirements
 
-## Authentication
+## Authentication and Accounts
 
-- Email/password signup + login (JWT)
-- Session/token refresh
+- Public signup creates only a `PENDING_VERIFICATION` Student account.
+- Email verification, invitations, and password-reset tokens are expiring, single-use, stored
+  securely, and rate-limited.
+- Verification must succeed before Student sign-in. Changing an email requires verifying the
+  new address.
+- Existing Admins invite Instructors/Admins; public privileged-role registration does not exist.
+  An address already attached to an Account cannot be invited or silently converted to another role.
+- The bootstrap Admin has no credential in the repository and must change the initial password.
+- Passwords accept 15–128 Unicode characters, reject common/compromised values, use Argon2id,
+  and do not require character-class composition or scheduled rotation.
+- Authentication, signup, verification, and recovery responses do not reveal account existence.
+- Suspension immediately blocks all protected actions, including actions from existing sessions.
+- Every Account has a self-chosen, non-unique display name of 2–50 characters in either script,
+  defaulting to the name given at registration or invitation acceptance and editable by its owner.
+  It rejects URLs, control characters, and markup, is never required to carry legal identity, and is
+  the only identity field an Instructor roster exposes. An Admin may reset an abusive value through
+  the audited moderation path.
 
 ## Student Features
 
-- Browse catalog (courses, chapters) — bundle browsing is V1/Fast-Follow (see §4 Scope)
-- Purchase single course or single chapter — bundle purchase is V1/Fast-Follow (see §4 Scope)
-- View purchase history
-- Video playback (HLS adaptive bitrate, resume progress) — per video-streaming-design.md
-- Mark lesson complete / track progress per lesson
-- Download lesson resources (slides, notes, readings) per lesson
-- Download lab materials (project files + guide) per lesson/course
-- Link to course community (external Discord/Telegram)
-- Redeem a coupon code at checkout (discount or free access) — see §Payments
-- View and join upcoming live office hours they're entitled to (join link revealed near start time)
-- Manage profile
+- Browse published Courses and filter them by Major, Subject, and Study Year.
+- Search published Courses by title, description, Instructor display name, and taxonomy label/code.
+  Search matches Arabic and English at once regardless of interface language, ignores diacritics and
+  alef/taa-marbuta/digit variants, ranks by relevance only, and never returns unpublished Courses or
+  protected Lesson content.
+- Evaluate a Course using its authored details and optional public preview.
+- Purchase one Course or one Section and view order/payment/refund history.
+- Apply one coupon at checkout and see the original price, discount, and final KWD total.
+- Watch entitled Lessons, resume playback, track completion, and retain progress after expiry.
+- Download entitled resources and labs through short-lived signed access.
+- View/join entitled upcoming office hours and receive transactional notifications.
+- Report entitled content using a fixed reason plus an optional/required explanation.
+- Manage profile, display name, and persistent interface language.
 
 ## Instructor Features
 
-- Create/edit course → section → lesson structure
-- Upload lesson video (raw upload, async transcode — per video-streaming-design.md)
-- Upload lesson resources (slides, notes, readings) — reference material, separate from lab materials
-- Upload lab materials (downloadable project files + guide)
-- View per-course analytics (enrollments, completion rate)
-- View student roster per course
-- Schedule one-off live office hours on own PUBLISHED courses (external link; entitled students only)
+- Create and edit only owned Course, Section, and Lesson content.
+- Classify an owned Course by selecting one Major, one Subject, and one Study Year from the
+  Admin-managed vocabulary; Instructors cannot create, rename, or retire vocabulary terms.
+- Upload videos through the existing processing pipeline; upload resources and lab materials as
+  distinct categories.
+- Upload at most one separate public Course preview and confirm publication permission.
+- Submit a Course/revision, view review status and Admin change requests, and resubmit.
+- View own Course analytics, a roster limited to Student-chosen display name/alias and
+  Course-scoped enrollment/progress, and catalog prices read-only; no direct Student PII.
+- Schedule/reschedule/cancel one-off office hours for an owned Published Course.
+- Receive Course-review, video-processing, change-request, and office-hours notifications.
 
 ## Admin Features
 
-- Manage users (students, instructors) — view, suspend
-- Approve/publish courses (moderation gate before catalog visibility)
-- View platform-wide revenue/payment dashboard
-- Manage and process instructor payouts (no instructor-facing earnings view in v1)
-- Process refunds
-- Moderate reported content
-- Manage coupons (create/list/edit/deactivate discount codes; view redemption stats) — admin-only
-- Schedule platform-wide live office hours (or on any course); cancel any session (moderation)
+- Invite Instructors/additional Admins and suspend/reactivate users.
+- Create, rename, retire, and delete Major/Subject taxonomy terms with bilingual labels and audit
+  history, and override any Course's classification.
+- Set/change Course and Section prices with reason and audit history.
+- Review Course content, publish/request changes, unpublish/republish, and archive when allowed.
+- Preview Course media through a separate audited authorization path.
+- Manage coupons and view historical redemption data.
+- Process full/partial refund requests and monitor gateway status.
+- Review content reports, dismiss/request changes/unpublish/suspend, and record resolution.
+- Reconcile monthly Instructor payouts, record adjustments/transfer reference, and email statement.
+- Cancel any office-hours session for moderation; Admins do not create platform-wide sessions.
 
-## Course Management
+## Course and Content Management
 
-- Course → Section → Lesson hierarchy (per video-streaming-design.md)
-- Video status lifecycle: `DRAFT → UPLOADING → UPLOADED → QUEUED → PROCESSING → READY → PUBLISHED`, with a `FAILED` branch from `PROCESSING` (auto-retry up to 3x, then manual retry via the instructor dashboard — see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-091)
+- Course hierarchy and ordering use `Course → Section → Lesson` only.
+- Course state follows the lifecycle in [DOMAIN_MODEL.md](DOMAIN_MODEL.md): Draft, Pending Review,
+  Changes Requested, Published, Unpublished, and Archived.
+- A Course cannot enter review without at least one Section, one Lesson, required READY video
+  content, and an assigned Major, Subject, and Study Year; validation identifies missing
+  requirements.
+- Each Course carries exactly one value per classification dimension. A retired term stays on the
+  Courses already using it until an Admin reassigns them, and a term still referenced by a Course
+  cannot be deleted.
+- Published content changes use a pending revision and never silently mutate the approved version.
+- Protected files remain inaccessible without entitlement. A public preview is a distinct asset.
+- Uploads are type/size validated and quarantined; public/downloadable assets require a successful
+  malware scan before availability.
 
-## Payments
+## Payments, Orders, Coupons, and Refunds
 
-- **Primary gateway: Tap Payments**, using its Deema BNPL product for installments. Chosen over MyFatoorah and PayTabs (researched 2026-07-20): Deema has the cleanest risk-transfer (Tap pays Gradex upfront in full, Deema/Tap owns the 2–4 month collection risk), the amount fit is clean (10 KWD production minimum, no max — covers the full 30–60 KWD range, unlike Tamara's reported 50 KWD Kuwait floor), and Tap is Kuwait-founded/HQ'd with native KNET support.
-- **Launch sequencing:** integrate Tap's core REST API (cards, KNET, Apple/Google Pay) first — this is needed regardless of the BNPL decision. Confirm directly with Tap's sales/integration team whether Deema accepts digital/non-shippable goods (online courses) as a merchant category — this is unconfirmed for ALL three researched gateways, not just Tap, and is a merchant-category approval question, not an engineering unknown. If Deema clears in time, it's an additive `src_deema` payment source on the same integration. If not, ship Aug 15 with card/KNET-only checkout and add installments as a fast-follow — do not let unconfirmed BNPL eligibility delay launch.
-- **Fallback: MyFatoorah** (via Tamara) if Tap/Deema doesn't clear for digital goods or fails to activate in time — but only after confirming in writing that Tamara accepts digital/e-learning products and that Gradex's 30–49 KWD tier isn't excluded by Tamara's reported 50 KWD Kuwait minimum.
-- **Ruled out: PayTabs** — its Kuwait "installment" offering is just a reseller layer over the same Deema product Tap offers directly, with no upside and added integration overhead.
-- No official Go SDK exists for any of the three — plan to hand-roll a thin internal Go client wrapping the REST API + HMAC-SHA256 webhook verification (normal, bounded work, not a blocker).
-- Refund handling (admin-initiated), consistent with the Kuwait Consumer Protection Law 14-day refund right (see Legal Constraints) and its digital-content-once-accessed exemption. A refund on a coupon order returns the actually-charged amount, not the pre-discount subtotal (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-131).
-- **Coupons** — an admin-issued discount code is validated and applied server-side *before* the Tap payment session is created: the discount reduces the order amount (integer fils; percentage or fixed), and a code that reduces the order to 0 KWD grants enrollment directly with no gateway call. Coupons never alter a course's listed price — the discount is per-order only (see [DECISIONS.md](DECISIONS.md) D-012, [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-124–BR-133).
+- Monetary values are integer fils and displayed as KWD with three decimal places.
+- Percentage discounts round to the nearest fil and are clamped to `[0, subtotal]`.
+- The server creates an Order and stable Payment Attempt reference before Tap redirect.
+- Tap webhook/API verification—not browser redirect—controls capture and entitlement grant.
+- Payment/refund callbacks and transactional state changes are signature-verified and idempotent.
+- A failed/declined/cancelled/ambiguous attempt grants no access; ambiguous status is reconciled
+  before another attempt proceeds.
+- A zero-value coupon order creates a real Order and entitlement without a gateway call.
+- A Course Entitlement blocks repurchase of that Course or any contained Section. A Section
+  Entitlement blocks that Section only; another Section or the full Course remains purchasable at
+  current catalog price, with no MVP upgrade credit/proration.
+- Failed/abandoned coupon attempts do not consume redemption. Cumulative full refund releases the
+  Student's per-coupon eligibility while preserving history; partial refund does not.
+- Only Admins initiate refunds. One or more refund amounts may not exceed the remaining captured
+  balance and require a reason.
+- Partial refund keeps entitlement active; cumulative full refund revokes it after confirmed
+  gateway success. Unsupported/failed refund requests have no entitlement effect.
+- Checkout records the accepted bilingual refund-policy version.
+
+## Payouts
+
+- One platform-wide Instructor revenue-share percentage is configurable but has no default.
+- Share uses net collected revenue after coupons, confirmed refunds, and gateway/payment fees.
+- Monthly statements itemize covered Orders and adjustments.
+- Admin marks preparation/payment status and records bank-transfer reference and audit data.
+- Late refunds/chargebacks adjust the next statement.
+- Instructor receives the statement by email; no in-app payout dashboard/withdrawal exists.
+
+## Live Office Hours
+
+- A session belongs to one Published Course and contains title, description, UTC start/end, and
+  an external link.
+- Only the owning Instructor creates/reschedules/cancels; Admin may cancel for moderation.
+- While the Course remains Published, any active Course entitlement or active Section entitlement
+  within the Course grants access; unpublishing/archiving hides Student discovery/join.
+- The join link is returned only after authentication and entitlement/moderation authorization.
+- Times display in the user's local timezone/language, defaulting to Kuwait time.
+
+## Content Reporting
+
+- Entitled Students can report a Course, Lesson, video, resource, or lab material.
+- Reasons are broken/unavailable, inaccurate, inappropriate, suspected copyright violation, or
+  other; “other” requires an explanation.
+- Reports are rate-limited and never auto-hide content.
+- Admin resolution and any resulting Instructor notice are audited.
 
 ## Notifications
 
-MVP ships **transactional notifications only** — event-driven, 1:1 messages the existing flows already imply. Delivered via **email + an in-app notification center** (unread badge + list), best-effort, not guaranteed-delivery (consistent with the delivery contract in §11 Admin Moderation & Payouts).
-
-MVP transactional events:
-
-- **Instructor — course approved / rejected** (rejection includes the reason) — see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-071, BR-072.
-- **Student — purchase confirmed / receipt** — sent after the gateway success webhook grants enrollment (BR-020), never on client redirect alone.
-- **Auth — password reset** — token-based reset link (email channel only).
-
-Build note: the in-app center is a real addition (a `notifications` table + list/unread-count endpoints + a frontend badge), kept deliberately minimal for MVP — no per-type preference settings, no read receipts beyond unread/read.
-
-**Post-launch (documented here, not built for launch):**
-
-- **Lifecycle / behavioral** — registered-but-no-purchase re-engagement, enrollment-expiry reminder (softens the silent expiry in [DECISIONS.md](DECISIONS.md) D-009 — reconcile before shipping), course-not-started nudge, abandoned checkout.
-- **Marketing / broadcast** — admin-authored new-course/promo blasts. Requires explicit opt-in consent at signup + unsubscribe, per Kuwait PDPL No. 26/2024 (§7 Legal Constraints); the transactional mail above does not require marketing consent.
-- **Additional channels** — WhatsApp/SMS (high GCC reach, paid per message, WhatsApp Business API approval overhead) and web/mobile push (needs service-worker/mobile infra).
+- Required in-app + email events: purchase receipt, refund status, password/security, invitation,
+  Course approval/change request, and office-hours cancellation/material reschedule.
+- New office-hours sessions and new Instructor Course/revision submissions are in-app and may also
+  use email when operationally appropriate.
+- Video-processing completion is an Instructor event.
+- Notification events are deduplicated and store delivery state; delivery failure never changes
+  the triggering transaction.
+- Required transactional/security events cannot be disabled; no MVP preferences screen exists.
 
 ---
 
@@ -156,193 +294,279 @@ Build note: the in-app center is a real addition (a `notifications` table + list
 
 ## Performance
 
-- **Page load:** catalog/course-detail pages target p95 < 2.5s Largest Contentful Paint on 4G Kuwait mobile connections (Google's Core Web Vitals "good" threshold is ≤2.5s LCP) — realistic given the student persona is primarily mobile-first, so this is measured on mobile, not desktop.
-- **Video start ("time to first frame"):** p95 < 2–3s from lesson-open to first HLS segment playing, in line with industry norms for adaptive-bitrate streaming (Mux/Akamai benchmarks put "good" startup time at ≤2s, "acceptable" up to 4s); this is bounded by the signed-URL issuance step (auth + ownership check) plus CDN edge fetch already defined in the video-streaming-design.md spec — no new playback logic here, just the target this PRD holds that pipeline to.
-- **Rebuffering:** target rebuffer ratio < 0.5% of total play time (industry "good" streaming benchmark is typically <0.5–1%), enabled by HLS adaptive bitrate ladder switching per the existing design spec — Gradex does not need to re-solve ABR logic, only monitor the ratio as a launch health metric.
-- **API response time:** p95 < 300ms for read endpoints (catalog, progress, dashboards) and p95 < 800ms for write/transactional endpoints (purchase, payment webhook handling) on the Go/Gin + PostgreSQL/Redis stack — consistent with typical SLOs for CRUD-style REST APIs at this scale; payment-gateway-dependent calls (installment setup) are excluded since latency there is vendor-controlled.
-- **Scaling to 3-year targets:** at launch (100–500 paid students, 8–12 courses) current single-region Postgres + Redis cache + CDN comfortably meets the above targets with room to spare; by 1 year (~1,500–3,000 paid students) expect read traffic (catalog browsing, progress polling) to dominate and require Redis cache-hit-rate monitoring plus read replicas if p95 read latency drifts upward; by 3 years (50K–200K registered users, multi-country GCC) expect CDN edge coverage and signed-URL issuance throughput to become the binding constraint before compute or storage does, since video delivery is CDN-offloaded but auth/entitlement checks per playback request still hit the origin API.
-- **Out of scope for this section:** transcode throughput, upload reliability, and CDN cache-key/TTL configuration are performance-relevant but owned by video-streaming-design.md — this PRD only sets the student-facing playback SLA, not the pipeline that produces it.
+- Public catalog/Course pages target p95 LCP under 2.5 seconds on representative Kuwait 4G.
+- Entitled video targets p95 time-to-first-frame under 3 seconds when the selected media delivery
+  path is healthy.
+- Read API endpoints target p95 under 300 ms and transactional writes under 800 ms, excluding
+  third-party gateway latency.
+- Progress-write failure must not interrupt playback.
 
 ## Security
 
-- **Auth tokens**: Short-lived JWT access tokens (signed, e.g. RS256/HS256) + longer-lived rotating refresh tokens. Refresh tokens are the revocable artifact — stored server-side in Redis and checked on every refresh call, so logout/admin revocation takes effect there. Access tokens are stateless: validated by signature/expiry/claims only, with no per-request Redis lookup, so an already-issued access token keeps working until its own short TTL naturally expires — revocation is bounded by that TTL, not instant on every protected-API call (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-006). Access tokens are never persisted in localStorage on the frontend, to limit XSS-driven token theft.
-- **Signed CDN URLs (purchaser-only access)**: Every HLS manifest/segment and lab-material download request is authorized against the student's purchase record before a short-TTL signed URL is issued (per video-streaming-design.md). Video manifest/segment URLs are session-scoped and short-lived rather than single-use — HLS playback needs repeated access to the same segment within a session (seeking, rebuffering, ABR rendition switches), which true single-use would break. Lab-material download URLs MAY be single-use where the storage/CDN layer supports it, since a one-time file download has no repeat-access requirement. Neither is ever long-lived by design — but while a signed URL is valid it's still a replayable bearer credential, not cryptographically bound to the requesting device, so short TTLs plus per-user/IP rate-limiting and monitoring (see Anti-piracy below) are the actual deterrence, not a guarantee that sharing is impossible. Both are re-issued per session rather than cached client-side long-term. *(See [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-100.)*
-- **Payment data handling**: Gradex never collects, transmits, or stores raw card/PAN data — checkout is fully delegated to the PCI-DSS-compliant gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments; PayTabs ruled out) via hosted payment page/redirect or tokenized SDK; Gradex only persists gateway transaction/token references, payment status, and amounts, and validates all payment webhooks via signature verification to prevent spoofed "payment succeeded" callbacks.
-- **Student PII protection**: Encrypt sensitive PII (national ID/civil ID if collected, phone, address) at rest; enforce TLS everywhere in transit; apply role-based access control so only authorized admin roles can view student PII; minimize PII collection to what's needed for enrollment/invoicing/GCC compliance.
-- **Anti-piracy / anti-scraping for video, lesson resources, and lab materials**: Rate-limit and monitor signed-URL issuance and download endpoints per user/IP to detect bulk-scraping or credential-sharing patterns across all downloadable content. Watermark or fingerprint downloadable **lab materials** (e.g. embedded student ID) to trace leaks back to source; **lesson resources** (slides/notes) are entitlement-gated and rate-limited but not individually watermarked — lower-value, and slide/image formats tag poorly (see [DECISIONS.md](DECISIONS.md) D-011). v1 has no DRM (per non-goals), so protection is deterrence-based, not encryption-based.
-- **General platform hardening**: Enforce HTTPS/TLS across all services, hash passwords with a strong adaptive algorithm (bcrypt/argon2), rate-limit auth and purchase endpoints against brute-force/abuse, and apply standard input validation/parameterized queries against injection on the Go/Gin + PostgreSQL stack.
-
-## Scalability
-
-- **API tier**: Go/Gin services are stateless (JWT auth, no server-side session) and horizontally scalable behind a load balancer; the 3-year target of 15K–60K MAU / 50K–200K registered users is modest request-volume-wise for this stack, so scaling is primarily about adding Gin instances and connection-pool headroom, not architectural rework.
-- **Video pipeline (dependency on video-streaming-design.md)**: transcode jobs are dispatched via a Redis-backed queue to a worker pool (ffmpeg); worker count scales horizontally and independently of the API tier based on queue depth, so instructor upload spikes (e.g. bulk course launches) don't degrade student-facing request latency. Playback itself scales via CDN-delivered signed HLS URLs, not app-server bandwidth — see that spec for the transcode/packaging/playback design, not restated here.
-- **Redis**: used for job queues, session/rate-limit state, and hot-path caching (catalog listings, course/lesson metadata, signed-URL issuance checks); start single-instance, move to Redis with replica(s) once queue throughput or cache hit-rate volume requires it — no architectural change needed to introduce replicas later.
-- **PostgreSQL**: single primary is sufficient through the 1-year target (~1.5K–3K paid students); plan for read replicas for catalog/analytics/reporting queries ahead of the 3-year target, keeping writes (purchases, progress events) on the primary. Add indexes on high-traffic access patterns (course/section/lesson lookups, per-user progress, enrollment checks) and revisit progress-event write volume (frequent per-lesson updates) as a candidate for batching/async writes if it becomes a hot path.
-- **Storage/CDN**: video assets, lesson resources, and lab material downloads are served from S3-compatible storage via CDN, so storage/bandwidth scaling is offloaded to the CDN/object-store provider and doesn't bottleneck the app tier as catalog size grows toward 100+ courses.
-- **Payments**: installment/BNPL risk and processing scale is carried by the gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments), not Gradex infrastructure; Gradex only scales its own webhook/callback handling and payment-state persistence in Postgres as transaction volume grows.
+- Deny by default; role, ownership, status, and entitlement authorization is server-side.
+- Secrets never enter the repository; credentials/tokens/personal data are excluded from logs.
+- Sensitive data is encrypted in transit and at rest according to classification.
+- Gradex never collects, transmits, or stores full card/PAN data; payment entry is Tap-hosted.
+- Webhooks are signature-verified, replay-safe, and idempotent.
+- Auth, verification, reset, checkout, reporting, signed-URL, and download endpoints are
+  rate-limited based on abuse risk.
+- Privileged identity, pricing, publishing, preview, refund, payout, and moderation actions are
+  auditable.
 
 ## Reliability
 
-- **Uptime target:** 99.5% monthly uptime for catalog browsing, purchase, and video playback (core revenue paths) during v1 — appropriate for an early-stage, single-region (Kuwait) platform at 100–500 paid students; re-evaluate toward 99.9% as usage scales toward the 1-year target (~1,500–3,000 paid students) and multi-country GCC presence (3-year horizon) increases the cost of downtime.
-- **Video processing failures:** handled per the approved video-streaming design spec — transcode failures move a lesson to `FAILED`, auto-retry up to 3x with exponential backoff, then fall back to manual retry via the instructor dashboard; no additional reliability design needed here beyond depending on that spec's retry/backoff and stale-`UPLOADING` reaper behavior.
-- **PostgreSQL backup strategy (source of truth for course, purchase, and progress data):** automated daily full backups + continuous WAL archiving for point-in-time recovery (target: restore to within 5 minutes of failure); backups retained 30 days, stored off-provider (e.g. separate region/account from primary DB) to survive a single-provider incident; monthly restore-drill to a staging environment to verify backups are actually restorable, not just taken.
-- **Payment/installment reliability:** the gateway (Tap Payments primary, MyFatoorah fallback — see §5 Payments) is the system of record for installment/BNPL risk and scheduling, so Gradex's reliability obligation is narrower — reconcile via idempotent webhook handling (safe to receive duplicate/out-of-order events) plus a scheduled polling job as fallback if a webhook is missed; on gateway timeout/5xx during checkout, fail safe (no course access granted, no double-charge) and surface a retryable error to the student rather than a silent failure.
-- **Payment data consistency:** purchase/entitlement state changes (grant course access, mark installment paid) are written transactionally in Postgres keyed by the gateway's idempotency/transaction ID, so a retried webhook or duplicate client request cannot double-grant access or double-record a payment.
-- **Graceful degradation:** a Redis outage must not block core purchase or playback flows for already-authenticated users — access tokens are stateless (signature/expiry only, see §6 Security Auth tokens), so in-flight browsing/playback/purchase requests keep working. Login, token refresh, explicit logout/revocation, and any Redis-backed rate-limit state are Redis-dependent and fail explicitly (a clear retryable error) during an outage rather than silently degrading. CDN/storage outage on the playback path returns a distinguishable error (per video-streaming spec) rather than a generic failure.
+- Core catalog, purchase, and playback paths target 99.5% monthly availability for MVP.
+- Payment and entitlement writes are transactional and safely recoverable after duplicate,
+  delayed, or out-of-order callbacks.
+- Backup/restore procedures must be automated and restore-tested before production; system design
+  selects RPO/RTO consistent with the business target and operating budget.
+- External notification failure is isolated from the business transaction.
+
+## Responsive Web and Localization
+
+- Complete Student capability works on supported phones, tablets/iPads, laptops, and desktops.
+- Instructor/Admin portals remain responsive; complex operational workflows may be desktop/tablet
+  optimized.
+- Arabic is the initial default and English is available everywhere; selection persists.
+- UI direction, navigation, icons, tables, forms, validation, dates, and mixed-language text work
+  correctly in RTL and LTR.
+- Instructor-authored Course content is not automatically translated.
 
 ## Accessibility
 
-- Target WCAG 2.1 AA as the baseline standard across all student- and instructor-facing web flows (catalog, course player, checkout, dashboards), audited before v1 launch and re-checked on major UI changes.
-- Full keyboard navigation and visible focus states for all interactive elements — catalog browsing/filtering, cart/checkout, video player controls (play/pause, seek, volume, quality, fullscreen), and instructor course builder — with no keyboard traps.
-- Screen-reader support (semantic HTML, ARIA landmarks/labels, alt text) for the core conversion path: catalog browsing, course/chapter/bundle detail pages, and the purchase/installment checkout flow, so a screen-reader user can find, evaluate, and buy a course end-to-end.
-- Minimum 4.5:1 color contrast for body text and 3:1 for large text/UI components across the Tailwind theme (including price/discount badges and payment-status indicators), verified against both light backgrounds and any dark-mode palette.
-- Video player accessibility is scoped to controls only (keyboard-operable, screen-reader-labelled, per video-streaming-design.md); subtitles/closed captions and transcripts are explicitly out of scope for v1 — do not block launch on caption support.
-- Accessible form/error handling for account creation, login, and payment forms (labeled inputs, inline error messages announced to assistive tech, sufficient touch-target size on mobile), given payment flows run through a third-party gateway iframe/redirect outside Gradex's direct control.
+- Platform-owned UI/player controls target WCAG 2.2 Level AA: keyboard operation, visible focus,
+  accessible authentication, semantic structure, labels, announced errors, contrast, and target
+  sizes.
+- Hosted checkout accessibility is evaluated and documented but not claimed as Gradex-controlled.
+- Captions/transcripts are outside MVP. Gradex therefore does not claim complete learning-product
+  WCAG conformance until that fast-follow gap is closed.
+
+## Privacy
+
+- Collect only data required for identity, learning, commerce, support, security, and law.
+- Instructor rosters expose only the minimum Course-scoped display identity and learning fields;
+  direct Student account/contact/payment PII remains Admin-only.
+- Record the version of any accepted legal/privacy/refund text.
+- Support access, correction, deactivation, and deletion requests, subject to documented retention.
+- Anonymize personal data where practical while preserving necessary financial/audit referential
+  integrity.
+- Exact retention periods require counsel/accounting approval before production.
 
 ---
 
 # 7. Constraints
 
-## Budget
+## Budget and Team
 
-- Bootstrapped / self-funded.
-
-## Team
-
-- 3 people: solo developer (you) building the full platform end-to-end, Tohamy (founder, logistics), Mokhtar (marketing/social media/advertising).
-- No dedicated backend/frontend split, no QA, no design hire — one developer covering the entire stack (auth, payments, video pipeline, course builder, admin tooling).
+- Bootstrapped/self-funded.
+- One developer owns the full stack; Tohamy owns founder/logistics work and Mokhtar owns
+  marketing/social/advertising.
+- Prefer a modular monolith and avoid new infrastructure without a current MVP requirement.
 
 ## Timeline
 
-- Target launch: 2026-08-15 (~3.5 weeks from today, 2026-07-20). See flagged risk below — this is tight against current v1 scope.
+- The previously stated target launch is 2026-08-15. Readiness, external approval, security,
+  testing, and legal gates take precedence over presenting that date as guaranteed.
 
-## Technology Constraints
+## Technology
 
-- Locked stack (per README.md): Next.js/React/TypeScript/Tailwind frontend, Go/Gin backend, PostgreSQL, Redis, S3-compatible storage, JWT auth.
+- Current repository stack: Next.js/React/TypeScript/Tailwind, Go/Gin, PostgreSQL, Redis,
+  S3-compatible storage, and HLS processing/playback. A production CDN and real token/session
+  authentication are system-design/implementation work; the current backend auth seam is fake
+  development-only.
+- This PRD defines outcomes, not final system-design mechanisms.
 
-## Legal Constraints
+## Legal and External Dependencies
 
-Researched 2026-07-20 (preliminary scan, not legal advice — confirm with a Kuwaiti lawyer before launch):
+This is a product-readiness summary, not legal advice. Production requires resolution of
+[LAUNCH_GATES.md](LAUNCH_GATES.md).
 
-- **⚠️ Commercial Registration (CR) is a launch-critical dependency.** To accept KNET or open a merchant gateway account with any Kuwait-facing payment provider, Gradex needs a valid CR from the Ministry of Commerce and Industry (MOCI) plus a business bank account at a KNET member bank. Gateway activation typically takes 7–15 business days once CR, bank account, and site HTTPS/SSL are in place. **Against the 2026-08-15 launch date, this should be started immediately if not already underway** — it's on the critical path before any payment integration can go live, independent of which gateway is chosen.
-- **⚠️ New Digital Commerce Law (Decree-Law No. 10 of 2026, gazetted 2026-03-01).** Requires anyone conducting commercial activity via electronic means to register with MOCI as a digital-commerce provider before operating. Implementing regulations are due within a year of gazette publication and the law only takes effect a month after those are issued — the exact operative date/registration mechanism was not yet finalized as of this research. Track this and register once the mechanism is live.
-- **Consumer Protection Law No. 39/2014 + Executive Regulations:** general 14-day cooling-off/refund right, but the new Digital Commerce Law exempts "downloaded software" and digital content generally once accessed — a "no refund once a lesson has been streamed or a file opened" policy is likely defensible, but confirm exact wording against the final legal text before relying on it.
-- **BNPL/installment licensing (CBK):** the licensing obligation falls on the payment/BNPL provider (regulated under CBK Resolution No. 45/471/2023), not on a merchant that simply integrates a CBK-licensed gateway — consistent with Gradex's plan to use Tap/Deema rather than build its own installment logic. Decree-Law 10/2026 also requires e-commerce platforms to restrict payment processing to CBK-licensed providers only, reinforcing this.
-- **Data protection:** no general data-localization/residency mandate found — hosting S3-compatible storage outside Kuwait appears legally permissible. Kuwait's Personal Data Protection Law No. 26/2024 (distinct from CITRA's narrower DPPR, which only applies to CITRA-licensed telecom/IT entities) is the broader law likely governing student PII; get explicit consent/privacy-policy disclosure for any cross-border data transfer. Breach-notification window is unconfirmed (sources conflict: 24h vs 72h).
-- **Education-content licensing:** unclear — no primary source found on whether a non-degree, supplementary course platform (Gradex's model, same as Baims) needs an education-sector-specific license from the Ministry of Higher Education / Private Universities Council, versus just ordinary MOCI commercial + digital-commerce registration. Baims appears to operate as a standard commercial entity with no visible education-specific license. Treat as open — do not market content as "accredited" or "certified" without confirming this first.
+- Use the correct reference: [CITRA Decision No. 26 of 2024 issuing the Data Privacy Protection
+  Regulation](https://www.citra.gov.kw/sites/ar/Pages/DecisionsDetails.aspx?id=6).
+- Kuwait's official announcement states that Digital Commerce Law No. 10 of 2026 applies six
+  months after Gazette publication and describes registration/disclosure/consumer obligations;
+  counsel must confirm operative dates and applicability.
+  [Official announcement](https://e.gov.kw/sites/KGOArabic/Pages/ApplicationPages/NewsDetail.aspx?nid=64409149)
+- Counsel must approve refund eligibility for streamed/downloaded education, privacy scope,
+  retention, consumer disclosures, and any education-sector licensing requirement.
+- Tap production onboarding, digital-course merchant approval, payment methods, webhook contract,
+  and partial-refund support must be verified in production configuration.
 
 ---
 
 # 8. Assumptions
 
-- **Payment gateway installment/BNPL suitability** — assumes Tap's Deema BNPL product (MyFatoorah/Tamara as fallback, per §5 Payments) can support installments for one-time digital purchases (30–60 KWD) in Kuwait without Gradex building its own risk/underwriting logic. Unvalidated: Deema's digital-goods merchant-category eligibility isn't yet confirmed in writing by Tap (see §9 Risk 1).
-- **Discord/Telegram as a retention/mentorship substitute** — assumes an unmoderated, unpaid, off-platform community is enough to deliver on the "no follow-up" differentiator. Unvalidated: no owner/process defined for who staffs it in v1.
-- **Linear/affordable storage + CDN egress costs at scale** — assumes GB-per-course-hour and GCC CDN egress costs stay affordable at 30–60 KWD price points as the catalog and rewatch volume grow. Unvalidated: no real cost data yet (pre-launch).
-- **Downloadable (non-sandboxed) labs are an acceptable proxy for "hands-on experience"** — assumes students can self-serve environment setup without support. Unvalidated: environment-setup friction is a common drop-off point for this format.
-- **Admin-only instructor payouts (no dashboard) is acceptable to instructors** — assumes instructors will trust a black-box payout process. Unvalidated: no revenue-share percentage or payout cadence defined yet.
-- **Kuwait/GCC compliance overhead** (refund law, VAT, instructor-payout tax withholding) is handleable ad hoc by admin ops rather than built into the payment/refund flow. Unvalidated: no refund window/eligibility policy defined yet.
-- **8–12 launch courses in 6 months** assumes instructor supply can be recruited and onboarded in parallel with building the platform from scratch. Unvalidated: no instructor pipeline/commitments exist yet, and course production usually has a longer lead time than platform engineering.
+- External Discord/Telegram can provide initial community/follow-up if an owner and moderation
+  process are assigned before launch.
+- Students can use downloadable labs without a managed execution environment; setup friction must
+  be tested with pilot Students.
+- Instructor supply and Course production can proceed in parallel with platform delivery.
+- One global revenue-share formula is sufficient for MVP; its numeric percentage remains a
+  pre-launch commercial decision.
+- Tap can activate an appropriate digital-course merchant account; this is an external launch
+  gate, not a system-design assumption to hard-code.
 
 ---
 
 # 9. Risks
 
-**1. Third-party payment gateway dependency (installments/BNPL)**
-- Impact: outage, pricing/API change, or a bad vendor relationship breaks Gradex's only revenue path platform-wide with no fallback; spoofed/delayed webhooks can also desync purchase records from actual payment state. Specifically: Deema's eligibility for digital/non-shippable goods (online courses) is unconfirmed by Tap or any researched vendor — if it's rejected at merchant-category underwriting, the "price && installments" USP has no v1 mechanism.
-- Mitigation: build the payment integration behind an internal gateway-agnostic adapter (not scattered SDK calls), verify webhook signatures, make purchase-status transitions idempotent, add a reconciliation job, and weigh vendor choice on installment reliability + Kuwait support quality, not just fees. Get the digital-goods eligibility question to Tap's sales team in writing this week — it's a fast, binding answer, not an engineering unknown — and be ready to launch card/KNET-only if it doesn't clear in time (see §5 Payments).
+## Payment Provider and Reconciliation
 
-**2. External Discord/Telegram community has no in-platform control**
-- Impact: Gradex can't measure engagement, moderate content, or guarantee the community stays alive — undermining the exact USP (community/follow-up) meant to beat Baims on something other than price.
-- Mitigation: treat the Discord/Telegram server as a real product surface with an assigned moderator and activity expectations, track engagement manually until it's worth building in-platform, and treat "external community" as a reviewed decision, not a default.
+**Impact:** provider approval, outages, unsupported refund methods, or callback drift can block
+revenue/access correctness.
 
-**3. Downloadable lab materials have no piracy protection**
-- Impact: one paying student can redistribute lab files freely with no traceability, cannibalizing sales of Gradex's own stated differentiator (hands-on labs) — the thing meant to justify pricing above Baims.
-- Mitigation: embed a per-purchase identifier into guide PDFs/project files, rate-limit and log download access per user, and enforce redistribution as a ToS violation with account-suspension consequences.
+**Mitigation:** hosted Tap integration behind an internal boundary, signature verification,
+idempotent states, reconciliation, and production onboarding verification before launch.
 
-**4. Direct price competition against Baims**
-- Impact: Gradex enters pre-launch with zero brand trust against a funded incumbent (450K+ enrollments) pricing at ~4 KWD/course vs Gradex's 30–60 KWD — if labs/mentorship/community don't land convincingly at first contact, students default to the cheaper, already-trusted option.
-- Mitigation: don't compete on price messaging — make the price gap legible (graded labs, active community, follow-up) explicit on course pages/marketing, and validate willingness-to-pay at 30–60 KWD with real Kuwait students before the first 8–12 courses launch.
+## External Community Ownership
 
-**5. Video transcoding pipeline untested against launch-week upload spikes**
-- Impact: onboarding 8–12 courses at once for launch could exceed worker capacity and delay course availability right when reputational damage from a slipped launch is highest, with no alerting yet built to catch it.
-- Mitigation: load-test the queue/worker pool against a simulated 8–12 course concurrent-upload scenario before the first real batch, and implement at least minimal alerting (queue depth, failed job count) ahead of launch.
+**Impact:** an unstaffed link-out undermines the follow-up promise.
 
-**6. Instructor payout model has no instructor-facing dashboard**
-- Impact: instructors — the pre-launch supply-side bottleneck for hitting the 8–12 course target — get no visibility into what they're owed or when they'll be paid, making recruitment/retention harder pre-launch when trust is most fragile.
-- Mitigation: commit to a fixed, transparent, documented payout cadence/formula and give instructors a simple manual statement (emailed PDF/CSV) each cycle; prioritize a real earnings dashboard early in the post-v1 roadmap.
+**Mitigation:** assign moderation/response ownership and pilot expectations before launch.
 
-**7. Solo-developer timeline risk (AI-assisted)**
-- Impact: v1 scope (JWT auth, purchase/installment payment integration, full video upload/transcode/HLS pipeline, course builder, progress tracking, admin approval/payout/refund dashboards) targeted for 2026-08-15 (~3.5 weeks from today) is being built by one developer using AI-assisted coding tools (Claude Code, antigravity-cli) rather than a traditional multi-engineer team. This meaningfully speeds up code-writing, but doesn't compress everything equally — third-party payment gateway integration/approval, video infra deployment and load-testing, and end-to-end testing/QA still take real wall-clock time regardless of how fast code gets generated. Risk is smaller than a fully unaided solo build, but not zero.
-- Mitigation: track scope against the date week-by-week rather than assuming AI-assisted velocity closes the whole gap; prioritize getting the third-party-dependent pieces (payment gateway account/approval, CDN/storage provisioning) started immediately since those have external lead times AI assistance can't shorten, and keep the "cut scope vs. move date" options from this PRD on the table if week 2 shows those external dependencies slipping.
-- **Resolved 2026-07-20:** scope-vs-date decision made — instructor portal stays fully in MVP; bundles and BNPL installments move to V1/Fast-Follow to reduce build risk without cutting the instructor differentiator. See [DECISIONS.md](DECISIONS.md) D-008.
+## Downloadable Content Leakage
+
+**Impact:** protected labs/resources can be redistributed.
+
+**Mitigation:** entitlement checks, short-lived URLs, download logging/rate limits, lab buyer tag,
+and enforceable Terms. MVP does not claim DRM.
+
+## Accessibility Gap in Course Media
+
+**Impact:** captions/transcripts are outside MVP, so some Students cannot fully access media and
+Gradex cannot claim complete WCAG conformance.
+
+**Mitigation:** keep claims scoped and prioritize manual/automated caption support fast-follow.
+
+## Solo-Developer and External-Lead-Time Risk
+
+**Impact:** gateway approval, legal review, security validation, video load testing, and end-to-end
+QA do not compress at the same rate as code generation.
+
+**Mitigation:** keep the authoritative MVP boundary fixed, track launch gates separately, and move
+the date rather than silently pulling fast-follow features into MVP or skipping quality gates.
 
 ---
 
 # 10. Success Metrics
 
-See [PROJECT_VISION.md](PROJECT_VISION.md) §11 for Business Metrics and Product Metrics targets (6-month/1-year/3-year) — inherited here rather than duplicated, to avoid drift between the two docs.
+Business and product outcome targets are owned by [PROJECT_VISION.md §11](PROJECT_VISION.md).
+Metrics that require an out-of-MVP feature (for example public ratings) must not be treated as
+instrumentable MVP metrics until that feature is approved.
 
 ---
 
 # 11. Acceptance Criteria
 
-Each item below implements one or more rules from [BUSINESS_RULES.md](BUSINESS_RULES.md) — tagged inline so the two documents don't silently drift apart.
+Each criterion names its governing business rules and primary verification method.
 
 ## Authentication
 
-- Given a prospective student submits a signup form with a unique email and a password meeting complexity requirements, when the backend validates and persists the account, then Gradex creates the user record with a securely hashed password, issues a short-lived JWT access token plus a refresh token, and returns 201 with the tokens (or sets the refresh token as an HttpOnly secure cookie) without ever echoing the plaintext or hashed password. *(Implements BR-002, BR-004)*
-- Given a registered student submits the correct email and password on login, when the credentials are verified against the stored hash, then Gradex returns a new JWT access token (short expiry, e.g. 15 min) and a new/rotated refresh token, and records the session in Redis so it can be revoked independently of token expiry. *(Implements BR-004)*
-- Given a logged-in student's JWT access token has expired but their refresh token is still valid and unrevoked, when the client calls the token refresh endpoint, then Gradex issues a new access token (and rotates the refresh token) without requiring re-entry of credentials, and rejects the request with 401 if the refresh token is expired, revoked, or reused after rotation. *(Implements BR-005)*
-- Given a signup or login request uses an email that is already registered, or invalid credentials, when the backend processes the request, then Gradex returns a clear 4xx error (409 for duplicate email, 401 for bad credentials) without revealing whether the email exists on the login path, and without issuing any token. *(Implements BR-001, BR-003)*
-- Given a student explicitly logs out or an admin revokes a session, when the refresh token's session entry is invalidated in Redis, then subsequent refresh calls using that refresh token are rejected with 401; any access token already issued before revocation keeps working (signature/expiry-only validation) until its own short TTL naturally expires. *(Implements BR-006)*
+- Given a new Student submits a valid display name/email/password, when signup is accepted, then a
+  `PENDING_VERIFICATION` account is created with that non-unique display name, no session is
+  issued, and a single-use verification link is sent with a generic anti-enumeration response.
+  *(BR-001/002/008/105; integration + E2E)*
+- Given a valid unused verification link, when it is consumed, then the Student becomes Active and
+  can sign in; expired/reused links fail safely and resend is rate-limited. *(BR-008; integration)*
+- Given an Admin invites an Instructor/Admin, when the recipient consumes the invitation, then the
+  address is verified, a valid display name and initial password are established, and the assigned
+  role—not a public choice—is activated. *(BR-009/105; integration + E2E)*
+- Given a bad login/recovery/signup probe, when processed, then the response does not reveal whether
+  the address exists. *(BR-001/003; security integration)*
+- Given an Admin suspends an account, when any existing/new session attempts a protected action,
+  then access is denied immediately and the suspension is audited. *(BR-007; E2E)*
+- Given a Student sets a display name, when an Instructor opens the roster for a Course that Student
+  is enrolled in, then only that display name and Course-scoped learning fields appear, two Students
+  may hold the same display name without conflict, and an Admin reset is audited. *(BR-064/101/105;
+  integration + E2E)*
 
-## Purchase & Payment (MVP — single course/chapter, card/KNET only)
+## Catalog, Checkout, and Entitlement
 
-- Given a logged-in student viewing a published course or chapter with a price, when they complete a single card/KNET payment via the gateway's hosted checkout, then Gradex grants access only after receiving the gateway's payment-success callback/webhook (not on client-side redirect), and creates an enrollment record tied to that specific course/chapter scope. Every checkout attempt carries a stable idempotency key reused across retries of the same order. *(Implements BR-020, BR-021)*
-- Given a student mid-checkout, when the gateway reports a declined, cancelled, or timed-out payment, then no enrollment or access is granted and the order is marked failed; the student is shown a clear retry path — a transport-level retry of the same attempt reuses that attempt's idempotency key, while a new payment attempt after a definitive decline/cancellation/timeout is issued a fresh idempotency key linked to the same order — and if the outcome is ambiguous (gateway timeout with no definitive response) Gradex reconciles the order's true status with the gateway before permitting another attempt on that order. *(Implements BR-022)*
-- Given an enrolled student who purchased a course or chapter, when they open a lesson within their purchased scope, then the platform verifies entitlement against the enrollment record — including that the enrollment's term hasn't expired — before issuing a signed playback URL and before allowing download of that lesson's resources or lab materials, and denies access to lessons outside the purchased scope or past the enrollment's expiry. *(Implements BR-023, BR-025)*
-- Given an admin viewing the revenue/payment dashboard, when a completed purchase — eligible per the refund policy in BR-044 (14-day right, exempted once a lesson has been streamed or a lab file opened) — is refunded through Gradex's refund workflow, then Gradex calls the gateway's refund API and updates the order/enrollment status to reflect revoked access only after the gateway confirms the refund (flagging a pending-refund state in the meantime if confirmation is delayed), and logs the refund event for audit without requiring manual reconciliation of gateway records. A partial refund follows the same gateway-confirmation-before-revocation rule, scoped to the partially refunded item. *(Implements BR-040, BR-041, BR-042, BR-044)*
+- Given a Student opens a published Course, then full-Course and individually priced Section
+  purchase options use the same Section entities shown in its outline; no Chapter entity exists.
+  *(BR-010/021; E2E)*
+- Given the catalog, when the Student filters by Major, Subject, and Study Year, then only published
+  Courses carrying those exact values are returned, and an unpublished or archived Course never
+  appears in any filter combination. *(BR-157/161; integration + E2E)*
+- Given an Arabic query typed with different hamza forms, diacritics, or Arabic-Indic digits, when
+  it is searched under either interface language, then matching Courses are returned from both
+  Arabic and English fields, ranked by relevance, and no Lesson title or protected file is exposed.
+  *(BR-161/162; integration)*
+- Given an Instructor edits an owned Course, then they may only select existing taxonomy terms;
+  attempts to create, rename, or retire a term are denied server-side, and every Admin vocabulary
+  change is audited. *(BR-158; integration)*
+- Given a Course missing any classification dimension, then submission for review is blocked and
+  names the missing dimension; a retired term stays on already-assigned Courses and a referenced
+  term cannot be deleted. *(BR-159/160; integration + E2E)*
+- Given a valid paid checkout, when Tap confirms capture through a verified callback/API result,
+  then the Order becomes Paid and one 150-day scoped entitlement is granted exactly once.
+  *(BR-020/021/025/031/033; integration + E2E)*
+- Given a redirect without confirmed capture or a failed/ambiguous attempt, then no entitlement is
+  granted and reconciliation/retry behavior is safe. *(BR-020/022/034; integration)*
+- Given a valid coupon, when preview/order creation occurs, then integer-fils discount/total are
+  snapshotted; zero total grants once without Tap. *(BR-124–129; unit + integration)*
+- Given the Student has a consuming redemption, a second use is denied; after cumulative full
+  refund it is eligible again while history remains. *(BR-128/129/131; integration)*
+- Given an active entitlement already covers the chosen scope, checkout blocks repurchase. A
+  Section-entitled Student may buy another Section or the full Course without automatic credit;
+  after expiry the standard purchase path is available. *(BR-024/025; E2E)*
 
-## Purchase & Payment (V1 / Fast-Follow — bundles & BNPL installments, per [DECISIONS.md](DECISIONS.md) D-008)
+## Refunds and Payouts
 
-- Given a logged-in student viewing a published bundle, when they purchase it — either a single payment or a Deema installment plan, if Deema clears for digital goods per §5 Payments — via the gateway's hosted checkout, then Gradex grants access only after the gateway's payment-success callback/webhook, and creates enrollment records covering every course in the bundle's scope, using the same idempotency-key and reconciliation guarantees as the MVP single-purchase flow above. *(Implements BR-020, BR-021, BR-022)*
-- Given a student who purchased via an installment plan and an upcoming installment is due, when the gateway attempts and fails to collect that installment per its own retry/dunning policy, then Gradex reflects the gateway's reported status change (e.g. past-due or plan-cancelled) by restricting access to the paid content per the agreed access policy, without Gradex re-implementing retry/risk logic itself. *(Implements BR-032)*
+- Given an Admin requests a supported partial refund within the remaining balance, when the gateway
+  confirms success, then the refunded balance/revenue/payout adjustment update and entitlement
+  remains active. *(BR-040–047; integration + E2E)*
+- Given cumulative confirmed refunds equal captured amount, then entitlement is revoked; a failed
+  or pending refund does not revoke it. *(BR-041/046/047; integration)*
+- Given a monthly payout run, then the configured global share uses net collected revenue,
+  itemizes Orders/adjustments, records manual transfer state/reference, and generates the emailed
+  statement without exposing an Instructor dashboard. *(BR-073/074; integration + E2E)*
 
-## Video Playback & Progress
+## Course Building and Moderation
 
-- Given a student who has purchased the course containing a PUBLISHED lesson, when they request that lesson's video, then the backend returns a signed CDN playback URL (short expiry) for the HLS master manifest, and the CDN serves subsequent segment requests only while that signature remains valid. *(Implements BR-050)*
-- Given a student who has NOT purchased/enrolled in the course (or an unauthenticated user), when they request a lesson's playback URL directly or via API, then the backend returns 403 without issuing a signed URL, regardless of whether the lesson's video file exists in storage. *(Implements BR-050)*
-- Given a student reopening a lesson they previously watched partway through, when the player loads the lesson, then the backend returns `last_position_seconds` alongside the playback URL and the player resumes from that position rather than starting at 0:00. *(Implements BR-052)*
-- Given a student actively watching a lesson, when the player posts progress (~every 10s) with `position_seconds`, then the backend clamps/rejects any value outside `[0, lesson.duration_seconds]` before persisting it, updates `max_position_seconds = max(existing, new)` and `last_position_seconds = new`, and marks `completed = true` (once, permanently) once `max_position_seconds` reaches ≥90% of the lesson duration, with completion never regressing on seek-back. Completion here is a client-reported progress signal, not proof of playback — acceptable for v1 since nothing is currently gated on it (certificates are a Future Feature per §4 Scope; instructor payouts are itemized by purchase per BR-073, not by completion). If certificates are un-deferred in a later version, completion must be backed by server-observed playback evidence before it's certificate-eligible. *(Implements BR-051)*
-- Given a signed playback URL expires mid-session or a progress POST fails, when the frontend receives a 403 on a segment/manifest request or a progress-write error, then the player transparently refreshes the playback token and retries once (403 case) or silently retries progress on the next tick (progress-write case) without interrupting playback or surfacing an error to the student. *(Implements BR-053)*
+- Given an Instructor edits an owned Draft Course, then Course/Section/Lesson ordering persists;
+  editing another Instructor's Course or any price is denied server-side. *(BR-010/019/060; integration)*
+- Given a Course does not meet readiness, submission is blocked with specific missing items; when
+  ready, submission moves to Pending Review and locks concurrent editing. *(BR-012/013/016/070; E2E)*
+- Given an Admin requests changes, the reason is required and visible; resubmission returns to
+  review. Approval publishes and notifies. *(BR-071/072/090/122; E2E)*
+- Given a Published Course revision, the live approved version remains unchanged until Admin
+  approval applies the revision atomically. *(BR-017/090; integration)*
+- Given an Admin unpublishes a Course, it leaves the catalog and checkout and protected Student
+  access is blocked without deleting Entitlements or progress; republishing restores access when
+  Account and Entitlement state otherwise permit it. *(BR-090; integration + E2E)*
+- Given an Admin changes a Course/Section price, the change is audited and affects future Orders
+  only; existing transaction snapshots remain unchanged. *(BR-019; integration)*
 
-## Instructor Course Builder
+## Learning, Preview, Reporting, and Office Hours
 
-- Given an authenticated instructor creating a new course, when they save a course with a title, description, and at least one section containing one lesson, then the course is created in draft status and remains invisible to students until it passes the admin approval/publish gate. *(Implements BR-011)*
-- Given an instructor building a course outline, when they add, reorder, or delete sections and lessons within a course, then the Course-Section-Lesson hierarchy and ordering persist correctly and are reflected immediately in the builder UI. *(Implements BR-010)*
-- Given an instructor on a lesson's video tab, when they upload a video file for that lesson, then the file is handed off to the existing upload/transcode/HLS pipeline and the lesson shows a processing status until the transcoded asset is ready, without the builder re-implementing transcoding logic. *(Implements BR-062)*
-- Given an instructor on a lesson's resources tab, when they upload one or more supplementary reference files (slides, notes, readings) within the allowed resource types and size caps (PDF, slides, images — see [DECISIONS.md](DECISIONS.md) D-011), then the files are stored in S3-compatible storage and listed on the lesson as downloadable resources accessible to enrolled students via signed URLs; resources are not watermarked. *(Implements BR-063, BR-067)*
-- Given an instructor on a lesson's lab materials tab, when they upload one or more hands-on files (project archives, code, a PDF/Markdown guide) within the allowed lab types and size caps (see [DECISIONS.md](DECISIONS.md) D-011), then the files are stored in S3-compatible storage, get a per-purchase identifier embedded at download time (per BR-103), and are listed on the lesson as downloadable lab materials accessible to enrolled students via signed URLs, with no code execution or sandboxing involved. *(Implements BR-063, BR-103)*
-- Given an instructor attempts to submit a course for admin review, when any lesson is missing its required video or the course has zero sections/lessons, then submission is blocked and the instructor sees a validation message identifying the missing content before the course can enter the approval queue. *(Implements BR-012)*
+- Given a Student requests playback/download, access is granted only within active entitlement
+  scope; progress resumes and completion never regresses. *(BR-023/050–053; integration + E2E)*
+- Given an Instructor uploads a public preview, it remains unavailable until validation,
+  quarantine, scan, and permission confirmation succeed; protected Lesson files remain private.
+  *(BR-104/143/144; integration)*
+- Given an entitled Student reports content, it enters the Admin queue without auto-hiding; Admin
+  resolution and any content/account action are audited. *(BR-145/146; E2E)*
+- Given an Instructor creates Course office hours, only active Course/Section-entitled Students see
+  the join link; an unauthorized/public request never receives it. *(BR-134–136; security E2E)*
+- Given a session is materially rescheduled/cancelled, deduplicated notifications are recorded and
+  email failure does not undo the schedule change. *(BR-120/122/140; integration)*
 
-## Admin Moderation & Payouts
+## Responsive, Bilingual, and Accessible Experience
 
-- Given a course has at least one section containing at least one lesson with a successfully transcoded (READY-status) video — the same readiness bar BR-012 blocks submission on — when the instructor submits the course for review, then the course status changes to "Pending Approval" and becomes visible in the admin approval queue but remains hidden from the student catalog. *(Implements BR-012, BR-013, BR-070)*
-- Given a course is in "Pending Approval" status, when an admin reviews it and clicks "Approve & Publish," then the course status changes to "Published," it becomes visible in the student catalog, and the instructor receives a notification of approval, delivered via email and the in-app notification center (best-effort, not guaranteed-delivery — see §5 Notifications). *(Implements BR-071)*
-- Given a course is in "Pending Approval" status, when an admin rejects it with a required rejection reason/comment, then the course status reverts to "Draft," the course stays hidden from the catalog, and the instructor sees the reason to revise and resubmit. *(Implements BR-072)*
-- Given a student's purchase (single payment or installment/BNPL) has been confirmed as collected by the payment gateway and reconciled in Gradex, when an admin opens the payouts screen for an instructor, then the admin sees that revenue itemized by course/purchase with gateway fees and refunds already deducted, and can mark it "Payout Approved" and later "Paid" with a reference/transaction note, without any earnings figures being exposed on the instructor-facing UI. *(Implements BR-073, BR-074)*
-- Given a refund is processed by an admin for a student purchase, when the associated instructor payout for that purchase has not yet been marked "Paid," then the refunded amount is automatically excluded from that instructor's payable balance; if the payout was already marked "Paid," then the system flags the payout record for manual admin adjustment/clawback in a future payout cycle. *(Implements BR-043)*
+- Given each core Student journey, it completes on representative phone, tablet/iPad, laptop, and
+  desktop viewports without missing functionality. *(BR-147; responsive E2E)*
+- Given Arabic/English selection, direction/layout/forms/tables/date display switch correctly and
+  the preference persists without translating Course-authored content. *(BR-149/150; E2E + visual)*
+- Given platform-owned UI, automated and manual accessibility checks cover WCAG 2.2 AA within the
+  scoped boundary; no complete-product claim is published while captions remain absent.
+  *(BR-151; automated accessibility + manual keyboard/screen-reader review)*
 
 ---
 
-# 12. Open Questions
+# 12. Launch Gates
 
-- Persona 2 (second primary GCC-university-student persona) — intentionally left blank, revisit later
-- Competitor table: Baims weaknesses / why-Gradex-is-better — not yet answered
-- Payment gateway: Tap Payments (Deema) recommended 2026-07-20, MyFatoorah fallback — but Deema's digital-goods eligibility is unconfirmed, needs direct written confirmation from Tap before committing checkout architecture to it
-- Kuwait Commercial Registration status — is one already in place, or does this need starting immediately given the 7–15 day KNET activation lead time against the 2026-08-15 launch date?
-- Education-content licensing — does Gradex's non-degree supplementary-course model need any MOHE/Private Universities Council license, or does ordinary MOCI commercial registration suffice? (unconfirmed, consult a lawyer)
-- Digital Commerce Law (Decree-Law 10/2026) registration mechanism — not yet live as of research date, track for when it opens
-- ~~Instructor-approval notification channel (email vs. in-app vs. both) and delivery guarantee~~ — resolved 2026-07-21: email + in-app notification center, best-effort delivery. See §5 Notifications
-- ~~Lesson-attachment allowed file types and size caps~~ — resolved 2026-07-21 (D-011): lesson resources = PDF, slides (PPT/PPTX), images (PNG/JPG), 50 MB per file / 200 MB per lesson; lab materials = archives (ZIP), common project files, plus a PDF/Markdown guide, 250 MB per file / 1 GB per lesson. (Distinct from video's `MAX_UPLOAD_SIZE_BYTES`, which is video-only.)
-- ~~v1 scope vs. 2026-08-15 launch date~~ — resolved 2026-07-20, see [DECISIONS.md](DECISIONS.md) D-008
+Unresolved production decisions and external dependencies are maintained in
+[LAUNCH_GATES.md](LAUNCH_GATES.md), with owner, evidence, deadline, and blocking point. They do not
+block system design unless that document explicitly says otherwise; they do block production when
+marked required-before-launch.

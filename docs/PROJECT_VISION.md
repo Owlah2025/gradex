@@ -1,9 +1,8 @@
 # Gradex Product Vision
 
-> Version: 0.1
-> Status: Draft
-> Last Updated: 2026-07-21
-> Author(s):
+> Version: 1.0
+> Status: Approved product direction
+> Last Updated: 2026-07-23
 
 ---
 
@@ -13,9 +12,10 @@
 
 **Gradex**
 
-## One Sentence Pitch
+## One-Sentence Pitch
 
-> Gradex is an online learning platform that helps Gulf university students master their coursework and become industry-ready through affordable, hands-on video courses backed by real community and follow-up support.
+> Gradex helps Gulf university Students master coursework and build practical skill through
+> fair-priced video Courses, hands-on labs, community, and real follow-up after purchase.
 
 ---
 
@@ -23,14 +23,12 @@
 
 ## Mission Statement
 
-- Solve student problems with other platforms
-- Qualify students for the industry market
-
----
+Put Student outcomes ahead of short-term revenue by combining structured academic teaching,
+practical materials, and dependable follow-up.
 
 ## Vision Statement
 
-Within 5–10 years, Gradex will be among the top 3 leading GCC university course platforms.
+Within 5–10 years, Gradex aims to be among the leading GCC university course platforms.
 
 ---
 
@@ -38,256 +36,206 @@ Within 5–10 years, Gradex will be among the top 3 leading GCC university cours
 
 ## Problem Statement
 
-Existing GCC course platforms treat revenue as the priority over students — students get no follow-up once they've paid, and are left to figure the rest out alone.
-
----
+Many course platforms sell access but provide little follow-up after payment. Students receive
+theory-heavy content, weak practical experience, and limited human/community support. Instructors
+also lack a focused Gulf platform through which to reach Students and earn transparent revenue.
 
 ### Student Problems
 
-- No follow-up/support after purchase — left alone once they've paid
-- Overpriced relative to value received
-- No mentorship or live human interaction during learning
-- No community/peers to learn alongside
-- All theory, no hands-on/lab practice to build real skill
-
----
+- Little follow-up after purchase.
+- Price is not always matched by delivered value.
+- Limited access to instructors when coursework becomes difficult.
+- Weak peer/community connection.
+- Too little hands-on practice tied to academic material.
 
 ### Instructor Problems
 
-- Can't monetize their expertise
-- Underpaid at university/institution jobs
-- No platform to reach students
-- No reach to build a personal brand/audience
-
----
+- Limited reach beyond an existing institution or personal audience.
+- Weak tools for publishing structured academic Courses and practical materials.
+- Limited visibility into Student engagement.
+- Unclear or inconsistent compensation processes on informal channels.
 
 ### Market Problems
 
-- other platforms focus on financials over quality and students' problems
-- they focus on academics and theory over hands-on experience
--
--
+- Platforms compete primarily on catalog size or price rather than follow-through.
+- Academic content and practical industry preparation are often separated.
+- Kuwait/GCC Student needs, language direction, payment methods, and academic context are not
+  always treated as first-class requirements.
 
 ---
 
 # 4. Our Solution
 
-Describe how Gradex solves these problems.
-- focus on labs and hands-on experience.
-- focus on students' problems over financials
+Gradex provides:
 
----
+- Structured `Course → Section → Lesson` learning paths.
+- Adaptive video lessons with progress and resume behavior.
+- Protected reference resources and downloadable hands-on labs.
+- An external Course community and Course-scoped external-link office hours.
+- Admin-reviewed Course quality and Admin-controlled pricing.
+- A responsive Arabic/English website across Student device classes.
+- Clear purchase, refund, entitlement, and Instructor payout records.
 
 ## Key Benefits
 
-## For Gradex Business
-
-- word of mouth
-
 ### For Students
 
-- fair price 
-- suitable community
-- mentorship live sessions (future)
-
+- Fair, visible pricing with the option to purchase a complete Course or one Section.
+- Practical materials tied directly to Course Lessons.
+- Follow-up through community and Instructor office hours.
+- Continuous learning across phones, tablets/iPads, laptops, and desktops.
 
 ### For Instructors
 
-- competitive salaries
-- personal branding 
-- suitable environment
--
+- Course-building, video/resource/lab delivery, and Student analytics.
+- Reach beyond an existing classroom or personal audience.
+- Admin-managed commercial operations and monthly payout statements.
+- A review process that protects live content from accidental edits.
 
-### For Universities
+### For Gradex
 
-- 
--
--
--
+- A focused Kuwait-first launch rather than an unfocused general marketplace.
+- Revenue through Course and Section purchases.
+- A foundation that can later support bundles, BNPL, captions, and broader GCC expansion.
 
 ---
 
 # 5. Target Audience
 
-gulf university students (currently in Kuwait)
+Gradex initially serves Gulf university Students in Kuwait.
 
-## Primary Users
+## Primary User
 
-### Persona 1
+### Fahd
 
-**Name**
-Fahd
+- **Age:** 19
+- **Country:** Kuwait
+- **Major:** Computer Science
+- **Goal:** earn strong results in first-year Courses and become practically capable.
+- **Pain:** high prices without mentorship/follow-up, fragmented resources, and theory without
+  practice.
+- **Devices:** phone for discovery/quick access; tablet or laptop for sustained study and labs.
 
-**Age**
-19
-
-**Country**
-Kuwait
-
-**Major**
-Computer Science
-
-**Goals**
-Get A's in first-year courses
-
-**Pain Points**
-Existing platforms overpriced; no mentorship/follow-up support
-
----
-
-### Persona 2
-
-**Name**
-
-**Age**
-
-**Country**
-
-**Major**
-
-**Goals**
-
-**Pain Points**
-
----
+Further persona research may refine messaging and prioritization, but is not a prerequisite for
+platform system design.
 
 ## Secondary Users
 
-- **Bootcamp/self-taught learners** — e.g. Ali, 21, Kuwait, business major. Wants to break into computer science and take the same courses actual CS students take; lacks a systematic curriculum.
-- **High schoolers prepping for university** — e.g. Amjad, 17, Kuwait, secondary school. Preparing for the computer science placement test.
+- Bootcamp/self-taught learners who want a systematic university-style curriculum.
+- High-school Students preparing for university placement or first-year material.
 
 ---
 
 # 6. Value Proposition
 
-> Students choose Gradex because it's the one Gulf platform that doesn't disappear after they pay — fair-priced, hands-on courses with real labs and an active peer community, built to make them industry-ready, not just get them through the exam.
+> Students choose Gradex because it does not disappear after payment: each Course combines clear
+> teaching, practical work, community, and real Instructor follow-up in a Kuwait-first experience.
 
----
+## Unique Selling Points
 
-## Unique Selling Points (USP)
-
-1. Community
-
-2. Price and installments
-
-3. Labs and real experience
-
-4. Mentorship and live sessions to solve students' problems (future)
-
-5. TAs (follow-up sessions) [future], based on number of students
-
+1. Follow-up through community and lightweight live office hours.
+2. Labs and practical Course materials, not video alone.
+3. Fair Course/Section purchasing rather than a one-size-fits-all commitment.
+4. Arabic/English responsive experience built for Gulf Students.
+5. Admin-reviewed quality and transparent commercial operations.
 
 ---
 
 # 7. Business Model
 
-## Revenue Streams (مصادر الدخل)
+## MVP Revenue
 
-- single course purchase, single chapter and courses bundles
+- Single Course purchase.
+- Single Section purchase (the UI may label Section as “Chapter”).
+- Coupons support launch promotions and controlled zero-value grants without changing catalog
+  prices.
 
-- recommended package courses (popular courses)
-
----
+Gradex retains a platform share and pays Instructors one configurable platform-wide percentage of
+net collected revenue. The percentage has no assumed value and must be chosen before production.
 
 ## Future Revenue Opportunities
 
-- summer bootcamps 
-
-- live sessions
-
-- private mentorship
+- Course bundles.
+- BNPL installments after provider approval.
+- Summer bootcamps.
+- Private mentorship.
+- Other formats only after the core Course product is validated.
 
 ---
 
 # 8. Product Scope
 
-## Core Features — MVP (Launch, 2026-08-15)
+[PRD.md §4](PRD.md) is the authoritative scope register.
+
+## MVP Summary
 
 ### Student
 
-- [ ] Browse course catalog (courses, chapters)
-- [ ] Purchase single course or single chapter
-- [ ] Video playback (HLS adaptive bitrate, resume from last position)
-- [ ] Progress tracking (mark lesson complete, resume position)
-- [ ] Download lesson resources (slides, notes, readings) per lesson
-- [ ] Download lab materials (project files + guide) per lesson/course
-- [ ] Link out to course community (external Discord/Telegram)
-- [ ] Profile management + purchase history
-
----
+- Register/verify, browse, buy one Course/Section, and view order/refund history.
+- Watch entitled video and retain progress across sessions and later repurchase after expiry.
+- Download protected resources/labs and evaluate an optional separate public preview.
+- Join external community and entitled Course office hours.
+- Receive transactional notifications and report entitled content.
 
 ### Instructor
 
-- [ ] Course → section → lesson builder (create/edit structure)
-- [ ] Upload lesson video (raw upload, async transcode)
-- [ ] Upload lesson resources (slides, notes, readings) — reference material, separate from labs
-- [ ] Upload lab materials (downloadable project files + guide)
-- [ ] Per-course analytics (enrollments, completion rate)
-
----
+- Activate an Admin invitation and manage only owned Course content.
+- Build Course/Section/Lesson structure and upload videos/resources/labs/previews.
+- Submit/revise content through Admin review.
+- View Course analytics, Student roster, and catalog prices read-only.
+- Schedule one-off office hours on an owned Published Course.
 
 ### Admin
 
-- [ ] User management (students, instructors — view, suspend)
-- [ ] Course approval/publish gate (moderation before catalog visibility)
-- [ ] Revenue/payment dashboard + refund processing
-- [ ] Manage and process instructor payouts (no instructor-facing earnings view in v1)
-- [ ] Content moderation (reported courses/materials)
-- [ ] Platform-wide analytics
+- Provision staff accounts and manage/suspend users.
+- Control Course/Section prices, publishing, unpublishing, and moderation.
+- Process coupons, payments/refunds, revenue records, and monthly Instructor payouts.
+- Resolve reported content and cancel office hours for moderation.
+
+## Fast-Follow
+
+- Bundles and BNPL.
+- Captions/transcripts and complete media accessibility.
+- Instructor payout dashboard/automated settlement.
+- MFA/social login and lifecycle/marketing communications.
 
 ---
 
-## V1 / Fast-Follow (post-launch)
+# 9. Non-Goals for MVP
 
-Ships shortly after MVP launch — real product scope, just not launch-blocking:
-
-- [ ] Bundle purchase (pricing + checkout + entitlement across multiple courses)
-- [ ] BNPL installments (Deema, if merchant-category approval clears in time — see [DECISIONS.md](DECISIONS.md) D-008)
-
----
-
-# 9. Non Goals (Version 1)
-
-Things we intentionally will NOT build.
-
-- [ ] Live mentorship / live sessions (deferred to future version)
-- [ ] TAs / follow-up sessions (deferred, scales with student volume)
-- [ ] In-platform community/forum (using external Discord/Telegram instead)
-- [ ] Sandboxed in-browser code execution for labs (ships as downloadable project + guide instead)
-- [ ] Course completion certificates (deferred to future version)
-- [ ] Live streaming, DRM (excluded per video streaming design spec)
+- Native mobile applications.
+- In-platform conferencing/live streaming, recordings, attendance, recurrence, RSVP/capacity,
+  timed reminders, or calendar integration.
+- In-platform community/forum.
+- Sandboxed code execution.
+- Certificates.
+- Reviews, ratings, recommendation engines, or invented testimonials.
+- Instructor control over prices, coupons, refunds, or withdrawals.
+- Notification preferences, marketing, SMS/WhatsApp, or push.
 
 ---
 
 # 10. Business Goals
 
-## First 6 Months
+## First Six Months
 
-- Launch with 8–12 courses live
-
-- 100–500 paid students
-
-- Price point 30–60 KWD per course
-
----
+- 8–12 live Courses.
+- 100–500 paid Students.
+- Test the 30–60 KWD full-Course pricing hypothesis with real Kuwait Students.
+- Establish repeatable Instructor onboarding, Course review, and monthly payout operations.
 
 ## First Year
 
-- Expand catalog to ~20–30 courses across more majors/years
-
-- ~1,500–3,000 cumulative paid students
-
-- Start piloting future revenue streams (bootcamps/live sessions, per Section 7)
-
----
+- 20–30 Courses across more majors/years.
+- 1,500–3,000 cumulative paid Students.
+- Use validated demand to choose fast-follow investments.
 
 ## Three Years
 
-- 50K–200K registered users (top-3 GCC platform ambition, per vision statement)
-
-- 100+ courses across multiple majors
-
-- Multi-country GCC presence (beyond Kuwait)
+- 50,000–200,000 registered users.
+- 100+ Courses across multiple majors.
+- 15,000–30,000 cumulative paid Students.
+- Multi-country GCC presence.
 
 ---
 
@@ -295,25 +243,25 @@ Things we intentionally will NOT build.
 
 ## Business Metrics
 
-| Metric | 6 Months | 1 Year | 3 Years |
-|--------|----------|--------|---------|
-| Registered Users | 500–2,000 | 5,000–10,000 | 50,000–200,000 |
+| Metric | Six Months | One Year | Three Years |
+|---|---:|---:|---:|
+| Registered users | 500–2,000 | 5,000–10,000 | 50,000–200,000 |
 | Paid Students | 100–500 | 1,500–3,000 | 15,000–30,000 |
-| Courses | 8–12 | 20–30 | 100+ |
-| Revenue (KWD) | ~5,000–20,000 | ~70,000–140,000 | ~750,000–1,500,000 |
-| Monthly Active Users | 150–600 | 1,500–3,000 | 15,000–60,000 |
-
----
+| Live Courses | 8–12 | 20–30 | 100+ |
+| Monthly active users | 150–600 | 1,500–3,000 | 15,000–60,000 |
 
 ## Product Metrics
 
-| Metric | 6 Months | 1 Year | 3 Years |
-|--------|----------|--------|---------|
-| Course Completion Rate | 30%+ | 40%+ | 50%+ |
-| Student Satisfaction | 4.0+/5 | 4.2+/5 | 4.5+/5 |
-| Average Rating | 4.3+/5 | 4.5+/5 | 4.7+/5 |
-| Daily Active Users | 50–150 | 300–600 | 3,000–10,000 |
-| Support Response Time | <48h | <24h | <12h |
+| Metric | Six Months | One Year | Three Years |
+|---|---:|---:|---:|
+| Course completion signal | 30%+ | 40%+ | 50%+ |
+| Student satisfaction survey | 4.0+/5 | 4.2+/5 | 4.5+/5 |
+| Office-hours participation | Establish baseline | Improve from baseline | Segment by market |
+| Refund rate | Establish baseline | Stable/declining | Segment by market |
+| Support response time | <48h | <24h | <12h |
+
+The MVP does not include public ratings/reviews, so “average Course rating” is not an MVP metric.
+Completion is a progress signal, not verified proof of learning.
 
 ---
 
@@ -321,139 +269,124 @@ Things we intentionally will NOT build.
 
 ## Brand Personality
 
-- Supportive — no student left alone after they pay
-- Hands-on — practical over theoretical, always
-- Straight-talking — fair price, no hidden fluff or hype
-- Ambitious — building toward top-3 GCC, not just another course seller
-- Approachable — peer community feel, not a cold institutional platform
-
----
+- Supportive.
+- Hands-on.
+- Straight-talking.
+- Ambitious without hype.
+- Approachable rather than institutional.
 
 ## Brand Values
 
-- **Students over revenue** — every tradeoff resolves in the student's favor.
-- **Hands-on over theory** — value is proven by what a student can build, not what they watched.
-- **Honesty over hype** — fair price, plain claims, no inflated promises.
-- **Follow-through** — support after purchase is the product, not a bonus.
-
----
+- **Students over short-term revenue.**
+- **Hands-on over theory alone.**
+- **Honesty over hype.**
+- **Follow-through after purchase.**
+- **Fairness and transparency in commercial operations.**
 
 ## Tone of Voice
 
-- **Plain and direct** — no jargon, no marketing fluff.
-- **Peer, not institution** — talk like a helpful senior student, not a university bulletin.
-- **Practical** — show the how, don't lecture the why.
-- **Honest about tradeoffs** — say what a course does and doesn't cover.
+- Plain and direct.
+- Peer-like, not bureaucratic.
+- Practical and specific.
+- Honest about limitations and tradeoffs.
+- Natural in both Arabic and English rather than literal word-for-word translation.
 
 ---
 
-# 13. Competitor Analysis
+# 13. Competitor Position
 
-| Competitor | Strengths | Weaknesses | Why Gradex is Better |
-|------------|-----------|------------|----------------------|
-| Baims | Huge scale (450K+ enrollments), 1,000+ courses/30K lectures, Kuwait/Saudi/Jordan/UAE/Qatar/UK, funded ($4M Series A), cheap (~4 KWD/course, some free) | TBD | TBD |
-| | | | |
-| | | | |
+Gradex does not need to win on catalog size or lowest price at launch. It aims to win a narrower
+position: Kuwait-first university Courses that combine practical materials and real follow-up.
+
+Competitor research remains useful for pricing and messaging but is not an authoritative input to
+system design unless it results in an approved [decision](DECISIONS.md).
 
 ---
 
 # 14. Assumptions
 
-Things we believe to be true but haven't validated yet.
+- Students value follow-up enough to prefer Gradex over cheaper video-only alternatives.
+- External community and office hours can validate the support promise before an in-platform
+  community is justified.
+- Downloadable labs provide enough practical value without sandboxed execution.
+- One global Instructor revenue-share formula is sufficient for MVP.
+- Kuwait-first Arabic/English responsive web support is the correct launch surface.
 
-- Registered:Paid ratio ~3–4x (many browse/sign up without purchasing)
-- Monthly Active Users ~25–30% of registered user base at any point
-- Daily Active Users ~15–20% of MAU (course platforms are lower-frequency than social apps)
-- Average revenue per paying student ~40–50 KWD (accounts for bundle/multi-course purchases beyond the 30–60 KWD single-course price)
-- Product-quality targets (completion, satisfaction, rating) are industry-benchmark starting points, not yet validated with real Gradex users
+These assumptions require pilot evidence; they are not reasons to add unapproved MVP scope.
 
 ---
 
 # 15. Risks
 
-Business risks are tracked in the PRD to avoid drift — see [PRD.md §9 Risks](PRD.md) for the full list (gateway dependency, external-community control, lab-material piracy, Baims price competition, transcode load, payout visibility, solo-dev timeline), each with impact and mitigation.
+Operational/product risks and mitigations are owned by [PRD.md §9](PRD.md). Unresolved
+production dependencies are owned by [LAUNCH_GATES.md](LAUNCH_GATES.md).
 
 ---
 
 # 16. Constraints
 
-Constraints are owned by the PRD to avoid drift — see [PRD.md §7 Constraints](PRD.md) for Budget (bootstrapped/self-funded), Team (solo developer + 2 founders), Timeline (launch 2026-08-15), Technology (locked stack per README.md), and Legal (Kuwait CR, Digital Commerce Law, consumer/refund law, BNPL licensing, data protection).
+Budget, team, technology, timeline, legal-readiness, and external-provider constraints are owned by
+[PRD.md §7](PRD.md) to avoid drift.
+
+---
 
 # 17. Stakeholders
 
-| Role | Name | Responsibilities |
-|------|------|------------------|
+| Role | Responsibility |
+|---|---|
+| Founder / logistics (Tohamy) | Business operations, provider/legal coordination, Instructor logistics |
+| Product/engineering | Product specification, system design, implementation, security, and operations |
+| Marketing (Mokhtar) | Student research, launch communication, acquisition, and campaign operations |
+| Instructors | Course production, content accuracy, Student follow-up, and office hours |
+| Students | Pilot feedback, learning outcomes, usability, and value validation |
 
 ---
 
 # 18. Product Principles
 
-These principles guide every decision.
-
-1. Students come first, not revenue.
-2. No student left alone after they pay — follow-up is the product, not an afterthought.
-3. Hands-on beats theory — every course ships with real, applicable practice.
-4. Fair price, not lowest price — compete on value, never race Baims to the bottom.
-5. Ship lean, validate before building — cut scope before cutting corners.
-6. Be honest about tradeoffs, especially with ourselves.
+1. Students come first, not short-term revenue.
+2. Follow-up after purchase is part of the product.
+3. Hands-on practice matters as much as explanation.
+4. Fair value beats a race to the lowest price.
+5. Ship a coherent MVP and validate before expanding.
+6. Be explicit about legal, accessibility, provider, and commercial uncertainty.
+7. No device class loses approved Student functionality.
 
 ---
 
 # 19. Future Vision
 
-Ideas for future versions.
-
 ## Version 2
 
-Near-term, once the core video-course product is validated (mirrors [PRD.md §4 Future Features](PRD.md)):
-
-- Live mentorship / live sessions
-- TAs / follow-up sessions (scales with student volume)
-- Course completion certificates (requires server-verified playback — see [PRD.md §11](PRD.md))
-
----
+- Bundles and BNPL after merchant approval.
+- Captions/transcripts and stronger media accessibility.
+- Instructor earnings dashboard and settlement automation if volume justifies it.
+- MFA and lifecycle communications.
 
 ## Version 3
 
-Longer-horizon expansion (mirrors §7 Future Revenue Opportunities):
-
-- Summer bootcamps
-- Private mentorship marketplace
-- Multi-country GCC expansion beyond Kuwait
-- In-platform community, if the external Discord/Telegram validates demand (see [DECISIONS.md](DECISIONS.md) D-005)
+- Bootcamps and private mentorship.
+- Multi-country GCC expansion.
+- In-platform community only if the external community validates demand.
+- Native applications only when web usage demonstrates a concrete need.
 
 ---
 
-# 20. Questions to Answer
+# 20. Questions to Resolve
 
-Open questions are tracked in [PRD.md §12 Open Questions](PRD.md) — Persona 2, Baims weaknesses, Deema digital-goods eligibility, Kuwait CR status, education-content licensing, Digital Commerce Law registration, notification channel, and lab-material upload limits.
+Product/system-design ambiguity is resolved by the current baseline. Remaining commercial, legal,
+provider, retention, and launch-readiness questions are tracked in
+[LAUNCH_GATES.md](LAUNCH_GATES.md), with owner and resolution point.
 
 ---
 
 # 21. Decision Log
 
-See [DECISIONS.md](DECISIONS.md) for the full decision log.
+See [DECISIONS.md](DECISIONS.md) for approved decisions and their rejected alternatives.
 
 ---
 
 # Appendix
 
-## Glossary
-
-| Term | Definition |
-|------|------------|
-| Student | |
-| Instructor | |
-| Course | |
-| Lesson | |
-| Enrollment | |
-
----
-
-## Notes
-
-```
-Meeting notes, brainstorming ideas, references, links...
-```
-
----
+Canonical terminology is defined in [GLOSSARY.md](GLOSSARY.md); entities, ownership, relationships,
+and lifecycles are defined in [DOMAIN_MODEL.md](DOMAIN_MODEL.md).

@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-07-22
+> Last Updated: 2026-07-23
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -10,15 +10,15 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-001 — Own-build HLS video pipeline
 
 **Date:** 2026-07-17
-**Decision:** Build the video upload/transcode/playback pipeline in-house (Go backend + Redis job queue + FFmpeg workers + S3-compatible storage + CDN, adaptive-bitrate HLS, signed URLs).
+**Decision:** Build the video upload/transcode/playback pipeline in-house (Go backend + Redis job queue + FFmpeg workers + S3-compatible storage, adaptive-bitrate HLS, and short-lived authorized playback). A CDN remains a system-design/deployment decision, not a claim about the current repository.
 **Reason:** Full control over the upload → transcode → playback flow and the auth/entitlement checks gating it; see [video-streaming-design.md](superpowers/specs/2026-07-17-video-streaming-design.md) for the full design.
 **Alternatives rejected:** Not recorded — no vendor comparison was documented at the time this spec was written.
 
-## D-002 — Payment gateway: Tap Payments (Deema BNPL), MyFatoorah fallback
+## D-002 — Tap Payments for MVP checkout; Deema BNPL is fast-follow
 
 **Date:** 2026-07-20
-**Decision:** Primary gateway is Tap Payments, using its Deema product for installments. MyFatoorah (via Tamara) is the fallback if Tap/Deema doesn't clear for digital goods in time.
-**Reason:** Deema has the cleanest risk-transfer (Tap pays Gradex upfront, Deema/Tap owns collection risk), the amount fit is clean (10 KWD minimum, no max — covers the full 30–60 KWD range), and Tap is Kuwait-founded/HQ'd with native KNET support.
+**Decision:** MVP checkout uses Tap Payments hosted card/KNET payments. Deema BNPL remains Fast-Follow and is not a launch dependency. MyFatoorah is considered only if Tap cannot activate Gradex's digital-course merchant account; it is not integrated speculatively in MVP.
+**Reason:** One hosted gateway keeps MVP payment and reconciliation behavior bounded. BNPL adds entitlement and payment-state branches and still requires written digital-goods approval, so it must not delay the core checkout path.
 **Alternatives rejected:** PayTabs — its Kuwait "installment" offering is a reseller layer over the same Deema product Tap offers directly, with no upside and added integration overhead.
 **Source:** [PRD.md §5 Payments](PRD.md)
 
@@ -26,9 +26,9 @@ Central record of significant product/technical decisions for Gradex — what wa
 
 **Date:** 2026-07-20
 **Decision:** Do not use MediaKit as a replacement for the own-build video pipeline (D-001).
-**Reason:** A 21-agent workflow reviewed all 16 MediaKit doc pages and scored it a plausible fit worth a spike — but the hands-on spike died in ~30 minutes: the documented API base URL 404s, the official scaffolder produces no MediaKit-specific routes, and the only real artifact found was an orphaned frontend-only npm package with nothing to talk to. The docs read as completely genuine; only running the actual install command surfaced that the backend doesn't exist.
+**Reason:** The documented install/API path was verified hands-on and did not produce or expose the claimed backend: the API base returned 404 and the official scaffolder contained no MediaKit-specific routes. The obtainable package was frontend-only, so it could not replace the required service.
 **Alternatives rejected:** N/A — MediaKit itself was the alternative being evaluated against D-001, and it was rejected.
-**Source:** [gradex-video-vendor-eval memory](../../.claude/projects/-home-owlah-gradex/memory/gradex-video-vendor-eval.md); full history in [2026-07-20-mediakit-spike-plan.md](superpowers/specs/2026-07-20-mediakit-spike-plan.md)
+**Source:** Full repository-local history in [2026-07-20-mediakit-spike-plan.md](superpowers/specs/2026-07-20-mediakit-spike-plan.md). The original external workspace-memory link was removed because it was not portable or available to repository readers.
 
 ## D-004 — Labs ship as downloadable files, not sandboxed execution
 
@@ -49,31 +49,31 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-006 — Instructor payouts are admin-managed only
 
 **Date:** 2026-07-20
-**Decision:** No instructor-facing earnings/payout dashboard in v1; admin views and processes all payouts, instructors receive a manual statement.
-**Reason:** Keep v1 lean — avoid building a self-service earnings dashboard before the platform has real revenue to show.
+**Decision:** No instructor-facing earnings/payout dashboard in MVP; admin views and processes all payouts, and instructors receive a monthly statement by email.
+**Reason:** Keep MVP lean—avoid building a self-service earnings dashboard before the platform has real revenue to show.
 **Alternatives rejected:** Self-service instructor earnings dashboard (deferred to a future version, not rejected outright).
 **Source:** [PRD.md §4 Scope](PRD.md), [PRD.md §9 Risk 6](PRD.md)
 
 ## D-007 — Course completion certificates deferred
 
 **Date:** 2026-07-20
-**Decision:** Course completion certificates are not part of v1.
-**Reason:** Keep v1 lean pre-launch.
+**Decision:** Course completion certificates are outside MVP.
+**Reason:** Keep the launch scope focused on purchase, learning, practice, and follow-up.
 **Alternatives rejected:** N/A — straightforward deferral.
 **Source:** [PRD.md §4 Scope](PRD.md), [PROJECT_VISION.md §9 Non-Goals](PROJECT_VISION.md)
 
-## D-008 — MVP keeps the full instructor portal; bundles and BNPL installments move to V1/fast-follow
+## D-008 — MVP keeps the Instructor portal; bundles and BNPL move to Fast-Follow
 
 **Date:** 2026-07-20
-**Decision:** The instructor portal (auth, own-course CRUD, section/lesson management, video/lab upload, submit-for-review, view submission status) stays fully in MVP. Bundle purchase (pricing + checkout + entitlement) and BNPL installments (Deema) move to V1/fast-follow, shipped after launch rather than blocking it.
+**Decision:** The Instructor portal (invitation/auth, own-Course CRUD, Section/Lesson management, video/resource/lab upload, submit-for-review, and status) stays in MVP. Bundles and Deema BNPL move to Fast-Follow after launch.
 **Reason:** Cut real build-time risk against the solo-developer, ~3.5-week timeline to the 2026-08-15 launch date ([PRD.md §9 Risk 7](PRD.md)) — without touching the instructor supply-side differentiator, which is core to the business model, not optional. Bundles and installments add real purchase/entitlement/checkout branching complexity that the 8–12 launch courses don't strictly need on day one.
-**Alternatives rejected:** Admin-only course creation for launch (rejected — instructor self-service isn't optional, it's core to the business model); dropping installments entirely rather than keeping them conditional (rejected — installment risk/collection is gateway-carried at near-zero Gradex-side engineering cost, so there's no reason to foreclose it for V1).
-**Source:** This session; see [PRD.md §4 Scope](PRD.md) and [PRD.md §12 Open Questions](PRD.md).
+**Alternatives rejected:** Admin-only Course creation for launch; permanently ruling out BNPL before provider and Student-demand validation.
+**Source:** Approved scope reduction; see [PRD.md §4 Scope](PRD.md).
 
 ## D-009 — Enrollment access is per-semester, not lifetime
 
 **Date:** 2026-07-20
-**Decision:** Course/chapter/bundle access expires 150 days (~5 months, approximating one academic semester) after the purchase timestamp, calculated in Kuwait local time (UTC+3), valid through the end of day 150, rather than lasting indefinitely. MVP ships silent expiry — access simply ends, no dedicated renewal flow — since a lapsed student can already regain access through the normal purchase flow (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-024/BR-025). *(Exact day count/timezone/boundary made concrete 2026-07-20, operationalizing the originally-stated "4–5 months" range so the rule is enforceable in code — revisit if a different exact term length is wanted.)*
+**Decision:** Course/Section access expires 150 days (~5 months, approximating one academic semester) after the purchase timestamp, calculated in Kuwait local time (UTC+3), valid through the end of day 150, rather than lasting indefinitely. MVP ships silent expiry — access simply ends, no dedicated renewal flow — since a lapsed student can regain access through the normal purchase flow (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-024/BR-025). Future bundle entitlements must adopt an explicit duration before bundle purchase ships. *(Canonical term changed from “chapter” to Section on 2026-07-23; exact day count/timezone/boundary remains unchanged.)*
 **Reason:** matches how the target student actually uses the product — access tied to the university course/semester they're taking right now — better than an open-ended lifetime default, and avoids building a separate renewal/repurchase flow before launch.
 **Alternatives rejected:** lifetime access (the more common course-platform default, and the initially recommended option — rejected in favor of a semester-aligned term that better fits how Gulf university students actually consume this content); building a dedicated renewal flow in MVP (rejected — real added scope against the 3.5-week timeline; repurchase through the standard checkout covers this for now).
 **Source:** This session; see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-025.
@@ -81,9 +81,9 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-010 — Notifications: transactional-only MVP on email + in-app center; lifecycle/marketing deferred
 
 **Date:** 2026-07-21
-**Decision:** MVP ships transactional notifications only, delivered on two channels — email + a minimal in-app notification center (unread badge + list). Transactional set: instructor course approval/rejection, student purchase receipt, password reset. Lifecycle notifications (registered-no-purchase re-engagement, enrollment-expiry reminders, course-not-started nudge, abandoned checkout), marketing/broadcast, and additional channels (WhatsApp/SMS, push) are deferred to post-launch.
-**Reason:** The three transactional events are already implied by existing MVP flows (BR-071/BR-072 approval, BR-020 enrollment grant, auth), so they add near-zero product scope. Email is day-one cheap; the in-app center is a small bounded build (a `notifications` table + list/unread-count endpoints + a frontend badge) and gives a durable per-user record independent of email deliverability. A full lifecycle/marketing engine (scheduler, segmentation, consent/unsubscribe management) is real scope against the solo-developer ~3.5-week timeline and carries PDPL consent obligations — same cut-to-protect-the-date logic as D-008.
-**Alternatives rejected:** Email-only MVP (rejected — no durable in-app record, and course-approval/student updates read better in-app); full lifecycle/marketing engine in MVP (rejected — scheduler + segmentation + consent management is post-launch scope, and marketing to non-purchasers requires opt-in under Kuwait PDPL No. 26/2024); WhatsApp/SMS at launch (rejected — paid per message plus WhatsApp Business API approval overhead; deferred).
+**Decision:** MVP ships a fixed transactional notification policy using a minimal in-app center plus email where required. In-app + email events are purchase receipt, refund status, password/security events, Account invitation, Course approval/changes requested, and office-hours cancellation/material rescheduling. New office-hours sessions (to currently entitled Students) and new Instructor Course/revision submissions (to Admin operations) are recorded in-app and may also use email when operationally appropriate. Video-processing completion targets the Instructor. Required transactional/security messages cannot be disabled. Marketing, preferences, WhatsApp/SMS, and push are post-MVP. *(Expanded 2026-07-23 to cover newly approved MVP flows.)*
+**Reason:** These messages complete existing account, commerce, moderation, and office-hours flows without creating a segmentation or preference engine. The in-app record remains durable; email delivery remains best-effort and never controls the underlying transaction.
+**Alternatives rejected:** Email-only MVP; granular notification settings; lifecycle/marketing automation; WhatsApp/SMS; push.
 **Source:** This session; see [PRD.md §5 Notifications](PRD.md), [PRD.md §4 Scope](PRD.md), and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-120–BR-123.
 
 ## D-011 — Lesson resources split from lab materials; both MVP, labs-only watermark
@@ -97,15 +97,103 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-012 — Coupons in MVP: admin-only discount codes applied pre-gateway
 
 **Date:** 2026-07-22
-**Decision:** Add an admin-managed coupon system to MVP. Admins (only) mint discount codes — percentage or fixed amount (integer fils) — optionally scoped to specific course(s)/chapter(s) or platform-wide. A code is validated and applied server-side *before* the Tap payment session is created; a code that reduces the order to 0 KWD grants enrollment directly with no gateway call (free-access path for beta testers/influencers). Redemption count commits on payment success / free-grant (soft global cap, exact per-user); one coupon per order, no stacking. Coupons never modify a course's listed price — the discount is per-order only.
-**Reason:** Launch promos and seeding free access are standard go-to-market levers, and the insertion point is clean — Gradex already computes the order amount before delegating checkout, so the discount slots in ahead of the gateway with no change to Tap integration. Admin-only keeps it aligned with who controls pricing/revenue today (BR-064) and avoids a BR-017 price-change side door. Full design in [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md).
-**Alternatives rejected:** Instructor-created coupons (deferred to V1 — collides with BR-017's no-silent-price-change guard, needs its own guardrails); disallowing free (100%) codes (rejected — free-seeding is a real launch need and the direct-grant path reuses existing enrollment/idempotency machinery); reserving redemptions at checkout with an expiry job (rejected — a background reservation-expiry job is real scope against the timeline for a global cap that is a marketing nicety, not a money-loss risk).
+**Decision:** Add an admin-managed coupon system to MVP. Admins (only) mint percentage or fixed-amount codes (integer fils), optionally scoped to Course(s)/Section(s) or platform-wide. A code is validated and applied server-side before the Tap payment session; a zero-value order grants entitlement without a gateway call. One coupon applies per order. Each Student may consume a code once at a time: failed/abandoned attempts do not consume it, and a fully refunded purchase releases that Student's redemption eligibility while retaining the historical redemption/refund records. Global caps remain configurable; per-user limits greater than one are not supported. Coupons never modify catalog prices. *(Section terminology and redemption/refund behavior amended 2026-07-23.)*
+**Reason:** Launch promos and seeding free access are standard go-to-market levers, and the insertion point is clean—the server computes the Order amount before hosted checkout. Admin-only matches the BR-019 pricing boundary and prevents an Instructor discount side door. Full design in [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md).
+**Alternatives rejected:** Instructor-created coupons (deferred — conflicts with Admin-only pricing ownership in BR-019); disallowing free (100%) codes (rejected — free-seeding is a launch need and reuses entitlement/idempotency machinery); reserving redemptions at checkout with an expiry job (rejected — unnecessary background-job scope for a soft global marketing cap).
 **Source:** This session; see [PRD.md §4 Scope](PRD.md), [PRD.md §5 Payments](PRD.md), and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-124–BR-133.
 
 ## D-013 — Live office hours in MVP (external-link only) — reverses the live-sessions deferral
 
 **Date:** 2026-07-22
-**Decision:** Add lightweight live office hours to MVP. Instructors (own PUBLISHED courses) and admins (any course, or platform-wide) schedule one-off sessions; Gradex owns scheduling, access control, and an event-driven "new session" notice, while the live audio/video happens on an external third party (Zoom / Google Meet / Discord voice) reached via a stored join link. Course-scoped access reuses playback entitlement (BR-023/BR-025); platform-wide sessions carry an admin per-session audience toggle. No RSVP, no recurrence, no timed reminders, no in-platform video. **This explicitly reverses the earlier deferral** of "live mentorship / live sessions" out of MVP (still recorded in the PRD Future list) — but only for this lightweight external-link form; Gradex-hosted live streaming, recurring series, RSVP/capacity, and timed reminders remain future.
-**Reason:** Live office hours directly serve the core "no student left alone after they pay" differentiator, and the external-link form is days of work with zero streaming infrastructure and no new compliance — so it can ship inside the timeline without reopening the scope that was cut. Keeping the video off-platform is what makes the reversal safe. Full design in [live-office-hours-design.md](superpowers/specs/2026-07-22-live-office-hours-design.md).
-**Alternatives rejected:** In-platform live video (WebRTC/SFU or reusing the VOD HLS pipeline) — rejected as multi-month scope, unrealistic for a solo dev against 2026-08-15, and duplicating infrastructure video-streaming-design.md deliberately scoped to pre-recorded HLS only; RSVP/capacity + recurring series + timed reminders — deferred to V1 (the timed reminder specifically needs the scheduler D-010 deferred).
+**Decision:** Add lightweight, Course-scoped live office hours to MVP. Instructors create/materially reschedule one-off sessions only for their own PUBLISHED Courses; an owner may still cancel an existing scheduled Session after the Course is Unpublished/Archived. Gradex owns scheduling, entitlement checks, and event-driven notices, while audio/video uses an external Zoom/Meet/Discord link. While the Course remains Published, any active Course or Section entitlement for that Course grants access. Unpublishing/archiving hides Student discovery/join without deleting the Session. Admins may cancel a session for moderation but do not create platform-wide sessions in MVP. Join links remain hidden until the authenticated authorization check succeeds. No RSVP, recurrence, timed reminders, attendance, recordings, calendar integration, or in-platform video. *(Scope narrowed and Section entitlement clarified 2026-07-23.)*
+**Reason:** Course-scoped external links directly support follow-up without adding live-video infrastructure or a platform-wide event/audience model. The reconciled design is in [live-office-hours-design.md](superpowers/specs/2026-07-22-live-office-hours-design.md).
+**Alternatives rejected:** Platform-wide sessions in MVP; in-platform video; RSVP/capacity; recurring series; timed reminders; attendance and recordings.
 **Source:** This session; see [PRD.md §4 Scope](PRD.md) and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-134–BR-141.
+
+## D-014 — Student-only registration and admin-provisioned staff accounts
+
+**Date:** 2026-07-23
+**Decision:** Public registration creates Student accounts only and requires email verification before sign-in. Instructors and additional Admins are invited by an existing Admin. An invitation cannot target an email already attached to any Account; MVP does not auto-convert roles, merge identities, or support multi-role Accounts. One bootstrap Admin is created once through a secure deployment operation, has no credential in the repository, and must change the initial password. Passwords allow 15–128 Unicode characters, reject common/compromised values, use Argon2id, and have no composition or periodic-rotation rule. Account suspension blocks all protected actions immediately, including existing sessions; system design selects the enforcement mechanism.
+**Reason:** This keeps privileged-role creation controlled, ensures account recovery/receipts use a verified address, and defines the security outcome before choosing token/session mechanics.
+**Alternatives rejected:** Public Instructor/Admin signup; implicit role conversion or multi-role Accounts; repository-stored bootstrap credentials; composition rules; suspension delayed until refresh-token expiry.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.2.
+
+## D-015 — Section is canonical; Admin owns all catalog pricing
+
+**Date:** 2026-07-23
+**Decision:** The only content hierarchy is `Course → Section → Lesson`. “Chapter” may be a localized/student-facing label for Section but is not a separate entity. Students may buy one Course or one Section per Order. A Course Entitlement covers all its Sections; a Section Entitlement covers only that Section. A Student with a Section may later buy another Section or the Course, but MVP gives no automatic upgrade credit/proration. Admins exclusively set/change Course and Section prices; Instructors have read-only price visibility. Price changes affect future orders only and are audited.
+**Reason:** The repository already implements Sections, while treating Chapter as separate would create a second overlapping domain entity. Admin pricing prevents Instructor content edits from changing commercial terms.
+**Alternatives rejected:** Separate Chapter and Section entities; Instructor-controlled pricing; retroactively changing transaction values.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.3.
+
+## D-016 — Responsive Arabic-first bilingual website
+
+**Date:** 2026-07-23
+**Decision:** MVP is a responsive website providing the complete Student experience on phones, tablets/iPads, laptops, and desktops. Instructor/Admin experiences remain responsive but complex operations are desktop/tablet optimized. Arabic and English are supported for every role, Arabic is the initial default, preference persists, and layouts support RTL/LTR. Platform-owned UI/player controls target WCAG 2.2 AA. Captions/transcripts remain fast-follow, so Gradex will not claim complete product-level WCAG conformance in MVP.
+**Reason:** The target audience learns across device classes, and both RTL and accessible interaction need to be part of initial design. The scoped conformance wording is honest about the approved media-accessibility boundary.
+**Alternatives rejected:** Native apps in MVP; phone-only/mobile-only positioning; English-only launch; unsupported full-product WCAG claims.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.13–4.14.
+
+## D-017 — Full and partial refunds with counsel-approved eligibility
+
+**Date:** 2026-07-23
+**Decision:** Admins can request one or more full/partial refunds up to the remaining captured balance. Partial success keeps entitlement active; cumulative successful refunds equal to the captured amount revoke it. State changes only after confirmed gateway success. Amount, reason, Admin, gateway reference, status, and history are audited. Refund-policy eligibility is configurable and must be approved by Kuwaiti counsel; the product will not assume that streaming automatically removes refund rights.
+**Reason:** Tap supports amount-controlled refund requests but may reject partial refunds for some payment methods. Separating eligibility from processing lets system design proceed while legal interpretation remains a launch gate.
+**Alternatives rejected:** Full-refund-only MVP; immediate access revocation on request; unverified “content accessed means no refund” language.
+**Source:** Approved documentation reconciliation; Tap [refund API](https://developers.tap.company/reference/create-a-refund) and [response codes](https://developers.tap.company/reference/charge-response-codes).
+
+## D-018 — Manual monthly payouts with system-recorded accounting
+
+**Date:** 2026-07-23
+**Decision:** MVP uses one platform-wide Instructor revenue-share percentage, configured before launch with no assumed default. Share is calculated from net collected revenue after coupons, confirmed refunds, and payment fees. Admins reconcile monthly, transfer manually by bank, record statement/calculation/adjustment/status/reference/audit data, and email the Instructor a monthly statement. Late refunds/chargebacks adjust the next period. No Instructor payout dashboard or automated settlement ships in MVP.
+**Reason:** The accounting model must be designable before the commercial percentage is chosen, while automated settlement and per-course negotiation would add unnecessary launch scope.
+**Alternatives rejected:** Hard-coded placeholder percentage; per-Course revenue-share rules; Instructor withdrawals; automated marketplace settlement.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.8.
+
+## D-019 — Separate public preview and end-to-end content reporting
+
+**Date:** 2026-07-23
+**Decision:** Protected Lesson Resources/Lab Materials are never exposed as samples. An Instructor may optionally upload one separate, explicitly public Course preview asset, validated/quarantined/malware-scanned and covered by a permission confirmation. Entitled Students may report a Course, Lesson, video, Resource, or Lab Material. Reports never auto-hide content; Admins dismiss, request changes, unpublish, or use Account suspension with an audited reason. Duplicate/spam reports are rate-limited.
+**Reason:** This resolves the public sample-lab contradiction while retaining a safe evaluation asset, and completes the Student action required to feed the existing Reported Content queue.
+**Alternatives rejected:** Publicly exposing protected labs; automatic removal on report; an Admin queue with no report origin.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.9–4.10.
+
+## D-020 — Conservative privacy and legal-readiness posture
+
+**Date:** 2026-07-23
+**Decision:** Gradex uses bilingual Privacy/Terms/Refund/checkout disclosures, data minimization, hosted payment entry, encryption, secret/PII-safe logging, versioned consent records, and data-subject request handling. Instructor rosters expose only a Student-chosen display name/alias and Course-scoped learning fields, never direct contact/payment/legal-identity or cross-Course data; direct Student PII remains Admin-only. Retention periods, refund eligibility, privacy-regulation applicability, and consumer wording are counsel/accounting launch gates rather than invented rules. Documentation names CITRA Decision No. 26 of 2024 correctly and states that the official announcement describes Digital Commerce Law No. 10 of 2026 as applying six months after Gazette publication.
+**Reason:** System design needs data classes and lifecycle obligations, but unresolved legal interpretations must not be presented as settled product rules.
+**Alternatives rejected:** Treating unverified legal summaries as enforceable requirements; postponing all privacy design; storing raw payment credentials.
+**Source:** [CITRA Decision No. 26 of 2024](https://www.citra.gov.kw/sites/ar/Pages/DecisionsDetails.aspx?id=6), [Kuwait Government Digital Commerce Law announcement](https://e.gov.kw/sites/KGOArabic/Pages/ApplicationPages/NewsDetail.aspx?nid=64409149), and [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.15.
+
+## D-021 — Explicit Course review and moderation lifecycle
+
+**Date:** 2026-07-23
+**Decision:** First publication follows `DRAFT → PENDING_REVIEW → PUBLISHED`, with `CHANGES_REQUESTED` and resubmission when an Admin requires revision. An approved Course may be unpublished for moderation and republished after resolution. Unpublishing removes it from catalog/new purchase and temporarily blocks Student access to its protected content without deleting Entitlements or progress. Instructor changes to a Published Course use a separate pending revision so the approved live version is not silently changed. Courses with enrollment history are archived rather than deleted.
+**Reason:** Publication readiness, Admin review, live visibility, temporary moderation, revision review, and terminal archival are different states and must not be collapsed into an ambiguous “status.”
+**Alternatives rejected:** Reverting every rejection to Draft with no reason-bearing state; editing live content directly; deleting Courses with commercial history.
+**Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.4–5.
+
+## D-022 — Catalog taxonomy is three Admin-controlled dimensions; Instructors select, never invent
+
+**Date:** 2026-07-23
+**Decision:** A Course is classified on exactly three dimensions: **Major**, **Subject**, and **Study Year**. Major and Subject are Admin-managed bilingual controlled vocabularies of Taxonomy Terms; Subject terms additionally carry an optional academic code (for example `CS 101`). Study Year is a fixed enumeration — `PREP`, `YEAR_1`, `YEAR_2`, `YEAR_3`, `YEAR_4`. Each Course carries exactly one Major, one Subject, and one Study Year. Only Admins create, rename, retire, or delete vocabulary terms, and every such action is audited; Instructors choose from existing terms while authoring and may not add new ones. An Admin may override any Course's assignment. Classification is required before a Course can be submitted for review. A retired term cannot be newly assigned but keeps existing Courses filterable until an Admin reassigns them; a term with zero referencing Courses may be deleted outright.
+**Reason:** [SCREENS.md](SCREENS.md) ST01 already promises subject/major/year catalog filtering, but no entity existed to back it, so system design had nothing to model. Three fixed dimensions keep filter queries exact-match and trivial for a solo developer, and matching the vocabulary boundary to the D-015 catalog-versus-content split keeps discovery quality Admin-owned while leaving per-Course data entry with the Instructor who actually knows the subject.
+**Alternatives rejected:** A single flat Category list plus a difficulty level (rejected — drops the major/year filters SCREENS commits to); a generic polymorphic Tag entity (rejected — join-heavy filters, kind validation pushed into the application layer, and moderation scope this team cannot absorb); free-text Instructor entry (rejected — produces duplicate and mistranslated bilingual terms immediately, which defeats controlled-vocabulary filtering); Admin assigning taxonomy during Course review (rejected — adds a manual step to every review and every correction).
+**Source:** This session; see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-157–BR-160, [DOMAIN_MODEL.md](DOMAIN_MODEL.md) §3, and [PRD.md §5](PRD.md).
+
+## D-023 — Catalog search is bilingual, Arabic-normalized, and scoped to published Courses
+
+**Date:** 2026-07-23
+**Decision:** Catalog search matches a Student's query against Course title, authored description, owning Instructor display name, and the labels/code of the Course's assigned Taxonomy Terms — in **both** Arabic and English regardless of the currently selected interface language — and returns only `PUBLISHED` Courses. Matching is case-insensitive and applies Arabic normalization: strip tashkeel/diacritics and tatweel, fold alef variants (`أ إ آ ٱ` → `ا`), alef maqsura (`ى` → `ي`), taa marbuta (`ة` → `ه`), and Arabic-Indic digits (`٠–٩` → `0–9`). Results are ranked by relevance only; there is no personalization, recommendation, or paid placement in MVP. Search combines with the D-022 filters. The retrieval mechanism (PostgreSQL full-text search with an Arabic configuration, trigram similarity, a materialized search column, or an external index) is a system-design choice, not a product decision.
+**Reason:** Search appeared in the screen inventory with no stated behavior, leaving the single highest-consequence storage decision in the catalog unanchored. Arabic normalization in particular cannot be retrofitted cheaply: an unnormalized index silently fails to match the same word typed with a different hamza or with diacritics, which is the normal case for the Arabic-default audience under D-016.
+**Alternatives rejected:** Searching only in the active interface language (rejected — Gulf students mix Arabic and English terms in one query, and Instructor-authored content is not translated under BR-150); exact-substring matching with no normalization (rejected — fails the majority Arabic case); including Lesson titles or protected content in the index (rejected — leaks structure of paid content into public results); naming a specific search engine here (rejected — belongs to system design under Principle VI).
+**Source:** This session; see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-161–BR-162 and [SCREENS.md](SCREENS.md) ST01.
+
+## D-024 — Students carry a non-unique, self-chosen display name
+
+**Date:** 2026-07-23
+**Decision:** Every Account has a display name that the owner chooses and may change at any time. It defaults to the name supplied at registration or invitation acceptance, is **not** unique (identity remains the normalized email and the internal identifier), accepts 2–50 characters in either script, and rejects URLs, control characters, and markup. The display name is the only identity field an Instructor roster exposes under BR-064; it must never be required to contain legal identity. An Admin may reset an abusive display name through the existing audited moderation path, and the reset is recorded like any other privileged action.
+**Reason:** BR-064, [PRD.md §5](PRD.md), and [SCREENS.md](SCREENS.md) IN07 all depend on a "Student-chosen display name/alias," but the Account entity defined no such attribute, so the privacy boundary those rules describe had nothing concrete behind it. Keeping it non-unique avoids inventing a global namespace — with availability checks, reserved words, squatting, and an RTL/ASCII handle policy — for zero MVP benefit.
+**Alternatives rejected:** A globally unique handle (rejected — a whole namespace and its UX for no MVP requirement); a system-generated opaque pseudonym such as "Student 4821" (rejected — makes rosters useless for the office-hours and community follow-up that is the product's stated differentiator); reusing legal identity in rosters (rejected — contradicts BR-101/D-020 PII minimization).
+**Source:** This session; see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-105, [DOMAIN_MODEL.md](DOMAIN_MODEL.md) §2, and [PRD.md §5](PRD.md).
