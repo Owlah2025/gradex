@@ -116,5 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Review and approve critical transaction, asynchronous-work, provider-failure, and recovery behavior
-for the selected split-managed-PaaS architecture.
+Review and approve security boundaries, observability, architecture validation, and explicitly open
+decisions for the selected split-managed-PaaS architecture.
