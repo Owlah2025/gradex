@@ -1,23 +1,23 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-25 — advanced by user
-> Last repository reconciliation: 2026-07-25 — user-advanced schedule
-> Scheduled day: Day 3 — Closed
+> Current schedule date: 2026-07-26 — advanced by user
+> Last repository reconciliation: 2026-07-26 — user-advanced schedule
+> Scheduled day: Day 4 — In progress
 > Target public go-live: 2026-08-15
-> Days remaining after today: 21 calendar days
+> Days remaining after today: 20 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline and
-platform architecture are approved, but detailed domain/API design and implementation have not
-started, the operating envelope remains provisional, and the founder deliberately deferred all
+platform architecture are approved, but detailed domain/API design and implementation are not
+complete, the operating envelope remains provisional, and the founder deliberately deferred all
 external-owner outreach to August 6. All 20 required entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 3 is closed. The July 25 architecture is approved by the developer/product owner, and Claude's
-final exact review of `c9c2238` returned `APPROVE ARCHITECTURE` with zero critical/high findings.
+Day 4 is in progress. July 26 is defining the complete MVP domain/data/state model from the approved
+July 25 architecture, canonical rules, existing feature designs, and current video-slice schema.
 There is no incomplete July 25 `Must` work.
 
 Repository evidence at the latest reconciliation:
@@ -36,7 +36,7 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Prepare the July 26 domain/data/state design: entities, ownership, invariants, PostgreSQL
+Approve the July 26 domain/data/state design: entities, ownership, invariants, PostgreSQL
 transactions/constraints/indexes, lifecycles, failure states, and retention boundaries.
 
 ## Milestones
@@ -63,7 +63,7 @@ scheduled for August 6 by founder decision and are tracked risks rather than hid
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Full MVP is not yet decomposed behind an architecture baseline | Developer + Codex | Complete the July 25–28 system-design schedule | July 28 | Approved architecture and dependency-ordered delivery slices |
+| Detailed MVP data/API behavior is not yet frozen | Developer + Codex | Complete the July 26–28 system-design schedule | July 28 | Approved domain/data/state and API/security designs plus dependency-ordered delivery slices |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
 ## Required Launch Gates
@@ -121,5 +121,5 @@ was `c9c2238`; all prior dispositions were verified closed and the verdict was
 
 ## Current Next Task
 
-On July 26, start domain/data/state design with explicit module ownership, transaction boundaries,
+Complete July 26 domain/data/state design with explicit module ownership, transaction boundaries,
 database constraints/indexes, lifecycle/failure states, and configurable retention boundaries.
