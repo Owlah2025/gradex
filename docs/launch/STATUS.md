@@ -122,5 +122,5 @@ actionability.
 
 ## Current Next Task
 
-Commit the verified architecture record, obtain the developer/product owner's final document
-review, then submit that exact commit for independent read-only review.
+Commit the corrected architecture record and submit that exact commit for independent read-only
+re-review.

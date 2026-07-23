@@ -1,6 +1,6 @@
 # Gradex Platform Architecture — Design Record
 
-> Status: Design content approved; formal-record and independent reviews pending
+> Status: Design content approved; independent re-review pending
 > Date: 2026-07-25
 > Scope: MVP platform architecture and provisional production topology
 > Change boundary: Design only; no production infrastructure or application behavior is
@@ -25,6 +25,9 @@ PostgreSQL, Redis, S3-compatible storage, and an implemented video-processing/pl
 authentication and Entitlements are not yet implemented. This design preserves that working slice
 while placing it inside the complete MVP architecture described by the canonical product
 documents.
+
+The five conversational approval sections map to this formal record as follows: Section 1 maps to
+§§2–3, Section 2 to §§4–6, Section 3 to §§7–8, Section 4 to §§9–10, and Section 5 to §§11–14.
 
 ## 2. Architecture Decision
 
@@ -99,7 +102,7 @@ These are validation values, not an approved demand forecast:
 | Asset or service | Provisional target |
 |---|---|
 | PostgreSQL | RPO no greater than 15 minutes; RTO no greater than 4 hours |
-| Source media | Versioned durable object storage; successfully completed uploads should not be lost under normal provider failure scenarios |
+| Source media | Durability posture, not an SLO: versioned durable object storage; successfully completed uploads should not be lost under normal provider failure scenarios |
 | Secondary source-media backup | Backup-copy RPO no greater than 24 hours; recovery RTO no greater than 8 hours |
 | Derived HLS assets | Reproducible from retained source media |
 | Redis | No authoritative durability requirement; queued intent is reconstructed from PostgreSQL |
@@ -156,11 +159,11 @@ flowchart LR
 
 ## 5. Runtime Containers
 
-| Container | One responsibility | Must not own |
+| Container | Primary responsibility | Must not own |
 |---|---|---|
 | Next.js frontend | Public and authenticated presentation, localization, interaction, and calls to the API | Authoritative authorization, payment state, Entitlements, secrets, or business invariants |
-| Go API | Authentication/authorization, domain orchestration, PostgreSQL transactions, webhook ingestion, signed-access issuance, and job enqueueing | Large media transfer, FFmpeg, long-running provider work, or presentation state |
-| Go worker | Idempotent asynchronous media, scanning, email, reconciliation, cleanup, reporting projection, and scheduled work | Public ingress or independent business authority |
+| Go API | Synchronous HTTP application boundary: enforce access and coordinate domain commands, queries, webhooks, signed-access issuance, and durable work intent | Large media transfer, FFmpeg, long-running provider work, or presentation state |
+| Go worker | Asynchronous execution boundary: dispatch outbox work and perform idempotent media, scanning, email, reconciliation, cleanup, projection, and scheduled jobs | Public ingress or independent business authority |
 | PostgreSQL | Authoritative business state, transactional outbox, audit, reconciliation state, and provider-reference mirrors | Large media bytes or ephemeral cache state |
 | Redis | Queue transport, cache, and rate-limit coordination | Irreplaceable jobs, Entitlements, payment truth, or unrecoverable state |
 | Object storage/CDN | Versioned source objects, quarantine, private derived assets, controlled previews, backup copy, and byte delivery | Course publication, Entitlement, payment, or moderation decisions |
@@ -177,14 +180,18 @@ email, and malware scanning remain external systems accessed only through adapte
 | Media and Assets | Upload intent, quarantine, validation/scanning workflow, video processing, resources, lab materials, previews, and signed delivery |
 | Commerce | Coupons, Orders, Tap payment attempts, refunds, reconciliation, receipts, and financial state |
 | Entitlements | Grants, expiry, revocation, and authoritative protected-access decisions |
-| Learning | Progress, completion, and Student learning state |
+| Learning | Durable Enrollment create/reuse, Course-scoped roster projection, progress, completion, and Student learning history |
 | Office Hours and Community | Session schedules, meeting-link disclosure, lifecycle, and external support/community links |
+| Moderation | Student Content Reports, triage, resolution, and Admin enforcement orchestration |
 | Notifications | Transactional events, templates, deduplication, delivery attempts, and suppression |
 | Reporting and Payouts | Operational projections, Instructor statements, revenue shares, and payout records |
 | Audit | Append-only evidence for privileged and financially sensitive actions |
 
 Catalog owns only Course-facing review state and feedback. Student reports, moderation decisions,
-and enforcement are Admin workflows; their privileged actions are recorded by Audit.
+and enforcement are Admin workflows owned by Moderation; their privileged actions are recorded by
+Audit. Learning owns Enrollment so Entitlement expiry can end access without deleting the durable
+Course relationship, progress, or least-privilege Instructor roster projection.
+*(BR-025/064/105/114/145/146)*
 
 ### 6.1 Dependency rules
 
@@ -207,6 +214,7 @@ flowchart TD
     Media[Media and Assets]
     Learning[Learning]
     Office[Office Hours and Community]
+    Moderation[Moderation]
     Notify[Notifications]
     Reports[Reporting and Payouts]
     Audit[Audit]
@@ -214,22 +222,37 @@ flowchart TD
 
     Commerce -->|price and scope contract| Catalog
     Commerce -->|atomic grant or revoke command| Entitlements
+    Commerce -->|atomic Enrollment create or reuse| Learning
     Media -->|Lesson and revision contract| Catalog
     Media -->|delivery authorization| Entitlements
+    Media -->|Admin review authorization| Identity
     Learning -->|access decision| Entitlements
     Learning -->|Lesson contract| Catalog
+    Learning -->|display-name roster projection| Identity
     Office -->|ownership and access| Identity
     Office -->|Course scope| Catalog
     Office -->|meeting-link Entitlement| Entitlements
+    Moderation -->|actor and Admin authorization| Identity
+    Moderation -->|reported Course or Lesson| Catalog
+    Moderation -->|reported asset| Media
+    Identity --> Outbox
+    Catalog --> Outbox
     Commerce --> Outbox
     Media --> Outbox
     Learning --> Outbox
     Office --> Outbox
+    Moderation --> Outbox
+    Reports --> Outbox
     Outbox --> Notify
     Outbox --> Reports
     Identity --> Audit
     Catalog --> Audit
+    Media --> Audit
     Commerce --> Audit
+    Entitlements --> Audit
+    Office --> Audit
+    Moderation --> Audit
+    Reports --> Audit
 ```
 
 The arrows represent use of an explicit contract, not permission to write another module's tables.
@@ -249,7 +272,7 @@ flowchart LR
 
     subgraph Backend[Managed backend runtime]
         API[Go API]
-        Worker[Go worker]
+        Worker[Go worker and outbox dispatcher]
         DB[(Managed PostgreSQL)]
         Redis[(Managed Redis)]
     end
@@ -276,11 +299,13 @@ flowchart LR
     API --> DB
     API --> Redis
     API --> Store
-    API -->|checkout and reconciliation| Tap
+    API -->|checkout and provider queries| Tap
     Tap -->|verified webhook| API
-    Redis --> Worker
+    Redis -->|deliver jobs| Worker
+    Worker -->|ack, retry, and queue state| Redis
     Worker --> DB
     Worker --> Store
+    Worker -->|scheduled reconciliation| Tap
     Worker --> Email
     Worker --> Scanner
     Store --> CDN
@@ -341,7 +366,8 @@ thresholds are resolved only when the applicable launch gates have evidence.
 
 1. The API authenticates, authorizes, validates, and checks idempotency where required.
 2. Authoritative state and required Audit/outbox records commit in one PostgreSQL transaction.
-3. A dispatcher publishes committed outbox intent to Redis.
+3. The worker process's outbox-dispatch loop publishes committed intent to Redis independently of
+   the API request lifecycle.
 4. A worker claims and executes work idempotently.
 5. Results, attempt counts, and terminal failures return to PostgreSQL.
 6. Retries use bounded exponential backoff with jitter. Exhausted work becomes a visible
@@ -357,14 +383,17 @@ They are not required for reads or every ordinary API request.
 - Tap-hosted checkout receives a stable Gradex Order/payment-attempt reference.
 - A browser redirect is presentation-only and never grants access.
 - Verified callbacks are stored and deduplicated before processing.
-- Successful payment state, Coupon redemption where applicable, and Entitlement grant commit
-  atomically.
+- Successful payment state, Coupon redemption where applicable, Enrollment create-or-reuse, and
+  Entitlement grant commit atomically.
+- A zero-total Coupon Order skips Tap and commits its `FREE_GRANTED` outcome, Coupon redemption,
+  Enrollment create-or-reuse, and Entitlement grant in one Order-keyed idempotent transaction.
 - Duplicate, delayed, reordered, or conflicting callbacks cannot double-grant access.
 - An unknown result remains pending and enters reconciliation.
 - Confirmed refund state and its Entitlement effect commit atomically under the approved policy.
 
 This preserves Constitution Principle IV and the detailed behavior in the
 [Coupons design](2026-07-22-coupons-system-design.md).
+*(BR-020/022/031/033/121/126/129)*
 
 ### 9.3 Media and downloadable assets
 
@@ -381,14 +410,18 @@ This preserves Constitution Principle IV and the detailed behavior in the
 
 This platform boundary supersedes none of the known gaps recorded in the
 [existing video design](2026-07-17-video-streaming-design.md); those gaps remain implementation
-work.
+work. Course revision, Entitlement, Admin preview, and public-preview behaviors remain governed by
+the canonical rules. *(BR-017/023/050/081/143/144)*
 
 ## 10. Failure and Recovery Behavior
 
 ### 10.1 Provider and infrastructure failure
 
 - **Redis/worker:** PostgreSQL retains outbox and processing state. Missing jobs are republished;
-  duplicate delivery is safe; interrupted transcodes restart into isolated output.
+  duplicate delivery is safe; interrupted transcodes restart into isolated output. The API falls
+  back to a stricter process-local limiter during a brief Redis outage. Identity/recovery issuance
+  fails closed when safe shared enforcement cannot be guaranteed; exact grace and recovery behavior
+  is finalized on July 27.
 - **Tap:** uncertain results remain pending and reconcile. The system never grants Entitlement
   optimistically.
 - **Email:** a failed attempt is recorded and retried without reversing its business transaction.
@@ -396,6 +429,8 @@ work.
 - **Storage/CDN:** delivery returns a controlled unavailable response and alerts; authorization is
   never bypassed.
 - **PostgreSQL:** protected writes and authorization-dependent delivery fail closed.
+- **Progress:** a transient progress-write failure is retried or deferred without interrupting
+  otherwise authorized playback. *(BR-053)*
 
 ### 10.2 Recovery order
 
@@ -423,6 +458,9 @@ foundation and later operational runbooks.
 - Tap callbacks require provider-authenticity verification, replay protection, deduplication, and
   reconciliation.
 - Signed access is short-lived and scoped to the approved asset/version, actor, and operation.
+- Admin Course preview is a distinct audited authorization path. It does not create or require a
+  Student Enrollment/Entitlement; Media requires explicit Admin review authorization and Audit
+  evidence before issuing access. *(BR-081)*
 - Rate limits reflect abuse risk, with stricter treatment for identity, recovery, checkout, refund,
   upload, report, and signed-delivery endpoints.
 - Secrets are injected through managed secret storage and never enter images, source, or logs.
@@ -472,13 +510,19 @@ temporary mitigation, accountable owner, approver, and expiry or next review dat
 
 | Open boundary | Gate | Architecture treatment before resolution |
 |---|---|---|
+| Instructor revenue share | `LG-001` | Reporting/Payouts accepts a versioned configured percentage and effective date; there is no code default |
+| Refund eligibility | `LG-002` | Commerce records the accepted policy version and keeps eligibility/Entitlement effects configurable rather than inferring them |
+| Data retention and deletion | `LG-003` | Data classes retain policy metadata; deletion/anonymization jobs cannot activate with invented periods |
 | Data residency, privacy applicability, cross-border handling | `LG-004` | Prefer a portable Middle East deployment; encrypt and document flows without claiming legal approval |
 | Tap merchant/method approval | `LG-008` | Hosted-payment adapter remains configurable |
 | Refund capability | `LG-009` | Model asynchronous/unsupported behavior; accept only validated production methods |
 | Webhook authenticity | `LG-010` | Verification contract and test vectors are required before adapter acceptance |
 | Malware scanner | `LG-014` | Quarantine-first interface fails closed; no provider is named |
+| Tax, invoice, receipt, and accounting treatment | `LG-016` | Commerce/Reporting preserve extensible immutable transaction fields without assuming tax or document rules |
+| Disputes and chargebacks | `LG-017` | Commerce records immutable dispute events; Entitlement, revenue, payout, notification, and evidence effects remain policy-driven |
 | Transactional email | `LG-018` | Delivery adapter, attempts, suppression, monitoring, and sender configuration remain replaceable |
 | Operating/recovery envelope | `LG-019` | Load, cost, region, scaling, backup, RPO, and RTO values remain provisional |
+| Instructor agreement and content rights | `LG-020` | Identity/Moderation retain versioned agreement and rights evidence boundaries without inventing terms |
 
 Other legal, commercial, content, accessibility, support, accounting, and production gates in
 [LAUNCH_GATES.md](../../LAUNCH_GATES.md) remain unchanged.
