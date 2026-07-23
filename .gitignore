@@ -3,3 +3,7 @@
 
 # Personal Claude Code permissions/config — machine-local, not shared
 .claude/settings.local.json
+
+# Local documentation review bundles — generated artifacts, not source
+/gradex-spec-review.zip
+/docs/gradex-spec-review.zip
