@@ -257,7 +257,8 @@ are resolved.
 
 - Implement Course/Section/Lesson management, ownership, resources/labs metadata, preview metadata,
   taxonomy selection, and price visibility.
-- Implement submission, changes requested, approval, publishing, unpublishing, archiving, and
+- Implement submission, changes requested, approval, publishing, delisting/relisting, retirement,
+  emergency access suspension/restoration, archiving, and
   revision handling.
 - Implement Admin taxonomy and audited Course/Section pricing.
 

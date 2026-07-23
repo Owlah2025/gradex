@@ -376,7 +376,7 @@ Analytics                       Office Hours
 +------------------------------------------------------------+
 ```
 
-Only valid state actions are enabled; change request/unpublish/archive require reason where
+Only valid state actions are enabled; change request/delisting/retirement/access suspension/archive require reason where
 specified.
 
 ## AD06 — Coupons

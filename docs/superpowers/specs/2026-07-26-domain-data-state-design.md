@@ -1,6 +1,6 @@
 # Gradex Domain, Data, and State Design
 
-> Status: In progress — conversational Sections 1–2 approved and locked
+> Status: In progress — conversational Sections 1–3 approved and locked
 > Date: 2026-07-26
 > Scope: Complete MVP authoritative domain state and PostgreSQL model
 > Change boundary: Design only; this record does not implement migrations or application behavior
@@ -25,7 +25,9 @@ The conversational approval sections map to this evolving record as follows:
 
 - Section 1: §§2–3.
 - Section 2: §§4–7.
-- Later sections will add Commerce/Entitlements/Learning and the remaining operational modules.
+- Section 3: §§8–11.
+- Later sections will add the remaining operational modules, retention treatment, and migration
+  sequence.
 
 ## 2. Shared Relational Conventions
 
@@ -114,11 +116,15 @@ Omission, supersession, retirement, and archival are different:
 - **archived:** hidden from normal operational views according to lifecycle, without erasing history.
 
 Retirement never occurs merely because an Instructor omitted content from a draft.
+Catalog delisting removes discovery/new checkout but preserves qualifying existing access. Emergency
+Course access suspension is the distinct elevated legal/security/malware/severe-moderation command
+that blocks existing runtime access; it records constrained reason, Audit, and notification/outbox
+evidence without mutating Entitlements.
 
 A retired Course, Section, Lesson, or authored version remains accessible only through an
-otherwise-active Entitlement whose effective commercial grant event predates `retired_at`. The
-effective event is verified payment success or the zero-value/manual-grant event—not a delayed
-webhook or row-insertion time.
+otherwise-active Entitlement whose `retirement_eligibility_at`, copied from Order `accepted_at`,
+predates `retired_at`. A grandfathered paid Order must remain within its payment deadline and have a
+verified capture occurrence within that deadline. Acquisition/payment/webhook times remain separate.
 
 Each Order Item and Entitlement preserves the approved Course revision used at acquisition. A Course
 Entitlement authorizes the current approved graph plus qualifying retired content from its acquired
@@ -215,9 +221,10 @@ DRAFT → IN_REVIEW → APPROVED → SUPERSEDED
 records an immutable rejection/review decision and clones the reviewed graph into a new `DRAFT`;
 it never reopens the submitted revision. An approved revision is never edited.
 
-The Course presentation lifecycle remains the canonical
-`DRAFT/PENDING_REVIEW/CHANGES_REQUESTED/PUBLISHED/UNPUBLISHED/ARCHIVED` model. A Published Course
-remains Published while another revision is in review.
+The Course presentation lifecycle remains
+`DRAFT/PENDING_REVIEW/CHANGES_REQUESTED/PUBLISHED/DELISTED/ARCHIVED`. Delisting controls discovery
+and new checkout only. A Published Course remains Published while another revision is in review.
+Retirement and emergency access suspension remain orthogonal.
 
 ### 5.2 Stable identities and immutable graphs
 
@@ -230,6 +237,7 @@ remains Published while another revision is in review.
 | `section_versions` / `lesson_versions` | Immutable authored values |
 | revision membership tables | Exact Course/Section/Lesson versions and positions comprising the complete graph |
 | `course_review_decisions` | Immutable reviewer, outcome, reason, evidence, and timestamp |
+| `course_access_suspensions` | Elevated legal/security/malware/severe-moderation block, actor/reason/evidence, start/end, resolution |
 
 Submission and approval validate the entire graph: ownership, exact ancestry, unique ordering,
 classification, nonempty structure, required ready/scanned assets, and absence of retired content.
@@ -267,7 +275,7 @@ without changing stable term IDs.
 
 `catalog_prices` has exactly one target—Course or Section—enforced by foreign keys plus an exclusive
 target check. It stores positive integer fils and explicit currency (`KWD` in MVP). Zero-value access
-uses a Coupon/manual grant, not a zero catalog price.
+uses a real Coupon Order, not a zero catalog price.
 
 `price_changes` immutably records target, old/new amount and currency, Admin, reason, and time.
 `course_access_period_changes` does the same for old/new future-purchase expiry.
@@ -365,7 +373,323 @@ The current `videos` table and direct-asynq handoff are migration inputs, not a 
 source of truth. July 28 sequencing preserves the working slice while moving it into Asset Versions
 and the PostgreSQL outbox.
 
-## 8. Section 1–2 Approval Record
+## 8. Commerce and Payment State
+
+### 8.1 Owned tables
+
+| Table | Purpose and important constraints |
+|---|---|
+| `orders` | One Student, commercial lifecycle, accepted policy/version, currency/totals, revision, distinct `created_at`, `accepted_at`, `payment_deadline_at`, `completed_at`, `expired_at`, `cancelled_at` |
+| `order_items` | Exactly one immutable Course/Section snapshot per Order, target IDs, containing Course, acquired approved revision, title/scope evidence, `access_ends_at`, subtotal/discount/total |
+| `payment_attempts` | Order, scoped idempotency reference, provider account/reference, mutable lifecycle, requested amount/currency, verified capture/occurrence and receipt times |
+| `payment_attempt_state_history` | Immutable old/new Attempt state, source provider event/local observation, reason, timestamp |
+| `payment_provider_events` | Verified/deduplicated immutable callback/API evidence, payload digest, provider event/reference, authenticity result |
+| `payment_reconciliation_cases` | Ambiguous, conflicting, late, or invalid-sequence outcomes requiring retry or operator resolution |
+| `refunds` | Admin request, positive amount/currency, reason, policy evidence, idempotency/provider references, lifecycle |
+| `refund_provider_events` | Verified/deduplicated immutable refund callback/API evidence |
+| `dispute_events` | Immutable provider dispute/chargeback evidence; policy effects remain gated by `LG-017` |
+| `commercial_documents` | Immutable receipt/invoice/refund-document data boundary; required fields/numbering remain gated by `LG-016` |
+
+Only a Student Account may own an Order. `order_items` uses separate Course/Section foreign keys plus
+an exclusive-target check, and `UNIQUE(order_id)` enforces at most one item. A deferred constraint
+trigger or transaction-end invariant requires exactly one item before an Order commits as payable or
+free-granted.
+
+All monetary columns are nonnegative integer fils, share the Order currency, and satisfy:
+
+```text
+subtotal_amount - discount_amount = total_amount
+0 <= discount_amount <= subtotal_amount
+```
+
+`order_items.access_ends_at`, target identity, acquired revision, catalog price, Coupon snapshot,
+accepted policies, amount, and currency never change after Order creation.
+`payment_deadline_at < order_items.access_ends_at` is required.
+
+### 8.2 Order and Payment Attempt lifecycles
+
+```text
+Order:
+PENDING_PAYMENT → PAID → PARTIALLY_REFUNDED → REFUNDED
+       ├────────→ CANCELLED
+       ├────────→ EXPIRED
+       ├────────→ RECONCILIATION_REQUIRED
+       └────────→ FREE_GRANTED
+
+CANCELLED/EXPIRED ── verified evidence money moved ─→ RECONCILIATION_REQUIRED
+
+Payment Attempt:
+CREATED → PENDING → SUCCEEDED | FAILED | CANCELLED
+                    └→ TIMED_OUT → SUCCEEDED | FAILED | CANCELLED | UNKNOWN
+                                     UNKNOWN → definitive provider outcome
+```
+
+Order refund state is updated from confirmed Refund totals but never replaces Refund rows. A zero-
+value Coupon Order enters `FREE_GRANTED`; it has no Payment Attempt or refundable captured amount.
+`CANCELLED` and `EXPIRED` are separate outcomes, not a sequence. `RECONCILIATION_REQUIRED` is a
+non-success exception state resolved only from preserved evidence: safe completion to `PAID`, proof
+of no capture to the applicable terminal outcome, or Refund handling when money moved but access
+cannot be granted.
+
+An Order is accepted only after rechecking Student role/status, target sellability, current price,
+Coupon reservation, future expiry, live conflicting Order/Entitlement coverage, current approved
+revision, and retirement. `accepted_at` is copied into the later Entitlement as
+`retirement_eligibility_at`; `payment_succeeded_at` and `entitlement.acquired_at` remain separate.
+The immutable revision snapshot prevents later graph changes from rewriting the accepted purchase.
+
+Retirement blocks new Orders immediately but does not invalidate an Order accepted before
+`retired_at` that remains within its deadline. Verified provider capture within that deadline may
+grant even when its callback is received later. A capture occurring after deadline or a success
+against a cancelled/expired/conflicting Order records Payment evidence and enters reconciliation;
+it cannot automatically grant or be discarded.
+
+A partial unique index permits only one active `CREATED`/`PENDING`/`UNKNOWN` Attempt per Order. A new
+Attempt is permitted only after the prior one is definitive. `SUCCEEDED` means verified captured
+payment, not authorization. `FAILED`/`CANCELLED` are provider-confirmed terminal outcomes;
+`TIMED_OUT` is a local observation and remains reconcilable; `UNKNOWN` blocks another Attempt.
+Provider occurrence—not event arrival—controls deadline eligibility. Immutable provider events and
+Attempt history preserve every observation/transition.
+
+### 8.3 Refund state
+
+Only an Admin creates a Refund. The command locks the Order and confirmed Refund total and rejects:
+
+- zero/negative or wrong-currency amounts;
+- an amount above remaining captured balance;
+- an unsupported provider/method capability;
+- a request not supported by the accepted policy configuration.
+
+`REQUESTED → PENDING → SUCCEEDED | FAILED | CANCELLED`. External calls occur outside the state
+transaction; verified results return through idempotent provider events. Pending/failed/cancelled
+Refunds do not change access or revenue.
+
+The exact eligibility policy remains versioned/configurable under `LG-002`. Tax/document treatment
+remains gated by `LG-016`; dispute/chargeback effects remain gated by `LG-017`.
+
+### 8.4 Commerce indexes
+
+Indexes cover:
+
+- Student Order history by `(student_id, created_at DESC)`;
+- one live pending Order per exact Student/acquisition scope, backed by access-guard locking for
+  cross-level Course/Section conflicts;
+- operational queues by Order/Attempt/Refund state and age;
+- unique scoped idempotency and provider references;
+- reconciliation cases by state/next-check time;
+- remaining-balance reads by Order;
+- policy/document lookup without exposing provider payloads to ordinary queries.
+
+## 9. Coupons
+
+### 9.1 Relational targets and history
+
+| Table | Purpose |
+|---|---|
+| `coupons` | Normalized code, type/value, validity window, active flag, global cap, `reserved_count`, historical `consumed_count`, creator, revision |
+| `coupon_course_targets` | Relational Course target with `(coupon_id, course_id)` uniqueness |
+| `coupon_section_targets` | Relational Section target with `(coupon_id, section_id)` uniqueness |
+| `coupon_redemptions` | Coupon, Student, Order, discount, `RESERVED/CONSUMED/RELEASED_*` lifecycle, reservation deadline, consume/release evidence |
+
+No target rows in either target table means platform-wide. Targets do not use polymorphic
+`item_type/item_id` columns.
+
+Coupon code is normalized uppercase/trimmed and unique. Percentage is `1..100`; fixed discount is
+positive integer fils. Validity bounds, cap, and discount math use database checks plus command
+validation. Once any Redemption exists, code/type/value are immutable. A Coupon with history
+deactivates rather than deletes.
+
+### 9.2 Reservation and exact capacity invariants
+
+- `UNIQUE(order_id)` ensures one Redemption per Order.
+- A partial unique index on `(coupon_id, student_id)` for `RESERVED/CONSUMED` enforces one
+  capacity-affecting use per Student.
+- Capacity is exact under a Coupon row lock:
+  `reserved_count + consumed_count < max_redemptions`.
+- Paid Order acceptance increments `reserved_count` and inserts `RESERVED` with
+  `reservation_expires_at = order.payment_deadline_at`.
+- Timely paid success atomically changes `RESERVED → CONSUMED`, decrements `reserved_count`, and
+  increments historical `consumed_count`.
+- Order expiry/cancellation changes `RESERVED → RELEASED_UNUSED` and decrements `reserved_count`.
+- Cumulative full Refund changes `CONSUMED → RELEASED_AFTER_FULL_REFUND` for Student eligibility
+  only; it never decrements `consumed_count` or restores global quota. Partial Refund does nothing.
+- Zero-value Order creation inserts directly as `CONSUMED` and increments `consumed_count`.
+- Coupon preview has no side effect. Order creation revalidates and snapshots the result.
+
+The Coupon row and Student eligibility are locked at Order acceptance and again at paid completion.
+Duplicate acceptance/payment/free-grant processing returns the existing Redemption and cannot
+reserve or consume twice.
+
+## 10. Entitlements and Learning
+
+### 10.1 Entitlement-owned tables
+
+| Table | Purpose and important constraints |
+|---|---|
+| `entitlements` | Required unique `source_order_id`, Student, exact Course/Section scope, containing Course, acquired revision, `acquired_at`, `retirement_eligibility_at`, original/effective expiry, constrained revocation evidence, revision |
+| `entitlement_adjustments` | Immutable old/new expiry, elevated Admin, reason, support/refund reference, time |
+| `student_course_access_guards` | One `(student_id, course_id)` row used to serialize grant, adjustment, revocation, and duplicate-coverage checks |
+
+Every Entitlement has exactly one Course or Section target, and its source Order Item must carry the
+same Student, scope, containing Course, acquired revision, and original expiry.
+`UNIQUE(source_order_id)` enforces exactly one Entitlement per successful Order.
+
+Expiry is derived from the authoritative instant; no midnight job mutates rows merely to mark them
+expired:
+
+```text
+revoked_at IS NULL AND current_timestamp < access_ends_at
+```
+
+`REVOKED` is an explicit persisted outcome. `EXPIRED` is a query/runtime classification. Account
+suspension and explicit emergency Course access suspension deny access without rewriting the
+Entitlement. Catalog delisting, retirement, and archival do not independently deny qualifying
+existing access.
+
+The access predicate additionally requires:
+
+- Account is active and role is Student;
+- Course has no active emergency access suspension;
+- target/lesson is in the current graph or qualifying acquired historical graph;
+- `retirement_eligibility_at` predates applicable retirement and the source Order met its deadline;
+- Course or Section scope covers the requested Lesson.
+
+### 10.2 Duplicate and overlap control
+
+Current-time and cross-level Course/Section coverage cannot be safely enforced with one partial
+unique index. The Student/Course access-guard row is locked at Order acceptance and again at paid
+success, Refund/reversal, and expiry adjustment.
+
+At Order acceptance the transaction rejects a conflicting active Entitlement or live pending Order,
+reserves Coupon capacity, and snapshots the graph/terms. At paid success it rechecks coverage before
+consuming the reservation and inserting the source-unique Entitlement. If another successful Order
+already produced conflicting coverage, Payment evidence is retained and the second Order enters
+reconciliation—no duplicate Entitlement is created.
+
+Coverage rules are:
+
+- an active Course Entitlement blocks a Course or any contained Section purchase;
+- an active Section Entitlement blocks that Section only;
+- a Course purchase remains allowed when only Section Entitlements are active, with no credit,
+  proration, automatic Refund, or expiry combination;
+- after that purchase both Entitlements remain independent and access is their union;
+- refund/revocation of the Course Entitlement leaves the Section Entitlement untouched;
+- extending an older Entitlement is rejected when it would overlap a later Entitlement covering the
+  same or broader/narrower conflicting scope.
+
+Indexes cover `(student_id, containing_course_id, access_ends_at)` for non-revoked rows and a
+Section-specific lookup. Database foreign keys and the guard-lock transaction together enforce the
+invariant; an application-only preflight check is insufficient.
+
+### 10.3 Learning-owned tables
+
+| Table | Purpose and important constraints |
+|---|---|
+| `enrollments` | Durable unique Student/Course relationship, first enrollment/acquisition times, lifecycle-independent learning history |
+| `lesson_progress` | Enrollment + stable Lesson, last/max position milliseconds, permanent `completed_at`, first completing Media Asset Version, last-watched time, revision |
+
+`UNIQUE(student_id, course_id)` creates or reuses one Enrollment even for a Section purchase.
+Enrollment has no access-authority state and remains after expiry, revocation, refund, retirement,
+delisting, access suspension, or Account suspension.
+
+`UNIQUE(enrollment_id, lesson_id)` is the Progress identity. Each write requires current runtime
+access and a Lesson reachable through the current approved or qualifying acquired graph. The server
+uses the trusted duration of the exact played Media Asset Version; client percentages are ignored.
+Reported positions are bounded/validated before `GREATEST` updates. `completed_at` and
+`completed_media_asset_version_id` are written once at the server-calculated 90% threshold and never
+cleared. Video replacement preserves completion and maximum historical position.
+
+Progress updates use compare-and-swap/monotonic SQL expressions so reordered or retried writes cannot
+reduce maximum position or completion. Expiry/revocation preserves Progress but blocks further
+playback-derived writes. The Instructor roster joins only Course-scoped Enrollment/Progress
+aggregates to the Account display name contract; it never exposes email, payment data, or
+cross-Course activity.
+
+## 11. Critical Commerce Transactions
+
+### 11.1 Paid Order acceptance
+
+One PostgreSQL transaction:
+
+1. locks the Student/Course access guard and rejects conflicting active Entitlements or live pending
+   Orders for the acquisition scope;
+2. locks/revalidates Course state, current approved graph, retirement, price, expiry, and policies;
+3. locks the Coupon when applicable, validates exact capacity/Student eligibility, and inserts a
+   deadline-matched `RESERVED` Redemption;
+4. inserts the `PENDING_PAYMENT` Order and immutable one-item snapshot with
+   `payment_deadline_at < access_ends_at`;
+5. writes required Audit/outbox intent.
+
+The provider session is created only after this commit. Failure to create it is recorded against the
+Order/Attempt and the reservation is released on cancellation/expiry.
+
+### 11.2 Paid grant
+
+Provider signature/authenticity, payload shape, and evidence normalization occur before the state
+transaction. One PostgreSQL transaction then:
+
+1. stores/deduplicates the verified provider event and locks Order, Attempt, Coupon reservation, and
+   the same Student/Course access guard;
+2. verifies captured amount/currency/reference, provider occurrence within deadline, grandfathered
+   retirement eligibility, and that no conflicting Entitlement now exists;
+3. resolves the Attempt as captured and completes the Order as paid;
+4. moves Coupon Redemption `RESERVED → CONSUMED` when applicable;
+5. creates or reuses the Learning Enrollment;
+6. creates exactly one `UNIQUE(source_order_id)` Entitlement from the immutable Order Item, copying
+   `accepted_at → retirement_eligibility_at` and recording separate `acquired_at`;
+7. writes required Audit evidence and stable-ID outbox events for receipt, reporting/payout, and
+   notification.
+
+Any invariant failure rolls back all authoritative grant effects. A duplicate callback returns the
+existing result. A second successful payment that now conflicts, or any late/unsafe capture, retains
+Payment evidence and moves the Order to reconciliation rather than creating duplicate access.
+
+### 11.3 Zero-value Coupon grant
+
+Order creation and grant occur in one transaction with no gateway:
+
+1. lock the access guard and Coupon capacity;
+2. revalidate target, expiry, price, Coupon, coverage, pending Orders, and retirement;
+3. insert the Order/one immutable Order Item as `FREE_GRANTED`;
+4. insert Coupon Redemption directly as `CONSUMED`;
+5. create/reuse Enrollment and create the Entitlement;
+6. write Audit and stable-ID outbox events.
+
+The scoped Order-creation idempotency key returns the same Order, Redemption, and Entitlement on
+retry.
+
+### 11.4 Confirmed Refund
+
+External provider verification occurs first. A verified successful Refund result transaction:
+
+1. deduplicates the provider event and locks Refund, Order, Entitlement, Coupon Redemption, and
+   access guard as applicable;
+2. marks the Refund successful and recomputes cumulative confirmed amount;
+3. updates the Order's derived refund state;
+4. leaves access active for a partial Refund;
+5. on cumulative full Refund, revokes only the Entitlement whose `source_order_id` is the refunded
+   Order, records the exact successful Refund IDs causing the threshold, and changes Coupon
+   Redemption to `RELEASED_AFTER_FULL_REFUND` exactly once without restoring historical quota;
+6. emits immutable reporting/payout adjustment, Audit, and notification events.
+
+It never deletes Enrollment/Progress or alters any other Entitlement. Coupon reuse still requires an
+active applicable Coupon with remaining global capacity. A later dispute/chargeback uses separate
+immutable events and cannot inherit an invented Entitlement policy before `LG-017`.
+
+### 11.5 Entitlement expiry adjustment
+
+The elevated Admin command locks the access guard and Entitlement, checks compare-and-swap and
+overlap rules, updates effective expiry, inserts the immutable adjustment, and writes Audit plus
+Student-notification outbox evidence. The original expiry and Order Item never change.
+
+### 11.6 Constrained Entitlement reversal
+
+There is no generic Admin “revoke Entitlement” command. A zero-value Entitlement has no Refund path
+and normally ends only through expiry. Any earlier reversal must reference a defined and authorized
+source workflow—reconciliation correction, approved fraud/abuse policy, future chargeback-equivalent
+policy, or legal action—with constrained reason, actor, evidence, Audit, and notification/outbox.
+Unavailable/unapproved workflows cannot be selected as free-form reasons.
+
+## 12. Section 1–3 Approval Record
 
 The developer/product owner approved:
 
@@ -380,7 +704,20 @@ The developer/product owner approved:
 - type-specific Media state and immutable attempt/object evidence;
 - strict price/asset target and checksum constraints;
 - immutable single-role Accounts with no Student capability for Instructor/Admin roles.
+- every ordinary Entitlement originating from a paid or zero-value Coupon Order; there is no
+  separate manual Admin grant.
+- exact Coupon reservation/consumption/release capacity;
+- explicit Order cancellation, expiry, and reconciliation state/timestamps;
+- separate Order acceptance, provider capture, Entitlement acquisition, and retirement eligibility;
+- one active Attempt across `CREATED/PENDING/UNKNOWN` with immutable observation history;
+- access-guard locking at both Order acceptance and paid success;
+- independent Section-to-Course Entitlements and union/refund behavior;
+- catalog delisting separated from retirement and emergency Course access suspension;
+- source-Order-only full-Refund revocation and constrained non-Refund reversal;
+- access-checked, exact-Asset-Version Progress evidence;
+- external provider verification before atomic PostgreSQL result application.
 
-Sections covering Commerce, Coupons, Entitlements, Learning, Moderation, Office Hours,
-Notifications, Reporting/Payouts, Audit, retention, transactions, indexes, and migration sequencing
-remain in progress.
+Conversational Section 3 is approved and locked after these corrections.
+
+Sections covering Moderation, Office Hours, Notifications, Reporting/Payouts, Audit, retention,
+remaining asynchronous failure state, and migration sequencing remain in progress.

@@ -23,37 +23,37 @@ implementation-level unknowns.
 - **Alternatives considered**: gateway-side promo codes (rejected because Gradex owns the Order
   amount and the Coupon rules must remain gateway-independent).
 
-## R-03 — Redemption commit timing (soft global cap, exact per-user)
+## R-03 — Reserve exact capacity at Order acceptance
 
-- **Decision**: Validity enforced hard at order creation; redemption **count** committed only
-  on payment-success / free-grant, inside the same enrollment-grant transaction, keyed by the
-  stable Order identifier. Paid callbacks are also deduplicated by their payment-attempt/gateway
-  reference under BR-033. Global cap is soft; per-user is exact.
-- **Rationale**: No phantom redemptions from abandoned checkouts; one Order key covers both paid
-  and gateway-free grant branches, while gateway callback deduplication prevents repeated paid
-  processing. Cap softness is a marketing nicety, not a money-loss risk, at launch scale.
-  Design approach 1 / BR-129.
-- **Alternatives considered**: reserve-at-checkout-with-expiry-job (rejected — real infra for a
-  soft benefit); commit-at-checkout-never-release (rejected — abandoned checkouts burn the cap).
+- **Decision**: Paid Order acceptance locks the Coupon and creates a deadline-matched `RESERVED`
+  Redemption. Timely verified capture consumes it in the Enrollment/Entitlement transaction;
+  cancellation/expiry releases it unused. A zero-value Order consumes immediately. Capacity counts
+  reservations plus historical consumed uses.
+- **Rationale**: Prevents accepting discounted payments that cannot be honored after another Order
+  exhausts the cap. Stable Order/provider keys keep each transition idempotent. D-028/BR-128/129.
+- **Alternatives considered**: soft capacity until capture (superseded—can accept money against
+  unavailable quota); commit-at-checkout-never-release (abandoned Orders burn capacity).
 
 ## R-04 — Student consuming-redemption enforcement
 
-- **Decision**: MVP has no configurable per-user limit. It allows one consuming Redemption per
-  Coupon/Student. A partial unique constraint on an unreleased row, or an equivalent transactional
-  invariant, enforces it. Cumulative confirmed full Refund sets the historical Redemption's release
-  state so the Student may consume the Coupon again; partial Refund does not.
+- **Decision**: MVP has no configurable per-user limit. It permits one `RESERVED`/`CONSUMED`
+  Redemption per Coupon/Student through a partial unique constraint. Unused reservation or
+  cumulative full Refund releases Student eligibility; partial Refund does not.
 - **Rationale**: This preserves exact eligibility and complete history without a hard
   `unique(coupon_id, student_id)` constraint that would make the approved full-refund release
   impossible. BR-128/129/131.
 - **Alternatives considered**: deleting the Redemption or decrementing the global historical count
   (rejected because both erase what happened); configurable limits above one (out of MVP).
 
-## R-05 — Concurrency on commit
+## R-05 — Concurrency on reservation and consumption
 
-- **Decision**: On commit, lock the Coupon row, re-read `redemption_count` and Student consuming
-  state, insert the Redemption, and increment the historical count—all in the grant transaction.
-- **Rationale**: Serializes concurrent commits on the same coupon; keeps count consistent with
-  redemption rows. Postgres row lock is sufficient at this scale.
+- **Decision**: At Order acceptance, lock the Coupon, verify
+  `reserved_count + consumed_count < max_redemptions`, insert `RESERVED`, and increment reserved
+  count. At paid success, lock again and atomically transfer reserved capacity to historical
+  consumed capacity. Release decrements only reserved capacity; full Refund never decrements
+  historical consumed count.
+- **Rationale**: Serializes capacity before payment while preserving exact history. PostgreSQL row
+  locking is sufficient at launch scale.
 - **Alternatives considered**: advisory locks / serializable isolation (unnecessary heavier
   machinery here).
 
@@ -85,8 +85,8 @@ implementation-level unknowns.
 
 ## R-09 — Refund release behavior
 
-- **Decision**: Partial Refund leaves the Redemption consuming. In the transaction that confirms
-  cumulative full Refund, mark it released once. Keep the historical record and global count.
+- **Decision**: Partial Refund leaves `CONSUMED`. Cumulative full Refund moves to
+  `RELEASED_AFTER_FULL_REFUND` once. Keep history and `consumed_count`; global quota is not restored.
 - **Rationale**: Implements BR-131 while making duplicate/out-of-order refund confirmation safe.
 - **Alternatives considered**: release on any partial Refund (rejected); release the global cap slot
   or delete history (rejected).

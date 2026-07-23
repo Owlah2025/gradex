@@ -1,14 +1,12 @@
 # Phase 1 Data Model: Coupons System
 
-> Status: Design input; migration numbering and final schema must be revalidated during platform
-> system design.
+> Status: Design input; capacity mechanics reconciled 2026-07-26 by D-028.
 
 All money is BIGINT **fils**. Timestamps are `timestamptz` instants stored in UTC.
 
 ## Enums
 
 - `coupon_discount_type`: `percentage` | `fixed`
-- `coupon_target_type`: `course` | `section`
 
 ## Table: `coupons`
 
@@ -21,7 +19,8 @@ All money is BIGINT **fils**. Timestamps are `timestamptz` instants stored in UT
 | `valid_from` | timestamptz | NULL | null = open start |
 | `valid_until` | timestamptz | NULL; not before `valid_from` | null = open end |
 | `max_redemptions` | bigint | NULL, `> 0` | null = unlimited global historical cap |
-| `redemption_count` | bigint | NOT NULL, default 0, `>= 0` | historical committed count; never decremented |
+| `reserved_count` | bigint | NOT NULL, default 0, `>= 0` | live paid-Order reservations |
+| `consumed_count` | bigint | NOT NULL, default 0, `>= 0` | historical consumed count; never decremented |
 | `is_active` | bool | NOT NULL, default true | immediate validation kill switch |
 | `created_by` | uuid | NOT NULL, FK → Accounts | Admin |
 | `created_at` / `updated_at` | timestamptz | NOT NULL | audit timestamps |
@@ -29,24 +28,14 @@ All money is BIGINT **fils**. Timestamps are `timestamptz` instants stored in UT
 There is no configurable `per_user_limit`: MVP always permits one consuming redemption per
 Coupon/Student at a time.
 
-## Table: `coupon_targets`
+## Tables: `coupon_course_targets` and `coupon_section_targets`
 
-No rows for a Coupon means platform-wide applicability. Rows restrict it to the listed items.
-
-| column | type | constraints |
-|---|---|---|
-| `coupon_id` | uuid | NOT NULL, FK → coupons(id) ON DELETE CASCADE |
-| `item_type` | `coupon_target_type` | NOT NULL (`course` or `section`) |
-| `item_id` | uuid | NOT NULL; must resolve to the matching canonical entity |
-| composite | | UNIQUE (`coupon_id`, `item_type`, `item_id`) |
-
-System design must choose how polymorphic target integrity is enforced; it cannot accept a missing
-or mismatched Course/Section.
+No rows in either table means platform-wide. Each table uses real relational foreign keys and
+`UNIQUE(coupon_id, course_id)` or `UNIQUE(coupon_id, section_id)`; no polymorphic target ID exists.
 
 ## Table: `coupon_redemptions`
 
-One row per committed historical use. Full refund releases consuming status without deleting or
-rewriting the historical event.
+One row per reservation/use. History remains through release.
 
 | column | type | constraints | notes |
 |---|---|---|---|
@@ -55,16 +44,15 @@ rewriting the historical event.
 | `student_id` | uuid | NOT NULL, FK → Accounts | Student role |
 | `order_id` | uuid | NOT NULL, FK → Orders, UNIQUE | idempotent order association |
 | `amount_discounted` | bigint | NOT NULL, `>= 0` | fils snapshot |
-| `redeemed_at` | timestamptz | NOT NULL | historical commit time |
-| `released_at` | timestamptz | NULL | set only after cumulative confirmed full refund |
-| `release_reason` | text/enum | NULL with `released_at` | `FULL_REFUND` in MVP |
+| `state` | constrained text | `RESERVED`, `CONSUMED`, `RELEASED_UNUSED`, `RELEASED_AFTER_FULL_REFUND` | |
+| `reservation_expires_at` | timestamptz | required only while reserved | equals Order payment deadline |
+| `reserved_at` / `consumed_at` | timestamptz | state-consistent | |
+| `released_at` / `release_reason` | timestamp/state reason | state-consistent | |
 
-Use a partial unique constraint (or an equivalent transactionally enforced invariant) so there is
-at most one row for `(coupon_id, student_id)` where `released_at IS NULL`. This retains earlier
-history while allowing a later redemption after full refund.
+Use a partial unique constraint so there is at most one row per `(coupon_id, student_id)` in
+`RESERVED`/`CONSUMED`. This retains history while allowing later use after release.
 
-Indexes support Coupon history, Student eligibility, and Order lookup. `redemption_count` remains a
-global historical committed count and is not decremented when `released_at` is set.
+Indexes support Coupon history, reservation expiry, Student eligibility, and Order lookup.
 
 ## External Order Contract
 
@@ -87,17 +75,18 @@ Owned by the Order/checkout subsystem. See
 3. Validate active state, time window, global historical cap, Student consuming eligibility, and
    absence of an active Entitlement before order creation. *(BR-024, BR-128)*
 4. Snapshot the Coupon and monetary values on the Order. *(BR-128)*
-5. Commit Redemption only with payment success or free grant in the entitlement-grant transaction.
-   Failed/abandoned attempts create no Redemption. *(BR-126, BR-129)*
-6. Keep the global cap soft only for an already-priced Order as approved in approach 1. *(BR-129)*
-7. A partial Refund leaves `released_at` null. Cumulative confirmed full Refund sets it once without
-   deleting history or decrementing `redemption_count`. *(BR-131)*
+5. Paid Order acceptance reserves capacity through its payment deadline; cancellation/expiry
+   releases unused capacity. *(BR-128)*
+6. Timely verified capture consumes the reservation in the Entitlement transaction; a zero-value
+   Order consumes directly. Capacity counts reserved plus historical consumed uses. *(BR-129)*
+7. Partial Refund stays consumed. Cumulative full Refund releases Student eligibility without
+   deleting history, decrementing `consumed_count`, or restoring global quota. *(BR-131)*
 8. Freeze code/type/value after first historical Redemption; preserve delete/deactivate behavior.
    *(BR-130)*
 9. Apply no more than one Coupon per Order. *(BR-127)*
 
 ## Audit
 
-Record Coupon create/edit/deactivate/delete, Redemption commit, and full-refund eligibility release
+Record Coupon create/edit/deactivate/delete, reservation, consumption/release, and full-refund release
 with actor/system source, target, Order, outcome, and timestamp. Never log a secret or unnecessary
 Student PII. *(BR-133, BR-156)*

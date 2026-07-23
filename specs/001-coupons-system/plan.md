@@ -1,6 +1,6 @@
 # Implementation Plan: Coupons System
 
-**Branch**: `001-coupons-system` | **Date**: 2026-07-22 | **Reconciled**: 2026-07-23 | **Spec**: [spec.md](spec.md)
+**Branch**: `001-coupons-system` | **Date**: 2026-07-22 | **Reconciled**: 2026-07-26 | **Spec**: [spec.md](spec.md)
 
 > Status: Draft implementation input. Revalidate package boundaries, API conventions, migration
 > numbering, and transaction ownership after platform system design.
@@ -12,10 +12,11 @@
 The proposed implementation adds an Admin-managed Coupon subsystem to the Go backend: a
 provisional `coupon` domain with types, repository, and service; Admin + Student HTTP capabilities;
 and a schema migration whose sequence number is assigned when tasks are ordered. Discounts are
-computed in integer fils in the service layer **before** a payment session is created;
-a 0-KWD result routes to a direct enrollment grant. Redemption commit is deferred to the
-order's payment-success / free-grant transaction, keyed by the stable Order identifier. The paid
-branch separately deduplicates callbacks by payment-attempt/gateway reference.
+computed in integer fils before a payment session is created. Paid Order acceptance reserves exact
+Coupon capacity through the payment deadline; verified timely capture consumes it in the
+Enrollment/Entitlement transaction, while cancellation/expiry releases it. A 0-KWD result consumes
+and grants in one no-gateway transaction. Stable Order/provider references make transitions
+idempotent.
 
 **Critical sequencing:** real Accounts/auth, catalog prices, Orders/checkout/payments,
 Enrollment/Entitlement, Refunds, and audit do not exist yet. Only pure discount/validation logic can
@@ -30,7 +31,8 @@ Platform system design must sequence these foundations without duplicate tempora
 **Primary Dependencies**: Gin (HTTP) and pgx v5/PostgreSQL. Redis exists for the video queue;
 whether commerce/Coupon processing uses it is a platform system-design decision.
 
-**Storage**: Proposed PostgreSQL tables (`coupons`, `coupon_targets`, `coupon_redemptions`) +
+**Storage**: PostgreSQL (`coupons`, relational Course/Section target tables,
+`coupon_redemptions`) +
 coupon-related columns on the future `orders` table (defined as contract, added by the orders
 migration, not this one). Money as integer **fils** (BIGINT).
 
@@ -45,9 +47,9 @@ design.
 **Performance Goals**: coupon preview + apply are write-path-adjacent; stay within PRD p95
 < 800ms for write/transactional endpoints. Preview is a read (< 300ms target).
 
-**Constraints**: no floats on money; discount clamped `[0, subtotal]`; one active consuming
-Redemption per Coupon/Student with full-refund release; global cap intentionally soft (design
-approach 1); all Coupon mutations and Redemption releases audit-logged.
+**Constraints**: no floats on money; discount clamped `[0, subtotal]`; one active
+`RESERVED`/`CONSUMED` Redemption per Coupon/Student; exact reserved-plus-consumed global capacity;
+full-Refund eligibility release without quota restoration; all transitions audited.
 
 **Scale/Scope**: Initial business target is 100–500 paid Students and 8–12 Courses. Correctness
 under retries/concurrency is mandatory; system design validates performance/capacity assumptions.
@@ -101,12 +103,12 @@ backend/
 │   │   ├── types.go                # Coupon, CouponTarget, CouponRedemption, enums, DTOs
 │   │   ├── discount.go             # pure discount math (fils, %/fixed, clamp) — unit-tested
 │   │   ├── validate.go             # pure validation (window/scope/cap/consuming-use/active)
-│   │   ├── service.go              # orchestration: preview, apply-at-order-creation, commit-on-grant
-│   │   ├── repo.go                 # SQL: CRUD, row-locked commit, redemption insert, stats
+│   │   ├── service.go              # orchestration: preview, reserve, consume, release
+│   │   ├── repo.go                 # SQL: CRUD, row-locked capacity/transitions, stats
 │   │   ├── audit.go                # audit-log writes for create/edit/deactivate/redeem
 │   │   ├── discount_test.go        # unit
 │   │   ├── validate_test.go        # unit
-│   │   └── coupon_integration_test.go  # free-grant, commit/release, uniqueness, soft-cap
+│   │   └── coupon_integration_test.go  # reserve/consume/release, free-grant, exact capacity
 │   ├── httpapi/
 │   │   ├── coupon_handlers.go      # NEW: admin + student endpoints
 │   │   └── router.go               # MODIFIED: wire admin + checkout coupon groups
@@ -136,7 +138,7 @@ subsystem.
 
 ## Phase Gate Notes
 
-- **Blocked on platform foundations:** Admin CRUD/preview/commit/refund release require Account
+- **Blocked on platform foundations:** Admin CRUD/preview/reserve/consume/refund release require Account
   authorization, Course/Section prices, Orders, Enrollment/Entitlement, Refunds, and audit; paid
   paths additionally require the gateway adapter.
 - **Independent before those foundations:** integer-fils discount math and validation rules can be

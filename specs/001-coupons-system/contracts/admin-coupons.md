@@ -31,8 +31,8 @@ Expected outcomes: created; duplicate normalized code; invalid type/value/window
 
 ## List and Detail
 
-- `GET /api/v1/admin/coupons` — paginated/filterable list with historical committed count and global
-  cap.
+- `GET /api/v1/admin/coupons` — paginated/filterable list with reserved/historical-consumed counts
+  and global cap.
 - `GET /api/v1/admin/coupons/:id` — Coupon, Course/Section targets, Redemption history, releases, and
   relevant audit data.
 
@@ -44,7 +44,8 @@ Example list item:
   "code": "WELCOME20",
   "discount_type": "percentage",
   "discount_value": 20,
-  "redemption_count": 12,
+  "reserved_count": 3,
+  "consumed_count": 12,
   "max_redemptions": 100,
   "is_active": true,
   "valid_until": "2026-08-31T23:59:59Z"

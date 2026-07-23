@@ -83,7 +83,7 @@ decision for history.
 ## D-010 — Notifications: transactional-only MVP on email + in-app center; lifecycle/marketing deferred
 
 **Date:** 2026-07-21
-**Decision:** MVP ships a fixed transactional notification policy using a minimal in-app center plus email where required. In-app + email events are purchase receipt, refund status, password/security events, Account invitation, Course approval/changes requested, office-hours cancellation/material rescheduling, and an Admin extension or shortening of an individual Entitlement. New office-hours sessions (to currently entitled Students) and new Instructor Course/revision submissions (to Admin operations) are recorded in-app and may also use email when operationally appropriate. Video-processing completion targets the Instructor. Required transactional/security messages cannot be disabled. Marketing, preferences, WhatsApp/SMS, and push are post-MVP. *(Expanded 2026-07-26 to cover approved Entitlement adjustments.)*
+**Decision:** MVP ships a fixed transactional notification policy using a minimal in-app center plus email where required. In-app + email events are purchase receipt, refund/reconciliation status, password/security events, Account invitation, Course approval/changes requested, office-hours cancellation/material rescheduling, Admin Entitlement expiry adjustment, and emergency Course access suspension/restoration. New office-hours sessions (to currently entitled Students) and new Instructor Course/revision submissions (to Admin operations) are recorded in-app and may also use email when operationally appropriate. Video-processing completion targets the Instructor. Required transactional/security messages cannot be disabled. Marketing, preferences, WhatsApp/SMS, and push are post-MVP. *(Expanded 2026-07-26 for Entitlement adjustment, reconciliation, and emergency access suspension.)*
 **Reason:** These messages complete existing account, commerce, moderation, and office-hours flows without creating a segmentation or preference engine. The in-app record remains durable; email delivery remains best-effort and never controls the underlying transaction.
 **Alternatives rejected:** Email-only MVP; granular notification settings; lifecycle/marketing automation; WhatsApp/SMS; push.
 **Source:** This session; see [PRD.md §5 Notifications](PRD.md), [PRD.md §4 Scope](PRD.md), and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-120–BR-123.
@@ -99,15 +99,19 @@ decision for history.
 ## D-012 — Coupons in MVP: admin-only discount codes applied pre-gateway
 
 **Date:** 2026-07-22
+**Status:** Capacity/commit timing amended on 2026-07-26 by D-028. The approved scope, ownership,
+discount behavior, targets, and refund-release rule remain in force.
 **Decision:** Add an admin-managed coupon system to MVP. Admins (only) mint percentage or fixed-amount codes (integer fils), optionally scoped to Course(s)/Section(s) or platform-wide. A code is validated and applied server-side before the Tap payment session; a zero-value order grants entitlement without a gateway call. One coupon applies per order. Each Student may consume a code once at a time: failed/abandoned attempts do not consume it, and a fully refunded purchase releases that Student's redemption eligibility while retaining the historical redemption/refund records. Global caps remain configurable; per-user limits greater than one are not supported. Coupons never modify catalog prices. *(Section terminology and redemption/refund behavior amended 2026-07-23.)*
 **Reason:** Launch promos and seeding free access are standard go-to-market levers, and the insertion point is clean—the server computes the Order amount before hosted checkout. Admin-only matches the BR-019 pricing boundary and prevents an Instructor discount side door. Full design in [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md).
-**Alternatives rejected:** Instructor-created coupons (deferred — conflicts with Admin-only pricing ownership in BR-019); disallowing free (100%) codes (rejected — free-seeding is a launch need and reuses entitlement/idempotency machinery); reserving redemptions at checkout with an expiry job (rejected — unnecessary background-job scope for a soft global marketing cap).
+**Alternatives rejected at the time:** Instructor-created coupons; disallowing free codes; capacity
+reservation at checkout. The reservation rejection was superseded by D-028 after payment-race
+review showed that exact pre-payment capacity is required.
 **Source:** This session; see [PRD.md §4 Scope](PRD.md), [PRD.md §5 Payments](PRD.md), and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-124–BR-133.
 
 ## D-013 — Live office hours in MVP (external-link only) — reverses the live-sessions deferral
 
 **Date:** 2026-07-22
-**Decision:** Add lightweight, Course-scoped live office hours to MVP. Instructors create/materially reschedule one-off sessions only for their own PUBLISHED Courses; an owner may still cancel an existing scheduled Session after the Course is Unpublished/Archived. Gradex owns scheduling, entitlement checks, and event-driven notices, while audio/video uses an external Zoom/Meet/Discord link. While the Course remains Published, any active Course or Section entitlement for that Course grants access. Unpublishing/archiving hides Student discovery/join without deleting the Session. Admins may cancel a session for moderation but do not create platform-wide sessions in MVP. Join links remain hidden until the authenticated authorization check succeeds. No RSVP, recurrence, timed reminders, attendance, recordings, calendar integration, or in-platform video. *(Scope narrowed and Section entitlement clarified 2026-07-23.)*
+**Decision:** Add lightweight, Course-scoped live office hours to MVP. Instructors create/materially reschedule one-off sessions only for their own PUBLISHED Courses; an owner may still cancel an existing scheduled Session after the Course is Delisted/Archived. Gradex owns scheduling, entitlement checks, and event-driven notices, while audio/video uses an external Zoom/Meet/Discord link. Any qualifying active Course or Section Entitlement grants access; delisting/retirement/archival alone does not hide an existing entitled Student's scheduled Session, while cancellation or emergency Course access suspension does. Admins may cancel a session for moderation but do not create platform-wide sessions. Join links remain hidden until authenticated authorization succeeds. No RSVP, recurrence, timed reminders, attendance, recordings, calendar integration, or in-platform video. *(Access semantics amended 2026-07-26 by D-029.)*
 **Reason:** Course-scoped external links directly support follow-up without adding live-video infrastructure or a platform-wide event/audience model. The reconciled design is in [live-office-hours-design.md](superpowers/specs/2026-07-22-live-office-hours-design.md).
 **Alternatives rejected:** Platform-wide sessions in MVP; in-platform video; RSVP/capacity; recurring series; timed reminders; attendance and recordings.
 **Source:** This session; see [PRD.md §4 Scope](PRD.md) and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-134–BR-141.
@@ -155,7 +159,7 @@ decision for history.
 ## D-019 — Separate public preview and end-to-end content reporting
 
 **Date:** 2026-07-23
-**Decision:** Protected Lesson Resources/Lab Materials are never exposed as samples. An Instructor may optionally upload one separate, explicitly public Course preview asset, validated/quarantined/malware-scanned and covered by a permission confirmation. Entitled Students may report a Course, Lesson, video, Resource, or Lab Material. Reports never auto-hide content; Admins dismiss, request changes, unpublish, or use Account suspension with an audited reason. Duplicate/spam reports are rate-limited.
+**Decision:** Protected Lesson Resources/Lab Materials are never exposed as samples. An Instructor may optionally upload one separate, explicitly public Course preview asset, validated/quarantined/malware-scanned and covered by a permission confirmation. Entitled Students may report a Course, Lesson, video, Resource, or Lab Material. Reports never auto-hide content; Admins dismiss, request changes, delist, retire, invoke constrained emergency Course access suspension, or use Account suspension with an audited reason. Duplicate/spam reports are rate-limited. *(Moderation actions amended 2026-07-26 by D-029.)*
 **Reason:** This resolves the public sample-lab contradiction while retaining a safe evaluation asset, and completes the Student action required to feed the existing Reported Content queue.
 **Alternatives rejected:** Publicly exposing protected labs; automatic removal on report; an Admin queue with no report origin.
 **Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.9–4.10.
@@ -171,6 +175,8 @@ decision for history.
 ## D-021 — Explicit Course review and moderation lifecycle
 
 **Date:** 2026-07-23
+**Status:** Visibility/access semantics superseded on 2026-07-26 by D-029. The review/revision and
+archival decisions remain in force.
 **Decision:** First publication follows `DRAFT → PENDING_REVIEW → PUBLISHED`, with `CHANGES_REQUESTED` and resubmission when an Admin requires revision. An approved Course may be unpublished for moderation and republished after resolution. Unpublishing removes it from catalog/new purchase and temporarily blocks Student access to its protected content without deleting Entitlements or progress. Instructor changes to a Published Course use a separate pending revision so the approved live version is not silently changed. Courses with enrollment history are archived rather than deleted.
 **Reason:** Publication readiness, Admin review, live visibility, temporary moderation, revision review, and terminal archival are different states and must not be collapsed into an ambiguous “status.”
 **Alternatives rejected:** Reverting every rejection to Draft with no reason-bearing state; editing live content directly; deleting Courses with commercial history.
@@ -227,3 +233,56 @@ overrides in MVP; dynamically changing existing Entitlements when the Course def
 unaudited expiry edits.
 **Source:** Approved July 26 domain/data/state design Section 1; see
 [the July 26 daily record](launch/daily/2026-07-26.md).
+
+## D-027 — Every MVP Entitlement originates from an Order
+
+**Date:** 2026-07-26
+**Decision:** Every ordinary Course/Section Entitlement originates from exactly one Order. Paid
+Orders grant only after verified payment success; a valid 100%/fixed-to-zero Coupon uses the
+existing `FREE_GRANTED` Order path without contacting Tap. Admins may extend or shorten an existing
+Entitlement but cannot create access through a separate manual-grant command.
+**Reason:** A single commercial origin keeps expiry disclosure, Course revision snapshot, Coupon
+history, access, receipts, refunds, reporting, and Audit evidence on one transaction model. Targeted
+100% Coupons already provide auditable free seeding without a second grant workflow.
+**Alternatives rejected:** Direct Admin Entitlement creation; an Entitlement with no Order origin;
+using a zero catalog price as an implicit grant.
+**Source:** Approved July 26 domain/data/state scope decision; see
+[the July 26 daily record](launch/daily/2026-07-26.md).
+
+## D-028 — Reserve Coupon capacity when Gradex accepts an Order
+
+**Date:** 2026-07-26
+**Decision:** A paid Coupon Order atomically reserves Coupon capacity when Gradex accepts its
+immutable commercial terms. The reservation shares the Order payment deadline, counts against
+global capacity, and blocks the Student's concurrent reuse. Verified timely capture consumes it in
+the Entitlement transaction; Order expiry/cancellation releases an unused reservation. A
+zero-value Coupon Order consumes immediately. Historical consumed count never decrements, including
+after full Refund; full Refund only releases that Student's consuming eligibility. Orders have
+explicit cancellation, expiry, and reconciliation-required outcomes, and retirement eligibility is
+copied from the Order's pre-retirement `accepted_at`, while acquisition completion remains separately
+recorded.
+**Reason:** Deferring all Coupon capacity until capture can accept more discounted payments than the
+cap can honor. Separating acceptance, payment occurrence, acquisition, and retirement eligibility
+also makes delayed callbacks and retirement races deterministic.
+**Alternatives rejected:** Soft global capacity after pricing; creating Redemption only at payment
+success; using webhook arrival time for deadline/retirement eligibility; silently granting or
+discarding late/conflicting payments.
+**Source:** Approved July 26 Commerce review; see
+[Gradex Domain, Data, and State Design](superpowers/specs/2026-07-26-domain-data-state-design.md).
+
+## D-029 — Catalog delisting is separate from emergency Course access suspension
+
+**Date:** 2026-07-26
+**Decision:** Ordinary catalog delisting removes a Course from public discovery and new checkout but
+does not deny existing entitled Students. Retirement blocks future acquisition/inclusion while
+preserving qualifying existing access. Immediate denial of existing Student access requires a
+separate elevated Course access-suspension command with a constrained legal, security, malware, or
+severe-moderation reason, immutable Audit evidence, and notification/outbox intent. Entitlements are
+not rewritten by any of these Course operations.
+**Reason:** Visibility, future sellability, content retirement, and emergency access denial have
+different actors, consequences, and evidence. A generic “unpublish” transition made ordinary
+catalog operations capable of unexpectedly removing paid access.
+**Alternatives rejected:** Treating delisting as access revocation; dynamically mutating
+Entitlements; an unrestricted generic Course access toggle; automatic content hiding on report.
+**Source:** Approved July 26 Commerce/Entitlement review; supersedes D-021's prior
+`UNPUBLISHED` access-blocking semantics.

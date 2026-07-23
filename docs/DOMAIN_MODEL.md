@@ -14,7 +14,7 @@ must preserve these meanings and the rules in [BUSINESS_RULES.md](BUSINESS_RULES
   object; it is never a separate entity, table, purchase type, or API target.
 - `Enrollment` is the durable Student-to-Course learning relationship used for roster/progress.
 - `Entitlement` is the time-bounded authorization to access a Course or one Section.
-- A purchase/grant may create or reuse an Enrollment and creates one Entitlement.
+- A paid or zero-value Coupon Order may create or reuse an Enrollment and creates one Entitlement.
 - Expiry/revocation ends access but does not delete Enrollment or progress history.
 
 ## 2. Identity and Access
@@ -85,17 +85,20 @@ Lifecycle:
 ```text
 DRAFT → PENDING_REVIEW → PUBLISHED
            ↓                 ↕
-     CHANGES_REQUESTED    UNPUBLISHED
+     CHANGES_REQUESTED      DELISTED
            └─→ PENDING_REVIEW  └─→ ARCHIVED
 PUBLISHED ──────────────────────→ ARCHIVED
 ```
 
 - `CHANGES_REQUESTED` requires an Admin reason and permits Instructor revision/resubmission.
-- `UNPUBLISHED` is a reversible Admin moderation state; it removes the Course from catalog/new
-  purchase and temporarily blocks Student access to protected Course content while the issue is
-  resolved, without deleting Entitlements or progress.
+- `DELISTED` is reversible and removes catalog discovery/new checkout without denying qualifying
+  existing Student access.
 - `ARCHIVED` is terminal for catalog/new purchases. A Course with enrollment history is archived,
   not hard-deleted; Students retain access while their existing Entitlement remains active.
+- Retirement is a separate explicit future-acquisition/inclusion block. Emergency Course access
+  suspension is an orthogonal elevated state that immediately blocks existing Student access for a
+  constrained legal, security, malware, or severe-moderation reason without mutating Entitlements.
+  Suspension and restoration preserve immutable reason/actor/Audit/notification evidence.
 - Changing `default_access_ends_at` affects future Orders only. A Course may remain Published and
   available to existing entitled Students without a future default, but checkout is disabled until
   an Admin configures one.
@@ -172,8 +175,11 @@ is published only after validation, quarantine, successful malware scan, and per
 
 ### Progress
 
-Student/Lesson learning state: last position, maximum position, completion, and timestamps. It
-belongs to a durable Enrollment and remains after Entitlement expiry. Completion never regresses.
+Student/Lesson learning state: last/max position in milliseconds, permanent completion,
+`completed_at`, the exact completing Media Asset Version, last-watched time, and revision. It belongs
+to a durable Enrollment and remains after Entitlement expiry. Writes require runtime Lesson access;
+the server validates/bounds positions and calculates completion from the trusted duration of the
+exact played Asset Version. Completion never regresses.
 
 ## 4. Catalog Price and Commerce
 
@@ -187,7 +193,8 @@ change when the catalog price changes.
 
 Commercial intent for exactly one Student and one purchasable item (Course or Section). Its item
 snapshot preserves identity, catalog subtotal, coupon details, discount, total, currency,
-`access_ends_at`, accepted policy version, and identifiers.
+`access_ends_at`, accepted policy version, approved revision, and identifiers. Order timestamps
+separate creation, commercial acceptance, payment deadline, completion, expiry, and cancellation.
 
 Lifecycle:
 
@@ -196,13 +203,16 @@ PENDING_PAYMENT → PAID ───────────────→ REFUND
        │             └→ PARTIALLY_REFUNDED ─→ REFUNDED
        ├────────→ CANCELLED
        └────────→ EXPIRED
+       └────────→ RECONCILIATION_REQUIRED
 
 PENDING_PAYMENT → FREE_GRANTED
 ```
 
 `FREE_GRANTED` is a successful zero-value terminal payment outcome and still creates normal
 Enrollment/Entitlement records. Order refund state is derived from confirmed Refund totals; it does
-not replace Refund records.
+not replace Refund records. `CANCELLED` and `EXPIRED` are separate outcomes, not sequential.
+`RECONCILIATION_REQUIRED` is a visible exception when money may have moved but automatic completion
+is unsafe; resolution preserves all evidence.
 
 ### Payment Attempt
 
@@ -218,7 +228,10 @@ CREATED → PENDING ─→ SUCCEEDED
 
 An Order may have multiple Attempts while it remains payable. A failed/cancelled/timed-out Attempt
 does not itself grant access; Order cancellation/expiry is separate. Only verified success can grant
-access, and it grants once.
+access, and it grants once. `SUCCEEDED` means verified capture, not authorization. `FAILED` and
+`CANCELLED` are provider-confirmed outcomes. `TIMED_OUT` is locally observed and may later reconcile;
+`UNKNOWN` blocks another Attempt. Provider occurrence time—not arrival time—controls deadline
+eligibility, and immutable event/transition history remains even when Attempt state changes.
 
 ### Refund
 
@@ -244,27 +257,33 @@ progress, not access to the Student's direct account/contact/payment PII.
 
 ### Entitlement
 
-Authorization scope tied to a Student, Course or Section, source Order/grant, effective commercial
-grant time, `original_access_ends_at`, current authoritative `access_ends_at`, and revocation
-details. Access is allowed only while `current_timestamp < access_ends_at`.
+Authorization scope tied to a Student, Course or Section and its required source Order. It preserves
+`acquired_at`, `retirement_eligibility_at` copied from Order acceptance,
+`original_access_ends_at`, current authoritative `access_ends_at`, and revocation details. Access is
+allowed only while `current_timestamp < access_ends_at`.
 
 ```text
 ACTIVE → EXPIRED
    └──→ REVOKED
 ```
 
-Account suspension and Course unpublishing can block access without mutating Entitlement state.
+Account suspension and explicit emergency Course access suspension can block access without mutating
+Entitlement state. Delisting, retirement, and archival alone do not deny qualifying existing access.
 A Course Entitlement authorizes every Section in its Course. A Section Entitlement authorizes only
 that Section; it creates no upgrade credit against a later Course purchase.
+
+After an allowed Section-to-Course purchase, both Entitlements remain independent and access is
+their union. Refunding/revoking the Course Entitlement leaves the earlier Section Entitlement
+untouched.
 
 An elevated Admin may extend or shorten `access_ends_at`. Each change creates an immutable
 Entitlement Adjustment recording old/new instants, reason, actor, timestamp, and an optional
 support/refund reference; `original_access_ends_at` never changes.
 
 Retirement blocks future acquisition. Retired Course/Section/Lesson content remains accessible only
-when the Entitlement's effective payment-success or free/manual-grant timestamp is earlier than the
-relevant `retired_at` instant and the Entitlement remains otherwise active. A delayed webhook's
-database insertion time cannot turn a post-retirement grant into an eligible one.
+when `retirement_eligibility_at < retired_at`, the Order remained within its payment deadline, and
+any paid capture occurred within that deadline. Webhook arrival/database insertion time is never the
+eligibility timestamp.
 
 ## 5. Coupons
 
@@ -275,14 +294,18 @@ targets, and optional global cap. No targets means platform-wide applicability.
 
 ### Coupon Redemption
 
-Historical link between Coupon, Student, Order, and committed discount.
+Historical capacity reservation/use between Coupon, Student, Order, and discount.
 
 ```text
-COMMITTED → RELEASED_AFTER_FULL_REFUND
+RESERVED → CONSUMED → RELEASED_AFTER_FULL_REFUND
+    └────→ RELEASED_UNUSED
 ```
 
-Only `COMMITTED` consumes the Student's one-use eligibility. Release permits a future Order but does
-not delete history or reduce the historical global redemption count.
+Paid Order acceptance creates `RESERVED` until its payment deadline. Timely success consumes it;
+Order expiry/cancellation releases it unused. A zero-value Coupon Order consumes immediately.
+Reserved plus historically consumed uses count against global capacity. Full Refund releases the
+Student's eligibility but does not delete history, reduce historical consumed count, or restore
+global quota.
 
 ## 6. Office Hours and Notifications
 
@@ -381,7 +404,8 @@ Student 1 ── submits ── * Content Report ── resolved by ── Admin
 - Gateway success/refund confirmation is authoritative; browser redirect is not.
 - Idempotency prevents duplicate charge-state application, grant, refund, coupon commit, or notice.
 - Catalog price changes never rewrite historical Order/refund/payout values.
-- Suspension, unpublishing, entitlement expiry/revocation, and deletion are separate concepts.
+- Account suspension, catalog delisting, retirement, emergency Course access suspension,
+  Entitlement expiry/revocation, archival, and deletion are separate concepts.
 - Records with financial, access, moderation, or audit history are not silently hard-deleted.
 - Catalog discovery, filtering, and search expose only `PUBLISHED` Courses and never index Lesson
   titles or protected Resource/Lab content.

@@ -169,7 +169,8 @@ These are mandatory follow-ups, not alternate product decisions:
 - Publication: first approval; pending replacement while old stays live; rejection keeps old live;
   atomic approved swap.
 - Playback: Course Entitlement; matching/nonmatching Section Entitlement; expired/revoked;
-  suspended Account; unpublished/archived Course policy; Admin audited preview; expired/tampered
+  suspended Account; emergency Course access suspension; qualifying Delisted/Archived access;
+  Admin audited preview; expired/tampered
   token; repeated HLS seek/rebuffer.
 - Progress: resume, seek backward, monotonic maximum, 90% boundary, over-duration input, concurrent
   updates, replacement preservation, transient write failure.

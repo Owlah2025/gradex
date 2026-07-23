@@ -144,8 +144,8 @@ SP 800-63B:
 ### 4.4 Course and video lifecycles
 
 - The Course lifecycle supports `draft`, `pending_review`, `changes_requested`, `published`,
-  `unpublished`, and `archived`, plus resubmission transitions. A Course with enrollment
-  history is archived rather than permanently deleted.
+  `delisted`, and `archived`, plus resubmission transitions. Delisting affects discovery/checkout;
+  emergency access suspension is separate. *(Reconciled 2026-07-26 by D-029.)*
 - A Course needs at least one Section, one Lesson, and a READY Lesson video before submission.
 - Published content cannot bypass Admin review. Material Instructor changes return through the
   documented review path.
@@ -177,12 +177,13 @@ SP 800-63B:
 
 - Coupons are created and managed only by Admins.
 - A Student may successfully redeem a given coupon only once.
-- Failed or abandoned attempts do not consume the redemption.
+- Paid Order acceptance reserves capacity; cancellation/expiry releases unused reservation.
 - A fully refunded purchase releases the Student's per-coupon redemption for future use while
   preserving historical records and auditability.
 - Per-user coupon limits greater than one are not configurable in MVP.
 - Global redemption caps remain configurable.
-- Redemption commits only after confirmed payment or a successful zero-value grant.
+- Timely capture consumes a reservation; a zero-value grant consumes immediately. Capacity counts
+  reserved plus historical consumed uses. *(Reconciled 2026-07-26 by D-028.)*
 - One coupon may be applied to an order; stacking is out of scope.
 
 ### 4.7 Refunds
@@ -240,8 +241,8 @@ possible `Partial Refund not Supported` response for some transactions:
 - Reasons include broken/unavailable, inaccurate, inappropriate, suspected copyright
   violation, and other. “Other” requires a short explanation.
 - A report never hides content automatically.
-- Admins may dismiss a report, request Instructor changes, unpublish affected content, or use
-  existing account-suspension powers.
+- Admins may dismiss, request changes, delist, retire, invoke constrained emergency Course access
+  suspension, or use Account suspension. *(Reconciled by D-029.)*
 - Resolution records the acting Admin, reason, action, timestamp, and audit history.
 - Duplicate/spam reports are rate-limited.
 - Instructors are notified only when an Admin requests changes or performs a relevant content
@@ -251,12 +252,11 @@ possible `Partial Refund not Supported` response for some transactions:
 
 - Instructors create or materially reschedule office-hours sessions only for their own
   `PUBLISHED` Courses. An owner may still cancel an existing scheduled Session after the Course is
-  Unpublished or Archived; they cannot create or reschedule in those states.
+  Delisted or Archived; they cannot create or reschedule in those states.
 - A session contains a title, description, start/end time, and external meeting link.
-- Students may discover and open the link only while the Course remains `PUBLISHED` and they have
-  an active Course entitlement or an active Section entitlement for that Course. Unpublishing or
-  archiving hides Student discovery/join without deleting the Session. Admins retain moderation
-  access.
+- Existing entitled Students may discover/open the link after delisting/retirement/archival unless
+  the Session is cancelled or emergency Course access suspension is active. Admins retain
+  moderation access. *(Reconciled by D-029.)*
 - Times are stored consistently and displayed in the user's local timezone, defaulting to
   Kuwait time, using the selected interface language.
 - Meeting links remain hidden until authentication and entitlement checks pass.

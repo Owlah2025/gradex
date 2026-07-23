@@ -59,13 +59,13 @@ discount is applied.
 - **FR-007** Coupon guardrails: `valid_from`/`valid_until` window, global `max_redemptions`
   cap, one consuming redemption per Student, and `is_active` toggle. Per-user limits greater
   than one are not configurable. (BR-128)
-- **FR-008** Validity is enforced hard at order creation and the discount/total snapshotted
-  onto the order. (BR-128)
-- **FR-009** Redemption count commits only on payment success or free-grant, in the entitlement
-  transaction keyed by stable Order identifier. Paid callbacks are additionally deduplicated by
-  payment-attempt/gateway reference (BR-033); free grants require no gateway identifier.
-  Duplicate/replayed work never double-counts. Global cap is soft under concurrency; one consuming
-  redemption per `(coupon, Student)` is exact. (BR-129)
+- **FR-008** Validity and exact capacity are enforced under locks at Order acceptance; amounts are
+  snapshotted and a paid Order creates a deadline-matched `RESERVED` Redemption. (BR-128)
+- **FR-009** Timely verified capture moves `RESERVED → CONSUMED` in the Entitlement transaction;
+  cancellation/expiry releases unused capacity, and zero-value Orders consume immediately.
+  Provider/Order idempotency prevents double transitions. Reserved plus historical consumed uses
+  count against the global cap; one `RESERVED`/`CONSUMED` use per `(Coupon, Student)` is exact.
+  (BR-129/033)
 - **FR-010** After any redemption, `code`/`discount_type`/`discount_value` are immutable;
   only `is_active`/`valid_until`/`max_redemptions`/targets remain editable. Zero-redemption
   coupons may be deleted; redeemed coupons only deactivated. (BR-130)
@@ -81,19 +81,17 @@ discount is applied.
 
 ## Key Entities
 
-- **Coupon** — the code and its rules (type, value, window, optional global cap, active,
-  redemption_count, created_by).
+- **Coupon** — the code/rules plus exact `reserved_count` and historical `consumed_count`.
 - **CouponTarget** — optional scope link to a Course/Section (absence = platform-wide).
-- **CouponRedemption** — a committed use: coupon, user, order, amount_discounted, timestamp;
-  it remains historical and can be released from consuming status only after cumulative full
-  refund of its Order.
+- **CouponRedemption** — a historical `RESERVED`, `CONSUMED`, or released use with Order deadline,
+  discount, transition timestamps, and reason evidence.
 - **Order (external)** — owned by the orders/checkout subsystem; carries coupon_id,
   coupon_code snapshot, subtotal/discount/total amounts, and a free-grant terminal state.
 
 ## Dependencies
 
-- **Orders/checkout/payments subsystem (PREREQUISITE, not built here).** Coupons attach to an
-  order and commit redemptions inside the order's grant transaction. This feature builds
+- **Orders/checkout/payments subsystem (PREREQUISITE, not built here).** Coupons reserve at Order
+  acceptance and consume/release inside Order lifecycle transactions. This feature builds
   against the order-side **interface contract** in
   [contracts/order-integration.md](contracts/order-integration.md) and is gated on that
   subsystem existing. The coupon plan does NOT build a full orders subsystem.
@@ -108,8 +106,8 @@ coupons.
 
 ## Success Criteria
 
-- Every FR above is covered by an automated test (unit for math/validation, integration for
-  free-grant, paid-webhook redemption, duplicate-webhook no-double-count, consuming-redemption
-  uniqueness, soft-cap race, frozen-field edit rejection, partial-refund retention, and cumulative
-  full-refund eligibility release).
+- Every FR above is covered by an automated test (unit for math/validation; integration for
+  reservation/expiry release, exact capacity races, free grant, paid consume, duplicate-webhook
+  dedupe, Student uniqueness, frozen-field rejection, partial-Refund retention, and full-Refund
+  Student release without quota restoration).
 - No monetary value is represented as a float anywhere in the feature.

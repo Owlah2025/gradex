@@ -48,5 +48,6 @@ amounts. Preview never creates a Redemption or changes the historical count.
 
 There is no separate commit endpoint. The create-Order request carries the code, and the server
 revalidates it against current authoritative price and eligibility before snapshotting amounts.
-Redemption commits only in the payment-success/free-grant transaction. Failed or abandoned attempts
-do not consume the Coupon. See [order-integration.md](order-integration.md).
+Paid Order acceptance reserves capacity through its payment deadline; verified timely capture
+consumes it, while cancellation/expiry releases it unused. Zero-value Orders consume immediately.
+See [order-integration.md](order-integration.md).

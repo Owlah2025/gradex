@@ -78,7 +78,8 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Pending Review | Course/revision is read-only to the Instructor while an Admin reviews it. |
 | Changes Requested | Admin returned a Course/revision with a required reason for Instructor revision. |
 | Published | Approved Course version is visible in the catalog and eligible for entitled access/purchase. |
-| Unpublished | Admin temporarily removed Course visibility/access for moderation without deleting history. |
+| Delisted | Course removed from catalog discovery/new checkout without denying qualifying existing access. |
+| Emergency Course Access Suspension | Elevated legal/security/malware/severe-moderation block on existing Student access without rewriting Entitlements. |
 | Archived | Terminal catalog/new-purchase state for historical Course records; not a hard delete. |
 | Active Entitlement | Current authorization within its access term and not revoked. |
 | Expired Entitlement | Authorization whose current effective `access_ends_at` instant has passed. |

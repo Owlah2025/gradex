@@ -100,7 +100,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Instructor Course analytics and a minimal Course-scoped Student roster; price visibility is
   read-only.
 - Admin-only Course/Section pricing with audit history.
-- Admin Course review, publish, unpublish, archive, and reported-content moderation.
+- Admin Course review, publish, delist/relist, retire, archive, emergency access suspension, and
+  reported-content moderation.
 - Admin user provisioning, suspension, coupons, refunds, revenue reporting, and payout records.
 
 ### Commerce and communication
@@ -179,7 +180,7 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Browse published Courses and filter them by Major, Subject, and Study Year.
 - Search published Courses by title, description, Instructor display name, and taxonomy label/code.
   Search matches Arabic and English at once regardless of interface language, ignores diacritics and
-  alef/taa-marbuta/digit variants, ranks by relevance only, and never returns unpublished Courses or
+  alef/taa-marbuta/digit variants, ranks by relevance only, and never returns delisted Courses or
   protected Lesson content.
 - Evaluate a Course using its authored details and optional public preview.
 - Purchase one Course or one Section and view order/payment/refund history.
@@ -210,11 +211,12 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Create, rename, retire, and delete Major/Subject taxonomy terms with bilingual labels and audit
   history, and override any Course's classification.
 - Set/change Course and Section prices with reason and audit history.
-- Review Course content, publish/request changes, unpublish/republish, and archive when allowed.
+- Review Course content, publish/request changes, delist/relist, retire, archive, and invoke or
+  resolve emergency access suspension when authorized.
 - Preview Course media through a separate audited authorization path.
 - Manage coupons and view historical redemption data.
 - Process full/partial refund requests and monitor gateway status.
-- Review content reports, dismiss/request changes/unpublish/suspend, and record resolution.
+- Review content reports, dismiss/request changes/delist/retire/access-suspend, and record resolution.
 - Reconcile monthly Instructor payouts, record adjustments/transfer reference, and email statement.
 - Cancel any office-hours session for moderation; Admins do not create platform-wide sessions.
 
@@ -222,7 +224,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
 - Course hierarchy and ordering use `Course → Section → Lesson` only.
 - Course state follows the lifecycle in [DOMAIN_MODEL.md](DOMAIN_MODEL.md): Draft, Pending Review,
-  Changes Requested, Published, Unpublished, and Archived.
+  Changes Requested, Published, Delisted, and Archived. Retirement and emergency access suspension
+  are separate.
 - A Course cannot enter review without at least one Section, one Lesson, required READY video
   content, and an assigned Major, Subject, and Study Year; validation identifies missing
   requirements.
@@ -241,22 +244,30 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - The server creates an Order and stable Payment Attempt reference before Tap redirect.
 - Tap webhook/API verification—not browser redirect—controls capture and entitlement grant.
 - Payment/refund callbacks and transactional state changes are signature-verified and idempotent.
-- A failed/declined/cancelled/ambiguous attempt grants no access; ambiguous status is reconciled
-  before another attempt proceeds.
+- Orders explicitly distinguish Pending Payment, Paid, Free Granted, Cancelled, Expired,
+  Reconciliation Required, Partially Refunded, and Refunded, with separate creation, acceptance,
+  payment-deadline, completion, expiry, and cancellation timestamps.
+- One active `CREATED`/`PENDING`/`UNKNOWN` Payment Attempt exists per Order. Success means verified
+  capture; timeout remains reconcilable; provider occurrence—not arrival—controls deadline.
 - A zero-value coupon order creates a real Order and entitlement without a gateway call.
+- Every ordinary Entitlement originates from one paid or zero-value Coupon Order. Admins may adjust
+  an existing Entitlement's expiry but cannot create access through a separate manual-grant path.
 - A Course Entitlement blocks repurchase of that Course or any contained Section. A Section
   Entitlement blocks that Section only; another Section or the full Course remains purchasable at
-  current catalog price, with no MVP upgrade credit/proration.
+  current catalog price, with no MVP upgrade credit/proration/refund/expiry combination. Both
+  Entitlements remain independent after a Section-to-Course purchase.
 - A Course must have a future Admin-configured access-expiry instant before checkout. Sections have
   no independent expiry override. The Order preserves the disclosed instant; runtime access uses
   the Entitlement's current effective expiry, which an elevated Admin may extend or shorten through
   an audited adjustment.
-- Failed/abandoned coupon attempts do not consume redemption. Cumulative full refund releases the
-  Student's per-coupon eligibility while preserving history; partial refund does not.
+- Paid Coupon Order acceptance reserves exact Coupon capacity until its payment deadline. Timely
+  capture consumes the reservation; cancellation/expiry releases it unused. Zero-value Orders
+  consume immediately. Full Refund releases Student eligibility but never restores historical
+  global quota; partial Refund does not release it.
 - Only Admins initiate refunds. One or more refund amounts may not exceed the remaining captured
   balance and require a reason.
-- Partial refund keeps entitlement active; cumulative full refund revokes it after confirmed
-  gateway success. Unsupported/failed refund requests have no entitlement effect.
+- Partial Refund keeps access active; cumulative full Refund revokes only that Order's Entitlement
+  after confirmed gateway success. Unsupported/failed requests have no access effect.
 - Checkout records the accepted bilingual refund-policy version.
 
 ## Payouts
@@ -273,8 +284,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - A session belongs to one Published Course and contains title, description, UTC start/end, and
   an external link.
 - Only the owning Instructor creates/reschedules/cancels; Admin may cancel for moderation.
-- While the Course remains Published, any active Course entitlement or active Section entitlement
-  within the Course grants access; unpublishing/archiving hides Student discovery/join.
+- Existing entitled Students may discover/join after delisting/retirement/archival unless the
+  Session is cancelled or the Course has emergency access suspension.
 - The join link is returned only after authentication and entitlement/moderation authorization.
 - Times display in the user's local timezone/language, defaulting to Kuwait time.
 
@@ -288,9 +299,9 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
 ## Notifications
 
-- Required in-app + email events: purchase receipt, refund status, password/security, invitation,
-  Course approval/change request, office-hours cancellation/material reschedule, and an Admin
-  extension or shortening of an individual Entitlement.
+- Required in-app + email events: purchase receipt, refund/reconciliation status, password/security,
+  invitation, Course approval/change request, office-hours cancellation/material reschedule, Admin
+  Entitlement expiry adjustment, and emergency Course access suspension/restoration.
 - New office-hours sessions and new Instructor Course/revision submissions are in-app and may also
   use email when operationally appropriate.
 - Video-processing completion is an Instructor event.
@@ -496,7 +507,7 @@ Each criterion names its governing business rules and primary verification metho
   purchase options use the same Section entities shown in its outline; no Chapter entity exists.
   *(BR-010/021; E2E)*
 - Given the catalog, when the Student filters by Major, Subject, and Study Year, then only published
-  Courses carrying those exact values are returned, and an unpublished or archived Course never
+  Courses carrying those exact values are returned, and a delisted or archived Course never
   appears in any filter combination. *(BR-157/161; integration + E2E)*
 - Given an Arabic query typed with different hamza forms, diacritics, or Arabic-Indic digits, when
   it is searched under either interface language, then matching Courses are returned from both
@@ -511,15 +522,17 @@ Each criterion names its governing business rules and primary verification metho
 - Given a valid paid checkout, when Tap confirms capture through a verified callback/API result,
   then the Order becomes Paid and one scoped Entitlement with the disclosed Course-configured
   expiry is granted exactly once. *(BR-020/021/025/031/033; integration + E2E)*
-- Given a redirect without confirmed capture or a failed/ambiguous attempt, then no entitlement is
-  granted and reconciliation/retry behavior is safe. *(BR-020/022/034; integration)*
+- Given a redirect without confirmed capture or a failed/ambiguous/late Attempt, then no Entitlement
+  is granted automatically and preserved evidence drives safe reconciliation. *(BR-020/022/034)*
 - Given a valid coupon, when preview/order creation occurs, then integer-fils discount/total are
-  snapshotted; zero total grants once without Tap. *(BR-124–129; unit + integration)*
+  snapshotted and paid capacity is reserved until the Order deadline; zero total consumes and grants
+  once without Tap. *(BR-124–129; unit + integration)*
 - Given the Student has a consuming redemption, a second use is denied; after cumulative full
   refund it is eligible again while history remains. *(BR-128/129/131; integration)*
 - Given an active entitlement already covers the chosen scope, checkout blocks repurchase. A
-  Section-entitled Student may buy another Section or the full Course without automatic credit;
-  after expiry the standard purchase path is available. *(BR-024/025; E2E)*
+  Section-entitled Student may buy another Section or the full Course without automatic credit,
+  expiry combination, or modification of the original Section Entitlement; after expiry the
+  standard purchase path is available. *(BR-024/025; E2E)*
 
 ## Refunds and Payouts
 
@@ -542,16 +555,18 @@ Each criterion names its governing business rules and primary verification metho
   review. Approval publishes and notifies. *(BR-071/072/090/122; E2E)*
 - Given a Published Course revision, the live approved version remains unchanged until Admin
   approval applies the revision atomically. *(BR-017/090; integration)*
-- Given an Admin unpublishes a Course, it leaves the catalog and checkout and protected Student
-  access is blocked without deleting Entitlements or progress; republishing restores access when
-  Account and Entitlement state otherwise permit it. *(BR-090; integration + E2E)*
+- Given an Admin delists a Course, it leaves catalog/checkout but qualifying existing access
+  continues. Given an elevated Admin invokes emergency access suspension with a constrained reason,
+  existing Student access stops without mutating Entitlements/Progress and Audit/notifications are
+  recorded; restoration re-enables otherwise-valid access. *(BR-090; integration + E2E)*
 - Given an Admin changes a Course/Section price, the change is audited and affects future Orders
   only; existing transaction snapshots remain unchanged. *(BR-019; integration)*
 
 ## Learning, Preview, Reporting, and Office Hours
 
-- Given a Student requests playback/download, access is granted only within active entitlement
-  scope; progress resumes and completion never regresses. *(BR-023/050–053; integration + E2E)*
+- Given a Student requests playback/download or writes Progress, runtime access and qualifying graph
+  reachability are required. Completion uses the trusted exact Asset Version duration, ignores
+  client percentages, and never regresses across Video replacement. *(BR-023/050–053/116)*
 - Given an Instructor uploads a public preview, it remains unavailable until validation,
   quarantine, scan, and permission confirmation succeed; protected Lesson files remain private.
   *(BR-104/143/144; integration)*

@@ -22,7 +22,7 @@ The paths/status codes below are proposed. Update this guide if platform system 
 ## Scenario 1 — Admin creates a percentage coupon
 
 1. `POST /api/v1/admin/coupons` with `WELCOME20`, `percentage`, `20`, and global cap `100`.
-2. Expect `201`; `GET /api/v1/admin/coupons` shows it with `redemption_count: 0`.
+2. Expect `201`; admin detail shows `reserved_count: 0`, `consumed_count: 0`.
 3. Re-POST the same code → expect `409 duplicate_code`.
 
 ## Scenario 2 — Student previews (no side effects)
@@ -32,15 +32,14 @@ The paths/status codes below are proposed. Update this guide if platform system 
 2. Expect `valid:true`, `subtotal_amount:40000`, `discount_amount:8000`, `total_amount:32000`,
    `free:false`.
 3. `GET /api/v1/admin/coupons/00000000-0000-0000-0000-000000000020` →
-   `redemption_count` still `0` (preview committed nothing).
+   both counts remain `0` (preview committed nothing).
 
-## Scenario 3 — Paid redemption commits on grant (needs orders/fake)
+## Scenario 3 — Paid reservation then consumption (needs orders/fake)
 
-1. Create an order with the code (order creation snapshots discount/total).
+1. Create an Order with the code. Expect one `RESERVED` row and `reserved_count = 1`.
 2. Simulate the gateway success webhook (idempotency key `K`).
-3. Expect: enrollment granted; one `coupon_redemptions` row; `redemption_count = 1`.
-4. **Replay** the same webhook (key `K`) → still one redemption row, `redemption_count = 1`
-   (no double-count — BR-033/129).
+3. Expect Enrollment/Entitlement; row `CONSUMED`; `reserved_count = 0`, `consumed_count = 1`.
+4. Replay webhook → counts/rows unchanged (BR-033/129).
 
 ## Scenario 4 — Free (100%) coupon grants directly, no gateway
 
@@ -48,7 +47,7 @@ The paths/status codes below are proposed. Update this guide if platform system 
 2. Student creates an order → `total_amount = 0` → free-grant path.
 3. Expect: Enrollment/Entitlement granted with the Order's disclosed Course-configured expiry;
    one redemption row;
-   `redemption_count = 1`; **no gateway session created**.
+   `consumed_count = 1`; **no gateway session created**.
 
 ## Scenario 5 — One consuming Redemption per Student (exact)
 
@@ -67,20 +66,19 @@ The paths/status codes below are proposed. Update this guide if platform system 
 1. Delete a redeemed Coupon → expect `409 has_redemptions`.
 2. Delete an unredeemed Coupon → expect `204`.
 
-## Scenario 8 — Soft global cap under race (integration test)
+## Scenario 8 — Exact global capacity under race
 
-1. Coupon cap `= 1`. Two orders created (both pass creation-time validation).
-2. Both grant transactions commit. Expect: both enrollments honored; `redemption_count = 2`
-   (> cap) — documented soft-cap behavior (BR-129), not a bug.
+1. Coupon cap `= 1`; two Students concurrently create paid Orders.
+2. Exactly one reserves/creates. The other receives `cap_reached`; total reserved + consumed is `1`.
+3. Expire/cancel the reserved Order and verify capacity is released for a later Order.
 
 ## Scenario 9 — Refund eligibility release
 
 1. Partially refund the paid Coupon Order; a new use by the same Student remains `already_used`.
 2. Confirm additional Refund(s) until cumulative confirmed refunds equal the captured amount.
 3. Expect the original Redemption to remain in history with released state and
-   `redemption_count` unchanged.
-4. The Student may now use the Coupon on a different eligible item; the new successful Order creates
-   a second historical Redemption.
+   `consumed_count` unchanged.
+4. The Student may use it again only if global capacity remains (or the cap is increased).
 5. Replay the full-refund confirmation; it does not create a second release or alter counts again.
 
 ## Unit-test checklist (no DB)

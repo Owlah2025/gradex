@@ -68,15 +68,15 @@ Creation/material rescheduling succeeds only when all are true:
 - transition is valid and input/link validation succeeds.
 
 An Instructor cannot manage another Instructor's Session. Cancellation retains the record.
-The owning Instructor may cancel an existing scheduled Session even after its Course becomes
-Unpublished/Archived, but cannot create or reschedule in those states.
+The owning Instructor may cancel an existing scheduled Session after its Course becomes
+Delisted/Archived, but cannot create or reschedule in those states.
 
 ### Student Discovery and Join
 
 A Student may discover/join the Course Session only when all are true:
 
 - Account is Active and not suspended;
-- Session is not cancelled and the Course remains `PUBLISHED`;
+- Session is not cancelled and the Course has no emergency access suspension;
 - Student has a current Course Entitlement or at least one current Section Entitlement belonging to
   that Course;
 - any time-window rule selected during system design permits join.
@@ -133,8 +133,9 @@ invites in MVP.
 ## 8. Verification
 
 - Role/ownership matrix: owner, foreign Instructor, Student, Admin, suspended Instructor.
-- Course state matrix: Published allows an otherwise authorized Student to discover/join; Draft,
-  Pending Review, Unpublished, and Archived deny Student discovery/join.
+- Course state matrix: Published, Delisted, or Archived preserves an otherwise qualifying existing
+  Student's discovery/join; emergency access suspension denies it. Draft/Pending Review has no
+  qualifying purchased graph.
 - Entitlement matrix: active Course; active Section in Course; Section in another Course; expired;
   revoked; none.
 - Join-link secrecy: public/list/notification/log/error payloads never contain it.

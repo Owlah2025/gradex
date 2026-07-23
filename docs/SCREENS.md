@@ -197,7 +197,8 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 - **Content:** Course progress, access-until, ordered Sections/Lessons, locked markers, Resources/Labs,
   upcoming office hours, community link.
 - **Actions:** Start/resume Lesson, open allowed material, join authorized office hours, report Course.
-- **States:** Course Entitlement, Section-only Entitlement, expired, temporarily Unpublished.
+- **States:** Course Entitlement, Section-only Entitlement, expired, Delisted but accessible,
+  emergency access suspended.
 - **Constraints:** Locked Lessons never expose signed URLs.
 
 ## ST07 — Lesson Player
@@ -256,7 +257,7 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 
 **Purpose:** See owned Courses and their lifecycle/review state.
 
-- **Content:** Course cards/table, Draft/Pending Review/Changes Requested/Published/Unpublished/
+- **Content:** Course cards/table, Draft/Pending Review/Changes Requested/Published/Delisted/
   Archived, video failures, upcoming office hours.
 - **Actions:** Create Course, open Builder/Analytics/Office Hours, respond to change request.
 - **Constraints:** No earnings/payout or price-edit controls.
@@ -373,8 +374,10 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 **Purpose:** Review Course content and apply an audited publication/moderation transition.
 
 - **Content:** Metadata, outline, Resources/Labs/Preview, audited video player, revision diff, history.
-- **Actions:** Publish, request changes with reason, unpublish/republish, archive when allowed.
-- **States:** Reviewing, applying, Published, Changes Requested, Unpublished, conflict/failure.
+- **Actions:** Publish, request changes with reason, delist/relist, retire, archive, or invoke/resolve
+  constrained emergency access suspension.
+- **States:** Reviewing, applying, Published, Changes Requested, Delisted, access suspended,
+  conflict/failure.
 - **Constraints:** No partial publish; Admin preview never creates Student Entitlement.
 
 ## AD06 — Coupons
@@ -422,7 +425,8 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 **Purpose:** Resolve Student reports without automatic takedown.
 
 - **Content:** Target, reporter, reason/note, Course/Instructor, related reports, current state/history.
-- **Actions:** Start review, dismiss, request changes, unpublish, suspend Account; record reason.
+- **Actions:** Start review, dismiss, request changes, delist, retire, emergency-access-suspend, or
+  suspend Account; record exact reason/action.
 - **States:** Open/Under Review/Resolved Dismissed/Resolved Actioned.
 
 ## AD11 — Office-Hours Moderation

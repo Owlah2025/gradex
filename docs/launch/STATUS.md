@@ -18,7 +18,9 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 Day 4 is in progress. July 26 is defining the complete MVP domain/data/state model from the approved
 July 25 architecture, canonical rules, existing feature designs, and current video-slice schema.
-There is no incomplete July 25 `Must` work.
+Design Sections 1–3—shared foundations, Identity/Catalog/Media, and
+Commerce/Coupons/Entitlements/Learning—are approved and locked after clarification. There is no
+incomplete July 25 `Must` work.
 
 Repository evidence at the latest reconciliation:
 
@@ -121,5 +123,5 @@ was `c9c2238`; all prior dispositions were verified closed and the verdict was
 
 ## Current Next Task
 
-Complete July 26 domain/data/state design with explicit module ownership, transaction boundaries,
-database constraints/indexes, lifecycle/failure states, and configurable retention boundaries.
+Complete July 26 domain/data/state design by defining Moderation, Office Hours, Notifications,
+Reporting/Payouts, Audit, retention, remaining asynchronous failure state, and migration sequencing.

@@ -1,7 +1,7 @@
 # Coupons System — Design Spec
 
 **Date:** 2026-07-22
-**Status:** Approved feature design; reconciled 2026-07-23; revalidate technical mechanics during platform system design
+**Status:** Approved feature design; capacity mechanics reconciled 2026-07-26 by D-028
 **Scope:** MVP feature addition
 **Related:** [PRD.md](../../PRD.md) §5 Payments, [BUSINESS_RULES.md](../../BUSINESS_RULES.md) BR-019/020/022/024/033/040–047/124–133, [DECISIONS.md](../../DECISIONS.md) D-012
 
@@ -23,14 +23,14 @@ listed price (no BR-019 conflict) — the discount is per-order only.
 | Free access | **Allowed** — 100% or fixed ≥ price → 0 KWD → direct enrollment grant, no gateway | Seeds influencers/beta testers at launch; reuses enrollment/idempotency machinery. |
 | Scope | **Per-Coupon**: platform-wide by default, optionally restricted to specific Course(s)/Section(s) | Covers catalog purchase scopes without a separate “Chapter” entity. |
 | Guardrails | Expiry window · optional global cap · exactly one consuming Redemption per Student · active toggle · **one Coupon per Order** | Per-user limits greater than one are not configurable in MVP. |
-| Redemption commit | **Commit on payment success / free-grant** (soft global cap, exact per-user) | No phantom redemptions from abandoned checkouts; zero new infra; cap softness is non-critical at launch scale (100–500 students). |
+| Capacity | **Reserve paid capacity at Order acceptance; consume on timely capture; release unused on Order cancellation/expiry** | Prevents accepting discounted payments the configured cap cannot honor; exact globally and per Student. |
 
 ## 3. Dependency note
 
 The backend currently has video-slice Course/Section/Lesson stubs, Video/Progress, and fake
 per-Lesson entitlements. It has no real Accounts/auth, catalog pricing, Orders/payments,
-Enrollment/Entitlement, Refund, or audit subsystem. A Coupon attaches to an Order and commits
-through the same Entitlement-grant transaction. This is a feature-level contract, not an
+Enrollment/Entitlement, Refund, or audit subsystem. A Coupon attaches to an Order, reserves at paid
+acceptance, and consumes through the Entitlement-grant transaction. This is a feature-level contract, not an
 independently shippable schema; platform system design must sequence all prerequisites without
 temporary duplicate models.
 
@@ -53,22 +53,23 @@ to `0 ≤ discount ≤ subtotal` (never negative, never exceeds price).
 | `valid_from` | timestamptz null | null = open-ended start |
 | `valid_until` | timestamptz null | null = open-ended end |
 | `max_redemptions` | int null | global cap; null = unlimited |
-| `redemption_count` | int | default 0 — committed count |
+| `reserved_count` | int | default 0 — live paid-Order reservations |
+| `consumed_count` | int | default 0 — historical consumed count; never decremented |
 | `is_active` | bool | default true — instant kill switch |
 | `created_by` | uuid | admin user id |
 | `created_at` / `updated_at` | timestamptz | audit |
 
-### `coupon_targets` (only rows when scope = targeted)
+### `coupon_course_targets` / `coupon_section_targets`
 
-`coupon_id`, `item_type` (`course` \| `section`), `item_id`; `unique(coupon_id, item_type, item_id)`.
-**No rows for a coupon = platform-wide.**
+Relational `(coupon_id, course_id)` and `(coupon_id, section_id)` unique target rows. **No rows in
+either table means platform-wide.**
 
 ### `coupon_redemptions`
 
-`id`, `coupon_id`, `student_id`, `order_id`, `amount_discounted` (fils), `redeemed_at`,
-`released_at`, `release_reason`. Preserve every row historically. Enforce at most one unreleased
-Redemption per `(coupon_id, student_id)` using a partial unique constraint or equivalent
-transactional invariant. Cumulative confirmed full Refund releases it; partial Refund does not.
+`id`, `coupon_id`, `student_id`, `order_id`, `amount_discounted` (fils), `state`,
+`reservation_expires_at`, `reserved_at`, `consumed_at`, `released_at`, `release_reason`. States are
+`RESERVED`, `CONSUMED`, `RELEASED_UNUSED`, and `RELEASED_AFTER_FULL_REFUND`. Preserve every row.
+Enforce at most one `RESERVED`/`CONSUMED` Redemption per `(coupon_id, student_id)`.
 
 ### Order-side contract (fields the future orders table must carry)
 
@@ -84,27 +85,26 @@ terminal state** (comp order, no gateway; e.g. payment method = `comp`).
    + `total_amount`. Returns the preview, or a typed rejection reason.
 2. **Create order** — hard-validate again, **snapshot** `discount_amount` / `total_amount`
    onto the order (this locks the price the gateway will charge). Two branches:
-   - **`total_amount == 0` (free):** single transaction → lock coupon row → re-check cap +
-     Student eligibility → insert `coupon_redemptions` row → `redemption_count++` → create enrollment
-     → mark order free-granted. **No gateway call.** The stable Order identifier makes the entire
-     grant transaction idempotent under BR-129.
-   - **`total_amount > 0`:** open Tap session for `total_amount`. On the success webhook
-     (BR-020 / BR-033), deduplicate by payment-attempt/gateway reference, then within the same
-     Order-idempotent grant transaction → lock coupon → insert redemption →
-     `redemption_count++` → grant enrollment.
-3. **Authority split** — validity is enforced **hard at order creation**; the redemption
-   **count commits only at payment-success / free-grant**. If the global cap fills from other
-   orders between order creation and webhook, this already-priced order is still honored (the
-   accepted soft cap). Student consuming eligibility stays exact via the unreleased-row invariant.
+   - **`total_amount == 0` (free):** single transaction → lock Coupon capacity → re-check rules →
+     create Order/item → insert `CONSUMED` Redemption and increment `consumed_count` → create/reuse
+     Enrollment and Entitlement → mark Order `FREE_GRANTED`. **No gateway call.**
+   - **`total_amount > 0`:** in the Order-acceptance transaction lock Coupon capacity, insert a
+     deadline-matched `RESERVED` Redemption, and increment `reserved_count`; then open Tap. Verified
+     timely capture atomically moves `RESERVED → CONSUMED`, transfers the count from reserved to
+     historical consumed, and grants access. Cancellation/expiry moves it to `RELEASED_UNUSED` and
+     decrements reserved capacity.
+3. **Capacity** — accept only while `reserved_count + consumed_count < max_redemptions` under the
+   Coupon row lock. Full Refund releases Student eligibility but does not decrement historical
+   `consumed_count` or restore global quota.
 
 ## 7. API
 
 ### Admin (admin auth; all mutations audited)
 
 - `POST /admin/coupons` — create
-- `GET /admin/coupons` — list + redemption stats (`count / max`)
+- `GET /admin/coupons` — list + reservation/consumption stats (`reserved + consumed / max`)
 - `GET /admin/coupons/:id` — detail + redemption log
-- `PATCH /admin/coupons/:id` — edit. **Once `redemption_count > 0`, freeze `discount_type` /
+- `PATCH /admin/coupons/:id` — edit. **Once any reservation/use exists, freeze `discount_type` /
   `discount_value` / `code`** (integrity — cannot rewrite what people already redeemed);
   still editable: `is_active`, `valid_until`, `max_redemptions`, targets.
 - `DELETE /admin/coupons/:id` — only if zero redemptions; otherwise deactivate (mirrors
@@ -128,10 +128,10 @@ terminal state** (comp order, no gateway; e.g. payment method = `comp`).
 - **BR-024 still applies** — a coupon cannot grant an item the user already actively holds.
 - **BR-019 clean** — a Coupon never touches a Course/Section's listed price; discount is per-Order
   only. No pending-revision, no instructor involvement.
-- **Refund (BR-040–047/131):** Refunds cannot exceed the actually charged total. Historical
-  Redemption/Refund rows and global `redemption_count` remain. Partial Refund keeps the Redemption
-  consuming; cumulative confirmed full Refund marks it released so that Student can use the Coupon
-  again on a future eligible purchase. The global historical cap slot is not released.
+- **Refund (BR-040–047/131):** Refunds cannot exceed captured total. Historical Redemption/Refund
+  rows and `consumed_count` remain. Partial Refund keeps `CONSUMED`; cumulative confirmed full
+  Refund moves to `RELEASED_AFTER_FULL_REFUND`, permitting later Student use only if the Coupon
+  remains valid and has global capacity. Historical quota is not restored.
 - **Audit:** coupon create / edit / deactivate + every redemption is logged (same discipline
   as refunds BR-042 and admin preview BR-081).
 
@@ -139,11 +139,11 @@ terminal state** (comp order, no gateway; e.g. payment method = `comp`).
 
 - **Unit:** discount math — % rounding, fixed clamp-to-zero, negative guard, > subtotal
   guard; each validation predicate (window, cap, consuming eligibility, scope, active).
-- **Integration** (follows existing `*_integration_test.go` patterns): free path grants
-  enrollment + redemption in one transaction; paid path records redemption on webhook;
-  **duplicate webhook does not double-count** (BR-033); consuming uniqueness enforced; soft-cap
-  race honored; partial Refund retains eligibility use; cumulative full Refund releases once while
-  retaining history/count; frozen-field edit rejected after first Redemption.
+- **Integration**: paid Order acceptance reserves exact capacity; expiry/cancellation releases it;
+  timely capture consumes it and grants once; free path consumes/grants in one transaction;
+  duplicate webhook does not double-count; concurrent cap/Student races are rejected; partial
+  Refund remains consuming; cumulative full Refund releases Student eligibility without restoring
+  historical quota; frozen-field edit is rejected after first reservation/use.
 
 ## 10. Out of scope (MVP)
 

@@ -188,7 +188,8 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 ### Admin
 
 - Provision staff accounts and manage/suspend users.
-- Control Course/Section prices, publishing, unpublishing, and moderation.
+- Control Course/Section prices, publishing, catalog delisting, retirement, emergency access
+  suspension, and moderation.
 - Process coupons, payments/refunds, revenue records, and monthly Instructor payouts.
 - Resolve reported content and cancel office hours for moderation.
 

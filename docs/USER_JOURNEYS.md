@@ -31,7 +31,7 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
   `PUBLISHED` Courses are discoverable; search matches both languages with Arabic normalization and
   ranks by relevance only (BR-161/162).
 - **Edge cases:** Thin launch catalog; no Course for the selected filter combination; query typed
-  with diacritics or a different hamza form; archived/unpublished Course absent from purchase
+  with diacritics or a different hamza form; archived/delisted Course absent from purchase
   results.
 - **Failure behavior:** Catalog errors provide retry/empty states without exposing protected data.
 
@@ -71,8 +71,9 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 
 - **Goal:** See a valid discount before entering hosted checkout.
 - **Actions:** Enter code; view subtotal, integer-fils discount, total, and rejection reason.
-- **Rules:** One coupon per Order; one consuming redemption per Student; global cap/target/window
-  checked server-side (BR-124–129).
+- **Rules:** One Coupon per Order; paid acceptance reserves exact global/Student capacity through
+  the payment deadline; timely capture consumes it and cancellation/expiry releases it
+  (BR-124–129).
 - **Edge cases:** Zero-value grant, expired/inactive/wrong-scope/already-used code, cap race.
 - **Failure behavior:** Invalid coupon leaves catalog price unchanged; zero total never opens Tap.
 
@@ -290,8 +291,9 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 
 - **Goal:** Run promotions and reconcile money/access.
 - **Actions:** Create/edit/deactivate Coupon; view redemption history; inspect Orders/Attempts.
-- **Rules:** Admin-only, frozen redeemed value fields, one coupon/order, one consuming redemption
-  per Student (BR-124–133).
+- **Rules:** Admin-only, frozen value fields after reservation/use, one Coupon/Order, one
+  `RESERVED`/`CONSUMED` use per Student, exact global capacity, and full-Refund Student release
+  without quota restoration (BR-124–133).
 - **Failure behavior:** Reconciliation flags gateway/Order disagreement; history is not deleted.
 
 ## AJ-07 — Process Full or Partial Refunds
@@ -306,7 +308,8 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 ## AJ-08 — Resolve Content Reports
 
 - **Goal:** Correct problems while avoiding automatic or unaudited removal.
-- **Actions:** Review target/evidence; dismiss, request changes, unpublish, or suspend as warranted.
+- **Actions:** Review target/evidence; dismiss, request changes, delist/retire, invoke emergency
+  Course access suspension, or suspend Account as warranted.
 - **Rules:** No auto-hide; reason/action/actor/timestamp audited (BR-145/146).
 - **Failure behavior:** Unpublish is reversible and does not erase Entitlements/history.
 

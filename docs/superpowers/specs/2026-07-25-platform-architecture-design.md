@@ -242,7 +242,7 @@ flowchart TD
     Moderation -->|actor and Admin authorization| Identity
     Moderation -->|account enforcement command| Identity
     Moderation -->|reported Course or Lesson| Catalog
-    Moderation -->|unpublish or change-request command| Catalog
+    Moderation -->|delist, retire, access-suspend, or change-request command| Catalog
     Moderation -->|reported asset| Media
     Moderation -->|reporter eligibility| Entitlements
     Notify -->|recipient, locale, and contact resolution| Identity
@@ -392,12 +392,13 @@ They are not required for reads or every ordinary API request.
 
 ### 9.2 Purchase and Entitlement
 
-- Order creation snapshots the purchased Course/Section, price, currency, and Coupon result.
+- Order acceptance snapshots the purchased Course/Section, approved revision, price, currency,
+  expiry, and Coupon result; a paid Coupon Order reserves exact capacity through its deadline.
 - Tap-hosted checkout receives a stable Gradex Order/payment-attempt reference.
 - A browser redirect is presentation-only and never grants access.
 - Verified callbacks are stored and deduplicated before processing.
-- Successful payment state, Coupon redemption where applicable, Enrollment create-or-reuse, and
-  Entitlement grant commit atomically.
+- Verified timely capture, Coupon reservation consumption where applicable, Enrollment
+  create-or-reuse, and source-unique Entitlement grant commit atomically.
 - A zero-total Coupon Order skips Tap and commits its `FREE_GRANTED` outcome, Coupon redemption,
   Enrollment create-or-reuse, and Entitlement grant in one Order-keyed idempotent transaction.
 - Duplicate, delayed, reordered, or conflicting callbacks cannot double-grant access.
@@ -448,8 +449,8 @@ Preserving the working video behavior does not preserve this non-transactional e
 - **Storage/CDN:** delivery returns a controlled unavailable response and alerts; authorization is
   never bypassed.
 - **PostgreSQL:** protected writes and authorization-dependent delivery fail closed.
-- **Progress:** a transient progress-write failure is retried or deferred without interrupting
-  otherwise authorized playback. *(BR-053)*
+- **Progress:** a transient write failure is retried/deferred without interrupting otherwise
+  authorized playback; the write revalidates runtime access before applying. *(BR-053/116)*
 
 ### 10.2 Recovery order
 
