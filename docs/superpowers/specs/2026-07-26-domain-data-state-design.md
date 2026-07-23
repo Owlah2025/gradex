@@ -1,6 +1,6 @@
 # Gradex Domain, Data, and State Design
 
-> Status: In progress — conversational Sections 1–3 approved and locked
+> Status: In progress — conversational Sections 1–4 approved and locked
 > Date: 2026-07-26
 > Scope: Complete MVP authoritative domain state and PostgreSQL model
 > Change boundary: Design only; this record does not implement migrations or application behavior
@@ -26,8 +26,8 @@ The conversational approval sections map to this evolving record as follows:
 - Section 1: §§2–3.
 - Section 2: §§4–7.
 - Section 3: §§8–11.
-- Later sections will add the remaining operational modules, retention treatment, and migration
-  sequence.
+- Section 4: §§13–19.
+- A later section will add the migration sequence and final cross-module matrices.
 
 ## 2. Shared Relational Conventions
 
@@ -719,5 +719,384 @@ The developer/product owner approved:
 
 Conversational Section 3 is approved and locked after these corrections.
 
-Sections covering Moderation, Office Hours, Notifications, Reporting/Payouts, Audit, retention,
-remaining asynchronous failure state, and migration sequencing remain in progress.
+Migration sequencing and the final cross-module matrices remain in progress.
+
+## 13. Moderation and Content Reports
+
+### 13.1 Owned records and lifecycle
+
+| Table | Purpose and important constraints |
+|---|---|
+| `content_reports` | Origin/reporter, stable logical target, exact reported version/revision, constrained reason, optional note, lifecycle, assigned Admin, revision |
+| `content_report_events` | Immutable submission, assignment, review, decision, action reference, actor, reason, and timestamp |
+
+An entitled Student may report a Course, Lesson, video, resource, lab material, or Office-Hours
+Session. A report preserves both the stable logical target and the exact Course Revision, Course/
+Lesson Version, Media Asset Version, Office-Hours Session revision, or equivalent version visible
+when reported. The target and version are relational: constrained nullable foreign keys plus
+exclusive-target checks, or equivalent type-specific target tables. An unchecked
+`target_type/target_id` pair or current-pointer-only reference is not authoritative.
+
+Automated systems may create a typed report or scan finding with immutable source evidence and no
+reporting Account. Automated findings do not perform moderation hiding, retirement, or Account
+suspension. Media quarantine/rejection and emergency security suspension remain separate,
+constrained safety workflows rather than implicit report resolution.
+
+```text
+OPEN → UNDER_REVIEW → RESOLVED_DISMISSED
+                    └→ RESOLVED_ACTIONED
+```
+
+A partial unique constraint prevents the same Student from opening a second unresolved report
+against the exact target. Rate limiting and abuse controls are additional July 27 security policy,
+not a replacement for that invariant. “Other” requires an explanation. Reports never auto-hide,
+auto-retire, or auto-suspend content.
+
+### 13.2 Resolution and source-module authority
+
+An Admin may dismiss a report or select an authorized source-module command: request Catalog
+changes, delist, explicitly retire, invoke emergency Course access suspension, cancel an
+Office-Hours Session, or suspend an Account. Moderation never updates Catalog, Identity, Media, or
+Office Hours tables directly.
+
+The application coordinator locks the report and source aggregate, validates the Admin and
+compare-and-swap revisions, invokes the owning module command, then atomically records the report
+resolution/event, required Audit evidence, and stable-ID notification/outbox events. Failure of the
+source command leaves the report unresolved. The resulting source action ID is retained so
+`RESOLVED_ACTIONED` always identifies the exact action taken. Decision explanations and action
+results are appended as immutable events; editing the report status never overwrites them.
+
+Indexes support the Admin queue by `(state, created_at)`, assigned-Admin work, target history, and
+the unresolved-report uniqueness check.
+
+## 14. Office Hours
+
+### 14.1 Session data and lifecycle
+
+| Table | Purpose and important constraints |
+|---|---|
+| `office_hour_sessions` | Stable Course/creator identity, current Version pointer, cancellation state, revision |
+| `office_hour_session_versions` | Immutable title/description, UTC start/end, encrypted external-link ciphertext/key version, creator/time |
+| `office_hour_session_events` | Immutable create, material reschedule, cancellation, and moderation history |
+| `office_hour_delivery_evidence` | Separate attendance, Instructor check-in, meeting-provider, recording, no-show, or dispute evidence when a supported workflow supplies it |
+
+```text
+Derived time phase: UPCOMING → LIVE → ENDED
+Explicit mutation: ACTIVE → CANCELLED
+```
+
+An uncancelled Session is `UPCOMING` before `starts_at`, `LIVE` from `starts_at` while
+`current_timestamp < ends_at`, and `ENDED` afterward. Time proves only that the scheduled window
+ended; it never asserts delivery or attendance. No scheduled write persists `ENDED`. Start must
+precede end. Cancellation and rescheduling are explicit compare-and-swap mutations with immutable
+events. Rescheduling creates an immutable Session Version and atomically changes the current pointer;
+reports and delivery evidence retain the exact Version they observed.
+
+The owning active Instructor may create/materially reschedule only for an owned Published Course.
+Ownership at creation remains evidence, while the current owner controls later Instructor changes.
+The current owner may cancel after delisting or archival; an Admin may cancel only through the
+audited moderation path.
+
+Join access is distinct from historical access. The external meeting link is disclosed only during
+the permitted `LIVE` window and still requires an active Student Account, current Course or
+contained-Section Entitlement, uncancelled Session, and no active emergency Course access
+suspension. The Session page and any separately authorized materials/recording may remain available
+after `ENDED` to qualifying Students. Delisting, retirement, or archival alone does not remove that
+historical access. Cancellation blocks joining but never deletes Session, notification, attendance,
+delivery, or Audit history. Admin moderation preview follows its separate audited path.
+
+The external link is decrypted and returned only by the specialized authorized join command. It is
+never included in catalog/list responses, notification payloads, Audit metadata, application logs,
+or public pages. Indexes support upcoming Sessions by `(course_id, starts_at)` and operational
+cancellation/history queries.
+
+Creation, material rescheduling, and cancellation atomically write the Session/event, required
+Audit evidence, and one deduplicated notification outbox intent. Delivery never controls the
+Session transaction.
+
+## 15. Notifications
+
+### 15.1 Durable record and delivery evidence
+
+| Table | Purpose and important constraints |
+|---|---|
+| `notification_events` | Stable source event, category/type, template version, safe render parameters, occurrence time |
+| `notification_recipients` | Event, exact Account, channel, locale/destination snapshot, durable in-app recorded/read state |
+| `notification_delivery_attempts` | Recipient row, provider reference, attempt number, lifecycle, reason/timestamps |
+
+The source transaction relationally inserts the exact Account audience; a delayed worker never
+recalculates recipients from the current roster. `UNIQUE(notification_event_id, account_id,
+channel)` prevents duplicate channel records. The in-app recipient row is the durable Notification.
+Its `read_at` is monotonic and never cleared. Email is a best-effort mirror:
+
+```text
+PENDING → SENT
+    └───→ FAILED
+```
+
+Each retry creates a new attempt or immutable attempt-history record; earlier evidence is not
+overwritten. Exact provider, suppression, bounce, and retry policy remain blocked on `LG-018`.
+
+Notification Events have an explicit category:
+
+- **mandatory transactional/security:** receipts, Refund/reconciliation status, security, invitation,
+  Entitlement expiry adjustment, and emergency access suspension/restoration; preferences cannot
+  suppress these;
+- **operational:** Course review outcomes, Office Hours creation/cancellation/material reschedule,
+  and Instructor Media-processing completion, using the fixed product channel policy;
+- **optional marketing:** consent/preference controlled and outside MVP.
+
+Lifecycle automation, marketing delivery, preference controls, SMS, WhatsApp, and push remain
+outside MVP. Email failure never removes, invalidates, or changes the durable in-app recipient row.
+
+The source business transaction creates the stable outbox event. The Notifications consumer
+idempotently renders/delivers the already-fixed recipients and records attempts. Failure or
+exhaustion never rolls back or changes the source action. Payloads carry IDs and safe rendering
+inputs, not protected links, credentials, provider payloads, or unnecessary personal data.
+
+Indexes support recipient history/unread reads, source-event deduplication, and delivery work by
+state and next-attempt time.
+
+## 16. Reporting, Earnings, and Payouts
+
+### 16.1 Versioned share and append-only ledger
+
+| Table | Purpose and important constraints |
+|---|---|
+| `revenue_share_configurations` | Required version, percentage/basis points, effective range, creator/approver, evidence; no code default |
+| `earning_ledger_entries` | Immutable earning, fee, Refund, chargeback, payout adjustment, carry-forward, or correction with stable source and commercial snapshots |
+| `reporting_reconciliation_cases` | Scoped missing/ambiguous Order, Payment, Refund, chargeback, fee, earning, or ledger evidence |
+| `payout_statements` | Instructor, half-open statement period, currency, lifecycle, frozen totals, revision |
+| `payout_statement_items` | Exact ledger entries included once in a Statement |
+| `payout_statement_events` | Immutable lifecycle, review, approval, block, and exception evidence |
+| `payout_payment_attempts` | Immutable destination snapshot, amount/currency, idempotency, transfer/reference, payer, lifecycle, paid time, supporting document |
+
+The numeric share remains blocked on `LG-001`; no earning can be calculated without one effective,
+non-overlapping approved configuration. Tax, fee, invoice, and statement-field treatment remains
+blocked on `LG-016`. Dispute/chargeback effects remain blocked on `LG-017`.
+
+Each paid Order completion creates exactly one positive ledger entry, deduplicated by stable source
+event ID. It snapshots:
+
+- the Instructor owning the Course at Order completion;
+- the effective revenue-share configuration version;
+- Order/Course identity, currency, gross price, Coupon discount, confirmed payment fees, net
+  collected basis, share calculation, and final Instructor amount.
+
+Zero-value grants create no positive earning. Course reassignment and share changes affect later
+Orders only. A confirmed Refund or future approved chargeback creates an immutable negative
+adjustment linked to the original earning and original Instructor using the applicable snapshotted
+commercial/share policy; it never rewrites the positive line or moves the adjustment to the current
+Course owner.
+
+Every earning, provider fee, Refund, chargeback, payout adjustment, carry-forward, and approved
+manual accounting correction is an immutable ledger entry. Corrections append compensating entries;
+existing lines are never edited or deleted. Every adjustment relationally identifies its exact
+source—original earning, Refund, chargeback, provider fee, payout, or approved manual-correction
+record—and carries stable source-event uniqueness.
+
+The paid-grant/Refund transaction emits the stable reporting event; it does not depend on the
+Reporting consumer to complete access or a Refund. In one idempotent consumer transaction,
+Reporting deduplicates that event, rechecks the immutable Order/Payment/Refund evidence and effective
+configuration, inserts the ledger entry, and records its consumer receipt. Missing or contradictory
+evidence creates a reconciliation case instead of inventing a value. A periodic reconciliation
+compares completed paid Orders and confirmed Refunds with source-linked ledger entries. Reporting
+projections may be rebuilt; the immutable ledger is authoritative for Statement calculation.
+
+### 16.2 Statements and late adjustments
+
+```text
+DRAFT → READY_FOR_REVIEW → APPROVED → PAYMENT_PENDING → PAID
+DRAFT / READY_FOR_REVIEW → BLOCKED → DRAFT
+PAYMENT_PENDING → PAYMENT_FAILED → PAYMENT_PENDING
+```
+
+`UNIQUE(instructor_account_id, currency, period_start, period_end)` enforces one Statement per
+Instructor/currency/accounting period. Statements cover monthly, half-open, non-overlapping
+periods. The exact accounting cutoff timezone and closing procedure remain configured with the
+approved accounting treatment rather than hidden in code. `UNIQUE(ledger_entry_id)` on Statement
+Items prevents one ledger line from appearing in two Statements.
+
+Approval freezes the exact ledger-entry set and calculated totals; approved and paid Statements
+are never recalculated or rewritten. A reconciliation case blocks only a Statement that contains or
+may depend on its affected Instructor, currency, source transaction, or accounting period.
+Unrelated cases cannot block other payouts.
+
+`APPROVED → PAYMENT_PENDING` snapshots the bank/payment destination. `PAID` requires verified
+evidence of the exact approved amount/currency, destination snapshot, bank reference, payer, paid
+time, supporting document, elevated actor, Audit, and statement-notification outbox. Partial
+Statement payment is prohibited in MVP. A failed/ambiguous transfer retains its immutable Attempt;
+retry first reconciles bank/provider state and uses idempotency so it cannot create duplicate
+evidence or double payment.
+
+A negative adjustment arriving after approval enters a later open Statement and never rewrites the
+approved one. A nonpositive payable balance cannot enter `PAYMENT_PENDING`; its approved balance is
+carried forward through immutable ledger entries and never produces a negative bank transfer.
+
+Indexes cover Instructor/occurrence period, source-event uniqueness, unassigned ledger entries,
+Statement lifecycle/period, and bank-reference reconciliation. The Instructor receives the
+statement by email; there is no MVP earnings dashboard, withdrawal control, or automated
+settlement.
+
+## 17. Audit
+
+`audit_events` is an append-only privileged-action record containing:
+
+- stable event ID, actor Account and immutable role snapshot;
+- constrained action, owning module, exact target type/ID, and target revision where applicable;
+- required reason, safe before/after or immutable evidence metadata;
+- correlation ID plus applicable idempotency, source action, support, policy, and provider
+  references;
+- authoritative occurrence timestamp.
+
+Audit records evidence; they do not own workflow state. Every privileged change commits its required
+Audit row in the same PostgreSQL transaction as the source change. This includes identity/security,
+invitation, taxonomy, price/expiry, submission/review/publishing/preview, retirement/access
+suspension, refund/reconciliation, Coupon, moderation, Office Hours, payout, retention, and Admin
+display-name reset operations. Every Admin protected-content preview is recorded separately.
+
+The application database role cannot update or delete Audit rows. Indexes support time, actor,
+module/target, action, and correlation/reference investigations. Partitioning/export mechanics and
+retention duration remain configurable; no Audit deletion job is activated before `LG-003`.
+Credentials, bearer secrets, protected links, full provider payloads, and unnecessary personal data
+must not enter Audit metadata.
+
+## 18. Outbox, Scheduled Work, and Failure Recovery
+
+### 18.1 PostgreSQL authority
+
+| Table | Purpose and important constraints |
+|---|---|
+| `outbox_events` | Stable UUID, source module/aggregate, constrained type/schema, safe payload or authoritative source reference, state, availability, attempts/lease, last error, completion/exhaustion evidence |
+| `outbox_dispatch_attempts` | Immutable attempt number, worker/transport, start/end, outcome, reason |
+| `consumer_event_receipts` | Consumer + event ID, processing/result reference; unique pair |
+| `scheduled_jobs` | Durable job kind/subject, due time, lifecycle, lease/attempt/evidence; only where a derived clock check is insufficient |
+
+Source state and its outbox intent commit atomically. PostgreSQL preserves the stable work/event ID,
+payload or source reference, state, availability time, attempt count, lease owner/expiry, last
+error, and completion evidence. Redis/asynq is disposable acceleration and never the only record
+that work is due; a dispatcher can reconstruct every pending item from PostgreSQL alone. Delivery
+is at least once, so every consumer uses `UNIQUE(consumer, event_id)` or equivalent domain
+idempotency. Transport acceptance is not consumer completion.
+
+Retries use bounded backoff and immutable attempt evidence. After the configured bound, the event
+records `exhausted_at` and remains visible in an operational queue/alert; it is never silently
+dropped. Manual retry is a sensitive idempotent command with actor, reason, Audit, and a new
+immutable attempt linked to the exhausted work item; it never resets or erases earlier evidence and
+does not duplicate the source event. Before retrying an ambiguous email, transfer, Refund, or other
+external side effect, the command reconciles provider state. If success cannot be safely excluded,
+the item remains reconciliation-required rather than being resent blindly. A reconciliation sweep
+republishes uncompleted intent after worker/Redis loss.
+
+Durable scheduled work uses `PENDING → RUNNING → SUCCEEDED | RETRYABLE_FAILED | EXHAUSTED`.
+Workers claim due rows through a bounded lease; an expired lease returns retryable work to the
+queue without creating a second source effect. Clock-derived states such as Entitlement expiry and
+Office-Hours ending do not get artificial scheduled jobs.
+
+Domain modules keep their own authoritative attempt/history records for Payments, Refunds, Media,
+email, and reconciliation. The shared outbox does not collapse those lifecycles into a generic job
+status. Optional projection/report/notification failures do not change successful source state.
+
+Indexes cover available unpublished work `(published_at, available_at)`, exhausted work, aggregate
+history, scheduled due/lease recovery, and consumer receipt lookup.
+
+### 18.2 Recovery order
+
+After database/worker failure:
+
+1. restore and verify PostgreSQL authority;
+2. restart outbox/scheduled-work leases and reconcile stale attempts;
+3. rebuild Redis queues from PostgreSQL intent;
+4. reconcile provider-side Payments, Refunds, and Media operations from immutable references;
+5. retry projections, reporting, and notifications idempotently;
+6. verify exhausted queues and Audit/reconciliation evidence.
+
+Redis loss may delay work but cannot lose an Order, Entitlement, upload intent, payout line,
+Notification record, or required Audit event.
+
+## 19. Retention and Privacy-Control Records
+
+### 19.1 Configurable policy boundary
+
+| Table | Purpose and important constraints |
+|---|---|
+| `retention_policy_versions` | Data class, action (`RETAIN/DELETE/ANONYMIZE`), duration/rule, effective range, approval evidence |
+| `legal_holds` | Exact subject/data class/scope, authority, reason, start/end, active state |
+| `retention_scope_guards` | Subject/scope serialization row shared by hold creation and deletion claims |
+| `retention_actions` | Immutable lifecycle plus planned/executed/skipped/failed database/object-store evidence |
+| `data_subject_requests` | Requester/subject, verification evidence, requested scope, lifecycle, outcome/action references |
+
+There is no default retention duration and no destructive retention job is enabled while `LG-003`
+is open. Applicable privacy rights, identity verification, response deadline, cross-border
+treatment, and notice wording remain blocked on `LG-004`; the model preserves evidence without
+inventing legal conclusions.
+
+The policy inventory covers Identity/profile, credentials/security/session evidence, authored
+content and revisions, Learning/Progress, Commerce/provider evidence, Entitlements, Media source and
+derived objects, Moderation, Notifications, earnings/payouts, Audit/outbox, and backups.
+
+Data-subject requests use an operational lifecycle that does not presume which legal rights apply:
+
+```text
+RECEIVED → VERIFYING_IDENTITY → IN_REVIEW → ACTION_PENDING → COMPLETED
+                        └───────────────→ REJECTED
+RECEIVED/VERIFYING_IDENTITY ───────────→ CANCELLED
+```
+
+Rejection requires an approved legal/policy basis and evidence. The exact response deadline and
+available request types remain gated.
+
+Retention execution is idempotent and fail-closed:
+
+- an active legal hold or absent/ambiguous approved policy blocks automated and manual mutation;
+- financial, access, learning, authored, moderation, payout, and Audit relationships are not hard
+  deleted merely because an Account is deactivated;
+- anonymization preserves referential integrity and immutable commercial/operational evidence while
+  removing approved personal identifiers;
+- durable object deletion is provider-version-specific, records verification, and cannot silently
+  overwrite or detach an Asset Version;
+- backup expiry follows the approved backup-copy policy envelope rather than pretending immediate
+  physical deletion;
+- every execution/skip/failure produces retention evidence and required Audit/outbox records.
+
+Remote object deletion is not claimed to be atomic with PostgreSQL:
+
+1. **Authorize transaction:** lock the retention scope guard, revalidate the effective approved
+   policy and legal gates, prove no active hold, identify the exact database/object version, mark it
+   `DELETION_PENDING`, record policy/reason/actor or job/request time, and emit stable deletion work.
+2. **External step:** re-lock/recheck the scope immediately before claiming work, then delete the
+   exact provider, bucket, key, and provider object version. Verify absence or provider-confirmed
+   permanent deletion; a delete marker is insufficient when an underlying version remains.
+3. **Confirm transaction:** record provider evidence and mark remote deletion confirmed, preserving
+   only the minimum policy-authorized tombstone and required Audit evidence. Failure or
+   unverifiable deletion remains `DELETION_PENDING` or becomes `DELETION_FAILED`, never completed.
+
+Legal-hold creation locks the same scope guard. It blocks an unclaimed pending deletion. If an
+external deletion is already claimed, hold creation surfaces and records the conflict for immediate
+resolution rather than silently claiming the object is protected. Database anonymization/deletion
+commits only under the approved policy and hold checks, with immutable action evidence in the same
+transaction.
+
+Operational expiry prevents use of expired tokens, sessions, invitations, reservations, and signed
+URLs immediately; their eventual cleanup timing still follows an approved policy. Indexes support
+active holds, effective policies by data class, due actions, request queues, and failed object
+deletions.
+
+## 20. Section 4 Approval Record
+
+The developer/product owner approved and locked §§13–19 after these corrections:
+
+- Office Hours uses time-derived `UPCOMING/LIVE/ENDED`; delivery and attendance are separate
+  evidence, and cancellation never deletes history.
+- Moderation preserves both stable targets and exact reported versions; automated findings cannot
+  silently apply moderation actions.
+- Notification Events snapshot Account/channel recipients relationally at source-event time;
+  mandatory notices cannot be suppressed and email failure cannot invalidate in-app records.
+- every financial change is an immutable source-linked ledger entry; corrections compensate rather
+  than rewrite.
+- Statement approval freezes its items/totals; payout uses immutable payment attempts/evidence,
+  prohibits partial payment, carries negative balances forward, and scopes reconciliation blocks.
+- PostgreSQL contains enough durable work/lease/attempt/completion state to rebuild Redis queues;
+  ambiguous external retries reconcile before resend.
+- remote deletion requires exact-version authorization, external verification, and a confirming
+  transaction serialized with legal-hold checks.

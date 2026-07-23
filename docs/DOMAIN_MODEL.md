@@ -312,40 +312,51 @@ global quota.
 ### Office-Hours Session
 
 One Course-scoped external meeting created by the owning Instructor. It records schedule, link,
-status, and cancellation/moderation history. Student discovery/join additionally requires the Course
-to remain `PUBLISHED`.
+status, and cancellation/moderation history. Student discovery/join requires runtime access and no
+active emergency Course access suspension. Delisting, retirement, or archival alone does not hide
+the Session from otherwise-qualified existing Students. A material reschedule creates an immutable
+Session Version and moves the stable Session's current pointer, so reports retain the exact schedule
+and content they observed.
 
 ```text
-SCHEDULED → COMPLETED
-     └────→ CANCELLED
+Derived time phase: UPCOMING → LIVE → ENDED
+Explicit mutation: ACTIVE → CANCELLED
 ```
 
-`COMPLETED` may be derived after end time. Join-link disclosure requires authorization at request
-time and is not embedded in public/catalog data.
+`ENDED` is derived after the end time and proves no delivery or attendance. Join-link disclosure is
+limited to the authorized live window. Session history and separately authorized materials or
+recordings may remain visible afterward; cancellation blocks joining but deletes no history.
+Attendance, Instructor check-in, provider, recording, no-show, and dispute evidence stay separate.
 
-### Notification / Delivery Attempt
+### Notification Event / Recipient / Delivery Attempt
 
-Durable per-recipient in-app event with read state, deduplication key, and optional channel delivery
-attempts.
+One source Event has relationally snapshotted Account/channel Recipients. In-app recipient state is
+durable; optional email Attempts are best-effort and retain immutable delivery evidence.
 
 ```text
 Notification: RECORDED → READ
 Email attempt: PENDING → SENT | FAILED
 ```
 
-Delivery state never controls the source business transaction.
+Mandatory transactional/security notices cannot be suppressed. Operational notices follow fixed
+product channel rules. Marketing is optional and outside MVP. Email state never controls the source
+business transaction or invalidates the in-app record.
 
 ## 7. Moderation and Audit
 
 ### Content Report
 
-Student-submitted report against a Course/Lesson/video/resource/lab with a reason and optional note.
+Student- or automation-originated report/finding against a stable logical target and the exact
+Course Revision, authored version, Media Asset Version, or Office-Hours Session revision visible
+when reported, with a constrained reason and optional note.
 
 ```text
 OPEN → UNDER_REVIEW → RESOLVED_DISMISSED | RESOLVED_ACTIONED
 ```
 
-Content is not hidden automatically. Resolution records the Admin and action.
+Content is not hidden automatically. Media quarantine/rejection and emergency security suspension
+remain separate safety workflows. Every resolution and resulting Admin action is appended
+immutably.
 
 ### Audit Event
 
@@ -356,11 +367,14 @@ vocabulary changes, and Admin resets of an Account display name.
 
 ## 8. Instructor Earnings and Payouts
 
-### Earning / Adjustment
+### Financial Ledger Entry
 
-Derived accounting line from a paid Order or later refund/chargeback. Zero-value grants create no
-positive earning. Amount uses the configured global share of net collected revenue and snapshots
-the formula inputs used for the statement.
+Immutable accounting line for an earning, payment fee, Refund, chargeback, payout adjustment,
+carry-forward, or approved correction. Zero-value grants create no positive earning. An earning
+snapshots formula inputs, effective configuration version, and owning Instructor at Order
+completion. Every adjustment links its exact source; corrections append compensating entries.
+Course reassignment never rewrites earlier lines, and later Refund/chargeback adjustments remain
+tied to the original earning, Instructor, and snapshotted policy.
 
 ### Payout Statement
 
@@ -368,12 +382,15 @@ Monthly Instructor record containing eligible Orders, fees/refunds/chargeback ad
 configuration, and payable total.
 
 ```text
-DRAFT → APPROVED → PAID
-  └──────────────→ VOID (before payment, with reason)
+DRAFT → READY_FOR_REVIEW → APPROVED → PAYMENT_PENDING → PAID
+DRAFT / READY_FOR_REVIEW → BLOCKED → DRAFT
+PAYMENT_PENDING → PAYMENT_FAILED → PAYMENT_PENDING
 ```
 
-`PAID` requires a manual bank-transfer reference. Later adjustments appear in a future statement.
-The statement is emailed; there is no Instructor dashboard in MVP.
+Approval immutably freezes items and totals. Payment initiation snapshots the destination; `PAID`
+requires verified full-payment evidence. Partial statement payment is prohibited. Later adjustments
+appear in a future statement, and negative payable balances carry forward without a negative bank
+transfer. The statement is emailed; there is no Instructor dashboard in MVP.
 
 ## 9. Core Relationship Summary
 

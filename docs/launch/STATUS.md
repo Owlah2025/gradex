@@ -18,9 +18,10 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 Day 4 is in progress. July 26 is defining the complete MVP domain/data/state model from the approved
 July 25 architecture, canonical rules, existing feature designs, and current video-slice schema.
-Design Sections 1–3—shared foundations, Identity/Catalog/Media, and
-Commerce/Coupons/Entitlements/Learning—are approved and locked after clarification. There is no
-incomplete July 25 `Must` work.
+Design Sections 1–4—shared foundations, Identity/Catalog/Media,
+Commerce/Coupons/Entitlements/Learning, and the operational modules/Audit/outbox/retention
+boundaries—are approved and locked after clarification. Migration sequencing and the final
+cross-module matrices remain. There is no incomplete July 25 `Must` work.
 
 Repository evidence at the latest reconciliation:
 
@@ -82,7 +83,7 @@ Fast-follow gates are outside this count. Recalculate from
 ## Latest Verified Checks
 
 - `git diff --check` passed.
-- Documentation guard passed across 41 Markdown files: zero missing local links or invalid JSON
+- Documentation guard passed across 42 Markdown files: zero missing local links or invalid JSON
   examples; changed-document BR, D, and LG references are all defined. The prior full-baseline
   screen-reference and SpecKit-manifest checks remain valid because those artifacts did not change.
 - SpecKit CLI reports `0.13.4`; all five Bash workflow scripts are executable (`755`).
@@ -123,5 +124,5 @@ was `c9c2238`; all prior dispositions were verified closed and the verdict was
 
 ## Current Next Task
 
-Complete July 26 domain/data/state design by defining Moderation, Office Hours, Notifications,
-Reporting/Payouts, Audit, retention, remaining asynchronous failure state, and migration sequencing.
+Complete July 26 domain/data/state design with the migration sequence and final cross-module
+ownership, transition, constraint/index, and retention matrices.

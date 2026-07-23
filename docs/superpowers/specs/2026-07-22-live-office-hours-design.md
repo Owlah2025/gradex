@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 
-**Reconciled:** 2026-07-23
+**Reconciled:** 2026-07-26
 
 **Status:** Approved feature design; technical mechanics require platform system design
 
@@ -32,7 +32,7 @@ or platform-wide office hours in MVP.
 | Delivery | Stored external meeting link revealed only after authorization |
 | Schedule | One-off; Instructor may create, materially reschedule, or cancel |
 | Notification | Fixed event-driven policy; no preferences or timed reminders |
-| Lifecycle | `SCHEDULED → COMPLETED` or `SCHEDULED → CANCELLED` |
+| Lifecycle | Time-derived `UPCOMING → LIVE → ENDED`; explicit `ACTIVE → CANCELLED` |
 
 This feature intentionally excludes recurring series, RSVP/capacity, calendar sync, attendance,
 recordings, built-in video, platform-wide events, and automated reminders.
@@ -46,10 +46,12 @@ The system design must preserve these fields/meanings without treating this as a
 | ID | Stable Session identifier |
 | Course | Required owning Published Course |
 | Created by | Required owning Instructor |
-| Title/description | Localized platform fields or Instructor-authored text according to final content model |
-| Start/end | UTC instants; end must be after start |
-| External join link | Sensitive value excluded from public/list payloads and notifications |
-| Status | Scheduled, completed (possibly derived), or cancelled |
+| Session version | Immutable version selected by the stable Session's current pointer; reports retain the exact observed version |
+| Title/description | Versioned localized platform fields or Instructor-authored text according to final content model |
+| Start/end | Versioned UTC instants; end must be after start |
+| External join link | Versioned sensitive value excluded from public/list payloads and notifications |
+| Time phase | Upcoming before start, Live during `[start, end)`, Ended afterward; derived, not persisted by a timer |
+| Explicit state | Active or Cancelled; cancellation/rescheduling is audited |
 | Cancellation/moderation | Actor, role, reason, timestamp |
 | Created/updated timestamps | Audit and conflict handling |
 
@@ -79,11 +81,13 @@ A Student may discover/join the Course Session only when all are true:
 - Session is not cancelled and the Course has no emergency access suspension;
 - Student has a current Course Entitlement or at least one current Section Entitlement belonging to
   that Course;
-- any time-window rule selected during system design permits join.
+- current time is within the half-open live window `[starts_at, ends_at)`.
 
 The join link is returned only from an authenticated, authorized join operation. It is absent from
 public/catalog payloads, notification content, logs, analytics, and unauthorized error responses.
-The exact early-join/late-close window is a tunable system-design decision, not a product rule.
+The authorized Session page and any separately approved materials/recording may remain available
+after `ENDED`; time ending proves no delivery or attendance. Cancellation blocks joining but does
+not delete Session, notification, delivery, or Audit history.
 
 ### Admin Moderation
 
@@ -111,7 +115,8 @@ Notification recording/delivery is best-effort and never controls the schedule m
   appropriate.
 - Material reschedule: in-app and email to currently entitled Students.
 - Cancellation: in-app and email to currently entitled Students.
-- Deduplicate retried events and never include the external join link in notification content.
+- Relationally snapshot exact Account/channel recipients at source-event time, deduplicate retried
+  events, and never include the external join link in notification content.
 
 There are no preferences, timed reminders, marketing messages, SMS/WhatsApp, push, or calendar
 invites in MVP.
@@ -122,7 +127,10 @@ invites in MVP.
   the application network unless system design provides SSRF-safe handling.
 - Store UTC instants and display in the user's locale/timezone; default to Kuwait time only when no
   preference is known.
-- Prevent invalid intervals and edits after cancellation/completion except audited moderation data.
+- Prevent invalid intervals and edits after cancellation/ending except separate audited delivery,
+  no-show, dispute, or moderation evidence.
+- A material reschedule creates an immutable Session Version and atomically moves the current
+  pointer; it never rewrites the version previously reported or audited.
 - Handle concurrent Instructor/Admin cancellation idempotently.
 - A cancelled Session disappears from upcoming lists but remains available in authorized history.
 - A newly expired/revoked Entitlement or suspended Account must fail join authorization even if the
@@ -139,10 +147,10 @@ invites in MVP.
 - Entitlement matrix: active Course; active Section in Course; Section in another Course; expired;
   revoked; none.
 - Join-link secrecy: public/list/notification/log/error payloads never contain it.
-- Lifecycle: create, reschedule, Instructor cancel, Admin moderation cancel, completed derivation,
+- Lifecycle: create, reschedule, Instructor cancel, Admin moderation cancel, ended derivation,
   duplicate/concurrent cancellation.
-- Notification: correct current recipients, deduplication, and business mutation surviving email
-  failure.
+- Notification: exact source-time relational recipients, deduplication, and business mutation plus
+  durable in-app record surviving email failure.
 - Localization/responsiveness/accessibility: Arabic/English, RTL/LTR, local time, and all Student
   actions on phone/tablet/laptop/desktop.
 

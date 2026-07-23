@@ -274,9 +274,14 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
 - One platform-wide Instructor revenue-share percentage is configurable but has no default.
 - Share uses net collected revenue after coupons, confirmed refunds, and gateway/payment fees.
-- Monthly statements itemize covered Orders and adjustments.
-- Admin marks preparation/payment status and records bank-transfer reference and audit data.
-- Late refunds/chargebacks adjust the next statement.
+- Each paid Order snapshots the effective share version and owning Instructor. Course reassignment
+  affects later Orders only; Refund/chargeback adjustments remain with the original earning.
+- Earnings, fees, Refunds, chargebacks, payout adjustments, carry-forwards, and corrections are
+  immutable source-linked ledger entries; corrections use compensating entries.
+- One monthly Statement per Instructor/currency/period freezes its items and totals on approval.
+- Payment initiation snapshots the destination; `PAID` requires verified full-payment evidence.
+  Partial Statement payments and negative transfers are not supported; negative balances carry.
+- Late refunds/chargebacks adjust a later Statement without rewriting an approved/paid one.
 - Instructor receives the statement by email; no in-app payout dashboard/withdrawal exists.
 
 ## Live Office Hours
@@ -284,18 +289,22 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - A session belongs to one Published Course and contains title, description, UTC start/end, and
   an external link.
 - Only the owning Instructor creates/reschedules/cancels; Admin may cancel for moderation.
-- Existing entitled Students may discover/join after delisting/retirement/archival unless the
-  Session is cancelled or the Course has emergency access suspension.
-- The join link is returned only after authentication and entitlement/moderation authorization.
+- An uncancelled Session is derived as Upcoming, Live, or Ended from its scheduled instants; Ended
+  does not imply delivery or attendance.
+- The join link is returned only during the authorized Live window. Existing entitled Students may
+  retain historical Session/material access after delisting/retirement/archival.
+- Cancellation blocks joining but preserves Session, notification, delivery, and Audit history.
 - Times display in the user's local timezone/language, defaulting to Kuwait time.
 
 ## Content Reporting
 
-- Entitled Students can report a Course, Lesson, video, resource, or lab material.
+- Entitled Students can report a Course, Lesson, video, resource, lab material, or Office-Hours
+  Session. The stable target and exact visible revision/version are preserved.
 - Reasons are broken/unavailable, inaccurate, inappropriate, suspected copyright violation, or
   other; “other” requires an explanation.
-- Reports are rate-limited and never auto-hide content.
-- Admin resolution and any resulting Instructor notice are audited.
+- Reports are rate-limited and never auto-hide content. Automated findings also cannot perform
+  moderation actions; Media quarantine and emergency security suspension remain separate.
+- Admin resolution, exact resulting action, and any Instructor notice are immutably audited.
 
 ## Notifications
 
@@ -305,9 +314,11 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - New office-hours sessions and new Instructor Course/revision submissions are in-app and may also
   use email when operationally appropriate.
 - Video-processing completion is an Instructor event.
-- Notification events are deduplicated and store delivery state; delivery failure never changes
-  the triggering transaction.
-- Required transactional/security events cannot be disabled; no MVP preferences screen exists.
+- Notification Events relationally snapshot exact Account/channel recipients at source-event time.
+  Delivery attempts are idempotent; email failure never changes the source transaction or durable
+  in-app record.
+- Mandatory transactional/security events cannot be disabled. Operational events follow fixed
+  channel policy; optional marketing/preferences remain outside MVP.
 
 ---
 
@@ -541,9 +552,10 @@ Each criterion names its governing business rules and primary verification metho
   remains active. *(BR-040–047; integration + E2E)*
 - Given cumulative confirmed refunds equal captured amount, then entitlement is revoked; a failed
   or pending refund does not revoke it. *(BR-041/046/047; integration)*
-- Given a monthly payout run, then the configured global share uses net collected revenue,
-  itemizes Orders/adjustments, records manual transfer state/reference, and generates the emailed
-  statement without exposing an Instructor dashboard. *(BR-073/074; integration + E2E)*
+- Given a monthly payout run, then immutable source-linked ledger entries calculate one Statement
+  per Instructor/currency/period; approval freezes items/totals, and only verified full-transfer
+  evidence marks it Paid. Later adjustments carry forward without rewriting it. *(BR-073/074;
+  integration + E2E)*
 
 ## Course Building and Moderation
 
