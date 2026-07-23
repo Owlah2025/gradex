@@ -1,102 +1,65 @@
-# Gradex — Frontend
+# Gradex Frontend
 
-Production Next.js app for Gradex. This slice ships the **Landing** page
-(`SCREENS.md` → Screen 1) plus the shared design-language components every
-later screen composes from.
+The current Next.js application implements the public landing-page slice and shared visual
+components. It is not yet the complete MVP screen inventory.
 
-## Stack
+Product behavior is governed by [`../docs/PRD.md`](../docs/PRD.md), and landing behavior by
+[`../docs/design/landing-page/LANDING_SPEC.md`](../docs/design/landing-page/LANDING_SPEC.md).
 
-- **Next.js 14** (App Router) · **TypeScript** (strict)
-- **Tailwind CSS** + **shadcn/ui** primitives (Radix under the hood)
-- **next-themes** (dark mode, `class` strategy)
-- **lucide-react** icons
-- Bilingual **English ⇄ Arabic (RTL)** via a typed locale provider
+## Verified Stack
 
-## Getting started
+- Next.js 14 App Router and React 18
+- TypeScript with `strict: true`
+- Tailwind CSS and Radix/shadcn-style primitives
+- `next-themes` and Lucide icons
+- Typed English/Arabic locale provider with RTL support
+
+## Commands
+
+From `frontend/`:
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
-npm run build      # production build
-npm run typecheck  # tsc --noEmit
+npm run dev
+npm run build
+npm run typecheck
 npm run lint
 ```
 
-> Webfonts (Alexandria, IBM Plex Sans Arabic, IBM Plex Mono) load from Google
-> Fonts via `next/font` at build time — the build machine needs network access
-> to `fonts.googleapis.com`.
+These commands map directly to `package.json`. `npm run dev` uses Next.js's default local address,
+normally `http://localhost:3000` when the port is available. The Google fonts loaded through
+`next/font` may require network access during a production build.
 
-## Design system → code
+## Structure
 
-The design system lives in [`../docs/design-system`](../docs/design-system)
-(recovered from the exported Claude Design project `f4d3887e…`). Its tokens are
-wired in exactly once:
-
-- **Colour / radius / shadow / motion tokens** → `tailwind.config.ts` +
-  `src/app/globals.css` (semantic shadcn HSL tokens for light **and** dark, plus
-  the raw `gx.*` brand ramp). **Never hardcode a hex in a component.**
-- **60 / 30 / 10 rule** — slate surfaces, blue primary, orange accent used for
-  exactly one "pop" per view (hero + final CTA). Orange never for routine
-  buttons or body text.
-- **Type** — `font-display` (Alexandria) for headings/buttons, `font-sans`
-  (IBM Plex Sans Arabic) for body, `font-mono` for course codes + KWD prices.
-
-### WCAG AA deviations from the raw tokens (intentional)
-
-- `--primary` is **blue-600** (not blue-500) so white-on-primary clears 4.5:1.
-  blue-500 stays the focus ring / decorative accent.
-- The orange accent button uses **navy text** (white-on-orange fails AA).
-
-## Architecture
-
-`page.tsx` is pure composition — it renders section components and nothing else.
-Markup and logic live in reusable components:
-
-```
+```text
 src/
-├─ app/
-│  ├─ layout.tsx            # fonts, Providers, metadata, skip link, <html lang/dir>
-│  ├─ page.tsx              # Landing — composes sections only
-│  ├─ globals.css           # tokens (light/dark) + base layer
-│  ├─ opengraph-image.tsx   # dynamic OG image (next/og)
-│  ├─ icon.svg              # favicon (bird mark)
-│  ├─ sitemap.ts · robots.ts
-├─ components/
-│  ├─ ui/                   # shared design language (shadcn-style, reused everywhere)
-│  │  ├─ button · card · badge · tag · avatar · accordion · sheet · typography
-│  ├─ layout/               # navbar · mobile-nav · footer · container · section · auth-actions
-│  ├─ brand/                # logo · wordmark · bird-mark · scribble
-│  ├─ common/               # reveal · empty-state · theme-toggle · language-toggle
-│  ├─ course/               # course-card  (reused by Catalog + Course Details later)
-│  ├─ sections/             # hero · featured-courses · why-gradex · learning-experience
-│  │                        #  instructor-spotlight · testimonials · faq · final-cta
-│  └─ providers.tsx         # ThemeProvider + LocaleProvider
-├─ lib/
-│  ├─ utils.ts              # cn()
-│  ├─ types.ts              # Course / FaqItem / Testimonial / Localized
-│  └─ i18n/                 # config · locale-provider · dictionaries/{en,ar}
-├─ data/                    # courses · faq · testimonials (placeholder, see notes)
-└─ config/site.ts           # metadata + brand config
+├── app/          # application shell, landing composition, metadata, and global CSS
+├── components/   # brand, common, course, layout, landing-section, and UI components
+├── config/       # site metadata/configuration
+├── data/         # development seed content used by the landing slice
+└── lib/          # types, helpers, and English/Arabic locale support
 ```
 
-**Building the next screens (Catalog, Course Details, …):** import from
-`components/ui`, `components/layout`, and `components/course` — do not invent new
-UI. Add screen-specific composition under `components/sections` (or a new
-folder) and a thin route in `app/`.
+Use semantic theme tokens and existing components before adding a new visual pattern. The active
+design reference is [`../docs/design-system/README.md`](../docs/design-system/README.md).
 
-## Accessibility
+## Accessibility Boundary
 
-Semantic landmarks (`header`/`nav`/`main`/`section[aria-labelledby]`/`footer`),
-single `h1`, visible focus rings, skip link, keyboard-operable sheet + accordion,
-`prefers-reduced-motion` respected, AA contrast (see deviations above).
+The platform-owned interface targets WCAG 2.2 AA, including semantic structure, keyboard operation,
+visible focus, reduced-motion handling, and AA contrast. Do not turn this into a claim that the
+complete learning product currently conforms: captions/transcripts are outside the MVP and hosted
+checkout is not fully controlled by Gradex.
 
-## Notes / follow-up
+## Known Product Drift
 
-- Auth routes (`/login`, `/register`, `/courses`, `/dashboard`) are linked but
-  not built yet — they are later screens in `DESIGN_ORDER.MD`.
-- `data/courses.ts`, `data/testimonials.ts` are **placeholders**. Per Gradex's
-  "honesty over hype" principle, replace testimonials with real consented pilot
-  quotes (or hide the section) before launch, and wire courses to the catalog API.
-- Locale switching is client-side. To scale to full localized routing/SEO across
-  34 screens, migrate to `next-intl` with an `[locale]` segment — the dictionary
-  shape here already matches that model.
+- `src/lib/i18n/config.ts` currently defaults to English; the approved requirement is Arabic as the
+  initial default with a persistent language choice.
+- `src/app/page.tsx` currently renders placeholder Testimonials. They must be removed or hidden
+  unless real testimonials and publication consent exist.
+- Course and Instructor data are development seed content and must not be represented as verified
+  public catalog/identity data;
+- linked auth, catalog, and dashboard routes are not yet implemented.
+
+Treat these as implementation follow-ups. Do not change the approved documentation to match the
+temporary landing implementation.

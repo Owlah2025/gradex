@@ -1,261 +1,341 @@
 # User Journeys
 
-> Status: Draft
-> Last Updated: 2026-07-21
+> Status: Aligned with approved MVP
+> Last Updated: 2026-07-23
 
-Task-based user journeys (not page-based) for the three Gradex roles — student, instructor, admin. Each task lists goals, user actions, decisions, edge cases, possible errors, and opportunities for delight. Every step is grounded in the current product docs; rule references point to [BUSINESS_RULES.md](BUSINESS_RULES.md) (BR-xxx), [DECISIONS.md](DECISIONS.md) (D-xxx), and [PRD.md](PRD.md).
-
-Scope note: journeys reflect the **MVP launch product** — single course/chapter purchase, card/KNET checkout, semester-length access, external community. Bundles, BNPL installments, and certificates are post-launch (see [DECISIONS.md](DECISIONS.md) D-008, [PRD.md §4 Scope](PRD.md)) and are not part of these flows.
-
----
-
-# 1. Student Journey — buy & watch a course
-
-```
-TASK FLOW (student)
-
-Discover ──▶ Evaluate & decide ──▶ Sign up / sign in ──▶ Pay & get access
-                   │                                             │
-                   └──▶ (not ready) leave / bounce               ▼
-                                                          Orient (dashboard)
-                                                                 │
-                                                                 ▼
-   Return & resume ◀── Practice (resources·labs·community) ◀── Watch a lesson
-        │                                                        ▲
-        └────────────────── loop until done / expiry ───────────┘
-```
-
-![Student journey — task flow](journeys/student-journey.svg)
-
-## T1 — Discover a course
-- **Goal:** Find a course matching a specific university subject/level.
-- **Actions:** Browse catalog, filter by major/year, search by course name, open chapters within a course.
-- **Decisions:** Whole course or single chapter? Is my subject even here?
-- **Edge cases:** Empty/thin catalog at launch (8–12 courses); subject not covered; only one instructor.
-- **Errors:** Slow catalog load on 4G (target p95 <2.5s LCP); broken thumbnail.
-- **Delight:** "Which course for [my university course code]?" helper; free preview lesson per course; "students in your major bought" hint.
-
-## T2 — Evaluate & decide
-- **Goal:** Judge if the course is worth 30–60 KWD vs. cheaper alternatives.
-- **Actions:** Read outline (sections/lessons), watch preview, check included labs/resources, see price + access term.
-- **Decisions:** Trust the value? Buy course or just one chapter? Now or later?
-- **Edge cases:** Course not yet published; price mid-change (student sees last-approved price, BR-017); already owns it (BR-024) → show "Go to course", not "Buy".
-- **Errors:** Price/scope mismatch between catalog and checkout.
-- **Delight:** Make the price gap legible — visible lab/community/follow-up (Risk 4); show "access until [date]" concretely, not "150 days"; sample lab download.
-
-## T3 — Sign up / sign in
-- **Goal:** Get an account with minimum friction, without losing the chosen course.
-- **Actions:** Register (unique email + password) or log in; return to the course.
-- **Decisions:** Sign up now or after choosing to buy? (Recommend: "buy" triggers auth, then returns to checkout.)
-- **Edge cases:** Duplicate email (BR-001 → 409); suspended account (BR-007 → blocked); logged-out mid-purchase.
-- **Errors:** 409 duplicate; 401 bad credentials with no email-exists leak (BR-003); refresh token expired mid-flow (BR-005).
-- **Delight:** Preserve the chosen course across signup (deep-link back to checkout); social proof on the auth screen.
-
-## T4 — Pay & get access
-- **Goal:** Pay safely and know instantly access is granted.
-- **Actions:** Confirm item, pay via hosted card/KNET checkout, wait for confirmation.
-- **Decisions:** Payment method (card vs KNET); retry vs abandon on failure.
-- **Edge cases:** Access granted **only** on gateway webhook success, never on redirect (BR-020); ambiguous timeout → reconcile before re-attempt (BR-022, BR-034); re-buying an active enrollment blocked (BR-024).
-- **Errors:** Declined/cancelled/timeout → order failed, no access, clear retry (BR-022); delayed webhook → "confirming payment…" holding state, not a false failure; duplicate webhook cannot double-charge (BR-033).
-- **Delight:** Instant email + in-app receipt (BR-121); reassuring "we've got your payment, unlocking now" state if the webhook lags; one-tap into the first lesson on success.
-
-## T5 — Orient (course dashboard)
-- **Goal:** Understand what was bought and where to start.
-- **Actions:** See course map, progress = 0%, access-until date, first-lesson CTA, resources/labs, community link.
-- **Decisions:** Start now or later? In order or jump?
-- **Edge cases:** Chapter-only purchase → non-owned lessons visibly locked (BR-021, BR-023); enrollment near expiry.
-- **Errors:** Progress fails to load; locked lesson mistakenly shown unlocked.
-- **Delight:** "Start here" nudge; estimated time-to-complete; warm first-purchase welcome (brand: no student left alone).
-
-## T6 — Watch a lesson
-- **Goal:** Watch smoothly and never lose their place.
-- **Actions:** Play (HLS adaptive), pause/seek/quality/fullscreen, auto-resume from last position (BR-052), auto-mark complete at ≥90% (BR-051).
-- **Decisions:** Which quality; rewatch vs advance; mark done manually?
-- **Edge cases:** Signed URL expires mid-session → silent token refresh, no interruption (BR-053, BR-100); seek-back never un-completes (BR-051); expired enrollment mid-watch → access-denied, not silent retry (BR-023 vs BR-053).
-- **Errors:** 403 on segment → refresh + retry once (BR-053); CDN/storage outage → distinguishable error; progress POST fails → silent retry next tick.
-- **Delight:** Resume banner "Pick up at 12:04"; remember playback speed/quality; keyboard-first player (accessibility); auto-advance to next lesson.
-
-## T7 — Practice (resources, labs, community)
-- **Goal:** Apply the lesson with real materials and peers.
-- **Actions:** Download lesson resources (slides/notes) and lab materials (project + guide); open community link.
-- **Decisions:** Do the lab now or later; ask the community?
-- **Edge cases:** Entitlement + expiry checked before every download (BR-023); resources un-watermarked, labs buyer-tagged (BR-103, D-011); external Discord could be dead/unmoderated (Risk 2).
-- **Errors:** Download link expired → re-issue; wrong-type/over-cap file (shouldn't reach student); broken Discord link.
-- **Delight:** Lab setup checklist to cut environment-setup drop-off (PRD assumption); "mark lab done"; community deep-link to the right channel; leak-tracing tag invisible to honest users.
-
-## T8 — Return & resume (and eventually renew)
-- **Goal:** Come back days later and continue effortlessly; understand when access ends.
-- **Actions:** Log in → "Continue learning" → resume exact lesson/position; check access-until; re-purchase after expiry via normal checkout (BR-025).
-- **Decisions:** Continue vs restart; renew after a lapsed semester?
-- **Edge cases:** Silent expiry — access just ends, no renewal flow in MVP (D-009); after expiry, BR-024 allows re-buy.
-- **Errors:** Resume points to a lesson whose video was replaced (progress preserved, BR-059); stale session token.
-- **Delight (biggest gap today):** MVP ships *silent* expiry — an expiry reminder ("7 days of access left") is a post-launch lifecycle notification (D-010) and a strong retention win; "welcome back, here's what's new" on return.
+These task journeys apply the canonical scope in [PRD.md](PRD.md), rules in
+[BUSINESS_RULES.md](BUSINESS_RULES.md), and terminology in [GLOSSARY.md](GLOSSARY.md).
+They describe one responsive website. Student journeys must complete on phones, tablets/iPads,
+laptops, and desktops; complex Instructor/Admin operations are responsive but desktop/tablet
+optimized.
 
 ---
 
-# 2. Instructor Journey — build, publish, get paid
+# 1. Student — Discover, Buy, and Learn
 
-```
-TASK FLOW (instructor)
-
-Join & sign in ──▶ Create course structure ──▶ Upload videos ──▶ Add resources & labs
-                                                                          │
-                                                                          ▼
-        Get paid ◀── Track analytics ◀── Go live ◀── Review outcome ◀── Validate & submit
-             ▲                                          │
-             │                                   (rejected) revise ──┐
-             └──────── edit published (pending-revision) ◀───────────┘
+```text
+Discover → Evaluate → Register/Verify or Sign In → Apply Coupon → Hosted Checkout
+                                                                  ↓
+Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
+                                                                  ↓
+                                                         Expiry → Buy Again
 ```
 
-![Instructor journey — task flow](journeys/instructor-journey.svg)
+## SJ-01 — Discover a Course
 
-## T1 — Join & sign in
-- **Goal:** Get an instructor account and understand the deal.
-- **Actions:** Onboard (recruited manually pre-launch), sign in.
-- **Decisions:** Commit content time before seeing an earnings UI?
-- **Edge cases:** No self-serve instructor signup specced; suspended instructor blocked from editing (BR-065).
-- **Errors:** Auth errors as per student.
-- **Delight:** Clear, documented payout cadence up front (Risk 6) — trust before there's a dashboard.
+- **Goal:** Find a Course matching a university subject/level.
+- **Actions:** Browse the published catalog, filter by Major/Subject/Study Year, search in Arabic or
+  English, open a Course detail page.
+- **Decisions:** Is this the right Course? Buy the complete Course or one Section?
+- **Rules:** `Course → Section → Lesson`; “Chapter” may only label Section (BR-010/021). Only
+  `PUBLISHED` Courses are discoverable; search matches both languages with Arabic normalization and
+  ranks by relevance only (BR-161/162).
+- **Edge cases:** Thin launch catalog; no Course for the selected filter combination; query typed
+  with diacritics or a different hamza form; archived/unpublished Course absent from purchase
+  results.
+- **Failure behavior:** Catalog errors provide retry/empty states without exposing protected data.
 
-## T2 — Create course structure
-- **Goal:** Model the course as Course → Section → Lesson.
-- **Actions:** Create course (starts Draft, invisible — BR-011), add/reorder/delete sections & lessons (BR-010), set price.
-- **Decisions:** Course vs chapter granularity; ordering; pricing in the 30–60 KWD band.
-- **Edge cases:** Own courses only (BR-060); ordering must persist.
-- **Errors:** Reorder not saved; duplicate/empty titles.
-- **Delight:** Templated course skeleton; autosave; live student-preview.
+## SJ-02 — Evaluate the Course
 
-## T3 — Upload lesson videos
-- **Goal:** Get a watchable lesson video with minimal fuss.
-- **Actions:** Raw upload → async transcode → status until READY (BR-062, BR-091).
-- **Decisions:** Re-upload/replace a bad take?
-- **Edge cases:** Transcode FAILED → auto-retry 3× then manual (BR-091); launch-week upload spike may exceed workers (Risk 5); replace preserves progress (BR-059).
-- **Errors:** Upload over `MAX_UPLOAD_SIZE_BYTES`; stuck UPLOADING (reaper); transcode failure with no alert.
-- **Delight:** Clear per-stage progress (uploading→processing→ready); "your video is ready" notification; resumable uploads on flaky connections.
+- **Goal:** Understand content, practical value, Instructor, price, and access term.
+- **Actions:** Review outline, authored details, resources/lab inclusion, office-hours support,
+  Course/Section prices, 150-day term, and optional public preview.
+- **Rules:** Admin controls prices (BR-019); protected Labs/Resources are not previews
+  (BR-143/144); active ownership changes CTA to “Go to Course” (BR-024).
+- **Edge cases:** No preview asset; some Sections not owned; recently changed price affects future
+  Orders only.
+- **Failure behavior:** Preview/price/scope mismatch blocks checkout rather than charging stale data.
 
-## T4 — Add resources & labs
-- **Goal:** Attach the right materials to each lesson.
-- **Actions:** Upload lesson resources (slides/notes, ≤50 MB/file, 200 MB/lesson) and lab materials (project + guide, ≤250 MB/file, 1 GB/lesson) — separate buckets (D-011, BR-067/068).
-- **Decisions:** Which bucket a file belongs in; how much practice to include.
-- **Edge cases:** Over-cap upload rejected (BR-068); replace overwrites in place, no versioning (BR-066).
-- **Errors:** Wrong file type rejected; over-cap rejected with a clear message.
-- **Delight:** Drag-drop with instant size/type validation; per-lesson "materials complete" indicator.
+## SJ-03 — Register and Verify
 
-## T5 — Validate & submit for review
-- **Goal:** Submit a complete course confidently.
-- **Actions:** Submit → moves to Pending Approval (BR-070).
-- **Decisions:** Ready, or missing content?
-- **Edge cases:** Blocked if any lesson lacks a READY video or the course has zero sections/lessons, with a message naming what's missing (BR-012, BR-013).
-- **Errors:** Submit attempted while a video is still transcoding.
-- **Delight:** Pre-submit checklist showing exactly what's blocking; one-click "fix" jumps to the gap.
+- **Goal:** Create a Student account without losing the selected Course/Section.
+- **Actions:** Submit display name/email/password; receive/consume verification link; return to
+  original intent.
+- **Rules:** Public registration is Student-only; verification precedes sign-in; responses do not
+  expose existing accounts; the display name follows BR-105 and is not an identity key
+  (BR-001/002/008/105).
+- **Edge cases:** Existing email, expired/reused link, resend throttling, suspended account.
+- **Failure behavior:** Generic safe response, clear verification status, preserved `returnTo`.
 
-## T6 — Handle review outcome
-- **Goal:** Get approved, or fix and resubmit fast.
-- **Actions:** Wait (course read-only during review, BR-016); on approval → Published + notified (BR-071); on rejection → reason shown, back to Draft, editable (BR-072, BR-015).
-- **Decisions:** How to address the rejection reason.
-- **Edge cases:** Can't edit while Pending (BR-016); rejection always carries a reason (BR-072).
-- **Errors:** Notification not delivered (best-effort, BR-120) → dashboard status is the source of truth.
-- **Delight:** Specific, kind rejection feedback; review ETA; in-app + email approval ping (D-010).
+## SJ-04 — Sign In
 
-## T7 — Go live & track analytics
-- **Goal:** See the course perform.
-- **Actions:** View per-course enrollments, completion rate, own student roster (BR-064).
-- **Decisions:** Iterate content based on completion drop-off?
-- **Edge cases:** **No earnings/payout figures** anywhere instructor-facing (BR-064, BR-074, D-006).
-- **Errors:** Analytics lag.
-- **Delight:** Per-lesson completion funnel (where students drop); "N students started this week."
+- **Goal:** Authenticate and continue the intended purchase/learning route.
+- **Actions:** Enter credentials; refresh/rotate session as needed.
+- **Rules:** Generic credential failure (BR-003), revoked refresh rejection (BR-005), immediate
+  suspension enforcement (BR-007).
+- **Edge cases:** Session expires during checkout; Account becomes suspended while active.
+- **Failure behavior:** Re-authentication preserves safe return path; suspension never reaches
+  protected content.
 
-## T8 — Edit published course & get paid
-- **Goal:** Improve a live course without disrupting students; receive payouts.
-- **Actions:** Edit → creates a pending-revision; live course stays up and unchanged until admin re-approves (BR-017, BR-090); receive periodic manual payout statement (emailed PDF/CSV, D-006, Risk 6).
-- **Decisions:** Edit now or batch changes.
-- **Edge cases:** Price change also goes through review (BR-017); refund may reduce a not-yet-paid payout (BR-043).
-- **Errors:** Revision rejected → discarded, live untouched.
-- **Delight:** "Draft changes" preview; predictable payout statement each cycle; a real earnings dashboard is the top post-v1 ask (Risk 6).
+## SJ-05 — Apply a Coupon
+
+- **Goal:** See a valid discount before entering hosted checkout.
+- **Actions:** Enter code; view subtotal, integer-fils discount, total, and rejection reason.
+- **Rules:** One coupon per Order; one consuming redemption per Student; global cap/target/window
+  checked server-side (BR-124–129).
+- **Edge cases:** Zero-value grant, expired/inactive/wrong-scope/already-used code, cap race.
+- **Failure behavior:** Invalid coupon leaves catalog price unchanged; zero total never opens Tap.
+
+## SJ-06 — Pay and Receive Access
+
+- **Goal:** Complete card/KNET payment and know whether access is ready.
+- **Actions:** Confirm one Course/Section Order; use Tap-hosted checkout; return to confirming/receipt.
+- **Rules:** Verified webhook/API success—not redirect—grants one Entitlement (BR-020/021/031/033).
+- **Edge cases:** Delayed callback, ambiguous timeout, duplicate callback, already-active Entitlement.
+- **Failure behavior:** Declined/cancelled/timed-out attempt grants no access; ambiguous outcomes
+  reconcile before retry (BR-022/034).
+- **Notification:** Receipt is recorded after grant; delivery failure does not affect access
+  (BR-120–123).
+
+## SJ-07 — Orient in Course Home
+
+- **Goal:** Understand purchased scope, locked Sections, progress, access expiry, materials, and
+  upcoming office hours.
+- **Actions:** Start/resume a Lesson; view Course outline and explicit locked state.
+- **Rules:** Course purchase covers all Sections; Section purchase covers only that Section;
+  Enrollment/progress can remain after Entitlement expiry.
+- **Edge cases:** Mixed owned/locked Sections; expired access with retained progress.
+- **Failure behavior:** Locked content never receives signed playback/download URLs.
+
+## SJ-08 — Watch and Resume a Lesson
+
+- **Goal:** Watch smoothly and never lose progress.
+- **Actions:** Play/pause/seek/quality/fullscreen; resume position; continue between Lessons.
+- **Rules:** Active scope checked before signed playback (BR-023/050); completion at ≥90% never
+  regresses (BR-051); resume uses last position (BR-052).
+- **Device behavior:** Responsive video, landscape, keyboard controls, and browser fullscreen where
+  available (BR-147/151).
+- **Failure behavior:** Transient token/progress failure recovers without interrupting playback;
+  authorization/expiry fails explicitly (BR-053).
+
+## SJ-09 — Use Resources, Labs, Community, and Office Hours
+
+- **Goal:** Practise and receive follow-up.
+- **Actions:** Download entitled Resource/Lab; open external community; view/join Course office hours.
+- **Rules:** Each download is entitlement-checked (BR-023/063); Labs may carry buyer identification
+  (BR-103); office-hours link requires active Course/Section Entitlement (BR-135/136).
+- **Edge cases:** Expired signed URL, cancelled/rescheduled session, external link failure.
+- **Failure behavior:** Reissue authorized download; cancelled session is not joinable; notification
+  failure does not alter schedule.
+
+## SJ-10 — Report Content
+
+- **Goal:** Tell Gradex about broken, inaccurate, inappropriate, or rights-infringing content.
+- **Actions:** Choose a report target/reason; explain “other”; submit.
+- **Rules:** Student must be entitled; reports are rate-limited and never auto-hide content
+  (BR-145/146).
+- **Failure behavior:** Duplicate/spam attempt is throttled; successful submission receives a safe
+  acknowledgement without revealing Admin operations.
+
+## SJ-11 — Request and Track a Refund
+
+- **Goal:** Request a policy-eligible full/partial refund and see its status.
+- **Actions:** Contact/support flow supplies Order and reason; Admin makes the gateway request;
+  Student sees pending/succeeded/failed status.
+- **Rules:** Accepted bilingual policy version governs eligibility (BR-044/153); gateway success is
+  authoritative; partial keeps access, cumulative full revokes (BR-041/046/047).
+- **Edge cases:** Multiple partial refunds, unsupported method, amount above remaining balance.
+- **Failure behavior:** Pending/failed request does not revoke access; confirmed full refund does.
+
+## SJ-12 — Return After Expiry
+
+- **Goal:** Continue learning after the 150-day term.
+- **Actions:** Sign in, see retained progress and expired access, purchase again through normal flow.
+- **Rules:** Expiry ends access but preserves Enrollment/progress; active duplicate purchase is
+  blocked, expired scope may be repurchased (BR-024/025).
+- **MVP boundary:** No expiry reminder or dedicated renewal flow.
 
 ---
 
-# 3. Admin Journey — moderate, support, settle money
+# 2. Instructor — Join, Publish, Support, and Receive a Statement
 
-```
-TASK FLOW (admin)
-
-Sign in ──▶ Triage moderation queue ──▶ Preview content ──▶ Approve / Reject
-   │                                                              │
-   ├──▶ Manage users (suspend)                                    ▼
-   ├──▶ Watch revenue dashboard                            course Published
-   ├──▶ Process refunds ──▶ (clawback if payout paid)
-   ├──▶ Run instructor payouts (approve ▶ paid)
-   └──▶ Moderate reported content
+```text
+Admin Invitation → Activate → Build Content → Upload/Preview → Submit
+                                                       ↓
+Emailed Statement ← Analytics/Office Hours ← Published ← Review/Revise
 ```
 
-![Admin journey — task flow](journeys/admin-journey.svg)
+## IJ-01 — Accept Invitation
 
-## T1 — Sign in
-- **Goal:** Secure privileged access.
-- **Actions:** Admin login; only admins see PII (BR-101).
-- **Edge cases:** Session revocation (BR-006).
-- **Errors:** Auth as above.
-- **Delight:** Ops landing — what needs attention today (queue depth, pending refunds, failed transcodes).
+- **Goal:** Activate a verified Instructor account securely.
+- **Actions:** Consume Admin invitation; set display name and initial password; sign in.
+- **Rules:** No public Instructor signup (BR-009); approved password policy (BR-002); display name
+  follows BR-105 and is not an identity key.
+- **Edge cases:** Expired/reused invitation, suspended Account.
+- **Failure behavior:** Resend is Admin/rate controlled; no role self-selection.
 
-## T2 — Triage moderation queue
-- **Goal:** Clear the review backlog.
-- **Actions:** See Pending Approval courses (BR-070), hidden from catalog.
-- **Decisions:** Priority order.
-- **Edge cases:** Launch-week batch of 8–12 courses at once (Risk 5).
-- **Errors:** Queue not reflecting a just-submitted course.
-- **Delight:** Age/SLA on each queued item; bulk triage.
+## IJ-02 — Build Course Structure
 
-## T3 — Preview content
-- **Goal:** Watch lesson videos to judge quality without owning the course.
-- **Actions:** Audited admin preview of any lesson incl. Draft/Pending (BR-081) — logged (admin ID, lesson, timestamp), no enrollment created.
-- **Edge cases:** Distinct authorization path from student playback (BR-050 vs BR-081).
-- **Errors:** Preview denied due to a missing preview path (would block review).
-- **Delight:** Reviewer checklist overlay; scrub without full watch.
+- **Goal:** Create an owned `Course → Section → Lesson` outline and classify it for the catalog.
+- **Actions:** Create/reorder/edit Course content with autosave/draft behavior; select one Major,
+  Subject, and Study Year from the Admin-managed vocabulary.
+- **Rules:** Own Courses only (BR-060); ordering persists (BR-010); price is visible read-only and
+  only Admin can change it (BR-019); taxonomy terms may be selected but never created, renamed, or
+  retired by an Instructor (BR-158).
+- **Edge cases:** Empty/duplicate titles, pending-review read-only state, needed subject missing from
+  the vocabulary, a previously assigned term later retired by an Admin.
+- **Failure behavior:** Cross-owner, price, and vocabulary mutation are denied server-side.
 
-## T4 — Approve / reject
-- **Goal:** Publish good courses, return weak ones with clear guidance.
-- **Actions:** Approve → Published + notify instructor (BR-071); reject → required reason, back to Draft (BR-072).
-- **Decisions:** Meets bar? What to cite on rejection.
-- **Edge cases:** Approving a pending-revision applies changes atomically to the live course (BR-017, BR-090).
-- **Errors:** Approve fails mid-publish → course must not end up half-visible.
-- **Delight:** Reason templates for common rejections; preview-as-student before approving.
+## IJ-03 — Upload Videos, Resources, and Labs
 
-## T5 — Manage users
-- **Goal:** Keep the platform safe.
-- **Actions:** View users, suspend students/instructors (BR-007, BR-065).
-- **Decisions:** Suspend vs warn.
-- **Edge cases:** Suspending a student kills access despite prior purchases (BR-007); suspending an instructor does not revoke enrolled students' access (BR-065).
-- **Errors:** Suspension not propagating to active sessions/playback.
-- **Delight:** Reason + audit trail; reversible suspend.
+- **Goal:** Attach ready learning content to each Lesson.
+- **Actions:** Upload video through processing; add separate Resources/Lab Materials.
+- **Rules:** Existing video pipeline (BR-062/091); allowed category/type/size rules
+  (BR-063/067/068); protected downloads require scan/entitlement (BR-104).
+- **Edge cases:** Processing failure/retry, over-cap/wrong-type file, replacement preserving progress.
+- **Failure behavior:** Clear status; rejected/failed upload never becomes available.
 
-## T6 — Watch revenue dashboard
-- **Goal:** See platform financial health.
-- **Actions:** View platform-wide revenue/payments.
-- **Edge cases:** Refund reduces revenue for the period but not historical enrollment counts (BR-045).
-- **Errors:** Webhook desync between payment state and records (Risk 1) — needs a reconciliation view.
-- **Delight:** Refund/chargeback trend; per-course revenue.
+## IJ-04 — Add an Optional Public Preview
 
-## T7 — Process refunds
-- **Goal:** Refund fairly and safely.
-- **Actions:** Admin-only refund (BR-040) → call gateway → revoke access **only after** gateway confirms (BR-041), pending-refund state meanwhile; log for audit (BR-042).
-- **Decisions:** Eligible? (14-day right minus digital-once-accessed exemption, BR-044.)
-- **Edge cases:** Partial refund scoped to item; if instructor payout already Paid → flag for clawback (BR-043).
-- **Errors:** Gateway refund fails → don't revoke; ambiguous state → reconcile.
-- **Delight:** Inline policy check (streamed? file opened?); one-click audit export.
+- **Goal:** Help public Students evaluate the Course without exposing protected materials.
+- **Actions:** Upload one preview; confirm permission; wait for validation/scan.
+- **Rules:** Preview is separate from Lesson assets and at most one per Course (BR-143/144).
+- **Failure behavior:** Failed scan/validation keeps it private without affecting protected Course.
 
-## T8 — Run payouts & moderate reports
-- **Goal:** Pay instructors correctly; keep content clean.
-- **Actions:** Payout screen itemized by course/purchase, fees + refunds pre-deducted → mark "Approved" then "Paid" with a reference (BR-073); moderate reported courses/materials.
-- **Decisions:** Cycle timing; clawback handling.
-- **Edge cases:** Refund after "Paid" → manual clawback next cycle (BR-043); never expose earnings to the instructor UI (BR-074).
-- **Errors:** Double-payout; mismatch vs gateway.
-- **Delight:** Auto-generated statement PDF/CSV per instructor (Risk 6); reconciliation flags before "Paid".
+## IJ-05 — Submit and Handle Review
+
+- **Goal:** Publish complete, approved content.
+- **Actions:** Run readiness checklist; submit; view Pending Review; receive approval/change request;
+  revise and resubmit.
+- **Rules:** Readiness (BR-012/013), locked review state (BR-016), required Admin reason
+  (BR-070–072), explicit Course lifecycle (BR-090).
+- **Failure behavior:** Missing items block submission with exact fixes; notification failure does
+  not replace dashboard state.
+
+## IJ-06 — Maintain a Published Course
+
+- **Goal:** Improve content without silently altering the approved live version.
+- **Actions:** Create a Course Revision; preview; resubmit.
+- **Rules:** Live version remains unchanged until revision approval (BR-017/090); price is not in
+  Instructor revision.
+- **Failure behavior:** Change request leaves live version intact.
+
+## IJ-07 — View Analytics and Run Office Hours
+
+- **Goal:** Understand learning engagement and support Students.
+- **Actions:** View own enrollments/completion/roster; schedule/reschedule/cancel one-off Course
+  office hours.
+- **Rules:** Analytics limited to owned Course; price read-only/no earnings dashboard (BR-064);
+  own Published Course office hours only (BR-134).
+- **Failure behavior:** Suspended Instructor cannot edit/schedule, while approved Student content
+  remains governed by BR-065.
+
+## IJ-08 — Receive Monthly Payout Statement
+
+- **Goal:** Understand the monthly amount transferred.
+- **Actions:** Receive emailed statement listing eligible Orders and adjustments; raise an ops query
+  outside the platform if needed.
+- **Rules:** One configured global share of net collected revenue; manual bank transfer; no in-app
+  earnings/withdrawal (BR-073/074).
+- **Edge cases:** Late refund/chargeback appears on next statement.
 
 ---
 
-# Cross-cutting notes
+# 3. Admin — Provision, Price, Moderate, Refund, and Reconcile
 
-- **Silent expiry is the clearest delight/retention gap.** The student "return & renew" task has no reminder in MVP (D-009); an expiry-reminder notification is a post-launch lifecycle win (D-010).
-- **External community is a fragile USP surface.** The student "practice" task depends on an off-platform Discord/Telegram with no in-platform control (Risk 2) — needs an assigned moderator.
-- **No instructor earnings visibility in MVP** (D-006) shapes the whole instructor "get paid" task around a manual statement — trust-sensitive pre-launch (Risk 6).
+```text
+Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
+        ├→ Suspend/Reactivate
+        ├→ Coupons/Revenue/Refunds
+        ├→ Content Reports/Unpublish
+        └→ Monthly Statements/Payouts
+```
+
+## AJ-01 — Bootstrap and Sign In
+
+- **Goal:** Establish and use privileged access safely.
+- **Actions:** One-time secure deployment creates first Admin; force password change; subsequent
+  sessions use normal auth.
+- **Rules:** No repository credential (BR-009); privileged actions audited.
+- **Failure behavior:** Suspension blocks Admin protected actions immediately.
+
+## AJ-02 — Invite and Manage Accounts
+
+- **Goal:** Provision Instructors/Admins and keep access safe.
+- **Actions:** Send invitation, view status, resend/revoke as allowed, suspend/reactivate with reason.
+- **Rules:** Public role assignment prohibited; existing Account emails cannot be invited/converted;
+  suspension immediate (BR-007/009).
+- **Failure behavior:** Conflicting-address/expired/reused invitations fail safely; active sessions
+  cannot bypass suspend.
+
+## AJ-03 — Set Course and Section Prices
+
+- **Goal:** Control catalog commercial terms.
+- **Actions:** Set/change price with required reason; review audit history.
+- **Rules:** Admin-only, integer fils, future Orders only (BR-019).
+- **Failure behavior:** Historical Orders/refunds/payouts remain unchanged.
+
+## AJ-04 — Maintain the Catalog Taxonomy
+
+- **Goal:** Keep Major/Subject vocabularies usable so catalog filtering stays meaningful.
+- **Actions:** Create terms with Arabic/English labels and optional Subject code; rename, retire,
+  delete unreferenced terms; override a Course's classification.
+- **Rules:** Admin-only and audited (BR-158); renaming never rewrites assigned Courses; a retired
+  term stays on existing Courses until reassigned; a referenced term cannot be deleted (BR-159/160).
+- **Edge cases:** Instructor requests a missing subject; near-duplicate labels; retiring a term still
+  used by Published Courses.
+- **Failure behavior:** Delete is blocked while referenced rather than cascading; classification
+  stays valid for every Published Course.
+
+## AJ-05 — Review and Publish Course Content
+
+- **Goal:** Publish quality content without half-applied state.
+- **Actions:** Triage Pending Review; audited media preview; publish or request changes with reason.
+- **Rules:** Admin preview is separate from Student Entitlement (BR-081); status transitions follow
+  BR-070–072/090.
+- **Failure behavior:** Approval/revision application is atomic; queue/dashboard state is source of
+  truth if notification fails.
+
+## AJ-06 — Manage Coupons and Revenue
+
+- **Goal:** Run promotions and reconcile money/access.
+- **Actions:** Create/edit/deactivate Coupon; view redemption history; inspect Orders/Attempts.
+- **Rules:** Admin-only, frozen redeemed value fields, one coupon/order, one consuming redemption
+  per Student (BR-124–133).
+- **Failure behavior:** Reconciliation flags gateway/Order disagreement; history is not deleted.
+
+## AJ-07 — Process Full or Partial Refunds
+
+- **Goal:** Apply the approved policy safely.
+- **Actions:** Check policy/version, remaining balance, and method support; submit amount/reason;
+  wait for gateway result.
+- **Rules:** Admin-only; idempotent/audited; no access change before confirmation; partial/full
+  semantics (BR-040–047).
+- **Failure behavior:** Failure leaves access/revenue unchanged; late success applies exactly once.
+
+## AJ-08 — Resolve Content Reports
+
+- **Goal:** Correct problems while avoiding automatic or unaudited removal.
+- **Actions:** Review target/evidence; dismiss, request changes, unpublish, or suspend as warranted.
+- **Rules:** No auto-hide; reason/action/actor/timestamp audited (BR-145/146).
+- **Failure behavior:** Unpublish is reversible and does not erase Entitlements/history.
+
+## AJ-09 — Run Monthly Instructor Payouts
+
+- **Goal:** Transfer the correct amount and produce transparent records.
+- **Actions:** Generate/review statement; apply adjustments; approve; transfer by bank; record
+  reference; email statement.
+- **Rules:** One configured global percentage; net collected basis; late changes go to future
+  statement; no automated settlement (BR-073/074).
+- **Failure behavior:** Idempotent run/reference checks prevent duplicate payment; corrections are
+  adjustments, not silent edits to Paid statements.
+
+## AJ-10 — Moderate Office Hours
+
+- **Goal:** Stop an inappropriate/invalid session without becoming its scheduler.
+- **Actions:** View session details; cancel with reason.
+- **Rules:** Admin cannot create platform-wide sessions; cancellation retained/audited and notifies
+  entitled Students best-effort (BR-134/137/139/140).
+
+---
+
+# Cross-Cutting Boundaries
+
+- No Instructor price editing or in-app payout dashboard.
+- No protected sample Lab; public preview is separate.
+- No separate Chapter entity.
+- No built-in live video, recurrence, RSVP, attendance, recording, or calendar integration.
+- No notification preference, marketing, SMS/WhatsApp, or push journey.
+- No public review/rating/recommendation journey.
+- Remaining legal/provider/commercial work is in [LAUNCH_GATES.md](LAUNCH_GATES.md), not hidden in
+  journey assumptions.

@@ -2,7 +2,8 @@
 
 **Date:** 2026-07-23
 
-**Status:** Approved in brainstorming; pending written-spec review
+**Status:** Approved design record; baseline validation completed after follow-up remediation on
+2026-07-23
 
 **Scope:** Documentation baseline required before platform system design
 
@@ -234,7 +235,7 @@ possible `Partial Refund not Supported` response for some transactions:
 
 ### 4.10 Content reporting
 
-- Entitled Students can report a Course, Lesson, video, or downloadable resource.
+- Entitled Students can report a Course, Lesson, video, Resource, or Lab Material.
 - Reasons include broken/unavailable, inaccurate, inappropriate, suspected copyright
   violation, and other. “Other” requires a short explanation.
 - A report never hides content automatically.
@@ -247,11 +248,14 @@ possible `Partial Refund not Supported` response for some transactions:
 
 ### 4.11 Live office hours
 
-- Instructors create, reschedule, and cancel office-hours sessions only for their own approved
-  Courses.
+- Instructors create or materially reschedule office-hours sessions only for their own
+  `PUBLISHED` Courses. An owner may still cancel an existing scheduled Session after the Course is
+  Unpublished or Archived; they cannot create or reschedule in those states.
 - A session contains a title, description, start/end time, and external meeting link.
-- Students with an active Course or Section entitlement for that Course may view and open the
-  link.
+- Students may discover and open the link only while the Course remains `PUBLISHED` and they have
+  an active Course entitlement or an active Section entitlement for that Course. Unpublishing or
+  archiving hides Student discovery/join without deleting the Session. Admins retain moderation
+  access.
 - Times are stored consistently and displayed in the user's local timezone, defaulting to
   Kuwait time, using the selected interface language.
 - Meeting links remain hidden until authentication and entitlement checks pass.
@@ -263,10 +267,10 @@ possible `Partial Refund not Supported` response for some transactions:
 The MVP uses a fixed transactional policy rather than notification preferences:
 
 - In-app and email: purchase receipt, refund updates, password/security events, account
-  invitation, course approval/rejection, and office-hours cancellation or material
+  invitation, Course approval/changes requested, and office-hours cancellation or material
   rescheduling.
-- In-app by default, with email where operationally appropriate: new office-hours session and
-  Instructor change requests.
+- In-app by default, with email where operationally appropriate: new office-hours session and new
+  Instructor Course/revision submissions to Admin operations.
 - Video-processing completion is an Instructor event, not a Student event.
 - Required security and transactional messages cannot be disabled.
 - Each event is deduplicated and stores delivery status. Delivery failure never rolls back the
@@ -416,7 +420,7 @@ The documentation is ready for system design when all of the following pass:
 3. Every approved policy has a decision and corresponding business rule.
 4. Downstream journeys, screens, navigation, wireframes, and feature specs agree with the
    baseline.
-5. No unresolved `[NEEDS CLARIFICATION]`, placeholder, TODO, or “to be consolidated” marker
+5. No unresolved clarification tag, placeholder, task marker, or consolidation note
    remains unless intentionally recorded in `LAUNCH_GATES.md` with an owner and resolution
    point.
 6. Relative links and referenced local files resolve.
@@ -433,7 +437,7 @@ product ambiguity or contradictory system-design inputs.
 
 ## 9. Implementation sequence
 
-After the written design is reviewed and an implementation plan is approved:
+The approved reconciliation was completed in this sequence:
 
 1. Inventory and classify all Markdown documents.
 2. Patch Constitution and canonical product baseline while preserving unrelated edits.

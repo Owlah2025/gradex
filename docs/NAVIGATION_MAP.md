@@ -1,167 +1,174 @@
-# NAVIGATION MAP
+# Navigation Map
 
-> Status: Draft
-> Last Updated: 2026-07-21
+> Status: Aligned with approved MVP
+> Last Updated: 2026-07-23
 
-Per-role navigation trees for the Gradex **MVP**, derived from the Entry/Exit edges in [SCREENS.md](SCREENS.md). Shows the primary paths a user takes through the product — the skeleton wireframes hang off. If a path isn't here, it isn't in the MVP.
-
-**Source chain:** [USER_JOURNEYS](USER_JOURNEYS.md) → [SCREENS](SCREENS.md) → **Navigation Map** → Wireframes → UI Mockups.
+Per-role route hierarchy for the responsive Gradex website. Behavioral rules live in
+[NAVIGATION_RULES.md](NAVIGATION_RULES.md); detailed screen contracts in [SCREENS.md](SCREENS.md).
 
 ## Legend
 
-```
-├── └── │      parent → child navigation edge
-[modal]        opens over parent, not a route (see SCREENS.md demotions)
-[state]        a state of the parent screen, not a route
-[external]     leaves the app (e.g. Discord, hosted gateway page)
-◄─ back        notable return path
-(loop)         repeats / cycles back
-► goes to      jump to a node documented elsewhere in this map
+```text
+[modal]      overlay, not a route
+[state]      state within the parent route
+[external]   leaves Gradex
+►            cross-tree navigation
 ```
 
-Cross-cutting screens (Notification Center, Account/Settings, Profile, Legal, Error states) are reachable from **any** authenticated screen via global chrome — mapped once under **Global**, not repeated in each tree.
+## Public and Authentication
 
----
-
-## Shared — entry & auth spine
-
-Every role enters here. Auth routes by role on success.
-
-```
+```text
 Landing
-├── Catalog                          ► STUDENT tree
-├── Course Details                   ► STUDENT tree (public, shareable deep link)
+├── Catalog / Search
+│   └── Course Details
+│       └── Public Preview                         [modal or embedded]
 ├── Login
-│     ├── [role redirect] ──► Student Dashboard / Instructor Dashboard / Admin Ops Landing
-│     ├── [deep-link return] ──► Checkout        (buy-while-logged-out, T3)
-│     ├── Forgot Password
-│     │     └── Reset Password        [external: email link]
-│     └── Register
-├── Register
-│     ├── [role redirect / deep-link return]
-│     └── Login
-└── Legal (Terms / Privacy / Refund)
+│   ├── Forgot Password → Reset Password           [email deep link]
+│   └── Register → Verify Email                    [email deep link]
+├── Accept Staff Invitation                        [email deep link]
+└── Legal
+    ├── Terms
+    ├── Privacy
+    └── Refund Policy
 ```
 
----
+Successful auth routes by role or returns to a validated internal `returnTo` destination.
 
-## Global — reachable from any authenticated screen
+## Authenticated Global
 
-```
-(top nav / account menu / footer, any role)
-├── Notification Center
-│     └── [deep link] ──► Receipt / Course Home / Lesson Player / Moderation item
-├── Account / Settings
+```text
+Role shell
+├── Notifications
 ├── Profile
+│   ├── Language / Locale
+│   ├── Change Email → Verify New Email
+│   ├── Change Password
+│   └── Account / Data Request
 ├── Legal
-└── System Error & Empty States
-      ├── 403 Access Denied / Enrollment Expired ──► Checkout (re-buy, BR-024/025)
-      ├── 404 Not Found ──► Landing / Dashboard
-      └── 500 / Offline ──► retry
+└── Error/Status
+    ├── Access Denied / Suspended
+    ├── Entitlement Expired → Course Details / Checkout
+    ├── Not Found
+    └── Offline / Retry
 ```
-
----
 
 ## Student
 
-Mobile-first. Public discovery flows into the authed learning loop.
+```text
+Catalog / Search
+├── Filter by Major / Subject / Study Year        [state]
+└── Course Details
+    ├── Public Preview
+    ├── [actively entitled] Go to Course → Course Home
+    └── Checkout
+        ├── Choose Course or Section
+        ├── Apply Coupon                           [state]
+        ├── Tap Hosted Checkout                    [external]
+        ├── Confirming / Failed                    [state]
+        └── Receipt
+            ├── Start / Resume → Lesson Player
+            ├── Course Home
+            └── Orders & Refunds
 
-```
-Landing
-└── Catalog
-      ├── Search Results
-      │     └── Course Details
-      └── Course Details
-            ├── Lesson Preview                     [modal]
-            ├── [owned] "Go to course" ──►  Course Home        (BR-024)
-            └── Checkout                            (auth-gated; login/register then return)
-                  ├── Processing "confirming…"      [state]     (webhook lag, BR-020)
-                  ├── Failed / declined ──► retry   [state]     (BR-022)
-                  └── Payment Success / Receipt
-                        ├── "Start first lesson" ──► Lesson Player
-                        └── Student Dashboard
-                              │
-   ┌──────────────────────────┘
-   │
 Student Dashboard
-├── "Continue learning" ──► Lesson Player            (resume exact position, T8)
-├── Catalog                                          (browse more)
-├── Profile
-└── Course Home
-      ├── Lesson Player
-      │     ├── next / prev lesson                   (auto-advance, loop)
-      │     ├── Lesson Resources & Labs
-      │     └── ◄─ back to Course Home
-      ├── Lesson Resources & Labs
-      │     ├── download resources / lab materials
-      │     └── Community link-out                   [external: Discord, T7]
-      └── Community link-out                          [external]
+├── Continue Learning → Lesson Player
+├── My Courses → Course Home
+├── Browse → Catalog
+├── Upcoming Office Hours
+└── Orders & Refunds
+
+Course Home
+├── Section / Lesson outline
+│   ├── Lesson Player
+│   │   ├── Previous / Next Lesson
+│   │   ├── Resources & Labs
+│   │   └── Report Content                         [modal]
+│   └── Locked Section / Lesson                    [state]
+├── Resources & Labs
+├── Upcoming Office Hours
+│   └── Join External Meeting                      [external, authorized]
+├── Community                                      [external]
+└── Report Course                                  [modal]
+
+Orders & Refunds
+└── Order / Payment / Refund detail
 ```
-
-**Loop:** Dashboard ⇄ Course Home ⇄ Lesson Player ⇄ Resources is the repeat learning cycle (watch → practice → return) until course done or access expires (silent expiry, D-009).
-
----
 
 ## Instructor
 
-Desktop-first. Provisioned manually → lands on dashboard post-login. No earnings figures anywhere (BR-064/074).
-
-```
+```text
 Instructor Dashboard
-├── Course Builder                     (new / edit course)
-│     ├── Lesson Editor
-│     │     ├── video upload ──► transcode status (Uploading→Processing→Ready / Failed)
-│     │     └── Resources & Labs Manager
-│     ├── Resources & Labs Manager     (2 buckets: resources / labs)
-│     └── Submit for Review
-│           ├── [blocked] pre-submit checklist ──► fix-jump ◄─ Course Builder
-│           └── [submitted] ──► Instructor Dashboard   (course = Pending Approval)
-├── Course Analytics                   (enrollments, completion funnel, roster)
-├── Payout Statements                  (download PDF/CSV; no earnings figures)
-└── Review Outcome                     [notification + Dashboard status]
-      ├── Approved ──► course Published
-      └── Rejected + reason ──► Course Builder   (back to Draft, editable, BR-072)
+├── Courses
+│   └── Course Builder
+│       ├── Section / Lesson Editor
+│       │   ├── Video Upload / Processing          [state]
+│       │   └── Resources & Labs
+│       ├── Public Preview Manager
+│       ├── Price                                  [read-only]
+│       ├── Submit / Review Status
+│       │   ├── Pending Review                     [read-only state]
+│       │   ├── Changes Requested → Builder
+│       │   └── Published
+│       └── Published Revision → Submit / Review
+├── Analytics
+│   └── Course Analytics / Roster
+├── Office Hours
+│   └── Create / Reschedule / Cancel owned Course session
+└── Notifications
 ```
 
-**Cycle:** Build → Submit → (rejected → revise → resubmit) → Published → edit live (pending-revision, live stays up) → re-review (BR-016/017/090).
-
----
+There is no Instructor earnings, payout-statement, withdrawal, pricing-edit, coupon, or refund route.
+The monthly payout statement is sent by email outside the authenticated UI.
 
 ## Admin
 
-Desktop-first. Privileged, audited. Only admin sees PII (BR-101).
-
-```
-Admin Ops Landing                       (queue depth · pending refunds · failed transcodes)
-├── Moderation Queue
-│     └── Content Review
-│           ├── audited lesson preview           (no enrollment, BR-081)
-│           ├── Approve ──► Published + notify    (BR-071) ◄─ back to Queue
-│           └── Reject + required reason ──► Draft (BR-072) ◄─ back to Queue
-├── User Management
-│     └── Suspend / reinstate            (reason + audit; student vs instructor differ, BR-007/065)
-├── Revenue Dashboard
-│     └── Refunds                        (drill-in)
+```text
+Admin Ops
+├── Users
+│   ├── Invite Instructor / Admin
+│   ├── Invitation Status
+│   └── User Detail → Suspend / Reactivate
+├── Course Review
+│   ├── Moderation Queue
+│   └── Content Review
+│       ├── Audited Video / Content Preview
+│       ├── Publish
+│       ├── Request Changes
+│       ├── Unpublish / Republish
+│       └── Archive (when allowed)
+├── Catalog Taxonomy
+│   ├── Majors / Subjects vocabulary
+│   └── Term Detail → Edit / Retire / Delete (unreferenced only)
+├── Pricing
+│   └── Course / Section Price + Audit History
+├── Coupons
+│   ├── Create / Edit / Deactivate
+│   └── Redemption History
+├── Revenue
+│   └── Order / Payment Attempt Detail
 ├── Refunds
-│     ├── policy check ──► gateway refund ──► revoke on confirm (BR-041)
-│     └── payout already paid ──► clawback flag ► Payouts        (BR-043)
+│   └── Order Lookup → Full / Partial Refund → Gateway Status
 ├── Payouts
-│     ├── itemized run ──► Approve ──► Paid + reference (BR-073)
-│     └── generates statement ► Instructor · Payout Statements
-└── Reported Content
-      └── ► Content Review / take-down action
+│   └── Monthly Run → Instructor Statement → Approve → Record Paid Reference
+├── Reported Content
+│   └── Report Detail → Dismiss / Request Changes / Unpublish / Suspend
+└── Office-Hours Moderation
+    └── Session Detail → Cancel with reason
 ```
 
----
+Admins do not create platform-wide office-hours sessions in MVP.
 
-## Cross-role handoffs
+## Cross-Role Handoffs
 
-Edges that cross a role boundary (async, via state + notification — no shared screen):
-
+```text
+Admin Invitation                  → Instructor/Admin activation
+Instructor Submit                → Admin Course Review queue
+Admin Publish / Request Changes  → Instructor status + notification
+Student Payment Success          → Admin Revenue + Instructor earning line
+Student Content Report           → Admin Reported Content queue
+Admin Refund Success             → Student refund state + entitlement/payout adjustment
+Instructor Office-Hours change   → Entitled Student list + notifications
+Admin Monthly Payout             → Instructor emailed statement
 ```
-Instructor · Submit for Review ─────► Admin · Moderation Queue           (course enters queue)
-Admin · Content Review (approve/reject) ─► Instructor · Review Outcome    [notification]
-Admin · Payouts (statement) ─────────► Instructor · Payout Statements
-Student · Checkout (paid) ───────────► Admin · Revenue Dashboard          (revenue recorded)
-Admin · Refunds ─────────────────────► Student · 403 Access Denied        (access revoked on confirm)
-```
+
+All handoffs are state/event transitions. Email delivery is never the source of truth.

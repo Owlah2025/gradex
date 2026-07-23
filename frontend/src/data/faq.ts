@@ -8,19 +8,19 @@ export const faqItems: FaqItem[] = [
       ar: "ماذا أحصل فعلاً عند شراء المقرر؟",
     },
     answer: {
-      en: "Lifetime access to the course videos, downloadable notes and slides, the hands-on lab files with a guide, and an invite to the course community.",
-      ar: "وصول دائم لفيديوهات المقرر، وملخصات وشرائح قابلة للتنزيل، وملفات المعمل التطبيقي مع دليل، ودعوة لمجتمع المقرر.",
+      en: "A Course purchase covers all of its Sections; a Section purchase covers that Section only. Access lasts 150 days from purchase and includes the protected videos plus any Resources and Lab Materials available in the purchased scope.",
+      ar: "شراء المقرر يمنحك الوصول إلى جميع أقسامه، بينما شراء قسم يمنحك الوصول إلى ذلك القسم فقط. يستمر الوصول 150 يوماً من تاريخ الشراء ويشمل الفيديوهات المحمية وأي مصادر ومواد معملية متاحة ضمن ما اشتريته.",
     },
   },
   {
-    id: "instalments",
+    id: "payment",
     question: {
-      en: "Can I pay in instalments?",
-      ar: "أقدر أدفع على أقساط؟",
+      en: "How do I pay?",
+      ar: "كيف أدفع؟",
     },
     answer: {
-      en: "Single courses and chapters are available now, priced in KWD. Instalments are coming shortly after launch — you'll see the option at checkout when it's live.",
-      ar: "المقررات والفصول متاحة الآن بأسعار بالدينار. الأقساط قادمة بعد الإطلاق بفترة قصيرة — سيظهر الخيار عند الدفع فور توفره.",
+      en: "Course and Section prices are shown in KWD. Payment is completed on Tap's hosted checkout, so Gradex does not collect or store your card details.",
+      ar: "تظهر أسعار المقررات والأقسام بالدينار الكويتي. يتم الدفع عبر صفحة الدفع المستضافة من Tap، لذلك لا تجمع Gradex بيانات بطاقتك ولا تخزنها.",
     },
   },
   {
@@ -30,8 +30,8 @@ export const faqItems: FaqItem[] = [
       ar: "المقررات بالعربي أو الإنجليزي؟",
     },
     answer: {
-      en: "The platform is fully bilingual. Instruction is in Arabic and English; code and course codes stay in English so what you learn matches the industry.",
-      ar: "المنصة ثنائية اللغة بالكامل. الشرح بالعربية والإنجليزية؛ والكود ورموز المقررات تبقى بالإنجليزية ليطابق ما تتعلمه سوق العمل.",
+      en: "The Gradex interface is available in Arabic and English. Each Course keeps the language chosen by its Instructor, which is shown on the Course details; Gradex does not automatically translate Course content.",
+      ar: "واجهة Gradex متاحة بالعربية والإنجليزية. يحتفظ كل مقرر باللغة التي اختارها المدرّس وتظهر هذه اللغة في تفاصيل المقرر؛ ولا تترجم Gradex محتوى المقرر تلقائياً.",
     },
   },
   {
@@ -41,8 +41,8 @@ export const faqItems: FaqItem[] = [
       ar: "ماذا يحدث بعد إنهاء المقرر؟",
     },
     answer: {
-      en: "Access doesn't expire and the community stays open. Come back to the labs and notes whenever a topic comes up again in your degree.",
-      ar: "الوصول لا ينتهي والمجتمع يبقى مفتوحاً. ارجع للمعامل والملخصات كلما تكرر الموضوع في دراستك.",
+      en: "Your Course or Section access remains active through the end of day 150 in Kuwait time. Your learning progress remains recorded after access expires, and you can purchase access again through the normal checkout.",
+      ar: "يبقى وصولك إلى المقرر أو القسم فعالاً حتى نهاية اليوم 150 بتوقيت الكويت. يظل تقدمك الدراسي محفوظاً بعد انتهاء الوصول، ويمكنك شراء الوصول مجدداً عبر الدفع المعتاد.",
     },
   },
   {

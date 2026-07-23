@@ -1,154 +1,183 @@
-# Gradex — MVP Landing Page (High-Fidelity Spec)
+# Gradex MVP Landing Page
 
-> Status: Ready for implementation
-> Screen: `SCREENS.md → Landing` (Screen 1, Public)
-> Design system: `_ds/gradex-design-system-f4d3887e…` (exported project, recovered from `Wireframe review.zip`)
-> Mockup: [`index.html`](index.html) — self-contained, uses the DS tokens verbatim
-> Target stack: Next.js (App Router) + Tailwind + shadcn/ui
+> Status: Approved product/design baseline; current implementation drift is listed below
+> Screen: [S01 — Landing](../../SCREENS.md)
+> Last updated: 2026-07-23
 
-This page **follows** the existing design system; it does not redesign it. Every color, type, radius, shadow, and motion value is a DS token. Where the brief asked for "components from the design system," this page uses only the DS families: Button, IconButton, Badge, Tag, Card, CourseCard, Avatar, Icon (Lucide), plus native `<details>` disclosure for the FAQ (a Card + summary, no new visual family).
+The landing page introduces Gradex, lets visitors browse the catalog, and routes them to Student
+registration or sign-in. It follows the repository design system; it does not define product scope,
+commerce policy, or authorization independently.
 
----
+Authoritative references:
 
-## Design decisions grounded in the brand
+- [Product requirements](../../PRD.md)
+- [Business rules](../../BUSINESS_RULES.md)
+- [Screen inventory](../../SCREENS.md)
+- [Navigation rules](../../NAVIGATION_RULES.md)
+- [Design system](../../design-system/README.md)
 
-- **Origami bird = a student taking flight.** It is the page's one signature: it *is* the loader, and it reappears ascending in the hero. Everything else stays quiet and disciplined (Chanel's "remove one accessory" — the bird earns the boldness, so no competing hero illustration).
-- **Honesty over hype (Product Principle 6).** Pre-launch, the page shows **no fabricated stat-counters** (no "50,000 students"). Trust is built from concrete inclusions — labs in every course, bilingual, fair KWD pricing, instructor follow-up — and from an explicit, honest testimonial framing ("Voices from our pilot cohort. We'll only ever show reviews from students who actually took the course.").
-- **Numbering only where it's a real sequence.** Only *Learning Experience* is numbered (01–04) because the steps genuinely build on each other. Featured courses and Why-Gradex pillars are parallel, so they carry no numbers — numbering there would be decoration.
-- **Bilingual, Arabic-first.** A working `ع ⇄ EN` toggle flips `dir` and swaps every `.t` node. LTR islands are preserved for course codes, KWD prices, code snippets, "Java", and the wordmark, per the DS content rules.
-- **Anti-Baims positioning, stated plainly.** One line under Why Gradex: "Fair price, not the cheapest — we compete on what you can build, never a race to the bottom."
+The adjacent [`index.html`](index.html) is an earlier visual prototype. It is useful for visual
+comparison only. Its placeholder testimonials, installment question, and other stale copy are not
+approved MVP requirements.
 
-### Color discipline (60 / 30 / 10)
-- **60%** slate page `--surface-page #f8fafc` + white cards.
-- **30%** primary blue `#4f7cff` — buttons, links, focus rings, icon chips.
-- **10%** orange `#ff7e4d` — **exactly one pop per view**: the hero primary CTA, the final-CTA primary, "New" badges, the scribble underline, the bird's beak. Never a routine button, never body text.
-- Navy `#0d1b2a` for the two dark bands (hero, final CTA) and the footer.
-- One gradient element per view max (`--gradient-brand` on the hero glow / thumbnails).
+## Page Goals
 
-### Type
-- **Alexandria** (700–800) — all headings, buttons, eyebrows, prices-as-display.
-- **IBM Plex Sans Arabic** — body (line-height 1.6–1.7; Arabic needs taller lines).
-- **IBM Plex Mono** — course codes (`CS 101`), KWD prices (`38.000 KWD`), step numbers, code island.
+1. Explain the Student value proposition without unsupported claims.
+2. Let a visitor browse Published Courses and open Course Details.
+3. Let a visitor create a Student account or sign in.
+4. Demonstrate Arabic/English and responsive behavior from the first public screen.
+5. Provide required legal and support links.
 
----
+## Content Rules
 
-## Loader (page-load moment)
+- Arabic is the initial interface language; the saved language choice persists.
+- All platform copy has natural Arabic and English versions with correct RTL/LTR behavior.
+- Course titles/descriptions remain in their authored language; do not imply automatic translation.
+- Use only real Published Course, price, Instructor, and catalog data.
+- Do not show fabricated testimonials, ratings, enrollment counts, outcomes, credentials, or
+  endorsements.
+- An Instructor spotlight may appear only when the identity, claims, image, and quotation are real,
+  current, and approved for public use. Otherwise omit the section.
+- A testimonial section may appear only when real Student testimonials and explicit publication
+  permission exist. Otherwise omit it entirely.
+- Do not promise a Lab for every Course. Labs are optional protected lesson content.
+- Do not advertise installments, certificates, subscriptions, native apps, built-in live video, or
+  other non-MVP capabilities.
+- Accessibility wording must use the boundary in the PRD: platform-owned UI/player controls target
+  WCAG 2.2 AA; the site must not claim complete product conformance while captions/transcripts are
+  outside MVP.
 
-**Purpose** — Brand-first entrance; stands in for the referenced *Animated Logo Hero* asset (see blocker note at the end).
-**Layout** — Full-screen navy overlay, centered origami bird above the `Gradex` wordmark.
-**Motion** — Bird rises + wing flaps, wordmark fades in, overlay lifts after ~1.7 s. `prefers-reduced-motion` → overlay is dismissed immediately, no animation.
-**Implementation** — In Next.js, mount as a client component that removes itself on `window.load` (or route-ready), gated on `useReducedMotion()`.
+## Page Structure
 
----
+### Header
 
-## 1. Sticky Header
+- Brand mark links to the landing page.
+- Public navigation links to Catalog and appropriate informational/legal pages.
+- Actions: Sign in, Create Student account, and Browse Courses.
+- Language control is visible and keyboard operable.
+- On narrow screens, navigation moves into an accessible sheet/drawer without removing actions.
+- An authenticated user sees a role-appropriate Dashboard action rather than a public registration
+  prompt.
 
-- **Purpose** — Constant access to nav + the two conversion paths (browse, register); orient guests and returning users.
-- **Layout** — 64px, frosted `rgba(255,255,255,0.88)` + 12px blur, 1px bottom border. `[bird + wordmark] · [nav] · (auto) · [ع] [auth cluster]`.
-- **Components** — BirdMark + Wordmark; nav links (Alexandria 600); `IconButton` language toggle; **guest cluster** = `Button ghost "Log in"` + `Button outline "Create account"` + `Button primary "Browse courses"`; **returning cluster** = notifications `IconButton` + `Button primary "Go to dashboard"` + `Avatar`. A preview-only chip (bottom-left) switches the two states; it is not part of the shipped page.
-- **Visual hierarchy** — Blue solid "Browse courses" is the header's strongest element; "Create account" is the quieter outline; "Log in" is a text-weight ghost. Orange is deliberately **absent** here (reserved for hero).
-- **Responsive** — ≤860px nav + desktop auth collapse into a right-side sheet opened by a hamburger `IconButton`; closes on scrim click / `Esc`.
-- **Next/shadcn** — shadcn `NavigationMenu` + `Sheet` + `Button` variants (`primary→default`, `outline`, `ghost`). Returning state driven by session.
+### Hero
 
-## 2. Hero
+- State a concise, supportable value proposition for university learning.
+- Primary action: Browse Courses.
+- Secondary action: Create Student account.
+- Avoid a time-delayed, full-screen loader. Brand animation may be decorative only and must not block
+  content, interaction, or performance; respect `prefers-reduced-motion`.
+- Decorative imagery is hidden from assistive technology and must not imply unavailable features.
 
-- **Purpose** — State the value proposition and route to Browse / Register in one screen.
-- **Layout** — `min-height:88vh`, navy with a blue radial glow (top-right) and a faint orange glow (bottom-left). Two columns: copy (left) / visual (right).
-- **Components** — Eyebrow "University courses · Kuwait"; `H1` "Graduate with excellence." with the **orange scribble underline** under *excellence.*; lead paragraph; `Button accent "Browse courses"` (the one orange pop) + `Button on-dark "Create account"`; a trust-chip list (Lucide check/languages/banknote icons). Visual = a floating `CourseCard` mock + a mono code island ("grade: passed ✓") + the ascending origami bird — no stock photography, per DS.
-- **Visual hierarchy** — H1 (clamp 40→68px, weight 800) → lead → orange CTA → trust chips. The scribble draws attention to the single word "excellence" and nothing else.
-- **Responsive** — ≤1024px stacks to one column; ≤560px the visual is hidden to keep the headline uncrowded and CTAs go full-width stacked.
-- **Accessibility** — CTAs are ≥44px tall; orange-on-navy and white-on-navy both clear AA; the visual is `aria-hidden`.
+### Featured Courses
 
-## 3. Featured Courses
+- Show a small data-driven selection of Published Courses, or an honest empty state.
+- Each card links to Course Details and uses the catalog's actual title, Instructor, metadata, and
+  Admin-controlled price.
+- Price is formatted in KWD to three decimal places.
+- Do not show ratings unless a real, approved rating capability and data source exist.
+- Loading, empty, and error states must not fabricate catalog content.
 
-- **Purpose** — Prove the catalog is real and specific; drive Course Details.
-- **Layout** — Left-aligned section head + a 3-up `CourseCard` grid.
-- **Components** — `CourseCard`: gradient thumb + mono course-code badge + `Badge accent "New"`; `Tag` level + `Tag "Labs included"` (check icon); title; instructor row (`Avatar` + name); mono meta (lessons · hours); footer with mono `38.000 KWD` price + ghost "View". Section foot: `Button outline "Browse all courses"`.
-- **Visual hierarchy** — Thumbnail/code → title → price. **No star ratings** (honest pre-launch) — a "New" badge stands in.
-- **States** — Default / Loading (Card skeletons for the strip) / Empty ("Our first courses land soon — get notified"), matching `SCREENS.md`'s thin-launch note.
-- **Responsive** — 3-col → 1-col at ≤860px.
-- **Next/shadcn** — `CourseCard` component fed from the catalog API; shadcn `Skeleton` for loading; `Badge`, `Card`.
+### Why Gradex
 
-## 4. Why Gradex
+- Explain approved value pillars such as structured learning, optional practical work, and
+  Instructor support.
+- Claims must be specific enough to verify and must not imply that optional features exist in every
+  Course.
+- Avoid unverified competitor comparisons and superlatives.
 
-- **Purpose** — Differentiate on the three USPs competitors drop: labs, community, follow-up.
-- **Layout** — Centered head on a soft brand-tint band (`--gradient-brand-soft`), 3 parallel pillar Cards, one honest positioning line beneath.
-- **Components** — `Card` + blue `iconchip` (Lucide `bird`/`users`/`shield-check`) + `H4` + body. Positioning note uses a banknote icon in accent.
-- **Visual hierarchy** — Equal-weight pillars (parallel, unnumbered); the tint band separates this from the white sections around it.
-- **Responsive** — 3-col → 1-col at ≤860px.
+### Learning Experience
 
-## 5. Learning Experience
+Explain the typical sequence without turning optional elements into promises:
 
-- **Purpose** — Show that a Gradex course is a sequence that ends in *doing*, not watching.
-- **Layout** — Section head + a 4-step row joined by a fading blue rail; each step = mono number, icon chip, H4, body.
-- **Components** — `<ol>` of steps; `iconchip` (monitor-play, file-text, list-checks, then **accent** users chip on step 04 — the follow-up payoff mirrors the hero's orange).
-- **Visual hierarchy** — The **only numbered section** (01–04, mono). Step 04 tints orange to land the "follow-up" promise.
-- **Responsive** — 4-col → 2-col (≤1024px, rail hidden) → 1-col (≤560px).
+1. Find a Course or Section.
+2. Purchase through hosted checkout.
+3. Learn through entitled Lessons and Resources.
+4. Use available Labs or Course-scoped office hours where the Instructor has provided them.
 
-## 6. Instructor Spotlight
+### Optional Real-Identity Content
 
-- **Purpose** — Put a credible, regional human behind the courses; reinforce "instructors who stay."
-- **Layout** — Two columns on brand-tint: instructor `Card` (left) / supporting copy + CTA (right).
-- **Components** — Large `Avatar`, name + role, pull-quote, credential `Badge`s, a small stat strip (courses / lessons / AR·EN). Copy column: eyebrow, H2, two paragraphs, `Button primary "Meet the instructors"`.
-- **Visual hierarchy** — The quote is the emotional anchor; stats are supporting, not vanity metrics.
-- **Responsive** — 2-col → stacked at ≤1024px.
-- **Note** — Instructor name/photo are **placeholders** (initial-avatar, no stock photo per DS). Replace with a real instructor + consent before launch.
+An Instructor spotlight and/or Student testimonials may sit here only when the content rules above
+are satisfied. The layout must collapse cleanly when either section is absent. These sections are
+not launch requirements.
 
-## 7. Student Testimonials
+### FAQ
 
-- **Purpose** — Social proof, honestly framed for a pre-launch product.
-- **Layout** — Head (with the honesty disclaimer) + 3 quote Cards.
-- **Components** — `Card` `<figure>` → `blockquote` + `Avatar` + name + `CS · Year 1` line.
-- **Visual hierarchy** — Quote first, attribution quiet.
-- **Responsive** — 3-col → 1-col at ≤860px.
-- **Note** — Quotes are **placeholder pilot voices**, flagged as such. Recommendation: do not ship fabricated testimonials — swap for real pilot quotes, or hide the section until they exist (Product Principle 6).
+Answer only questions supported by the approved MVP, including:
 
-## 8. FAQ
+- what a Course or Section purchase grants;
+- supported devices and responsive browser use;
+- Arabic/English interface behavior versus Course content language;
+- payment currency and hosted checkout;
+- refund-policy location and how to request a refund;
+- how to obtain support.
 
-- **Purpose** — Remove the specific objections that block a first purchase (what you get, instalments, language, after-purchase, devices).
-- **Layout** — Centered head on brand-tint + a single narrow column (≤760px) of disclosure Cards.
-- **Components** — Native `<details>/<summary>` styled as Cards with a rotating chevron — fully keyboard-accessible, no JS, no invented component.
-- **Visual hierarchy** — Question (Alexandria 700) → answer (body). First item open by default.
-- **Responsive** — Single column at all widths; comfortable tap targets.
-- **Next/shadcn** — Map to shadcn `Accordion` (`type="single" collapsible`) with the same content.
+Use the shared accessible Accordion. Do not describe installments as available in MVP.
 
-## 9. Final CTA
+### Final Call to Action
 
-- **Purpose** — Last, unambiguous conversion moment.
-- **Layout** — Navy band with a blue radial glow; centered copy.
-- **Components** — H2 "Ready to graduate with excellence?" + lead + `Button accent "Browse courses"` (this view's one orange pop) + `Button on-dark "Create free account"`.
-- **Visual hierarchy** — Heading → orange CTA. Mirrors the hero to bookend the page.
-- **Responsive** — CTAs wrap/stack on narrow screens.
+- Primary action: Browse Courses.
+- Secondary action: Create Student account.
+- Repeat the approved value proposition without scarcity, fake urgency, or unsupported outcome
+  claims.
 
-## 10. Footer
+### Footer
 
-- **Purpose** — Legal completeness (Kuwait Digital Commerce Law) + secondary navigation + brand close.
-- **Layout** — Navy, 4 columns: brand + tagline + socials / Explore / Company / Legal, then a bottom bar.
-- **Components** — BirdMark + Wordmark; `IconButton` socials (Discord, X, Instagram); link lists. Legal column: **Terms / Privacy / Refund policy** (required). Bottom: "© 2026 Gradex. Built in Kuwait." + "Prices in KWD."
-- **Visual hierarchy** — Brand block widest; link columns equal and quiet.
-- **Responsive** — 4-col → 2-col (≤860px) → 1-col (≤560px).
+- Brand and concise description.
+- Links to Catalog, About/Support where implemented, and role-appropriate authentication.
+- Links to Terms, Privacy Notice, Refund Policy, and other launch-gated legal disclosures.
+- KWD notice and accurate copyright/entity information.
+- Include social links only for maintained official accounts.
 
----
+## Responsive Behavior
 
-## Accessibility (WCAG AA)
+- The public and Student experience is functionally complete on phones, tablets/iPads, laptops, and
+  desktops.
+- Layouts reflow based on content; horizontal scrolling is not required for core interaction.
+- Calls to action remain visible and operable on narrow screens.
+- Touch targets, focus visibility, reading order, and RTL behavior are verified at each supported
+  layout.
+- Hover effects have equivalent focus/touch presentation.
 
-- Semantic landmarks: `header[role=banner]`, `nav[aria-label]`, `main`, `section[aria-labelledby]`, `footer[role=contentinfo]` — verified in the a11y tree.
-- Single `H1`; ordered `H2 → H3/H4` per section.
-- Visible focus ring (`--ring-focus`, 3px blue) on every interactive element.
-- `prefers-reduced-motion`: loader, scroll-reveal, scribble draw, and bird float all disable.
-- Color pairs (white/navy, orange/navy, ink/slate) meet AA for their sizes; orange is never used for small body text on light.
-- Decorative visuals `aria-hidden`; icons paired with text labels.
-- Full keyboard path: nav → sheet (Esc to close) → FAQ disclosures → all CTAs.
+## Accessibility Acceptance
 
-## Implementation notes (Next.js + Tailwind + shadcn/ui)
+Within the platform-owned interface boundary:
 
-1. Port `tokens/*.css` into `globals.css` `@layer base` and mirror them in `tailwind.config` (`colors.brand`, `fontFamily.display/body/mono`, `borderRadius`, `boxShadow`). Do not hardcode hex in components.
-2. Build DS components as the shadcn equivalents noted per section; keep the `.gx-*` utility semantics (`gx-container`, `gx-eyebrow`, `gx-reveal`).
-3. `Reveal` = a client wrapper using IntersectionObserver at threshold 0.15 (already the DS pattern).
-4. Featured courses, instructor, and testimonials should be data-driven; wire loading/empty states from `SCREENS.md`.
-5. RTL: drive `dir` from locale (next-intl or similar); keep the LTR islands (course code, price, code, wordmark) with `dir="ltr"`.
+- semantic `header`, `nav`, `main`, section headings, and `footer` landmarks;
+- one page `h1` and logical heading order;
+- a visible skip link and complete keyboard path;
+- labelled language, menu, accordion, and authentication controls;
+- visible focus, AA contrast, non-color-only status, and sufficient target sizes;
+- no automatic motion that ignores reduced-motion preference;
+- localized page title, landmarks, control labels, validation, and empty/error states.
 
-## Blocked / follow-up
+## Data and State Requirements
 
-- **`claude_design` MCP import** (`/design/p/f4d3887e…`) and the **Animated Logo Hero** (`/design/p/83ae09bc…`) both require `/design-login` OAuth, which needs an interactive terminal — unavailable in this session. The design system was instead recovered from the `Wireframe review.zip` already in the repo (same project id). To pull the canonical animated logo, authorize in an interactive `claude` session (or claude.ai connector settings) and re-import; then swap it into the loader in place of the stand-in bird.
-- Replace placeholder instructor + testimonials with real, consented content before launch.
+- Featured Courses come from the Published Course catalog.
+- Authentication state controls the header/dashboard action.
+- Locale comes from the application locale provider and persists per approved behavior.
+- Empty/error content is localized and actionable.
+- Public preview links, when present, resolve only to the separate approved preview asset—not to a
+  protected Lab or Resource.
+
+## Current Implementation Drift
+
+These are implementation follow-ups, not alternative requirements:
+
+- `frontend/src/lib/i18n/config.ts` currently defaults to English; Arabic must be the initial
+  default.
+- `frontend/src/app/page.tsx` renders placeholder Testimonials. The section must be removed or
+  hidden until real, consented testimonials exist.
+- Current Course cards and Instructor content are seed/placeholders. They may support development
+  but cannot be represented as real public catalog or identity data at launch.
+- The earlier HTML prototype contains the same stale claims and is not a release artifact.
+
+## Review Checklist
+
+- Every visible claim maps to an approved MVP behavior or verified real data.
+- Public actions resolve to implemented, authorized routes.
+- Arabic is the initial default and all public copy works in RTL and LTR.
+- Phone, tablet/iPad, laptop, and desktop layouts pass functional review.
+- No protected content is exposed as a preview.
+- No placeholder social proof or identity content can reach production.
+- Legal links and launch disclosures are approved and available.
+- Platform-owned accessibility acceptance checks pass without claiming broader conformance.

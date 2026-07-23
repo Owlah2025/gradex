@@ -1,1122 +1,464 @@
-# SCREENS
+# Screens
 
-> Status: Draft
-> Last Updated: 2026-07-21
+> Status: Canonical MVP screen contract
+> Last Updated: 2026-07-23
 
-Source-of-truth screen inventory for the Gradex **MVP**. One entry per screen: what it's for, how you get in/out, what it's made of, what states it can be in, who may see it. This is the contract between product (what the screen is for), design (how it looks), and engineering (what to build).
-
-**Source chain:** [PROJECT_VISION](PROJECT_VISION.md) → [PRD](PRD.md) → [BUSINESS_RULES](BUSINESS_RULES.md) → [USER_JOURNEYS](USER_JOURNEYS.md) → **SCREENS** → Navigation Map → Wireframes → UI Mockups.
-
-Rule references: `BR-xxx` → [BUSINESS_RULES.md](BUSINESS_RULES.md), `D-xxx` → [DECISIONS.md](DECISIONS.md), `T#` → [USER_JOURNEYS.md](USER_JOURNEYS.md).
-
----
+This document defines the purpose, content, actions, states, and permissions of Gradex screens.
+Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavior in
+[NAVIGATION_RULES.md](NAVIGATION_RULES.md), and governing rules in
+[BUSINESS_RULES.md](BUSINESS_RULES.md).
 
 ## Conventions
 
-- **Permissions:** `Public` (no auth) · `Authenticated` (any signed-in role) · `Student` · `Instructor` · `Admin`.
-- **Global chrome (not repeated per screen):** top nav (logo, role-aware links, Notification bell → Notification Center, account menu), footer (Legal links). Student surfaces are **mobile-first, single column**; instructor & admin surfaces are **desktop-first working views**. Per-screen chrome (header/bottom-nav/breadcrumb/sidebar/back), responsive targets, and behavior rules (guarded URLs, unsaved changes, back semantics) live in [NAVIGATION_RULES.md](NAVIGATION_RULES.md).
-- **Every screen implicitly has** a `Loading` and an `Error` state; only screen-specific or notable states are re-listed below.
-- **Sub-states & modals (NOT standalone screens)** — deliberately demoted to reduce navigation complexity:
-  - **Lesson Preview** → modal/player on *Course Details*.
-  - **Payment Processing** ("confirming payment…") & **Payment Failed / retry** → states of *Checkout* (BR-020, BR-022).
-  - **Community link-out** → external action/card on *Course Home* / *Lesson Resources* (T7).
-  - **Review Outcome** (approved/rejected + reason) → *Notification Center* entry + status on *Instructor Dashboard* (T6, BR-071/072).
-
-**Count: 34 standalone screens** — 10 shared · 9 student · 7 instructor · 8 admin.
+- One responsive web screen may render differently across viewports without changing capability.
+- `Section` is canonical; UI copy may localize it as “Chapter.”
+- Modal/drawer states are documented under their owning screen, not counted separately.
+- Every mutation validates role/ownership/status server-side and exposes pending/success/failure.
+- Arabic/English and RTL/LTR apply to every screen, including tables, dialogs, errors, and email
+  deep-link destinations.
+- No MVP screen exists for Instructor pricing, Instructor earnings/payouts, notification
+  preferences, platform-wide office hours, reviews/ratings, recommendations, bundles, or BNPL.
 
 ---
 
-# Shared / System
-
-## Landing
+# Shared and Authentication
 
-**Purpose**
-Market Gradex, surface featured courses, route visitors to catalog or auth.
+## S01 — Landing
 
-**Entry**
-- Direct / marketing link (root URL)
-- Logout redirect
+**Purpose:** Explain Gradex's Kuwait-first value and move visitors into Course discovery.
 
-**Exit**
-- Catalog
-- Login
-- Register
-- Course Details (featured card)
+- **Entry:** Public root, logo/home links.
+- **Core content:** Value proposition, how learning/follow-up works, featured published Courses,
+  Instructor value, FAQ, legal/footer links.
+- **Primary actions:** Browse Courses, open Course Details, Login, Register.
+- **States:** Published Course list/empty; authenticated header variant.
+- **Constraints:** No fabricated testimonials, public ratings, recommendation claims, or protected
+  Lesson/Lab previews.
 
-**Components**
-- Hero + value proposition
-- Featured / popular courses strip
-- How-it-works / differentiators (labs, community, follow-up)
-- Primary CTAs (Browse, Sign up)
-- Footer (Legal)
+## S02 — Login
 
-**States**
-- Default
-- Loading (featured strip)
-- Empty (thin catalog at launch, 8–12 courses)
+**Purpose:** Authenticate an Active Account and return safely to its intended route.
 
-**Permissions**
-Public
+- **Entry:** Header, guarded-route redirect, Register/Reset completion.
+- **Fields:** Email, password.
+- **Actions:** Sign in, Forgot Password, Register (Students only).
+- **States:** Submitting, generic invalid credentials, suspended/deactivated, retryable failure.
+- **Exit:** Validated `returnTo` or role root.
 
----
+## S03 — Student Registration
 
-## Login
+**Purpose:** Create a `PENDING_VERIFICATION` Student Account.
 
-**Purpose**
-Authenticate an existing user; return them to where they were headed.
+- **Fields:** Display name, email, password, required policy acceptance.
+- **Display-name guidance:** 2–50 Arabic/Latin-script characters; no URLs, control characters, or
+  markup. It is a non-unique profile label, not the Account identity.
+- **Password guidance:** 15–128 characters; spaces/Unicode allowed; no composition checklist.
+- **Actions:** Submit, Login.
+- **States:** Submitting; generic accepted response; breached/common-password validation; rate limit.
+- **Exit:** Verify Email screen. No session is issued before verification.
+- **Permissions:** Public; role cannot be chosen.
 
-**Entry**
-- Landing / global nav
-- Register ("already have an account")
-- Any auth-gated action (e.g. Buy → deep-link back to Checkout, T3)
+## S04 — Verify Email
 
-**Exit**
-- Role-based redirect: Student Dashboard / Instructor Dashboard / Admin Ops Landing
-- Deep-linked return target (e.g. Checkout)
-- Forgot Password
-- Register
+**Purpose:** Complete Student activation or explain why the link cannot be used.
 
-**Components**
-- Email + password fields
-- Submit
-- "Forgot password?" link
-- Link to Register
-- Inline error area
+- **Entry:** Registration and email deep link.
+- **Actions:** Consume link, resend, return to Login.
+- **States:** Pending, verified, expired, already used, invalid, resend throttled.
+- **Exit:** Login or validated preserved intent.
 
-**States**
-- Default
-- Invalid credentials — 401, no email-exists leak (BR-003)
-- Account suspended — blocked (BR-007)
-- Submitting
+## S05 — Forgot / Reset Password
 
-**Permissions**
-Public
+**Purpose:** Request and complete a non-enumerating password reset.
 
----
+- **Request fields:** Email.
+- **Reset fields:** New password, confirmation.
+- **States:** Generic request accepted, expired/reused token, invalid password, success.
+- **Exit:** Login.
 
-## Register
+## S06 — Accept Staff Invitation
 
-**Purpose**
-Create a student account with minimum friction, without losing the chosen course.
+**Purpose:** Verify and activate an Admin-assigned Instructor/Admin role.
 
-**Entry**
-- Landing / global nav
-- Login ("create account")
-- Buy action when logged out (T3)
+- **Entry:** Expiring email link.
+- **Content:** Inviting organization, assigned role, email, policy links.
+- **Fields:** Display name, initial password, and confirmation.
+- **Display-name guidance:** Same BR-105 validation as Student registration; it defaults the
+  invited Account profile and remains editable after activation.
+- **States:** Valid, expired, revoked, already used, suspended/deactivated target.
+- **Exit:** Login; no public role selector or role upgrade.
 
-**Exit**
-- Role-based redirect / deep-linked return (e.g. Checkout)
-- Login
+## S07 — Notification Center
 
-**Components**
-- Email + password (+ confirm) fields
-- Submit
-- Link to Login
-- Inline error area
-- Legal consent (Terms / Privacy)
+**Purpose:** Durable per-recipient record of fixed transactional events.
 
-**States**
-- Default
-- Duplicate email — 409 (BR-001)
-- Submitting
+- **Content:** Unread/read list, event type, timestamp, safe deep link.
+- **Actions:** Open event, mark read/all read.
+- **Events:** Purchases, refunds, security, invitations, Course/revision submission and
+  review/change request, video-processing (Instructor), and office-hours changes per BR-122.
+- **States:** Loading, empty, delivery-channel failure metadata hidden from ordinary user.
+- **Constraints:** No preferences, marketing, SMS/WhatsApp, or push controls.
 
-**Notes**
-No self-serve **instructor** signup in MVP — instructors are recruited manually (T1).
+## S08 — Profile and Account
 
-**Permissions**
-Public
+**Purpose:** Manage personal profile, language, email/password, and Account/data requests.
 
----
+- **Content:** Role/status, profile fields, display name, language, Account/security links.
+- **Actions:** Edit profile and display name, switch Arabic/English, change email (verify new
+  address), change password, request data access/correction/deactivation/deletion, logout.
+- **Rules:** Display name is 2–50 characters in either script, is not unique, rejects URLs/control
+  characters/markup, and is what an Instructor roster shows (BR-105).
+- **States:** Dirty form, verification pending, request acknowledged, suspended/deactivated read-only
+  handling as policy permits.
+- **Permissions:** Authenticated owner; role mutation is absent.
 
-## Forgot Password
+## S09 — Legal
 
-**Purpose**
-Start password recovery by email.
+**Purpose:** Show versioned bilingual Terms, Privacy Notice, and Refund Policy.
 
-**Entry**
-- Login
+- **Entry:** Footer, Registration, Checkout, Profile.
+- **Content:** Effective version/date and approved text.
+- **Actions:** Switch legal document/language; return to source.
+- **Constraints:** No unapproved claim that streaming automatically removes refund rights.
 
-**Exit**
-- Login (after request sent)
-- Reset Password (via emailed link)
+## S10 — System States
 
-**Components**
-- Email field
-- Submit
-- Confirmation message
+**Purpose:** Shared 401/403/404/expired/offline/5xx and empty states.
 
-**States**
-- Default
-- Sent (generic confirmation — no email-exists leak)
-- Submitting
-
-**Permissions**
-Public
-
----
-
-## Reset Password
-
-**Purpose**
-Set a new password from an emailed one-time link.
-
-**Entry**
-- Password-reset email link
-
-**Exit**
-- Login
-
-**Components**
-- New password (+ confirm) fields
-- Submit
-
-**States**
-- Default
-- Invalid / expired token
-- Success
-- Submitting
-
-**Permissions**
-Public (token-scoped)
-
----
-
-## Account / Settings
-
-**Purpose**
-Manage credentials and account-level preferences.
-
-**Entry**
-- Global account menu
-
-**Exit**
-- Back to originating dashboard
-
-**Components**
-- Change email
-- Change password
-- Notification preferences
-- Session / logout
-
-**States**
-- Default
-- Saving
-- Save error
-
-**Permissions**
-Authenticated
-
----
-
-## Profile
-
-**Purpose**
-View / edit personal display info.
-
-**Entry**
-- Global account menu
-- Dashboard
-
-**Exit**
-- Account / Settings
-
-**Components**
-- Name / display fields
-- Editable form
-- Save
-
-**States**
-- View
-- Edit
-- Saving
-
-**Permissions**
-Authenticated
-
----
-
-## Notification Center
-
-**Purpose**
-Central list of transactional notifications (payment receipt, video ready, review outcome, approvals) — email + in-app, best-effort (BR-120, PRD §Notifications).
-
-**Entry**
-- Global nav bell (unread badge)
-
-**Exit**
-- Deep-link to the related screen (receipt, course, lesson, moderation item)
-
-**Components**
-- Unread badge
-- Notification list (read/unread)
-- Item → deep link
-- Mark-as-read
-
-**States**
-- Default
-- Empty (no notifications)
-- Loading
-
-**Permissions**
-Authenticated (content scoped per role)
-
----
-
-## Legal (Terms / Privacy / Refund Policy)
-
-**Purpose**
-Static compliance content; refund policy referenced at checkout (Kuwait Consumer Protection Law, 14-day right + digital-once-accessed exemption, BR-044).
-
-**Entry**
-- Footer
-- Checkout
-- Register (consent)
-
-**Exit**
-- Back
-
-**Components**
-- Static content sections
-- Section nav / anchors
-
-**States**
-- Default
-
-**Permissions**
-Public
-
----
-
-## System Error & Empty States
-
-**Purpose**
-Standardized fallbacks: not-found, server error, and **access-denied / expired enrollment** (403 mid-watch, BR-023).
-
-**Entry**
-- Any failed route / expired-access authorization
-
-**Exit**
-- Home / Dashboard / Catalog
-- Re-buy via Checkout (after expiry, BR-024/025)
-
-**Components**
-- Status message
-- Cause-appropriate CTA (retry / go home / re-purchase)
-
-**States**
-- 404 Not Found
-- 500 Server Error
-- 403 Access Denied / Enrollment Expired
-- Offline / network
-
-**Permissions**
-Public
+- **Actions:** Retry, Login, role root, Catalog, Course Details/repurchase when allowed.
+- **Constraints:** Do not reveal entity/account existence; do not advertise out-of-scope actions.
 
 ---
 
 # Student
 
-> Mobile-first, single column.
+## ST01 — Catalog and Search
 
-## Catalog
+**Purpose:** Find published Courses by Major, Subject, Study Year, and search.
 
-**Purpose**
-Browse published courses and narrow to a university subject/level (T1).
+- **Content:** Search field, the three taxonomy filters, active-filter chips, result count, Course
+  cards with Instructor, price, term, and practical material/office-hours indicators grounded in
+  Course data.
+- **Actions:** Search, filter by Major/Subject/Study Year, clear filters, sort, open Course Details.
+- **States:** Loading, no Courses, no matches, error.
+- **Rules:** Only `PUBLISHED` Courses appear (BR-161). Filters are exact-match on one value per
+  dimension; taxonomy labels render in the selected language while search matches Arabic and English
+  at once with diacritic/alef/digit normalization (BR-162). Ranking is relevance only — no
+  recommendations, promotion, or personalization.
+- **Responsive:** Filter sheet on small screens; rail where space allows.
 
-**Entry**
-- Landing
-- Global nav
-- Student Dashboard
+## ST02 — Course Details
 
-**Exit**
-- Course Details
-- Search Results
+**Purpose:** Evaluate a Published Course and choose Course or Section access.
 
-**Components**
-- Search bar
-- Filters (major, year/level)
-- Course grid (thumbnail, title, instructor, price, access term)
-- Pagination / infinite scroll
-
-**States**
-- Default
-- Loading
-- Empty (thin launch catalog / no results for filter)
-- Error (slow 4G — target p95 < 2.5s LCP)
-
-**Permissions**
-Public
-
----
+- **Content:** Title, Instructor, authored description/language, outline, Resources/Labs summary,
+  office-hours support, community, Course price, individually priced Sections, access term.
+- **Actions:** Play optional Public Preview, choose Course/Section, Checkout, Go to Course if active,
+  Login/Register when required.
+- **Public Preview state:** Separate validated asset; absent preview removes the control.
+- **Locked content:** Lesson titles may be visible, but protected media/files are not public.
+- **Constraints:** No Sample Lab download, ratings/reviews, recommendations, bundle, or BNPL CTA.
 
-## Search Results
-
-**Purpose**
-Show courses matching a query (T1). Shares layout with Catalog.
+## ST03 — Checkout
 
-**Entry**
-- Catalog search bar
-- Global nav search
+**Purpose:** Confirm one Course/Section Order, apply one coupon, accept policy, and open Tap.
 
-**Exit**
-- Course Details
-- Catalog (clear search)
+- **Content:** Item/scope, catalog subtotal, coupon/discount, total KWD, 150-day term, accepted Refund
+  Policy version, payment-method handoff.
+- **Actions:** Apply/remove coupon, continue to Tap, cancel.
+- **States:** Coupon valid/invalid/inactive/expired/wrong-scope/cap/already-used; zero-value grant;
+  creating Order; gateway unavailable.
+- **Rules:** Integer fils; server recalculates; active duplicate Entitlement blocked.
 
-**Components**
-- Query field (persisted term)
-- Filters
-- Result grid
-- Pagination
+## ST04 — Payment Confirmation and Receipt
 
-**States**
-- Results
-- Empty ("subject not covered")
-- Loading
-- Error
+**Purpose:** Represent gateway-confirmed status without trusting the redirect.
 
-**Permissions**
-Public
+- **States:** Confirming/pending, paid, free-granted, failed/cancelled/timed-out, reconciliation
+  needed.
+- **Receipt content:** Order/item snapshot, subtotal/discount/paid amount, payment reference, date,
+  access expiry, Refund Policy version.
+- **Actions:** Start/Go to Course, Orders & Refunds, retry a definitive failure safely.
+- **Constraints:** No access/receipt success until verified backend confirmation.
 
----
+## ST05 — Student Dashboard
 
-## Course Details
+**Purpose:** Resume learning and see owned/expired Courses, upcoming office hours, and recent status.
 
-**Purpose**
-Let a student evaluate a course and decide to buy the whole course or a single chapter (T2).
+- **Content:** Continue Learning, My Courses/Sections, progress, expiry, upcoming sessions, recent
+  notifications/order status.
+- **Actions:** Resume Lesson, open Course Home, Browse, Orders & Refunds.
+- **States:** First purchase/empty, active, near expiry (without scheduled reminder), expired.
 
-**Entry**
-- Catalog / Search Results
-- Landing featured card
-- Deep link / share
+## ST06 — Course Home
 
-**Exit**
-- Checkout (Buy course / Buy chapter)
-- Login / Register (if logged out → return here)
-- Course Home (if already owned → "Go to course", BR-024)
+**Purpose:** Navigate the Course within the Student's exact Entitlement scope.
 
-**Components**
-- Title, instructor, price, **access-until** (concrete date, not "150 days")
-- Outline (sections → lessons)
-- **Preview** trigger → Lesson Preview modal
-- Included labs / resources / community callout (value legibility, Risk 4)
-- Buy CTA (course or chapter scope)
-- Sample lab download
+- **Content:** Course progress, access-until, ordered Sections/Lessons, locked markers, Resources/Labs,
+  upcoming office hours, community link.
+- **Actions:** Start/resume Lesson, open allowed material, join authorized office hours, report Course.
+- **States:** Course Entitlement, Section-only Entitlement, expired, temporarily Unpublished.
+- **Constraints:** Locked Lessons never expose signed URLs.
 
-**States**
-- Default (purchasable)
-- Owned → "Go to course" instead of Buy (BR-024)
-- Unpublished / unavailable
-- Price mid-change → last-approved price shown (BR-017)
-- Loading
+## ST07 — Lesson Player
 
-**Notes**
-**Lesson Preview** is a modal here, not a standalone screen.
+**Purpose:** Watch an entitled Lesson and retain progress.
 
-**Permissions**
-Public (Buy requires auth)
+- **Content:** Responsive HLS player, Lesson title/context, progress, Lesson outline/rail, material and
+  report actions.
+- **Actions:** Play/pause/seek/volume/quality/fullscreen, Previous/Next, Course Home, Resources/Labs,
+  Report.
+- **States:** Loading, playing, resuming, completed, video unavailable, transient retry,
+  access denied/expired.
+- **Accessibility:** Keyboard and screen-reader-labelled controls; captions are not an MVP control.
 
----
+## ST08 — Lesson Resources and Labs
 
-## Checkout
+**Purpose:** Download entitled reference/hands-on files.
 
-**Purpose**
-Confirm the item and pay via hosted card/KNET; grant access only on webhook success (T4, BR-020).
+- **Content:** Separate Resource and Lab lists with type/size/description.
+- **Actions:** Download via newly authorized short-lived link; report a file; return to Lesson/Course.
+- **States:** Empty per category, generating link, expired/retry, denied, unavailable after moderation.
+- **Constraints:** No public link; Lab buyer-identification may be applied server-side.
 
-**Entry**
-- Course Details (Buy)
-- Login / Register (deep-link return)
+## ST09 — Office Hours
 
-**Exit**
-- Payment Success / Receipt (on webhook success)
-- Course Details (cancel)
-- Retry (stay, on failure)
+**Purpose:** View Course-scoped sessions the Student is entitled to join.
 
-**Components**
-- Order summary (item, scope, price, access term)
-- Payment method (card / KNET) → hosted gateway page/redirect
-- Refund-policy link (Legal)
-- Pay CTA
-- Idempotency-keyed order (BR-020)
+- **Content:** Course, title, description, localized start/end, status.
+- **Actions:** Open Course, join external meeting after authorization.
+- **States:** Upcoming, rescheduled, cancelled, completed, empty, entitlement expired.
+- **Constraints:** Link is never present in public/unauthorized payloads.
 
-**States**
-- Review / ready
-- **Processing** — "confirming payment…" holding state, webhook may lag (BR-020) — never a false failure
-- Success → redirect to Receipt
-- **Failed / declined / cancelled / timeout** — no access, clear retry (BR-022)
-- Already-enrolled block (re-buy active enrollment refused, BR-024)
+## ST10 — Orders and Refunds
 
-**Notes**
-Processing and Failed are **states here**, not separate screens.
+**Purpose:** View Order, Payment Attempt, Receipt, and Refund history/status.
 
-**Permissions**
-Student
+- **Content:** Item snapshot, paid/discount amounts, payment status/reference, Entitlement term,
+  accepted policy version, Refund list and remaining refundable balance where appropriate.
+- **Actions:** View receipt/policy; follow support refund-request instructions; return to Course.
+- **States:** Paid/free-granted/failed; refund pending/partially refunded/refunded/failed.
+- **Constraints:** Student does not directly call refund mutation; Admin applies approved process.
 
----
+### Report Content Modal/Drawer
 
-## Payment Success / Receipt
+Owned by Course Details only when entitled, Course Home, Lesson Player, and Materials screens.
 
-**Purpose**
-Confirm access is granted and give an in-app receipt; one-tap into first lesson (T4, BR-121).
-
-**Entry**
-- Checkout (webhook success)
-- Notification Center (receipt notification)
-
-**Exit**
-- Course Home / first Lesson Player ("Start learning")
-- Student Dashboard
-
-**Components**
-- Confirmation + receipt details (item, amount, date, txn ref)
-- "Start first lesson" CTA
-- Link to Dashboard
-
-**States**
-- Default
-- Loading (post-redirect reconcile)
-
-**Permissions**
-Student
-
----
-
-## Student Dashboard
-
-**Purpose**
-Home base for a signed-in student: what they own, where to resume (T5/T8).
-
-**Entry**
-- Post-login redirect
-- Global nav
-- Receipt
-
-**Exit**
-- Course Home
-- Catalog (browse more)
-- Profile
-
-**Components**
-- "Continue learning" (resume last lesson/position)
-- My Courses list (progress %, access-until)
-- Empty-state CTA → Catalog
-
-**States**
-- Default (has courses)
-- Empty (no enrollments → browse)
-- Near-expiry indicator (silent expiry in MVP, D-009)
-- Loading
-
-**Permissions**
-Student
-
----
-
-## Course Home
-
-**Purpose**
-Per-course map: understand what was bought and where to start (T5).
-
-**Entry**
-- Student Dashboard
-- Receipt
-- Course Details (owned)
-
-**Exit**
-- Lesson Player
-- Lesson Resources & Labs
-- Community link-out (external)
-
-**Components**
-- Course header (progress, access-until)
-- Section → lesson list with per-lesson lock/complete markers
-- "Start here" / resume CTA
-- Estimated time-to-complete
-- Resources / labs entry
-- **Community link-out** card (external Discord, T7)
-
-**States**
-- Default
-- Chapter-only purchase → non-owned lessons visibly **Locked** (BR-021/023)
-- Progress load error
-- Near / past expiry (access ends silently, D-009)
-
-**Permissions**
-Student (enrollment-scoped)
-
----
-
-## Lesson Player
-
-**Purpose**
-Watch a lesson smoothly and never lose place (T6).
-
-**Entry**
-- Course Home
-- Student Dashboard ("Continue")
-- Receipt ("Start first lesson")
-
-**Exit**
-- Next / previous lesson (auto-advance)
-- Course Home
-- Lesson Resources & Labs
-
-**Components**
-- HLS adaptive video player (play/pause, seek, quality, fullscreen, speed) — keyboard-operable
-- Resume banner ("Pick up at 12:04")
-- Progress / auto-complete at ≥90% (BR-051)
-- Lesson list / next-up
-- Resources tab entry
-
-**States**
-- Playing / paused
-- Resume prompt
-- Buffering
-- Signed-URL refresh (silent, no interruption, BR-053/100)
-- **Access denied** — expired enrollment mid-watch (BR-023) → System 403
-- Playback error (CDN/storage outage — distinguishable)
-
-**Permissions**
-Student (enrollment-scoped playback authz, BR-050)
-
----
-
-## Lesson Resources & Labs
-
-**Purpose**
-Download lesson resources (slides/notes) and lab materials (project + guide) to practice (T7).
-
-**Entry**
-- Lesson Player (Resources tab)
-- Course Home
-
-**Exit**
-- Back to Lesson Player / Course Home
-- Community link-out (external)
-
-**Components**
-- Resources list (slides/notes) — download
-- Lab materials list (project + guide) — download, buyer-tagged (BR-103, D-011)
-- Per-item size/type
-- "Mark lab done"
-- Lab setup checklist
-
-**States**
-- Default
-- Empty (no materials for lesson)
-- Entitlement / expiry re-checked per download (BR-023)
-- Download link expired → re-issue
-- Error
-
-**Notes**
-May render as a **tab within Course Home / Lesson Player** rather than a distinct route — decide at wireframe stage.
-
-**Permissions**
-Student (entitlement-scoped)
+- **Fields:** Target, fixed reason, explanation (required for “other”).
+- **States:** Submitting, accepted, duplicate/rate-limited, error.
+- **Effect:** Creates a report; never auto-hides content.
 
 ---
 
 # Instructor
 
-> Desktop-first working views. Instructor accounts are provisioned manually (T1). **No earnings/payout figures anywhere instructor-facing** (BR-064/074, D-006).
+## IN01 — Instructor Dashboard and Courses
 
-## Instructor Dashboard
+**Purpose:** See owned Courses and their lifecycle/review state.
 
-**Purpose**
-Overview of the instructor's courses and their lifecycle status; entry to build, review outcomes, analytics (T1/T7).
+- **Content:** Course cards/table, Draft/Pending Review/Changes Requested/Published/Unpublished/
+  Archived, video failures, upcoming office hours.
+- **Actions:** Create Course, open Builder/Analytics/Office Hours, respond to change request.
+- **Constraints:** No earnings/payout or price-edit controls.
 
-**Entry**
-- Post-login redirect
-- Global nav
+## IN02 — Course Builder
 
-**Exit**
-- Course Builder
-- Course Analytics
-- Payout Statements
-- Notification Center (review outcome)
+**Purpose:** Manage owned Course metadata and ordered Sections/Lessons.
 
-**Components**
-- Course list with status (Draft / Pending Approval / Published / Pending-Revision)
-- **Review outcome** surfacing (approved / rejected + reason) — status + notification, not its own screen (BR-071/072)
-- "New course" CTA
-- Per-course quick actions (edit, analytics)
+- **Content:** Authored metadata/language, Major/Subject/Study Year selectors, Course outline,
+  current Course/Section prices read-only, state/sync indicator.
+- **Actions:** Edit metadata, select classification, add/reorder/delete Sections/Lessons, open
+  Lesson/Preview, submit.
+- **States:** Autosaving/synced/error, read-only Pending Review, Published live + pending revision,
+  missing-classification validation blocking submit.
+- **Permissions:** Own Course only; all price fields non-editable; taxonomy selectors offer existing
+  Admin-managed terms only — no create/rename/retire control, and retired terms are unselectable.
 
-**States**
-- Default
-- Empty (no courses yet)
-- Rejected banner (reason shown, back to Draft, editable — BR-072/015)
-- Read-only while Pending (BR-016)
-- Loading
+## IN03 — Lesson Editor
 
-**Permissions**
-Instructor (own courses only, BR-060)
+**Purpose:** Edit Lesson metadata and manage its video.
 
----
+- **Content:** Title/order, video upload/processing state, existing live-vs-replacement state.
+- **Actions:** Save, upload/replace/retry video, open Materials.
+- **States:** Uploading/processing/ready/failed/published; unsaved/upload-leave guard.
 
-## Course Builder
+## IN04 — Resources and Labs Manager
 
-**Purpose**
-Model and edit the course as Course → Section → Lesson; set price (T2).
+**Purpose:** Manage protected files as two distinct categories.
 
-**Entry**
-- Instructor Dashboard (New / Edit course)
+- **Content:** Lists, type/size limits, scan/availability state.
+- **Actions:** Upload/replace/delete allowed file, edit description.
+- **States:** Validating/uploading/quarantined/scanning/available/failed/over-cap.
 
-**Exit**
-- Lesson Editor
-- Resources & Labs Manager
-- Submit for Review
+## IN05 — Public Preview Manager
 
-**Components**
-- Course metadata (title, description, price in 30–60 KWD band)
-- Section list (add / reorder / delete)
-- Lesson list per section (add / reorder / delete)
-- Autosave indicator
-- Live student-preview
+**Purpose:** Manage the Course's optional separate public preview.
 
-**States**
-- Draft (invisible until published, BR-011)
-- Editing / autosaving
-- Pending-revision (edits to a live course queue for re-approval; live stays unchanged, BR-017/090)
-- Read-only while Pending Approval (BR-016)
-- Save / reorder error
+- **Content:** Current asset, allowed formats/limits, permission confirmation, scan state.
+- **Actions:** Upload/replace/remove, confirm permission, preview public rendering.
+- **States:** None, validating/quarantined/scanning/available/failed.
+- **Constraints:** Cannot select a protected Lesson/Lab as public.
 
-**Permissions**
-Instructor (own courses, BR-060)
+## IN06 — Submit and Review Status
 
----
+**Purpose:** Validate readiness, submit, and respond to Admin review.
 
-## Lesson Editor
+- **Content:** Checklist, missing-item links, current status, Admin reason/history.
+- **Actions:** Submit, return to fix, revise/resubmit after Changes Requested.
+- **States:** Not ready, ready, submitting, Pending Review read-only, Changes Requested, Published.
 
-**Purpose**
-Get a watchable lesson: upload raw video, track transcode to READY (T3).
+## IN07 — Course Analytics
 
-**Entry**
-- Course Builder (open lesson)
+**Purpose:** View owned Course learning activity.
 
-**Exit**
-- Course Builder
-- Resources & Labs Manager
+- **Content:** Enrollment count, completion/progress aggregates, Lesson drop-off, own Course roster
+  with Student-chosen display name/alias and Course-scoped enrollment/progress fields only.
+- **Actions:** Filter/export only if approved by privacy/access policy; open Course/Lesson.
+- **Constraints:** No earnings/payout numbers; no Student email, phone, payment/legal identity, or
+  cross-Course activity.
 
-**Components**
-- Lesson title / metadata
-- Video upload (drag-drop, resumable)
-- Per-stage status (Uploading → Processing → Ready)
-- Replace / re-upload
-- Preview
+## IN08 — Instructor Office Hours
 
-**States**
-- Empty (no video)
-- Uploading (progress)
-- Processing / transcoding
-- Ready
-- **Failed** — auto-retry 3× then manual retry (BR-091)
-- Over `MAX_UPLOAD_SIZE_BYTES` rejected
-- Stuck-UPLOADING (reaper) surfaced
+**Purpose:** Schedule one-off external-link sessions for an owned Published Course.
 
-**Permissions**
-Instructor (own courses)
-
----
-
-## Resources & Labs Manager
-
-**Purpose**
-Attach downloadable materials to a lesson in two separate buckets (T4, D-011).
-
-**Entry**
-- Lesson Editor
-- Course Builder
-
-**Exit**
-- Course Builder / Lesson Editor
-
-**Components**
-- Resources uploader (slides/notes — ≤50 MB/file, 200 MB/lesson)
-- Lab materials uploader (project + guide — ≤250 MB/file, 1 GB/lesson)
-- File list per bucket (replace in place, no versioning, BR-066)
-- Instant size/type validation
-- Per-lesson "materials complete" indicator
-
-**States**
-- Default
-- Uploading
-- Wrong type rejected
-- Over-cap rejected with message (BR-068)
-- Error
-
-**Permissions**
-Instructor (own courses)
-
----
-
-## Submit for Review
-
-**Purpose**
-Submit a complete course for admin approval with a pre-submit checklist (T5).
-
-**Entry**
-- Course Builder
-
-**Exit**
-- Instructor Dashboard (course → Pending Approval, BR-070)
-
-**Components**
-- Pre-submit checklist (every lesson has a READY video; ≥1 section/lesson)
-- Blocking-issues list naming what's missing (BR-012/013)
-- "Fix" jump-links to gaps
-- Submit CTA
-
-**States**
-- Ready to submit
-- Blocked (missing content / video still transcoding)
-- Submitting
-
-**Permissions**
-Instructor (own courses)
-
----
-
-## Course Analytics
-
-**Purpose**
-See how a published course performs — engagement only, **no revenue** (T7, BR-064).
-
-**Entry**
-- Instructor Dashboard
-
-**Exit**
-- Course Builder (iterate content)
-
-**Components**
-- Per-course enrollments count
-- Completion rate
-- Per-lesson completion funnel (drop-off)
-- Student roster (own students)
-
-**States**
-- Default
-- Empty (no enrollments yet)
-- Loading / analytics lag
-
-**Permissions**
-Instructor (own courses; **never** earnings, BR-074)
-
----
-
-## Payout Statements
-
-**Purpose**
-Access periodic manual payout statements — informational, no live earnings dashboard in MVP (T8, D-006).
-
-**Entry**
-- Instructor Dashboard
-
-**Exit**
-- Download (PDF / CSV)
-
-**Components**
-- Statement list by cycle
-- Download link per statement
-- Payout cadence explainer (trust, Risk 6)
-
-**States**
-- Default
-- Empty (no statements yet)
-
-**Notes**
-Displays issued statements only — **no per-course earnings figures** in the live UI (BR-074, D-006).
-
-**Permissions**
-Instructor (own statements)
+- **Fields:** Course, title, description, start/end, external link.
+- **Actions:** Create/reschedule/cancel.
+- **States:** Scheduled/completed/cancelled, validation, suspended/read-only.
+- **Constraints:** No platform-wide/recurring session, RSVP, attendance, recording, reminder, or
+  calendar controls.
 
 ---
 
 # Admin
 
-> Desktop-first. Only admins see student PII (BR-101). Privileged actions are audited.
+## AD01 — Admin Ops
 
-## Admin Ops Landing
+**Purpose:** Surface actionable operational state.
 
-**Purpose**
-"What needs attention today" — queues and exceptions at a glance (T1).
+- **Content:** Pending Course reviews, open reports, pending/failed refunds, payout run status,
+  failed content processing/scans, invitation status.
+- **Actions:** Open the relevant queue/detail.
+- **Constraints:** Metrics are operational, not recommendations/marketing analytics.
 
-**Entry**
-- Post-login redirect
-- Global nav
+## AD02 — Users and Invitations
 
-**Exit**
-- Moderation Queue
-- Refunds
-- Payouts
-- User Management
-- Revenue Dashboard
+**Purpose:** Provision staff and manage Account status.
 
-**Components**
-- Moderation queue depth
-- Pending refunds count
-- Failed transcodes count
-- Quick links to each ops area
+- **Content:** Search/filter Accounts, role/status, invitation history, relevant audit events.
+- **Actions:** Invite Instructor/Admin, resend/revoke invitation, suspend/reactivate with reason.
+- **States:** Pending/accepted/expired/revoked/conflicting-address invitations;
+  Active/Suspended/Deactivated Accounts.
+- **Constraints:** No password display/reset to known value; no public role assignment; an email
+  already attached to an Account cannot be invited or converted to another role in MVP.
 
-**States**
-- Default
-- All-clear (empty queues)
-- Loading
+## AD03 — Pricing
 
-**Permissions**
-Admin
+**Purpose:** Set and audit Course/Section catalog prices.
 
----
+- **Content:** Course outline, current prices, price history.
+- **Actions:** Set/change integer-fils price with required reason.
+- **States:** Unsaved validation, saving, success, conflict, audit view.
+- **Constraint:** Change affects future Orders only.
 
-## Moderation Queue
+## AD04 — Course Review Queue
 
-**Purpose**
-Clear the review backlog of Pending Approval courses (T2, BR-070).
+**Purpose:** Triage `PENDING_REVIEW` Courses/revisions.
 
-**Entry**
-- Admin Ops Landing
-- Global nav
+- **Content:** Course, Instructor, first publication/revision, submitted time, readiness summary.
+- **Actions:** Open Content Review, filter/sort.
+- **States:** Loading, empty, stale/conflict.
 
-**Exit**
-- Content Review
+## AD05 — Content Review
 
-**Components**
-- Queue list (course, instructor, submitted-at, **age/SLA**)
-- Priority sort
-- Bulk triage
-- Open → Content Review
+**Purpose:** Review Course content and apply an audited publication/moderation transition.
 
-**States**
-- Default
-- Empty (queue clear)
-- Launch-week batch (8–12 at once, Risk 5)
-- Loading
+- **Content:** Metadata, outline, Resources/Labs/Preview, audited video player, revision diff, history.
+- **Actions:** Publish, request changes with reason, unpublish/republish, archive when allowed.
+- **States:** Reviewing, applying, Published, Changes Requested, Unpublished, conflict/failure.
+- **Constraints:** No partial publish; Admin preview never creates Student Entitlement.
 
-**Permissions**
-Admin
+## AD06 — Coupons
 
----
+**Purpose:** Create/manage discounts and inspect history.
 
-## Content Review
+- **Fields:** Code, percentage/fixed value, validity, Course/Section targets, global cap, active.
+- **Actions:** Create/edit/deactivate; delete only with no redemption; view redemption/refund history.
+- **States:** Draft validation, active/inactive/expired, cap reached, frozen redeemed value fields.
+- **Constraints:** No configurable per-user limit; one consuming redemption per Student.
 
-**Purpose**
-Preview any lesson (incl. Draft/Pending) and approve or reject with a reason (T3/T4).
+## AD07 — Revenue and Order Detail
 
-**Entry**
-- Moderation Queue
+**Purpose:** Reconcile Orders, Payment Attempts, Entitlements, Refunds, and Instructor accounting.
 
-**Exit**
-- Moderation Queue (after decision)
+- **Content:** Amount snapshots, gateway references/status, coupon, Entitlement, refund/earning lines,
+  reconciliation warning.
+- **Actions:** Search/filter/export as permitted, open Refund/Payout context.
+- **States:** Pending/paid/free-granted/failed/unknown/partially refunded/refunded.
 
-**Components**
-- Course outline
-- **Audited** admin lesson preview player (logged: admin ID, lesson, timestamp; no enrollment, BR-081)
-- Reviewer checklist overlay
-- Approve → Published + notify (BR-071)
-- Reject → **required reason**, back to Draft (BR-072)
-- Reason templates
+## AD08 — Refunds
 
-**States**
-- Reviewing
-- Approving (atomic publish; must not end half-visible)
-- Rejecting (reason required)
-- Pending-revision review → applies changes atomically to live course (BR-017/090)
+**Purpose:** Request and track policy-eligible full/partial refunds.
 
-**Permissions**
-Admin
+- **Content:** Order/captured/refunded/remaining balance, method capability, accepted policy version,
+  existing Refunds, payout impact.
+- **Fields:** Integer-fils amount, required reason.
+- **Actions:** Submit idempotently, refresh/reconcile status.
+- **States:** Requested/pending/succeeded/failed/cancelled; partial/full cumulative outcome.
+- **Constraints:** No Entitlement/revenue effect before confirmed gateway success.
 
----
+## AD09 — Payouts
 
-## User Management
+**Purpose:** Prepare monthly statements and record manual bank transfers.
 
-**Purpose**
-Keep the platform safe — view users, suspend students/instructors (T5).
+- **Content:** Configured global share (or blocking unconfigured state), eligible Orders, fees,
+  refunds/chargebacks, prior adjustments, payable total, statement history.
+- **Actions:** Generate/review, approve, mark Paid with required reference, email statement, void an
+  unpaid statement with reason.
+- **States:** Draft/Approved/Paid/Void; failed email does not undo Paid state.
+- **Constraints:** No automated transfer or Instructor UI.
 
-**Entry**
-- Admin Ops Landing
-- Global nav
+## AD10 — Reported Content
 
-**Exit**
-- User detail / action confirm
+**Purpose:** Resolve Student reports without automatic takedown.
 
-**Components**
-- User list / search (PII admin-only, BR-101)
-- Role filter
-- Suspend / reinstate (reason + audit trail)
-- User detail
+- **Content:** Target, reporter, reason/note, Course/Instructor, related reports, current state/history.
+- **Actions:** Start review, dismiss, request changes, unpublish, suspend Account; record reason.
+- **States:** Open/Under Review/Resolved Dismissed/Resolved Actioned.
 
-**States**
-- Default
-- Suspend confirm (reason required)
-- Suspended view
-- Loading
+## AD11 — Office-Hours Moderation
 
-**Notes**
-Suspending a **student** kills access despite prior purchases (BR-007); suspending an **instructor** does **not** revoke enrolled students' access (BR-065).
+**Purpose:** Inspect and cancel inappropriate/invalid Course sessions.
 
-**Permissions**
-Admin
+- **Content:** Course/Instructor/session/link/schedule/status and audit history.
+- **Action:** Cancel with required reason.
+- **Constraints:** No Admin create/platform-wide session action.
+
+## AD12 — Catalog Taxonomy
+
+**Purpose:** Maintain the Major and Subject vocabularies that classify and filter the catalog.
+
+- **Content:** Major and Subject term lists with Arabic/English labels, Subject academic code,
+  active/retired state, referencing-Course count, and audit history.
+- **Actions:** Create term, edit bilingual labels/code, retire/restore, delete an unreferenced term,
+  open referencing Courses, override a Course's classification.
+- **States:** Saving, duplicate-label validation, retire confirmation, delete blocked while
+  referenced, empty vocabulary.
+- **Rules:** Admin only (BR-158). Renaming changes labels everywhere and never rewrites assigned
+  Courses; retiring blocks new assignment but leaves existing Courses filterable; a referenced term
+  cannot be deleted (BR-159/160). Every change is audited.
+- **Constraints:** Study Year is a fixed enumeration and is not editable here. No fourth
+  classification dimension, no free-text tags, and no Instructor access.
 
 ---
 
-## Revenue Dashboard
+# Screen Index
 
-**Purpose**
-Platform financial health — platform-wide revenue/payments (T6).
+| ID | Screen | Audience |
+|---|---|---|
+| S01–S10 | Shared/auth/legal/system screens | Public or role-aware |
+| ST01–ST10 | Catalog through Orders/Refunds | Student/public where stated |
+| IN01–IN08 | Course operations, analytics, office hours | Instructor |
+| AD01–AD12 | Users, pricing, moderation, commerce, payouts, catalog taxonomy | Admin |
 
-**Entry**
-- Admin Ops Landing
-- Global nav
-
-**Exit**
-- Refunds (drill-in)
-
-**Components**
-- Revenue over period
-- Per-course revenue
-- Refund / chargeback trend
-- **Reconciliation view** (webhook vs record desync, Risk 1)
-
-**States**
-- Default
-- Loading
-- Reconciliation-flag / desync warning
-
-**Permissions**
-Admin
-
----
-
-## Refunds
-
-**Purpose**
-Refund fairly and safely; revoke access only after gateway confirms (T7, BR-040/041).
-
-**Entry**
-- Admin Ops Landing
-- Revenue Dashboard
-- User / order lookup
-
-**Exit**
-- Refund confirm
-- Payouts (clawback flag)
-
-**Components**
-- Order lookup
-- Inline **policy check** (streamed? file opened? — 14-day right minus digital-once-accessed, BR-044)
-- Full / partial refund (scoped to item, BR-043)
-- Refund action → gateway call
-- Audit log / export (BR-042)
-
-**States**
-- Eligible / ineligible (policy)
-- **Pending-refund** (access retained until gateway confirms, BR-041)
-- Confirmed → access revoked
-- Payout-already-paid → **flag for clawback** (BR-043)
-- Gateway refund failed → do not revoke; reconcile
-
-**Permissions**
-Admin (refunds are admin-only, BR-040)
-
----
-
-## Payouts
-
-**Purpose**
-Pay instructors correctly — itemized, fees + refunds pre-deducted, approve → paid (T8, BR-073).
-
-**Entry**
-- Admin Ops Landing
-- Global nav
-
-**Exit**
-- Payout statement generated (feeds instructor Payout Statements)
-
-**Components**
-- Payout run itemized by course/purchase
-- Fees + refunds pre-deducted
-- Reconciliation flags before "Paid"
-- Approve → mark Paid with reference
-- Auto-generated statement (PDF/CSV) per instructor
-
-**States**
-- Draft run
-- Approved
-- Paid (with reference)
-- Clawback pending (refund after Paid → manual next cycle, BR-043)
-- Mismatch vs gateway flagged
-
-**Notes**
-Earnings live here, in **admin** — never exposed to the instructor UI (BR-074).
-
-**Permissions**
-Admin
-
----
-
-## Reported Content
-
-**Purpose**
-Moderate reported courses/materials (T8).
-
-**Entry**
-- Admin Ops Landing
-- Global nav
-
-**Exit**
-- Content Review / action
-
-**Components**
-- Reports list (target, reporter, reason, date)
-- Open reported item
-- Action (dismiss / take down / warn)
-- Audit trail
-
-**States**
-- Default
-- Empty (no reports)
-- Loading
-
-**Permissions**
-Admin
-
----
-
-## Screen index
-
-| # | Screen | Role | Permission |
-|---|--------|------|------------|
-| 1 | Landing | Shared | Public |
-| 2 | Login | Shared | Public |
-| 3 | Register | Shared | Public |
-| 4 | Forgot Password | Shared | Public |
-| 5 | Reset Password | Shared | Public |
-| 6 | Account / Settings | Shared | Authenticated |
-| 7 | Profile | Shared | Authenticated |
-| 8 | Notification Center | Shared | Authenticated |
-| 9 | Legal | Shared | Public |
-| 10 | System Error & Empty States | Shared | Public |
-| 11 | Catalog | Student | Public |
-| 12 | Search Results | Student | Public |
-| 13 | Course Details | Student | Public |
-| 14 | Checkout | Student | Student |
-| 15 | Payment Success / Receipt | Student | Student |
-| 16 | Student Dashboard | Student | Student |
-| 17 | Course Home | Student | Student |
-| 18 | Lesson Player | Student | Student |
-| 19 | Lesson Resources & Labs | Student | Student |
-| 20 | Instructor Dashboard | Instructor | Instructor |
-| 21 | Course Builder | Instructor | Instructor |
-| 22 | Lesson Editor | Instructor | Instructor |
-| 23 | Resources & Labs Manager | Instructor | Instructor |
-| 24 | Submit for Review | Instructor | Instructor |
-| 25 | Course Analytics | Instructor | Instructor |
-| 26 | Payout Statements | Instructor | Instructor |
-| 27 | Admin Ops Landing | Admin | Admin |
-| 28 | Moderation Queue | Admin | Admin |
-| 29 | Content Review | Admin | Admin |
-| 30 | User Management | Admin | Admin |
-| 31 | Revenue Dashboard | Admin | Admin |
-| 32 | Refunds | Admin | Admin |
-| 33 | Payouts | Admin | Admin |
-| 34 | Reported Content | Admin | Admin |
-
-**Demoted to states/modals (documented in-parent, not standalone):** Lesson Preview · Payment Processing · Payment Failed · Community link-out · Review Outcome.
+Modal/drawer states: Public Preview · Report Content · coupon result · confirmation dialogs ·
+unsaved/upload warning. External destinations: Tap hosted checkout · Discord/Telegram · meeting link.

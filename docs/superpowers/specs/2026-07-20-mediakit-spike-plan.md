@@ -3,6 +3,11 @@
 > Status: **REJECTED — spike failed at install verification (2026-07-20). Do not adopt. Proceed with the fallback in §6.**
 > Date: 2026-07-20
 > Scope: build-vs-buy decision for the video upload/transcode/delivery slice of [2026-07-17-video-streaming-design.md](./2026-07-17-video-streaming-design.md). Does not replace that spec — it's a gate in front of it.
+>
+> Historical-record note (2026-07-23): Gradex proceeded with its own Go/asynq/FFmpeg/S3-compatible
+> slice. The current video design now documents both the implementation and mandatory product gaps.
+> Sections 1–5 and 7 below preserve the evaluation trail; they are not current architecture or
+> implementation instructions.
 
 ---
 
@@ -10,16 +15,26 @@
 
 The spike never reached Docker. Step one of MediaKit's own Quick Start — `go install github.com/MUKE-coder/grit/v3/cmd/grit@latest` then `grit new my-media --triple --next --style default` — was run exactly as documented. Findings:
 
-1. **`grit`'s own README never mentions MediaKit.** It's a generic Go+Gin+GORM / Next.js full-stack scaffolder, unrelated on its face.
-2. **The scaffolded project contains zero MediaKit functionality.** No transcode, no HLS, no private-assets/signed-URL endpoint, no webhooks, no analytics, no AI-analysis route — confirmed by grepping the generated Go source. The only upload/signed-URL code present is Grit's generic, generic-purpose S3 presigned-upload plumbing (any Grit app gets this for arbitrary file storage; it has nothing to do with video or purchaser-gating).
-3. **`grit plugin list` shows exactly one plugin: `multitenant`.** No media/video plugin exists to install on top of the base scaffold either.
-4. **`https://mediakitapi.gritcms.com`** — the base URL every single curl example across all 16 doc pages targets — **returns 404.** There is no live backend, hosted or otherwise.
-5. **`github.com/MUKE-coder/mediakit`** (linked from the docs' own LLM-reference page) — 404, confirmed earlier in the doc-only eval.
-6. The only real artifact found anywhere: an npm package `@mediakit-dev/react` (versions 0.1.0–0.4.1, published Mar–Apr 2026, real dependencies — `hls.js`, `plyr`, `blurhash`) — genuine, but frontend-only, no README, and useless without a backend implementing the documented API.
+1. The installed `grit` README had no MediaKit reference; it described a general Go/Next.js
+   scaffolder.
+2. The generated project contained no MediaKit transcode, HLS, private-playback, webhook, analytics,
+   or AI-analysis implementation when its generated Go source was inspected.
+3. `grit plugin list` listed only `multitenant`; it exposed no media/video plugin through that
+   documented path.
+4. `https://mediakitapi.gritcms.com`, the API base used by the reviewed examples, returned 404 at
+   verification time. The documented hosted API therefore could not be exercised.
+5. The documentation-linked `github.com/MUKE-coder/mediakit` location returned 404 at verification
+   time.
+6. The obtainable `@mediakit-dev/react` package was a frontend library and did not supply the
+   backend required by the documented API.
 
-**Conclusion: MediaKit's backend does not exist in any obtainable form** — not self-hosted (the documented install path produces none of it), not hosted (the documented API base URL 404s). The docs site is detailed, internally consistent, and reads exactly like real API documentation — but it documents a server that was never shipped. A frontend component library was published; the Go service it's meant to talk to wasn't, or was pulled.
+**Conclusion:** the spike could not obtain or verify an operable MediaKit backend through either
+documented route on 2026-07-20. That evidence was sufficient to reject the dependency for Gradex;
+it does not claim the vendor can never provide a working product later.
 
-This is why the spike existed even after a thorough doc review: no amount of reading documentation can confirm a product actually runs. The prior doc-only assessment (§1–§7 below) concluded "partial fit, worth a 2-day spike" — that conclusion was reasonable given only doc evidence, but wrong, because the one thing docs can't show is whether the server exists. It doesn't.
+The prior doc-only assessment (§1–§7 below) concluded "partial fit, worth a 2-day spike." The
+install/API check showed that the documented integration could not be verified, so the fallback
+became the operative decision.
 
 **Everything below this point is the doc-only analysis that motivated the spike. It's kept for the record — none of it changes the outcome. Skip straight to §6 (fallback).**
 
@@ -27,7 +42,9 @@ This is why the spike existed even after a thorough doc review: no amount of rea
 
 ## 1. Method
 
-16 MediaKit doc pages (`https://mediakit.gritcms.com/docs/*`) fetched and cross-checked against the approved video-streaming spec's 12 concrete requirements. Findings were adversarially verified by 3 independent skeptic passes, then re-verified by hand where the skeptics disagreed with the initial read. One material correction came out of that process — see §3.
+The then-available MediaKit documentation under `https://mediakit.gritcms.com/docs/*` was checked
+against 12 requirements from the approved video design. One material correction from that review is
+recorded in §3. All vendor details below are historical observations, not current claims.
 
 ## 2. Requirement coverage (corrected)
 
@@ -42,21 +59,26 @@ This is why the spike existed even after a thorough doc review: no amount of rea
 | R7 | Auto-retry w/ backoff on transcode failure | **Weaker than own spec** | Failure is surfaced (`transcode_status`, failure webhook), but retry is a manual "Retranscode" button / `POST .../retranscode`, no idempotency key, no auto-backoff. Own spec's 3x exponential backoff is more robust than what's documented here. |
 | R8 | Data model integration | Real architectural cost | MediaKit requires its own Postgres — no option to point it at Gradex's schema. Integration means storing a `mediakit_asset_id` FK in Gradex's `videos` table and treating MediaKit's DB as a second, non-authoritative system of record, reconciled via webhook. Conflicts with the own spec's "Postgres is the single source of truth" principle. |
 | R9 | Deployment/ops fit for solo dev, ~3.5wk runway | Real added surface | Self-hosting is real (Docker Compose, `grit` CLI scaffolder, own Next.js admin panel, own Redis/asynq pool) — but it's a second full service to run, not a library import. |
-| R10 | License & vendor maturity | MIT confirmed, maturity thin | No pricing anywhere (genuinely free). GitHub org (`MUKE-coder`) is real and active — `grit` (94★, pushed today) and `gritcms` (18★) both live; only the specific `mediakit` repo name 404s, likely a stale/renamed doc link, not vendor abandonment. Still: no independent reviews, no case studies, no support channel/SLA anywhere. Young, single-maintainer-flavored project. |
+| R10 | License & vendor maturity | MIT reported, maturity thin | During the evaluation, other `MUKE-coder` repositories were reachable but the referenced `mediakit` repository was not. No independent reviews, case studies, or support SLA were found. Historical observation only; reverify before any future reconsideration. |
 | R11 | React SDK inside Next.js | Covered | App Router-native (`MediaKitProvider`, `app/videos/[id]/page.tsx` examples), 8 components incl. `VideoPlayer`/`PlyrPlayer` with HLS.js + quality switching wired in. Genuine player/upload-UI time savings if adopted. |
 | R12 | Kuwait PDPL / data residency | Gradex still owns | Self-hosted means residency is purely Gradex's infra choice (which R2/S3 region, which Postgres/Redis host) — unaffected by this decision either way. |
 
 ## 3. Correction note
 
-The first assessment pass read `/docs/private-assets` and `/docs/integration-nextjs` as templated placeholder pages ("Test"/"fact1"/"fact2") and flagged that — plus a supposedly "fabricated" Claude model ID string on `/docs/ai` and a 404 on `github.com/MUKE-coder/mediakit` — as vendor-maturity red flags serious enough to recommend against adoption outright. Independent re-fetch of both doc pages returned substantive, on-topic API documentation matching what a real signed-URL feature would look like, and the GitHub org check showed the author's other repos (`grit`, `gritcms`) are live and actively pushed. Net: the maturity picture is "young, unproven at scale, no third-party reviews" — not "possibly fake." Treat this as a reminder that a single doc fetch isn't ground truth on a make-or-break requirement; it got checked twice here specifically because R4 was the one gap serious enough to end the evaluation if real.
+The first assessment pass misread two documentation pages as templates and treated a missing
+repository as conclusive. A second fetch found substantive signed-URL documentation and other
+author repositories that were reachable at evaluation time. That correction justified a hands-on
+spike—but the spike subsequently failed the install/API verification in §0. These observations are
+historical and must be reverified if the decision is ever reopened.
 
-## 4. Verdict
+## 4. Doc-Only Verdict (Superseded by the Spike)
 
 **Not a wholesale swap of the approved spec.** R2 (240p), R6 (replace semantics), R7 (retry robustness), R8 (second DB), and R9 (second service) are real, uncompensated costs, and R5/R12 are on Gradex regardless. But R4 — the one requirement that would have ended this outright — checks out, and R3/R11 are solid, verified wins. That's enough to justify a short, hard-capped spike before deciding, rather than dropping the idea or committing blind.
 
-**Recommendation: partial adoption, gated by a 2-day spike.** If adopted, MediaKit takes the upload/transcode/signed-delivery/player slice; Gradex's own backend keeps purchase/entitlement checks, progress tracking, and replace-semantics parity exactly as already spec'd, calling into MediaKit via its API/webhooks instead of running its own asynq+FFmpeg workers.
+**Historical recommendation:** partial adoption only if a two-day spike passed. It did not pass;
+the operative outcome is rejection in §0 and D-003.
 
-## 5. Spike plan (hard cap: 2 elapsed days, no extensions)
+## 5. Historical Spike Plan (Completed/Failed)
 
 **Phase 0 — gate (before starting):** Confirm actual slack exists in the ~3.5-week runway. No slack → skip straight to §6 fallback, spend zero days here.
 
@@ -75,7 +97,8 @@ The first assessment pass read `/docs/private-assets` and `/docs/integration-nex
 
 ## 6. Fallback (default outcome if spike is skipped or fails)
 
-Proceed with [2026-07-17-video-streaming-design.md](./2026-07-17-video-streaming-design.md) exactly as written, zero MediaKit dependency. Rough solo-dev implementation order/estimate to fit the runway:
+Proceed with the repository-owned design and zero MediaKit dependency. This path was taken. The
+following estimate is retained as the historical planning estimate, not a remaining schedule:
 
 1. Data model + upload validation + presigned S3 upload — 2–3 days
 2. asynq worker pool: `metadata.extract` + `video.transcode` chain, FFmpeg to 240p–1080p — 4–5 days
@@ -84,15 +107,17 @@ Proceed with [2026-07-17-video-streaming-design.md](./2026-07-17-video-streaming
 5. Replace-over-published dual-live-until-swap + reaper job + retry/backoff — 2 days
 6. Error paths, correlation IDs, ops metrics, launch-week-spike load test — 2 days
 
-~13–16 days total, entirely on tooling already chosen and trusted (Go, Postgres, Redis, asynq, FFmpeg, S3), every open question already resolved in writing.
+The estimate was ~13–16 days using Go, Postgres, Redis, asynq, FFmpeg, and S3-compatible storage.
+Product integration questions are now governed by the reconciled video design and platform system
+design; they are not all resolved by this historical spike.
 
-## 7. If the spike passes: target architecture
+## 7. Rejected Hypothetical Architecture (Retained for History)
 
 Core principle (non-negotiable): **Gradex's Postgres stays the single source of truth for lesson/entitlement lifecycle. MediaKit is a processing/cache layer underneath it, never the system of record, never exposed to the frontend directly.**
 
 **`VideoService` interface** — MediaKit is never called directly from handlers. All access goes through one Go interface, so swapping providers later doesn't touch business logic:
 
-```go
+```text
 type VideoService interface {
     RequestUpload(ctx, lessonID, filename, contentType) (UploadTicket, error)
     CompleteUpload(ctx, lessonID, providerAssetID string) error

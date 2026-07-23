@@ -1,193 +1,161 @@
-# NAVIGATION RULES
+# Navigation Rules
 
-> Status: Draft
-> Last Updated: 2026-07-21
+> Status: Aligned with approved MVP
+> Last Updated: 2026-07-23
 
-Navigation **behavior** layer for the Gradex MVP — chrome, responsive targets, and the cross-cutting rules (guarded URLs, unsaved changes, browser-back semantics) that [SCREENS.md](SCREENS.md) and [NAVIGATION_MAP.md](NAVIGATION_MAP.md) don't cover. Locking these before wireframing because they're expensive to retrofit.
+Navigation behavior for the responsive Gradex website. Screen definitions live in
+[SCREENS.md](SCREENS.md); route relationships in [NAVIGATION_MAP.md](NAVIGATION_MAP.md).
 
-**Source chain:** [SCREENS](SCREENS.md) → [NAVIGATION_MAP](NAVIGATION_MAP.md) → **Navigation Rules** → Wireframes.
+## 1. App Shells
 
-Two decisions here are genuine product-policy forks (marked **⟶ ratify in DECISIONS.md**): Lesson-Player back semantics, and the unsaved-changes intercept pattern.
+- **Public/Student:** public top navigation. Authenticated small screens use bottom tabs
+  `Home · Browse · Notifications · Profile`; tablet/desktop layouts promote these destinations to
+  wider top/side navigation. Checkout and Lesson Player may use focused/immersive chrome.
+- **Instructor:** responsive shell with `Dashboard · Courses · Analytics · Office Hours ·
+  Notifications · Profile`. Persistent sidebar on wide screens; drawer/collapsed rail on smaller
+  screens. No payout/earnings destination.
+- **Admin:** responsive operations shell with `Ops · Course Review · Users · Pricing · Coupons ·
+  Revenue · Refunds · Payouts · Reports`. Persistent sidebar on wide screens and drawer/collapsed
+  rail on smaller screens.
 
----
+Student functionality is complete across phones, tablets/iPads, laptops, and desktops. Instructor
+and Admin shells remain responsive, while complex operational screens are optimized for
+tablet/laptop/desktop (BR-147/148).
 
-## App shells
+## 2. Chrome by Screen
 
-Chrome is not per-screen invention — it comes from one shell per role.
+`✓` present · `✗` absent · `~` conditional.
 
-- **Student shell (mobile-first):** bottom tab bar = **`Home` · `Browse` · `Notifications` · `Profile`**. Top header carries context + search. Learning surfaces (player, checkout) are full-screen pushes that *suppress* the tab bar. On desktop the tab bar promotes to top-nav links; a left rail appears for filters (Catalog) and lesson list (Player).
-- **Instructor shell (desktop-first):** persistent **left sidebar** = `Dashboard · Analytics · Payout Statements` (+ current-course context section). Top header. No bottom nav. Breadcrumbs on nested build screens.
-- **Admin shell (desktop-first):** persistent **left sidebar** = `Ops · Moderation Queue · Users · Revenue · Refunds · Payouts · Reports`. Top header. No bottom nav.
+### Shared and Student
 
----
+| Screen | Header | Student Tabs | Breadcrumb/Context | Back/Close |
+|---|:---:|:---:|:---:|:---:|
+| Landing / Catalog | ✓ | ~ authenticated | ~ desktop | ~ |
+| Course Details | ✓ | ~ | ~ desktop | ✓ |
+| Login / Register / Verify / Accept Invitation | logo | ✗ | ✗ | ✓ |
+| Forgot / Reset Password | logo | ✗ | ✗ | ✓ |
+| Checkout | minimal | ✗ | ✗ | cancel |
+| Payment Confirming / Receipt | minimal | ✗ | ✗ | controlled (§6) |
+| Student Dashboard | ✓ | ✓ | ✗ | ✗ root |
+| Course Home | ✓ | ✓ | ~ desktop | Dashboard |
+| Lesson Player | overlay/minimal | ✗ | ~ desktop | Course/history (§6) |
+| Resources & Labs | ✓ | ~ | ~ desktop | Course/Player |
+| Office Hours | ✓ | ✓ | ~ | Course/Dashboard |
+| Orders & Refunds | ✓ | ✓ | ~ | Profile/Dashboard |
+| Notification Center | ✓ | ✓ | ✗ | prior/root |
+| Profile / Language / Account | ✓ | ✓ | ✗ | prior/root |
+| Legal | ✓ | ✗ | ✗ | prior/home |
 
-## 1. Navigation chrome — per screen
+### Instructor
 
-`✓` present · `✗` absent · `~` conditional. "Back" = an explicit in-app back/close affordance (distinct from browser Back — see §5).
+| Screen | Sidebar | Breadcrumb | Back/Close |
+|---|:---:|:---:|:---:|
+| Dashboard / Course List | ✓ | ✗ | ✗ root |
+| Course Builder | ✓ | Dashboard / Course | ✓ |
+| Lesson Editor / Materials | ✓ | Dashboard / Course / Lesson | ✓ + dirty guard |
+| Public Preview Manager | ✓ | Dashboard / Course / Preview | ✓ + dirty/upload guard |
+| Submit / Review Status | ✓ | Dashboard / Course / Review | ✓ |
+| Course Analytics | ✓ | Dashboard / Course / Analytics | ✓ |
+| Office Hours | ✓ | Dashboard / Office Hours | ~ |
 
-### Shared
+### Admin
 
-| Screen | Header | Bottom Nav | Breadcrumb | Sidebar | Back |
-|--------|:--:|:--:|:--:|:--:|:--:|
-| Landing | ✓ | ✗ | ✗ | ✗ | ✗ |
-| Login / Register | ~ logo only | ✗ | ✗ | ✗ | ✓ |
-| Forgot / Reset Password | ~ logo only | ✗ | ✗ | ✗ | ✓ |
-| Account / Settings | ✓ | ~ role shell | ✗ | ~ role shell | ✓ |
-| Profile | ✓ | ~ role shell | ✗ | ~ role shell | ✓ |
-| Notification Center | ✓ | ~ role shell | ✗ | ~ role shell | ✓ |
-| Legal | ✓ | ✗ | ✗ | ✗ | ✓ |
-| System Error & Empty States | ~ minimal | ✗ | ✗ | ✗ | ✓ home CTA |
+| Screen | Sidebar | Breadcrumb | Back/Close |
+|---|:---:|:---:|:---:|
+| Ops / User / Pricing / Coupon / Revenue roots | ✓ | ✗ | ✗ root |
+| Invitation/User detail | ✓ | Users / Account | drawer or ✓ |
+| Moderation Queue / Content Review | ✓ | Queue / Course | ~ / ✓ |
+| Refund detail | ✓ | Refunds / Order | ✓ |
+| Payout Run / Statement | ✓ | Payouts / Period / Instructor | ✓ |
+| Reported Content / Resolution | ✓ | Reports / Item | ✓ |
+| Office-Hours moderation | ✓ | Ops / Office Hours | ✓ |
 
-### Student (mobile-first)
+## 3. Responsive Behavior
 
-| Screen | Header | Bottom Nav | Breadcrumb | Sidebar | Back |
-|--------|:--:|:--:|:--:|:--:|:--:|
-| Catalog | ✓ search | ✓ (`Browse` root) | ✗ | ~ filter rail (desktop) | ✗ |
-| Search Results | ✓ | ✓ | ✗ | ~ filter rail | ✓ |
-| Course Details | ✓ | ✓ | ~ desktop | ✗ | ✓ |
-| Checkout | ~ minimal | ✗ | ✗ | ✗ | ✓ cancel |
-| Payment Success / Receipt | ✓ | ✗ | ✗ | ✗ | ✗ (suppressed, §5) |
-| Student Dashboard | ✓ | ✓ (`Home` root) | ✗ | ✗ | ✗ |
-| Course Home | ✓ | ✓ | ~ desktop | ✗ | ✓ → Dashboard |
-| Lesson Player | ~ overlay | ✗ (immersive) | ~ desktop | ~ lesson rail (desktop) | ✓ → §5 |
-| Lesson Resources & Labs | ✓ | ~ | ~ desktop | ✗ | ✓ → Course/Player |
+| Surface | Small screen | Tablet | Laptop/Desktop |
+|---|---|---|---|
+| Student shell | Bottom tabs; sheets for filters/lists | Tabs or compact rail; two-column where useful | Top navigation; persistent filter/lesson rail where useful |
+| Lesson Player | Responsive/fullscreen video; Lesson list sheet | Video + collapsible Lesson drawer | Video + persistent Lesson rail |
+| Instructor/Admin shell | Header + drawer; stacked forms/tables | Collapsible rail; responsive table/card choice | Persistent sidebar; full table/workspace |
+| Course Builder | Usable single-column edits; reorder/upload may advise larger screen | Full builder with collapsible outline | Full multi-pane builder |
+| Financial/moderation tables | Essential fields/cards; drill-in | Scroll/column prioritization | Full table + filters/detail pane |
 
-### Instructor (desktop-first)
+No route may be desktop-only. A complex screen may recommend a larger display but must provide a
+safe responsive view and must not pretend unsupported edits succeeded.
 
-| Screen | Header | Bottom Nav | Breadcrumb | Sidebar | Back |
-|--------|:--:|:--:|:--:|:--:|:--:|
-| Instructor Dashboard | ✓ | ✗ | ✗ | ✓ (root) | ✗ |
-| Course Builder | ✓ | ✗ | ✓ Dash / Course | ✓ | ✓ |
-| Lesson Editor | ✓ | ✗ | ✓ Dash / Course / Lesson | ✓ | ✓ ⚠ unsaved §4 |
-| Resources & Labs Manager | ✓ | ✗ | ✓ …/ Lesson / Materials | ✓ | ✓ ⚠ unsaved §4 |
-| Submit for Review | ✓ | ✗ | ✓ Dash / Course | ✓ | ✓ |
-| Course Analytics | ✓ | ✗ | ✓ Dash / Course / Analytics | ✓ | ✓ |
-| Payout Statements | ✓ | ✗ | ✗ | ✓ (root) | ✗ |
+## 4. Locale and Direction
 
-### Admin (desktop-first)
+- Arabic is the first default when no saved preference exists; English is always selectable.
+- Language choice persists across public/authenticated routes and does not change Course-authored
+  content.
+- Direction switches at the document/shell level. Navigation order, chevrons, breadcrumbs, drawers,
+  tables, form alignment, and animation direction follow RTL/LTR semantics—not visual mirroring by
+  exception.
+- Route identifiers remain locale-neutral; localized slugs may be added only with a canonical URL
+  and redirect policy.
+- Dates/times use the selected locale and user timezone; office hours default to Kuwait time when
+  no timezone is known.
 
-| Screen | Header | Bottom Nav | Breadcrumb | Sidebar | Back |
-|--------|:--:|:--:|:--:|:--:|:--:|
-| Admin Ops Landing | ✓ | ✗ | ✗ | ✓ (root) | ✗ |
-| Moderation Queue | ✓ | ✗ | ✗ | ✓ | ✗ |
-| Content Review | ✓ | ✗ | ✓ Queue / Course | ✓ | ✓ |
-| User Management | ✓ | ✗ | ✗ (+ detail drawer) | ✓ | ~ drawer close |
-| Revenue Dashboard | ✓ | ✗ | ✗ | ✓ | ✗ |
-| Refunds | ✓ | ✗ | ✗ (+ order lookup) | ✓ | ~ |
-| Payouts | ✓ | ✗ | ✓ Payouts / Run | ✓ | ✓ into run |
-| Reported Content | ✓ | ✗ | ✗ | ✓ | ✗ |
+## 5. Guarded Routes and Direct URLs
 
----
-
-## 2. Responsive behavior — per role, with screen exceptions
-
-| Role | Primary target | Mobile nav | Tablet nav | Desktop nav |
-|------|----------------|-----------|-----------|-------------|
-| Student | **Mobile** | Bottom tabs + full-screen pushes; filters/lists as bottom sheet | Bottom tabs + 2-col grid + drawer | Top nav (tabs promote to links) + left rail; no bottom tabs |
-| Instructor | **Desktop** | Header + hamburger drawer, single column, stacked (usable, not optimized) | Collapsible icon-rail sidebar + drawer | Persistent left sidebar + header |
-| Admin | **Desktop** | Header + drawer; triage/read realistic, heavy ops degraded | Collapsible sidebar | Persistent left sidebar + header |
-
-**Rule:** default a screen to its **role's primary target**. Never emit a desktop-first layout for a student screen or a mobile-first layout for instructor/admin.
-
-**Screen exceptions worth pinning now:**
-
-```
-Lesson Player          Primary: Mobile
-  Mobile   fullscreen video · controls overlay · lesson list = bottom sheet · tab bar hidden
-  Tablet   video + collapsible lesson drawer
-  Desktop  video + persistent right lesson rail + notes column
-
-Catalog filters        Primary: Mobile
-  Mobile   "Filters" button → bottom sheet
-  Desktop  left filter sidebar (always visible)
-
-Course Builder         Primary: Desktop (reorder + upload are desktop-recommended)
-  Mobile   view/light-edit only; drag-reorder + bulk upload degrade — warn, don't block
-```
-
----
-
-## 3. Direct URL / guarded-route access — global rule
-
-Every guarded route resolves through one gate. Applies to typed URLs, shared links, refresh, and bookmarks.
-
-```
-Request a route
-├── Public route (Landing, Catalog, Search, Course Details, Legal)
-│     └── render (shareable deep links allowed here)
+```text
+Request route
+├── Public route → render
 └── Guarded route
-      ├── Not authenticated ──► Login  [capture returnTo]
-      │        └── on success ──► original route (works for Register too)
-      ├── Authenticated, wrong role ──► 403 (no role/existence leak)
-      ├── Authenticated, right role, no entitlement (e.g. /course/123/lesson/5 not owned)
-      │        └── ──► Course Details (upsell), not a raw 403 oracle
-      └── Entitlement expired ──► 403 Access Denied ──► Checkout (re-buy)   (BR-023/024/025)
+    ├── unauthenticated → Login (capture safe returnTo)
+    ├── pending verification → Verify Email
+    ├── suspended/deactivated → blocked account state
+    ├── wrong role/ownership → 403 without existence leak
+    ├── missing/expired entitlement → Course Details / expired access state
+    └── authorized → render
 ```
 
 Rules:
-- **`returnTo` is preserved across both Login and Register**, and survives the auth round-trip (generalizes the deep-link-return already noted in T3/T4).
-- **No existence oracle:** a not-owned or non-existent course resolves to the same public Course Details / not-found path — don't let 403-vs-404 leak what exists (consistent with BR-003 no-email-leak stance).
-- **Only public screens are shareable.** Authed deep links always pass through the gate above; they never render for a logged-out viewer.
-- Hosted gateway checkout is `[external]` — return is by gateway redirect **plus** webhook, never client-side trust (BR-020).
 
----
+- `returnTo` survives Login/Register/Verification but is validated as an internal allowed route.
+- Public shareable routes are Landing, Catalog/Search, Course Details/Public Preview, and Legal.
+- Protected Lesson, file, office-hours, report, Order/refund, Instructor, and Admin routes always
+  pass the server-side role/ownership/status/entitlement gate.
+- A Section entitlement grants only its Lessons but grants Course-scoped office-hours access.
+- Admin Course preview is an audited role permission, not a fake Student Entitlement.
+- Hosted Tap checkout is external; redirect controls navigation only, never payment truth.
 
-## 4. Unsaved changes — global rule  ⟶ ratify in DECISIONS.md
+## 6. History and Back Semantics
 
-**Dirty-state screens:** Course Builder, Lesson Editor, Resources & Labs Manager, Profile, Account/Settings, and admin free-text actions (reject reason, refund note).
+- In-app Back and browser Back should agree unless a documented terminal flow protects users.
+- Shell roots (Student Dashboard/Catalog, Instructor Dashboard, Admin Ops) are stable roots.
+- Checkout Back cancels/returns to Course Details without creating access.
+- Successful Receipt replaces the transient checkout-return entry so Back cannot reopen a completed
+  payment form; explicit CTAs go to Course Home, first Lesson, or Orders.
+- Each Lesson has its own route. Next/Previous/auto-advance pushes history; Back retraces Lessons.
+- An always-visible Course affordance returns directly to Course Home without traversing all Lesson
+  history. A direct Lesson deep link falls back to Course Home when no in-app history exists.
 
-```
-User leaves a dirty screen  (in-app Back · nav click · tab close · browser Back)
-└── Unsaved changes?
-      ├── No  ──► navigate
-      └── Yes ──► intercept
-            ├── Save draft  ──► persist ──► navigate
-            ├── Discard     ──► drop changes ──► navigate
-            └── Cancel      ──► stay
-```
+## 7. Unsaved Changes and Uploads
 
-Nuances:
-- **Course Builder autosaves** (SCREENS.md) → intercept fires only for an in-flight/unsynced change, not routine edits.
-- **Uploads in progress** (Lesson Editor, Resources & Labs Manager) → intercept warns "leaving cancels this upload."
-- Guard **tab/browser close** too (`beforeunload`), not just in-app nav.
-- Read-only states (course Pending Approval, BR-016) are never dirty → no intercept.
+Dirty screens include Course/Section/Lesson edits, materials/preview uploads, profile changes,
+Admin price reason, change-request/report resolution, refund reason/amount, and payout reference.
 
----
-
-## 5. Browser history & back semantics — global rule + Lesson Player decision
-
-**General:** in-app Back and browser Back **agree** — no divergent history. Shell roots (Student Dashboard, Catalog, Instructor Dashboard, Admin Ops Landing) are history roots (Back doesn't wander mid-app). Flow terminals control their own history:
-
-- **Checkout** Back = cancel → Course Details.
-- **Payment Success / Receipt** = `history.replace` on success → **Back does not return to a completed payment** (prevents re-pay confusion). Forward is via explicit CTAs only.
-
-### Lesson Player — the decision  ⟶ ratify in DECISIONS.md
-
-Question raised: watch Lesson 1 → 2 → 3, press Back — go to **Lesson 2** or **Course Home**?
-
-**Decision:**
-1. **Each lesson is its own route** (`/course/:id/lesson/:n`).
-2. **Lesson→lesson navigation PUSHES history** — manual *Next/Prev* and **auto-advance** at ≥90% (BR-051) both push. So **Back from Lesson 3 → Lesson 2 → Lesson 1** — Back retraces what the student actually moved through. Predictable, matches expectation.
-3. **Entering a lesson from Course Home pushes over it** → from the *first* lesson opened, Back = Course Home.
-4. **Deep link straight into a lesson** (empty in-app history) → Back falls back to **Course Home** (synthesized), never out of the app.
-5. **Course Home is always one tap** via a dedicated chrome affordance (breadcrumb on desktop, back-to-course chevron in the mobile overlay header) — **independent of history depth**, so a binge-watcher never has to Back through every lesson to reach the overview.
-
-```
-Course Home
-   └─(open L1, push)─► Lesson 1 ─(Next, push)─► Lesson 2 ─(Next, push)─► Lesson 3
-                                                                            │
-   Browser/in-app Back retraces: L3 ◄─ L2 ◄─ L1 ◄─ Course Home
-   Chrome "◄ Course" affordance: jumps to Course Home from any lesson, any depth
+```text
+Leave dirty screen
+├── no unsaved work → navigate
+└── unsaved work → Save draft | Discard | Stay
 ```
 
-Rejected alternative: `history.replace` on advance (Back from any lesson → Course Home). Cleaner stack but violates the "Back undoes my last move" expectation and makes rewatching the previous lesson harder. Chosen push+affordance gives both.
+- Course Builder autosave shows sync state; intercept only when change is unsynced/in-flight.
+- Leaving during an upload explains whether it cancels or can resume; it never silently abandons.
+- Browser/tab close receives the appropriate native warning when reliable recovery is impossible.
+- `PENDING_REVIEW` content is read-only and therefore cannot become dirty for the Instructor.
+- Submitted refunds, price changes, and payout records are immutable events/state transitions, not
+  unsaved form state rewritten after success.
 
----
+## 8. Error and Empty-State Navigation
 
-## Open items to ratify
-
-- **D-candidate:** Lesson-Player back semantics (§5) — push-per-lesson + always-available Course-Home affordance.
-- **D-candidate:** unsaved-changes intercept (§4) — Save draft / Discard / Cancel, + autosave & upload nuances.
-- **D-candidate:** receipt back-suppression via `history.replace` (§5).
-
-Fold these into [DECISIONS.md](DECISIONS.md) when the design phase's decisions are batched.
+- 401: authenticate/re-authenticate and return safely.
+- 403 wrong role/ownership: neutral Access Denied with role-appropriate root CTA.
+- Missing/expired Student Entitlement: Course Details/expired state with allowed purchase path.
+- 404: no entity/existence leak; return to role root/catalog.
+- Payment/Refund pending: retain stable status page and poll/reconcile; do not infer failure.
+- Offline/5xx: preserve safe local form state where possible and offer retry.
+- Empty states point only to authorized MVP actions—never to ratings, payout dashboards,
+  notification preferences, platform-wide office hours, bundles, or BNPL.

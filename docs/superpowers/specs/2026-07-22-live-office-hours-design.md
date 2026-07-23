@@ -1,122 +1,155 @@
-# Live Office Hours — Design Spec
+# Live Office Hours — MVP Feature Design
 
 **Date:** 2026-07-22
-**Status:** Approved (brainstorming) — ready for implementation plan
-**Scope:** MVP feature addition
-**Related:** [PRD.md](../../PRD.md) §4 Scope, [BUSINESS_RULES.md](../../BUSINESS_RULES.md) BR-023/025/065/070/120, [DECISIONS.md](../../DECISIONS.md) D-003/D-004/D-010
 
----
+**Reconciled:** 2026-07-23
+
+**Status:** Approved feature design; technical mechanics require platform system design
+
+**Scope:** MVP, external meeting link only
+
+**Related:** [PRD](../../PRD.md), [Business Rules](../../BUSINESS_RULES.md) BR-120/122 and
+BR-134–141, [Decision D-013](../../DECISIONS.md)
 
 ## 1. Summary
 
-Instructors and admins schedule one-off live sessions. Gradex owns **scheduling, access
-control, and event-driven notifications**; the live audio/video itself happens on a proven
-third party (Zoom / Google Meet / Discord voice) reached via a stored join link. Gradex holds
-no streaming infrastructure.
+The owning Instructor schedules one-off office-hours sessions for their own Published Course.
+Gradex owns the schedule, server-side authorization, safe join-link disclosure, status history, and
+fixed notifications. Zoom/Google Meet/another approved external service owns the live call. Gradex
+does not provide live-video infrastructure.
 
-## 2. Scope tension (acknowledged)
+An Admin may inspect and cancel a session for moderation with a reason. Admins cannot create Course
+or platform-wide office hours in MVP.
 
-PRD §4 explicitly deferred "Live mentorship / live sessions" out of MVP, and the course
-community was decided to live on external Discord (D-004). This feature pulls a *lightweight*
-form back in. It is kept lightweight on purpose — external video, no RSVP, no scheduler — so
-it does not reopen the scope that was cut to protect the 2026-08-15 date.
+## 2. Locked MVP Boundary
 
-## 3. Decisions locked in brainstorming
+| Area | Approved behavior |
+|---|---|
+| Creator | Owning Instructor only, for their own `PUBLISHED` Course |
+| Admin | Read/moderate and cancel only; no creation or rescheduling on Instructor's behalf |
+| Scope | Exactly one Course; no platform-wide/open audience |
+| Student access | Any active Course Entitlement or any active Section Entitlement within the Course |
+| Delivery | Stored external meeting link revealed only after authorization |
+| Schedule | One-off; Instructor may create, materially reschedule, or cancel |
+| Notification | Fixed event-driven policy; no preferences or timed reminders |
+| Lifecycle | `SCHEDULED → COMPLETED` or `SCHEDULED → CANCELLED` |
 
-| # | Decision | Rationale |
-|---|----------|-----------|
-| Delivery | **External link, Gradex schedules** | Days of work vs months; zero streaming infra; no new compliance. In-platform WebRTC and reusing the VOD HLS pipeline were both rejected as far too large. |
-| Creator | **Instructor (own course) + Admin (any course or platform-wide)** | Instructor mentorship serves the "no student left alone" principle; admin can also run platform-wide Q&As. |
-| Access | Course-scoped = active enrollment; platform-wide = admin per-session toggle (`enrolled` vs `open`) | Reuses playback entitlement (BR-023/025); admin flexibility for open/marketing sessions. |
-| Recurrence | **One-off only** ("duplicate" to repeat) | One row per session; recurrence → V1. |
-| RSVP | **None** — show-and-join | No registration/capacity tables; Zoom/Meet enforces its own room cap. |
-| Reminders | **Event-driven "new session" notice only** (on publish/reschedule/cancel) | Fits D-010's transactional model; needs no scheduler. Timed "1h-before" reminder → V1 once a scheduler exists. |
+This feature intentionally excludes recurring series, RSVP/capacity, calendar sync, attendance,
+recordings, built-in video, platform-wide events, and automated reminders.
 
-## 4. Data model
+## 3. Conceptual Data
 
-### `office_hours_sessions`
-| column | type | notes |
-|--------|------|-------|
-| `id` | uuid | PK |
-| `created_by` | uuid | instructor or admin user id |
-| `creator_role` | enum | `instructor` \| `admin` (audit) |
-| `course_id` | uuid null | **null = platform-wide** (admin only) |
-| `title` | text | |
-| `description` | text null | optional |
-| `scheduled_start` | timestamptz | stored **UTC**, displayed Kuwait time UTC+3 (consistent BR-025) |
-| `scheduled_end` | timestamptz | |
-| `join_url` | text | Zoom / Meet / Discord link |
-| `audience` | enum | `course_enrolled` (implied when `course_id` set) · `platform_enrolled` · `platform_open` |
-| `recording_url` | text null | instructor pastes after the session |
-| `status` | enum | `scheduled` \| `cancelled` (live/ended derived from time) |
-| `created_at` / `updated_at` | timestamptz | audit |
+The system design must preserve these fields/meanings without treating this as a final schema:
 
-## 5. Access resolution
+| Field | Meaning |
+|---|---|
+| ID | Stable Session identifier |
+| Course | Required owning Published Course |
+| Created by | Required owning Instructor |
+| Title/description | Localized platform fields or Instructor-authored text according to final content model |
+| Start/end | UTC instants; end must be after start |
+| External join link | Sensitive value excluded from public/list payloads and notifications |
+| Status | Scheduled, completed (possibly derived), or cancelled |
+| Cancellation/moderation | Actor, role, reason, timestamp |
+| Created/updated timestamps | Audit and conflict handling |
 
-One function, `(user, session) → allowed?`, reusing existing entitlement:
+Do not add audience type, platform scope, RSVP, capacity, recurrence, recording URL, attendance, or
+reminder fields for MVP.
 
-- **course-scoped** (`course_id` set) → active, non-expired enrollment in `course_id` (same
-  check as playback, BR-023 / BR-025 — a lapsed 150-day enrollment is denied).
-- **platform_enrolled** → any user with ≥1 active enrollment.
-- **platform_open** → any authenticated user.
-- **admin** → always (moderation).
+## 4. Authorization
 
-**Join-URL reveal:** `join_url` is returned **only** to an entitled user, **only** within
-`[scheduled_start − 15min, scheduled_end]`, status `scheduled`. It is never rendered on public
-or catalog pages — so the external link is not a leak path.
+### Instructor Mutation
 
-## 6. API
+Creation/material rescheduling succeeds only when all are true:
 
-### Instructor / admin
-- `POST /office-hours` — create. Instructor: `course_id` must be an own **PUBLISHED** course.
-  Admin: any course, or `null` (platform-wide) with an `audience` toggle.
-- `PATCH /office-hours/:id` — edit time / title / link / recording_url.
-- `POST /office-hours/:id/cancel` — cancel (not delete).
-- `GET /office-hours?scope=mine` — sessions I created.
+- caller is an Active, non-suspended Instructor;
+- Course exists and caller is its owning Instructor;
+- Course is currently `PUBLISHED`;
+- transition is valid and input/link validation succeeds.
 
-### Student
-- `GET /office-hours` — upcoming sessions I'm entitled to.
-- `GET /office-hours/:id/join` — returns `join_url` if entitled and within the window; else
-  a too-early / 403 response.
+An Instructor cannot manage another Instructor's Session. Cancellation retains the record.
+The owning Instructor may cancel an existing scheduled Session even after its Course becomes
+Unpublished/Archived, but cannot create or reschedule in those states.
 
-### Admin moderation
-- `GET /admin/office-hours` — all sessions.
-- Cancel any session.
+### Student Discovery and Join
 
-## 7. Notifications
+A Student may discover/join the Course Session only when all are true:
 
-Event-driven, reusing the D-010 email + in-app notification center; best-effort per BR-120
-(a failed send never blocks the action):
+- Account is Active and not suspended;
+- Session is not cancelled and the Course remains `PUBLISHED`;
+- Student has a current Course Entitlement or at least one current Section Entitlement belonging to
+  that Course;
+- any time-window rule selected during system design permits join.
 
-- **On publish, reschedule, cancel** → notify entitled students.
-- **Guard:** `platform_open` sessions do **not** mass-notify (would spam non-buyers and raise
-  PDPL exposure) — they rely on the in-app upcoming list only. Notifications fire only for
-  `course_enrolled` / `platform_enrolled` audiences.
+The join link is returned only from an authenticated, authorized join operation. It is absent from
+public/catalog payloads, notification content, logs, analytics, and unauthorized error responses.
+The exact early-join/late-close window is a tunable system-design decision, not a product rule.
 
-## 8. Business rules (new — to slot into BUSINESS_RULES.md)
+### Admin Moderation
 
-- Session times stored UTC, displayed Kuwait time (UTC+3), consistent with BR-025.
-- An instructor may create/edit sessions only on their own PUBLISHED courses; cannot schedule
-  on a course that isn't theirs.
-- A **suspended instructor (BR-065)** cannot create or edit sessions (consistent with "blocks
-  new submissions").
-- **No admin-approval gate** — sessions publish immediately (unlike course content BR-070);
-  admin moderates reactively and may cancel any session. An office-hours event is not graded
-  content, and an approval queue would kill the spontaneity of scheduling a Q&A.
-- **Cancel ≠ delete** — cancelled sessions are retained for audit and hidden from upcoming
-  lists.
-- Course-scoped entitlement is identical to playback (BR-023 / BR-025).
+An authenticated Admin may list/inspect Sessions and cancel any scheduled Session with a required
+moderation reason. Admin access is audited. Admin cannot use this path to create a Session, turn it
+platform-wide, impersonate the Instructor, or add attendees.
 
-## 9. Testing
+## 5. Proposed Capability Surface
 
-- **Unit:** entitlement matrix (3 audiences × enrolled / lapsed / non-enrolled / admin);
-  join-window gating (too-early / during / after / cancelled).
-- **Integration:** create notifies entitled-only; `platform_open` does not mass-notify;
-  cancel notifies + hides; instructor cannot schedule on a foreign course; suspended
-  instructor blocked; lapsed enrollment denied join.
+Final paths and error envelopes belong to system design. The feature needs capabilities equivalent
+to:
 
-## 10. Out of scope (MVP)
+- Instructor: create, list own Course Sessions, reschedule/update, cancel.
+- Student: list Sessions for entitled Courses, request authorized join-link disclosure.
+- Admin: list/inspect all Sessions and cancel with a moderation reason.
 
-In-platform live video; recurring series; RSVP / capacity; timed pre-session reminders
-(needs the deferred scheduler, D-010); attendance tracking; automatic recording (only a
-manually-pasted `recording_url`); mass-notifying `platform_open` sessions.
+Every mutation enforces role/ownership/status on the backend. List responses should not carry join
+links; obtain the sensitive link only through the authorized join operation.
+
+## 6. Notifications
+
+Notification recording/delivery is best-effort and never controls the schedule mutation.
+
+- New Session: in-app for currently entitled Students; email may also be used when operationally
+  appropriate.
+- Material reschedule: in-app and email to currently entitled Students.
+- Cancellation: in-app and email to currently entitled Students.
+- Deduplicate retried events and never include the external join link in notification content.
+
+There are no preferences, timed reminders, marketing messages, SMS/WhatsApp, push, or calendar
+invites in MVP.
+
+## 7. Validation and Failure Behavior
+
+- Validate supported HTTPS meeting-link shape/provider policy without fetching arbitrary URLs from
+  the application network unless system design provides SSRF-safe handling.
+- Store UTC instants and display in the user's locale/timezone; default to Kuwait time only when no
+  preference is known.
+- Prevent invalid intervals and edits after cancellation/completion except audited moderation data.
+- Handle concurrent Instructor/Admin cancellation idempotently.
+- A cancelled Session disappears from upcoming lists but remains available in authorized history.
+- A newly expired/revoked Entitlement or suspended Account must fail join authorization even if the
+  Student saw the Session earlier.
+- External-provider outage/link failure is reported as supportable failure; Gradex does not claim to
+  control third-party call availability.
+
+## 8. Verification
+
+- Role/ownership matrix: owner, foreign Instructor, Student, Admin, suspended Instructor.
+- Course state matrix: Published allows an otherwise authorized Student to discover/join; Draft,
+  Pending Review, Unpublished, and Archived deny Student discovery/join.
+- Entitlement matrix: active Course; active Section in Course; Section in another Course; expired;
+  revoked; none.
+- Join-link secrecy: public/list/notification/log/error payloads never contain it.
+- Lifecycle: create, reschedule, Instructor cancel, Admin moderation cancel, completed derivation,
+  duplicate/concurrent cancellation.
+- Notification: correct current recipients, deduplication, and business mutation surviving email
+  failure.
+- Localization/responsiveness/accessibility: Arabic/English, RTL/LTR, local time, and all Student
+  actions on phone/tablet/laptop/desktop.
+
+## 9. Out of Scope
+
+- platform-wide/open sessions or Admin-created sessions;
+- in-platform audio/video or reuse of the VOD pipeline;
+- recurrence/duplication automation, RSVP, capacity, waitlists, attendance;
+- recordings or recording links;
+- timed reminders, calendar integration, SMS/WhatsApp, or push;
+- Session chat, polls, materials, or payment separate from Course/Section Entitlement.

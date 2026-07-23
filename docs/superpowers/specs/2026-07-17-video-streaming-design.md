@@ -1,155 +1,185 @@
-# Video Streaming & Playback — Design Spec
+# Video Upload, Processing, and Playback — Design Record
 
-> Status: Approved (design phase)
-> Date: 2026-07-17
-> Scope: First implementation slice of Gradex — video upload, processing, and playback for pre-recorded course lessons.
+> Status: Implemented technical slice with known product/security gaps; revalidate during platform system design
+> Original date: 2026-07-17
+> Reconciled: 2026-07-23
+> Scope: Pre-recorded Lesson video only
 
----
+## 1. Purpose and Authority
 
-## 1. Overview
+This record documents the existing Go video slice and the product constraints it must ultimately
+satisfy. It does not replace [PRD.md](../../PRD.md),
+[BUSINESS_RULES.md](../../BUSINESS_RULES.md), or [DOMAIN_MODEL.md](../../DOMAIN_MODEL.md).
 
-Gradex courses are structured as **Course → Section → Lesson**, with one video per lesson. Instructors upload raw video files; the platform transcodes them to adaptive-bitrate HLS, serves them through a CDN with signed URLs (purchasers only), and tracks per-student watch progress.
+The canonical hierarchy is `Course → Section → Lesson`, with at most one current approved Video
+Asset per Lesson. Raw Instructor uploads are processed into HLS renditions; entitled Students play
+approved video and maintain per-Lesson progress.
 
-Out of scope for this slice: live streaming, DRM, thumbnail/subtitle/watermark/virus-scan workers (designed for, not built), device-limit enforcement, cancellation UI, alerting implementation.
+This slice excludes live/office-hours video, DRM, captions/transcripts, thumbnails, watermarks,
+device limits, and public Course previews. A public preview is a separate asset governed by
+BR-143/144 and cannot reuse protected Lesson authorization accidentally.
 
-**Dependencies/assumptions:** this spec assumes an authentication system (JWT, per the platform's tech stack) and a course enrollment/purchase record already exist or are built in parallel — specifically, an "is this user authenticated," "does this user own this lesson as instructor," and "has this user purchased/enrolled in this course as student" check. Those systems are not designed here; if they don't exist yet, they're a blocking dependency for §5 (Playback Flow) and the authorization step of §4 (Upload & Processing Flow).
+## 2. Current Repository Implementation
 
----
+The current backend implements:
 
-## 2. Architecture
+- direct presigned upload to S3-compatible storage;
+- `.mp4`/`.mov` extension checks and a configured post-upload size limit;
+- Redis/asynq jobs for metadata extraction and FFmpeg HLS transcoding;
+- 1080p/720p/480p/240p renditions without upscaling above the source (except the minimum rung);
+- Postgres-backed video/progress state;
+- a token-authorized manifest proxy that rewrites child playlists and signs segment URLs;
+- per-Lesson resume position and permanent completion at 90%;
+- retries, stale-upload reset, and integration tests around storage/worker behavior;
+- fake development authentication/entitlements pending the real auth/commerce systems.
 
-```
-Instructor Upload → Backend API → S3-compat storage (courses/{course-id}/{lesson-id}/raw/original.mp4)
-                                    → Redis job queue (asynq, typed jobs)
-                                         → Video Processing Service
-                                              ├─ metadata.extract   → Postgres (duration, resolution, bitrate, codec, size, fps)
-                                              ├─ video.transcode    → hls/master.m3u8 + 1080p/720p/480p/240p renditions
-                                              ├─ thumbnail.generate (future)
-                                              ├─ subtitle.generate  (future)
-                                              ├─ watermark.apply    (future)
-                                              └─ virus.scan         (future)
-Student Playback → Backend API (auth + course ownership check) → signed CDN URL → CDN → S3-compat storage (hls/)
-                  → Backend API (progress ping) → Postgres
-```
+Relevant source:
 
-**Storage layout:**
-```
-courses/{course-id}/{lesson-id}/
-  raw/original.mp4
-  hls/master.m3u8, 1080p/, 720p/, 480p/, 240p/
-  thumbnails/
-  subtitles/
-```
+- `backend/internal/video/`
+- `backend/internal/httpapi/router.go`
+- `backend/internal/auth/fake.go`
+- `backend/internal/db/migrations/0001_init.up.sql`
 
-**Video status lifecycle (state machine):**
-```
-DRAFT → UPLOADING → UPLOADED → QUEUED → PROCESSING → READY → PUBLISHED
-                                              ↓
-                                           FAILED → (retry) → QUEUED
-                                           CANCELLED (from QUEUED/PROCESSING, nice-to-have, not v1-blocking)
-```
+No CDN is configured in this repository. The current path serves manifest content through the Go
+API and HLS segment bytes through presigned object-storage URLs. System design may add a CDN but
+must then define cache/signature behavior explicitly.
 
-**Backend responsibility (explicit boundary):**
-- Owns: authentication, authorization, course ownership verification, signed URL generation, progress tracking, metadata API.
-- Never: streams video, transcodes video, serves media bytes directly.
+## 3. Current Processing Flow
 
-**Video Processing Service** is a worker pool consuming typed jobs from the Redis queue (`metadata.extract`, `video.transcode`, and future job types). New capabilities (thumbnails, subtitles, watermarking, virus scanning) are added as new job types/workers without redesigning the architecture (open/closed).
-
----
-
-## 3. Data Model
-
-```
-courses         (existing/assumed — id, title, ...)
-sections        id, course_id, title, order
-lessons         id, section_id, title, order, status (video lifecycle enum), duration_seconds
-videos          id, lesson_id, raw_key, hls_master_key, resolution, bitrate, codec,
-                 file_size_bytes, fps, status, failed_reason, retry_count
-progress        id, user_id, lesson_id, max_position_seconds, last_position_seconds,
-                 completed, completed_at, last_watched_at, updated_at
+```text
+Instructor requests upload URL
+  → server checks lesson ownership through the current entitlement seam
+  → client uploads raw .mp4/.mov directly to object storage
+  → client completes upload
+  → metadata.extract job (ffprobe)
+  → video.transcode job (FFmpeg HLS ladder)
+  → READY
+  → approved publication operation
+  → PUBLISHED/playable
 ```
 
-- `videos` is 1:1 with `lessons` (one video per lesson).
-- `progress` is per `(user_id, lesson_id)`.
-- Postgres is the source of truth for lifecycle state; storage objects are derived artifacts (see §6 consistency).
+Current Video Asset lifecycle:
 
----
-
-## 4. Upload & Processing Flow
-
-**Validation** (before signed upload URL is issued): lesson exists; instructor is authorized/owns the lesson; no conflicting in-flight or published video (re-upload while `PUBLISHED` is allowed — see replace behavior below); file type restricted to `.mp4` and `.mov`; max file size 5GB (covers a long lecture at high bitrate; revisit if instructor feedback says otherwise).
-
-**Flow:**
-```
-Request Upload URL → Backend Validation → Signed Upload URL (15 min expiry)
-  → Direct Upload → Object Storage (raw/original.mp4)
-  → Complete Upload (idempotent: POST /video/complete — already QUEUED/PROCESSING → no-op success)
-  → Queue metadata.extract
-       → Metadata Worker → writes duration/resolution/bitrate/codec/size/fps to Postgres
-       → Queue video.transcode (chained after metadata succeeds, not parallel —
-         transcode ladder decisions depend on source resolution)
-            → Transcoding Worker (FFmpeg) → HLS renditions + master.m3u8
-            → READY
-  → Instructor Review → PUBLISHED
+```text
+DRAFT → UPLOADING → QUEUED → PROCESSING → READY → PUBLISHED
+                    ↘                     ↗
+                      FAILED → retry ─────
 ```
 
-**Replace behavior:** re-uploading over a `PUBLISHED` lesson resets lifecycle to `UPLOADING`. Old `hls/` assets are kept live until the new transcode reaches `READY`, then swapped — avoids serving a broken player mid-replace.
+The migration includes `UPLOADED`, although the current service transitions directly from
+`UPLOADING` to `QUEUED`. System design should remove unused state or define its meaning rather than
+letting code and model drift.
 
-**Idempotency:** `POST /video/complete` and `POST /video/retry` are safe to call repeatedly; no duplicate jobs on frontend retry/timeout.
+The source of truth for processing/publication state is Postgres. Object-storage files are derived
+artifacts. The final system design must define orphan cleanup, reconciliation, backup/recovery, and
+whether raw uploads are retained after successful processing.
 
-**Failure & retry:** transcode failure → `FAILED` with `failed_reason` stored; auto-retry up to 3x with exponential backoff; beyond that, manual-retry-only via instructor dashboard. Retry restarts the job chain from `metadata.extract`.
+## 4. Product Constraints the Final Design Must Preserve
 
-**Cleanup on failure:** `raw/original.mp4` retained 30 days after `FAILED` (allows retry without re-upload), then deleted via storage lifecycle policy.
+### Upload and Publication
 
-**Internal events** (named now as extension points for future notifications/analytics/audit; not wired to any consumer in this slice): `VideoUploaded`, `MetadataExtracted`, `TranscodingStarted`, `TranscodingCompleted`, `VideoPublished`, `VideoFailed`.
+- Only the owning Active Instructor may upload/retry video for their own Course.
+- A first Course cannot become Published without Admin approval and required content readiness.
+- A structural/video change to an already Published Course creates a pending Course Revision. The
+  approved live Video remains playable until Admin approves the replacement; processing `READY` is
+  not publication approval. *(BR-016/017/061)*
+- Upload/complete/retry operations must be idempotent under client and queue retry.
+- File validation must not trust extension or client MIME alone; system design must define content
+  inspection, quarantining, and safe FFmpeg execution.
 
-**Security:** signed upload URL expires in 15 minutes; signed playback URL expires in 5 minutes.
+### Entitlement and Playback
 
-**Operational metrics to log** (instrumented, no dashboards built in this slice): queue length, average processing time, failed job count, retry count, worker CPU usage, storage used.
+- Before issuing every playback authorization, the server verifies Active Account, Course/video
+  status, and a current Course Entitlement or a current Section Entitlement covering the Lesson.
+  *(BR-007/023/050)*
+- Admin preview uses its separate audited authorization path. Instructor preview/edit behavior must
+  be explicitly designed; it cannot masquerade as a Student purchase.
+- HLS authorization is short-lived and scoped to the Video/playback session. HLS segment requests
+  may repeat for seek/rebuffer/adaptive bitrate; “single use” is inappropriate. *(BR-100)*
+- Unauthorized, expired, revoked, suspended, missing, and temporarily unavailable outcomes have
+  distinct safe client behavior without leaking storage keys or existence.
+- Access is denied when Entitlement expires/revokes or Account is suspended, even if the Student
+  previously obtained a URL/token. The mechanism belongs to system design.
 
----
+### Progress
 
-## 5. Playback Flow
+- Progress belongs to Student Enrollment/Lesson, not the replaceable Video file.
+- Track last position for resume and maximum position for completion.
+- Completion becomes true at 90% and never regresses. *(BR-051/052/059)*
+- Progress-write failure never interrupts otherwise authorized playback; retry safely. *(BR-053)*
+- Never accept impossible/negative positions; clamp or reject beyond-duration values consistently.
 
-1. Student opens lesson → frontend calls `GET /lessons/{id}/video/playback-url`.
-2. Backend checks: user authenticated, user enrolled/purchased the course containing this lesson, lesson status is `PUBLISHED`.
-3. Backend issues a signed CDN URL/cookie (5 min expiry) for `hls/master.m3u8`; CDN validates the signature on each subsequent segment request as playback continues.
-4. Frontend player (HLS.js / native HLS) loads the manifest and adapts rendition to bandwidth.
-5. Player posts progress every ~10s (`POST /lessons/{id}/progress` with `position_seconds`). Backend updates `max_position_seconds = max(existing, new)` and `last_position_seconds = new`; sets `completed = true` (once, permanently) when `max_position_seconds ≥ 0.9 * duration`.
-6. On reopen, backend returns `last_position_seconds` alongside the playback URL so the player resumes there.
+## 5. Proposed Capability Contract
 
-**Seeking:** unrestricted. Free seeking counts toward progress — these are paid courses, not compliance training; the platform tracks learning progress, not frame-by-frame watch proof. Completion never regresses on seek-back because it's based on `max_position_seconds`.
+Final API paths and error envelopes are system-design decisions. The platform needs capabilities
+equivalent to:
 
-**Concurrent sessions:** multiple devices per account allowed in v1. No device-limit enforcement. Account-sharing mitigation deferred to a future spec if it becomes a business problem.
+- owning Instructor requests an upload ticket, completes upload, and retries failed processing;
+- Admin/approved Course workflow publishes the ready Asset/revision;
+- entitled Student requests a playback authorization and posts progress;
+- authorized manifest/segment delivery validates the short-lived playback grant.
 
-**Playback error contract (frontend):**
-- `403` → refresh playback token, retry once
-- `404` → show "video unavailable" state
-- `500` → retry with backoff
+The current repository exposes these under `/api/v1/lessons/:lessonID/...` and a
+`/api/v1/videos/:videoID/manifest/...` route. Treat those paths as existing implementation, not a
+frozen public contract.
 
-**Progress write failures:** a failed `POST /progress` never interrupts playback; the player retries on the next scheduled tick, no user-facing error.
+## 6. Security and Reliability Requirements
 
-**CDN cache config** (infrastructure note, not application logic): cache `.m3u8`/`.ts`/`.m4s` per standard HLS TTLs; never cache signed-URL responses in a way that outlives their signature.
+- Run FFmpeg/ffprobe with bounded CPU, memory, time, disk, output size, and isolated untrusted-input
+  handling selected during system design.
+- Validate object existence/size after direct upload; do not trust client completion.
+- Signed upload/playback TTLs, maximum upload size, retry counts, stale thresholds, and retention are
+  configurable operational parameters with safe bounds.
+- Queue delivery is at-least-once: every job and state transition must tolerate duplicates and
+  out-of-order/stale work.
+- Keep raw/storage paths and signed URLs out of logs; use correlation identifiers instead.
+- Define metrics/alerts for queue age/depth, processing duration/failure, retry exhaustion, storage
+  errors/capacity, and playback authorization/delivery failures.
+- Define reconciliation for DB/object divergence and recovery for a worker crash during publish/swap.
+- Storage deletion follows Course/Lesson history rules; never delete an enrolled/financial/audit
+  record merely because media cleanup occurs.
 
----
+## 7. Known Implementation Gaps
 
-## 6. Error Handling & Edge Cases
+These are mandatory follow-ups, not alternate product decisions:
 
-- **Transcode failure:** see §4 (retry/backoff/manual-retry, `failed_reason` surfaced to instructor).
-- **Upload interrupted** (network drop mid-upload, `complete` never called): lesson stuck at `UPLOADING`. A reaper job resets entries stale >24h back to `DRAFT`; instructor re-uploads.
-- **Worker crash mid-job:** asynq's visibility-timeout/redelivery requeues the job; both `metadata.extract` and `video.transcode` are safe to rerun (idempotent).
-- **Storage/CDN outage:** playback-url endpoint returns `503` (distinguishable from `404`/missing-video); frontend shows a retry state.
-- **Database vs. storage consistency:** Postgres is source of truth. A periodic reconciliation job scans for mismatches (DB says `READY` but object missing, or object exists but DB was never updated) and flags/corrects them. No distributed transaction — reconciliation is sufficient for this slice.
-- **Orphan cleanup:** deleting a lesson/course enqueues an async storage-cleanup job removing its `courses/{course-id}/{lesson-id}/` prefix; not inline with the delete request.
-- **Correlation IDs:** every upload/processing job carries a correlation ID threaded through request → queue → worker → storage logs, for tracing.
-- **Virus scanning:** explicitly out of scope for this slice; the typed-job design in the Video Processing Service accommodates adding it later without redesign.
-- **Alerts to define** (documented now, not implemented): queue depth too high, worker failure rate above threshold, average transcode time trending up, storage nearing capacity, CDN error rate rising.
+- `backend/internal/auth/fake.go` trusts `X-Debug-User-ID` and fake entitlement rows. The API process
+  refuses non-fake mode because real auth is not implemented; this must be impossible in production.
+- The Instructor route currently exposes `POST .../publish` and changes Video state directly. It must
+  be controlled by the Admin-approved Course/revision workflow.
+- Re-upload over `PUBLISHED` currently changes the same Video record to `UPLOADING`, so the approved
+  video is no longer playable while processing. This violates the live-version/pending-revision rule
+  and needs versioned/staged replacement before release.
+- The fake entitlement check is per Lesson and does not yet model Course/Section Entitlements,
+  expiry, Account suspension, Course status, or the Admin preview path.
+- The manifest token proves only Video/expiry and is not tied to Account/session status. The final
+  design must satisfy immediate suspension and entitlement revocation throughout playback.
+- Current token errors flow through the generic conflict mapping rather than a finalized
+  authentication/authorization error contract.
+- MIME/content inspection, malware/security scanning policy for applicable public/downloadable
+  assets, FFmpeg isolation, reconciliation, cleanup/retention, CDN, and production observability are
+  not complete.
 
----
+## 8. Verification Matrix
 
-## 7. Testing Considerations
+- Upload: owner/non-owner/suspended Instructor; wrong type/content; oversize; interrupted upload;
+  duplicate complete; stale reset.
+- Processing: source-resolution ladder; malformed media; bounded FFmpeg failure; duplicate job;
+  retries exhausted; storage/DB divergence.
+- Publication: first approval; pending replacement while old stays live; rejection keeps old live;
+  atomic approved swap.
+- Playback: Course Entitlement; matching/nonmatching Section Entitlement; expired/revoked;
+  suspended Account; unpublished/archived Course policy; Admin audited preview; expired/tampered
+  token; repeated HLS seek/rebuffer.
+- Progress: resume, seek backward, monotonic maximum, 90% boundary, over-duration input, concurrent
+  updates, replacement preservation, transient write failure.
+- Privacy/operations: no secrets/URLs/PII in logs; correlation; metrics; backup/recovery; retention.
 
-- Upload flow: validation rejects bad file types/oversized files/unauthorized instructors; idempotency of `complete`/`retry` under duplicate calls.
-- Processing: metadata extraction accuracy across a few sample codecs/resolutions; transcode job chaining order; retry/backoff behavior on induced ffmpeg failure; reconciliation job catches induced DB/storage mismatches.
-- Playback: signed URL rejects expired/tampered signatures; non-purchasers get denied; progress `max()` semantics under seek-backward; resume-position correctness across sessions; concurrent-device playback.
-- Failure paths: interrupted upload reaper; storage outage returns `503` not `404`; progress-post failure doesn't interrupt playback.
+## 9. System-Design Inputs Still Open
+
+- media deployment topology, worker isolation, storage/CDN and regional placement;
+- staged Asset/version model integrated with Course Revision approval;
+- production auth/entitlement/playback-token strategy and immediate suspension;
+- exact TTLs, limits, retry/backoff, retention, and cleanup policies;
+- API/error/event contracts, observability, reconciliation, and disaster recovery;
+- supported upload content policy and security-scanning boundary.

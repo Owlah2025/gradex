@@ -1,658 +1,467 @@
-# WIREFRAMES
+# MVP Low-Fidelity Wireframes
 
-> Status: Draft
-> Last Updated: 2026-07-21
+> Status: Aligned with [SCREENS.md](SCREENS.md)
+> Last Updated: 2026-07-23
 
-Low-fidelity wireframes for every MVP screen. **Hierarchy and layout only** — no color, no styling, no real copy. Blocks are labeled by role in the layout, not designed.
-
-**Source chain:** [SCREENS](SCREENS.md) · [NAVIGATION_MAP](NAVIGATION_MAP.md) · [NAVIGATION_RULES](NAVIGATION_RULES.md) → **Wireframes** → UI Mockups.
-
-Each screen: read its contract in [SCREENS.md](SCREENS.md) (components/states/permissions) and its chrome/responsive row in [NAVIGATION_RULES.md](NAVIGATION_RULES.md). Frames below honor those. Student = **mobile frame** (single column + bottom tabs). Instructor/Admin = **desktop frame** (left sidebar + content).
+These frames describe hierarchy and responsive behavior, not visual styling. Arabic layouts mirror
+shell direction/reading order semantically; they are not separate screens. Every Student frame must
+adapt across phone, tablet/iPad, laptop, and desktop.
 
 ## Legend
 
-```
-[ Label ]  button        [ input........ ]  field         ( ) radio   [ ] checkbox
-====       section rule   ----  soft divider  [ IMG ]  image/thumb    « back
-•Item      active nav      ▸ expand           >          chevron / go
-{ State }  state note (layout variant, not drawn separately unless it changes hierarchy)
+```text
+[ Action ]    button/link                 [field........] input
+▸ / ▾         collapsed / expanded       { state }       conditional state
+🔒            locked by entitlement       [external]      leaves Gradex
 ```
 
-## Shells (drawn once, referenced by every screen)
+## Responsive Shells
 
+### Student — small screen
+
+```text
++--------------------------------+
+| Gradex      Search       Bell  |
+|--------------------------------|
+|                                |
+|          screen body           |
+|                                |
+|--------------------------------|
+| Home | Browse | Notice | Me    |
++--------------------------------+
 ```
-STUDENT — mobile                     INSTRUCTOR / ADMIN — desktop
-+---------------------------+        +----------+---------------------------------+
-| Logo   [search]  Notif  = |        | Logo     | breadcrumb            Notif  ⋮  |
-+---------------------------+        |          +---------------------------------+
-|                           |        | •Nav     |                                 |
-|         CONTENT           |        |  Nav     |            CONTENT              |
-|                           |        |  Nav     |                                 |
-+---------------------------+        |  Nav     |                                 |
-| •Home  Browse  Notif  Prof|        |  ...     |                                 |
-+---------------------------+        +----------+---------------------------------+
+
+### Student — wide screen
+
+```text
++------------------------------------------------------------------+
+| Gradex | Home | Browse | Notifications | Search | Language | Me |
+|------------------------------------------------------------------|
+| optional filter/lesson rail | main content                       |
++------------------------------------------------------------------+
+```
+
+### Instructor/Admin — responsive operations shell
+
+```text
+small:  +------------------------------+    wide: +-------------------------------+
+        | ☰  Context      Bell | Me    |          | Sidebar | Header              |
+        |------------------------------|          |         |---------------------|
+        | stacked content / cards      |          |         | workspace / table   |
+        +------------------------------+          +-------------------------------+
+```
+
+Instructor navigation has no earnings/payout entry. Admin navigation includes Users, Pricing,
+Coupons, Review, Revenue, Refunds, Payouts, Reports.
+
+---
+
+# Shared and Authentication
+
+## S01 — Landing
+
+```text
++------------------------------------------------------------------+
+| Gradex               Browse | Login | Register | العربية/English|
+|------------------------------------------------------------------|
+| University learning with real follow-up                          |
+| [ Browse Courses ] [ How Gradex works ]                           |
+|------------------------------------------------------------------|
+| Featured published Courses                                       |
+| [Course] [Course] [Course]                                       |
+|------------------------------------------------------------------|
+| Video + labs + community + office hours                          |
+| Instructor value | FAQ | Terms | Privacy | Refund                |
++------------------------------------------------------------------+
+```
+
+No rating/testimonial/recommendation block appears unless separately approved with real data.
+
+## S02–S06 — Auth Card Pattern
+
+```text
++--------------------------------------+
+| Gradex                          [←]  |
+|--------------------------------------|
+| Title                                |
+| Explanation / assigned role          |
+| [display name (register/invite)....] |
+| [email.............................]  |
+| [password (15–128).................] |
+| [ Primary action ]                   |
+| Secondary link / safe status         |
++--------------------------------------+
+```
+
+Variants:
+
+- Registration → display name + email/password → generic accepted → Verify Email.
+- Verify Email → verified / expired / reused / resend throttled.
+- Staff invitation → assigned role + display name/password, no role picker.
+- Reset → new password, no character-class checklist.
+
+## S07–S09 — Notifications, Profile, Legal
+
+```text
++-----------------------------------------------+
+| Title                              Language   |
+|-----------------------------------------------|
+| Tabs/sections                                 |
+| • transactional event / profile field / text |
+| • timestamp / status / effective version     |
+|-----------------------------------------------|
+| [ contextual action ]                        |
++-----------------------------------------------+
+```
+
+Notification variant has read/unread actions but no preferences. Legal variant exposes Terms,
+Privacy, and Refund Policy with language/version.
+
+---
+
+# Student
+
+## ST01 — Catalog/Search
+
+```text
++--------------------------------------------------+
+| Search university Course...         [ Filters ] |
+|--------------------------------------------------|
+| {filter sheet/desktop rail}                      |
+|   Major [v]  Subject [v]  Study Year [v]        |
+|   {active chips} [ Clear all ]   N results      |
+| [Course card]  [Course card]                     |
+| Instructor · full-Course price · 150-day term   |
+| Labs/resources · office hours                    |
++--------------------------------------------------+
+```
+
+Filters are exact-match, one value per dimension. Search matches Arabic and English at once.
+
+## ST02 — Course Details
+
+```text
++--------------------------------------------------+
+| Course title                      Instructor     |
+| Authored language · summary                       |
+| [ Public preview ] {hidden if none}              |
+|--------------------------------------------------|
+| Full Course                 40.000 KWD [ Buy ]   |
+| ▾ Section 1                15.000 KWD [ Buy ]   |
+|    Lesson A · Lesson B                           |
+| ▸ Section 2                15.000 KWD [ Buy ]   |
+|--------------------------------------------------|
+| Included Resources · Labs · Community · Hours   |
+| Access: 150 days | Refund Policy                |
++--------------------------------------------------+
+```
+
+There is no Sample Lab download. A “Chapter” label, if localized, replaces the visible word
+Section only; it does not create a second object.
+
+## ST03 — Checkout
+
+```text
++----------------------------------------+
+| Checkout                         [ X ] |
+|----------------------------------------|
+| Course / Section snapshot              |
+| Subtotal                   15.000 KWD  |
+| Coupon [............] [ Apply ]        |
+| Discount                  - 3.000 KWD  |
+| Total                      12.000 KWD  |
+| Access: 150 days                       |
+| [✓] Accept Refund Policy v...          |
+| [ Continue to Tap ]                    |
++----------------------------------------+
+
+{ total 0.000 → Grant access; do not open Tap }
+```
+
+## ST04 — Confirmation / Receipt States
+
+```text
++----------------------------------------+
+| { Confirming payment… }                |
+| { Paid / Free grant / Failed }         |
+|----------------------------------------|
+| Order · item · amounts · reference     |
+| Access until DATE · policy version     |
+| [ Start / Go to Course ] [ Orders ]   |
++----------------------------------------+
+```
+
+## ST05–ST06 — Dashboard / Course Home
+
+```text
++--------------------------------------------------+
+| Continue learning                                |
+| [ Course · Lesson · progress · Resume ]          |
+|--------------------------------------------------|
+| Course Home · access until DATE                  |
+| ▾ Section 1 (owned)                              |
+|    ✓ Lesson A    ▷ Lesson B                      |
+| ▸ Section 2 🔒                                   |
+|--------------------------------------------------|
+| Resources | Labs | Office Hours | Community     |
+| [ Report Course ]                                |
++--------------------------------------------------+
+```
+
+## ST07–ST08 — Lesson Player / Materials
+
+```text
++--------------------------------------------------+
+| ← Course | Lesson title                         |
+|--------------------------------------------------|
+|                RESPONSIVE VIDEO                  |
+|      play · seek · volume · quality · fullscreen|
+|--------------------------------------------------|
+| [Previous] progress [Next] [Report]             |
+|--------------------------------------------------|
+| Resources                   Labs                 |
+| [File · type · size · Download]                 |
++--------------------------------------------------+
+```
+
+On small screens the Lesson list/materials use sheets/stacked sections. On desktop a persistent
+Lesson rail may appear. Captions are not shown as an MVP control.
+
+## ST09 — Office Hours
+
+```text
++----------------------------------------+
+| Upcoming Office Hours                  |
+|----------------------------------------|
+| Course · Session title                 |
+| Localized DATE/TIME · Scheduled        |
+| [ View Course ] [ Join ]               |
+|----------------------------------------|
+| {rescheduled} {cancelled} {empty}      |
++----------------------------------------+
+```
+
+`Join` is rendered only after authorization; the URL is not embedded in unauthorized data.
+
+## ST10 — Orders and Refunds
+
+```text
++--------------------------------------------------+
+| Orders & Refunds                                 |
+|--------------------------------------------------|
+| Order # · Course/Section · Paid/Free/Failed      |
+| paid · discount · access term            [Open] |
+|--------------------------------------------------|
+| Detail: payment reference · policy version       |
+| Refunds: amount · Pending/Succeeded/Failed       |
+| Remaining refundable balance                     |
++--------------------------------------------------+
+```
+
+## Report Content Modal
+
+```text
++----------------------------------------+
+| Report Course / Lesson / File     [X] |
+| Reason [select......................]  |
+| Details [...........................]  |
+| [ Submit Report ]                     |
++----------------------------------------+
 ```
 
 ---
 
-# Shared / System
+# Instructor
 
-## Landing
-```
-+---------------------------+
-| Logo            [Sign in] |
-+---------------------------+
-|   ===== HERO =====        |
-|   Value proposition       |
-|   [ Browse ] [ Sign up ]  |
-+---------------------------+
-| Featured courses          |
-| [IMG] [IMG] [IMG]  >      |
-+---------------------------+
-| How it works              |
-| - Labs  - Community       |
-| - Follow-up               |
-+---------------------------+
-| Footer: Legal | About     |
-+---------------------------+
-{ empty: thin launch strip }
+## IN01 — Dashboard
+
+```text
++----------+------------------------------------------+
+| Dashboard| My Courses                               |
+| Courses  | [Course · Draft · Edit]                  |
+| Analytics| [Course · Changes Requested · Review]    |
+| Hours    | [Course · Published · Analytics]         |
+| Notice   | Upcoming sessions · processing failures  |
++----------+------------------------------------------+
 ```
 
-## Login
-```
-+---------------------------+
-|          Logo             |
-+---------------------------+
-|        Sign in            |
-|  [ email............. ]   |
-|  [ password.......... ]   |
-|            Forgot? >      |
-|      [   Sign in   ]      |
-|  --------------------     |
-|  New here? Register >     |
-+---------------------------+
-{ error: inline banner above form (401 / suspended) }
+No earnings or payout-statement destination.
+
+## IN02–IN05 — Builder, Lesson, Materials, Preview
+
+```text
++----------+-----------------------------------------------+
+| Courses  | Course Builder · autosaved/sync state         |
+|          | Title [.................................]      |
+|          | Course price 40.000 KWD  🔒 Admin-controlled  |
+|          | ▾ Section 1 · 15.000 KWD 🔒                   |
+|          |    Lesson A [Video: READY] [Materials]        |
+|          |    Lesson B [Video: PROCESSING]               |
+|          | [ + Section ] [ Public Preview ]              |
+|          | [ Submit for Review ]                         |
++----------+-----------------------------------------------+
+
+Materials: Resources | Labs → upload/scan/available states
+Preview: one separate asset → permission ✓ → scan → public
 ```
 
-## Register
-```
-+---------------------------+
-|          Logo             |
-+---------------------------+
-|      Create account       |
-|  [ email............. ]   |
-|  [ password.......... ]   |
-|  [ confirm........... ]   |
-|  [ ] Agree Terms/Privacy  |
-|      [  Create  ]         |
-|  Have an account? Sign in>|
-+---------------------------+
-{ error: duplicate email 409 inline }
+## IN06 — Submit / Review
+
+```text
++-----------------------------------------------+
+| Review readiness                              |
+| ✓ Section/Lesson structure                    |
+| ✓ Required READY video content                |
+| ! Missing item → [ Fix ]                      |
+|-----------------------------------------------|
+| {Ready [Submit]} {Pending Review read-only}  |
+| {Changes Requested: reason [Revise]}          |
++-----------------------------------------------+
 ```
 
-## Forgot Password
-```
-+---------------------------+
-|      Reset password       |
-|  Enter your email         |
-|  [ email............. ]   |
-|      [ Send link ]        |
-|  « Back to sign in        |
-+---------------------------+
-{ sent: generic confirmation replaces form }
-```
+## IN07–IN08 — Analytics / Office Hours
 
-## Reset Password
-```
-+---------------------------+
-|     Set new password      |
-|  [ new password...... ]   |
-|  [ confirm........... ]   |
-|      [   Save   ]         |
-+---------------------------+
-{ invalid/expired token: error + request-again link }
-```
-
-## Account / Settings
-```
-+---------------------------+  (role shell chrome)
-| Account                   |
-+---------------------------+
-| Email                     |
-|  [ ............. ] [Edit] |
-| Password                  |
-|  [ Change password ]      |
-| Notifications             |
-|  [x] Email  [x] In-app    |
-| ----                      |
-|  [ Log out ]              |
-+---------------------------+
-```
-
-## Profile
-```
-+---------------------------+
-| « Profile          [Edit] |
-+---------------------------+
-|   ( avatar )              |
-|   Name                    |
-|   [ display name..... ]   |
-|   Major / Year            |
-|      [   Save   ]         |
-+---------------------------+
-{ view vs edit toggle }
-```
-
-## Notification Center
-```
-+---------------------------+
-| « Notifications  [Read all]|
-+---------------------------+
-| • Payment receipt      >  |
-| • Video ready          >  |
-|   Review approved      >  |
-|   ...                     |
-+---------------------------+
-{ empty: "No notifications yet" }
-```
-
-## Legal
-```
-+---------------------------+
-| « Terms / Privacy / Refund|
-+---------------------------+
-| [Terms][Privacy][Refund]  | anchors
-| ===                       |
-| Section heading           |
-| body text ..............  |
-| ........................  |
-+---------------------------+
-```
-
-## System Error & Empty States
-```
-+---------------------------+
-|                           |
-|        (  !  )            |
-|   403 / 404 / 500 msg     |
-|   Cause-appropriate line  |
-|                           |
-|  [ Go home ] [ Retry ]    |
-|  (403 expired: [ Re-buy ])|
-+---------------------------+
+```text
+Analytics                       Office Hours
++--------------------------+    +-------------------------------+
+| Enrollments · completion |    | Course [owned Published....] |
+| Lesson progress funnel   |    | Title / description          |
+| Student roster (minimal) |    | Start / End / external link  |
+| no revenue/earnings      |    | [Schedule] [Reschedule][Cancel]|
++--------------------------+    +-------------------------------+
 ```
 
 ---
 
-# Student  (mobile-first)
+# Admin
 
-## Catalog
-```
-+---------------------------+
-| Logo   [search...]  Notif |
-+---------------------------+
-| [ Filters v ]   Major/Year|
-+---------------------------+
-| Course grid               |
-| +----------+ +----------+  |
-| | [IMG]    | | [IMG]    |  |
-| | Title    | | Title    |  |
-| | Instr.   | | Instr.   |  |
-| | Price·term| |Price·term| |
-| +----------+ +----------+  |
-| +----------+ +----------+  |
-|      [ Load more ]        |
-+---------------------------+
-| •Home Browse Notif Prof   |
-+---------------------------+
-{ empty: "No courses for this filter" }
-{ desktop: left filter sidebar, 3–4 col grid }
+## AD01–AD02 — Ops / Users and Invitations
+
+```text
++----------+------------------------------------------------+
+| Ops      | Pending Reviews · Reports · Refunds · Payouts  |
+| Users    |------------------------------------------------|
+| Pricing  | Users [search/filter] [Invite Staff]           |
+| Review   | Account · Role · Status · Invitation           |
+| ...      | [Suspend/Reactivate] [Resend/Revoke Invite]    |
++----------+------------------------------------------------+
 ```
 
-## Search Results
-```
-+---------------------------+
-| « [ query........... ] X  |
-+---------------------------+
-| [ Filters v ]   N results |
-+---------------------------+
-| +----------+ +----------+  |
-| | [IMG]    | | [IMG]    |  |
-| | Title    | | Title    |  |
-| +----------+ +----------+  |
-+---------------------------+
-| •Home Browse Notif Prof   |
-+---------------------------+
-{ empty: "Subject not covered" + suggestions }
+## AD03 — Pricing
+
+```text
++--------------------------------------------------+
+| Course / Section Pricing                         |
+|--------------------------------------------------|
+| Course price [40000 fils]                        |
+| Section 1   [15000 fils]                         |
+| Reason      [.................................]  |
+| [ Save audited price change ]                    |
+|--------------------------------------------------|
+| History: old → new · Admin · reason · time       |
++--------------------------------------------------+
 ```
 
-## Course Details
-```
-+---------------------------+
-| «                    Share|
-+---------------------------+
-|   [   IMG / preview   ]   |
-|   [ ▷ Preview lesson ]    | -> modal
-+---------------------------+
-| Title                     |
-| Instructor                |
-| Price     Access until DATE|
-+---------------------------+
-| [ Buy course ][Buy chapter]|
-+---------------------------+
-| Outline                   |
-| ▸ Section 1               |
-|    - Lesson  (preview)    |
-|    - Lesson               |
-| ▸ Section 2               |
-+---------------------------+
-| Includes: labs·resources· |
-| community                 |
-| [ Sample lab download ]   |
-+---------------------------+
-{ owned: primary CTA -> "Go to course" }
-{ price mid-change: last-approved shown }
+## AD04–AD05 — Course Queue / Review
+
+```text
++-----------+------------------------------------------------+
+| Review    | Pending Review queue                           |
+|           | Course · Instructor · first/revision · age     |
+|-----------+------------------------------------------------|
+| Content Review                                             |
+| Outline | audited video/material/preview | revision diff  |
+| [ Publish ] [ Request Changes ] [ Unpublish ] [ Archive ] |
+| Reason [...............................................]   |
++------------------------------------------------------------+
 ```
 
-## Checkout
-```
-+---------------------------+
-| « Checkout                |
-+---------------------------+
-| Order summary             |
-|  Item · scope             |
-|  Price                    |
-|  Access term              |
-| ----                      |
-| Payment method            |
-|  ( ) Card                 |
-|  ( ) KNET                 |
-|  -> hosted gateway page   |
-| ----                      |
-| Refund policy >           |
-|     [   Pay now   ]       |
-+---------------------------+
-{ processing: "Confirming payment..." spinner, no fail }
-{ failed: error + [ Retry ] / [ Cancel ] }
-{ already enrolled: blocked notice }
+Only valid state actions are enabled; change request/unpublish/archive require reason where
+specified.
+
+## AD06 — Coupons
+
+```text
++--------------------------------------------------+
+| Coupons                         [ Create ]        |
+| Code · type/value · targets · window · cap/state|
+|--------------------------------------------------|
+| Edit: Course/Section targets · global cap        |
+| No per-user-limit field                          |
+| [ Save ] [ Deactivate ]                          |
+| Redemption/refund history                        |
++--------------------------------------------------+
 ```
 
-## Payment Success / Receipt
-```
-+---------------------------+
-|        ( check )          |
-|     Payment confirmed     |
-+---------------------------+
-| Receipt                   |
-|  Item · amount · date     |
-|  Txn reference            |
-+---------------------------+
-| [ Start first lesson ]    |
-| [ Go to dashboard ]       |
-+---------------------------+
-{ no Back to checkout (history.replace) }
+## AD07–AD08 — Revenue / Refund
+
+```text
+Revenue / Order detail              Refund drawer/page
++------------------------------+    +-------------------------------+
+| Order/Attempt/Entitlement     |    | Captured / refunded / remain |
+| subtotal/discount/paid        |    | Method: partial supported?   |
+| coupon / gateway reference   |    | Amount [fils...............] |
+| refund + earning lines       |    | Reason [...................] |
+| {reconciliation warning}     |    | [ Request Refund ]           |
++------------------------------+    | {Pending/Success/Failed}     |
+                                    +-------------------------------+
 ```
 
-## Student Dashboard
-```
-+---------------------------+
-| Logo            Notif   = |
-+---------------------------+
-| Continue learning         |
-| +-----------------------+ |
-| | [IMG] Lesson · 12:04  | |
-| |        [ Resume ]     | |
-| +-----------------------+ |
-+---------------------------+
-| My courses                |
-| +--------+ Progress ▓▓░ 40%|
-| | [IMG]  | Access to DATE |
-| +--------+                |
-| +--------+ Progress ▓░░ 15%|
-+---------------------------+
-| •Home Browse Notif Prof   |
-+---------------------------+
-{ empty: "No courses yet" -> [ Browse ] }
-{ near expiry: badge on card }
+## AD09 — Payouts
+
+```text
++--------------------------------------------------+
+| Monthly Payout Run · share: {configured/block}  |
+|--------------------------------------------------|
+| Instructor · Orders · fees · refunds · adjust   |
+| Net collected · share · payable                 |
+| [ Generate ] [ Approve ]                        |
+| Bank reference [................] [ Mark Paid ] |
+| [ Email Statement ]                             |
++--------------------------------------------------+
 ```
 
-## Course Home
-```
-+---------------------------+
-| « Course title            |
-+---------------------------+
-| Progress ▓▓▓░░ 55%        |
-| Access until DATE         |
-| Est. time to complete     |
-+---------------------------+
-| [ Start here / Resume ]   |
-+---------------------------+
-| ▸ Section 1               |
-|   ✓ Lesson (done)         |
-|   ▷ Lesson (current)      |
-|   ⌷ Lesson (locked)       | <- chapter-only
-| ▸ Section 2               |
-+---------------------------+
-| [ Resources & labs ]      |
-| [ Community ]  (external) |
-+---------------------------+
-| •Home Browse Notif Prof   |
-+---------------------------+
-{ locked lessons visible when chapter-only }
+## AD10–AD11 — Reports / Office-Hours Moderation
+
+```text
+Reported Content                     Office-Hours Moderation
++-------------------------------+    +-------------------------------+
+| Target · reporter · reason    |    | Course · Instructor · time   |
+| State/history/evidence        |    | external link · state        |
+| [Dismiss] [Request Changes]   |    | Reason [...................] |
+| [Unpublish] [Suspend]         |    | [ Cancel Session ]           |
++-------------------------------+    +-------------------------------+
 ```
 
-## Lesson Player
-```
-+---------------------------+
-| « Course       (overlay)  |
-+---------------------------+
-|                           |
-|      [   VIDEO   ]        |
-|   ▷ ▮▮  --o------  ⚙ ⛶     | controls
-+---------------------------+
-| Resume at 12:04?  [ Go ]  |
-+---------------------------+
-| Lesson title              |
-| [ Resources ] [ Next > ]  |
-+---------------------------+
-| Up next: Lesson N+1       |
-+---------------------------+
-{ tab bar hidden (immersive) }
-{ access denied mid-watch -> 403 screen }
-{ desktop: right lesson-list rail + notes }
-```
+Admins have no create/platform-wide office-hours control.
 
-## Lesson Resources & Labs
-```
-+---------------------------+
-| « Lesson materials        |
-+---------------------------+
-| Resources (slides/notes)  |
-|  - file.pdf   [Download]  |
-|  - file.pptx  [Download]  |
-+---------------------------+
-| Lab materials             |
-|  - project.zip [Download] |
-|  - guide.pdf   [Download] |
-|  [ ] Mark lab done        |
-|  Setup checklist ▸        |
-+---------------------------+
-| [ Community ] (external)  |
-+---------------------------+
-{ empty: "No materials for this lesson" }
-{ link expired -> re-issue inline }
+## AD12 — Catalog Taxonomy
+
+```text
++--------------------------------------------------+
+| Catalog Taxonomy    [ Majors ] [ Subjects ]     |
+|--------------------------------------------------|
+| ar label · en label · code · state · #courses   |
+| ---------------------------------------------   |
+| علوم حاسوب · Computer Science · — · active · 7  |
+| برمجة ١   · CS 101          · CS 101 · act · 3  |
+| [ Edit ] [ Retire ] [ Delete: blocked if used ] |
+|--------------------------------------------------|
+| [ + New term ]  ar [......] en [......] code[..]|
++--------------------------------------------------+
+Study Year is a fixed enumeration and is not edited here.
 ```
 
 ---
 
-# Instructor  (desktop-first — left sidebar shell)
+# Coverage
 
-## Instructor Dashboard
-```
-+----------+---------------------------------+
-| Logo     | My courses            Notif  ⋮  |
-| •Dash    +---------------------------------+
-|  Analyt. | [ + New course ]                |
-|  Payouts | ------------------------------- |
-|          | Title      Status        Actions|
-|          | Course A   Published    [Edit]  |
-|          | Course B   Pending      (lock)  |
-|          | Course C   Rejected !   [Edit]  |
-|          |   reason shown on Course C      |
-+----------+---------------------------------+
-{ empty: "No courses yet" -> New course }
-{ pending rows read-only }
-```
+| Screen IDs | Wireframe coverage |
+|---|---|
+| S01–S10 | Landing, Auth pattern, Notifications/Profile/Legal pattern, shared state behavior |
+| ST01–ST10 | Catalog, Course, Checkout, Receipt, Dashboard/Course, Player/Materials, Hours, Orders |
+| IN01–IN08 | Dashboard, Builder/Lesson/Materials/Preview, Review, Analytics, Hours |
+| AD01–AD12 | Ops/Users, Pricing, Review, Coupons, Revenue/Refund, Payouts, Reports/Hours moderation, Taxonomy |
 
-## Course Builder
-```
-+----------+---------------------------------+
-| Logo     | Dash / Course        autosaved  |
-| •Dash    +---------------------------------+
-|          | [ Course title........ ]        |
-|          | [ Description......... ]        |
-|          | Price [ KWD ]                   |
-|          | ============ Structure ======== |
-|          | ▸ Section 1        [+][^][v][x] |
-|          |    - Lesson        [edit][x]    |
-|          |    - Lesson                     |
-|          | ▸ Section 2                     |
-|          | [ + Add section ]               |
-|          | ------------------------------- |
-|          | [ Preview ] [ Submit for review]|
-+----------+---------------------------------+
-{ draft (invisible) · pending (read-only) · pending-revision }
-```
-
-## Lesson Editor
-```
-+----------+---------------------------------+
-| Logo     | Dash / Course / Lesson          |
-| •Dash    +---------------------------------+
-|          | [ Lesson title........ ]        |
-|          | ===== Video =====               |
-|          | +-----------------------------+ |
-|          | |  Drag & drop / [ Upload ]   | |
-|          | +-----------------------------+ |
-|          | Status: Uploading ▓▓▓░ 60%      |
-|          |         Processing... / Ready ✓ |
-|          | [ Replace ]                     |
-|          | ------------------------------- |
-|          | [ Resources & labs ]            |
-+----------+---------------------------------+
-{ FAILED: retry (auto 3x then manual) }
-{ over max size: reject msg }
-{ « Back while unsaved -> intercept }
-```
-
-## Resources & Labs Manager
-```
-+----------+---------------------------------+
-| Logo     | Dash / Course / Lesson / Mat.   |
-| •Dash    +---------------------------------+
-|          | Resources (<=50MB/file,200MB)   |
-|          | +-------------------+ [Upload]  |
-|          | | drop files        |           |
-|          | +-------------------+           |
-|          |  - slides.pdf          [x]      |
-|          | ------------------------------- |
-|          | Lab materials (<=250MB,1GB)     |
-|          | +-------------------+ [Upload]  |
-|          |  - project.zip         [x]      |
-|          |  - guide.pdf           [x]      |
-|          | Materials complete: ✓           |
-+----------+---------------------------------+
-{ wrong type / over cap -> reject inline }
-```
-
-## Submit for Review
-```
-+----------+---------------------------------+
-| Logo     | Dash / Course                   |
-| •Dash    +---------------------------------+
-|          | Pre-submit checklist            |
-|          |  ✓ >=1 section / lesson         |
-|          |  ✓ Every lesson has READY video |
-|          |  ! Lesson 3 video processing    | -> [Fix]
-|          |  ✓ Price set                    |
-|          | ------------------------------- |
-|          | [ Submit for review ] (disabled |
-|          |   until blockers clear)         |
-+----------+---------------------------------+
-{ blocked: list names what's missing + jump }
-```
-
-## Course Analytics
-```
-+----------+---------------------------------+
-| Logo     | Dash / Course / Analytics       |
-|  Dash    +---------------------------------+
-| •Analyt. | Enrollments: N   Completion: %  |
-|          | ============ Funnel =========== |
-|          | L1 ▓▓▓▓▓▓▓▓  100%               |
-|          | L2 ▓▓▓▓▓▓░░   72%               |
-|          | L3 ▓▓▓▓░░░░   48%  <- drop       |
-|          | ------------------------------- |
-|          | Student roster                  |
-|          |  name · progress                |
-+----------+---------------------------------+
-| NO earnings figures anywhere               |
-{ empty: "No enrollments yet" }
-```
-
-## Payout Statements
-```
-+----------+---------------------------------+
-| Logo     | Payout statements               |
-|  Dash    +---------------------------------+
-| •Payouts | Cadence: explained up front     |
-|          | ------------------------------- |
-|          | Cycle          Statement        |
-|          | 2026-06     [ PDF ] [ CSV ]     |
-|          | 2026-05     [ PDF ] [ CSV ]     |
-|          | (statements only, no live $)    |
-+----------+---------------------------------+
-{ empty: "No statements yet" }
-```
-
----
-
-# Admin  (desktop-first — left sidebar shell)
-
-## Admin Ops Landing
-```
-+----------+---------------------------------+
-| Logo     | Ops                   Notif  ⋮  |
-| •Ops     +---------------------------------+
-| Queue    | +----------+ +----------+       |
-| Users    | | Queue    | | Pending  |       |
-| Revenue  | | depth: N | | refunds:N|       |
-| Refunds  | +----------+ +----------+       |
-| Payouts  | +----------+                    |
-| Reports  | | Failed   |                    |
-|          | | transc: N|  -> quick links    |
-+----------+---------------------------------+
-{ all-clear: empty queues }
-```
-
-## Moderation Queue
-```
-+----------+---------------------------------+
-| Logo     | Moderation queue                |
-| •Queue   +---------------------------------+
-|          | [ ] Course · Instr · Age/SLA    |
-|          | [ ] Course A · X · 2d  [Review]  |
-|          | [ ] Course B · Y · 4h  [Review]  |
-|          | ------------------------------- |
-|          | [ Bulk triage ]                 |
-+----------+---------------------------------+
-{ empty: queue clear }
-{ launch-week: long batch list }
-```
-
-## Content Review
-```
-+----------+---------------------------------+
-| Logo     | Queue / Course                  |
-| •Queue   +---------------------------------+
-|          | Outline | [  PREVIEW VIDEO  ]   |
-|          | ▸ Sec 1 |  (audited, logged)    |
-|          |  L1     |  ▷ ▮ --o-- ⚙          |
-|          |  L2     | ----------------------|
-|          |         | Reviewer checklist    |
-|          | ------------------------------- |
-|          | [ Approve ]  [ Reject ]         |
-|          |   Reject -> reason (required)   |
-|          |   [ reason templates v ]        |
-+----------+---------------------------------+
-{ approve = atomic publish; revision applies to live }
-```
-
-## User Management
-```
-+----------+---------------------------------+
-| Logo     | Users            [search.....]  |
-| •Users   +---------------------------------+
-|          | Role: [All v]                   |
-|          | Name · Email(PII) · Role · State|
-|          | Fahd · ...· Student · Active [⋮]|
-|          |   [⋮] -> Suspend / Reinstate     |
-|          | ------------------------------- |
-|          | (detail drawer opens right)     |
-+----------+---------------------------------+
-{ suspend: reason required + audit }
-{ student suspend kills access; instructor no }
-```
-
-## Revenue Dashboard
-```
-+----------+---------------------------------+
-| Logo     | Revenue                         |
-| •Revenue +---------------------------------+
-|          | Period [ v ]   Total: KWD ...   |
-|          | ===== trend chart (bars) =====  |
-|          | ▓ ▓ ▓ ▓ ▓ ▓                     |
-|          | ------------------------------- |
-|          | Per-course revenue   table      |
-|          | Refund / chargeback trend       |
-|          | ! Reconciliation flags   >      |
-+----------+---------------------------------+
-{ desync warning surfaced }
-```
-
-## Refunds
-```
-+----------+---------------------------------+
-| Logo     | Refunds                         |
-| •Refunds +---------------------------------+
-|          | [ Order lookup......... ][Find] |
-|          | ------------------------------- |
-|          | Order · student · amount        |
-|          | Policy check:                   |
-|          |   streamed? file opened? (14d)  |
-|          |   -> Eligible / Ineligible      |
-|          | ( ) Full   ( ) Partial [ amt ]  |
-|          | [ Issue refund ]                |
-|          | { pending-refund until gateway }|
-|          | ! Payout paid -> clawback flag  |
-+----------+---------------------------------+
-{ gateway fail -> do not revoke; reconcile }
-```
-
-## Payouts
-```
-+----------+---------------------------------+
-| Logo     | Payouts / Run                   |
-| •Payouts +---------------------------------+
-|          | Cycle [ v ]                     |
-|          | Instructor · course · gross     |
-|          |   - fees  - refunds  = net      |
-|          | ! reconciliation flags          |
-|          | ------------------------------- |
-|          | [ Approve ]  then  [ Mark paid ]|
-|          |   ref: [ ........ ]             |
-|          | -> generates statement PDF/CSV  |
-+----------+---------------------------------+
-| earnings live HERE only, never instructor  |
-{ refund after paid -> clawback next cycle }
-```
-
-## Reported Content
-```
-+----------+---------------------------------+
-| Logo     | Reported content                |
-| •Reports +---------------------------------+
-|          | Target · reporter · reason · date|
-|          | Course A · ... · spam  [Open]   |
-|          | Material X · ... · IP  [Open]   |
-|          |   [Open] -> Content Review/action|
-|          | action: Dismiss / Take down/Warn|
-+----------+---------------------------------+
-{ empty: no reports }
-```
-
----
-
-## Coverage
-
-34 / 34 screens. States shown as `{ ... }` notes where they change hierarchy; full state/permission contract in [SCREENS.md](SCREENS.md), chrome/responsive in [NAVIGATION_RULES.md](NAVIGATION_RULES.md). Demoted nodes (Lesson Preview modal, Payment Processing/Failed states, Community link-out, Review Outcome) appear as annotations on their parent frames, not as separate screens.
+Detailed field/state/permission contracts remain in [SCREENS.md](SCREENS.md). These frames do not
+add routes or features beyond that source.
