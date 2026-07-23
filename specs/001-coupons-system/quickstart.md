@@ -46,7 +46,8 @@ The paths/status codes below are proposed. Update this guide if platform system 
 
 1. Admin creates `FREEBETA` = `percentage 100` (or `fixed ≥ price`).
 2. Student creates an order → `total_amount = 0` → free-grant path.
-3. Expect: enrollment granted with 150-day term from grant time; one redemption row;
+3. Expect: Enrollment/Entitlement granted with the Order's disclosed Course-configured expiry;
+   one redemption row;
    `redemption_count = 1`; **no gateway session created**.
 
 ## Scenario 5 — One consuming Redemption per Student (exact)

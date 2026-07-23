@@ -73,6 +73,8 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-009 — Enrollment access is per-semester, not lifetime
 
 **Date:** 2026-07-20
+**Status:** Superseded on 2026-07-26 by D-026. This entry preserves the original fixed-duration
+decision for history.
 **Decision:** Course/Section access expires 150 days (~5 months, approximating one academic semester) after the purchase timestamp, calculated in Kuwait local time (UTC+3), valid through the end of day 150, rather than lasting indefinitely. MVP ships silent expiry — access simply ends, no dedicated renewal flow — since a lapsed student can regain access through the normal purchase flow (see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-024/BR-025). Future bundle entitlements must adopt an explicit duration before bundle purchase ships. *(Canonical term changed from “chapter” to Section on 2026-07-23; exact day count/timezone/boundary remains unchanged.)*
 **Reason:** matches how the target student actually uses the product — access tied to the university course/semester they're taking right now — better than an open-ended lifetime default, and avoids building a separate renewal/repurchase flow before launch.
 **Alternatives rejected:** lifetime access (the more common course-platform default, and the initially recommended option — rejected in favor of a semester-aligned term that better fits how Gulf university students actually consume this content); building a dedicated renewal flow in MVP (rejected — real added scope against the 3.5-week timeline; repurchase through the standard checkout covers this for now).
@@ -81,7 +83,7 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-010 — Notifications: transactional-only MVP on email + in-app center; lifecycle/marketing deferred
 
 **Date:** 2026-07-21
-**Decision:** MVP ships a fixed transactional notification policy using a minimal in-app center plus email where required. In-app + email events are purchase receipt, refund status, password/security events, Account invitation, Course approval/changes requested, and office-hours cancellation/material rescheduling. New office-hours sessions (to currently entitled Students) and new Instructor Course/revision submissions (to Admin operations) are recorded in-app and may also use email when operationally appropriate. Video-processing completion targets the Instructor. Required transactional/security messages cannot be disabled. Marketing, preferences, WhatsApp/SMS, and push are post-MVP. *(Expanded 2026-07-23 to cover newly approved MVP flows.)*
+**Decision:** MVP ships a fixed transactional notification policy using a minimal in-app center plus email where required. In-app + email events are purchase receipt, refund status, password/security events, Account invitation, Course approval/changes requested, office-hours cancellation/material rescheduling, and an Admin extension or shortening of an individual Entitlement. New office-hours sessions (to currently entitled Students) and new Instructor Course/revision submissions (to Admin operations) are recorded in-app and may also use email when operationally appropriate. Video-processing completion targets the Instructor. Required transactional/security messages cannot be disabled. Marketing, preferences, WhatsApp/SMS, and push are post-MVP. *(Expanded 2026-07-26 to cover approved Entitlement adjustments.)*
 **Reason:** These messages complete existing account, commerce, moderation, and office-hours flows without creating a segmentation or preference engine. The in-app record remains durable; email delivery remains best-effort and never controls the underlying transaction.
 **Alternatives rejected:** Email-only MVP; granular notification settings; lifecycle/marketing automation; WhatsApp/SMS; push.
 **Source:** This session; see [PRD.md §5 Notifications](PRD.md), [PRD.md §4 Scope](PRD.md), and [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-120–BR-123.
@@ -205,3 +207,23 @@ Central record of significant product/technical decisions for Gradex — what wa
 **Reason:** This structure preserves the working repository stack and own-build video pipeline while minimizing operational work for one developer. It allows the frontend, API, worker, data, and media paths to scale independently without making open provider, budget, legal, load, or recovery choices permanent.
 **Alternatives rejected:** A unified managed PaaS (rejected because it increases platform coupling and narrows region/runtime choices); cloud-managed primitives (rejected because their networking, identity, and operational burden is too high for the August 15 launch); a self-managed production host (rejected because it conflicts with the approved low-operations priority).
 **Source:** Approved platform architecture; see [2026-07-25-platform-architecture-design.md](superpowers/specs/2026-07-25-platform-architecture-design.md).
+
+## D-026 — Course-configured semester expiry with audited Entitlement adjustments
+
+**Date:** 2026-07-26
+**Decision:** D-009's fixed 150-day duration is replaced by an Admin-managed Course
+`default_access_ends_at` instant for future purchases. A Section has no independent access-period
+override. Checkout discloses the exact expiry and the Order snapshots it; the granted Entitlement
+stores both that original instant and its current authoritative `access_ends_at`. Access is allowed
+only while `current_timestamp < access_ends_at`. An elevated Admin may extend or shorten an
+individual Entitlement with a required reason and immutable adjustment/Audit history; changing the
+Course default never silently changes an existing Entitlement. For a Kuwait-local calendar date,
+the persisted exclusive boundary is the first instant of the following local day converted to UTC.
+**Reason:** Semester end dates vary, and a Student may purchase near the end of a semester. An exact
+disclosed expiry avoids granting an unintended fixed five-month term while separate original and
+effective values preserve both the commercial agreement and later support decisions.
+**Alternatives rejected:** Lifetime access; the superseded fixed 150-day term; Section-level expiry
+overrides in MVP; dynamically changing existing Entitlements when the Course default changes;
+unaudited expiry edits.
+**Source:** Approved July 26 domain/data/state design Section 1; see
+[the July 26 daily record](launch/daily/2026-07-26.md).

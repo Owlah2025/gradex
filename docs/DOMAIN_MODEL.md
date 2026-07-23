@@ -65,9 +65,9 @@ token/session mechanics but must satisfy immediate suspension and safe logout/ro
 ### Course
 
 Top-level catalog/learning product. Exactly one Instructor owns a Course; an Admin may reassign
-ownership. A Course has authored details, one current Admin-controlled price, its catalog
-classification, Sections, an optional public preview, community link, publication state, and
-history.
+ownership. A Course has authored details, one current Admin-controlled price, an Admin-configured
+`default_access_ends_at` for future purchases, its catalog classification, Sections, an optional
+public preview, community link, publication state, and history.
 
 Lifecycle:
 
@@ -85,6 +85,9 @@ PUBLISHED ──────────────────────→ 
   resolved, without deleting Entitlements or progress.
 - `ARCHIVED` is terminal for catalog/new purchases. A Course with enrollment history is archived,
   not hard-deleted; Students retain access while their existing Entitlement remains active.
+- Changing `default_access_ends_at` affects future Orders only. A Course may remain Published and
+  available to existing entitled Students without a future default, but checkout is disabled until
+  an Admin configures one.
 
 ### Taxonomy Term and Course Classification
 
@@ -119,7 +122,8 @@ Catalog pricing is not part of an Instructor revision.
 ### Section
 
 Ordered grouping within exactly one Course. A Section contains Lessons and may have an Admin-set
-catalog price, making it an MVP purchasable scope.
+catalog price, making it an MVP purchasable scope. It has no independent access-period override;
+Section checkout snapshots the containing Course's configured expiry.
 
 ### Lesson
 
@@ -170,9 +174,9 @@ change when the catalog price changes.
 
 ### Order
 
-Commercial intent for exactly one Student and one purchasable item (Course or Section). It snapshots
-item identity, catalog subtotal, coupon details, discount, total, currency, accepted policy version,
-and identifiers.
+Commercial intent for exactly one Student and one purchasable item (Course or Section). Its item
+snapshot preserves identity, catalog subtotal, coupon details, discount, total, currency,
+`access_ends_at`, accepted policy version, and identifiers.
 
 Lifecycle:
 
@@ -229,8 +233,9 @@ progress, not access to the Student's direct account/contact/payment PII.
 
 ### Entitlement
 
-Authorization scope tied to a Student, Course or Section, source Order/grant, start, expiry, and
-revocation details.
+Authorization scope tied to a Student, Course or Section, source Order/grant, effective commercial
+grant time, `original_access_ends_at`, current authoritative `access_ends_at`, and revocation
+details. Access is allowed only while `current_timestamp < access_ends_at`.
 
 ```text
 ACTIVE → EXPIRED
@@ -240,6 +245,15 @@ ACTIVE → EXPIRED
 Account suspension and Course unpublishing can block access without mutating Entitlement state.
 A Course Entitlement authorizes every Section in its Course. A Section Entitlement authorizes only
 that Section; it creates no upgrade credit against a later Course purchase.
+
+An elevated Admin may extend or shorten `access_ends_at`. Each change creates an immutable
+Entitlement Adjustment recording old/new instants, reason, actor, timestamp, and an optional
+support/refund reference; `original_access_ends_at` never changes.
+
+Retirement blocks future acquisition. Retired Course/Section/Lesson content remains accessible only
+when the Entitlement's effective payment-success or free/manual-grant timestamp is earlier than the
+relevant `retired_at` instant and the Entitlement remains otherwise active. A delayed webhook's
+database insertion time cannot turn a post-retirement grant into an eligible one.
 
 ## 5. Coupons
 

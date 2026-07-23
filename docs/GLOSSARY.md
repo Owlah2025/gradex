@@ -81,7 +81,7 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Unpublished | Admin temporarily removed Course visibility/access for moderation without deleting history. |
 | Archived | Terminal catalog/new-purchase state for historical Course records; not a hard delete. |
 | Active Entitlement | Current authorization within its access term and not revoked. |
-| Expired Entitlement | Authorization whose 150-day access term ended naturally. |
+| Expired Entitlement | Authorization whose current effective `access_ends_at` instant has passed. |
 | Revoked Entitlement | Authorization ended before natural expiry, such as after cumulative full refund. |
 | Audit Event | Immutable record of privileged actor, action, target, reason/context, and timestamp. |
 | Launch Gate | Unresolved commercial/legal/provider/readiness item that blocks production (or a named fast-follow feature), not ordinary system design. |

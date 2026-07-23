@@ -110,8 +110,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Admin coupons: percentage/fixed, optional Course/Section scope, global cap, one consuming
   redemption per Student, and zero-value grants.
 - Full and partial refunds, subject to gateway capability and the counsel-approved policy.
-- 150-day Course/Section entitlement from purchase/grant, using the approved Kuwait-time
-  boundary.
+- Course-configured semester expiry disclosed at checkout and snapshotted onto the Order and
+  Entitlement, with audited Admin extension/shortening of individual Entitlements.
 - Manual monthly Instructor payout process with system-recorded accounting and emailed statement.
 - Course-scoped one-off live office hours using an entitlement-protected external meeting link.
 - Fixed transactional in-app/email notifications.
@@ -242,6 +242,10 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - A Course Entitlement blocks repurchase of that Course or any contained Section. A Section
   Entitlement blocks that Section only; another Section or the full Course remains purchasable at
   current catalog price, with no MVP upgrade credit/proration.
+- A Course must have a future Admin-configured access-expiry instant before checkout. Sections have
+  no independent expiry override. The Order preserves the disclosed instant; runtime access uses
+  the Entitlement's current effective expiry, which an elevated Admin may extend or shorten through
+  an audited adjustment.
 - Failed/abandoned coupon attempts do not consume redemption. Cumulative full refund releases the
   Student's per-coupon eligibility while preserving history; partial refund does not.
 - Only Admins initiate refunds. One or more refund amounts may not exceed the remaining captured
@@ -280,7 +284,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 ## Notifications
 
 - Required in-app + email events: purchase receipt, refund status, password/security, invitation,
-  Course approval/change request, and office-hours cancellation/material reschedule.
+  Course approval/change request, office-hours cancellation/material reschedule, and an Admin
+  extension or shortening of an individual Entitlement.
 - New office-hours sessions and new Instructor Course/revision submissions are in-app and may also
   use email when operationally appropriate.
 - Video-processing completion is an Instructor event.
@@ -499,8 +504,8 @@ Each criterion names its governing business rules and primary verification metho
   names the missing dimension; a retired term stays on already-assigned Courses and a referenced
   term cannot be deleted. *(BR-159/160; integration + E2E)*
 - Given a valid paid checkout, when Tap confirms capture through a verified callback/API result,
-  then the Order becomes Paid and one 150-day scoped entitlement is granted exactly once.
-  *(BR-020/021/025/031/033; integration + E2E)*
+  then the Order becomes Paid and one scoped Entitlement with the disclosed Course-configured
+  expiry is granted exactly once. *(BR-020/021/025/031/033; integration + E2E)*
 - Given a redirect without confirmed capture or a failed/ambiguous attempt, then no entitlement is
   granted and reconciliation/retry behavior is safe. *(BR-020/022/034; integration)*
 - Given a valid coupon, when preview/order creation occurs, then integer-fils discount/total are

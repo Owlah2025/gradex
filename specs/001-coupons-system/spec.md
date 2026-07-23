@@ -50,9 +50,9 @@ discount is applied.
 - **FR-002** A coupon has a discount type of `percentage` (1–100) or `fixed` (fils). (BR-125)
 - **FR-003** The computed discount is integer fils, percentages rounded to nearest fil,
   clamped to `[0, subtotal]`. (BR-125)
-- **FR-004** A coupon reducing the order to 0 grants enrollment directly, no gateway; the
-  free-grant order is a real order + enrollment with normal entitlement (BR-023) and 150-day
-  term (BR-025). (BR-126)
+- **FR-004** A coupon reducing the order to 0 grants Enrollment directly, no gateway; the
+  free-grant Order is a real Order + Enrollment with the normal Entitlement checks and disclosed
+  Course-configured expiry snapshot (BR-023/025/126).
 - **FR-005** At most one coupon per order; no stacking. (BR-127)
 - **FR-006** A coupon may be platform-wide (no targets) or restricted to specific
   Course(s)/Section(s). (BR-128)

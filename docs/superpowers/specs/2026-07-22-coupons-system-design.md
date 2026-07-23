@@ -122,9 +122,9 @@ terminal state** (comp order, no gateway; e.g. payment method = `comp`).
 - **Money math:** fils integers; percentage rounds to nearest fil; discount clamped to
   `[0, subtotal]`; fixed ≥ price → total 0 → free path.
 - **One coupon per order** — no stacking.
-- **Free-grant order is a real order** — same enrollment record, same entitlement checks
-  (BR-023), same **150-day term** (BR-025) from grant time; distinguished by payment method
-  = comp.
+- **Free-grant order is a real order** — same Enrollment record and Entitlement checks
+  (BR-023/025), with the same disclosed Course-configured expiry snapshot as a paid Order;
+  distinguished by payment method = comp.
 - **BR-024 still applies** — a coupon cannot grant an item the user already actively holds.
 - **BR-019 clean** — a Coupon never touches a Course/Section's listed price; discount is per-Order
   only. No pending-revision, no instructor involvement.

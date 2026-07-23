@@ -98,6 +98,6 @@ text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Ar
 <g class="c-gray">
 <rect x="500" y="662" width="150" height="46" rx="8"/>
 <text class="th" x="575" y="684" text-anchor="middle">Silent expiry</text>
-<text class="ts" x="575" y="700" text-anchor="middle">no reminder (D-009)</text>
+<text class="ts" x="575" y="700" text-anchor="middle">exact expiry (D-026)</text>
 </g>
 </svg>

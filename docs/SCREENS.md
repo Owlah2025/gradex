@@ -163,8 +163,8 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 **Purpose:** Confirm one Course/Section Order, apply one coupon, accept policy, and open Tap.
 
-- **Content:** Item/scope, catalog subtotal, coupon/discount, total KWD, 150-day term, accepted Refund
-  Policy version, payment-method handoff.
+- **Content:** Item/scope, catalog subtotal, coupon/discount, total KWD, exact access-expiry instant,
+  accepted Refund Policy version, payment-method handoff.
 - **Actions:** Apply/remove coupon, continue to Tap, cancel.
 - **States:** Coupon valid/invalid/inactive/expired/wrong-scope/cap/already-used; zero-value grant;
   creating Order; gateway unavailable.

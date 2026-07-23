@@ -207,8 +207,9 @@ rather than hard-coded.
   learning, reports, office hours, notifications, payouts, and audit.
 - Define lifecycle and failure states for transactional and asynchronous work.
 
-**Exit evidence:** Course/Section entitlement and 150-day expiry are unambiguous; all critical state
-transitions have actors and preconditions; idempotency constraints are defined.
+**Exit evidence:** Course/Section Entitlement scope and exact semester-expiry authority are
+unambiguous; all critical state transitions have actors and preconditions; idempotency constraints
+are defined.
 
 #### Monday, July 27 — API, security, and integration design
 

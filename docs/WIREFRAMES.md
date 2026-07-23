@@ -131,7 +131,7 @@ Privacy, and Refund Policy with language/version.
 |   Major [v]  Subject [v]  Study Year [v]        |
 |   {active chips} [ Clear all ]   N results      |
 | [Course card]  [Course card]                     |
-| Instructor · full-Course price · 150-day term   |
+| Instructor · price · access-until date          |
 | Labs/resources · office hours                    |
 +--------------------------------------------------+
 ```
@@ -152,7 +152,7 @@ Filters are exact-match, one value per dimension. Search matches Arabic and Engl
 | ▸ Section 2                15.000 KWD [ Buy ]   |
 |--------------------------------------------------|
 | Included Resources · Labs · Community · Hours   |
-| Access: 150 days | Refund Policy                |
+| Access until: {date/time} | Refund Policy       |
 +--------------------------------------------------+
 ```
 
@@ -170,7 +170,7 @@ Section only; it does not create a second object.
 | Coupon [............] [ Apply ]        |
 | Discount                  - 3.000 KWD  |
 | Total                      12.000 KWD  |
-| Access: 150 days                       |
+| Access until: {exact disclosed date}   |
 | [✓] Accept Refund Policy v...          |
 | [ Continue to Tap ]                    |
 +----------------------------------------+

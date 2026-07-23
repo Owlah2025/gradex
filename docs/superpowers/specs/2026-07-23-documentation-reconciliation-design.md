@@ -167,8 +167,9 @@ SP 800-63B:
 - Gateway webhook/API confirmation, not browser redirect, controls payment success, refunds,
   and entitlement changes.
 - Callbacks, retries, and grants are idempotent.
-- Successful payment or a valid zero-value coupon grant creates a 150-day entitlement using
-  the approved Kuwait-time boundary.
+- Successful payment or a valid zero-value coupon grant creates an Entitlement using the exact
+  expiry disclosed and snapshotted on the Order. *(Reconciled 2026-07-26 by D-026, which supersedes
+  the fixed 150-day boundary.)*
 - A Student cannot repurchase a scope for which they already have an active entitlement.
 - Order, payment attempt, refund, entitlement, and payout states remain separate.
 

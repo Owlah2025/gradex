@@ -39,7 +39,7 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 
 - **Goal:** Understand content, practical value, Instructor, price, and access term.
 - **Actions:** Review outline, authored details, resources/lab inclusion, office-hours support,
-  Course/Section prices, 150-day term, and optional public preview.
+  Course/Section prices, exact disclosed access-expiry date, and optional public preview.
 - **Rules:** Admin controls prices (BR-019); protected Labs/Resources are not previews
   (BR-143/144); active ownership changes CTA to “Go to Course” (BR-024).
 - **Edge cases:** No preview asset; some Sections not owned; recently changed price affects future
@@ -139,7 +139,7 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 
 ## SJ-12 — Return After Expiry
 
-- **Goal:** Continue learning after the 150-day term.
+- **Goal:** Continue learning after the purchased semester-access period.
 - **Actions:** Sign in, see retained progress and expired access, purchase again through normal flow.
 - **Rules:** Expiry ends access but preserves Enrollment/progress; active duplicate purchase is
   blocked, expired scope may be repurchased (BR-024/025).

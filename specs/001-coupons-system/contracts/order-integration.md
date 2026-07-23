@@ -13,10 +13,11 @@
   (`coupon_id`, `coupon_code`, `subtotal_amount`, `discount_amount`, `total_amount`,
   free-grant terminal status).
 - A grant transaction fired on (a) gateway payment-success webhook and (b) free-grant, idempotent
-  by stable Order identifier for both branches, that grants the enrollment (BR-020/021) and
-  150-day term (BR-025). The paid branch separately deduplicates callbacks by
+  by stable Order identifier for both branches, that grants the Enrollment and Entitlement with
+  the Order's disclosed Course-configured expiry snapshot (BR-020/021/025). The paid branch
+  separately deduplicates callbacks by
   payment-attempt/gateway reference (BR-033); the free branch has no gateway key.
-- An enrollment/entitlement service the free-grant path can call directly (no gateway).
+- An Enrollment/Entitlement service the free-grant path can call directly (no gateway).
 
 ## What the coupon domain exposes to the orders subsystem
 
