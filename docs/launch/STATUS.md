@@ -2,7 +2,7 @@
 
 > Current schedule date: 2026-07-24 — advanced by user
 > Last repository reconciliation: 2026-07-23 18:46 EEST
-> Scheduled day: Day 2 — Protected recovery/spillover
+> Scheduled day: Day 2 — Closed
 > Target public go-live: 2026-08-15
 > Days remaining after today: 22 calendar days
 > Launch confidence: **Red**
@@ -15,9 +15,8 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 2 is the protected recovery day. Day 1 is closed, its baseline is approved, and repository
-evidence shows no implementation carryover. No new feature or architecture work starts today;
-platform architecture starts July 25.
+Day 2 is closed. The protected recovery day introduced no feature or architecture work and no
+implementation carryover. Platform architecture starts July 25.
 
 Repository evidence at the latest reconciliation:
 
@@ -35,8 +34,8 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Preserve the recovery day. Handle only a newly discovered critical blocker or an explicit replan;
-otherwise keep the approved baseline stable for the July 25 architecture start.
+Begin the July 25 platform-architecture slice: architecture drivers, provisional operating
+envelope, module boundaries, system context, containers, runtime topology, and deployment model.
 
 ## Milestones
 
@@ -85,6 +84,8 @@ Fast-follow gates are outside this count. Recalculate from
 - Frontend `typecheck`, `lint`, and production `build` passed.
 - Backend `make build` and `make test` passed.
 - The required gate register contains 20 entries and all 20 currently have status `OPEN`.
+- July 24 closed with a clean worktree before its launch-control closeout and no application
+  changes; no test or independent-review rerun was required.
 
 ## Latest Review
 
