@@ -2,24 +2,23 @@
 
 > Current schedule date: 2026-07-25 — advanced by user
 > Last repository reconciliation: 2026-07-25 — user-advanced schedule
-> Scheduled day: Day 3 — Platform architecture in progress
+> Scheduled day: Day 3 — Closed
 > Target public go-live: 2026-08-15
 > Days remaining after today: 21 calendar days
 > Launch confidence: **Red**
 
-Red means the full-MVP public-launch forecast is not yet credible. The Day 1 documentation baseline
-is approved and platform architecture has started, but its operating envelope remains provisional
-and the founder deliberately deferred all external-owner outreach to August 6. All 20 required
-entries in
+Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline and
+platform architecture are approved, but detailed domain/API design and implementation have not
+started, the operating envelope remains provisional, and the founder deliberately deferred all
+external-owner outreach to August 6. All 20 required entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 3 is in progress. The protected July 24 recovery day introduced no feature or architecture work
-and no implementation carryover. The original July 25 architecture is approved by the
-developer/product owner; Claude's final exact review of `c9c2238` returned
-`APPROVE ARCHITECTURE` with zero critical/high findings. Corrected-record owner acceptance remains.
+Day 3 is closed. The July 25 architecture is approved by the developer/product owner, and Claude's
+final exact review of `c9c2238` returned `APPROVE ARCHITECTURE` with zero critical/high findings.
+There is no incomplete July 25 `Must` work.
 
 Repository evidence at the latest reconciliation:
 
@@ -37,15 +36,15 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Obtain the developer/product owner's acceptance of the corrected July 25 architecture record, then
-close Day 3 and hand off the July 26 domain/data/state design.
+Prepare the July 26 domain/data/state design: entities, ownership, invariants, PostgreSQL
+transactions/constraints/indexes, lifecycles, failure states, and retention boundaries.
 
 ## Milestones
 
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress | [July 25 platform architecture](../superpowers/specs/2026-07-25-platform-architecture-design.md); Claude approved exact commit `c9c2238` with zero critical/high findings; corrected-record owner acceptance pending |
+| M1 — Platform architecture baseline | July 28 | In progress | [July 25 platform architecture](../superpowers/specs/2026-07-25-platform-architecture-design.md); owner accepted; Claude approved exact commit `c9c2238` with zero critical/high findings |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -56,8 +55,8 @@ close Day 3 and hand off the July 26 domain/data/state design.
 
 ## Carryover
 
-No Day 1 implementation carryover. External-gate contact confirmation and outreach are deliberately
-scheduled for August 6 by founder decision and do not create recovery-day work.
+No incomplete July 25 `Must` work. External-gate contact confirmation and outreach are deliberately
+scheduled for August 6 by founder decision and are tracked risks rather than hidden carryover.
 
 ## Current Blockers and Risks
 
@@ -122,5 +121,5 @@ was `c9c2238`; all prior dispositions were verified closed and the verdict was
 
 ## Current Next Task
 
-Obtain the developer/product owner's acceptance of the corrected formal record, then close Day 3
-and hand off the July 26 domain/data/state design.
+On July 26, start domain/data/state design with explicit module ownership, transaction boundaries,
+database constraints/indexes, lifecycle/failure states, and configurable retention boundaries.

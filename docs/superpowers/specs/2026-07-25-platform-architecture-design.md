@@ -1,6 +1,6 @@
 # Gradex Platform Architecture — Design Record
 
-> Status: Independently approved at `c9c2238`; corrected-record owner acceptance pending
+> Status: Approved by developer/product owner; independently approved at `c9c2238`
 > Date: 2026-07-25
 > Scope: MVP platform architecture and provisional production topology
 > Change boundary: Design only; no production infrastructure or application behavior is
