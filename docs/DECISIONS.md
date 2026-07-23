@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-25
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -197,3 +197,11 @@ Central record of significant product/technical decisions for Gradex — what wa
 **Reason:** BR-064, [PRD.md §5](PRD.md), and [SCREENS.md](SCREENS.md) IN07 all depend on a "Student-chosen display name/alias," but the Account entity defined no such attribute, so the privacy boundary those rules describe had nothing concrete behind it. Keeping it non-unique avoids inventing a global namespace — with availability checks, reserved words, squatting, and an RTL/ASCII handle policy — for zero MVP benefit.
 **Alternatives rejected:** A globally unique handle (rejected — a whole namespace and its UX for no MVP requirement); a system-generated opaque pseudonym such as "Student 4821" (rejected — makes rosters useless for the office-hours and community follow-up that is the product's stated differentiator); reusing legal identity in rosters (rejected — contradicts BR-101/D-020 PII minimization).
 **Source:** This session; see [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-105, [DOMAIN_MODEL.md](DOMAIN_MODEL.md) §2, and [PRD.md §5](PRD.md).
+
+## D-025 — Modular monolith on a split managed PaaS
+
+**Date:** 2026-07-25
+**Decision:** Deploy the Gradex modular monolith as an edge-hosted Next.js frontend, a separately scalable Go API and Go worker, managed PostgreSQL as authority, managed Redis as disposable queue/cache infrastructure, and managed object storage/CDN. External providers remain behind configurable adapters. The launch is single-region and avoids Kubernetes, speculative microservices, and fixed overprovisioning. Production approval requires no unresolved critical defects; a high-severity defect requires documented risk acceptance, mitigation, and owner approval.
+**Reason:** This structure preserves the working repository stack and own-build video pipeline while minimizing operational work for one developer. It allows the frontend, API, worker, data, and media paths to scale independently without making open provider, budget, legal, load, or recovery choices permanent.
+**Alternatives rejected:** A unified managed PaaS (rejected because it increases platform coupling and narrows region/runtime choices); cloud-managed primitives (rejected because their networking, identity, and operational burden is too high for the August 15 launch); a self-managed production host (rejected because it conflicts with the approved low-operations priority).
+**Source:** Approved platform architecture; see [2026-07-25-platform-architecture-design.md](superpowers/specs/2026-07-25-platform-architecture-design.md).

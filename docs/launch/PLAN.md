@@ -402,8 +402,9 @@ owner; rollback is executable from its runbook.
 - Load-test catalog, login, signed playback, progress, webhook bursts, and media workers.
 - Audit accessibility, responsive behavior, Arabic/English, RTL/LTR, and mixed-language content.
 
-**Exit evidence:** no critical/high security or data-loss defect; launch-load targets pass;
-LG-014, LG-015, LG-018, and LG-019 are resolved; otherwise confidence is Red.
+**Exit evidence:** no unresolved critical security or data-loss defect; every high-severity defect
+has documented risk acceptance, mitigation, and owner approval; launch-load targets pass; LG-014,
+LG-015, LG-018, and LG-019 are resolved; otherwise confidence is Red.
 
 ### Final Launch Runway
 
@@ -461,8 +462,9 @@ The developer may approve public go-live only when:
    → protected learning → progress.
 3. Instructor authoring/Admin review, refunds, support repair, office hours, notifications,
    reporting, and payout records meet their MVP acceptance criteria.
-4. No critical/high security, authorization, privacy, payment, data-loss, or public/private media
-   defect remains.
+4. No unresolved critical defect remains. Every high-severity security, authorization, privacy,
+   payment, data-loss, or public/private media defect has documented risk acceptance, mitigation,
+   and owner approval.
 5. Production backup, restore, monitoring, alerting, support, incident response, and rollback have
    been demonstrated.
 6. Prices, content, policies, consent versions, payment credentials, sender identity, domain, and

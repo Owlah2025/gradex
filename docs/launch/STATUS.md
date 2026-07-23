@@ -17,7 +17,8 @@ This compressed response window can move the readiness-gated August 15 launch.
 ## Current Phase
 
 Day 3 is in progress. The protected July 24 recovery day introduced no feature or architecture work
-and no implementation carryover. The July 25 platform-architecture approval loop is active.
+and no implementation carryover. The July 25 platform architecture is approved by the
+developer/product owner; self-review and independent review remain.
 
 Repository evidence at the latest reconciliation:
 
@@ -35,8 +36,8 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Approve the July 25 platform architecture: drivers, provisional operating envelope, module
-boundaries, system context, containers, runtime topology, and deployment model. Keep every
+Complete the July 25 platform-architecture quality gate: verify the approved design, commit a
+stable review target, obtain independent review, and resolve required findings. Keep every
 unresolved provider/policy choice configurable and explicitly provisional.
 
 ## Milestones
@@ -44,7 +45,7 @@ unresolved provider/policy choice configurable and explicitly provisional.
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress | July 25 architecture approval loop and required system-design artifacts |
+| M1 — Platform architecture baseline | July 28 | In progress | [July 25 platform architecture](../superpowers/specs/2026-07-25-platform-architecture-design.md) approved by developer; independent review pending |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -111,10 +112,15 @@ actionability.
 - The four consolidated external/operations messages are prepared as drafts in the
   [August 6 outreach pack](outreach/2026-08-06-launch-gate-outreach.md); `DRAFT` never counts as
   sent evidence.
-- Founder decision on 2026-07-23: external/provider outreach is deferred to August 6. Required
-  gate statuses and production exit criteria are unchanged.
+- Founder decision on 2026-07-23: external/provider outreach is deferred to August 6. That
+  scheduling decision did not change required gate statuses.
+- D-025: use a split managed PaaS around the modular monolith; the edge frontend, Go API, Go worker,
+  PostgreSQL, Redis, and object-storage/CDN boundaries scale independently without hard-coding
+  providers.
+- Production approval requires no unresolved critical defect. A high-severity defect requires
+  documented risk acceptance, mitigation, and owner approval.
 
 ## Current Next Task
 
-Review and approve security boundaries, observability, architecture validation, and explicitly open
-decisions for the selected split-managed-PaaS architecture.
+Commit the verified architecture record, obtain the developer/product owner's final document
+review, then submit that exact commit for independent read-only review.

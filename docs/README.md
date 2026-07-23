@@ -1,7 +1,7 @@
 # Gradex Documentation
 
-> Status: Ready for platform system design; production launch gates remain open
-> Last updated: 2026-07-23
+> Status: Platform architecture approved; detailed system design and production launch gates remain open
+> Last updated: 2026-07-25
 
 Gradex is a responsive Arabic/English web learning platform for university Students. The MVP lets
 Students discover and purchase Course or Section access, learn through protected video and
@@ -75,11 +75,14 @@ gradex/
 
 ## Current State
 
-- The reconciled product definition is ready to be used as the platform system-design input.
+- The reconciled product definition and
+  [platform architecture](superpowers/specs/2026-07-25-platform-architecture-design.md) are approved
+  system-design inputs; independent architecture review is pending.
 - A landing-page frontend and a video/backend technical slice already exist; they are implementation
   evidence, not proof that the full MVP is built.
-- Platform system design may begin; affected design decisions must revisit any gate whose
-  resolution point is "before affected design sign-off."
+- Domain/data/state and API/security/integration design remain scheduled before the implementation
+  foundation. Affected design decisions must revisit any gate whose resolution point is "before
+  affected design sign-off."
 - Production launch additionally requires every MVP gate in [LAUNCH_GATES.md](LAUNCH_GATES.md) to
   be resolved and evidenced.
 
