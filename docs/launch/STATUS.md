@@ -2,7 +2,7 @@
 
 > Current schedule date: 2026-07-26 — advanced by user
 > Last repository reconciliation: 2026-07-26 — user-advanced schedule
-> Scheduled day: Day 4 — In progress
+> Scheduled day: Day 4 — Completed
 > Target public go-live: 2026-08-15
 > Days remaining after today: 20 calendar days
 > Launch confidence: **Red**
@@ -16,14 +16,10 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 4 is in progress. July 26 is defining the complete MVP domain/data/state model from the approved
-July 25 architecture, canonical rules, existing feature designs, and current video-slice schema.
-Design Sections 1–6 are owner-approved: shared foundations; Identity/Catalog/Media;
-Commerce/Coupons/Entitlements/Learning; operational modules/Audit/outbox/retention; preservation-
-safe migration; and final ownership/transition/protection/retention matrices. Documentation
-self-review and the first independent read-only review are complete with zero critical/high
-findings. Exact corrected commit `2e4f3e1` passed final independent disposition verification and is
-ready for owner closeout. There is no incomplete July 25 `Must` work.
+Day 4 is closed. The complete domain/data/state design is owner-approved and independently approved:
+exact corrected substantive commit `2e4f3e1` has zero critical/high findings and every advisory
+disposition resolved. All July 26 `Must` and `Should` work is complete. The schedule remains on
+July 26 until the user manually starts July 27 API/security design.
 
 Repository evidence at the latest reconciliation:
 
@@ -41,8 +37,8 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Approve the July 26 domain/data/state design: entities, ownership, invariants, PostgreSQL
-transactions/constraints/indexes, lifecycles, failure states, and retention boundaries.
+Preserve the closed July 26 design baseline and wait for the user to start July 27 API/security
+design.
 
 ## Milestones
 
@@ -60,8 +56,9 @@ transactions/constraints/indexes, lifecycles, failure states, and retention boun
 
 ## Carryover
 
-No incomplete July 25 `Must` work. External-gate contact confirmation and outreach are deliberately
-scheduled for August 6 by founder decision and are tracked risks rather than hidden carryover.
+No incomplete July 26 `Must` or `Should` work. External-gate contact confirmation and outreach are
+deliberately scheduled for August 6 by founder decision and remain tracked risks rather than hidden
+carryover. The untracked financial spreadsheet is user-owned and intentionally untouched.
 
 ## Current Blockers and Risks
 
@@ -134,4 +131,4 @@ any severity, no tracked worktree changes, and final verdict **APPROVE DOMAIN DE
 
 ## Current Next Task
 
-Obtain owner closeout of the corrected formal record, then start the July 27 API/security design.
+When the user manually advances the schedule, start July 27 API/security design.
