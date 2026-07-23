@@ -1,6 +1,6 @@
 # Gradex Domain, Data, and State Design
 
-> Status: Independently approved — advisory dispositions pending exact-commit verification
+> Status: Independently approved — exact substantive design commit `2e4f3e1`
 > Date: 2026-07-26
 > Scope: Complete MVP authoritative domain state and PostgreSQL model
 > Change boundary: Design only; this record does not implement migrations or application behavior
@@ -1636,3 +1636,7 @@ All advisory precision findings are incorporated:
   conditional on an authentic transitional source;
 - uncapped Coupon capacity uses `max_redemptions IS NULL`;
 - paid versus `FREE_GRANTED` Order deadline nullability is explicit.
+
+Claude then verified exact corrected commit `2e4f3e1` read-only. All five dispositions were
+`RESOLVED`; no new critical, high, medium, or low finding was introduced; the worktree had no
+tracked modification; and the final verdict remained **APPROVE DOMAIN DESIGN**.

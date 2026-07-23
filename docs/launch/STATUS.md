@@ -22,8 +22,8 @@ Design Sections 1–6 are owner-approved: shared foundations; Identity/Catalog/M
 Commerce/Coupons/Entitlements/Learning; operational modules/Audit/outbox/retention; preservation-
 safe migration; and final ownership/transition/protection/retention matrices. Documentation
 self-review and the first independent read-only review are complete with zero critical/high
-findings; advisory precision corrections are being finalized. There is no incomplete July 25
-`Must` work.
+findings. Exact corrected commit `2e4f3e1` passed final independent disposition verification and is
+ready for owner closeout. There is no incomplete July 25 `Must` work.
 
 Repository evidence at the latest reconciliation:
 
@@ -94,19 +94,18 @@ Fast-follow gates are outside this count. Recalculate from
 - Backend `make build` and `make test` passed.
 - The required gate register contains 20 entries and all 20 currently have status `OPEN`.
 - The July 26 owner-approved design was self-reviewed against the current `0001_init` schema,
-  direct-asynq video path, fake access seam, and current frontend access copy. Independent review
-  remains required.
+  direct-asynq video path, fake access seam, and current frontend access copy. Exact corrected
+  commit `2e4f3e1` passed independent review with zero critical/high findings and every advisory
+  disposition resolved.
 - July 24 closed with a clean worktree before its launch-control closeout and no application
   changes; no test or independent-review rerun was required.
 
 ## Latest Review
 
-Claude independently reviewed exact domain-design commit `5ba126c` read-only against the canonical
-rules, launch gates, architecture, and current schema/code seams. Counts: 0 critical, 0 high,
-1 medium, and 4 low; verdict: **APPROVE DOMAIN DESIGN**. The advisory findings clarified the
-pending earning-snapshot carrier, direct-full-Refund diagram, greenfield Identity migration,
-uncapped Coupon capacity, and free-grant payment-deadline nullability. A final exact-commit
-verification will confirm those dispositions.
+Claude's initial independent review of exact domain-design commit `5ba126c` returned 0 critical,
+0 high, 1 medium, and 4 low findings with verdict **APPROVE DOMAIN DESIGN**. Exact corrected commit
+`2e4f3e1` then passed final read-only verification: every disposition resolved, no new finding at
+any severity, no tracked worktree changes, and final verdict **APPROVE DOMAIN DESIGN**.
 
 ## Decisions in Force
 
@@ -135,5 +134,4 @@ verification will confirm those dispositions.
 
 ## Current Next Task
 
-Commit the independent-review dispositions, run their documentation guard, and obtain final
-exact-commit verification before implementation planning.
+Obtain owner closeout of the corrected formal record, then start the July 27 API/security design.
