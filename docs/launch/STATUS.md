@@ -1,9 +1,10 @@
 # Gradex Launch Status
 
-> Last reconciled: 2026-07-23 18:46 EEST
-> Scheduled day: Day 1 — Closed
+> Current schedule date: 2026-07-24 — advanced by user
+> Last repository reconciliation: 2026-07-23 18:46 EEST
+> Scheduled day: Day 2 — Protected recovery/spillover
 > Target public go-live: 2026-08-15
-> Days remaining after today: 23 calendar days
+> Days remaining after today: 22 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The Day 1 documentation baseline
@@ -14,9 +15,9 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 ## Current Phase
 
-Day 1 is closed. Product, experience, and feature documentation is reconciled, independently
-reviewed, committed, and approved for platform system design. July 24 remains a protected recovery
-day with no planned work; platform architecture starts July 25.
+Day 2 is the protected recovery day. Day 1 is closed, its baseline is approved, and repository
+evidence shows no implementation carryover. No new feature or architecture work starts today;
+platform architecture starts July 25.
 
 Repository evidence at the latest reconciliation:
 
@@ -34,9 +35,8 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Begin the July 25 platform-architecture slice. Treat unresolved budget, load, availability,
-provider, legal, and accounting inputs as explicit configurable assumptions; do not represent them
-as approved production policy.
+Preserve the recovery day. Handle only a newly discovered critical blocker or an explicit replan;
+otherwise keep the approved baseline stable for the July 25 architecture start.
 
 ## Milestones
 
@@ -55,7 +55,7 @@ as approved production policy.
 ## Carryover
 
 No Day 1 implementation carryover. External-gate contact confirmation and outreach are deliberately
-scheduled for August 6 by founder decision.
+scheduled for August 6 by founder decision and do not create recovery-day work.
 
 ## Current Blockers and Risks
 
@@ -113,6 +113,6 @@ actionability.
 
 ## Tomorrow's First Task
 
-July 24 is protected recovery with no planned work. On July 25, start platform architecture:
+On July 25, start platform architecture:
 drivers, provisional launch load/availability/recovery envelope, module boundaries, system context,
 containers, runtime topology, and deployment model.
