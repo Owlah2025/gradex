@@ -116,5 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Review and approve the architecture drivers and provisional operating envelope for the selected
-split-managed-PaaS topology before documenting module and container boundaries.
+Review and approve the system context, containers, module boundaries, and dependency directions
+for the selected split-managed-PaaS topology.
