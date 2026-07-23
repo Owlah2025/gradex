@@ -9,6 +9,11 @@ production release until its exit evidence exists.
 
 Status values: `OPEN`, `RESOLVED`, `DEFERRED`.
 
+The consolidated placeholder messages and send-tracking table are in the
+[2026-07-24 launch-gate outreach pack](launch/outreach/2026-07-24-launch-gate-outreach.md).
+They remain drafts until every placeholder is replaced and the message actually leaves the
+sender's account.
+
 ## Required for MVP
 
 | ID | Gate | Owner | Next action / due | Exit evidence | Blocking point | Status |

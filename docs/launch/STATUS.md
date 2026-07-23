@@ -1,6 +1,6 @@
 # Gradex Launch Status
 
-> Last reconciled: 2026-07-23 18:28 EEST
+> Last reconciled: 2026-07-23 18:41 EEST
 > Scheduled day: Day 1 — Establish launch control
 > Target public go-live: 2026-08-15
 > Days remaining after today: 23 calendar days
@@ -60,7 +60,7 @@ outreach moves to the July 24 recovery day.
 
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
-| Required launch gates are all open | Role owners in LAUNCH_GATES.md | Founder confirms named contacts and sends the dated July 24 outreach | July 24 | Named contacts plus acknowledged requests/delivery dates |
+| Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders in the prepared outreach pack, confirm named contacts, and send the dated requests | July 24 | Named contacts plus acknowledged requests/delivery dates |
 | Full MVP is not yet decomposed behind an architecture baseline | Developer + Codex | Complete Days 2–5 of the system-design schedule | July 28 | Approved architecture and dependency-ordered delivery slices |
 | External lead times can outlast the build | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners on the recovery day | July 24 | Acknowledged requests with delivery dates |
 
@@ -104,6 +104,9 @@ actionability.
 - The approved documentation/specification baseline ends at commit `1f63a59`.
 - Codex is the default SpecKit integration; both Codex and Claude integrations remain installed.
 - Local `gradex-spec-review.zip` bundles are generated review artifacts and are ignored.
+- The four consolidated external/operations messages are prepared as drafts in the
+  [July 24 outreach pack](outreach/2026-07-24-launch-gate-outreach.md); `DRAFT` never counts as
+  sent evidence.
 
 ## Tomorrow's First Task
 
