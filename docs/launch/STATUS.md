@@ -116,5 +116,5 @@ actionability.
 
 ## Current Next Task
 
-Review and approve the system context, containers, module boundaries, and dependency directions
-for the selected split-managed-PaaS topology.
+Review and approve the runtime topology, deployment model, scaling rules, and environment isolation
+for the selected split-managed-PaaS architecture.
