@@ -18,8 +18,8 @@ This compressed response window can move the readiness-gated August 15 launch.
 
 Day 3 is in progress. The protected July 24 recovery day introduced no feature or architecture work
 and no implementation carryover. The original July 25 architecture is approved by the
-developer/product owner; Claude approved corrected commit `2e9f7bb` with zero critical/high
-findings. Final precision corrections and owner acceptance remain.
+developer/product owner; Claude's final exact review of `c9c2238` returned
+`APPROVE ARCHITECTURE` with zero critical/high findings. Corrected-record owner acceptance remains.
 
 Repository evidence at the latest reconciliation:
 
@@ -37,16 +37,15 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Complete the July 25 platform-architecture quality gate: verify the approved design, commit a
-stable review target, obtain independent review, and resolve required findings. Keep every
-unresolved provider/policy choice configurable and explicitly provisional.
+Obtain the developer/product owner's acceptance of the corrected July 25 architecture record, then
+close Day 3 and hand off the July 26 domain/data/state design.
 
 ## Milestones
 
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress | [July 25 platform architecture](../superpowers/specs/2026-07-25-platform-architecture-design.md); Claude approved `2e9f7bb` with zero critical/high findings; final owner acceptance pending |
+| M1 — Platform architecture baseline | July 28 | In progress | [July 25 platform architecture](../superpowers/specs/2026-07-25-platform-architecture-design.md); Claude approved exact commit `c9c2238` with zero critical/high findings; corrected-record owner acceptance pending |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -94,10 +93,10 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-Claude completed three independent read-only architecture passes. The latest reviewed exact commit
-was `2e9f7bb`; verdict: **APPROVE ARCHITECTURE**, with zero critical/high findings. Its remaining
-medium/low precision findings were corrected before final owner acceptance. The earlier M0 baseline
-verdict remains **APPROVE BASELINE** with zero critical/high findings.
+Claude completed four independent read-only architecture passes. The latest reviewed exact commit
+was `c9c2238`; all prior dispositions were verified closed and the verdict was
+**APPROVE ARCHITECTURE**, with zero critical/high findings. The earlier M0 baseline verdict remains
+**APPROVE BASELINE** with zero critical/high findings.
 
 ## Decisions in Force
 
@@ -123,5 +122,5 @@ verdict remains **APPROVE BASELINE** with zero critical/high findings.
 
 ## Current Next Task
 
-Commit the final documentation cleanup, verify the exact commit has no critical/high finding, and
-obtain the developer/product owner's acceptance of the corrected formal record.
+Obtain the developer/product owner's acceptance of the corrected formal record, then close Day 3
+and hand off the July 26 domain/data/state design.
