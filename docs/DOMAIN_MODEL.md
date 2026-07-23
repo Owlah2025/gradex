@@ -387,10 +387,11 @@ DRAFT / READY_FOR_REVIEW → BLOCKED → DRAFT
 PAYMENT_PENDING → PAYMENT_FAILED → PAYMENT_PENDING
 ```
 
-Approval immutably freezes items and totals. Payment initiation snapshots the destination; `PAID`
-requires verified full-payment evidence. Partial statement payment is prohibited. Later adjustments
-appear in a future statement, and negative payable balances carry forward without a negative bank
-transfer. The statement is emailed; there is no Instructor dashboard in MVP.
+Approval immutably freezes items, totals, and the approved payout destination. Transfer initiation
+creates an immutable attempt using that destination; `PAID` requires verified full-payment evidence.
+Partial statement payment is prohibited. Later adjustments appear in a future statement, and
+negative payable balances carry forward without a negative bank transfer. The statement is emailed;
+there is no Instructor dashboard in MVP.
 
 ## 9. Core Relationship Summary
 
@@ -423,7 +424,9 @@ Student 1 ── submits ── * Content Report ── resolved by ── Admin
 - Catalog price changes never rewrite historical Order/refund/payout values.
 - Account suspension, catalog delisting, retirement, emergency Course access suspension,
   Entitlement expiry/revocation, archival, and deletion are separate concepts.
-- Records with financial, access, moderation, or audit history are not silently hard-deleted.
+- Financial ledger entries, Statements, payout evidence, and privileged-action Audit records are
+  append-only and never rewritten or hard-deleted. Other records with access or moderation history
+  require an explicit approved retention workflow rather than silent deletion.
 - Catalog discovery, filtering, and search expose only `PUBLISHED` Courses and never index Lesson
   titles or protected Resource/Lab content.
 - Exact storage, table, API, token, and queue designs belong to the system-design phase.

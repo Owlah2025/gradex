@@ -279,8 +279,9 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Earnings, fees, Refunds, chargebacks, payout adjustments, carry-forwards, and corrections are
   immutable source-linked ledger entries; corrections use compensating entries.
 - One monthly Statement per Instructor/currency/period freezes its items and totals on approval.
-- Payment initiation snapshots the destination; `PAID` requires verified full-payment evidence.
-  Partial Statement payments and negative transfers are not supported; negative balances carry.
+- Approval snapshots the payout destination; transfer initiation creates an immutable attempt using
+  it, and `PAID` requires verified full-payment evidence. Partial Statement payments and negative
+  transfers are not supported; negative balances carry.
 - Late refunds/chargebacks adjust a later Statement without rewriting an approved/paid one.
 - Instructor receives the statement by email; no in-app payout dashboard/withdrawal exists.
 
@@ -380,8 +381,11 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
   direct Student account/contact/payment PII remains Admin-only.
 - Record the version of any accepted legal/privacy/refund text.
 - Support access, correction, deactivation, and deletion requests, subject to documented retention.
-- Anonymize personal data where practical while preserving necessary financial/audit referential
-  integrity.
+- Anonymize eligible personal data where practical while preserving stable surrogate identity and
+  necessary financial/action provenance. Financial ledger entries, Statements, payout evidence,
+  and privileged-action Audit records are append-only and are never rewritten or hard-deleted;
+  policy may restrict access, archive, minimize separable payloads, or anonymize eligible personal
+  references.
 - Exact retention periods require counsel/accounting approval before production.
 
 ---

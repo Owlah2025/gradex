@@ -63,7 +63,10 @@ The current module is `github.com/Owlah2025/gradex/backend` and declares Go `1.2
 
 ### Persistence and Migrations
 
-- Every schema change uses ordered up/down migrations under `backend/internal/db/migrations/`.
+- Every schema change uses an ordered forward migration under `backend/internal/db/migrations/`.
+  Provide a down migration only when reversal is demonstrably safe and non-destructive. After an
+  authority cutover or destructive Contract migration, database recovery is forward-only; do not
+  provide a down migration that can re-enable legacy authority or discard accepted state.
 - Use constraints and transactions for invariants that must survive concurrency.
 - State transitions use guarded updates rather than unvalidated status assignment.
 - Do not edit an already-applied production migration; add a new migration.

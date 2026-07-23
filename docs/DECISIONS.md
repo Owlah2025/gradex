@@ -151,7 +151,7 @@ review showed that exact pre-payment capacity is required.
 ## D-018 — Manual monthly payouts with system-recorded accounting
 
 **Date:** 2026-07-23
-**Decision:** MVP uses one platform-wide Instructor revenue-share percentage, configured before launch with no assumed default. Share is calculated from net collected revenue after coupons, confirmed refunds, and payment fees. Every earning, fee, Refund, chargeback, payout adjustment, carry-forward, and approved correction is an immutable source-linked ledger entry; corrections append compensating entries. One monthly Statement exists per Instructor/currency/period. `DRAFT → READY_FOR_REVIEW → APPROVED → PAYMENT_PENDING → PAID`, with review blocking and retryable payment-failure paths. Approval freezes included entries/totals; payment initiation snapshots the destination; `PAID` requires verified full-payment evidence. Partial Statement payments and negative bank transfers are prohibited, negative balances carry forward, and late Refunds/chargebacks adjust a later period. Admins transfer manually and email the Statement. No Instructor payout dashboard or automated settlement ships in MVP. *(Detailed lifecycle amended 2026-07-26 by Section 4; recipient snapshot remains D-030.)*
+**Decision:** MVP uses one platform-wide Instructor revenue-share percentage, configured before launch with no assumed default. Share is calculated from net collected revenue after coupons, confirmed refunds, and payment fees. Every earning, fee, Refund, chargeback, payout adjustment, carry-forward, and approved correction is an immutable source-linked ledger entry; corrections append compensating entries. One monthly Statement exists per Instructor/currency/period. `DRAFT → READY_FOR_REVIEW → APPROVED → PAYMENT_PENDING → PAID`, with review blocking and retryable payment-failure paths. Approval freezes included entries, totals, and approved payout destination; transfer initiation creates an immutable attempt using that destination; `PAID` requires verified full-payment evidence. Partial Statement payments and negative bank transfers are prohibited, negative balances carry forward, and late Refunds/chargebacks adjust a later period. Admins transfer manually and email the Statement. No Instructor payout dashboard or automated settlement ships in MVP. *(Detailed lifecycle amended 2026-07-26 by Sections 4/6; recipient snapshot remains D-030.)*
 **Reason:** The accounting model must be designable before the commercial percentage is chosen, while automated settlement and per-course negotiation would add unnecessary launch scope.
 **Alternatives rejected:** Hard-coded placeholder percentage; per-Course revenue-share rules; Instructor withdrawals; automated marketplace settlement.
 **Source:** Approved documentation reconciliation; see [documentation-reconciliation-design.md](superpowers/specs/2026-07-23-documentation-reconciliation-design.md) §4.8.
@@ -301,3 +301,23 @@ rewrite an accepted calculation.
 earlier earnings when the global percentage changes; moving late Refund adjustments to a new owner.
 **Source:** Approved July 26 Reporting/Payouts design decision; see
 [the July 26 daily record](launch/daily/2026-07-26.md).
+
+## D-031 — Preserve authentic legacy state through forward-only context cutovers
+
+**Date:** 2026-07-26
+**Decision:** Keep applied `0001_init` unchanged and evolve through in-place
+expand–backfill–cutover–contract. Preserve safe Course/Section/Lesson UUIDs, compatible Account
+identity/credentials, exact Media/object evidence, and semantically valid Learning state through
+resumable typed mappings and context authority epochs. Never derive commercial/legal history from
+`fake_entitlements` or fabricate approval/Audit evidence. Each context converges live deltas,
+promotes constraints, fences writes, switches authority once, and thereafter repairs forward.
+Legacy structures are removed only by later rehearsed forward migrations after reconciliation,
+observation, queue drain, and new-authority restore evidence.
+**Reason:** A development reset would hide migration defects that could later lose stable identity,
+Media, Progress, or external-work evidence in staging/production. Independent dual writes or
+post-cutover legacy rollback would create split-brain authority.
+**Alternatives rejected:** Reset/squash `0001_init`; one big-bang shadow-schema switch; converting
+fake access into Orders/Entitlements; assuming legacy `READY` proves new Media readiness; restoring
+legacy authority after a context epoch changes.
+**Source:** Approved July 26 domain/data/state design Sections 5–6; see
+[Gradex Domain, Data, and State Design](superpowers/specs/2026-07-26-domain-data-state-design.md).
