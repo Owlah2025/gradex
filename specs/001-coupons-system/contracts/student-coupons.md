@@ -1,47 +1,52 @@
 # Contract: Student Coupon API
 
-Requires student auth (`requireAuth`). Money fields are integer fils.
+> Status: Proposed feature contract; confirm path/error envelope during system design.
 
-## POST /api/v1/checkout/coupons/preview — validate + compute (no side effects)
+Requires an authenticated Active Student. Money fields are integer fils and the server resolves the
+Admin-controlled catalog subtotal.
 
-Request:
+## Preview Coupon (No Side Effects)
+
+Proposed endpoint: `POST /api/v1/checkout/coupons/preview`
+
 ```json
-{ "code": "WELCOME20", "item_type": "course", "item_id": "<uuid>" }
+{
+  "code": "WELCOME20",
+  "item_type": "section",
+  "item_id": "00000000-0000-0000-0000-000000000000"
+}
 ```
 
-Response `200` (valid):
+Valid response example:
+
 ```json
 {
   "valid": true,
   "code": "WELCOME20",
-  "subtotal_amount": 40000,   // fils (course price, resolved server-side)
-  "discount_amount": 8000,    // fils
-  "total_amount": 32000,      // fils; 0 => free
+  "subtotal_amount": 40000,
+  "discount_amount": 8000,
+  "total_amount": 32000,
   "free": false
 }
 ```
 
-Response `200` (invalid) — HTTP 200 with `valid:false` so the checkout UI can show a message
-inline:
+Invalid response example:
+
 ```json
 { "valid": false, "reason": "expired" }
 ```
-`reason` ∈ `expired | inactive | not_applicable | cap_reached | already_used | unknown_code`.
 
-### Validation performed (FR-015, BR-128)
-1. code exists (normalized match) — else `unknown_code`
-2. `is_active` — else `inactive`
-3. within `[valid_from, valid_until]` — else `expired`
-4. applicable to `item_id` (platform-wide or targeted) — else `not_applicable`
-5. global cap not reached — else `cap_reached`
-6. user has not already redeemed / already holds the item (BR-024) — else `already_used`
-7. compute discount (fils, clamp `[0, subtotal]`); set `free = total==0`
+Stable rejection reasons may include `expired`, `inactive`, `not_applicable`, `cap_reached`,
+`already_used`, and `unknown_code`. Final HTTP status/error-envelope conventions belong to system
+design.
 
-**Preview is read-only** — it never inserts a redemption or mutates `redemption_count`.
+Validation checks normalized code, active/window, Course/Section target, global cap, no active
+consuming Redemption, and no active Entitlement for the item; then it computes/clamps integer-fils
+amounts. Preview never creates a Redemption or changes the historical count.
 
-## Apply at checkout
+## Apply at Checkout
 
-There is **no separate apply/commit endpoint**. The validated `code` is passed into the
-existing create-order call (orders subsystem). Order creation re-runs the same hard validation
-(step 1–7) and snapshots `discount_amount`/`total_amount` onto the order. Redemption is
-committed later by the order grant transaction (see order-integration contract).
+There is no separate commit endpoint. The create-Order request carries the code, and the server
+revalidates it against current authoritative price and eligibility before snapshotting amounts.
+Redemption commits only in the payment-success/free-grant transaction. Failed or abandoned attempts
+do not consume the Coupon. See [order-integration.md](order-integration.md).

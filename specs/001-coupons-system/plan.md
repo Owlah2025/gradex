@@ -1,76 +1,80 @@
 # Implementation Plan: Coupons System
 
-**Branch**: `001-coupons-system` | **Date**: 2026-07-22 | **Spec**: [spec.md](spec.md)
+**Branch**: `001-coupons-system` | **Date**: 2026-07-22 | **Reconciled**: 2026-07-23 | **Spec**: [spec.md](spec.md)
+
+> Status: Draft implementation input. Revalidate package boundaries, API conventions, migration
+> numbering, and transaction ownership after platform system design.
 
 **Input**: Feature specification from `/specs/001-coupons-system/spec.md`
 
 ## Summary
 
-Add an admin-managed coupon subsystem to the Go backend: a new `coupon` domain
-(`backend/internal/coupon/`) with types, repository, and service; admin + student HTTP
-handlers wired into the existing Gin router; and one new migration (`0002`). Discounts are
+The proposed implementation adds an Admin-managed Coupon subsystem to the Go backend: a
+provisional `coupon` domain with types, repository, and service; Admin + Student HTTP capabilities;
+and a schema migration whose sequence number is assigned when tasks are ordered. Discounts are
 computed in integer fils in the service layer **before** a payment session is created;
 a 0-KWD result routes to a direct enrollment grant. Redemption commit is deferred to the
-order's payment-success / free-grant transaction, keyed by the gateway idempotency id.
+order's payment-success / free-grant transaction, keyed by the stable Order identifier. The paid
+branch separately deduplicates callbacks by payment-attempt/gateway reference.
 
-**Critical sequencing:** the orders/checkout/payments subsystem does not exist yet. This plan
-builds the coupon domain and its validation/discount logic against the **order-side interface
-contract** ([contracts/order-integration.md](contracts/order-integration.md)) and is
-**gated** on that subsystem. Coupon redemption-commit and the paid-checkout path cannot be
-integration-tested end-to-end until the orders subsystem lands; the coupon domain, its unit
-tests, admin CRUD, and the free-grant path (which needs only enrollment, not the gateway) can
-proceed independently against the contract.
+**Critical sequencing:** real Accounts/auth, catalog prices, Orders/checkout/payments,
+Enrollment/Entitlement, Refunds, and audit do not exist yet. Only pure discount/validation logic can
+be built independently. Admin CRUD needs real Admin authorization/audit/targets; paid and free
+Redemption/grant paths both need the Order and Enrollment/Entitlement transaction boundary.
+Platform system design must sequence these foundations without duplicate temporary models.
 
 ## Technical Context
 
 **Language/Version**: Go (module `github.com/Owlah2025/gradex/backend`), matching existing backend
 
-**Primary Dependencies**: Gin (HTTP), database/sql + PostgreSQL driver, Redis (existing; used
-by payments/webhook idempotency, not by coupon core)
+**Primary Dependencies**: Gin (HTTP) and pgx v5/PostgreSQL. Redis exists for the video queue;
+whether commerce/Coupon processing uses it is a platform system-design decision.
 
-**Storage**: PostgreSQL — 3 new tables (`coupons`, `coupon_targets`, `coupon_redemptions`) +
+**Storage**: Proposed PostgreSQL tables (`coupons`, `coupon_targets`, `coupon_redemptions`) +
 coupon-related columns on the future `orders` table (defined as contract, added by the orders
 migration, not this one). Money as integer **fils** (BIGINT).
 
 **Testing**: Go `testing` + existing integration-test pattern
 (`internal/*/**_integration_test.go`, Postgres-backed)
 
-**Target Platform**: Linux server (single-region, per PRD §6)
+**Target Platform**: Web backend; deployment topology/region is selected during platform system
+design.
 
 **Project Type**: Web service (Go/Gin backend + Next.js frontend)
 
 **Performance Goals**: coupon preview + apply are write-path-adjacent; stay within PRD p95
 < 800ms for write/transactional endpoints. Preview is a read (< 300ms target).
 
-**Constraints**: no floats on money; discount clamped `[0, subtotal]`; per-user exactness via
-DB unique constraint; global cap intentionally soft (design approach 1); all coupon mutations
-audit-logged.
+**Constraints**: no floats on money; discount clamped `[0, subtotal]`; one active consuming
+Redemption per Coupon/Student with full-refund release; global cap intentionally soft (design
+approach 1); all Coupon mutations and Redemption releases audit-logged.
 
-**Scale/Scope**: launch scale 100–500 students, 8–12 courses; coupon volume tiny. Concurrency
-correctness matters only at the row level (coupon row lock on commit), not throughput.
+**Scale/Scope**: Initial business target is 100–500 paid Students and 8–12 Courses. Correctness
+under retries/concurrency is mandatory; system design validates performance/capacity assumptions.
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-The project constitution (`.specify/memory/constitution.md`) is an unfilled template — no
-ratified principles, so there are **no binding constitutional gates**. In its place this plan
-honors the repository's actual conventions:
+The project constitution (`.specify/memory/constitution.md`) is ratified and provides binding
+engineering gates. This draft honors its MVP, authorization, transactional, testing, localization,
+accessibility, security, and documentation requirements:
 
 - **Domain layout** mirrors `internal/video` (`types.go`, `repo.go`, `service.go`, handlers in
   `internal/httpapi`). ✅
-- **Migrations** follow the numbered `NNNN_name.up/down.sql` convention (this feature = `0002`).
-  ✅
+- **Migrations** follow the numbered `NNNN_name.up/down.sql` convention; the sequence is assigned
+  after prerequisites are planned. ✅
 - **Testing** follows the existing Postgres-backed `*_integration_test.go` pattern + unit tests
   for pure logic. ✅
 - **Money** is integer fils end-to-end (no float), per BR-125. ✅
-- **No silent scope creep**: this plan does not build the orders subsystem; it depends on it via
-  a written contract. ✅
+- **No silent scope creep**: this plan does not invent temporary Account/Order/Enrollment/audit
+  implementations; it depends on their platform contracts. ✅
 
-`docs/CODING_STANDARDS.md` is itself a placeholder pending the pre-build architecture pass; when
-it is filled, re-check lint/format/error-handling conventions against this plan.
+Re-check the final implementation against `docs/CODING_STANDARDS.md` and the future platform system
+design before task generation.
 
-**Result: PASS** (no violations; Complexity Tracking empty).
+**Result: PASS as a feature-level proposal; the technical structure is not approved until platform
+system design revalidates it.**
 
 ## Project Structure
 
@@ -96,29 +100,29 @@ backend/
 │   ├── coupon/                     # NEW domain
 │   │   ├── types.go                # Coupon, CouponTarget, CouponRedemption, enums, DTOs
 │   │   ├── discount.go             # pure discount math (fils, %/fixed, clamp) — unit-tested
-│   │   ├── validate.go             # pure validation predicates (window/scope/cap/per-user/active)
+│   │   ├── validate.go             # pure validation (window/scope/cap/consuming-use/active)
 │   │   ├── service.go              # orchestration: preview, apply-at-order-creation, commit-on-grant
 │   │   ├── repo.go                 # SQL: CRUD, row-locked commit, redemption insert, stats
 │   │   ├── audit.go                # audit-log writes for create/edit/deactivate/redeem
 │   │   ├── discount_test.go        # unit
 │   │   ├── validate_test.go        # unit
-│   │   └── coupon_integration_test.go  # Postgres-backed: free-grant, commit, uniqueness, soft-cap
+│   │   └── coupon_integration_test.go  # free-grant, commit/release, uniqueness, soft-cap
 │   ├── httpapi/
 │   │   ├── coupon_handlers.go      # NEW: admin + student endpoints
 │   │   └── router.go               # MODIFIED: wire admin + checkout coupon groups
 │   └── db/migrations/
-│       ├── 0002_coupons.up.sql     # NEW: 3 tables + indexes + enums
-│       └── 0002_coupons.down.sql
+│       ├── NNNN_coupons.up.sql     # sequence assigned during task planning
+│       └── NNNN_coupons.down.sql
 └── ...
 
 frontend/                            # follow-on (not this plan's core; contract-ready)
 └── src/ ...                          # admin coupon mgmt screens + checkout coupon field
 ```
 
-**Structure Decision**: New self-contained `internal/coupon` domain following the established
+**Provisional Structure**: A self-contained `internal/coupon` domain following the established
 `internal/video` layering (pure logic split into `discount.go`/`validate.go` so the risky money
 math and predicates are unit-testable without a DB). HTTP stays in `internal/httpapi`. One
-migration adds coupon tables; the order-side columns are owned by the orders migration per the
+migration adds Coupon tables; Order-side columns are owned by the Order migration per the
 dependency contract. Frontend work is contract-ready but sequenced after the backend + orders
 subsystem.
 
@@ -132,8 +136,8 @@ subsystem.
 
 ## Phase Gate Notes
 
-- **Blocked-until-orders:** paid-path redemption commit, order-creation snapshot, and refund
-  interaction require the orders/checkout subsystem. Track as an explicit dependency; do not
-  fold orders into this feature.
-- **Independently shippable now:** coupon tables + admin CRUD + preview endpoint + discount/
-  validation logic (unit-tested) + free-grant path (needs only enrollment).
+- **Blocked on platform foundations:** Admin CRUD/preview/commit/refund release require Account
+  authorization, Course/Section prices, Orders, Enrollment/Entitlement, Refunds, and audit; paid
+  paths additionally require the gateway adapter.
+- **Independent before those foundations:** integer-fils discount math and validation rules can be
+  unit-tested against domain values. They are not a shippable Coupon feature by themselves.

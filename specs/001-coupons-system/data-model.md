@@ -1,96 +1,103 @@
 # Phase 1 Data Model: Coupons System
 
-All money is BIGINT **fils**. Timestamps are `timestamptz` (UTC). Migration `0002_coupons`.
+> Status: Design input; migration numbering and final schema must be revalidated during platform
+> system design.
+
+All money is BIGINT **fils**. Timestamps are `timestamptz` instants stored in UTC.
 
 ## Enums
 
 - `coupon_discount_type`: `percentage` | `fixed`
+- `coupon_target_type`: `course` | `section`
 
 ## Table: `coupons`
 
 | column | type | constraints | notes |
-|--------|------|-------------|-------|
-| `id` | uuid | PK, default gen | |
-| `code` | text | NOT NULL, `UNIQUE` (on normalized value) | stored UPPERCASE + trimmed |
+|---|---|---|---|
+| `id` | uuid | PK | |
+| `code` | text | NOT NULL, unique normalized value | stored uppercase and trimmed |
 | `discount_type` | `coupon_discount_type` | NOT NULL | |
-| `discount_value` | int | NOT NULL, CHECK (`> 0`); when `percentage`, CHECK (`<= 100`) | fils when `fixed` |
+| `discount_value` | bigint | NOT NULL, `> 0`; percentage also `<= 100` | fils when fixed |
 | `valid_from` | timestamptz | NULL | null = open start |
-| `valid_until` | timestamptz | NULL, CHECK (`valid_until IS NULL OR valid_until >= valid_from`) | null = open end |
-| `max_redemptions` | int | NULL, CHECK (`> 0`) | null = unlimited (global cap) |
-| `per_user_limit` | int | NOT NULL, default 1, CHECK (`>= 1`) | |
-| `redemption_count` | int | NOT NULL, default 0, CHECK (`>= 0`) | committed count |
-| `is_active` | bool | NOT NULL, default true | instant kill switch |
-| `created_by` | uuid | NOT NULL, FK → users(id) | admin |
-| `created_at` | timestamptz | NOT NULL, default now() | |
-| `updated_at` | timestamptz | NOT NULL, default now() | |
+| `valid_until` | timestamptz | NULL; not before `valid_from` | null = open end |
+| `max_redemptions` | bigint | NULL, `> 0` | null = unlimited global historical cap |
+| `redemption_count` | bigint | NOT NULL, default 0, `>= 0` | historical committed count; never decremented |
+| `is_active` | bool | NOT NULL, default true | immediate validation kill switch |
+| `created_by` | uuid | NOT NULL, FK → Accounts | Admin |
+| `created_at` / `updated_at` | timestamptz | NOT NULL | audit timestamps |
 
-Indexes: unique on `code`; index on `is_active` (list filtering).
+There is no configurable `per_user_limit`: MVP always permits one consuming redemption per
+Coupon/Student at a time.
 
 ## Table: `coupon_targets`
 
-Absence of any row for a coupon = **platform-wide**. Presence restricts to the listed items.
+No rows for a Coupon means platform-wide applicability. Rows restrict it to the listed items.
 
 | column | type | constraints |
-|--------|------|-------------|
+|---|---|---|
 | `coupon_id` | uuid | NOT NULL, FK → coupons(id) ON DELETE CASCADE |
-| `item_type` | text | NOT NULL, CHECK in (`course`,`chapter`) |
-| `item_id` | uuid | NOT NULL |
-| | | `UNIQUE (coupon_id, item_type, item_id)` |
+| `item_type` | `coupon_target_type` | NOT NULL (`course` or `section`) |
+| `item_id` | uuid | NOT NULL; must resolve to the matching canonical entity |
+| composite | | UNIQUE (`coupon_id`, `item_type`, `item_id`) |
 
-Index on `coupon_id`.
+System design must choose how polymorphic target integrity is enforced; it cannot accept a missing
+or mismatched Course/Section.
 
 ## Table: `coupon_redemptions`
 
-One row per committed use.
+One row per committed historical use. Full refund releases consuming status without deleting or
+rewriting the historical event.
 
-| column | type | constraints |
-|--------|------|-------------|
-| `id` | uuid | PK |
-| `coupon_id` | uuid | NOT NULL, FK → coupons(id) |
-| `user_id` | uuid | NOT NULL, FK → users(id) |
-| `order_id` | uuid | NOT NULL, FK → orders(id) *(external table, see contract)* |
-| `amount_discounted` | bigint | NOT NULL, CHECK (`>= 0`) | fils |
-| `redeemed_at` | timestamptz | NOT NULL, default now() |
-| | | **`UNIQUE (coupon_id, user_id)`** — hard per-user guard |
+| column | type | constraints | notes |
+|---|---|---|---|
+| `id` | uuid | PK | |
+| `coupon_id` | uuid | NOT NULL, FK → coupons(id) | |
+| `student_id` | uuid | NOT NULL, FK → Accounts | Student role |
+| `order_id` | uuid | NOT NULL, FK → Orders, UNIQUE | idempotent order association |
+| `amount_discounted` | bigint | NOT NULL, `>= 0` | fils snapshot |
+| `redeemed_at` | timestamptz | NOT NULL | historical commit time |
+| `released_at` | timestamptz | NULL | set only after cumulative confirmed full refund |
+| `release_reason` | text/enum | NULL with `released_at` | `FULL_REFUND` in MVP |
 
-Indexes: unique `(coupon_id, user_id)`; index on `coupon_id` (stats); index on `order_id`.
+Use a partial unique constraint (or an equivalent transactionally enforced invariant) so there is
+at most one row for `(coupon_id, student_id)` where `released_at IS NULL`. This retains earlier
+history while allowing a later redemption after full refund.
 
-## External contract: order-side columns
+Indexes support Coupon history, Student eligibility, and Order lookup. `redemption_count` remains a
+global historical committed count and is not decremented when `released_at` is set.
 
-Owned by the orders/checkout subsystem (added by its migration, NOT `0002`). Listed here as
-the interface this feature reads/writes. See [contracts/order-integration.md](contracts/order-integration.md).
+## External Order Contract
 
-| column (on `orders`) | type | notes |
-|----------------------|------|-------|
-| `coupon_id` | uuid NULL | applied coupon |
-| `coupon_code` | text NULL | denormalized snapshot at apply time |
-| `subtotal_amount` | bigint | original price, fils |
-| `discount_amount` | bigint | fils, ≥ 0, ≤ subtotal |
-| `total_amount` | bigint | subtotal − discount, fils; `0` → free-grant path |
-| `status` | enum | must include a free-grant terminal state (comp order) |
+Owned by the Order/checkout subsystem. See
+[contracts/order-integration.md](contracts/order-integration.md).
 
-## Relationships
+| field on Order | type | meaning |
+|---|---|---|
+| `coupon_id` | uuid nullable | applied Coupon |
+| `coupon_code` | text nullable | immutable normalized snapshot |
+| `subtotal_amount` | bigint | Admin-controlled catalog price snapshot, fils |
+| `discount_amount` | bigint | `0..subtotal_amount`, fils |
+| `total_amount` | bigint | subtotal minus discount; zero uses `FREE_GRANTED` |
+| `status` | state | includes the Domain Model's `FREE_GRANTED` outcome |
 
-- `coupons` 1—* `coupon_targets` (scope)
-- `coupons` 1—* `coupon_redemptions`
-- `coupon_redemptions` *—1 `orders` (external) and *—1 `users`
-- A coupon references only its own targets/redemptions; no coupling to course pricing rows
-  (BR-017 stays clean — discount is per-order).
+## Validation and State Rules
 
-## Validation & state rules (enforced in service + DB)
-
-1. `discount_value` bounds per type (DB CHECK + service). (BR-125)
-2. Computed discount clamped `[0, subtotal]`; `total = 0` ⇒ free path. (BR-125/126)
-3. Applicability: platform-wide (no targets) OR item ∈ targets. (FR-006)
-4. Window: `now ∈ [valid_from, valid_until]` (nulls open-ended). (FR-007)
-5. Global cap: `redemption_count < max_redemptions` at order creation (soft thereafter). (BR-129)
-6. Per-user: no existing redemption for `(coupon,user)` beyond `per_user_limit`. (BR-129)
-7. Active: `is_active = true`. (FR-007)
-8. Immutability after first redemption: `code`/`discount_type`/`discount_value` frozen. (BR-130)
-9. Delete only when `redemption_count = 0`; else deactivate. (BR-130)
-10. One coupon per order. (BR-127)
+1. Validate discount type/value and compute/clamp integer-fils amounts. *(BR-125)*
+2. No targets means platform-wide; otherwise the Course/Section target must match. *(BR-128)*
+3. Validate active state, time window, global historical cap, Student consuming eligibility, and
+   absence of an active Entitlement before order creation. *(BR-024, BR-128)*
+4. Snapshot the Coupon and monetary values on the Order. *(BR-128)*
+5. Commit Redemption only with payment success or free grant in the entitlement-grant transaction.
+   Failed/abandoned attempts create no Redemption. *(BR-126, BR-129)*
+6. Keep the global cap soft only for an already-priced Order as approved in approach 1. *(BR-129)*
+7. A partial Refund leaves `released_at` null. Cumulative confirmed full Refund sets it once without
+   deleting history or decrementing `redemption_count`. *(BR-131)*
+8. Freeze code/type/value after first historical Redemption; preserve delete/deactivate behavior.
+   *(BR-130)*
+9. Apply no more than one Coupon per Order. *(BR-127)*
 
 ## Audit
 
-`audit_log` entries (existing audit facility) for: coupon create, edit, deactivate, delete,
-and each redemption (coupon id, user id, order id, amount, timestamp). (BR-133)
+Record Coupon create/edit/deactivate/delete, Redemption commit, and full-refund eligibility release
+with actor/system source, target, Order, outcome, and timestamp. Never log a secret or unnecessary
+Student PII. *(BR-133, BR-156)*

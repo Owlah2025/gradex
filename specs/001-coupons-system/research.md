@@ -20,34 +20,38 @@ implementation-level unknowns.
 - **Rationale**: Gradex already sets the order amount before delegating checkout to Tap
   (hosted page / tokenized SDK). Discount must land ahead of that. Keeps Tap integration
   unaware of coupons. BR-128.
-- **Alternatives considered**: gateway-side promo codes (rejected — not portable across Tap's
-  KNET/card/Deema sources, and Gradex owns the amount anyway).
+- **Alternatives considered**: gateway-side promo codes (rejected because Gradex owns the Order
+  amount and the Coupon rules must remain gateway-independent).
 
 ## R-03 — Redemption commit timing (soft global cap, exact per-user)
 
 - **Decision**: Validity enforced hard at order creation; redemption **count** committed only
   on payment-success / free-grant, inside the same enrollment-grant transaction, keyed by the
-  gateway idempotency id (BR-033). Global cap is soft; per-user is exact.
-- **Rationale**: No phantom redemptions from abandoned checkouts; reuses order idempotency so a
-  duplicate webhook can't double-count; zero new infrastructure. Cap softness is a marketing
-  nicety, not a money-loss risk, at launch scale. Design approach 1 / BR-129.
+  stable Order identifier. Paid callbacks are also deduplicated by their payment-attempt/gateway
+  reference under BR-033. Global cap is soft; per-user is exact.
+- **Rationale**: No phantom redemptions from abandoned checkouts; one Order key covers both paid
+  and gateway-free grant branches, while gateway callback deduplication prevents repeated paid
+  processing. Cap softness is a marketing nicety, not a money-loss risk, at launch scale.
+  Design approach 1 / BR-129.
 - **Alternatives considered**: reserve-at-checkout-with-expiry-job (rejected — real infra for a
   soft benefit); commit-at-checkout-never-release (rejected — abandoned checkouts burn the cap).
 
-## R-04 — Per-user limit enforcement
+## R-04 — Student consuming-redemption enforcement
 
-- **Decision**: Unique constraint `unique(coupon_id, user_id)` on `coupon_redemptions` is the
-  hard guard for the default limit of 1. For a configured limit > 1, enforce via a `SELECT
-  count(*) ... FOR UPDATE`-style check under the coupon row lock in the commit transaction.
-  BR-024 (no double-purchase of the same item) further constrains repeat use.
-- **Rationale**: DB-level exactness for the common case; transactional counting for the rare
-  configurable case. No race window.
-- **Alternatives considered**: application-only counting (rejected — racy without the lock).
+- **Decision**: MVP has no configurable per-user limit. It allows one consuming Redemption per
+  Coupon/Student. A partial unique constraint on an unreleased row, or an equivalent transactional
+  invariant, enforces it. Cumulative confirmed full Refund sets the historical Redemption's release
+  state so the Student may consume the Coupon again; partial Refund does not.
+- **Rationale**: This preserves exact eligibility and complete history without a hard
+  `unique(coupon_id, student_id)` constraint that would make the approved full-refund release
+  impossible. BR-128/129/131.
+- **Alternatives considered**: deleting the Redemption or decrementing the global historical count
+  (rejected because both erase what happened); configurable limits above one (out of MVP).
 
 ## R-05 — Concurrency on commit
 
-- **Decision**: On commit, `SELECT ... FOR UPDATE` the coupon row, re-read `redemption_count`
-  and per-user count, insert the redemption, increment the count — all in the grant transaction.
+- **Decision**: On commit, lock the Coupon row, re-read `redemption_count` and Student consuming
+  state, insert the Redemption, and increment the historical count—all in the grant transaction.
 - **Rationale**: Serializes concurrent commits on the same coupon; keeps count consistent with
   redemption rows. Postgres row lock is sufficient at this scale.
 - **Alternatives considered**: advisory locks / serializable isolation (unnecessary heavier
@@ -65,7 +69,8 @@ implementation-level unknowns.
 
 - **Decision**: A 0-KWD order runs a direct enrollment grant with no gateway, but still creates
   a real order (payment method = comp), inserts the redemption, and grants enrollment in one
-  transaction, idempotent per BR-024. This is an explicit, audited exception to BR-020's
+  transaction, idempotent by stable Order identifier under BR-129. This is an explicit, audited
+  exception to BR-020's
   "access only after payment webhook".
 - **Rationale**: Free-seeding (influencers/testers) is a real launch need; reuses the same
   enrollment/idempotency machinery. BR-126.
@@ -78,10 +83,18 @@ implementation-level unknowns.
 - **Rationale**: Frontend shows the correct message; avoids leaking which codes exist beyond
   what's necessary. FR-015.
 
+## R-09 — Refund release behavior
+
+- **Decision**: Partial Refund leaves the Redemption consuming. In the transaction that confirms
+  cumulative full Refund, mark it released once. Keep the historical record and global count.
+- **Rationale**: Implements BR-131 while making duplicate/out-of-order refund confirmation safe.
+- **Alternatives considered**: release on any partial Refund (rejected); release the global cap slot
+  or delete history (rejected).
+
 ## Resolved unknowns
 
-All `NEEDS CLARIFICATION` from Technical Context are resolved above. No open clarifications
-remain for the coupon domain itself. The one external open item — the shape of the orders/
+All prior Technical Context clarification questions are resolved above. No open product
+clarifications remain for the Coupon domain itself. The external design dependency—the shape of the Order/
 checkout subsystem — is captured as a contract dependency in
 [contracts/order-integration.md](contracts/order-integration.md), not a clarification on this
 feature.

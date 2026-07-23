@@ -1,54 +1,62 @@
 # Contract: Admin Coupon API
 
-All endpoints require admin auth (`requireAuth` + admin role check, mirroring
-`requireInstructor` in the existing router). All mutations write an audit-log entry (BR-133).
-Money fields are integer fils. Base group: `/api/v1/admin/coupons`.
+> Status: Proposed feature contract; confirm path/error envelope during system design.
 
-## POST /api/v1/admin/coupons — create
+Every endpoint requires authenticated Admin authorization and every mutation writes an audit event.
+Money fields are integer fils. Proposed base group: `/api/v1/admin/coupons`.
 
-Request:
+## Create Coupon
+
+`POST /api/v1/admin/coupons`
+
 ```json
 {
   "code": "WELCOME20",
-  "discount_type": "percentage",     // "percentage" | "fixed"
-  "discount_value": 20,               // 1..100 for percentage; fils for fixed
-  "valid_from": "2026-08-01T00:00:00Z",   // nullable
-  "valid_until": "2026-08-31T23:59:59Z",  // nullable
-  "max_redemptions": 100,             // nullable = unlimited
-  "per_user_limit": 1,                // default 1
-  "targets": [                        // omit/empty = platform-wide
-    { "item_type": "course", "item_id": "<uuid>" }
+  "discount_type": "percentage",
+  "discount_value": 20,
+  "valid_from": "2026-08-01T00:00:00Z",
+  "valid_until": "2026-08-31T23:59:59Z",
+  "max_redemptions": 100,
+  "targets": [
+    { "item_type": "course", "item_id": "00000000-0000-0000-0000-000000000000" }
   ]
 }
 ```
-Responses: `201` coupon object; `409` if code already exists; `400` on invalid
-type/value/window.
 
-## GET /api/v1/admin/coupons — list
+`valid_from`, `valid_until`, and `max_redemptions` may be null/omitted according to the final API
+serialization. Empty/omitted targets means platform-wide. `discount_value` is 1–100 for percentage
+and positive integer fils for fixed discounts. There is no `per_user_limit` field in MVP.
 
-Query: `?active=true|false`, pagination. Returns coupons with redemption stats:
-```json
-[{ "id": "...", "code": "WELCOME20", "discount_type": "percentage", "discount_value": 20,
-   "redemption_count": 12, "max_redemptions": 100, "is_active": true, "valid_until": "..." }]
-```
+Expected outcomes: created; duplicate normalized code; invalid type/value/window/target; denied role.
 
-## GET /api/v1/admin/coupons/:id — detail
+## List and Detail
 
-Returns the coupon + its targets + redemption log (user id, order id, amount, timestamp).
+- `GET /api/v1/admin/coupons` — paginated/filterable list with historical committed count and global
+  cap.
+- `GET /api/v1/admin/coupons/:id` — Coupon, Course/Section targets, Redemption history, releases, and
+  relevant audit data.
 
-## PATCH /api/v1/admin/coupons/:id — edit
-
-Editable always: `is_active`, `valid_until`, `max_redemptions`, `targets`.
-Editable only while `redemption_count = 0`: `code`, `discount_type`, `discount_value`.
-Responses: `200` updated; `409 frozen_field` if a frozen field is changed after redemptions.
-
-## DELETE /api/v1/admin/coupons/:id — delete/deactivate
-
-If `redemption_count = 0` → hard delete (`204`). Else → `409 has_redemptions` (client should
-PATCH `is_active=false` instead). (BR-130)
-
-## Errors (shape)
+Example list item:
 
 ```json
-{ "error": { "code": "frozen_field|has_redemptions|duplicate_code|invalid_value", "message": "..." } }
+{
+  "id": "00000000-0000-0000-0000-000000000000",
+  "code": "WELCOME20",
+  "discount_type": "percentage",
+  "discount_value": 20,
+  "redemption_count": 12,
+  "max_redemptions": 100,
+  "is_active": true,
+  "valid_until": "2026-08-31T23:59:59Z"
+}
 ```
+
+## Edit and Delete
+
+- `PATCH /api/v1/admin/coupons/:id` — after any historical Redemption, code/type/value are frozen;
+  active state, validity end, global cap, and targets remain editable subject to validation.
+- `DELETE /api/v1/admin/coupons/:id` — allowed only with zero historical Redemptions; otherwise
+  deactivate.
+
+The system-design error envelope must provide stable machine codes such as `duplicate_code`,
+`invalid_value`, `invalid_target`, `frozen_field`, and `has_redemptions` without leaking internals.

@@ -1,7 +1,7 @@
 # Feature Spec: Coupons System
 
 **Feature branch**: `001-coupons-system`
-**Date**: 2026-07-22
+**Date**: 2026-07-22; reconciled 2026-07-23
 **Status**: Ready for planning
 **Canonical design**: [docs/superpowers/specs/2026-07-22-coupons-system-design.md](../../docs/superpowers/specs/2026-07-22-coupons-system-design.md)
 **Governed by**: BUSINESS_RULES BR-124–BR-133, DECISIONS D-012
@@ -21,21 +21,25 @@ grants enrollment directly with no gateway call. Coupons never modify a course's
 ## User Scenarios
 
 ### Admin creates a coupon
+
 Given an authenticated admin, when they submit a code, discount type/value, optional scope,
-window, caps and per-user limit, then a coupon is created (code stored uppercase, unique) and
+window, global cap and active state, then a coupon is created (code stored uppercase, unique) and
 becomes redeemable per its window and `is_active`.
 
 ### Student redeems a paid coupon
-Given a student at checkout for a course/chapter and a valid applicable code, when they apply
+
+Given a student at checkout for a Course/Section and a valid applicable code, when they apply
 it, then the order total is reduced by the computed discount, the gateway charges the reduced
 total, and on the success webhook the enrollment is granted and the redemption recorded.
 
 ### Student redeems a free (100%) coupon
+
 Given a code that reduces the order to 0 KWD, when the student confirms, then enrollment is
 granted directly with no gateway call, and the redemption is recorded — all in one
 transaction.
 
 ### Coupon rejected
+
 Given an expired / inactive / non-applicable / cap-reached / already-used / unknown code,
 when previewed or applied, then the system returns the specific typed rejection reason and no
 discount is applied.
@@ -51,19 +55,23 @@ discount is applied.
   term (BR-025). (BR-126)
 - **FR-005** At most one coupon per order; no stacking. (BR-127)
 - **FR-006** A coupon may be platform-wide (no targets) or restricted to specific
-  course(s)/chapter(s). (design §5)
+  Course(s)/Section(s). (BR-128)
 - **FR-007** Coupon guardrails: `valid_from`/`valid_until` window, global `max_redemptions`
-  cap, `per_user_limit` (default 1), `is_active` toggle. (design §5, BR-128)
+  cap, one consuming redemption per Student, and `is_active` toggle. Per-user limits greater
+  than one are not configurable. (BR-128)
 - **FR-008** Validity is enforced hard at order creation and the discount/total snapshotted
   onto the order. (BR-128)
-- **FR-009** Redemption count commits only on payment success or free-grant, keyed by gateway
-  idempotency id (BR-033); duplicate/replayed webhooks never double-count. Global cap is soft
-  under concurrency; per-user limit is exact via unique `(coupon,user)` + BR-024. (BR-129)
+- **FR-009** Redemption count commits only on payment success or free-grant, in the entitlement
+  transaction keyed by stable Order identifier. Paid callbacks are additionally deduplicated by
+  payment-attempt/gateway reference (BR-033); free grants require no gateway identifier.
+  Duplicate/replayed work never double-counts. Global cap is soft under concurrency; one consuming
+  redemption per `(coupon, Student)` is exact. (BR-129)
 - **FR-010** After any redemption, `code`/`discount_type`/`discount_value` are immutable;
   only `is_active`/`valid_until`/`max_redemptions`/targets remain editable. Zero-redemption
   coupons may be deleted; redeemed coupons only deactivated. (BR-130)
-- **FR-011** A refund on a coupon order returns the charged total (not subtotal); the
-  redemption record is retained, count not decremented. (BR-131)
+- **FR-011** Refunds on a coupon order cannot exceed the amount charged. Historical redemption
+  and refund records and the global historical count remain. A cumulative full refund releases
+  that Student's eligibility to consume the coupon again; a partial refund does not. (BR-131)
 - **FR-012** Codes stored uppercase + trimmed, matched case-insensitively, unique. (BR-132)
 - **FR-013** Coupon create/edit/deactivate and every redemption are audit-logged. (BR-133)
 - **FR-014** A student cannot redeem a coupon toward an item they already actively hold
@@ -73,11 +81,12 @@ discount is applied.
 
 ## Key Entities
 
-- **Coupon** — the code and its rules (type, value, window, caps, per-user limit, active,
+- **Coupon** — the code and its rules (type, value, window, optional global cap, active,
   redemption_count, created_by).
-- **CouponTarget** — optional scope link to a course/chapter (absence = platform-wide).
+- **CouponTarget** — optional scope link to a Course/Section (absence = platform-wide).
 - **CouponRedemption** — a committed use: coupon, user, order, amount_discounted, timestamp;
-  unique per (coupon, user).
+  it remains historical and can be released from consuming status only after cumulative full
+  refund of its Order.
 - **Order (external)** — owned by the orders/checkout subsystem; carries coupon_id,
   coupon_code snapshot, subtotal/discount/total amounts, and a free-grant terminal state.
 
@@ -93,12 +102,14 @@ discount is applied.
 
 ## Out of Scope (MVP)
 
-Instructor-created coupons; coupon stacking; minimum-purchase thresholds; refund-releases-cap
-behavior; bundle-scoped coupons.
+Instructor-created coupons; coupon stacking; configurable per-user limits greater than one;
+minimum-purchase thresholds; releasing the global historical cap/count after refund; bundle-scoped
+coupons.
 
 ## Success Criteria
 
 - Every FR above is covered by an automated test (unit for math/validation, integration for
-  free-grant, paid-webhook redemption, duplicate-webhook no-double-count, per-user uniqueness,
-  soft-cap race, frozen-field edit rejection, refund retention).
+  free-grant, paid-webhook redemption, duplicate-webhook no-double-count, consuming-redemption
+  uniqueness, soft-cap race, frozen-field edit rejection, partial-refund retention, and cumulative
+  full-refund eligibility release).
 - No monetary value is represented as a float anywhere in the feature.
