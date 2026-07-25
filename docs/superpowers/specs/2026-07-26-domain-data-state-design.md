@@ -1,6 +1,7 @@
 # Gradex Domain, Data, and State Design
 
-> Status: Independently approved — exact substantive design commit `2e4f3e1`
+> Status: Independently approved baseline — exact substantive design commit `2e4f3e1`;
+> session-credential storage refined by the July 27 API/security design
 > Date: 2026-07-26
 > Scope: Complete MVP authoritative domain state and PostgreSQL model
 > Change boundary: Design only; this record does not implement migrations or application behavior
@@ -166,7 +167,8 @@ path is not an MVP table or capability.
 |---|---|
 | `accounts` | Normalized unique email, immutable constrained role, status, display name, locale, verification/security timestamps, `session_epoch`, revision |
 | `password_credentials` | Restricted one-to-one password hash and change timestamp; no profile data |
-| `sessions` | Account, refresh family, hashed token material, rotation ancestry, expiry, revocation/reuse state |
+| `sessions` | Stable Account session family, family ID, admitted Account epoch, authentication/activity/reauthentication times, idle/absolute expiry, current credential generation, revocation and reuse state |
+| `session_credentials` | Immutable session credential generations with unique credential/CSRF digests, issue/supersession/stale-use/reuse evidence, and replacement-generation ancestry; only the current unsuperseded generation authenticates |
 | `account_tokens` | Hashed verification/reset/email-change token, purpose, subject, expiry, consumed time; bearer secret never stored |
 | `staff_invitations` | Normalized unregistered email, Instructor/Admin role, inviter, token digest, lifecycle, expiry, optional resulting Account |
 | `instructor_profiles` | Optional role-specific Instructor metadata without duplicating Account role or identity |

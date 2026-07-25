@@ -121,7 +121,7 @@ generic `500 INTERNAL_ERROR`; diagnostics remain protected and correlated by req
 | Status | Common Gradex use | Companion |
 |---|---|---|
 | `400` | malformed/structural request; required idempotency key missing | — |
-| `401` | protected-resource authentication missing, expired, invalid, or replaced | applicable `WWW-Authenticate` |
+| `401` | protected-resource authentication missing, expired, invalid, or replaced | fixed `WWW-Authenticate: GradexSession realm="gradex-web"` |
 | `403` | authenticated but unauthorized; CSRF/origin failure | — |
 | `404` | unavailable or concealed resource | — |
 | `405` | method unavailable | `Allow` |
@@ -136,8 +136,13 @@ generic `500 INTERNAL_ERROR`; diagnostics remain protected and correlated by req
 | `500` | unexpected failure | — |
 | `503` | unavailable service/dependency or no safe limiter fallback | safe `Retry-After` |
 
-This mapping is common, not exhaustive. The generic login `401 AUTHENTICATION_FAILED` never
-varies challenge/header behavior by hidden Account state.
+This mapping is common, not exhaustive. Every browser-facing `401`, including the generic login
+`401 AUTHENTICATION_FAILED`, returns the same
+`WWW-Authenticate: GradexSession realm="gradex-web"` challenge. `GradexSession` is a
+first-party opaque-session challenge, not Basic or Bearer authentication, so it does not ask the
+browser to surface a native credential prompt or expose a token to JavaScript. The challenge never
+varies by hidden Account state. A future mobile, service, or public bearer surface defines its own
+challenge as part of that separate product contract.
 
 ### 2.4 Caching, validators, and URIs
 
@@ -247,6 +252,13 @@ for idle/absolute expiry, Account status, revocation, and epoch. Clearing uses t
 host-only scope, Path, Secure, and SameSite. The gateway does not forward this cookie to static,
 CDN, or unrelated upstream services, and logs never retain its value.
 
+`SameSite=Strict` is intentional for MVP. A cross-site return navigation from Tap may omit the
+session cookie on the first HTML request, so the checkout-return page is public, renders no private
+Order/Account state, and treats `tap_id` only as an untrusted discovery hint. After that page loads,
+a same-origin API request re-establishes the browser-session view and retrieves authoritative payment
+status; if the session is unavailable, the user signs in again. Provider webhook/retrieval evidence,
+not the redirect or initial SSR state, completes payment.
+
 ### 4.2 Stable sessions and immutable generations
 
 `sessions` is the stable server-authoritative family record: Account/family IDs, session epoch,
@@ -311,9 +323,11 @@ superseded generation.
 
 Each cookie-authenticated `POST`, `PUT`, `PATCH`, or `DELETE` requires structural/media
 checks; exact trusted Origin or controlled Referer fallback; valid session-bound
-`X-CSRF-Token`; authentication/authorization; rate-limit decision; idempotency admission; and then
-precondition/domain command. A CSRF rejection never claims idempotency or creates domain, Audit, or
-outbox records.
+`X-CSRF-Token`; authentication sufficient to establish the trusted rate-limit scope; application
+rate-limit decision; idempotency admission; and then full resource authorization, concurrency
+preconditions, and the domain command. A CSRF rejection never claims idempotency or creates domain,
+Audit, or outbox records. A rate-limit rejection never claims idempotency, and full authorization is
+re-evaluated inside every authoritative mutation transaction as required by §6.1.
 
 The synchronizer token is random, server-session-bound, browser-memory-only, sent only in
 `X-CSRF-Token`, compared safely, rotated with session credential, and invalidated on logout,
@@ -331,6 +345,29 @@ it may create/reuse anonymous host-only cookie and return CSRF token with `Cache
 It never creates Account, credential delivery, Order, Entitlement, or other business record and does
 not extend authenticated idle expiry. Login requires its Origin/CSRF defense, then creates a wholly
 new authenticated family and CSRF token.
+
+### 4.5 Secure bootstrap Administrator
+
+The one bootstrap Admin is created by a restricted, out-of-band deployment operation, never by an
+HTTP endpoint or ordinary application worker. The operation requires the dedicated deployment
+principal, an explicit production configuration gate, a stable operation ID, the normalized Admin
+email, and an initial password supplied only through the approved secret manager or equivalent
+secure one-time injection. The plaintext password never enters Git, a migration, process arguments,
+logs, telemetry, Audit, support tooling, or the database; Identity stores only its Argon2id hash.
+
+One PostgreSQL transaction locks a singleton bootstrap marker, proves no bootstrap operation has
+completed, proves no Admin Account exists, validates the password policy, creates the verified
+`ACTIVE` Admin with immutable `ADMIN` role and `PASSWORD_CHANGE_REQUIRED`, writes immutable Identity
+security evidence and required Audit, and marks the stable operation complete. Failure rolls the
+entire transaction back. A retry with the same operation ID returns the recorded result; any later
+or differently fingerprinted attempt fails closed and cannot mint another Admin.
+
+The temporary credential can authenticate only into a restricted password-change session. Until the
+password is successfully changed, the bootstrap Account cannot use Admin, financial, security,
+retention, provider, or content-management capabilities. Successful change uses the normal recent-
+authentication, credential/session rotation, Audit, and notification rules, clears
+`PASSWORD_CHANGE_REQUIRED`, and creates the first ordinary Admin session. Additional Admins are then
+created only through the approved invitation workflow.
 
 ## 5. Public Identity privacy boundary
 
@@ -493,6 +530,35 @@ CreateDownloadCapability(exact_object, download_grant, expires_at)
 
 They may use signed URLs, path tokens, edge validation, or future signed cookies without changing
 the Gradex domain model.
+
+### 7.1 Malware-scanning adapter
+
+Upload completion establishes the exact provider object/version, size, type, and checksum and leaves
+the Asset Version quarantined. It atomically appends one stable scanning operation to the
+transactional outbox. No public preview, protected download, HLS capability, Course approval, or
+`READY` transition is possible until the exact quarantined object has verified clean scan evidence.
+
+The scanner adapter is provider-neutral until `LG-014` approves a service, supported limits,
+authenticity mechanism, and test vectors. Its operation binds provider account/environment, exact
+object identity/version/checksum, scan-policy version, and Gradex operation ID. It uses that operation
+ID as provider idempotency key where supported. A callback is external ingress authenticated by the
+approved scanner-specific procedure; polling retrieves the authoritative provider result. Source IP,
+filename, content type, and caller-supplied result fields never prove scan success.
+
+Immutable scan attempts distinguish queued/submitted, provider-accepted, clean, rejected,
+retryable-failed, unknown, and exhausted outcomes. A timeout or ambiguous provider response is
+`UNKNOWN` and is reconciled before another provider submission. Verified callbacks/results are
+deduplicated by the strongest provider event or observation identity. Duplicate, delayed, or
+reordered observations cannot regress terminal rejection, replace the exact object under review, or
+create a second `READY` transition. A clean result applies only when object identity, checksum,
+policy, current Asset Version state, and authority epoch still match.
+
+Transient failures retry with bounded backoff, jitter, concurrency, cost, and elapsed-time limits.
+Known malicious content, unsupported permanent conditions, or authenticity failure never retries as
+clean. Scanner outage, unknown result, exhausted retry, or missing `LG-014` configuration fails
+closed: the Asset Version remains quarantined and unavailable, the exhausted operation stays visible,
+and any manual retry is an authorized idempotent command with immutable attempt evidence. No feature
+flag, Admin action, or direct storage URL can bypass successful scan evidence.
 
 ## 8. Provider ingress and reconciliation
 
@@ -750,6 +816,7 @@ status, revenue share, Course lifecycle, payout, moderation, or legal hold.
 | Surface | Session/CSRF | Primary decision | Idempotency | Evidence |
 |---|---|---|---|---|
 | Public Identity admission | anonymous bootstrap and exact Origin/CSRF where browser initiated | input/abuse; never Account disclosure | privacy-safe scope where required | security events; registration Identity evidence only when real |
+| Bootstrap Admin deployment | no browser or public endpoint | dedicated deployment principal + singleton/no-Admin guard | stable operation ID and fingerprint | Identity security evidence + Audit co-commit |
 | Student/Instructor/Admin mutation | required | module policy + transaction recheck | documented sensitive command | privileged/consequential Audit co-commit |
 | Personalized GET | session; no mutation CSRF | scoped query/module policy | no | telemetry/security only |
 | Playback session | authenticated mutation + CSRF | exact version, Entitlement/history, state | documented grant policy | protected policy evidence |
@@ -794,13 +861,14 @@ duplicate/reordered callback: no duplicate Entitlement or financial effect
 
 | Area | Minimum proof |
 |---|---|
-| HTTP/API | negotiation; UTF-8/duplicate/unknown JSON; problem status; localization; headers/cache; direct/collection shape |
+| HTTP/API | negotiation; UTF-8/duplicate/unknown JSON; problem status; localization; fixed browser-session challenge; headers/cache; direct/collection shape |
 | Idempotency/cursor | same/different fingerprint; in-flight/stale/reconcile; replay headers/request ID; cursor tamper/expiry/context/order/filter |
-| Session/CSRF | host-only cookie; no JS credentials; rotation boundaries; concurrent stale classification; logout/epoch/suspension commit-time race; CSRF before idempotency |
+| Session/CSRF | host-only cookie; no JS credentials; rotation boundaries; concurrent stale classification; logout/epoch/suspension commit-time race; Tap return after Strict-cookie omission; CSRF/rate decision before idempotency/full authorization |
+| Bootstrap Admin | deployment-only singleton; no Admin pre-exists; secret-manager injection; no plaintext persistence/telemetry; password-change-only session; retry and concurrent execution |
 | Privacy | hidden-account response status/body/header/cookie/timing/size/delivery equivalence |
 | Authorization | deny map; scoped query; concealment; ownership/access/state/recent-auth/epoch rechecks |
 | Rate control | quota 429 vs unavailable 503; outage modes; fallback bounds; private keys; atomic spend; webhook durable admission |
-| Media | exact version; every HLS URI; no byte proxy; expiry/renewal/revocation; Range/HEAD; capability log/referrer protection |
+| Media | exact version; every HLS URI; no byte proxy; expiry/renewal/revocation; Range/HEAD; capability log/referrer protection; scanning clean/reject/timeout/duplicate/reorder/unknown/exhaustion |
 | Providers | Tap approved vectors; invalid/duplicate/reordered/ambiguous callbacks; test/live isolation; semantic mismatch/reconciliation; DB retry |
 | Outbox/email | source+intent atomicity; duplicate receipt; lease recovery; external unknown; accepted vs delivered; secret validity replacement; exhaustion/manual retry |
 | Audit/telemetry | Audit write rollback; no update/delete grants; correction link; allowlist/redaction leakage; sampling independence; export-failure alert |
