@@ -50,9 +50,9 @@ func (s *videoService) GetPlaybackURL(ctx context.Context, lessonID, viewerID st
 		return SignedURL{}, fmt.Errorf("%w: video %s has no hls_master_key", ErrNotFound, v.ID)
 	}
 
-	expiry := time.Duration(s.cfg.PlaybackURLExpiryMinutes) * time.Minute
+	expiry := s.cfg.PlaybackURLExpiry()
 	expiresAt := time.Now().Add(expiry)
-	token := signPlaybackToken(s.cfg.PlaybackTokenSecret, v.ID, expiresAt)
+	token := signPlaybackToken(s.cfg.PlaybackTokenSecret().Expose(), v.ID, expiresAt)
 	manifestURL := fmt.Sprintf("/api/v1/videos/%s/manifest/master.m3u8?token=%s", v.ID, token)
 
 	lastPosition := 0.0
@@ -78,7 +78,7 @@ func (s *videoService) GetPlaybackURL(ctx context.Context, lessonID, viewerID st
 // presigned S3 GET URLs, since segments are the actual video bytes and
 // should stream directly from storage, not proxy through this backend.
 func (s *videoService) ServeManifest(ctx context.Context, videoID, path, token string) ([]byte, string, error) {
-	if err := verifyPlaybackToken(s.cfg.PlaybackTokenSecret, videoID, token); err != nil {
+	if err := verifyPlaybackToken(s.cfg.PlaybackTokenSecret().Expose(), videoID, token); err != nil {
 		return nil, "", err
 	}
 
@@ -104,7 +104,7 @@ func (s *videoService) ServeManifest(ctx context.Context, videoID, path, token s
 		return rewritten, manifestContentType, nil
 	}
 
-	segmentExpiry := time.Duration(s.cfg.PlaybackURLExpiryMinutes) * time.Minute
+	segmentExpiry := s.cfg.PlaybackURLExpiry()
 	renditionDir := filepath.Dir(path) // e.g. "720p" from "720p/playlist.m3u8"
 	rewritten, err := s.rewriteChildPlaylist(ctx, content, hlsPrefix, renditionDir, segmentExpiry)
 	if err != nil {

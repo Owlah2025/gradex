@@ -63,7 +63,7 @@ func (s *videoService) RequestUpload(ctx context.Context, lessonID, filename, co
 		return UploadTicket{}, err
 	}
 
-	expiry := time.Duration(s.cfg.UploadURLExpiryMinutes) * time.Minute
+	expiry := s.cfg.UploadURLExpiry()
 	uploadURL, err := s.storage.PresignPutURL(ctx, rawKey, contentType, expiry)
 	if err != nil {
 		return UploadTicket{}, err
@@ -105,8 +105,8 @@ func (s *videoService) CompleteUpload(ctx context.Context, lessonID string) erro
 	if !exists {
 		return fmt.Errorf("%w: no object found at %s", ErrNotFound, *v.RawKey)
 	}
-	if size > s.cfg.MaxUploadSizeBytes {
-		_, _ = s.repo.setVideoFailed(ctx, v.ID, fmt.Sprintf("uploaded file (%d bytes) exceeds max allowed size (%d bytes)", size, s.cfg.MaxUploadSizeBytes))
+	if size > s.cfg.MaxUploadSizeBytes() {
+		_, _ = s.repo.setVideoFailed(ctx, v.ID, fmt.Sprintf("uploaded file (%d bytes) exceeds max allowed size (%d bytes)", size, s.cfg.MaxUploadSizeBytes()))
 		return fmt.Errorf("%w: file too large", ErrConflict)
 	}
 

@@ -21,34 +21,34 @@ func main() {
 		log.Fatalf("loading config: %v", err)
 	}
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	pool, err := db.Connect(ctx, cfg.DatabaseURL().Expose())
 	if err != nil {
 		log.Fatalf("connecting to database: %v", err)
 	}
 	defer pool.Close()
 
 	storageClient, err := storage.New(ctx, storage.Options{
-		Endpoint:     cfg.S3Endpoint,
-		AccessKey:    cfg.S3AccessKey,
-		SecretKey:    cfg.S3SecretKey,
-		Bucket:       cfg.S3Bucket,
-		Region:       cfg.S3Region,
-		UsePathStyle: cfg.S3UsePathStyle,
+		Endpoint:     cfg.S3Endpoint(),
+		AccessKey:    cfg.S3AccessKey().Expose(),
+		SecretKey:    cfg.S3SecretKey().Expose(),
+		Bucket:       cfg.S3Bucket(),
+		Region:       cfg.S3Region(),
+		UsePathStyle: cfg.S3UsePathStyle(),
 	})
 	if err != nil {
 		log.Fatalf("connecting to storage: %v", err)
 	}
 
-	queueClient := queue.NewClient(cfg.RedisAddr)
+	queueClient := queue.NewClient(cfg.RedisAddr())
 	defer queueClient.Close()
 
-	ffmpeg := video.NewFFmpeg(cfg.FFmpegBinaryPath, cfg.FFprobeBinaryPath)
+	ffmpeg := video.NewFFmpeg(cfg.FFmpegBinaryPath(), cfg.FFprobeBinaryPath())
 	worker := video.NewWorker(pool, storageClient, queueClient, ffmpeg)
 
 	mux := asynq.NewServeMux()
 	worker.Register(mux)
 
-	server := queue.NewServer(cfg.RedisAddr)
+	server := queue.NewServer(cfg.RedisAddr())
 	log.Println("gradex video worker starting")
 	if err := server.Run(mux); err != nil {
 		log.Fatalf("worker error: %v", err)
