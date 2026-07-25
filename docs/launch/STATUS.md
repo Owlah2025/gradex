@@ -2,7 +2,7 @@
 
 > Current schedule date: 2026-07-28 — advanced by user
 > Last repository reconciliation: 2026-07-28 — start-of-day, HEAD `1cce2c4`
-> Scheduled day: Day 6 — Architecture review and delivery foundation (`PLANNED`)
+> Scheduled day: Day 6 — Architecture review and delivery foundation (`IN_PROGRESS`)
 > Target public go-live: 2026-08-15
 > Days remaining after today: 18 calendar days
 > Launch confidence: **Red**
@@ -28,12 +28,15 @@ July 25/26/27 designs into dependency-ordered feature slices, and build the deli
 is the last day before July 29 begins the Authentication/RBAC implementation, and the first day this
 project produces production application code rather than design.
 
-Start-of-day reconciliation confirmed the delivery foundation is genuinely absent rather than
-partially present: `.github/` contains no workflow, so CI has never run; `internal/config` validates
-only the video slice; logging is `gin.Default()` plus stdlib `log` with no request-ID middleware;
-`internal/httpapi/router.go` exposes no health or readiness route; and `internal/httpapi/middleware.go`
-still returns `{"error": "..."}` rather than the Problem Details envelope frozen in the July 27
-design. Only `0001_init` exists, applied through a hand-installed `golang-migrate` binary.
+Every Day 6 gap is now closed. The delivery foundation exists and is verified on hosted
+infrastructure rather than only on the developer's workstation: typed two-layer configuration with
+fail-closed validation, structured logging behind a closed field allowlist, per-attempt trusted
+request IDs, the RFC 9457 Problem Details envelope across all of `/api/v1`, liveness and readiness
+probes, repository-owned migrations under `cmd/migrate`, and a four-job CI pipeline with a
+documentation guard and a secret-exposure guard.
+
+This is the first day the project produced production application code. Nine commits land it, from
+`4d4bbe8` through `7bd4d84`.
 
 Delivery roles changed on 2026-07-25 under
 [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
@@ -105,6 +108,19 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Hosted CI on `feature/002-authentication-rbac` demonstrated green → fail → green: run
+  `30169408259` at `7f942cd` all green; run `30169530354` at `aae5039` failed **only** the Guards
+  job at the Documentation guard step while the other three stayed green; run `30169635035` at
+  `654e63b` green after the revert; run `30169979735` at `7bd4d84` green with the review fixes. CI
+  is therefore proven to enforce, not merely to pass, and to isolate failures by area.
+- Backend `gofmt`, `go build`, `go vet` on the default and `integration` tags, and `go test -race`
+  all pass. Frontend `npm ci`, `lint`, `typecheck`, and `build` all pass.
+- Migration lifecycle verified against real PostgreSQL: empty → `up` → expected tables, foreign keys
+  and version 1 → repeated `up` is a no-op → `down` empties → `up` again. Dirty-state and
+  unsupported-schema-version detection both verified. A production `down` migration is refused, and
+  a canary password placed in the DSN never reaches failure output.
+- `scripts/docs-guard.sh` passes across 106 Markdown files; `scripts/expose-guard.sh` passes with 5
+  approved call sites. Both were negative-tested and fail as intended.
 - `git diff --check` passed at Day 5 close.
 - Documentation guard passed across 45 Markdown files at Day 5 close: zero missing local links, zero
   invalid JSON examples, and every `DECISIONS.md` anchor referenced by a changed document resolves —
@@ -135,8 +151,21 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-The July 27 API/security/integration design passed independent read-only review at exact range
-`1a388cb..d6b4991`, reviewed by `agy` on `gemini-3.1-pro-high` under
+The Day 6 delivery foundation passed independent read-only review at exact range
+`1cce2c4..654e63b`, reviewed by `agy` on `gemini-3.1-pro-high` under
+[D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): **0 critical, 0 high, 0 medium, 2 low**,
+verdict **APPROVE WITH FINDINGS**, all nine review dimensions reported verified. Read-only was proven
+structurally: the reviewer ran in a disposable detached worktree at the frozen commit and its
+workspace was confirmed unmodified afterwards.
+
+Both low findings were confirmed empirically before being accepted, then fixed in `7bd4d84`: a
+`Secret.LogValue` signature that did not actually satisfy `slog.LogValuer`, and a `truncate` that
+could split a multi-byte character. Neither was a security regression — redaction held through a
+fallback — but both weakened a guarantee the code claimed to make. No critical or high finding
+required rechecking.
+
+Earlier: the July 27 API/security/integration design passed independent read-only review at exact
+range `1a388cb..d6b4991`, reviewed by `agy` on `gemini-3.1-pro-high` under
 [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): **0 critical, 0 high, 0 medium, 0 low**,
 verdict **APPROVE**, with all nine review dimensions reported verified. The reviewer ran in a
 disposable worktree at the frozen commit and its workspace was asserted unmodified afterwards.
@@ -180,17 +209,12 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-July 28 (Day 6) is started and `PLANNED`. First action: approve the combined M1 architecture baseline
-across the July 25, 26, and 27 designs and close the pending developer review of the July 27 written
-design, then convert the designs into dependency-ordered feature slices before building the delivery
-foundation — typed configuration validation, structured logging, request IDs, health/readiness
-endpoints, migrations, and CI.
+All Day 6 `Must`, `Should`, and `Could` work is complete with recorded evidence, and the independent
+review is resolved. Formal closure awaits the developer's `Close the day` command.
 
-Three decisions are waiting on the developer before implementation starts: the Problem Details
-retrofit scope for the existing video handlers, whether the post-`6862db5` bootstrap-Admin and
-malware-scanning sections stand as written, and branch placement. See
-[Decisions Required](daily/2026-07-28.md#decisions-required).
-
-July 28 is the last day before Authentication/RBAC implementation begins on July 29, and the first
-day that produces production application code. The slice ordering decided here determines whether
-the remaining schedule is executable.
+Next: July 29 (Day 7) — the Authentication/RBAC vertical slice, S1 in
+[SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac-july-29). First action is the fixed bootstrap
+chain, which must be worked in order and cannot be started out of sequence: bootstrap schema/state →
+controlled bootstrap command → restricted-session principal/policy → password-change completion →
+session rotation and restriction removal → normal Admin authorization. Its five required tests are
+close conditions, not optional coverage.
