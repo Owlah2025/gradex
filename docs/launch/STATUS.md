@@ -194,3 +194,6 @@ malware-scanning sections stand as written, and branch placement. See
 July 28 is the last day before Authentication/RBAC implementation begins on July 29, and the first
 day that produces production application code. The slice ordering decided here determines whether
 the remaining schedule is executable.
+
+<!-- TEMPORARY: deliberate CI-enforcement check, reverted immediately. -->
+[deliberately dead link](docs/launch/THIS_FILE_DOES_NOT_EXIST.md)
