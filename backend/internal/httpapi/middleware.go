@@ -19,9 +19,14 @@ var (
 
 // errorResponse never leaks err.Error() to the client on 5xx — that path can
 // carry raw DB/storage errors. It's logged server-side instead.
+//
+// TODO(S0 Must 5): replace with writeProblem. This still emits the legacy
+// {"error": ...} shape rather than RFC 9457, which is why the retrofit is its
+// own commit. The literal path is already gone from the server-side line: it
+// carries identifiers and can carry a token, which §10.2 forbids in telemetry.
 func errorResponse(c *gin.Context, status int, err error) {
 	if status >= http.StatusInternalServerError {
-		log.Printf("httpapi: %d error for %s %s: %v", status, c.Request.Method, c.Request.URL.Path, err)
+		log.Printf("httpapi: %d error for %s %s", status, c.Request.Method, routeTemplateOf(c))
 		c.AbortWithStatusJSON(status, gin.H{"error": "internal server error"})
 		return
 	}

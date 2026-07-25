@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
+	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
 	"github.com/Owlah2025/gradex/backend/internal/video"
@@ -20,6 +22,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
+
+	logger := logging.New(os.Stdout, "gradex-api", string(cfg.Environment()), logging.LevelFromString(cfg.LogLevel()))
 
 	pool, err := db.Connect(ctx, cfg.DatabaseURL().Expose())
 	if err != nil {
@@ -53,7 +57,10 @@ func main() {
 	authenticator := auth.NewFakeAuthenticator()
 	entitlements := auth.NewFakeEntitlementChecker(pool)
 
-	router := httpapi.NewRouter(svc, authenticator, entitlements)
+	router, err := httpapi.NewRouter(cfg, logger, svc, authenticator, entitlements)
+	if err != nil {
+		log.Fatalf("building router: %v", err)
+	}
 
 	log.Printf("gradex API listening on :%s (env=%s, payments=%v, email=%v, fake_auth=%v)",
 		cfg.Port(), cfg.Environment(), cfg.Payments().Enabled(), cfg.Email().Enabled(), cfg.AuthFakeMode())

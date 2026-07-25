@@ -74,6 +74,8 @@ type Config struct {
 	publicOrigin         string
 	corsAllowedOrigins   []string
 	corsAllowCredentials bool
+	trustedProxies       []string
+	logLevel             string
 
 	httpReadTimeout  time.Duration
 	httpWriteTimeout time.Duration
@@ -120,6 +122,18 @@ func (c *Config) CORSAllowedOrigins() []string {
 }
 
 func (c *Config) CORSAllowCredentials() bool { return c.corsAllowCredentials }
+
+// TrustedProxies returns a copy of the proxy CIDRs whose forwarding headers may
+// be believed. An empty result means trust none, which is the default: the
+// framework's own default of trusting every proxy would let any client forge
+// its apparent address.
+func (c *Config) TrustedProxies() []string {
+	out := make([]string, len(c.trustedProxies))
+	copy(out, c.trustedProxies)
+	return out
+}
+
+func (c *Config) LogLevel() string { return c.logLevel }
 
 func (c *Config) HTTPReadTimeout() time.Duration  { return c.httpReadTimeout }
 func (c *Config) HTTPWriteTimeout() time.Duration { return c.httpWriteTimeout }
@@ -190,6 +204,8 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		publicOrigin:         p.str("PUBLIC_ORIGIN", ""),
 		corsAllowedOrigins:   p.list("CORS_ALLOWED_ORIGINS"),
 		corsAllowCredentials: p.boolean("CORS_ALLOW_CREDENTIALS", false),
+		trustedProxies:       p.list("TRUSTED_PROXIES"),
+		logLevel:             p.str("LOG_LEVEL", "info"),
 
 		httpReadTimeout:  p.duration("HTTP_READ_TIMEOUT", 15*time.Second),
 		httpWriteTimeout: p.duration("HTTP_WRITE_TIMEOUT", 30*time.Second),
@@ -344,6 +360,12 @@ func (c *Config) validate(p *parser) {
 
 	if c.maxUploadSizeBytes <= 0 {
 		p.errf("MAX_UPLOAD_SIZE_BYTES must be positive, got %d", c.maxUploadSizeBytes)
+	}
+
+	switch c.logLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		p.errf("LOG_LEVEL must be one of debug, info, warn, error; got %q", c.logLevel)
 	}
 
 	// Credentialed CORS with a wildcard origin is the other named invalid
