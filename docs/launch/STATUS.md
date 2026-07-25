@@ -2,7 +2,7 @@
 
 > Current schedule date: 2026-07-27 — advanced by user
 > Last repository reconciliation: 2026-07-27 — user-advanced schedule
-> Scheduled day: Day 5 — In progress
+> Scheduled day: Day 5 — Closed; Day 6 (July 28) is next
 > Target public go-live: 2026-08-15
 > Days remaining after today: 19 calendar days
 > Launch confidence: **Red**
@@ -13,17 +13,25 @@ implementation are not complete, the operating envelope remains provisional, and
 deliberately deferred all external-owner outreach to August 6. All 20 required entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch. The complete
-July 27 API/security/integration design is developer-approved and has passed independent read-only
-review at exact range `1a388cb..d6b4991` with no critical or high finding; only final
-written-artifact review by the developer remains. Confidence stays Red because it is driven by the
-20 open launch gates and the absent implementation, not by design-review state.
+July 27 API/security/integration design is developer-approved, has passed independent read-only
+review at exact range `1a388cb..d6b4991` with no critical or high finding, and Day 5 is closed.
+Confidence stays Red because it is driven by the 20 open launch gates and the absence of any
+production implementation, not by design-review state. Three consecutive design days have now closed
+on schedule with no carryover, which is the evidence that would move confidence once implementation
+starts landing.
 
 ## Current Phase
 
-Day 5 is in progress. The common HTTP/API/error/event, session, authorization, delivery, provider,
+Day 5 is closed. The common HTTP/API/error/event, session, authorization, delivery, provider,
 abuse, reconciliation, and security-verification design is written, developer-approved, and has
-passed independent read-only review. The only remaining Day 5 evidence is developer review of the
-written specification. There is no incomplete July 26 Must or Should work.
+passed independent read-only review with no critical or high finding. Every `Must` and `Should` item
+is complete; the `Could` JSON examples were deferred by developer decision and are non-binding, so
+they are not carryover. There is no incomplete July 26 or July 27 work.
+
+Day 6 (July 28) is next: approve the M1 architecture baseline, convert the July 25/26/27 designs into
+dependency-ordered feature slices, and build the delivery foundation. It is the last day before
+July 29 begins the Authentication/RBAC implementation, and the first day this project produces
+production application code rather than design.
 
 Delivery roles changed on 2026-07-25 under
 [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
@@ -54,7 +62,7 @@ without inventing an externally visible contract or trust-boundary decision.
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress | July 25 architecture approved at c9c2238; July 26 domain/data/state design approved at 2e4f3e1; July 27 API/security design developer-approved at 6862db5, independent review pending |
+| M1 — Platform architecture baseline | July 28 | In progress — all three designs approved, baseline approval outstanding | July 25 architecture approved at c9c2238; July 26 domain/data/state design approved at 2e4f3e1; July 27 API/security design developer-approved and independently reviewed at range `1a388cb..d6b4991`, verdict APPROVE, zero findings. Remaining: approve the combined baseline and convert it into dependency-ordered slices on July 28 |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -65,10 +73,13 @@ without inventing an externally visible contract or trust-boundary decision.
 
 ## Carryover
 
-No incomplete July 26 `Must` or `Should` work. External-gate contact confirmation and outreach are
-deliberately scheduled for August 6 by founder decision and remain tracked risks rather than hidden
-carryover. The untracked financial spreadsheet is user-owned, intentionally untouched, and outside
-the active design slice.
+No incomplete July 26 or July 27 `Must` or `Should` work. The July 27 `Could` item — non-binding JSON
+examples — was deferred by developer decision; the contracts are binding as written, so deferring
+illustration removes no acceptance evidence and it is not carryover.
+
+External-gate contact confirmation and outreach are deliberately scheduled for August 6 by founder
+decision and remain tracked risks rather than hidden carryover. The untracked financial spreadsheet
+and `.caveman.json` are user-owned, intentionally untouched, and outside the active slice.
 
 ## Current Blockers and Risks
 
@@ -92,10 +103,17 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
-- `git diff --check` passed.
-- Documentation guard passed across 44 Markdown files: zero missing local links or invalid JSON
-  examples; July 27 changed-document BR, D, and LG references are all defined. The prior full-baseline
-  screen-reference and SpecKit-manifest checks remain valid because those artifacts did not change.
+- `git diff --check` passed at Day 5 close.
+- Documentation guard passed across 45 Markdown files at Day 5 close: zero missing local links, zero
+  invalid JSON examples, and every `DECISIONS.md` anchor referenced by a changed document resolves —
+  including the new D-032 anchor referenced from `CLAUDE.md`, `AGENTS.md`, `PLAN.md`, `STATUS.md`,
+  the July 27 record, and the review brief template. The prior full-baseline screen-reference and
+  SpecKit-manifest checks remain valid because those artifacts did not change.
+- The Day 5 independent-review harness was verified end to end: `agy help` and `agy models` succeed,
+  `gemini-3.1-pro-high` is available, the reviewer's `touchedFiles` was `[]`, the disposable worktree
+  was removed, and the developer's `agy` settings file was restored byte-identical after the run.
+- No frontend or backend source file changed on July 27, so the frontend and backend gates below
+  remain the latest verified application state and were not rerun for a documentation-only day.
 - SpecKit CLI reports `0.13.4`; all five Bash workflow scripts are executable (`755`).
 - Frontend `typecheck`, `lint`, and production `build` passed.
 - Backend `make build` and `make test` passed.
@@ -160,5 +178,11 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Have the developer review the written July 27 design, then close Day 5 and convert the design into
-July 28 implementation slices. The independent review is complete with no critical or high finding.
+Start July 28 (Day 6). First action: approve the M1 architecture baseline across the July 25, 26,
+and 27 designs, then convert them into dependency-ordered feature slices before building the
+delivery foundation — configuration validation, migrations, structured logging, request IDs,
+health/readiness endpoints, and CI.
+
+July 28 is the last day before Authentication/RBAC implementation begins on July 29, and the first
+day that produces production application code. The slice ordering decided here determines whether
+the remaining schedule is executable.
