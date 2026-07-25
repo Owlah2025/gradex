@@ -36,8 +36,16 @@ ALLOWLIST=(
   "cmd/api/main.go"          # database, storage client construction
   "cmd/worker/main.go"       # database, storage client construction
   "cmd/migrate/main.go"      # database connection for schema migration
+  "cmd/bootstrap-admin/main.go" # database connection for the one-off bootstrap operation
   "internal/video/playback.go" # HMAC signing boundary for playback tokens
   "internal/config/config.go"  # placeholder validation, inside the boundary itself
+  # Argon2id hashing boundary. Two calls: the bootstrap plaintext goes to the
+  # hasher, and the resulting encoded hash goes to the database driver. Neither
+  # value travels further — not into a log, an error message, or a return
+  # value. This is the only place in the codebase that reads a password
+  # plaintext, which is why it earns an allowlist entry rather than a broader
+  # package-level exemption.
+  "internal/identity/bootstrap.go"
 )
 
 # Packages that exist to send data outward. Expose() here is a defect even if

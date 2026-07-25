@@ -94,9 +94,14 @@ func tableExists(t *testing.T, pool *pgxpool.Pool, name string) bool {
 var (
 	initTables     = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
 	identityTables = []string{"accounts", "password_credentials", "bootstrap_operations"}
+	auditTables    = []string{"audit_events"}
 )
 
-func allTables() []string { return append(append([]string{}, initTables...), identityTables...) }
+func allTables() []string {
+	all := append([]string{}, initTables...)
+	all = append(all, identityTables...)
+	return append(all, auditTables...)
+}
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
 // without any hand-installed binary: the whole thing runs from `go test`.

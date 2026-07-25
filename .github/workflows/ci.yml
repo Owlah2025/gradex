@@ -167,8 +167,8 @@ jobs:
           BEGIN
             SELECT version, dirty INTO v, d FROM schema_migrations ORDER BY version DESC LIMIT 1;
             -- Keep in step with MaxSchemaVersion in internal/db/schema.go.
-            IF v IS DISTINCT FROM 2 THEN
-              RAISE EXCEPTION 'schema version is %, expected 2', v;
+            IF v IS DISTINCT FROM 3 THEN
+              RAISE EXCEPTION 'schema version is %, expected 3', v;
             END IF;
             IF d THEN
               RAISE EXCEPTION 'schema is dirty after a successful migration';
@@ -177,7 +177,7 @@ jobs:
             SELECT string_agg(t, ', ') INTO missing
             FROM unnest(ARRAY[
               'courses','sections','lessons','videos','progress','fake_entitlements',
-              'accounts','password_credentials','bootstrap_operations'
+              'accounts','password_credentials','bootstrap_operations','audit_events'
             ]) AS t
             WHERE to_regclass('public.' || t) IS NULL;
             IF missing IS NOT NULL THEN
