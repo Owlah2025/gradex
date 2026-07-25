@@ -8,6 +8,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/video"
 )
@@ -36,10 +37,19 @@ func NewRouter(
 	svc video.Service,
 	authenticator auth.Authenticator,
 	entitlements auth.EntitlementChecker,
+	principals identity.PrincipalResolver,
 ) (*gin.Engine, error) {
 	r, err := newEngine(cfg, logger)
 	if err != nil {
 		return nil, err
+	}
+	if principals == nil {
+		// Fail at construction rather than at the first request. A router built
+		// without a principal resolver would serve protected routes with no
+		// capability decision at all, which is the failure this whole link
+		// exists to prevent — and it must not be possible to reach it by
+		// forgetting an argument.
+		return nil, fmt.Errorf("principal resolver is required")
 	}
 
 	// Probes sit outside /api/v1: no version promise, no session, no CSRF, no
@@ -51,8 +61,17 @@ func NewRouter(
 
 	v1 := r.Group("/api/v1")
 
+	// Every protected group runs authentication → capability policy → ownership
+	// or Entitlement, in that order. The capability step is what refuses a
+	// restricted or suspended principal before any route-specific check runs,
+	// so a route cannot be protected by ownership alone and accidentally admit
+	// an Account that should not be acting at all.
 	instructor := v1.Group("/lessons/:lessonID/video")
-	instructor.Use(requireAuth(authenticator), requireInstructor(entitlements))
+	instructor.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapContentManagement),
+		requireInstructor(entitlements),
+	)
 	{
 		instructor.POST("/upload-url", h.requestUpload)
 		instructor.POST("/complete", h.completeUpload)
@@ -61,7 +80,11 @@ func NewRouter(
 	}
 
 	student := v1.Group("/lessons/:lessonID")
-	student.Use(requireAuth(authenticator), requireStudentAccess(entitlements))
+	student.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapLearningAccess),
+		requireStudentAccess(entitlements),
+	)
 	{
 		student.GET("/video/playback-url", h.playbackURL)
 		student.POST("/progress", h.postProgress)

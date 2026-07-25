@@ -14,6 +14,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
@@ -85,7 +86,11 @@ func main() {
 		},
 	)
 
-	router, err := httpapi.NewRouter(cfg, logger, reporter, svc, authenticator, entitlements)
+	// Authorization reads Account and credential state from PostgreSQL on every
+	// protected request rather than trusting anything carried in the session.
+	principals := identity.NewDBPrincipalResolver(pool)
+
+	router, err := httpapi.NewRouter(cfg, logger, reporter, svc, authenticator, entitlements, principals)
 	if err != nil {
 		log.Fatalf("building router: %v", err)
 	}

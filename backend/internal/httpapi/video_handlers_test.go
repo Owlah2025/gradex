@@ -15,6 +15,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
@@ -90,8 +91,49 @@ func (f fakeEntitlements) IsInstructorForLesson(context.Context, string, string)
 	return f.allowed, f.err
 }
 
-func videoRouter(t *testing.T, svc video.Service, a fakeAuth, e fakeEntitlements) (*gin.Engine, *syncBuffer) {
+// stubPrincipals resolves any identifier to an Account in good standing with a
+// fixed role.
+//
+// It is not an authorization bypass: requireCapability still runs and still
+// decides. It just decides on a principal that is allowed, which is the
+// precondition these handler tests are about. The policy itself is tested in
+// identity/policy_test.go and middleware_test.go.
+type stubPrincipals struct{ role identity.Role }
+
+func (s stubPrincipals) ResolvePrincipal(_ context.Context, accountID string) (identity.Principal, error) {
+	return identity.Principal{
+		AccountID:       accountID,
+		Role:            s.role,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}, nil
+}
+
+// roleForPath picks the role whose capability matches the route group under
+// test.
+//
+// Instructor and Student capabilities are disjoint by design — content
+// management and learning access are different classes of action, and §4.1 says
+// a person needing both uses two Accounts. So a test that drives both groups
+// needs the matching principal for each; there is no single role that reaches
+// everything, and inventing one for test convenience would weaken the property
+// the policy exists to hold.
+func roleForPath(path string) identity.Role {
+	switch {
+	case strings.HasSuffix(path, "/playback-url"), strings.HasSuffix(path, "/progress"):
+		return identity.RoleStudent
+	default:
+		return identity.RoleInstructor
+	}
+}
+
+func videoRouter(t *testing.T, svc video.Service, a fakeAuth, e fakeEntitlements, role ...identity.Role) (*gin.Engine, *syncBuffer) {
 	t.Helper()
+
+	principalRole := identity.RoleInstructor
+	if len(role) > 0 {
+		principalRole = role[0]
+	}
 
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -110,7 +152,7 @@ func videoRouter(t *testing.T, svc video.Service, a fakeAuth, e fakeEntitlements
 	reporter := health.New(time.Second)
 	reporter.MarkStarted()
 
-	r, err := NewRouter(cfg, logger, reporter, svc, a, e)
+	r, err := NewRouter(cfg, logger, reporter, svc, a, e, stubPrincipals{role: principalRole})
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
@@ -229,7 +271,7 @@ func TestVideoErrorClassesMapToPublicProblems(t *testing.T) {
 		for _, route := range routes {
 			t.Run(tc.name+" "+route.path, func(t *testing.T) {
 				a, e := authorized()
-				r, _ := videoRouter(t, fakeService{err: tc.serviceErr}, a, e)
+				r, _ := videoRouter(t, fakeService{err: tc.serviceErr}, a, e, roleForPath(route.path))
 
 				rec := do(r, httptest.NewRequest(route.method, route.path, nil))
 
@@ -312,7 +354,7 @@ func TestRequestBodyFailures(t *testing.T) {
 		a, e := authorized()
 		r, _ := videoRouter(t, fakeService{
 			err: fmt.Errorf("%w: position_seconds must be >= 0", video.ErrValidation),
-		}, a, e)
+		}, a, e, identity.RoleStudent)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/progress",
 			strings.NewReader(`{"position_seconds": -5}`))
@@ -413,7 +455,8 @@ func TestAuthFailuresRevealNothing(t *testing.T) {
 	// nothing about the resource.
 	t.Run("entitlement lookup failure is a generic 500", func(t *testing.T) {
 		r, _ := videoRouter(t, fakeService{}, fakeAuth{},
-			fakeEntitlements{err: errors.New("pq: duplicate key value violates unique constraint \"videos_lesson_id_key\"")})
+			fakeEntitlements{err: errors.New("pq: duplicate key value violates unique constraint \"videos_lesson_id_key\"")},
+			identity.RoleStudent)
 
 		rec := do(r, httptest.NewRequest(http.MethodGet, "/api/v1/lessons/lesson-99/video/playback-url", nil))
 
@@ -429,7 +472,7 @@ func TestAuthFailuresRevealNothing(t *testing.T) {
 // The success contract is unchanged by this retrofit.
 func TestSuccessfulResponsesAreUnchanged(t *testing.T) {
 	a, e := authorized()
-	r, _ := videoRouter(t, fakeService{}, a, e)
+	r, _ := videoRouter(t, fakeService{}, a, e, identity.RoleStudent)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/progress",
 		strings.NewReader(`{"position_seconds": 12}`))

@@ -185,6 +185,62 @@ func (l *Logger) PanicRecovered(ev PanicEvent) {
 	l.slog.Error("panic_recovered", attrs...)
 }
 
+// AuthorizationEvent is one authorization decision that was not an allow.
+//
+// It carries the typed policy reason, which design §6.1 places in security
+// monitoring rather than in the response: a caller that could read "suspended"
+// versus "wrong role" versus "no such Account" would be reading the hidden
+// Account state §5 protects. The response stays uniform; this is where the
+// distinction lives.
+//
+// It carries no Account identifier. Correlating a denial to an Account is done
+// through the request ID and Audit, so a log shipped to a monitoring provider
+// does not become a directory of who was refused what.
+type AuthorizationEvent struct {
+	RequestID     string
+	Method        string
+	RouteTemplate string
+	Capability    string
+	DenyReason    string
+}
+
+func (l *Logger) AuthorizationDenied(ev AuthorizationEvent) {
+	l.slog.Warn("authorization_denied",
+		slog.String("request_id", Sanitize(ev.RequestID)),
+		slog.String("method", Sanitize(ev.Method)),
+		slog.String("route_template", Sanitize(ev.RouteTemplate)),
+		slog.String("capability", Sanitize(ev.Capability)),
+		slog.String("deny_reason", Sanitize(ev.DenyReason)),
+	)
+}
+
+// AuthorizationFaultEvent is a failure to *reach* an authorization decision —
+// the principal could not be resolved because a dependency failed.
+//
+// Kept separate from a denial on purpose: counting resolution faults as
+// refusals would make a database outage look like a spike in authorization
+// decisions on every dashboard.
+type AuthorizationFaultEvent struct {
+	RequestID     string
+	Method        string
+	RouteTemplate string
+	Capability    string
+	Err           error
+}
+
+func (l *Logger) AuthorizationFault(ev AuthorizationFaultEvent) {
+	attrs := []any{
+		slog.String("request_id", Sanitize(ev.RequestID)),
+		slog.String("method", Sanitize(ev.Method)),
+		slog.String("route_template", Sanitize(ev.RouteTemplate)),
+		slog.String("capability", Sanitize(ev.Capability)),
+	}
+	if ev.Err != nil {
+		attrs = append(attrs, slog.String("error", Sanitize(ev.Err.Error())))
+	}
+	l.slog.Error("authorization_fault", attrs...)
+}
+
 // ErrorClassOf names a panic value's type without rendering the value.
 func ErrorClassOf(v any) string { return fmt.Sprintf("%T", v) }
 
