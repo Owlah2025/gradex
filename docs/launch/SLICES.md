@@ -136,7 +136,10 @@ enforcement proof — are S1C's. No S2 work begins before S1C closes.
 This order is mandatory. Authentication/RBAC cannot be implemented without resolving each link, and
 no link may be started before the one above it is complete.
 
-Link 1 is complete at `90f92ec`.
+All six links are implemented in their required order: link 1 at `90f92ec`, link 2 at `d85d5a0`,
+link 3 at `b17cd26`, link 4 at `dc68511`, link 5 at `4ba1632`, and link 6 at `ec8af3b`. S1A remains
+open until the checks and independent review in
+[the July 29 record](daily/2026-07-29.md#acceptance-evidence) are complete.
 
 1. **Bootstrap schema/state.** An explicit Identity-owned constrained state for
    `PASSWORD_CHANGE_REQUIRED` — *not* an overload of `accounts.status`, which already reads `ACTIVE`

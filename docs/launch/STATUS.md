@@ -84,7 +84,7 @@ in isolation.
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–31 | In progress | Split into S1A (Jul 29, bootstrap/Admin security core), S1B (Jul 30, Student authentication), and S1C (Jul 31, staff lifecycle and enforcement). Link 1 landed at `90f92ec`; links 2–6 and the five bootstrap tests remain for S1A. M2 completes at S1C close |
+| M2 — Authentication/RBAC vertical slice | July 29–31 | In progress | Split into S1A (Jul 29, bootstrap/Admin security core), S1B (Jul 30, Student authentication), and S1C (Jul 31, staff lifecycle and enforcement). All six S1A links are implemented through `ec8af3b`; local/hosted verification and the frozen-range independent review remain before S1A closes. M2 completes at S1C close |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | Not started | E2E, infrastructure, security, load, accessibility |
@@ -108,10 +108,10 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1 carries four bootstrap obligations that no earlier slice covers | Claude | Implement the fixed bootstrap chain and its five required tests (S1A) | July 29 | [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac) chain complete with all five tests passing |
-| Splitting S1 consumes the July 31 protected recovery day | Developer + Claude | Hold S1A, S1B, and S1C to their days; August 7 is the next protected recovery point and any slip must travel there to find slack | July 31 | All three sub-slices close on their scheduled day with reviewer verdicts |
+| S1 carries four bootstrap obligations that no earlier slice covers | Codex | Finish S1A verification and freeze the implemented chain for independent review | July 29 | [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac) chain complete, all five tests passing, hosted CI green, and reviewer verdict recorded |
+| Splitting S1 consumes the July 31 protected recovery day | Developer + Codex | Hold S1A, S1B, and S1C to their days; August 7 is the next protected recovery point and any slip must travel there to find slack | July 31 | All three sub-slices close on their scheduled day with reviewer verdicts |
 | S2 moving to August 1 displaces S3, cascading through S8 | Developer | Decide the downstream calendar; S3–S8 are `TBD` in SLICES.md until then | July 30 | Dated S3–S8 assignments that do not silently consume August 7 |
-| Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
+| Landing FAQ still promises fixed 150-day access | Developer + Codex | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
 ## Required Launch Gates
@@ -127,6 +127,13 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- S1A pre-review local gate is green with PostgreSQL at schema version 4, Redis, MinIO, and the
+  documented published-video fixture available: backend build, default/integration vet,
+  `go test -race ./...`, and `go test -tags=integration ./...` all pass; the integration run includes
+  the Identity transaction suite, real PostgreSQL migrations, real MinIO presigning, and the Redis
+  video-redelivery case. Frontend clean install, lint, typecheck, and production build pass.
+  `scripts/docs-guard.sh` passes across 107 Markdown files, and `scripts/expose-guard.sh` passes with
+  9 approved `Expose` call sites, 1 password-plaintext boundary, and 2 reviewed plaintext reads.
 - Start-of-day July 29 reconciliation at `90f92ec`: `gofmt` clean, `go build ./...`, `go vet ./...`,
   and `go test ./...` all pass on the default tags. `scripts/docs-guard.sh` passes across 107
   Markdown files. The working tree holds only the two user-owned untracked files.
@@ -237,17 +244,11 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 7 is active on S1A in [SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac). Link 1 of the
-fixed bootstrap chain — bootstrap schema and state — is complete at `90f92ec`.
+Day 7 remains active on S1A in [SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac). All six
+ordered bootstrap links are implemented through `ec8af3b`, and the five close conditions have
+targeted local evidence. The July 29 architecture-boundary deadline is audited and linked from
+[LAUNCH_GATES.md](../LAUNCH_GATES.md#july-29-architecture-boundary-audit).
 
-Next action is link 2, the controlled one-off bootstrap command under its own `cmd/` entrypoint: not
-an HTTP endpoint, not an ordinary worker task, not a schema migration. Links 3 through 6 follow in
-order — restricted-session principal/policy → password-change completion → session rotation and
-restriction removal → normal Admin authorization — and no link may start before the one above it is
-complete. The five bootstrap tests are close conditions, not optional coverage.
-
-Today also carries the July 29 gate deadline from [PLAN.md §7](PLAN.md#7-gate-deadlines): every
-architecture-affecting open gate needs a documented configurable/provider boundary.
-[SLICES.md §7](SLICES.md#7-gate-dependent-slices) already covers `LG-014`, `LG-010`, `LG-018`, and
-the `LG-001`/legal pair; `LG-019` and the remaining architecture-affecting entries still need
-auditing and linking.
+The complete local gate is green with PostgreSQL, Redis, and MinIO available. Next action is to
+freeze and push the exact S1A range for hosted CI and independent Claude review. S1A stays open
+until those results are recorded and no critical/high reviewer finding remains.

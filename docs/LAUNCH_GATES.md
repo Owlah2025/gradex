@@ -1,7 +1,7 @@
 # Gradex Launch Gates
 
 > Status: Active
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-29
 
 This register separates unresolved production-readiness work from approved product scope. An open
 gate does not silently become a requirement or assumed answer. It blocks the named milestone and
@@ -55,6 +55,35 @@ Platform system design can start now. For open items whose blocking point is a d
 The missing numeric revenue share does not prevent the payout formula/data model: use a required
 versioned configuration with no default. Legal/accounting/provider gates do prevent representing an
 assumption as production policy.
+
+### July 29 Architecture-Boundary Audit
+
+The July 29 deadline in [the launch plan](launch/PLAN.md#7-gate-deadlines) is met. All 14 open gates
+that affect architecture have a documented configurable, policy, evidence, or provider boundary in
+the approved design baseline:
+
+| Gate | Documented boundary while open |
+|---|---|
+| `LG-001` | Reporting requires a versioned revenue-share configuration with no code default; no earning is calculated without an effective approved row ([domain §16.1](superpowers/specs/2026-07-26-domain-data-state-design.md#161-versioned-share-and-append-only-ledger)). |
+| `LG-002` | Refund eligibility and Entitlement effects remain versioned/configurable; unsupported policy refuses the Refund command ([domain §8.3](superpowers/specs/2026-07-26-domain-data-state-design.md#83-refund-state)). |
+| `LG-003` | Retention uses versioned per-data-class policy, and destructive jobs stay disabled while the gate is open ([domain §19.1](superpowers/specs/2026-07-26-domain-data-state-design.md#191-configurable-policy-boundary)). |
+| `LG-004` | Region placement remains portable and provisional; privacy-control records preserve evidence without inventing applicability, rights, residency, or cross-border conclusions ([platform §3.5](superpowers/specs/2026-07-25-platform-architecture-design.md#35-provisional-region-boundary), [domain §19.1](superpowers/specs/2026-07-26-domain-data-state-design.md#191-configurable-policy-boundary)). |
+| `LG-008` | Tap merchant and method selection stays behind the configurable hosted-payment adapter rather than entering domain logic ([platform §14](superpowers/specs/2026-07-25-platform-architecture-design.md#14-open-decisions-and-gates)). |
+| `LG-009` | Refund state models asynchronous and unsupported provider behavior, and the command refuses an unapproved provider/method capability ([domain §8.3](superpowers/specs/2026-07-26-domain-data-state-design.md#83-refund-state)). |
+| `LG-010` | Tap authenticity is an adapter contract with official vectors; production processing stays disabled until it is tested and approved ([API design §8](superpowers/specs/2026-07-27-api-security-integration-design.md#8-provider-ingress-and-reconciliation)). |
+| `LG-014` | The scanner adapter is provider-neutral; missing configuration, outage, ambiguity, or exhaustion leaves the exact Asset Version quarantined and unavailable ([API design §7.1](superpowers/specs/2026-07-27-api-security-integration-design.md#71-malware-scanning-adapter)). |
+| `LG-015` | Platform-owned UI/player validation and hosted-checkout/caption limitations form the claim boundary; complete conformance is not claimed while the gap remains ([platform §13](superpowers/specs/2026-07-25-platform-architecture-design.md#13-validation-and-production-acceptance)). |
+| `LG-016` | Commerce and Reporting preserve immutable commercial-document and transaction evidence without assuming tax, numbering, invoice, receipt, or statement rules ([platform §14](superpowers/specs/2026-07-25-platform-architecture-design.md#14-open-decisions-and-gates), [domain §16.1](superpowers/specs/2026-07-26-domain-data-state-design.md#161-versioned-share-and-append-only-ledger)). |
+| `LG-017` | Disputes remain immutable provider evidence whose Entitlement, revenue, payout, notification, and recovery effects require approved policy ([platform §14](superpowers/specs/2026-07-25-platform-architecture-design.md#14-open-decisions-and-gates)). |
+| `LG-018` | Transactional email uses replaceable delivery attempts, provider/sender configuration, suppression, and monitoring; email failure cannot reverse the durable in-app notification or source action ([domain §15.1](superpowers/specs/2026-07-26-domain-data-state-design.md#151-durable-record-and-delivery-evidence)). |
+| `LG-019` | Load, cost, region, scaling, availability, backup, RPO, and RTO remain explicitly provisional; the split managed topology keeps services and providers independently replaceable until approval ([platform §§2–3](superpowers/specs/2026-07-25-platform-architecture-design.md#2-architecture-decision)). |
+| `LG-020` | Identity and Moderation retain immutable versioned agreement and content-rights evidence without inventing terms ([platform §14](superpowers/specs/2026-07-25-platform-architecture-design.md#14-open-decisions-and-gates)). |
+
+`LG-005`–`LG-007` and `LG-011`–`LG-013` do not introduce an additional architecture choice:
+they resolve regulatory/licensing findings, commercial-account prerequisites, published policy
+content, launch catalog data, and named support ownership. Their production blocking points remain
+open exactly as listed above. This audit records design containment only; it resolves no launch
+gate and is not production-readiness evidence.
 
 ## Fast-Follow Gates
 
