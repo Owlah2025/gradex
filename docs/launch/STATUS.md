@@ -1,10 +1,10 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-28 — advanced by user
-> Last repository reconciliation: 2026-07-28 — start-of-day, HEAD `1cce2c4`
-> Scheduled day: Day 6 — Architecture review and delivery foundation (`IN_PROGRESS`)
+> Current schedule date: 2026-07-29 — advanced by user
+> Last repository reconciliation: 2026-07-29 — start-of-day, HEAD `f39257b`
+> Scheduled day: Day 6 — Closed at `f39257b`; Day 7 (July 29) is active
 > Target public go-live: 2026-08-15
-> Days remaining after today: 18 calendar days
+> Days remaining after today: 17 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
@@ -67,8 +67,8 @@ without inventing an externally visible contract or trust-boundary decision.
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | **Approved** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) still in progress today |
-| M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
+| M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) still in progress today |
+| M2 — Authentication/RBAC vertical slice | July 29 | In progress | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | Not started | E2E, infrastructure, security, load, accessibility |
