@@ -58,16 +58,6 @@ Invitation: PENDING → ACCEPTED
                   └→ REVOKED
 ```
 
-### Session
-
-An authenticated browser Session is one stable, independently revocable family associated with an
-Account and the admitted `session_epoch`. Each opaque cookie rotation creates an immutable credential
-generation with separate credential and CSRF digests; it never overwrites the earlier generation.
-Only the current unsuperseded generation authenticates. The stable family holds authentication,
-activity, reauthentication, idle/absolute expiry, revocation, and reuse status, while immutable
-generation ancestry supports concurrency-safe stale-presentation classification and confirmed reuse
-response.
-
 `SUSPENDED` immediately blocks protected actions. Reactivation restores role-authorized access
 subject to independent Course/Entitlement states.
 
@@ -78,8 +68,13 @@ token representation is stored. Resend/attempt behavior is rate-limited and audi
 
 ### Session
 
-Represents a refreshable authenticated session that can be revoked. System design chooses access
-token/session mechanics but must satisfy immediate suspension and safe logout/rotation rules.
+An authenticated browser Session is one stable, independently revocable family associated with an
+Account and the admitted `session_epoch`. Each opaque cookie rotation creates an immutable credential
+generation with separate credential and CSRF digests; it never overwrites the earlier generation.
+Only the current unsuperseded generation authenticates. The stable family holds authentication,
+activity, reauthentication, idle/absolute expiry, revocation, and reuse status, while immutable
+generation ancestry supports concurrency-safe stale-presentation classification and confirmed reuse
+response.
 
 ## 3. Course and Learning Content
 
