@@ -1,10 +1,10 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-27 — advanced by user
-> Last repository reconciliation: 2026-07-27 — user-advanced schedule
-> Scheduled day: Day 5 — Closed; Day 6 (July 28) is next
+> Current schedule date: 2026-07-28 — advanced by user
+> Last repository reconciliation: 2026-07-28 — start-of-day, HEAD `1cce2c4`
+> Scheduled day: Day 6 — Architecture review and delivery foundation (`PLANNED`)
 > Target public go-live: 2026-08-15
-> Days remaining after today: 19 calendar days
+> Days remaining after today: 18 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
@@ -22,16 +22,18 @@ starts landing.
 
 ## Current Phase
 
-Day 5 is closed. The common HTTP/API/error/event, session, authorization, delivery, provider,
-abuse, reconciliation, and security-verification design is written, developer-approved, and has
-passed independent read-only review with no critical or high finding. Every `Must` and `Should` item
-is complete; the `Could` JSON examples were deferred by developer decision and are non-binding, so
-they are not carryover. There is no incomplete July 26 or July 27 work.
+Day 5 is closed with no carryover. Day 6 (July 28) is open and `PLANNED` — see
+[the July 28 record](daily/2026-07-28.md): approve the combined M1 architecture baseline, convert the
+July 25/26/27 designs into dependency-ordered feature slices, and build the delivery foundation. It
+is the last day before July 29 begins the Authentication/RBAC implementation, and the first day this
+project produces production application code rather than design.
 
-Day 6 (July 28) is next: approve the M1 architecture baseline, convert the July 25/26/27 designs into
-dependency-ordered feature slices, and build the delivery foundation. It is the last day before
-July 29 begins the Authentication/RBAC implementation, and the first day this project produces
-production application code rather than design.
+Start-of-day reconciliation confirmed the delivery foundation is genuinely absent rather than
+partially present: `.github/` contains no workflow, so CI has never run; `internal/config` validates
+only the video slice; logging is `gin.Default()` plus stdlib `log` with no request-ID middleware;
+`internal/httpapi/router.go` exposes no health or readiness route; and `internal/httpapi/middleware.go`
+still returns `{"error": "..."}` rather than the Problem Details envelope frozen in the July 27
+design. Only `0001_init` exists, applied through a hand-installed `golang-migrate` binary.
 
 Delivery roles changed on 2026-07-25 under
 [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
@@ -62,7 +64,7 @@ without inventing an externally visible contract or trust-boundary decision.
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress — all three designs approved, baseline approval outstanding | July 25 architecture approved at c9c2238; July 26 domain/data/state design approved at 2e4f3e1; July 27 API/security design developer-approved and independently reviewed at range `1a388cb..d6b4991`, verdict APPROVE, zero findings. Remaining: approve the combined baseline and convert it into dependency-ordered slices on July 28 |
+| M1 — Platform architecture baseline | July 28 | In progress — baseline assembled and reviewed, developer sign-off outstanding | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Builder verdict `RECOMMEND APPROVE`. Remaining: developer sign-off, then the dependency-ordered slice register |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -86,7 +88,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Developer review of the written July 27 design is pending | Developer | Read the approved design and accept or correct it before July 28 planning | July 28 | Developer acceptance recorded in the July 27 daily record |
+| M1 baseline awaits developer sign-off | Developer | Sign the [M1 baseline record](M1_ARCHITECTURE_BASELINE.md); a builder recommendation is not an approval | July 28 | Signed developer line in that record |
 | Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -178,10 +180,16 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Start July 28 (Day 6). First action: approve the M1 architecture baseline across the July 25, 26,
-and 27 designs, then convert them into dependency-ordered feature slices before building the
-delivery foundation — configuration validation, migrations, structured logging, request IDs,
-health/readiness endpoints, and CI.
+July 28 (Day 6) is started and `PLANNED`. First action: approve the combined M1 architecture baseline
+across the July 25, 26, and 27 designs and close the pending developer review of the July 27 written
+design, then convert the designs into dependency-ordered feature slices before building the delivery
+foundation — typed configuration validation, structured logging, request IDs, health/readiness
+endpoints, migrations, and CI.
+
+Three decisions are waiting on the developer before implementation starts: the Problem Details
+retrofit scope for the existing video handlers, whether the post-`6862db5` bootstrap-Admin and
+malware-scanning sections stand as written, and branch placement. See
+[Decisions Required](daily/2026-07-28.md#decisions-required).
 
 July 28 is the last day before Authentication/RBAC implementation begins on July 29, and the first
 day that produces production application code. The slice ordering decided here determines whether
