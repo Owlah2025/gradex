@@ -69,6 +69,9 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if !cfg.Environment().IsProduction() {
 		t.Error("expected production environment")
 	}
+	if cfg.RecentAuthWindow() != 10*time.Minute {
+		t.Errorf("recent-authentication default = %s, want 10m", cfg.RecentAuthWindow())
+	}
 }
 
 // Production origin rules. There is no environment in which an http production

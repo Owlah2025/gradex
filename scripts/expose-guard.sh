@@ -46,6 +46,10 @@ ALLOWLIST=(
   # The encoded Argon2id hash goes to the database driver. No password plaintext
   # is read here — that happens only in credential.go, which check 4 enforces.
   "internal/identity/bootstrap.go"
+  # The encoded replacement Argon2id hash goes to PostgreSQL when password,
+  # restriction state, Audit, and session rotation commit atomically. No
+  # password plaintext is read here.
+  "internal/identity/password_change.go"
   # The password-plaintext boundary itself. See check 4.
   "internal/identity/credential.go"
 )

@@ -15,6 +15,12 @@ import (
 
 const recentAuthWindow = 15 * time.Minute
 
+var adminPasswordChangePolicy = PasswordChangePolicy{
+	RecentAuthWindow: recentAuthWindow,
+	IdleExpiry:       30 * time.Minute,
+	AbsoluteExpiry:   12 * time.Hour,
+}
+
 // bootstrapWithSession creates the bootstrap Admin and an authenticated session
 // family at generation 1, which is the state link 5 will complete from.
 func bootstrapWithSession(t *testing.T, conn *pgx.Conn, ctx context.Context) (accountID, sessionID string) {
@@ -134,6 +140,270 @@ func TestPrepareSucceedsWithoutMutatingAnything(t *testing.T) {
 	})
 
 	assertNothingMutated(t, conn, ctx, accountID, sessionID)
+}
+
+// Bootstrap close condition 4: the password, restriction state, session
+// credential, CSRF token, expiry windows, and Audit evidence become one
+// committed fact.
+func TestCompletePasswordChangeAtomicallyClearsRestrictionAndRotatesSession(t *testing.T) {
+	freshSchema(t)
+	conn, ctx := connect(t)
+	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	result, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+		AccountID:           accountID,
+		SessionID:           sessionID,
+		PresentedGeneration: 1,
+		Kind:                BootstrapMandatoryChange,
+		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+	}, adminPasswordChangePolicy, now)
+	if err != nil {
+		t.Fatalf("completing password change: %v", err)
+	}
+
+	if result.SessionID != sessionID || result.Generation != 2 {
+		t.Fatalf("replacement = session %q generation %d, want %q generation 2",
+			result.SessionID, result.Generation, sessionID)
+	}
+	if result.Credential.IsEmpty() || result.CSRFToken.IsEmpty() {
+		t.Fatal("successful completion did not return both replacement browser credentials")
+	}
+	if result.Credential.Expose() == result.CSRFToken.Expose() {
+		t.Fatal("the replacement session and CSRF credentials are identical")
+	}
+	if !result.IdleExpiresAt.Equal(now.Add(30 * time.Minute)) {
+		t.Errorf("idle expiry = %s, want %s", result.IdleExpiresAt, now.Add(30*time.Minute))
+	}
+	if !result.AbsoluteExpiresAt.Equal(now.Add(12 * time.Hour)) {
+		t.Errorf("absolute expiry = %s, want %s", result.AbsoluteExpiresAt, now.Add(12*time.Hour))
+	}
+
+	var credentialState, storedHash string
+	if err := conn.QueryRow(ctx,
+		`SELECT state::text, password_hash
+		   FROM password_credentials WHERE account_id = $1::uuid`,
+		accountID,
+	).Scan(&credentialState, &storedHash); err != nil {
+		t.Fatalf("reading replaced password: %v", err)
+	}
+	if credentialState != "ACTIVE" {
+		t.Errorf("credential state = %q, want ACTIVE", credentialState)
+	}
+	ok, err := VerifyPassword(storedHash, "a-brand-new-launch-passphrase-9")
+	if err != nil {
+		t.Fatalf("verifying replacement password: %v", err)
+	}
+	if !ok {
+		t.Error("the replacement password does not verify")
+	}
+	oldOK, err := VerifyPassword(storedHash, "correct-horse-battery-staple-7")
+	if err != nil {
+		t.Fatalf("checking superseded password: %v", err)
+	}
+	if oldOK {
+		t.Error("the temporary bootstrap password still verifies")
+	}
+
+	var (
+		currentGeneration                  int
+		authenticatedAt, reauthenticatedAt time.Time
+		idleExpiresAt, absoluteExpiresAt   time.Time
+		oldState                           string
+		oldReplacedBy                      int
+		oldSupersededAt                    time.Time
+		newState, newCredential, newCSRF   string
+	)
+	if err := conn.QueryRow(ctx,
+		`SELECT current_generation, authenticated_at, reauthenticated_at,
+		        idle_expires_at, absolute_expires_at
+		   FROM sessions WHERE id = $1::uuid`,
+		sessionID,
+	).Scan(&currentGeneration, &authenticatedAt, &reauthenticatedAt,
+		&idleExpiresAt, &absoluteExpiresAt); err != nil {
+		t.Fatalf("reading re-established session: %v", err)
+	}
+	if currentGeneration != 2 {
+		t.Errorf("current generation = %d, want 2", currentGeneration)
+	}
+	for name, times := range map[string]struct {
+		got  time.Time
+		want time.Time
+	}{
+		"authenticated":   {authenticatedAt, now},
+		"reauthenticated": {reauthenticatedAt, now},
+		"idle expiry":     {idleExpiresAt, result.IdleExpiresAt},
+		"absolute expiry": {absoluteExpiresAt, result.AbsoluteExpiresAt},
+	} {
+		if !times.got.Equal(times.want) {
+			t.Errorf("%s at = %s, want %s", name, times.got, times.want)
+		}
+	}
+
+	if err := conn.QueryRow(ctx,
+		`SELECT state::text, replaced_by_generation, superseded_at
+		   FROM session_credentials
+		  WHERE session_id = $1::uuid AND generation = 1`,
+		sessionID,
+	).Scan(&oldState, &oldReplacedBy, &oldSupersededAt); err != nil {
+		t.Fatalf("reading superseded generation: %v", err)
+	}
+	if oldState != "SUPERSEDED" || oldReplacedBy != 2 || !oldSupersededAt.Equal(now) {
+		t.Errorf("old generation = %s replaced-by %d at %s, want SUPERSEDED/2/%s",
+			oldState, oldReplacedBy, oldSupersededAt, now)
+	}
+
+	if err := conn.QueryRow(ctx,
+		`SELECT state::text, credential_digest, csrf_digest
+		   FROM session_credentials
+		  WHERE session_id = $1::uuid AND generation = 2`,
+		sessionID,
+	).Scan(&newState, &newCredential, &newCSRF); err != nil {
+		t.Fatalf("reading replacement generation: %v", err)
+	}
+	if newState != "CURRENT" {
+		t.Errorf("replacement state = %q, want CURRENT", newState)
+	}
+	if newCredential != DigestToken(result.Credential.Expose()) {
+		t.Error("stored replacement credential digest does not match returned credential")
+	}
+	if newCSRF != DigestToken(result.CSRFToken.Expose()) {
+		t.Error("stored replacement CSRF digest does not match returned token")
+	}
+	if newCredential == result.Credential.Expose() || newCSRF == result.CSRFToken.Expose() {
+		t.Error("a plaintext replacement credential was stored")
+	}
+
+	var auditAction, auditRole, auditKind string
+	var auditGeneration int
+	if err := conn.QueryRow(ctx,
+		`SELECT action, actor_role, metadata->>'change_kind',
+		        (metadata->>'replacement_generation')::integer
+		   FROM audit_events
+		  WHERE target_id = $1 AND action = 'PASSWORD_CHANGED'`,
+		accountID,
+	).Scan(&auditAction, &auditRole, &auditKind, &auditGeneration); err != nil {
+		t.Fatalf("reading password-change Audit evidence: %v", err)
+	}
+	if auditAction != "PASSWORD_CHANGED" || auditRole != "ADMIN" ||
+		auditKind != "BOOTSTRAP_MANDATORY" || auditGeneration != 2 {
+		t.Errorf("Audit = %s/%s/%s/%d, want PASSWORD_CHANGED/ADMIN/BOOTSTRAP_MANDATORY/2",
+			auditAction, auditRole, auditKind, auditGeneration)
+	}
+}
+
+// If the final evidence write fails, none of the earlier statements may
+// survive. This proves atomicity at the farthest failure point in the command.
+func TestCompletePasswordChangeRollsBackWhenAuditCannotCommit(t *testing.T) {
+	freshSchema(t)
+	conn, ctx := connect(t)
+	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
+
+	if _, err := conn.Exec(ctx, `
+		CREATE FUNCTION reject_password_change_audit() RETURNS TRIGGER AS $$
+		BEGIN
+		    IF NEW.action = 'PASSWORD_CHANGED' THEN
+		        RAISE EXCEPTION 'injected Audit failure';
+		    END IF;
+		    RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+		CREATE TRIGGER reject_password_change_audit
+		    BEFORE INSERT ON audit_events
+		    FOR EACH ROW EXECUTE FUNCTION reject_password_change_audit();
+	`); err != nil {
+		t.Fatalf("installing Audit failure injection: %v", err)
+	}
+
+	_, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+		AccountID:           accountID,
+		SessionID:           sessionID,
+		PresentedGeneration: 1,
+		Kind:                BootstrapMandatoryChange,
+		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+	}, adminPasswordChangePolicy, time.Now().UTC())
+	if err == nil {
+		t.Fatal("password change succeeded despite the required Audit write failing")
+	}
+
+	assertNothingMutated(t, conn, ctx, accountID, sessionID)
+
+	var passwordChangeAudits int
+	if err := conn.QueryRow(ctx,
+		`SELECT count(*) FROM audit_events WHERE action = 'PASSWORD_CHANGED'`,
+	).Scan(&passwordChangeAudits); err != nil {
+		t.Fatalf("counting password-change Audit rows: %v", err)
+	}
+	if passwordChangeAudits != 0 {
+		t.Fatalf("failed change left %d password-change Audit rows", passwordChangeAudits)
+	}
+}
+
+func TestVoluntaryPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
+	freshSchema(t)
+	conn, ctx := connect(t)
+	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
+
+	var otherSessionID string
+	now := time.Now().UTC()
+	if err := conn.QueryRow(ctx,
+		`INSERT INTO sessions
+		   (account_id, admitted_epoch, authenticated_at, last_activity_at,
+		    idle_expires_at, absolute_expires_at)
+		 VALUES ($1::uuid, 1, $2, $2, $3, $4)
+		 RETURNING id::text`,
+		accountID, now, now.Add(time.Hour), now.Add(12*time.Hour),
+	).Scan(&otherSessionID); err != nil {
+		t.Fatalf("creating other session: %v", err)
+	}
+	otherCredential, err := NewSessionCredential()
+	if err != nil {
+		t.Fatalf("minting other credential: %v", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO session_credentials
+		   (session_id, generation, credential_digest, csrf_digest)
+		 VALUES ($1::uuid, 1, $2, $3)`,
+		otherSessionID, otherCredential.CredentialDigest, otherCredential.CSRFDigest,
+	); err != nil {
+		t.Fatalf("inserting other credential: %v", err)
+	}
+
+	result, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+		AccountID:           accountID,
+		SessionID:           sessionID,
+		PresentedGeneration: 1,
+		Kind:                VoluntaryChange,
+		CurrentPassword:     config.NewSecret("correct-horse-battery-staple-7"),
+		NewPassword:         config.NewSecret("a-voluntary-launch-passphrase-8"),
+	}, adminPasswordChangePolicy, now)
+	if err != nil {
+		t.Fatalf("completing voluntary change: %v", err)
+	}
+	if result.Generation != 2 {
+		t.Errorf("replacement generation = %d, want 2", result.Generation)
+	}
+
+	var currentState, otherState, otherReason string
+	if err := conn.QueryRow(ctx,
+		`SELECT state::text FROM sessions WHERE id = $1::uuid`,
+		sessionID,
+	).Scan(&currentState); err != nil {
+		t.Fatalf("reading current session: %v", err)
+	}
+	if err := conn.QueryRow(ctx,
+		`SELECT state::text, revocation_reason::text
+		   FROM sessions WHERE id = $1::uuid`,
+		otherSessionID,
+	).Scan(&otherState, &otherReason); err != nil {
+		t.Fatalf("reading other session: %v", err)
+	}
+	if currentState != "ACTIVE" {
+		t.Errorf("current family state = %q, want ACTIVE", currentState)
+	}
+	if otherState != "REVOKED" || otherReason != "PASSWORD_CHANGE" {
+		t.Errorf("other family = %s/%s, want REVOKED/PASSWORD_CHANGE", otherState, otherReason)
+	}
 }
 
 func TestWrongCurrentPasswordIsRefusedAndChangesNothing(t *testing.T) {
@@ -324,30 +594,43 @@ func TestWeakPasswordDoesNotMutateCredentialsOrSessions(t *testing.T) {
 	}
 }
 
-// A suspension landing between admission and this transaction must win.
-func TestSuspendedAccountCannotPrepareAPasswordChange(t *testing.T) {
-	freshSchema(t)
-	conn, ctx := connect(t)
-	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
+// An Account becoming inactive between admission and this transaction must
+// win, regardless of which inactive lifecycle state it entered.
+func TestInactiveAccountCannotPrepareAPasswordChange(t *testing.T) {
+	for _, status := range []string{"PENDING_VERIFICATION", "SUSPENDED"} {
+		t.Run(status, func(t *testing.T) {
+			freshSchema(t)
+			conn, ctx := connect(t)
+			accountID, sessionID := bootstrapWithSession(t, conn, ctx)
 
-	if _, err := conn.Exec(ctx,
-		`UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, accountID); err != nil {
-		t.Fatalf("suspending: %v", err)
+			if _, err := conn.Exec(ctx,
+				`UPDATE accounts
+				    SET status = $2::account_status,
+				        email_verified_at = CASE
+				            WHEN $2 = 'PENDING_VERIFICATION' THEN NULL
+				            ELSE email_verified_at
+				        END
+				  WHERE id = $1::uuid`,
+				accountID, status,
+			); err != nil {
+				t.Fatalf("making Account inactive: %v", err)
+			}
+
+			inTx(t, conn, ctx, func(tx pgx.Tx) {
+				_, err := PreparePasswordChange(ctx, tx, PasswordChangeRequest{
+					AccountID:           accountID,
+					SessionID:           sessionID,
+					PresentedGeneration: 1,
+					Kind:                BootstrapMandatoryChange,
+					NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+				}, recentAuthWindow, time.Now().UTC())
+
+				if !errors.Is(err, ErrSessionNotUsable) {
+					t.Fatalf("err = %v, want ErrSessionNotUsable", err)
+				}
+			})
+		})
 	}
-
-	inTx(t, conn, ctx, func(tx pgx.Tx) {
-		_, err := PreparePasswordChange(ctx, tx, PasswordChangeRequest{
-			AccountID:           accountID,
-			SessionID:           sessionID,
-			PresentedGeneration: 1,
-			Kind:                BootstrapMandatoryChange,
-			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
-		}, recentAuthWindow, time.Now().UTC())
-
-		if !errors.Is(err, ErrSessionNotUsable) {
-			t.Fatalf("err = %v, want ErrSessionNotUsable", err)
-		}
-	})
 }
 
 // A session admitted under a superseded Account epoch is not usable, which is

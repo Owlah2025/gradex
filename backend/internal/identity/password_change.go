@@ -51,6 +51,7 @@ type PasswordChangeRequest struct {
 type PreparedPasswordChange struct {
 	AccountID string
 	SessionID string
+	Role      Role
 
 	// NewPasswordHash is the encoded Argon2id hash. The plaintext it came from
 	// no longer exists by the time this is returned.
@@ -67,6 +68,301 @@ type PreparedPasswordChange struct {
 	// RevokeOtherSessions is the policy decision, computed here so link 5
 	// applies it rather than re-deciding it.
 	RevokeOtherSessions bool
+}
+
+// PasswordChangePolicy contains the security windows established when the
+// successfully changed credential re-establishes the current session family.
+//
+// The caller selects the role-specific values from typed configuration. Keeping
+// them explicit here prevents Identity from silently applying one universal
+// lifetime to Student, Instructor, and Admin sessions.
+type PasswordChangePolicy struct {
+	RecentAuthWindow time.Duration
+	IdleExpiry       time.Duration
+	AbsoluteExpiry   time.Duration
+}
+
+// PasswordChangeResult contains the only plaintext values produced by a
+// successful change. They are returned only after Commit, so the transport can
+// replace the host-only session cookie and in-memory CSRF token without ever
+// issuing credentials for a rolled-back mutation.
+type PasswordChangeResult struct {
+	SessionID         string
+	Generation        int
+	Credential        config.Secret
+	CSRFToken         config.Secret
+	IdleExpiresAt     time.Time
+	AbsoluteExpiresAt time.Time
+}
+
+type passwordChangeCommit struct {
+	prepared          PreparedPasswordChange
+	replacement       IssuedCredential
+	nextGeneration    int
+	now               time.Time
+	idleExpiresAt     time.Time
+	absoluteExpiresAt time.Time
+	targetRevision    int
+}
+
+// CompletePasswordChange is the atomic link between password replacement,
+// restriction removal, and session rotation.
+//
+// The transaction either commits all of these effects or none:
+//   - replace the Argon2id password hash and clear CHANGE_REQUIRED;
+//   - supersede the admitted session credential and create its replacement;
+//   - re-establish the current family under the role-specific expiry windows;
+//   - revoke every other family when the change policy requires it; and
+//   - append privileged Identity Audit evidence.
+//
+// No HTTP response or cookie may be written until this function returns
+// successfully. A returned credential therefore always names committed state.
+func CompletePasswordChange(
+	ctx context.Context,
+	conn *pgx.Conn,
+	req PasswordChangeRequest,
+	policy PasswordChangePolicy,
+	now time.Time,
+) (PasswordChangeResult, error) {
+	if err := validatePasswordChangePolicy(policy); err != nil {
+		return PasswordChangeResult{}, err
+	}
+	now = now.UTC()
+
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return PasswordChangeResult{}, fmt.Errorf("beginning password-change transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	prepared, err := PreparePasswordChange(ctx, tx, req, policy.RecentAuthWindow, now)
+	if err != nil {
+		return PasswordChangeResult{}, err
+	}
+
+	change, err := newPasswordChangeCommit(prepared, policy, now)
+	if err != nil {
+		return PasswordChangeResult{}, err
+	}
+	if err := applyPasswordChange(ctx, tx, &change); err != nil {
+		return PasswordChangeResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PasswordChangeResult{}, fmt.Errorf("committing password change: %w", err)
+	}
+	return change.result(), nil
+}
+
+func (c passwordChangeCommit) result() PasswordChangeResult {
+	return PasswordChangeResult{
+		SessionID:         c.prepared.SessionID,
+		Generation:        c.nextGeneration,
+		Credential:        c.replacement.Credential,
+		CSRFToken:         c.replacement.CSRFToken,
+		IdleExpiresAt:     c.idleExpiresAt,
+		AbsoluteExpiresAt: c.absoluteExpiresAt,
+	}
+}
+
+func newPasswordChangeCommit(
+	prepared PreparedPasswordChange,
+	policy PasswordChangePolicy,
+	now time.Time,
+) (passwordChangeCommit, error) {
+	replacement, err := NewSessionCredential()
+	if err != nil {
+		return passwordChangeCommit{}, fmt.Errorf("minting replacement session credential: %w", err)
+	}
+	return passwordChangeCommit{
+		prepared:          prepared,
+		replacement:       replacement,
+		nextGeneration:    prepared.CurrentGeneration + 1,
+		now:               now,
+		idleExpiresAt:     now.Add(policy.IdleExpiry),
+		absoluteExpiresAt: now.Add(policy.AbsoluteExpiry),
+	}, nil
+}
+
+func validatePasswordChangePolicy(policy PasswordChangePolicy) error {
+	if policy.IdleExpiry <= 0 {
+		return errors.New("password change requires a positive session idle expiry")
+	}
+	if policy.AbsoluteExpiry <= 0 {
+		return errors.New("password change requires a positive session absolute expiry")
+	}
+	if policy.IdleExpiry >= policy.AbsoluteExpiry {
+		return errors.New("session idle expiry must be shorter than absolute expiry")
+	}
+	if policy.RecentAuthWindow <= 0 || policy.RecentAuthWindow >= policy.IdleExpiry {
+		return errors.New("recent-authentication window must be positive and shorter than idle expiry")
+	}
+	return nil
+}
+
+func applyPasswordChange(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	if err := replacePasswordCredential(ctx, tx, change); err != nil {
+		return err
+	}
+	if err := rotateSessionCredential(ctx, tx, change); err != nil {
+		return err
+	}
+	if err := reestablishSession(ctx, tx, change); err != nil {
+		return err
+	}
+	if err := revokeOtherSessions(ctx, tx, change); err != nil {
+		return err
+	}
+	if err := advanceAccountRevision(ctx, tx, change); err != nil {
+		return err
+	}
+	return appendPasswordChangeAudit(ctx, tx, change)
+}
+
+func replacePasswordCredential(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	// This is an encoded Argon2id hash, not password plaintext. Exposing the
+	// wrapper here hands it directly to PostgreSQL and nowhere else.
+	hash := change.prepared.NewPasswordHash
+	tag, err := tx.Exec(ctx,
+		`UPDATE password_credentials
+		    SET password_hash = $2, state = 'ACTIVE', password_changed_at = $3
+		  WHERE account_id = $1::uuid`,
+		change.prepared.AccountID, hash.Expose(), change.now,
+	)
+	if err != nil {
+		return fmt.Errorf("replacing password credential: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("replacing password credential: expected one row, changed %d", tag.RowsAffected())
+	}
+	return nil
+}
+
+func rotateSessionCredential(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	tag, err := tx.Exec(ctx,
+		`UPDATE session_credentials
+		    SET state = 'SUPERSEDED', superseded_at = $4, replaced_by_generation = $3
+		  WHERE session_id = $1::uuid AND generation = $2 AND state = 'CURRENT'`,
+		change.prepared.SessionID,
+		change.prepared.CurrentGeneration,
+		change.nextGeneration,
+		change.now,
+	)
+	if err != nil {
+		return fmt.Errorf("superseding admitted session credential: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("superseding admitted session credential: expected one row, changed %d", tag.RowsAffected())
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO session_credentials
+		   (session_id, generation, credential_digest, csrf_digest, issued_at)
+		 VALUES ($1::uuid, $2, $3, $4, $5)`,
+		change.prepared.SessionID,
+		change.nextGeneration,
+		change.replacement.CredentialDigest,
+		change.replacement.CSRFDigest,
+		change.now,
+	); err != nil {
+		return fmt.Errorf("creating replacement session credential: %w", err)
+	}
+	return nil
+}
+
+func reestablishSession(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	tag, err := tx.Exec(ctx,
+		`UPDATE sessions
+		    SET current_generation = $2,
+		        authenticated_at = $3,
+		        reauthenticated_at = $3,
+		        last_activity_at = $3,
+		        idle_expires_at = $4,
+		        absolute_expires_at = $5,
+		        updated_at = $3
+		  WHERE id = $1::uuid`,
+		change.prepared.SessionID,
+		change.nextGeneration,
+		change.now,
+		change.idleExpiresAt,
+		change.absoluteExpiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("re-establishing current session: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("re-establishing current session: expected one row, changed %d", tag.RowsAffected())
+	}
+	return nil
+}
+
+func revokeOtherSessions(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	if !change.prepared.RevokeOtherSessions {
+		return nil
+	}
+	_, err := tx.Exec(ctx,
+		`UPDATE sessions
+		    SET state = 'REVOKED',
+		        revoked_at = $3,
+		        revocation_reason = 'PASSWORD_CHANGE',
+		        updated_at = $3
+		  WHERE account_id = $1::uuid
+		    AND id <> $2::uuid
+		    AND state = 'ACTIVE'`,
+		change.prepared.AccountID, change.prepared.SessionID, change.now,
+	)
+	if err != nil {
+		return fmt.Errorf("revoking other session families: %w", err)
+	}
+	return nil
+}
+
+func advanceAccountRevision(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	err := tx.QueryRow(ctx,
+		`UPDATE accounts
+		    SET revision = revision + 1, updated_at = $2
+		  WHERE id = $1::uuid
+		 RETURNING revision`,
+		change.prepared.AccountID, change.now,
+	).Scan(&change.targetRevision)
+	if err != nil {
+		return fmt.Errorf("advancing Account revision: %w", err)
+	}
+	return nil
+}
+
+func appendPasswordChangeAudit(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO audit_events
+		   (actor_account_id, actor_role, actor_descriptor, action, module,
+		    target_type, target_id, target_revision, reason, metadata)
+		 VALUES ($1::uuid, $2, $1::text, 'PASSWORD_CHANGED', 'IDENTITY_AND_ACCESS',
+		         'ACCOUNT', $1::text, $3, $4, jsonb_build_object(
+		             'change_kind', $5::text,
+		             'session_id', $6::text,
+		             'previous_generation', $7::integer,
+		             'replacement_generation', $8::integer,
+		             'other_sessions_revoked', $9::boolean
+		         ))`,
+		change.prepared.AccountID,
+		string(change.prepared.Role),
+		change.targetRevision,
+		passwordChangeAuditReason(change.prepared.Kind),
+		change.prepared.Kind.String(),
+		change.prepared.SessionID,
+		change.prepared.CurrentGeneration,
+		change.nextGeneration,
+		change.prepared.RevokeOtherSessions,
+	); err != nil {
+		return fmt.Errorf("recording password-change audit event: %w", err)
+	}
+	return nil
+}
+
+func passwordChangeAuditReason(kind PasswordChangeKind) string {
+	if kind == BootstrapMandatoryChange {
+		return "Completed the mandatory bootstrap Administrator password change"
+	}
+	return "Account changed its password after recent authentication"
 }
 
 // PreparePasswordChange locks the Account, its credential, and the Session, then
@@ -112,8 +408,8 @@ func PreparePasswordChange(
 
 	// Recheck status under the lock. A suspension that landed between the
 	// request being admitted and this transaction starting must win.
-	if status == StatusSuspended {
-		return PreparedPasswordChange{}, fmt.Errorf("%w: Account is suspended", ErrSessionNotUsable)
+	if status != StatusActive {
+		return PreparedPasswordChange{}, fmt.Errorf("%w: Account is not active", ErrSessionNotUsable)
 	}
 
 	var (
@@ -192,6 +488,7 @@ func PreparePasswordChange(
 	return PreparedPasswordChange{
 		AccountID:         req.AccountID,
 		SessionID:         session.ID,
+		Role:              role,
 		NewPasswordHash:   newHash,
 		CurrentGeneration: session.CurrentGeneration,
 		Kind:              req.Kind,

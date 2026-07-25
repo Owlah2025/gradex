@@ -257,7 +257,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 
 		sessionIdleExpiry:     p.duration("SESSION_IDLE_EXPIRY", 12*time.Hour),
 		sessionAbsoluteExpiry: p.duration("SESSION_ABSOLUTE_EXPIRY", 720*time.Hour),
-		recentAuthWindow:      p.duration("RECENT_AUTH_WINDOW", 15*time.Minute),
+		recentAuthWindow:      p.duration("RECENT_AUTH_WINDOW", 10*time.Minute),
 
 		redisAddr: p.str("REDIS_ADDR", ""),
 
