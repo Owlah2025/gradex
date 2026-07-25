@@ -115,7 +115,7 @@ Carried forward into the slice register and the Identity slice, in the developer
    HTTP endpoint, ordinary worker, or schema migration.
 
 Their dependency ordering and required tests are fixed in
-[SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac-july-29), which sequences them so July 29 cannot
+[SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac), which sequences them so July 29 cannot
 implement Authentication/RBAC without resolving them first.
 
 ## Sign-off

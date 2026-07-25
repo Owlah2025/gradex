@@ -22,17 +22,19 @@ rather than absorbed as improvisation during implementation.
 | ID | Slice | Day | Primary modules | Depends on |
 |---|---|---|---|---|
 | S0 | Delivery foundation | Jul 28 | — (cross-cutting) | — |
-| S1 | Identity, sessions, and RBAC | Jul 29 | Identity and Access, Audit | S0 |
-| S2 | Course authoring and review | Jul 30 | Catalog and Authoring, Audit | S1 |
-| S3 | Public catalog, search, and shell | Aug 1 | Catalog and Authoring | S2 |
-| S4 | Media pipeline, delivery, and Entitlement evaluation | Aug 2 | Media and Assets, Entitlements | S1, S2 |
-| S5 | Protected learning | Aug 3 | Learning, Moderation | S3, S4 |
-| S6 | Orders, checkout, and coupons | Aug 4 | Commerce | S2, S4 |
-| S7 | Payments, entitlement grants, and refunds | Aug 5 | Commerce, Entitlements, Audit | S6 |
-| S8 | Instructor and Admin operations | Aug 6 | Reporting and Payouts, Moderation, Audit | S5, S7 |
+| S1A | Bootstrap and Admin security core | Jul 29 | Identity and Access, Audit | S0 |
+| S1B | Student authentication and session lifecycle | Jul 30 | Identity and Access, Audit | S1A |
+| S1C | Staff lifecycle, enforcement, and authorization matrix | Jul 31 | Identity and Access, Audit | S1B |
+| S2 | Course authoring and review | Aug 1 | Catalog and Authoring, Audit | S1C |
+| S3 | Public catalog, search, and shell | **TBD** | Catalog and Authoring | S2 |
+| S4 | Media pipeline, delivery, and Entitlement evaluation | **TBD** | Media and Assets, Entitlements | S1C, S2 |
+| S5 | Protected learning | **TBD** | Learning, Moderation | S3, S4 |
+| S6 | Orders, checkout, and coupons | **TBD** | Commerce | S2, S4 |
+| S7 | Payments, entitlement grants, and refunds | **TBD** | Commerce, Entitlements, Audit | S6 |
+| S8 | Instructor and Admin operations | **TBD** | Reporting and Payouts, Moderation, Audit | S5, S7 |
 | S9 | Office hours and notifications | Aug 8 | Office Hours, Notifications | S4, S5 |
 | S10 | Revenue, payouts, compliance, and recovery | Aug 9 | Reporting and Payouts | S7, S8 |
-| S11 | End-to-end integration | Aug 10 | all | S1–S10 |
+| S11 | End-to-end integration | Aug 10 | all | S1A–S10 |
 | S12 | Production infrastructure and observability | Aug 11 | operational | S11 |
 | S13 | Security and quality gate | Aug 12 | all | S12 |
 | S14 | Staging acceptance and gate audit | Aug 13 | all | S13 |
@@ -40,6 +42,12 @@ rather than absorbed as improvisation during implementation.
 | S16 | Public go/no-go | Aug 15 | — | S15 |
 
 Every `Depends on` entry points backwards. No forward dependency remains.
+
+**S3–S8 carry `TBD` days pending a developer decision (recorded 2026-07-29).** The S1A/S1B/S1C split
+moved S2 to August 1, which was S3's day; that displacement cascades through S8, whose next free slot
+is the protected August 7. Dependency *order* is unaffected — only the calendar mapping is open. These
+stay `TBD` rather than being shifted one day each, because silently absorbing the cascade into
+August 7 would spend the last protected recovery day without the developer deciding to spend it.
 
 ## 3. Ordering decisions that removed forward dependencies
 
@@ -101,14 +109,34 @@ migration automation, CI, and the documentation guard. Detailed tasks and accept
 Everything after S0 assumes these rails exist. No later slice re-invents configuration loading,
 logging, error shape, or CI.
 
-## 5. S1 — Identity, sessions, and RBAC (July 29)
+## 5. S1 — Identity, sessions, and RBAC
 
 The first product slice, and the one carrying the four M1 obligations.
 
-### 5.1 Bootstrap chain — fixed order
+**Split three ways on 2026-07-29 by developer decision.** S1 as originally scoped did not fit one
+8–10 hour envelope, so [PLAN.md §2](PLAN.md#daily-capacity) required splitting it before
+implementation rather than compressing its failure paths or quality evidence:
 
-This order is mandatory. July 29 cannot implement Authentication/RBAC without resolving each link,
-and no link may be started before the one above it is complete.
+- **S1A (July 29)** — bootstrap and Admin security core: the six-link chain in §5.1 and its five
+  close conditions in §5.2.
+- **S1B (July 30)** — Student authentication and session lifecycle (§5.3).
+- **S1C (July 31)** — staff invitations, suspension enforcement, the full authorization matrix, and
+  the S1 integration review (§5.4).
+
+S2 moved to August 1. July 31 was a protected recovery day and now carries S1C, so **August 7 is the
+next protected recovery point**. No MVP capability left the slice; only its calendar placement
+changed. Recorded in [the July 29 record](daily/2026-07-29.md).
+
+**S1 does not close until S1C closes.** S1A and S1B each close on their own acceptance evidence and
+reviewer verdict, but the complete S1 close conditions — the full authorization matrix and
+enforcement proof — are S1C's. No S2 work begins before S1C closes.
+
+### 5.1 Bootstrap chain — fixed order (S1A)
+
+This order is mandatory. Authentication/RBAC cannot be implemented without resolving each link, and
+no link may be started before the one above it is complete.
+
+Link 1 is complete at `90f92ec`.
 
 1. **Bootstrap schema/state.** An explicit Identity-owned constrained state for
    `PASSWORD_CHANGE_REQUIRED` — *not* an overload of `accounts.status`, which already reads `ACTIVE`
@@ -128,7 +156,7 @@ and no link may be started before the one above it is complete.
 6. **Normal Admin authorization.** The Account becomes an ordinary Admin. Further Admins come only
    through the approved invitation workflow.
 
-### 5.2 Bootstrap tests — required for S1 to close
+### 5.2 Bootstrap tests — required for S1A to close
 
 | # | Proves |
 |---|---|
@@ -141,12 +169,33 @@ and no link may be started before the one above it is complete.
 Test 3 is the one most likely to pass vacuously — it must assert against real protected endpoints,
 not against a policy function in isolation.
 
-### 5.3 Rest of S1
+**Its assertion is staged across the split, developer-approved 2026-07-29.** The full protected
+Identity and staff surface does not exist yet at S1A close, so:
+
+- **At S1A close**, test 3 asserts against actual protected routes that already exist — the video and
+  Instructor routes are acceptable *provided they exercise the real middleware and policy chain*, not
+  a stub or an isolated policy function. This is recorded as **initial end-to-end denial evidence**.
+- **At S1B and S1C close**, the assertion is rerun and expanded across the complete protected Identity
+  and staff surface. **S1C's run is the final full-surface proof.**
+
+S1A's result must never be recorded as the final proof. It demonstrates that the deny path works
+through the real chain; it does not demonstrate coverage.
+
+### 5.3 Student authentication and session lifecycle (S1B)
 
 Student registration with mandatory email verification; email/password login; rotating refresh
-sessions with family-reuse detection; password reset; logout and revocation; staff invitations with
-initial-password setup; immediate suspension enforcement across protected actions; non-enumerating
-responses per the §5 privacy boundary; and responsive Arabic/English authentication screens.
+sessions with family-reuse detection; password reset and recovery; logout and revocation;
+non-enumerating responses per the §5 privacy boundary; and the responsive Arabic/English Student
+authentication screens.
+
+### 5.4 Staff lifecycle, enforcement, and authorization matrix (S1C)
+
+Admin staff invitations with initial-password setup for Instructors and Admins and their screens;
+immediate suspension enforcement across new and existing sessions; the full role and ownership
+authorization matrix proven across every protected route that exists; the expanded full-surface rerun
+of bootstrap test 3; and the S1 integration review spanning S1A, S1B, and S1C together.
+
+This slice carries S1's complete close conditions. S2 does not start until it closes.
 
 ## 6. MVP coverage map
 

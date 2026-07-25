@@ -248,23 +248,62 @@ duplicate, replayed, delayed, and reordered callbacks have defined behavior.
 **Exit evidence:** architecture baseline approved; API, worker, frontend, PostgreSQL, and Redis run
 in the supported environment; CI exercises backend tests, frontend lint/typecheck, and builds.
 
-#### Wednesday, July 29 — Authentication and RBAC vertical slice
+#### Wednesday, July 29 — Bootstrap and Admin security core (S1A)
 
-**Outcome:** Deliver production-shaped identity and backend access control.
+> Replanned 2026-07-29: the original single-day Authentication/RBAC slice did not fit the §2
+> envelope, so it was split into S1A (July 29), S1B (July 30), and S1C (July 31) before
+> implementation, and Course authoring moved to August 1. No MVP capability was removed. See
+> [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac).
 
-- Implement Student registration/verification, login, refresh rotation, logout, recovery, and safe
-  non-enumerating responses.
-- Implement staff invitations and secure bootstrap Admin operation.
-- Enforce role, ownership, account status, and immediate suspension.
-- Complete responsive Arabic/English authentication screens.
+**Outcome:** Deliver the secure bootstrap Admin operation and deny-by-default backend authorization.
 
-**Exit evidence:** authentication acceptance tests pass end-to-end; direct API calls cannot bypass
-role/ownership; suspended accounts immediately lose protected access; critical/high review findings
-are resolved.
+- Implement the six-link bootstrap chain in fixed order, from schema/state through normal Admin
+  authorization.
+- Prove all five bootstrap close conditions, including the deny path against real protected
+  endpoints.
+- Audit the July 29 gate deadline: every architecture-affecting open gate has a documented
+  configurable/provider boundary.
+
+**Exit evidence:** all five bootstrap tests pass; a second bootstrap cannot mint a second Admin; the
+plaintext bootstrap password never reaches storage, logs, argv, or telemetry; critical/high review
+findings are resolved.
+
+#### Thursday, July 30 — Student authentication and session lifecycle (S1B)
+
+**Outcome:** Let a Student register, verify, sign in, and hold a safely rotating session.
+
+- Implement Student registration with mandatory email verification and email/password login.
+- Implement rotating refresh sessions with family-reuse detection, logout, and revocation.
+- Implement password reset and recovery with safe non-enumerating responses per the §5 privacy
+  boundary.
+- Complete the responsive Arabic/English Student authentication screens.
+
+**Exit evidence:** the Student authentication journey passes end-to-end; a replayed refresh token
+kills its family; recovery and registration responses do not disclose whether an address exists.
+
+#### Friday, July 31 — Staff lifecycle, enforcement, and authorization matrix (S1C)
+
+**Outcome:** Complete S1 by closing the staff and enforcement half of identity.
+
+- Implement Admin staff invitations and initial-password setup for Instructors and Admins, with
+  their screens.
+- Implement immediate suspension enforcement across new *and* existing sessions.
+- Prove the full role/ownership authorization matrix across every protected route that exists.
+- Rerun and expand bootstrap test 3 against the complete protected Identity and staff surface.
+- Run the S1 integration review across S1A, S1B, and S1C together.
+
+**Exit evidence:** direct API calls cannot bypass role or ownership anywhere in the matrix; a
+suspended account loses protected access immediately rather than at next token expiry; S1's complete
+close conditions are satisfied before any S2 work begins.
+
+> Replanned 2026-07-29: July 31 was a protected recovery/spillover day and now carries S1C. That
+> buffer is spent, leaving **August 7 as the next protected recovery point**. Any slip in S1A, S1B,
+> S1C, or S2 must travel to August 7 to find slack. Recorded in
+> [the July 29 record](daily/2026-07-29.md).
 
 ### Week 2 — Product and Revenue Journey
 
-#### Thursday, July 30 — Course authoring and review
+#### Saturday, August 1 — Course authoring and review
 
 **Outcome:** Let an Instructor create a Course and an Admin safely publish it.
 
@@ -278,11 +317,17 @@ are resolved.
 **Exit evidence:** Instructors cannot publish or change prices; draft content does not leak; the
 live revision remains stable until replacement approval.
 
-#### Friday, July 31 — Protected recovery/spillover
+> **Unresolved downstream conflict, recorded 2026-07-29.** August 1 previously carried S3 (catalog,
+> search, and public shell). Moving S2 here leaves S3 without a day, and the same displacement
+> cascades through S4–S8, whose next free slot is the protected August 7. This is a scheduling
+> decision for the developer and has not been resolved unilaterally. Until it is,
+> [SLICES.md §2](SLICES.md#2-slice-order) carries `TBD` days for S3 onward rather than dates that
+> would misrepresent the forecast.
 
-No new feature scope. Finish incomplete Week 2 `Must` work only; otherwise preserve recovery.
+#### Date TBD — Catalog, search, and public experience
 
-#### Saturday, August 1 — Catalog, search, and public experience
+> Displaced by the 2026-07-29 replan; awaiting the developer's downstream scheduling decision. Its
+> scope and exit evidence are unchanged.
 
 **Outcome:** Let Students find and understand purchasable Courses and Sections.
 

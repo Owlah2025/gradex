@@ -1,8 +1,8 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-29 — advanced by user
-> Last repository reconciliation: 2026-07-29 — start-of-day, HEAD `f39257b`
-> Scheduled day: Day 6 — Closed at `f39257b`; Day 7 (July 29) is active
+> Last repository reconciliation: 2026-07-29 — start-of-day, HEAD `90f92ec`
+> Scheduled day: Day 7 — Authentication and RBAC, S1A bootstrap/Admin security core, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 17 calendar days
 > Launch confidence: **Red**
@@ -12,31 +12,47 @@ platform architecture, and domain/data/state design are approved, but API/securi
 implementation are not complete, the operating envelope remains provisional, and the founder
 deliberately deferred all external-owner outreach to August 6. All 20 required entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
-This compressed response window can move the readiness-gated August 15 launch. The complete
-July 27 API/security/integration design is developer-approved, has passed independent read-only
-review at exact range `1a388cb..d6b4991` with no critical or high finding, and Day 5 is closed.
-Confidence stays Red because it is driven by the 20 open launch gates and the absence of any
-production implementation, not by design-review state. Three consecutive design days have now closed
-on schedule with no carryover, which is the evidence that would move confidence once implementation
-starts landing.
+This compressed response window can move the readiness-gated August 15 launch. Confidence stays Red
+because it is driven by the 20 open launch gates and by how little of the product is implemented —
+not by design-review state, which is sound. Four consecutive days have now closed on schedule with no
+carryover, and the delivery foundation plus the first identity schema have landed as production code.
+That is the evidence that moves confidence, but it needs several more days of accumulation before the
+forecast changes.
 
 ## Current Phase
 
-Day 5 is closed with no carryover. Day 6 (July 28) is open and `PLANNED` — see
-[the July 28 record](daily/2026-07-28.md): approve the combined M1 architecture baseline, convert the
-July 25/26/27 designs into dependency-ordered feature slices, and build the delivery foundation. It
-is the last day before July 29 begins the Authentication/RBAC implementation, and the first day this
-project produces production application code rather than design.
+Day 6 (July 28) is `CLOSED` at `f39257b` with no carryover; closure was recorded in `9bbdd49`. Day 7
+(July 29) is open and `IN_PROGRESS` — see [the July 29 record](daily/2026-07-29.md): S1A, the
+six-link bootstrap chain, which must be worked in fixed order.
 
-Every Day 6 gap is now closed. The delivery foundation exists and is verified on hosted
-infrastructure rather than only on the developer's workstation: typed two-layer configuration with
-fail-closed validation, structured logging behind a closed field allowlist, per-attempt trusted
-request IDs, the RFC 9457 Problem Details envelope across all of `/api/v1`, liveness and readiness
-probes, repository-owned migrations under `cmd/migrate`, and a four-job CI pipeline with a
-documentation guard and a secret-exposure guard.
+**S1 was split three ways on 2026-07-29 by developer decision.** It did not fit one 8–10 hour
+envelope, so [PLAN.md §2](PLAN.md#daily-capacity) required splitting before implementation rather
+than compressing its failure paths:
 
-This is the first day the project produced production application code. Nine commits land it, from
-`4d4bbe8` through `7bd4d84`.
+| Day | Slice | Contents |
+|---|---|---|
+| Jul 29 | S1A — bootstrap and Admin security core | Six-link chain, five close conditions, gate audit |
+| Jul 30 | S1B — Student authentication and session lifecycle | Registration, verification, login, refresh rotation, recovery, Student auth screens |
+| Jul 31 | S1C — staff lifecycle and enforcement | Invitations, suspension enforcement, full authorization matrix, S1 integration review |
+| Aug 1 | S2 — Course authoring and review | Moved from July 30 |
+
+No MVP capability left the slice. **S1 does not close until S1C closes**, and no S2 work begins
+before it does. July 31 was a protected recovery day and now carries S1C, so **August 7 is the next
+protected recovery point**.
+
+The Day 6 delivery foundation is verified on hosted infrastructure rather than only on the
+developer's workstation: typed two-layer configuration with fail-closed validation, structured
+logging behind a closed field allowlist, per-attempt trusted request IDs, the RFC 9457 Problem
+Details envelope across all of `/api/v1`, liveness and readiness probes, repository-owned migrations
+under `cmd/migrate`, and a four-job CI pipeline with a documentation guard and a secret-exposure
+guard. Nine commits landed it, from `4d4bbe8` through `7bd4d84`.
+
+Day 7 has landed link 1 of the bootstrap chain at `90f92ec`: migration `0002_identity_bootstrap`
+adds `accounts`, `password_credentials`, and `bootstrap_operations`. Both M1 obligations are database
+guarantees rather than conventions — `CHANGE_REQUIRED` is a `credential_state` on
+`password_credentials` and does not overload `accounts.status`, and the bootstrap singleton is a
+constrained primary key rather than a reuse of shared `idempotency_records`. Links 2 through 6 and
+the five bootstrap close-condition tests are not started.
 
 Delivery roles changed on 2026-07-25 under
 [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
@@ -58,17 +74,17 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Complete the independent-review and written-artifact-review evidence for the approved MVP
-API/security/integration design, then let July 28 create dependency-ordered implementation slices
-without inventing an externally visible contract or trust-boundary decision.
+Deliver the secure bootstrap Administrator through its complete six-link chain, with deny-by-default
+backend authorization proven against real protected endpoints rather than against a policy function
+in isolation.
 
 ## Milestones
 
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) still in progress today |
-| M2 — Authentication/RBAC vertical slice | July 29 | In progress | Acceptance tests and reviewed implementation |
+| M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
+| M2 — Authentication/RBAC vertical slice | July 29–31 | In progress | Split into S1A (Jul 29, bootstrap/Admin security core), S1B (Jul 30, Student authentication), and S1C (Jul 31, staff lifecycle and enforcement). Link 1 landed at `90f92ec`; links 2–6 and the five bootstrap tests remain for S1A. M2 completes at S1C close |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | Not started | E2E, infrastructure, security, load, accessibility |
@@ -78,9 +94,10 @@ without inventing an externally visible contract or trust-boundary decision.
 
 ## Carryover
 
-No incomplete July 26 or July 27 `Must` or `Should` work. The July 27 `Could` item — non-binding JSON
-examples — was deferred by developer decision; the contracts are binding as written, so deferring
-illustration removes no acceptance evidence and it is not carryover.
+No incomplete July 28 `Must`, `Should`, or `Could` work; Day 6 closed complete. No incomplete July 26
+or July 27 work either. The July 27 `Could` item — non-binding JSON examples — was deferred by
+developer decision; the contracts are binding as written, so deferring illustration removes no
+acceptance evidence and it is not carryover.
 
 External-gate contact confirmation and outreach are deliberately scheduled for August 6 by founder
 decision and remain tracked risks rather than hidden carryover. The untracked financial spreadsheet
@@ -91,7 +108,9 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1 carries four bootstrap obligations that no earlier slice covers | Claude | Implement the fixed S1 bootstrap chain and its five required tests | July 29 | [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac-july-29) chain complete with all five tests passing |
+| S1 carries four bootstrap obligations that no earlier slice covers | Claude | Implement the fixed bootstrap chain and its five required tests (S1A) | July 29 | [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac) chain complete with all five tests passing |
+| Splitting S1 consumes the July 31 protected recovery day | Developer + Claude | Hold S1A, S1B, and S1C to their days; August 7 is the next protected recovery point and any slip must travel there to find slack | July 31 | All three sub-slices close on their scheduled day with reviewer verdicts |
+| S2 moving to August 1 displaces S3, cascading through S8 | Developer | Decide the downstream calendar; S3–S8 are `TBD` in SLICES.md until then | July 30 | Dated S3–S8 assignments that do not silently consume August 7 |
 | Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -108,6 +127,14 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Start-of-day July 29 reconciliation at `90f92ec`: `gofmt` clean, `go build ./...`, `go vet ./...`,
+  and `go test ./...` all pass on the default tags. `scripts/docs-guard.sh` passes across 107
+  Markdown files. The working tree holds only the two user-owned untracked files.
+- Migration `0002_identity_bootstrap` was exercised against real PostgreSQL: every constraint refused
+  what it claims to refuse, including a second bootstrap attempt, a non-Argon2id password hash, a
+  role change, a mixed-case normalized email, and a verified timestamp on a `PENDING_VERIFICATION`
+  Account. The `up`/`down` lifecycle covers both migrations and CI's schema verification moved to
+  version 2.
 - Hosted CI on `feature/002-authentication-rbac` demonstrated green → fail → green: run
   `30169408259` at `7f942cd` all green; run `30169530354` at `aae5039` failed **only** the Guards
   job at the Documentation guard step while the other three stayed green; run `30169635035` at
@@ -181,7 +208,9 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Decisions in Force
 
-- Six workdays per week, with July 24, July 31, and August 7 protected for recovery/spillover.
+- Six workdays per week. July 24 and August 7 are protected for recovery/spillover. July 31 was
+  protected until the 2026-07-29 S1 split reassigned it to S1C, leaving August 7 as the next
+  protected recovery point.
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
 - August 15 is readiness-gated.
@@ -209,12 +238,17 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-All Day 6 `Must`, `Should`, and `Could` work is complete with recorded evidence, and the independent
-review is resolved. Formal closure awaits the developer's `Close the day` command.
+Day 7 is active on S1A in [SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac). Link 1 of the
+fixed bootstrap chain — bootstrap schema and state — is complete at `90f92ec`.
 
-Next: July 29 (Day 7) — the Authentication/RBAC vertical slice, S1 in
-[SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac-july-29). First action is the fixed bootstrap
-chain, which must be worked in order and cannot be started out of sequence: bootstrap schema/state →
-controlled bootstrap command → restricted-session principal/policy → password-change completion →
-session rotation and restriction removal → normal Admin authorization. Its five required tests are
-close conditions, not optional coverage.
+Next action is link 2, the controlled one-off bootstrap command under its own `cmd/` entrypoint: not
+an HTTP endpoint, not an ordinary worker task, not a schema migration. Links 3 through 6 follow in
+order — restricted-session principal/policy → password-change completion → session rotation and
+restriction removal → normal Admin authorization — and no link may start before the one above it is
+complete. The five bootstrap tests are close conditions, not optional coverage.
+
+Today also carries the July 29 gate deadline from [PLAN.md §7](PLAN.md#7-gate-deadlines): every
+architecture-affecting open gate needs a documented configurable/provider boundary.
+[SLICES.md §7](SLICES.md#7-gate-dependent-slices) already covers `LG-014`, `LG-010`, `LG-018`, and
+the `LG-001`/legal pair; `LG-019` and the remaining architecture-affecting entries still need
+auditing and linking.
