@@ -42,6 +42,33 @@ func (e Environment) Valid() bool {
 
 func (e Environment) IsProduction() bool { return e == EnvProduction }
 
+// ServiceRole is which Gradex process this is. Readiness policy differs by
+// role, so it is a typed value rather than a set of independent feature flags
+// that could be combined into a state nobody designed.
+type ServiceRole string
+
+const (
+	RoleAPI    ServiceRole = "api"
+	RoleWorker ServiceRole = "worker"
+)
+
+func (r ServiceRole) Valid() bool {
+	return r == RoleAPI || r == RoleWorker
+}
+
+// RequiresRedis reports whether this role cannot serve its responsibilities
+// without Redis.
+//
+// Both roles require it today: the worker consumes from it, and the API
+// enqueues synchronously during upload completion and retranscode, so losing
+// Redis makes those commands fail rather than queue.
+//
+// This flips for the API after the PostgreSQL outbox cutover (domain §7.3,
+// §§21-24), when command admission becomes durable in PostgreSQL alone and
+// Redis becomes a dispatch detail. The decision lives here, attached to the
+// role, so that change is one edit with one obvious meaning.
+func (r ServiceRole) RequiresRedis() bool { return true }
+
 // Capability records whether a gated provider surface is available, and when
 // it is not, a safe reason suitable for logs and readiness output.
 //
@@ -76,6 +103,8 @@ type Config struct {
 	corsAllowCredentials bool
 	trustedProxies       []string
 	logLevel             string
+	serviceRole          ServiceRole
+	readinessTimeout     time.Duration
 
 	httpReadTimeout  time.Duration
 	httpWriteTimeout time.Duration
@@ -134,6 +163,9 @@ func (c *Config) TrustedProxies() []string {
 }
 
 func (c *Config) LogLevel() string { return c.logLevel }
+
+func (c *Config) ServiceRole() ServiceRole        { return c.serviceRole }
+func (c *Config) ReadinessTimeout() time.Duration { return c.readinessTimeout }
 
 func (c *Config) HTTPReadTimeout() time.Duration  { return c.httpReadTimeout }
 func (c *Config) HTTPWriteTimeout() time.Duration { return c.httpWriteTimeout }
@@ -206,6 +238,8 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		corsAllowCredentials: p.boolean("CORS_ALLOW_CREDENTIALS", false),
 		trustedProxies:       p.list("TRUSTED_PROXIES"),
 		logLevel:             p.str("LOG_LEVEL", "info"),
+		serviceRole:          ServiceRole(p.str("SERVICE_ROLE", string(RoleAPI))),
+		readinessTimeout:     p.duration("READINESS_TIMEOUT", 2*time.Second),
 
 		httpReadTimeout:  p.duration("HTTP_READ_TIMEOUT", 15*time.Second),
 		httpWriteTimeout: p.duration("HTTP_WRITE_TIMEOUT", 30*time.Second),
@@ -342,6 +376,7 @@ func (c *Config) validate(p *parser) {
 		{"SHUTDOWN_TIMEOUT", c.shutdownTimeout},
 		{"SESSION_IDLE_EXPIRY", c.sessionIdleExpiry},
 		{"SESSION_ABSOLUTE_EXPIRY", c.sessionAbsoluteExpiry},
+		{"READINESS_TIMEOUT", c.readinessTimeout},
 		{"UPLOAD_URL_EXPIRY", c.uploadURLExpiry},
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
 	} {
@@ -366,6 +401,10 @@ func (c *Config) validate(p *parser) {
 	case "debug", "info", "warn", "error":
 	default:
 		p.errf("LOG_LEVEL must be one of debug, info, warn, error; got %q", c.logLevel)
+	}
+
+	if !c.serviceRole.Valid() {
+		p.errf("SERVICE_ROLE must be one of api, worker; got %q", c.serviceRole)
 	}
 
 	// Credentialed CORS with a wildcard origin is the other named invalid

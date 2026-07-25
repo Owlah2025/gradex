@@ -94,6 +94,9 @@ type RequestEvent struct {
 	DurationMillis  int64
 	ResponseSize    int
 	SafeErrorCode   string
+	// Routine marks a high-frequency endpoint whose successful attempts are
+	// not worth an info line. Failures ignore it.
+	Routine bool
 }
 
 // RequestCompleted logs one finished request at a level chosen from its
@@ -120,9 +123,35 @@ func (l *Logger) RequestCompleted(ev RequestEvent) {
 		l.slog.Error("http_request", attrs...)
 	case ev.Status >= 400:
 		l.slog.Warn("http_request", attrs...)
+	case ev.Routine:
+		// Probes run every few seconds for the life of the process; logging
+		// each success at info level would bury real traffic.
+		l.slog.Debug("http_request", attrs...)
 	default:
 		l.slog.Info("http_request", attrs...)
 	}
+}
+
+// DependencyEvent is one failed readiness check.
+//
+// The error is recorded here and nowhere else: readiness responses are
+// unauthenticated, so the DSN, host, database name, SQL text, or migration
+// state a check failure carries belongs only in the protected log.
+type DependencyEvent struct {
+	RequestID string
+	Check     string
+	Err       error
+}
+
+func (l *Logger) DependencyUnready(ev DependencyEvent) {
+	attrs := []any{
+		slog.String("request_id", Sanitize(ev.RequestID)),
+		slog.String("check", Sanitize(ev.Check)),
+	}
+	if ev.Err != nil {
+		attrs = append(attrs, slog.String("error", Sanitize(ev.Err.Error())))
+	}
+	l.slog.Warn("dependency_unready", attrs...)
 }
 
 // PanicEvent is a recovered panic.

@@ -1,10 +1,7 @@
 -include .env
 export
 
-MIGRATE := $(shell go env GOPATH)/bin/migrate
-MIGRATIONS_DIR := internal/db/migrations
-
-.PHONY: up down migrate-up migrate-down migrate-force run-api run-worker test test-integration seed smoke build
+.PHONY: up down migrate-up migrate-down migrate-version run-api run-worker test test-integration seed smoke build
 
 up:
 	docker compose up -d
@@ -12,14 +9,16 @@ up:
 down:
 	docker compose down
 
+# Migrations run through the repository's own command, so no globally
+# installed migrate binary is required. See cmd/migrate.
 migrate-up:
-	$(MIGRATE) -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" up
+	go run ./cmd/migrate up
 
 migrate-down:
-	$(MIGRATE) -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" down 1
+	go run ./cmd/migrate down 1
 
-migrate-force:
-	$(MIGRATE) -path $(MIGRATIONS_DIR) -database "$(DATABASE_URL)" force $(version)
+migrate-version:
+	go run ./cmd/migrate version
 
 run-api:
 	go run ./cmd/api

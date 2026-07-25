@@ -7,6 +7,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/video"
 )
@@ -31,6 +32,7 @@ import (
 func NewRouter(
 	cfg *config.Config,
 	logger *logging.Logger,
+	reporter *health.Reporter,
 	svc video.Service,
 	authenticator auth.Authenticator,
 	entitlements auth.EntitlementChecker,
@@ -39,6 +41,11 @@ func NewRouter(
 	if err != nil {
 		return nil, err
 	}
+
+	// Probes sit outside /api/v1: no version promise, no session, no CSRF, no
+	// authentication, and no idle-session extension.
+	r.GET(livenessPath, livenessHandler(reporter))
+	r.GET(readinessPath, readinessHandler(reporter, logger))
 
 	h := &videoHandlers{svc: svc}
 

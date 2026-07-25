@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
+	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
@@ -46,6 +51,9 @@ func main() {
 	queueClient := queue.NewClient(cfg.RedisAddr())
 	defer queueClient.Close()
 
+	redisHealth := queue.NewHealthClient(cfg.RedisAddr())
+	defer redisHealth.Close()
+
 	svc := video.NewService(pool, storageClient, queueClient, cfg)
 
 	// Belt and braces: config validation already refuses AUTH_FAKE_MODE when
@@ -57,14 +65,74 @@ func main() {
 	authenticator := auth.NewFakeAuthenticator()
 	entitlements := auth.NewFakeEntitlementChecker(pool)
 
-	router, err := httpapi.NewRouter(cfg, logger, svc, authenticator, entitlements)
+	reporter := health.New(cfg.ReadinessTimeout(),
+		health.Check{
+			Name:     "postgres",
+			Required: true,
+			Probe:    func(ctx context.Context) error { return db.Ping(ctx, pool) },
+		},
+		health.Check{
+			Name:     "schema",
+			Required: true,
+			Probe:    func(ctx context.Context) error { return db.CheckSchema(ctx, pool) },
+		},
+		health.Check{
+			Name: "redis",
+			// Required by role, not by a generic flag: this becomes false for
+			// the API once command admission is durable in PostgreSQL alone.
+			Required: cfg.ServiceRole().RequiresRedis(),
+			Probe:    redisHealth.Ping,
+		},
+	)
+
+	router, err := httpapi.NewRouter(cfg, logger, reporter, svc, authenticator, entitlements)
 	if err != nil {
 		log.Fatalf("building router: %v", err)
 	}
 
-	log.Printf("gradex API listening on :%s (env=%s, payments=%v, email=%v, fake_auth=%v)",
-		cfg.Port(), cfg.Environment(), cfg.Payments().Enabled(), cfg.Email().Enabled(), cfg.AuthFakeMode())
-	if err := router.Run(":" + cfg.Port()); err != nil {
-		log.Fatalf("server error: %v", err)
+	server := &http.Server{
+		Addr:         ":" + cfg.Port(),
+		Handler:      router,
+		ReadTimeout:  cfg.HTTPReadTimeout(),
+		WriteTimeout: cfg.HTTPWriteTimeout(),
+		IdleTimeout:  cfg.HTTPIdleTimeout(),
 	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		log.Printf("gradex API listening on :%s (env=%s, role=%s, payments=%v, email=%v, fake_auth=%v)",
+			cfg.Port(), cfg.Environment(), cfg.ServiceRole(),
+			cfg.Payments().Enabled(), cfg.Email().Enabled(), cfg.AuthFakeMode())
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
+		}
+	}()
+
+	// Readiness opens only once configuration, dependencies, and routing are
+	// all constructed. Before this the process answers liveness but takes no
+	// traffic.
+	reporter.MarkStarted()
+
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErr:
+		log.Fatalf("server error: %v", err)
+	case sig := <-shutdown:
+		log.Printf("received %s, draining", sig)
+	}
+
+	// Fail readiness first so the load balancer stops sending new requests,
+	// then finish what is already in flight. Liveness stays healthy throughout
+	// — a draining process should be removed from the pool, not killed.
+	reporter.MarkDraining()
+
+	drainCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout())
+	defer cancel()
+
+	if err := server.Shutdown(drainCtx); err != nil {
+		log.Printf("graceful shutdown did not complete: %v", err)
+	}
+	log.Println("gradex API stopped")
 }

@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
@@ -105,7 +107,10 @@ func videoRouter(t *testing.T, svc video.Service, a fakeAuth, e fakeEntitlements
 	buf := &syncBuffer{}
 	logger := logging.New(buf, "gradex-api-test", "development", logging.LevelFromString("info"))
 
-	r, err := NewRouter(cfg, logger, svc, a, e)
+	reporter := health.New(time.Second)
+	reporter.MarkStarted()
+
+	r, err := NewRouter(cfg, logger, reporter, svc, a, e)
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
