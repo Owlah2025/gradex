@@ -69,8 +69,8 @@ the active design slice.
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Independent review of July 27 design is pending | Developer + Claude | Review exact commit 6862db5 read-only; resolve critical/high findings before Day 5 close | July 28 | Reviewed exact commit, finding dispositions, no unresolved critical/high finding |
-| Landing FAQ still promises fixed 150-day access | Developer + Codex | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
+| Independent review of July 27 design is pending | Developer + agy | Review the exact July 27 design range read-only; resolve critical/high findings before Day 5 close | July 28 | Reviewed exact commit range, finding dispositions, no unresolved critical/high finding |
+| Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
 ## Required Launch Gates
@@ -120,10 +120,13 @@ any severity, no tracked worktree changes, and final verdict **APPROVE DOMAIN DE
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
 - August 15 is readiness-gated.
-- Codex is the primary builder; Claude is the independent read-only reviewer.
+- D-032: Claude is the primary builder and planner; `agy` (Antigravity CLI, `gemini-3.1-pro-high`) is
+  the independent read-only reviewer. Codex held the builder seat until 2026-07-25 and was replaced
+  when its quota was exhausted. Reviews run through `scripts/agy-review.sh`; a `TAINTED` or
+  `UNAVAILABLE` run is never recorded as an approval.
 - Missed work becomes visible carryover and cannot be marked complete without evidence.
 - The approved documentation/specification baseline ends at commit `1f63a59`.
-- Codex is the default SpecKit integration; both Codex and Claude integrations remain installed.
+- Claude is the default SpecKit integration; the Codex integration remains installed but unused.
 - Local `gradex-spec-review.zip` bundles are generated review artifacts and are ignored.
 - The four consolidated external/operations messages are prepared as drafts in the
   [August 6 outreach pack](outreach/2026-08-06-launch-gate-outreach.md); `DRAFT` never counts as

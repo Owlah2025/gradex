@@ -7,3 +7,7 @@
 # Local documentation review bundles — generated artifacts, not source
 /gradex-spec-review.zip
 /docs/gradex-spec-review.zip
+
+# Independent-review run artifacts from scripts/agy-review.sh — the verdict and finding
+# dispositions are transcribed into the daily record, which is the committed evidence
+/docs/launch/review/artifacts/

@@ -3,7 +3,7 @@
 > Status: Active
 > Schedule: 2026-07-23 through 2026-08-15
 > Public go-live target: 2026-08-15, readiness-gated
-> Delivery team: Solo developer, Codex builder, Claude reviewer
+> Delivery team: Solo developer, Claude builder, agy reviewer (see [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews))
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -35,14 +35,27 @@ the source-of-truth order in [the documentation index](../README.md#source-of-tr
 
 - **Developer/product owner:** approves product decisions, external commitments, accepted risks,
   scope changes, and the public go/no-go decision.
-- **Codex/builder:** plans and implements one bounded slice, runs its checks, documents evidence,
+- **Claude/builder:** plans and implements one bounded slice, runs its checks, documents evidence,
   and corrects review findings.
-- **Claude/reviewer:** reviews the exact diff or commit without editing it, checking requirements,
+- **agy/reviewer:** reviews the exact commit range without editing it, checking requirements,
   security, privacy, authorization, idempotency, concurrency, tests, observability, and scope.
 
-The reviewer must not review a moving target. Record the reviewed commit or diff description in the
-daily record. Critical and high findings return to the builder and must be rechecked before the
-slice closes.
+The reviewer must not review a moving target. Record the reviewed commit range in the daily record.
+Critical and high findings return to the builder and must be rechecked before the slice closes.
+
+The reviewer must not be the builder. Independence here is a model boundary, not a change of tone:
+the reviewer runs on a different model family (`gemini-3.1-pro-high`) in a separate process with no
+access to the builder's reasoning. Claude reading back over its own diff is a self-check and is
+never sufficient to close a slice.
+
+Reviews are dispatched with `scripts/agy-review.sh <base>..<head>`, which checks the exact commit out
+into a disposable worktree, sends the fixed brief in
+[`review/REVIEW_BRIEF_TEMPLATE.md`](review/REVIEW_BRIEF_TEMPLATE.md), and refuses to report a result
+that was not read-only. Two outcomes are not approvals and must never be recorded as one:
+
+- **TAINTED** — the reviewer modified something. The review is discarded, not corrected.
+- **UNAVAILABLE** — the run produced no retrievable verdict. Re-dispatch; do not infer a pass from
+  silence.
 
 ### Work-in-progress rule
 
@@ -67,7 +80,7 @@ removing its failure paths or quality evidence.
 
 ## 3. Command Protocol
 
-The quoted phrases below are the operational interface. They may be given to Codex in any
+The quoted phrases below are the operational interface. They may be given to Claude in any
 conversation that has access to this repository. Root-level `AGENTS.md` and `CLAUDE.md` route fresh
 agent sessions to this canonical protocol; they do not duplicate the schedule.
 
@@ -87,7 +100,7 @@ Return a brief containing:
 - today's single outcome;
 - `Must`, `Should`, and `Could` tasks in execution order;
 - timebox and stop condition for each `Must`;
-- Codex build assignment and Claude review assignment;
+- Claude build assignment and agy review assignment;
 - exact completion evidence and checks;
 - decisions or external blockers requiring the developer;
 - launch confidence and the reason for it.
@@ -98,7 +111,7 @@ new feature work forward.
 ### `Close the day`
 
 1. Run the checks required by today's acceptance evidence.
-2. Give Claude the exact stable diff or commit for read-only review.
+2. Dispatch `scripts/agy-review.sh <base>..<head>` on the exact stable commit range.
 3. Correct and retest all critical/high findings.
 4. Record completed, incomplete, blocked, and deliberately deferred work.
 5. Update [STATUS.md](STATUS.md), gate evidence, confidence, and tomorrow's first task.
@@ -227,7 +240,7 @@ duplicate, replayed, delayed, and reordered callbacks have defined behavior.
 
 **Outcome:** Approve the architecture baseline and executable delivery path.
 
-- Obtain independent Codex and Claude reviews and resolve critical findings.
+- Obtain the independent agy review and resolve critical findings.
 - Convert the architecture into dependency-ordered feature slices.
 - Complete configuration validation, migrations, structured logging, request IDs,
   health/readiness endpoints, and CI.

@@ -321,3 +321,38 @@ fake access into Orders/Entitlements; assuming legacy `READY` proves new Media r
 legacy authority after a context epoch changes.
 **Source:** Approved July 26 domain/data/state design Sections 5–6; see
 [Gradex Domain, Data, and State Design](superpowers/specs/2026-07-26-domain-data-state-design.md).
+
+## D-032 — Claude builds, agy reviews
+
+**Date:** 2026-07-25
+**Decision:** Reassign the delivery roles one seat: Claude becomes the builder and planner — owning
+slice planning, SpecKit, implementation, checks, evidence, and correction of findings — and `agy`
+(Google Antigravity CLI) becomes the independent read-only reviewer on model
+`gemini-3.1-pro-high`. Reviews are dispatched by `scripts/agy-review.sh <base>..<head>` against a
+fixed brief checked in at
+[the review brief template](launch/review/REVIEW_BRIEF_TEMPLATE.md). Read-only is enforced
+structurally, not by instruction: the reviewer receives a disposable detached worktree at the exact
+reviewed commit, its workspace is asserted unmodified afterwards, and the live repository is
+snapshotted before and after. A run that modifies its workspace is `TAINTED` and discarded; a run
+that yields no parseable verdict is `UNAVAILABLE`. Neither is ever recorded as an approval. The
+reviewer model must remain a different family from the builder; if Claude ever reviews a
+Claude-authored slice, that is a self-check and cannot close it.
+**Reason:** Codex exhausted its quota on 2026-07-25 with 19 days left before the readiness-gated
+August 15 launch and confidence already Red, leaving the builder seat empty. Claude is the only
+remaining agent able to plan and implement at the required rate. Moving Claude into that seat
+vacates the reviewer seat, and the property the workflow actually depends on — that the thing
+reviewing the work is not the thing that wrote it — has to be preserved by filling it with a
+different model family rather than by dropping review.
+**Alternatives rejected:** Claude reviewing its own diffs (nominally independent, shares the
+builder's blind spots, and removes the only external check on a Red-confidence launch);
+`claude-opus-4-6-thinking` as the agy reviewer (strong, but same family as the builder); pausing
+delivery until Codex quota returns (no credible date, and the schedule has no slack); trusting the
+reviewer's prompt-level promise not to edit instead of containing it in a disposable worktree.
+**Operational note:** agy's headless mode cannot prompt for tool permissions and auto-denies them,
+producing an empty report. The developer authorised `--dangerously-skip-permissions` for review runs
+on 2026-07-25 on the basis that the grant applies to a throwaway checkout rather than the working
+repository. The containment and the post-run assertions, not the flag, are what keep this safe.
+**Source:** Developer decision on 2026-07-25 after Codex quota exhaustion; supersedes the
+Codex-builder/Claude-reviewer model recorded in the approved
+[platform architecture](superpowers/specs/2026-07-25-platform-architecture-design.md), which is left
+unedited as approved-baseline evidence.
