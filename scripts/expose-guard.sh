@@ -43,17 +43,23 @@ ALLOWLIST=(
   "cmd/bootstrap-admin/main.go"
   "internal/video/playback.go" # HMAC signing boundary for playback tokens
   "internal/config/config.go"  # placeholder validation, inside the boundary itself
-  # Two calls, both reviewed: the password plaintext goes to validation and
-  # Argon2id hashing behind hashNewPassword, and the resulting encoded hash goes
-  # to the database driver. Check 4 below enforces that the first of these is
-  # the only password-plaintext exposure in the codebase.
+  # The encoded Argon2id hash goes to the database driver. No password plaintext
+  # is read here — that happens only in credential.go, which check 4 enforces.
   "internal/identity/bootstrap.go"
+  # The password-plaintext boundary itself. See check 4.
+  "internal/identity/credential.go"
 )
 
-# The one production site permitted to read a password plaintext, and the
-# marker comment that must sit immediately above it.
-PASSWORD_BOUNDARY_FILE="internal/identity/bootstrap.go"
+# The one production file permitted to read a password plaintext, the marker
+# that must name it, and the exact number of Expose() calls it may contain.
+#
+# The count is pinned rather than merely bounded. Link 4 legitimately added a
+# second plaintext read — verifying the current password for a voluntary change
+# — so the count moved from 1 to 2 as a reviewed decision. Pinning it means the
+# next addition also has to be a reviewed decision instead of arriving silently.
+PASSWORD_BOUNDARY_FILE="internal/identity/credential.go"
 PASSWORD_BOUNDARY_MARKER="gradex:plaintext-boundary"
+PASSWORD_BOUNDARY_EXPOSURES=2
 
 # Packages that exist to send data outward. Expose() here is a defect even if
 # someone adds the file to the allowlist, so this check runs independently.
@@ -114,8 +120,9 @@ if hits=$(cd "$BACKEND" && grep -rn 'string(.*\.Expose())' --include='*.go' . 2>
 fi
 
 # --- 4. the password-plaintext boundary -------------------------------------
-# Bootstrap password plaintext is exposed at exactly one reviewed production
-# boundary: the Identity password-hashing operation.
+# Password plaintext is exposed at exactly one reviewed production boundary:
+# the Identity credential operation in credential.go, which validates and hashes
+# a new password and verifies a current one.
 #
 # The other checks bound which *files* may call Expose(). This one bounds the
 # password specifically, because a second plaintext read is a duplicated
@@ -132,10 +139,9 @@ mapfile -t markers < <(
 if [ "${#markers[@]}" -ne 1 ]; then
   note "expose-guard: expected exactly 1 password-plaintext boundary marker, found ${#markers[@]}"
   for m in "${markers[@]:-}"; do note "  $m"; done
-  note "  The bootstrap password plaintext is exposed at exactly one reviewed"
-  note "  production boundary: the Identity password-hashing operation. A second"
-  note "  marker means a second plaintext read; remove it and route the value"
-  note "  through hashNewPassword instead."
+  note "  Password plaintext is read at exactly one reviewed boundary. A second"
+  note "  marker means a second boundary; remove it and route the value through"
+  note "  prepareCredential instead."
   fail=1
 else
   marker_file="${markers[0]%%:*}"
@@ -146,15 +152,24 @@ else
     note "expose-guard: password-plaintext boundary moved to $marker_file"
     note "  It must stay in $PASSWORD_BOUNDARY_FILE, where it is reviewed."
     fail=1
-  fi
+  else
+    # Every Expose() in the boundary file must sit after the marker, inside the
+    # function it introduces. A read placed above the marker would be outside
+    # the reviewed boundary while still living in the reviewed file.
+    exposures=$(cd "$BACKEND" && grep -c '\.Expose()' "$marker_file" || true)
+    if [ "$exposures" -ne "$PASSWORD_BOUNDARY_EXPOSURES" ]; then
+      note "expose-guard: $marker_file has $exposures Expose() calls, expected $PASSWORD_BOUNDARY_EXPOSURES"
+      note "  Each password-plaintext read is a reviewed decision. If this one is"
+      note "  intended, update PASSWORD_BOUNDARY_EXPOSURES and say why in review."
+      fail=1
+    fi
 
-  # The marker must actually mark an exposure. A marker that has drifted away
-  # from its Expose() call documents a boundary that is no longer there.
-  next_line=$(cd "$BACKEND" && sed -n "$((marker_line + 1))p" "$marker_file")
-  if ! printf '%s' "$next_line" | grep -q '\.Expose()'; then
-    note "expose-guard: the password-plaintext marker does not mark an Expose() call"
-    note "  $marker_file:$((marker_line + 1)): $next_line"
-    fail=1
+    early=$(cd "$BACKEND" && grep -n '\.Expose()' "$marker_file" | awk -F: -v m="$marker_line" '$1 < m')
+    if [ -n "$early" ]; then
+      note "expose-guard: password plaintext is read above the boundary marker:"
+      note "$early"
+      fail=1
+    fi
   fi
 fi
 
@@ -172,6 +187,6 @@ if hits=$(cd "$BACKEND" && grep -rn -i '[Pp]assword[A-Za-z]*\.Expose()' --includ
 fi
 
 if [ "$fail" -eq 0 ]; then
-  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary)"
+  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary, ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads)"
 fi
 exit "$fail"

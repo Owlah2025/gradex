@@ -113,6 +113,7 @@ type Config struct {
 
 	sessionIdleExpiry     time.Duration
 	sessionAbsoluteExpiry time.Duration
+	recentAuthWindow      time.Duration
 
 	databaseURL Secret
 	redisAddr   string
@@ -174,6 +175,14 @@ func (c *Config) ShutdownTimeout() time.Duration  { return c.shutdownTimeout }
 
 func (c *Config) SessionIdleExpiry() time.Duration     { return c.sessionIdleExpiry }
 func (c *Config) SessionAbsoluteExpiry() time.Duration { return c.sessionAbsoluteExpiry }
+
+// RecentAuthWindow is how recently a session must have proven a password before
+// it may perform a sensitive operation such as a voluntary password change.
+//
+// It is deliberately much shorter than the idle expiry: the threat it addresses
+// is an attacker at an already-authenticated session, which a long-lived
+// session does nothing to stop.
+func (c *Config) RecentAuthWindow() time.Duration { return c.recentAuthWindow }
 
 func (c *Config) DatabaseURL() Secret { return c.databaseURL }
 func (c *Config) RedisAddr() string   { return c.redisAddr }
@@ -248,6 +257,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 
 		sessionIdleExpiry:     p.duration("SESSION_IDLE_EXPIRY", 12*time.Hour),
 		sessionAbsoluteExpiry: p.duration("SESSION_ABSOLUTE_EXPIRY", 720*time.Hour),
+		recentAuthWindow:      p.duration("RECENT_AUTH_WINDOW", 15*time.Minute),
 
 		redisAddr: p.str("REDIS_ADDR", ""),
 
@@ -376,6 +386,7 @@ func (c *Config) validate(p *parser) {
 		{"SHUTDOWN_TIMEOUT", c.shutdownTimeout},
 		{"SESSION_IDLE_EXPIRY", c.sessionIdleExpiry},
 		{"SESSION_ABSOLUTE_EXPIRY", c.sessionAbsoluteExpiry},
+		{"RECENT_AUTH_WINDOW", c.recentAuthWindow},
 		{"READINESS_TIMEOUT", c.readinessTimeout},
 		{"UPLOAD_URL_EXPIRY", c.uploadURLExpiry},
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
@@ -391,6 +402,15 @@ func (c *Config) validate(p *parser) {
 	if c.sessionIdleExpiry > 0 && c.sessionAbsoluteExpiry > 0 && c.sessionIdleExpiry >= c.sessionAbsoluteExpiry {
 		p.errf("SESSION_IDLE_EXPIRY (%s) must be less than SESSION_ABSOLUTE_EXPIRY (%s)",
 			c.sessionIdleExpiry, c.sessionAbsoluteExpiry)
+	}
+
+	// A recent-authentication window at or above the idle expiry can never bind:
+	// any session still alive would satisfy it, so the requirement would be
+	// decorative. Refuse the configuration rather than ship a check that always
+	// passes.
+	if c.recentAuthWindow > 0 && c.sessionIdleExpiry > 0 && c.recentAuthWindow >= c.sessionIdleExpiry {
+		p.errf("RECENT_AUTH_WINDOW (%s) must be less than SESSION_IDLE_EXPIRY (%s), or it can never bind",
+			c.recentAuthWindow, c.sessionIdleExpiry)
 	}
 
 	if c.maxUploadSizeBytes <= 0 {

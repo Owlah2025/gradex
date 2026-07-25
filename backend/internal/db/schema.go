@@ -17,11 +17,11 @@ import (
 // exact-match requirement would make every migration an outage.
 //
 // Raise MinSchemaVersion only in the contract step, once no running instance
-// depends on the older shape. Version 1 stays supported because 0002 and 0003
-// only add tables — nothing a version-1 build reads has changed shape.
+// depends on the older shape. Version 1 stays supported because 0002, 0003, and
+// 0004 only add tables — nothing a version-1 build reads has changed shape.
 const (
 	MinSchemaVersion = 1
-	MaxSchemaVersion = 3
+	MaxSchemaVersion = 4
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

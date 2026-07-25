@@ -95,12 +95,14 @@ var (
 	initTables     = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
 	identityTables = []string{"accounts", "password_credentials", "bootstrap_operations"}
 	auditTables    = []string{"audit_events"}
+	sessionTables  = []string{"sessions", "session_credentials"}
 )
 
 func allTables() []string {
 	all := append([]string{}, initTables...)
 	all = append(all, identityTables...)
-	return append(all, auditTables...)
+	all = append(all, auditTables...)
+	return append(all, sessionTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
