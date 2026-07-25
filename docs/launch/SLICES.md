@@ -57,13 +57,25 @@ validity, scope evaluation, expiry, and revocation," while creation is *triggere
 So the module splits across two slices:
 
 - **S4 delivers** the grant record, scope evaluation (a Course grant covers every contained Section;
-  a Section grant covers only its Section), expiry, and revocation — with grants created only
-  through an authorized privileged path.
+  a Section grant covers only its Section), expiry, and revocation.
 - **S7 adds** the transactional creation of grants from verified payment and free grants.
 
-S4 and S5 are then fully testable on Aug 2–3 against privileged grants, and S7 wires the real
-producer to an already-proven consumer. This is the single most load-bearing ordering decision in the
-register: getting it wrong pushes all access-control verification to Aug 5.
+S4 and S5 are then fully testable on Aug 2–3, and S7 wires the real producer to an already-proven
+consumer. This is the single most load-bearing ordering decision in the register: getting it wrong
+pushes all access-control verification to Aug 5.
+
+**The S4 test path is not a production capability.** S4 exercises Entitlement evaluation through
+isolated integration fixtures or a non-production-only seed mechanism that cannot be enabled in
+production. It does not introduce a manual-grant command, an Admin grant screen, or any runtime flag
+that could mint an Entitlement outside the provenance rule below. The production invariant is
+unchanged by this split:
+
+> Every real Entitlement originates from a completed paid or zero-value Coupon Order Item, except
+> reconciliation that restores one from an already valid completed Order Item.
+
+Design §11.2 already forbids any flag from weakening Entitlement provenance. The seed mechanism is
+therefore build- or environment-excluded from production images rather than merely disabled by
+configuration, in the same way the current `AUTH_FAKE_MODE` seam must never reach production.
 
 ### 3.2 Authoring owns media *metadata*; the Media slice owns media *bytes*
 
