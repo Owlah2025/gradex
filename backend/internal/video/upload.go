@@ -27,7 +27,7 @@ var inFlightStatuses = map[Status]bool{
 func (s *videoService) RequestUpload(ctx context.Context, lessonID, filename, contentType string) (UploadTicket, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
 	if !allowedExtensions[ext] {
-		return UploadTicket{}, fmt.Errorf("%w: file type %q not allowed (only .mp4/.mov)", ErrConflict, ext)
+		return UploadTicket{}, fmt.Errorf("%w: file type %q not allowed (only .mp4/.mov)", ErrValidation, ext)
 	}
 
 	lesson, err := s.repo.getLesson(ctx, lessonID)
@@ -53,7 +53,7 @@ func (s *videoService) RequestUpload(ctx context.Context, lessonID, filename, co
 			return UploadTicket{}, err
 		}
 		if !applied {
-			return UploadTicket{}, fmt.Errorf("%w: video for lesson %s changed state concurrently, retry", ErrConflict, lessonID)
+			return UploadTicket{}, fmt.Errorf("%w: video for lesson %s changed state concurrently, retry", ErrConcurrentModification, lessonID)
 		}
 	case err == ErrNotFound:
 		if _, err := s.repo.insertVideo(ctx, lessonID, rawKey, StatusUploading); err != nil {
@@ -66,7 +66,7 @@ func (s *videoService) RequestUpload(ctx context.Context, lessonID, filename, co
 	expiry := s.cfg.UploadURLExpiry()
 	uploadURL, err := s.storage.PresignPutURL(ctx, rawKey, contentType, expiry)
 	if err != nil {
-		return UploadTicket{}, err
+		return UploadTicket{}, fmt.Errorf("%w: presigning upload URL: %w", ErrUnavailable, err)
 	}
 
 	return UploadTicket{
@@ -100,14 +100,14 @@ func (s *videoService) CompleteUpload(ctx context.Context, lessonID string) erro
 
 	size, exists, err := s.storage.HeadObject(ctx, *v.RawKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: heading uploaded object: %w", ErrUnavailable, err)
 	}
 	if !exists {
 		return fmt.Errorf("%w: no object found at %s", ErrNotFound, *v.RawKey)
 	}
 	if size > s.cfg.MaxUploadSizeBytes() {
 		_, _ = s.repo.setVideoFailed(ctx, v.ID, fmt.Sprintf("uploaded file (%d bytes) exceeds max allowed size (%d bytes)", size, s.cfg.MaxUploadSizeBytes()))
-		return fmt.Errorf("%w: file too large", ErrConflict)
+		return fmt.Errorf("%w: file too large", ErrValidation)
 	}
 
 	applied, err := s.repo.transitionVideoStatus(ctx, v.ID, StatusUploading, StatusQueued)
@@ -135,7 +135,7 @@ func (s *videoService) enqueueMetadataExtract(ctx context.Context, videoID, less
 	}
 	task := asynq.NewTask(queue.TypeMetadataExtract, payload, asynq.MaxRetry(3))
 	if _, err := s.queue.EnqueueContext(ctx, task); err != nil {
-		return fmt.Errorf("enqueueing metadata extract: %w", err)
+		return fmt.Errorf("%w: enqueueing metadata extract: %w", ErrUnavailable, err)
 	}
 	return nil
 }

@@ -148,8 +148,7 @@ func routeTemplateOf(c *gin.Context) string {
 // notFoundHandler answers an unmatched route with the standard envelope.
 func notFoundHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		writeProblem(c, problem.New(http.StatusNotFound, "not-found",
-			"Resource not found", "The requested resource does not exist."))
+		writeProblem(c, problem.NotFound())
 	}
 }
 
@@ -160,8 +159,7 @@ func methodNotAllowedHandler(engine *gin.Engine) gin.HandlerFunc {
 		if allowed := allowedMethods(engine, c.Request.URL.Path); allowed != "" {
 			c.Header("Allow", allowed)
 		}
-		writeProblem(c, problem.New(http.StatusMethodNotAllowed, "method-not-allowed",
-			"Method not allowed", "The requested method is not supported for this resource."))
+		writeProblem(c, problem.MethodNotAllowed())
 	}
 }
 

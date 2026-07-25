@@ -142,7 +142,7 @@ func (s *videoService) rewriteChildPlaylist(ctx context.Context, content []byte,
 		segmentKey := hlsPrefix + renditionDir + "/" + trimmed
 		signedURL, err := s.storage.PresignGetURL(ctx, segmentKey, expiry)
 		if err != nil {
-			return nil, fmt.Errorf("presigning segment %s: %w", segmentKey, err)
+			return nil, fmt.Errorf("%w: presigning segment %s: %w", ErrUnavailable, segmentKey, err)
 		}
 		lines[i] = signedURL
 	}
@@ -155,7 +155,7 @@ func (s *videoService) rewriteChildPlaylist(ctx context.Context, content []byte,
 // transcoding provider is behind the interface (see service.go's Service type).
 func (s *videoService) UpdateProgress(ctx context.Context, lessonID, viewerID string, positionSeconds float64) (Progress, error) {
 	if positionSeconds < 0 {
-		return Progress{}, fmt.Errorf("%w: position_seconds must be >= 0", ErrConflict)
+		return Progress{}, fmt.Errorf("%w: position_seconds must be >= 0", ErrValidation)
 	}
 
 	lesson, err := s.repo.getLesson(ctx, lessonID)

@@ -69,20 +69,114 @@ func New(status int, slug, title, detail string) Problem {
 	}
 }
 
+// The constructors below are the closed set of problem classes the API may
+// return. Handlers choose among them; they never build a Problem from an
+// internal error's text, because that text carries bucket and object keys,
+// filesystem paths, queue names, database constraint names, and raw provider
+// messages.
+
+// Malformed reports a structurally invalid request — unparseable JSON, a wrong
+// JSON type, a body that is not what the media type promised. It deliberately
+// carries no parser detail: a decoder message quotes the offending input.
+func Malformed() Problem {
+	return New(http.StatusBadRequest, "malformed-request",
+		"Malformed request",
+		"The request body could not be parsed.")
+}
+
+// ValidationFailed reports a syntactically valid request whose field values are
+// semantically unacceptable. Attach Violations to say which.
+func ValidationFailed() Problem {
+	return New(http.StatusUnprocessableEntity, "validation-failed",
+		"Request validation failed",
+		"One or more fields are invalid.")
+}
+
+// Unauthenticated reports missing or unusable authentication. Its companion
+// WWW-Authenticate challenge is added by the writer.
+func Unauthenticated() Problem {
+	return New(http.StatusUnauthorized, "authentication-required",
+		"Authentication required",
+		"This resource requires an authenticated session.")
+}
+
+// NotAuthorized reports an authenticated principal without authority here.
+//
+// The detail is deliberately uniform: §6.1 keeps typed policy reasons —
+// NOT_OWNER, ACCESS_NOT_COVERED, RESOURCE_SUSPENDED — for tests and security
+// monitoring, and out of public errors, so the response cannot be used to
+// probe ownership or coverage.
+func NotAuthorized() Problem {
+	return New(http.StatusForbidden, "not-authorized",
+		"Not authorized",
+		"This resource is not available to the current session.")
+}
+
+// NotFound reports an absent or concealed resource. §6.1 permits the same 404
+// for absence and invisibility, so this body never distinguishes the two.
+func NotFound() Problem {
+	return New(http.StatusNotFound, "not-found",
+		"Resource not found",
+		"The requested resource does not exist.")
+}
+
+// MethodNotAllowed reports a known path carrying an unsupported method.
+func MethodNotAllowed() Problem {
+	return New(http.StatusMethodNotAllowed, "method-not-allowed",
+		"Method not allowed",
+		"The requested method is not supported for this resource.")
+}
+
+// StateConflict reports a well-formed, authorized command that conflicts with
+// the resource's current state — a concurrent modification, or a resource that
+// already exists.
+func StateConflict() Problem {
+	return New(http.StatusConflict, "state-conflict",
+		"Conflicting resource state",
+		"The resource changed while this request was in flight. Reload and try again.")
+}
+
+// UnsupportedStateTransition reports a command that is not legal from the
+// resource's current state, as distinct from a race. The current state itself
+// is not disclosed: internal lifecycle values are not part of the public
+// contract.
+func UnsupportedStateTransition() Problem {
+	return New(http.StatusConflict, "unsupported-state-transition",
+		"Unsupported state transition",
+		"This operation is not available for the resource in its current state.")
+}
+
+// DependencyUnavailable reports a temporary failure of storage, the queue, or
+// a provider. It is separated from Internal so a client can distinguish
+// "retry later" from "this will not succeed".
+func DependencyUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "dependency-unavailable",
+		"Service temporarily unavailable",
+		"A dependency is temporarily unavailable. Try again shortly.")
+}
+
 // Internal is the generic unexpected-failure problem. Every unhandled fault
 // converges here: diagnostics stay in protected logs, correlated only by the
 // request ID (§2.3).
 func Internal(requestID string) Problem {
-	p := New(http.StatusInternalServerError, "internal-error",
+	return New(http.StatusInternalServerError, "internal-error",
 		"Internal server error",
-		"The request could not be completed. If the problem persists, contact support with the request ID.")
-	p.RequestID = requestID
-	return p
+		"The request could not be completed. If the problem persists, contact support with the request ID.").
+		WithRequestID(requestID)
 }
 
-// WithRequestID returns a copy carrying the trusted correlation identifier.
+// WithRequestID returns a copy carrying the trusted correlation identifier,
+// and derives the opaque `instance` URN from it.
+//
+// `instance` identifies this occurrence and must stay opaque: §2.3 forbids a
+// problem from revealing internal structure, so it is not a resource path.
+// Deriving it from the request ID keeps a support report, the response header,
+// and the protected log correlated by a single value.
 func (p Problem) WithRequestID(id string) Problem {
 	p.RequestID = id
+	if id != "" {
+		p.Instance = "urn:gradex:problem:" + id
+	}
 	return p
 }
 
@@ -110,6 +204,15 @@ func Write(w http.ResponseWriter, p Problem) error {
 	}
 	w.Header().Set("Content-Type", ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	// §2.3 requires the fixed first-party challenge on every browser-facing
+	// 401. GradexSession is an opaque-session challenge, not Basic or Bearer,
+	// so it does not prompt the browser for native credentials. The challenge
+	// never varies by hidden Account state.
+	if p.Status == http.StatusUnauthorized {
+		w.Header().Set("WWW-Authenticate", `GradexSession realm="gradex-web"`)
+	}
+
 	w.WriteHeader(p.Status)
 	_, err = w.Write(body)
 	return err

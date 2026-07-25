@@ -1,46 +1,26 @@
 package httpapi
 
 import (
-	"errors"
-	"log"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
 const ctxUserIDKey = "userID"
 
-var (
-	errNotInstructor = errors.New("not the instructor for this lesson")
-	errNoAccess      = errors.New("no access to this lesson")
-)
-
-// errorResponse never leaks err.Error() to the client on 5xx — that path can
-// carry raw DB/storage errors. It's logged server-side instead.
-//
-// TODO(S0 Must 5): replace with writeProblem. This still emits the legacy
-// {"error": ...} shape rather than RFC 9457, which is why the retrofit is its
-// own commit. The literal path is already gone from the server-side line: it
-// carries identifiers and can carry a token, which §10.2 forbids in telemetry.
-func errorResponse(c *gin.Context, status int, err error) {
-	if status >= http.StatusInternalServerError {
-		log.Printf("httpapi: %d error for %s %s", status, c.Request.Method, routeTemplateOf(c))
-		c.AbortWithStatusJSON(status, gin.H{"error": "internal server error"})
-		return
-	}
-	c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
-}
-
 // requireAuth resolves the caller's identity but does not check any
 // entitlement — used as the shared first step by both the instructor and
 // student middleware groups.
+//
+// The authenticator's error is not reported: it describes why authentication
+// failed, and §5 keeps hidden Account state out of public responses. The
+// response is the uniform challenge for every cause.
 func requireAuth(authenticator auth.Authenticator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, err := authenticator.UserFromRequest(c)
 		if err != nil {
-			errorResponse(c, http.StatusUnauthorized, err)
+			writeProblem(c, problem.Unauthenticated())
 			return
 		}
 		c.Set(ctxUserIDKey, userID)
@@ -50,17 +30,22 @@ func requireAuth(authenticator auth.Authenticator) gin.HandlerFunc {
 
 // requireInstructor checks the authenticated user owns the :lessonID lesson
 // as its instructor. Must run after requireAuth.
+//
+// A lookup failure and a denial are reported differently — one is a fault, the
+// other a decision — but neither says which lesson, who owns it, or whether it
+// exists. §6.1 keeps typed policy reasons in security monitoring, not in the
+// response.
 func requireInstructor(entitlements auth.EntitlementChecker) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.GetString(ctxUserIDKey)
 		lessonID := c.Param("lessonID")
 		ok, err := entitlements.IsInstructorForLesson(c.Request.Context(), userID, lessonID)
 		if err != nil {
-			errorResponse(c, http.StatusInternalServerError, err)
+			writeProblem(c, problem.Internal(""))
 			return
 		}
 		if !ok {
-			errorResponse(c, http.StatusForbidden, errNotInstructor)
+			writeProblem(c, problem.NotAuthorized())
 			return
 		}
 		c.Next()
@@ -75,11 +60,11 @@ func requireStudentAccess(entitlements auth.EntitlementChecker) gin.HandlerFunc 
 		lessonID := c.Param("lessonID")
 		ok, err := entitlements.HasAccess(c.Request.Context(), userID, lessonID)
 		if err != nil {
-			errorResponse(c, http.StatusInternalServerError, err)
+			writeProblem(c, problem.Internal(""))
 			return
 		}
 		if !ok {
-			errorResponse(c, http.StatusForbidden, errNoAccess)
+			writeProblem(c, problem.NotAuthorized())
 			return
 		}
 		c.Next()
