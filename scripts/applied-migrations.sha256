@@ -1,2 +1,4 @@
 e018ba576a1c5f40f3d11e0364fa4f38d70bfcc7ca0ada02ead0d4b9cbb8622a  backend/internal/db/migrations/0001_init.up.sql
 288c41794ba09c8d741262278f268d995bf5b24b255a3838ae6ea3404a443f19  backend/internal/db/migrations/0001_init.down.sql
+507a60608fde3fccb0c038e905fd2c61d98306e80cbf23f03698ec6ae4e5e03d  backend/internal/db/migrations/0002_identity_bootstrap.up.sql
+0eea67e43f4e9ed2904cb7dfe27f28e0fe8de21313c30a838d7e8494c4baafab  backend/internal/db/migrations/0002_identity_bootstrap.down.sql

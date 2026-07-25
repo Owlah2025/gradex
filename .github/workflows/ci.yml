@@ -152,7 +152,7 @@ jobs:
           go run ./cmd/migrate version
           go run ./cmd/migrate up
           go run ./cmd/migrate up      # a release step may run more than once
-          go run ./cmd/migrate down 1
+          go run ./cmd/migrate down 1  # reverts only the newest migration
           go run ./cmd/migrate up
 
       - name: Verify schema version and expected objects
@@ -166,15 +166,19 @@ jobs:
             missing text;
           BEGIN
             SELECT version, dirty INTO v, d FROM schema_migrations ORDER BY version DESC LIMIT 1;
-            IF v IS DISTINCT FROM 1 THEN
-              RAISE EXCEPTION 'schema version is %, expected 1', v;
+            -- Keep in step with MaxSchemaVersion in internal/db/schema.go.
+            IF v IS DISTINCT FROM 2 THEN
+              RAISE EXCEPTION 'schema version is %, expected 2', v;
             END IF;
             IF d THEN
               RAISE EXCEPTION 'schema is dirty after a successful migration';
             END IF;
 
             SELECT string_agg(t, ', ') INTO missing
-            FROM unnest(ARRAY['courses','sections','lessons','videos','progress','fake_entitlements']) AS t
+            FROM unnest(ARRAY[
+              'courses','sections','lessons','videos','progress','fake_entitlements',
+              'accounts','password_credentials','bootstrap_operations'
+            ]) AS t
             WHERE to_regclass('public.' || t) IS NULL;
             IF missing IS NOT NULL THEN
               RAISE EXCEPTION 'missing tables after migration: %', missing;

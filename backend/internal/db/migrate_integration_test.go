@@ -19,12 +19,11 @@ import (
 // The migration test runs against its own database so it can drop and recreate
 // the whole schema without touching a developer's working data.
 const (
-	adminDSN     = "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
-	testDBName   = "gradex_migrate_test"
-	testDSN      = "postgres://gradex:gradex@localhost:5432/" + testDBName + "?sslmode=disable"
-	sourceURL    = "file://migrations"
-	opTimeout    = 30 * time.Second
-	expectedInit = 1
+	adminDSN   = "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
+	testDBName = "gradex_migrate_test"
+	testDSN    = "postgres://gradex:gradex@localhost:5432/" + testDBName + "?sslmode=disable"
+	sourceURL  = "file://migrations"
+	opTimeout  = 30 * time.Second
 )
 
 // freshDatabase drops and recreates the test database so every run starts from
@@ -89,10 +88,15 @@ func tableExists(t *testing.T, pool *pgxpool.Pool, name string) bool {
 	return exists
 }
 
-// initTables are the tables 0001_init is responsible for. The migration is
-// already applied and must not be edited, so this list is a description of it,
-// not a specification for it.
-var initTables = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
+// The tables each applied migration is responsible for. These describe
+// migrations that already exist and must not be edited; they are not a
+// specification for them.
+var (
+	initTables     = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
+	identityTables = []string{"accounts", "password_credentials", "bootstrap_operations"}
+)
+
+func allTables() []string { return append(append([]string{}, initTables...), identityTables...) }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
 // without any hand-installed binary: the whole thing runs from `go test`.
@@ -101,7 +105,7 @@ func TestMigrateUpDownUp(t *testing.T) {
 	pool := openPool(t)
 
 	// 1. The database begins empty.
-	for _, table := range initTables {
+	for _, table := range allTables() {
 		if tableExists(t, pool, table) {
 			t.Fatalf("table %s exists before any migration ran", table)
 		}
@@ -124,7 +128,7 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 
 	// 3. The expected tables and version exist.
-	for _, table := range initTables {
+	for _, table := range allTables() {
 		if !tableExists(t, pool, table) {
 			t.Errorf("table %s is missing after up", table)
 		}
@@ -133,8 +137,10 @@ func TestMigrateUpDownUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading schema state after up: %v", err)
 	}
-	if state.Version != expectedInit {
-		t.Errorf("version = %d, want %d", state.Version, expectedInit)
+	// Migrating up goes to the newest migration, which is what this build
+	// declares as its maximum supported version.
+	if state.Version != MaxSchemaVersion {
+		t.Errorf("version = %d, want %d", state.Version, MaxSchemaVersion)
 	}
 	if state.Dirty {
 		t.Error("schema is dirty immediately after a successful up")
@@ -165,10 +171,14 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 
 	// 5. down returns the database to the expected empty state.
-	if err := m.Steps(-1); err != nil {
+	//
+	// Down() rather than Steps(-1): with more than one migration applied, a
+	// single step reverts only the newest, and asserting emptiness after it
+	// would fail for the wrong reason.
+	if err := m.Down(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		t.Fatalf("down: %v", err)
 	}
-	for _, table := range initTables {
+	for _, table := range allTables() {
 		if tableExists(t, pool, table) {
 			t.Errorf("table %s survived down", table)
 		}
