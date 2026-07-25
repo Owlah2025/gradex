@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func decode(t *testing.T, line string) map[string]any {
@@ -38,6 +39,44 @@ func TestSanitizeTruncatesOversizedFields(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "truncated") {
 		t.Error("truncation should be visible in the output")
+	}
+}
+
+// Truncation must not cut a multi-byte character in half. Gradex is
+// Arabic-default, so a long route or error string in a log field is routinely
+// multi-byte; a byte-boundary cut would end the field in U+FFFD replacement
+// characters. Reported as a LOW finding in the Day 6 review.
+func TestSanitizeTruncatesOnRuneBoundaries(t *testing.T) {
+	for name, s := range map[string]string{
+		"arabic":   strings.Repeat("مرحبا بالعالم ", 200),
+		"japanese": strings.Repeat("日本語テキスト", 200),
+		"emoji":    strings.Repeat("🎓📚", 400),
+		"mixed":    strings.Repeat("course-مساق-", 200),
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := Sanitize(s)
+			if !utf8.ValidString(got) {
+				t.Errorf("truncated value is not valid UTF-8: %q", got)
+			}
+			if strings.ContainsRune(got, utf8.RuneError) {
+				t.Errorf("truncated value contains the replacement character: %q", got)
+			}
+			if !strings.HasSuffix(got, "truncated") {
+				t.Errorf("value was not truncated: %q", got)
+			}
+		})
+	}
+}
+
+// The same guarantee for stacks, which take a different bound.
+func TestStackTruncationIsRuneSafe(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "s", "e", slog.LevelInfo).PanicRecovered(PanicEvent{
+		Stack: strings.Repeat("日本語のスタックトレース", 1000),
+	})
+	stack, _ := decode(t, buf.String())["stack"].(string)
+	if strings.ContainsRune(stack, utf8.RuneError) {
+		t.Errorf("truncated stack contains the replacement character: %q", stack)
 	}
 }
 

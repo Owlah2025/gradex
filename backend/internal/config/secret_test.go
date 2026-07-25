@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestSecretNeverRendersPlaintext(t *testing.T) {
 		"%q":           fmt.Sprintf("%q", s),
 		"%#v":          fmt.Sprintf("%#v", s),
 		"String()":     s.String(),
-		"LogValue()":   s.LogValue(),
+		"LogValue()":   s.LogValue().String(),
 		"struct %v":    fmt.Sprintf("%v", struct{ Token Secret }{s}),
 		"pointer %v":   fmt.Sprintf("%v", &s),
 		"slice %v":     fmt.Sprintf("%v", []Secret{s}),
@@ -57,6 +58,35 @@ func TestSecretNeverRendersPlaintext(t *testing.T) {
 func TestSecretExposeReturnsPlaintext(t *testing.T) {
 	if got := NewSecret(plaintext).Expose(); got != plaintext {
 		t.Errorf("Expose() = %q, want %q", got, plaintext)
+	}
+}
+
+// slog consults LogValuer before any other interface. A LogValue with the
+// wrong signature does not implement it — redaction then depends on slog
+// falling back to TextMarshaler, which works but is incidental rather than
+// guaranteed. Reported as a LOW finding in the Day 6 review.
+func TestSecretImplementsSlogLogValuer(t *testing.T) {
+	var v any = NewSecret(plaintext)
+	lv, ok := v.(slog.LogValuer)
+	if !ok {
+		t.Fatal("Secret does not implement slog.LogValuer")
+	}
+	if got := lv.LogValue().String(); got != redacted {
+		t.Errorf("LogValue() = %q, want %q", got, redacted)
+	}
+}
+
+// The redaction must survive the path slog actually takes, not just a direct
+// method call.
+func TestSecretRedactsThroughSlog(t *testing.T) {
+	var buf strings.Builder
+	slog.New(slog.NewJSONHandler(&buf, nil)).Info("test", slog.Any("token", NewSecret(plaintext)))
+
+	if strings.Contains(buf.String(), plaintext) {
+		t.Errorf("slog emitted the plaintext: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), redacted) {
+		t.Errorf("slog did not redact: %s", buf.String())
 	}
 }
 

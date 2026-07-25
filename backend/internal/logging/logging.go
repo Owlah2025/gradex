@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // maxFieldLength bounds any single string field. Oversized values are
@@ -212,11 +213,21 @@ func sanitizeControl(s string) string {
 
 func isControl(r rune) bool { return r < 0x20 || r == 0x7f }
 
+// truncate bounds a field by bytes, then steps back to a rune boundary.
+//
+// Cutting mid-rune emits invalid UTF-8, which the JSON encoder replaces with
+// U+FFFD — so a truncated Arabic route, error code, or stack frame would end in
+// replacement characters rather than readable text. Gradex is Arabic-default,
+// so multi-byte content in a log field is the normal case, not an edge case.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…truncated"
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…truncated"
 }
 
 // safeWriter isolates the logging destination from the request path.

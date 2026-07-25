@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -40,7 +41,17 @@ func (s Secret) String() string               { return redacted }
 func (s Secret) GoString() string             { return redacted }
 func (s Secret) MarshalText() ([]byte, error) { return []byte(redacted), nil }
 func (s Secret) MarshalJSON() ([]byte, error) { return []byte(`"` + redacted + `"`), nil }
-func (s Secret) LogValue() string             { return redacted }
+
+// LogValue satisfies slog.LogValuer, which is the interface slog consults
+// first. Returning a plain string did not implement it: slog fell back to
+// TextMarshaler and still redacted, but only incidentally, while the method
+// name advertised a guarantee the type did not actually provide.
+//
+// The compile-time assertion below is the point — it fails if the signature
+// drifts again.
+func (s Secret) LogValue() slog.Value { return slog.StringValue(redacted) }
+
+var _ slog.LogValuer = Secret{}
 
 // SecretRef names where a secret lives without containing it. Typed runtime
 // configuration may hold a reference; it may never hold the value (§11.2).
