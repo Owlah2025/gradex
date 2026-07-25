@@ -3,7 +3,8 @@
 > Milestone: M1 — Platform architecture baseline
 > Assembled: 2026-07-28 (Day 6, Must 1)
 > Builder verdict: **RECOMMEND APPROVE**
-> Developer approval: _pending — see [Sign-off](#sign-off)_
+> Developer approval: **APPROVED** at commit `4d4bbe8`, with the four obligations carried into the
+> dependency-ordered slice register
 
 This record combines three separately approved designs into one baseline and states what July 29
 onward may treat as frozen. It does not restate the designs; it names their exact approved commits,
@@ -102,21 +103,29 @@ belongs to the Media slice, not to a §7.1 amendment.
 Both provisionally accepted sections are now reviewed and remain locked. No design amendment was
 required, so the approved commits in §1 are unchanged by this review.
 
-Carried forward into the slice register and the Identity slice:
+Carried forward into the slice register and the Identity slice, in the developer's approved wording:
 
-1. constrained `PASSWORD_CHANGE_REQUIRED` marker (§2.2);
-2. singleton bootstrap-operation marker (§2.2);
-3. bootstrap capability restriction derived from the marker and enforced by every §6.1 module policy
-   (§2.2);
-4. bootstrap Administrator implemented as a controlled one-off release job in its own `cmd/`
-   entrypoint (§2.1).
+1. Add an explicit Identity-owned constrained state for `PASSWORD_CHANGE_REQUIRED`; do not overload
+   `accounts.status`.
+2. Add a dedicated bootstrap singleton/completion record; do not use shared `idempotency_records` as
+   domain uniqueness.
+3. Enforce the restricted bootstrap session through deny-by-default typed authorization policies,
+   permitting only the required password-change and session-termination operations.
+4. Run bootstrap through a controlled one-off release command under its own `cmd/` entrypoint, not an
+   HTTP endpoint, ordinary worker, or schema migration.
+
+Their dependency ordering and required tests are fixed in
+[SLICES.md](SLICES.md#5-s1--identity-sessions-and-rbac-july-29), which sequences them so July 29 cannot
+implement Authentication/RBAC without resolving them first.
 
 ## Sign-off
 
 - **Builder (Claude):** recommend approve. Cross-design reconciliation found no conflicting
   authority; both focused reviews passed every required property; four obligations are recorded
   above rather than left to be discovered during implementation.
-- **Developer/product owner:** _pending._ M1 is not approved until this line is signed. A builder
-  recommendation is not an approval.
+- **Developer/product owner:** **APPROVED** at commit `4d4bbe8`. The four findings are valid carried
+  implementation obligations, not reasons to reopen §4.5 or block the combined baseline. The
+  direct-asynq video path remains correctly assigned to the future Media migration slice and is not
+  an M1 blocker.
 - **Independent reviewer (`agy`):** this record is inside the Day 6 commit range and is reviewed with
   it at end of day.

@@ -64,7 +64,7 @@ without inventing an externally visible contract or trust-boundary decision.
 | Milestone | Target | Status | Evidence |
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
-| M1 — Platform architecture baseline | July 28 | In progress — baseline assembled and reviewed, developer sign-off outstanding | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Builder verdict `RECOMMEND APPROVE`. Remaining: developer sign-off, then the dependency-ordered slice register |
+| M1 — Platform architecture baseline | July 28 | **Approved** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) still in progress today |
 | M2 — Authentication/RBAC vertical slice | July 29 | Not started | Acceptance tests and reviewed implementation |
 | M3 — Product/revenue journey | August 5 | Not started | Authoring through verified entitlement |
 | M4 — Complete MVP operations | August 9 | Not started | Admin/Instructor, office hours, notifications, payouts |
@@ -88,7 +88,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| M1 baseline awaits developer sign-off | Developer | Sign the [M1 baseline record](M1_ARCHITECTURE_BASELINE.md); a builder recommendation is not an approval | July 28 | Signed developer line in that record |
+| S1 carries four bootstrap obligations that no earlier slice covers | Claude | Implement the fixed S1 bootstrap chain and its five required tests | July 29 | [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac-july-29) chain complete with all five tests passing |
 | Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
