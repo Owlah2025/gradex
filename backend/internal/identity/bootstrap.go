@@ -87,6 +87,31 @@ type BootstrapResult struct {
 
 const maxDisplayNameRunes = 200
 
+// hashNewPassword is the one production boundary at which a password plaintext
+// is read.
+//
+// Validation and hashing both need the plaintext, and doing them at two call
+// sites meant two exposures of the same value for one logical operation. They
+// are behind one function so that the guarantee is structural: the plaintext
+// exists as a local for the duration of this function and is never returned,
+// stored in a struct or database record, placed in an error, logged, written to
+// Audit metadata, copied into an outbox event, or retained for a later step.
+//
+// scripts/expose-guard.sh asserts that the marker below appears exactly once in
+// production code and that the line it marks is the exposure. Moving or
+// duplicating this boundary fails CI.
+func hashNewPassword(password config.Secret, checker CompromisedChecker) (config.Secret, error) {
+	// gradex:plaintext-boundary
+	plaintext := password.Expose()
+
+	if err := ValidatePassword(plaintext, checker); err != nil {
+		return config.Secret{}, err
+	}
+	// The return is an encoded Argon2id hash wrapped in a Secret, never the
+	// plaintext it was derived from.
+	return HashPassword(plaintext)
+}
+
 // NormalizeEmail produces the form uniqueness is enforced on.
 //
 // Case folding and trimming only. The local part is deliberately left otherwise
@@ -151,15 +176,12 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 		return BootstrapResult{}, errors.New("deployment principal is required")
 	}
 
-	if err := ValidatePassword(req.Password.Expose(), req.Compromised); err != nil {
-		return BootstrapResult{}, err
-	}
-
-	// Hashing is deliberately outside the transaction: Argon2id at these
-	// parameters takes hundreds of milliseconds, and holding the advisory lock
-	// across it would widen the window in which a concurrent attempt waits for
-	// no reason.
-	hash, err := HashPassword(req.Password.Expose())
+	// Validation and hashing happen behind one call so the plaintext is read
+	// exactly once. Hashing is deliberately outside the transaction: Argon2id
+	// at these parameters takes hundreds of milliseconds, and holding the
+	// advisory lock across it would widen the window in which a concurrent
+	// attempt waits for no reason.
+	hash, err := hashNewPassword(req.Password, req.Compromised)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
