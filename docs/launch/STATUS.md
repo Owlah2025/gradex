@@ -13,15 +13,21 @@ implementation are not complete, the operating envelope remains provisional, and
 deliberately deferred all external-owner outreach to August 6. All 20 required entries in
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch. The complete
-July 27 API/security/integration design is now developer-approved at commit 6862db5 and awaits
-independent read-only review plus final written-artifact review.
+July 27 API/security/integration design is developer-approved and has passed independent read-only
+review at exact range `1a388cb..d6b4991` with no critical or high finding; only final
+written-artifact review by the developer remains. Confidence stays Red because it is driven by the
+20 open launch gates and the absent implementation, not by design-review state.
 
 ## Current Phase
 
 Day 5 is in progress. The common HTTP/API/error/event, session, authorization, delivery, provider,
-abuse, reconciliation, and security-verification design is written and developer-approved. The
-remaining Day 5 evidence is independent read-only review of exact commit 6862db5 and developer
-review of the written specification. There is no incomplete July 26 Must or Should work.
+abuse, reconciliation, and security-verification design is written, developer-approved, and has
+passed independent read-only review. The only remaining Day 5 evidence is developer review of the
+written specification. There is no incomplete July 26 Must or Should work.
+
+Delivery roles changed on 2026-07-25 under
+[D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
+the builder/planner seat, and `agy` took the independent reviewer seat.
 
 Repository evidence at the latest reconciliation:
 
@@ -69,7 +75,7 @@ the active design slice.
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Independent review of July 27 design is pending | Developer + agy | Review the exact July 27 design range read-only; resolve critical/high findings before Day 5 close | July 28 | Reviewed exact commit range, finding dispositions, no unresolved critical/high finding |
+| Developer review of the written July 27 design is pending | Developer | Read the approved design and accept or correct it before July 28 planning | July 28 | Developer acceptance recorded in the July 27 daily record |
 | Landing FAQ still promises fixed 150-day access | Developer + Claude | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -109,10 +115,20 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-Claude's initial independent review of exact domain-design commit `5ba126c` returned 0 critical,
-0 high, 1 medium, and 4 low findings with verdict **APPROVE DOMAIN DESIGN**. Exact corrected commit
-`2e4f3e1` then passed final read-only verification: every disposition resolved, no new finding at
-any severity, no tracked worktree changes, and final verdict **APPROVE DOMAIN DESIGN**.
+The July 27 API/security/integration design passed independent read-only review at exact range
+`1a388cb..d6b4991`, reviewed by `agy` on `gemini-3.1-pro-high` under
+[D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): **0 critical, 0 high, 0 medium, 0 low**,
+verdict **APPROVE**, with all nine review dimensions reported verified. The reviewer ran in a
+disposable worktree at the frozen commit and its workspace was asserted unmodified afterwards.
+
+One earlier dispatch returned a valid low finding (duplicate `### Session` heading in
+`DOMAIN_MODEL.md`) but was discarded as evidence because the live repository changed mid-run. The
+finding was confirmed against the file and fixed in `b4d101e` before the recorded review ran. A
+review that cannot prove it was read-only is not downgraded to a weaker approval — it is discarded.
+
+Earlier: Claude's independent review of domain-design commit `5ba126c` returned 0 critical, 0 high,
+1 medium, and 4 low findings with verdict **APPROVE DOMAIN DESIGN**; exact corrected commit
+`2e4f3e1` then passed final read-only verification with every disposition resolved.
 
 ## Decisions in Force
 
@@ -144,5 +160,5 @@ any severity, no tracked worktree changes, and final verdict **APPROVE DOMAIN DE
 
 ## Current Next Task
 
-Obtain Claude's independent read-only review of exact commit 6862db5, resolve any critical/high
-finding, then have the developer review the written design before Day 5 close and July 28 planning.
+Have the developer review the written July 27 design, then close Day 5 and convert the design into
+July 28 implementation slices. The independent review is complete with no critical or high finding.
