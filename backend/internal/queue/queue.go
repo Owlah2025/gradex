@@ -8,7 +8,7 @@ import "github.com/hibiken/asynq"
 // (thumbnail:generate, subtitle:generate, watermark:apply, virus:scan) don't collide.
 const (
 	TypeMetadataExtract = "video:metadata_extract"
-	TypeTranscode        = "video:transcode"
+	TypeTranscode       = "video:transcode"
 )
 
 func NewClient(redisAddr string) *asynq.Client {

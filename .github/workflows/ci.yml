@@ -1,0 +1,230 @@
+name: CI
+
+# Every guarantee the delivery foundation claims must hold on a clean machine,
+# not only on the developer's workstation. Jobs are separated so a failure
+# names its own area rather than "CI is red".
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A superseded run on the same ref is wasted capacity and a misleading signal.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. No job here needs to write to the repository, and
+# nothing in CI requires a Tap, email, CDN, or production credential — provider
+# adapters are exercised against fixtures, never live services.
+permissions:
+  contents: read
+
+env:
+  # Pinned to the toolchain backend/go.mod declares, so CI cannot silently
+  # drift onto a different compiler than the one the code is written against.
+  GO_VERSION_FILE: backend/go.mod
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Verify formatting
+        working-directory: backend
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+      - name: Vet
+        working-directory: backend
+        # The integration variant is vetted too: a build-tagged file that no
+        # longer compiles is invisible to a plain `go vet` until someone runs
+        # the integration suite.
+        run: |
+          go vet ./...
+          go vet -tags=integration ./...
+
+      - name: Test
+        working-directory: backend
+        run: go test -race ./...
+
+      - name: Confirm a clean worktree
+        # A build or test that writes into the tree makes later runs depend on
+        # earlier ones.
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "The build left changes in the worktree:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install from lockfile
+        working-directory: frontend
+        # `npm ci` installs exactly what the lockfile pins and fails if
+        # package.json and the lockfile disagree. `npm install` would resolve
+        # fresh versions and rewrite the lockfile, so CI would stop testing the
+        # dependency set that ships.
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Postgres only. Redis is not started here: nothing in this job needs it,
+    # and an unused service is a slower job and a broader failure surface.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: gradex
+          POSTGRES_PASSWORD: gradex
+          POSTGRES_DB: gradex
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gradex"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Non-secret settings for a throwaway database. Nothing here is a real
+      # credential, and no production secret is available to this job.
+      APP_ENV: development
+      DATABASE_URL: postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable
+      REDIS_ADDR: localhost:6379
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: gradex-ci
+      S3_ACCESS_KEY: ci-access-key
+      S3_SECRET_KEY: ci-secret-key
+      PLAYBACK_TOKEN_SECRET: ci-playback-token-secret-not-a-real-key
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: ${{ env.GO_VERSION_FILE }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Migrate up, up again, down, up
+        working-directory: backend
+        # No globally installed binary: this is the same command a developer
+        # and a release step run.
+        run: |
+          go run ./cmd/migrate version
+          go run ./cmd/migrate up
+          go run ./cmd/migrate up      # a release step may run more than once
+          go run ./cmd/migrate down 1
+          go run ./cmd/migrate up
+
+      - name: Verify schema version and expected objects
+        working-directory: backend
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            v bigint;
+            d boolean;
+            missing text;
+          BEGIN
+            SELECT version, dirty INTO v, d FROM schema_migrations ORDER BY version DESC LIMIT 1;
+            IF v IS DISTINCT FROM 1 THEN
+              RAISE EXCEPTION 'schema version is %, expected 1', v;
+            END IF;
+            IF d THEN
+              RAISE EXCEPTION 'schema is dirty after a successful migration';
+            END IF;
+
+            SELECT string_agg(t, ', ') INTO missing
+            FROM unnest(ARRAY['courses','sections','lessons','videos','progress','fake_entitlements']) AS t
+            WHERE to_regclass('public.' || t) IS NULL;
+            IF missing IS NOT NULL THEN
+              RAISE EXCEPTION 'missing tables after migration: %', missing;
+            END IF;
+          END $$;
+          SQL
+
+      - name: Refuse production down migrations
+        working-directory: backend
+        env:
+          APP_ENV: production
+          PUBLIC_ORIGIN: https://ci.gradex.invalid
+          CORS_ALLOWED_ORIGINS: https://ci.gradex.invalid
+          AUTH_FAKE_MODE: "false"
+          PLAYBACK_TOKEN_SECRET: ci-production-shaped-token-not-a-real-key
+        run: |
+          if go run ./cmd/migrate down 1; then
+            echo "A production down migration was permitted." >&2
+            exit 1
+          fi
+          echo "Production down migration refused, as required."
+
+      - name: Redact secrets in migration failure output
+        working-directory: backend
+        env:
+          DATABASE_URL: postgres://gradex:CI_CANARY_PASSWORD@localhost:5999/nope?sslmode=disable
+        run: |
+          output="$(go run ./cmd/migrate up 2>&1 || true)"
+          echo "$output"
+          if printf '%s' "$output" | grep -q 'CI_CANARY_PASSWORD'; then
+            echo "The database password reached migration output." >&2
+            exit 1
+          fi
+          echo "Password redacted from failure output, as required."
+
+      - name: Schema integration tests
+        working-directory: backend
+        # Covers dirty-state detection and unsupported-version detection
+        # against a real database.
+        run: go test -tags=integration -run 'TestMigrateUpDownUp|TestDirtySchema|TestUnsupportedSchema' ./internal/db/
+
+  guards:
+    name: Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Documentation guard
+        run: ./scripts/docs-guard.sh
+
+      - name: Secret exposure guard
+        run: ./scripts/expose-guard.sh
