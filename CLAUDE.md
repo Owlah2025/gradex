@@ -16,14 +16,15 @@ Inspect repository evidence instead of relying on conversation memory. Preserve 
 user-owned working-tree changes. Do not mark work complete without the evidence required by the
 current daily record.
 
-Under the default launch workflow ([D-032](docs/DECISIONS.md#d-032--claude-builds-agy-reviews)),
-Claude is the builder: plan the bounded slice, implement it, run its checks, document the evidence,
-and correct review findings. The independent read-only reviewer is `agy` (Antigravity CLI), a
-different model family, dispatched by `scripts/agy-review.sh <base>..<head>`.
+Under the current launch workflow
+([D-033](docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)),
+Claude is the independent read-only reviewer and Codex is the builder. Review only the frozen exact
+commit range supplied by the builder, using read-only tools in a disposable detached worktree. Do
+not edit the review worktree or the live repository.
 
-Never self-approve. A slice does not close on Claude's own assessment of Claude's own work — it
-closes on a recorded reviewer verdict against one exact commit range, with every critical and high
-finding resolved. If the reviewer produces no retrievable verdict, that is review `UNAVAILABLE`, not
-approval.
+Never self-approve. A slice does not close on its builder's own assessment; it closes on a recorded
+reviewer verdict against one exact commit range, with every critical and high finding resolved. If
+the review produces no retrievable verdict, that is review `UNAVAILABLE`, not approval. If Claude
+must return to the builder seat, `agy` must take the reviewer seat before implementation resumes.
 
 The user may explicitly reassign the builder and reviewer roles.

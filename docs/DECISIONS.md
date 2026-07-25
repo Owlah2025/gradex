@@ -356,3 +356,22 @@ repository. The containment and the post-run assertions, not the flag, are what 
 Codex-builder/Claude-reviewer model recorded in the approved
 [platform architecture](superpowers/specs/2026-07-25-platform-architecture-design.md), which is left
 unedited as approved-baseline evidence.
+
+## D-033 — Codex resumes building and Claude resumes review
+
+**Date:** 2026-07-25
+**Decision:** Restore the original launch seats when Codex quota becomes available: Codex owns
+planning, implementation, checks, evidence, and finding correction; Claude performs the independent
+read-only review of one frozen exact commit range. Claude reviews from a disposable detached
+worktree with read-only tools and may not modify the review tree or the live repository. `agy`
+remains the approved fallback reviewer under D-032 when Claude is unavailable. The reviewer never
+reviews work it authored.
+**Reason:** D-032 was an availability response to an exhausted Codex quota, not a product or
+architecture preference. Restoring the original model split preserves delivery capacity while
+retaining the independent-review boundary and the reviewed evidence Claude and `agy` produced during
+the temporary reassignment.
+**Alternatives rejected:** Keeping Claude in the builder seat after Codex returns, which leaves the
+original builder capacity unused; letting Codex approve its own work; discarding the D-032/agy
+fallback and its proven containment harness.
+**Source:** Developer instruction during S1A on 2026-07-25: Codex quota returned and the launch
+workflow should return to its pre-exhaustion role assignment.

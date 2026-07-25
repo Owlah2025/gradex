@@ -1,7 +1,7 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-29 — advanced by user
-> Last repository reconciliation: 2026-07-29 — start-of-day, HEAD `90f92ec`
+> Last repository reconciliation: 2026-07-29 — bootstrap link 6, HEAD `ec8af3b`
 > Scheduled day: Day 7 — Authentication and RBAC, S1A bootstrap/Admin security core, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 17 calendar days
@@ -47,16 +47,16 @@ Details envelope across all of `/api/v1`, liveness and readiness probes, reposit
 under `cmd/migrate`, and a four-job CI pipeline with a documentation guard and a secret-exposure
 guard. Nine commits landed it, from `4d4bbe8` through `7bd4d84`.
 
-Day 7 has landed link 1 of the bootstrap chain at `90f92ec`: migration `0002_identity_bootstrap`
-adds `accounts`, `password_credentials`, and `bootstrap_operations`. Both M1 obligations are database
-guarantees rather than conventions — `CHANGE_REQUIRED` is a `credential_state` on
-`password_credentials` and does not overload `accounts.status`, and the bootstrap singleton is a
-constrained primary key rather than a reuse of shared `idempotency_records`. Links 2 through 6 and
-the five bootstrap close-condition tests are not started.
+Day 7 has landed all six ordered bootstrap links through `ec8af3b`. The one-off command, restricted
+principal, mandatory password preparation, atomic password/session/CSRF rotation, and normal Admin
+authority transition are implemented. The complete backend gate and Identity PostgreSQL integration
+suite are green locally. The gate-boundary audit, hosted CI, frozen-range independent review, and
+remaining close-condition reconciliation still stand between S1A and closure.
 
-Delivery roles changed on 2026-07-25 under
-[D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews): Codex exhausted its quota, Claude took
-the builder/planner seat, and `agy` took the independent reviewer seat.
+Delivery roles returned on 2026-07-25 under
+[D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review): Codex resumed the
+builder/planner seat when its quota returned, Claude resumed independent read-only review, and `agy`
+remains the approved fallback.
 
 Repository evidence at the latest reconciliation:
 
@@ -214,10 +214,9 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
 - August 15 is readiness-gated.
-- D-032: Claude is the primary builder and planner; `agy` (Antigravity CLI, `gemini-3.1-pro-high`) is
-  the independent read-only reviewer. Codex held the builder seat until 2026-07-25 and was replaced
-  when its quota was exhausted. Reviews run through `scripts/agy-review.sh`; a `TAINTED` or
-  `UNAVAILABLE` run is never recorded as an approval.
+- D-033: Codex is the primary builder and planner; Claude is the independent read-only reviewer.
+  Review uses a disposable detached worktree and frozen exact commit range. `agy` remains the
+  approved fallback under D-032. A `TAINTED` or `UNAVAILABLE` run is never recorded as approval.
 - Missed work becomes visible carryover and cannot be marked complete without evidence.
 - The approved documentation/specification baseline ends at commit `1f63a59`.
 - Claude is the default SpecKit integration; the Codex integration remains installed but unused.

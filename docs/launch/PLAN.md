@@ -3,7 +3,7 @@
 > Status: Active
 > Schedule: 2026-07-23 through 2026-08-15
 > Public go-live target: 2026-08-15, readiness-gated
-> Delivery team: Solo developer, Claude builder, agy reviewer (see [D-032](../DECISIONS.md#d-032--claude-builds-agy-reviews))
+> Delivery team: Solo developer, Codex builder, Claude reviewer (see [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review))
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -35,27 +35,31 @@ the source-of-truth order in [the documentation index](../README.md#source-of-tr
 
 - **Developer/product owner:** approves product decisions, external commitments, accepted risks,
   scope changes, and the public go/no-go decision.
-- **Claude/builder:** plans and implements one bounded slice, runs its checks, documents evidence,
+- **Codex/builder:** plans and implements one bounded slice, runs its checks, documents evidence,
   and corrects review findings.
-- **agy/reviewer:** reviews the exact commit range without editing it, checking requirements,
+- **Claude/reviewer:** reviews the exact commit range without editing it, checking requirements,
   security, privacy, authorization, idempotency, concurrency, tests, observability, and scope.
 
 The reviewer must not review a moving target. Record the reviewed commit range in the daily record.
 Critical and high findings return to the builder and must be rechecked before the slice closes.
 
 The reviewer must not be the builder. Independence here is a model boundary, not a change of tone:
-the reviewer runs on a different model family (`gemini-3.1-pro-high`) in a separate process with no
-access to the builder's reasoning. Claude reading back over its own diff is a self-check and is
-never sufficient to close a slice.
+Claude runs in a separate process against a disposable detached worktree at the frozen commit, with
+read-only tools and no access to the builder's reasoning. Codex reading back over its own diff is a
+self-check and is never sufficient to close a slice.
 
-Reviews are dispatched with `scripts/agy-review.sh <base>..<head>`, which checks the exact commit out
-into a disposable worktree, sends the fixed brief in
-[`review/REVIEW_BRIEF_TEMPLATE.md`](review/REVIEW_BRIEF_TEMPLATE.md), and refuses to report a result
-that was not read-only. Two outcomes are not approvals and must never be recorded as one:
+Reviews use the fixed brief in
+[`review/REVIEW_BRIEF_TEMPLATE.md`](review/REVIEW_BRIEF_TEMPLATE.md) against a disposable detached
+worktree. Claude receives only read and shell-inspection tools; the live repository status and the
+review worktree are checked before the verdict is recorded. Two outcomes are not approvals and must
+never be recorded as one:
 
 - **TAINTED** — the reviewer modified something. The review is discarded, not corrected.
 - **UNAVAILABLE** — the run produced no retrievable verdict. Re-dispatch; do not infer a pass from
   silence.
+
+If Claude is unavailable, `agy` remains the approved fallback through
+`scripts/agy-review.sh <base>..<head>` under D-032's existing containment rules.
 
 ### Work-in-progress rule
 
