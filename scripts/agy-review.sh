@@ -6,9 +6,10 @@
 #   scripts/agy-review.sh <base>..<head>
 #   scripts/agy-review.sh <commit>          # reviews <commit>^..<commit>
 #
-# Under D-032 Claude is the builder and agy is the independent reviewer. The agy-delegate skill is
-# built for delegating *implementation* and offers no CLI-enforced read-only mode, so read-only is
-# enforced structurally here instead of by trusting a flag or a prompt instruction:
+# Under D-033 Codex is the builder and Claude is the default independent reviewer. When Claude is
+# unavailable, agy remains the D-032 fallback. The agy-delegate skill is built for delegating
+# *implementation* and offers no CLI-enforced read-only mode, so read-only is enforced structurally
+# here instead of by trusting a flag or a prompt instruction:
 #
 #   * agy is pointed at a detached git worktree checked out at the exact reviewed commit, under the
 #     scratch directory. The real repository — including the user-owned untracked spreadsheet — is

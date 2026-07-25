@@ -3,10 +3,11 @@
 This template is the **fixed contract** given to the independent reviewer. It is checked in
 deliberately.
 
-Under the current delivery roles ([D-032](../../DECISIONS.md#d-032--claude-builds-agy-reviews)),
-Claude is the builder and therefore writes the dispatch that reviews Claude's own work. A brief
-composed freshly for each review would let the builder quietly steer what gets scrutinised. Keeping
-the brief fixed removes that lever: only the commit range varies.
+Under the current delivery roles
+([D-033](../../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)), Codex is the
+builder and Claude is the independent reviewer. A brief composed freshly for each review would let
+the builder quietly steer what gets scrutinised. Keeping the brief fixed removes that lever: only
+the commit range varies.
 
 Do not edit this template to soften a review, to steer it toward a conclusion, or to skip a
 dimension. Widening it (a new standing review dimension) is a deliberate, reviewable change; narrowing
@@ -27,9 +28,9 @@ Everything between the `<!-- BRIEF:BEGIN -->` and `<!-- BRIEF:END -->` markers i
 You are the independent read-only reviewer for the Gradex MVP launch workflow. Review exactly the
 commit range {{RANGE}} (base {{BASE}}, head {{HEAD}}) in this workspace.
 
-The builder is Claude. You are a different model, and independence is the entire reason you were
-given this job: do not assume the change is correct, do not defer to the confidence of its prose,
-and do not approve something you could not verify in the repository.
+The builder is Codex. You are an independent reviewer, and that separation is the entire reason you
+were given this job: do not assume the change is correct, do not defer to the confidence of its
+prose, and do not approve something you could not verify in the repository.
 
 Start with:
   git log --oneline {{RANGE}}
