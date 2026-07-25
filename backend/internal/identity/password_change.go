@@ -470,7 +470,7 @@ func PreparePasswordChange(
 		return PreparedPasswordChange{}, err
 	}
 
-	if err := CheckRecentAuthentication(req.Kind, session, recentAuthWindow, now); err != nil {
+	if err := CheckRecentAuthentication(session, recentAuthWindow, now); err != nil {
 		return PreparedPasswordChange{}, err
 	}
 

@@ -231,30 +231,38 @@ func TestDirtySchemaFailsReadiness(t *testing.T) {
 
 // A build whose supported range does not include the database's version must
 // refuse traffic rather than guess at the shape it finds.
-func TestUnsupportedSchemaVersionFailsReadiness(t *testing.T) {
-	freshDatabase(t)
-	pool := openPool(t)
+func TestSchemaOutsideSupportedRangeFailsReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int64
+	}{
+		{name: "below minimum", version: int64(MinSchemaVersion - 1)},
+		{name: "above maximum", version: int64(MaxSchemaVersion + 5)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			freshDatabase(t)
+			pool := openPool(t)
 
-	m := openMigrator(t)
-	if err := m.Up(); err != nil {
-		t.Fatalf("up: %v", err)
-	}
+			m := openMigrator(t)
+			if err := m.Up(); err != nil {
+				t.Fatalf("up: %v", err)
+			}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
-	defer cancel()
+			ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+			defer cancel()
 
-	// Stand in for a database migrated by a newer release than this build.
-	future := int64(MaxSchemaVersion + 5)
-	if _, err := pool.Exec(ctx,
-		"UPDATE "+schemaMigrationsTable+" SET version = $1", future); err != nil {
-		t.Fatalf("setting a future schema version: %v", err)
-	}
+			if _, err := pool.Exec(ctx,
+				"UPDATE "+schemaMigrationsTable+" SET version = $1", tc.version); err != nil {
+				t.Fatalf("setting schema version: %v", err)
+			}
 
-	err := CheckSchema(ctx, pool)
-	if !errors.Is(err, ErrSchemaIncompatible) {
-		t.Fatalf("CheckSchema returned %v, want ErrSchemaIncompatible", err)
-	}
-	if msg := err.Error(); !strings.Contains(msg, fmt.Sprint(future)) {
-		t.Errorf("the error should name the version found, got %q", msg)
+			err := CheckSchema(ctx, pool)
+			if !errors.Is(err, ErrSchemaIncompatible) {
+				t.Fatalf("CheckSchema returned %v, want ErrSchemaIncompatible", err)
+			}
+			if msg := err.Error(); !strings.Contains(msg, fmt.Sprint(tc.version)) {
+				t.Errorf("the error should name the version found, got %q", msg)
+			}
+		})
 	}
 }

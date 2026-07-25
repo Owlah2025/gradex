@@ -533,36 +533,39 @@ func TestInsufficientRecentAuthenticationIsRefused(t *testing.T) {
 		t.Fatalf("ageing the session: %v", err)
 	}
 
-	inTx(t, conn, ctx, func(tx pgx.Tx) {
-		_, err := PreparePasswordChange(ctx, tx, PasswordChangeRequest{
-			AccountID:           accountID,
-			SessionID:           sessionID,
-			PresentedGeneration: 1,
-			Kind:                VoluntaryChange,
-			CurrentPassword:     config.NewSecret("correct-horse-battery-staple-7"),
-			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
-		}, recentAuthWindow, time.Now().UTC())
+	for _, tc := range []struct {
+		name            string
+		kind            PasswordChangeKind
+		currentPassword config.Secret
+	}{
+		{
+			name:            "voluntary change",
+			kind:            VoluntaryChange,
+			currentPassword: config.NewSecret("correct-horse-battery-staple-7"),
+		},
+		{
+			name: "bootstrap mandatory change",
+			kind: BootstrapMandatoryChange,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inTx(t, conn, ctx, func(tx pgx.Tx) {
+				_, err := PreparePasswordChange(ctx, tx, PasswordChangeRequest{
+					AccountID:           accountID,
+					SessionID:           sessionID,
+					PresentedGeneration: 1,
+					Kind:                tc.kind,
+					CurrentPassword:     tc.currentPassword,
+					NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+				}, recentAuthWindow, time.Now().UTC())
 
-		if !errors.Is(err, ErrRecentAuthRequired) {
-			t.Fatalf("err = %v, want ErrRecentAuthRequired", err)
-		}
-	})
-
-	assertNothingMutated(t, conn, ctx, accountID, sessionID)
-
-	// The same session satisfies the bootstrap mandatory change, which is the
-	// asymmetry the design requires.
-	inTx(t, conn, ctx, func(tx pgx.Tx) {
-		if _, err := PreparePasswordChange(ctx, tx, PasswordChangeRequest{
-			AccountID:           accountID,
-			SessionID:           sessionID,
-			PresentedGeneration: 1,
-			Kind:                BootstrapMandatoryChange,
-			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
-		}, recentAuthWindow, time.Now().UTC()); err != nil {
-			t.Fatalf("the bootstrap mandatory change was refused for stale authentication: %v", err)
-		}
-	})
+				if !errors.Is(err, ErrRecentAuthRequired) {
+					t.Fatalf("err = %v, want ErrRecentAuthRequired", err)
+				}
+			})
+			assertNothingMutated(t, conn, ctx, accountID, sessionID)
+		})
+	}
 }
 
 func TestWeakPasswordDoesNotMutateCredentialsOrSessions(t *testing.T) {

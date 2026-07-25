@@ -53,13 +53,6 @@ type Session struct {
 	AbsoluteExpiresAt time.Time
 }
 
-// SessionCredential is one immutable generation.
-type SessionCredential struct {
-	SessionID  string
-	Generation int
-	State      string
-}
-
 // IssuedCredential is a freshly minted credential: the plaintext values the
 // browser receives, and the digests the database stores.
 //
@@ -175,13 +168,9 @@ const (
 	// BootstrapMandatoryChange is the first change on an Account whose
 	// credential is CHANGE_REQUIRED.
 	//
-	// The successfully authenticated bootstrap session *is* the recent primary
-	// authentication. Requiring a further ceremony would be requiring an
-	// impossible one: the Account has no other credential to reauthenticate
-	// with, and the password it holds is the one being replaced. There is also
-	// no current password to demand — the operator was handed a temporary value
-	// through the secret boundary, and asking for it again proves nothing the
-	// session has not already proven.
+	// The bootstrap session must still be inside the recent-authentication
+	// window. It does not separately demand the current password: the operator
+	// already proved that temporary value when the session was established.
 	BootstrapMandatoryChange PasswordChangeKind = iota
 
 	// VoluntaryChange is an ordinary later change. It requires the current
@@ -202,17 +191,9 @@ func (k PasswordChangeKind) String() string {
 // password.
 func (k PasswordChangeKind) RequiresCurrentPassword() bool { return k == VoluntaryChange }
 
-// CheckRecentAuthentication applies the recent-authentication rule for a change
-// kind.
-//
-// For the bootstrap mandatory change the authenticated session is sufficient,
-// so this only confirms the session is usable at all — which the caller has
-// already established, and which is rechecked inside the transaction because a
-// check outside one is advisory.
-func CheckRecentAuthentication(kind PasswordChangeKind, s Session, window time.Duration, now time.Time) error {
-	if kind == BootstrapMandatoryChange {
-		return nil
-	}
+// CheckRecentAuthentication applies the recent-authentication rule to every
+// password change.
+func CheckRecentAuthentication(s Session, window time.Duration, now time.Time) error {
 	if window <= 0 {
 		// A non-positive window would silently accept any age. Refuse rather
 		// than interpret a misconfiguration as "no requirement".

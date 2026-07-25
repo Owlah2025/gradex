@@ -41,37 +41,20 @@ func TestLastPrimaryAuthenticationPrefersReauthentication(t *testing.T) {
 	}
 }
 
-// The bootstrap mandatory change accepts the authenticated bootstrap session as
-// its recent primary authentication. Requiring more would require the
-// impossible: the Account has no other credential, and the password it holds is
-// the one being replaced.
-func TestBootstrapMandatoryChangeNeedsNoFurtherCeremony(t *testing.T) {
-	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
-	// Authenticated long outside any sane window.
-	s := Session{AuthenticatedAt: now.Add(-72 * time.Hour)}
-
-	if err := CheckRecentAuthentication(BootstrapMandatoryChange, s, 15*time.Minute, now); err != nil {
-		t.Fatalf("the bootstrap mandatory change demanded further authentication: %v", err)
-	}
-	if BootstrapMandatoryChange.RequiresCurrentPassword() {
-		t.Error("the bootstrap mandatory change demanded the current password")
-	}
-}
-
-func TestVoluntaryChangeRequiresRecentAuthentication(t *testing.T) {
+func TestPasswordChangeRequiresRecentAuthentication(t *testing.T) {
 	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 	window := 15 * time.Minute
 
 	t.Run("inside the window", func(t *testing.T) {
 		s := Session{AuthenticatedAt: now.Add(-5 * time.Minute)}
-		if err := CheckRecentAuthentication(VoluntaryChange, s, window, now); err != nil {
+		if err := CheckRecentAuthentication(s, window, now); err != nil {
 			t.Fatalf("a recent session was refused: %v", err)
 		}
 	})
 
 	t.Run("outside the window", func(t *testing.T) {
 		s := Session{AuthenticatedAt: now.Add(-60 * time.Minute)}
-		err := CheckRecentAuthentication(VoluntaryChange, s, window, now)
+		err := CheckRecentAuthentication(s, window, now)
 		if !errors.Is(err, ErrRecentAuthRequired) {
 			t.Fatalf("err = %v, want ErrRecentAuthRequired", err)
 		}
@@ -82,7 +65,7 @@ func TestVoluntaryChangeRequiresRecentAuthentication(t *testing.T) {
 			AuthenticatedAt: now.Add(-6 * time.Hour),
 			LastActivityAt:  now.Add(-1 * time.Second),
 		}
-		if err := CheckRecentAuthentication(VoluntaryChange, s, window, now); !errors.Is(err, ErrRecentAuthRequired) {
+		if err := CheckRecentAuthentication(s, window, now); !errors.Is(err, ErrRecentAuthRequired) {
 			t.Fatalf("recent activity satisfied a recent-authentication requirement: %v", err)
 		}
 	})
@@ -90,11 +73,17 @@ func TestVoluntaryChangeRequiresRecentAuthentication(t *testing.T) {
 	// A misconfigured window must not read as "no requirement".
 	t.Run("non-positive window fails closed", func(t *testing.T) {
 		s := Session{AuthenticatedAt: now}
-		if err := CheckRecentAuthentication(VoluntaryChange, s, 0, now); !errors.Is(err, ErrRecentAuthRequired) {
+		if err := CheckRecentAuthentication(s, 0, now); !errors.Is(err, ErrRecentAuthRequired) {
 			t.Fatalf("a zero window was treated as no requirement: %v", err)
 		}
 	})
 
+}
+
+func TestPasswordChangeKindsRequireCurrentPasswordAsDesigned(t *testing.T) {
+	if BootstrapMandatoryChange.RequiresCurrentPassword() {
+		t.Error("the bootstrap mandatory change demanded the current password")
+	}
 	if !VoluntaryChange.RequiresCurrentPassword() {
 		t.Error("a voluntary change did not require the current password")
 	}

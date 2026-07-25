@@ -16,11 +16,12 @@ import (
 // and new application versions both run against the expanded schema, so an
 // exact-match requirement would make every migration an outage.
 //
-// Raise MinSchemaVersion only in the contract step, once no running instance
-// depends on the older shape. Version 1 stays supported because 0002, 0003, and
-// 0004 only add tables — nothing a version-1 build reads has changed shape.
+// Raise MinSchemaVersion only when this build starts reading a newer shape.
+// Protected requests now resolve principals through the Account and credential
+// tables added by version 2, so serving against version 1 would turn every
+// authorization decision into an infrastructure fault.
 const (
-	MinSchemaVersion = 1
+	MinSchemaVersion = 2
 	MaxSchemaVersion = 4
 )
 
