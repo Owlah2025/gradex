@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -69,21 +70,17 @@ func TestResolvedBootstrapAdminIsRestrictedByPolicy(t *testing.T) {
 	}
 }
 
-// Clearing the requirement is what unlocks Admin authority — and it takes
-// effect on the next resolution, with nothing to invalidate.
-func TestClearingTheRequirementUnlocksAuthorityImmediately(t *testing.T) {
+// Link 6: only the real atomic password-change command unlocks normal Admin
+// authority, and the owner-state resolver observes it on the next request.
+func TestCompletedPasswordChangeUnlocksNormalAdminAuthority(t *testing.T) {
 	freshSchema(t)
 	conn, ctx := connect(t)
-
-	result, err := Bootstrap(ctx, conn, request("op-unlock"))
-	if err != nil {
-		t.Fatalf("bootstrapping: %v", err)
-	}
+	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
 
 	p, pctx := pool(t)
 	resolver := NewDBPrincipalResolver(p)
 
-	before, err := resolver.ResolvePrincipal(pctx, result.AccountID)
+	before, err := resolver.ResolvePrincipal(pctx, accountID)
 	if err != nil {
 		t.Fatalf("resolving before: %v", err)
 	}
@@ -91,18 +88,39 @@ func TestClearingTheRequirementUnlocksAuthorityImmediately(t *testing.T) {
 		t.Fatal("Admin operations were allowed before the password change")
 	}
 
-	if _, err := conn.Exec(ctx,
-		`UPDATE password_credentials SET state = 'ACTIVE' WHERE account_id = $1`, result.AccountID,
-	); err != nil {
-		t.Fatalf("clearing the requirement: %v", err)
+	if _, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+		AccountID:           accountID,
+		SessionID:           sessionID,
+		PresentedGeneration: 1,
+		Kind:                BootstrapMandatoryChange,
+		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+	}, adminPasswordChangePolicy, time.Now().UTC()); err != nil {
+		t.Fatalf("completing password change: %v", err)
 	}
 
-	after, err := resolver.ResolvePrincipal(pctx, result.AccountID)
+	after, err := resolver.ResolvePrincipal(pctx, accountID)
 	if err != nil {
 		t.Fatalf("resolving after: %v", err)
 	}
-	if !Authorize(after, CapAdminOperations).Allowed {
-		t.Fatal("Admin operations were still denied after the requirement was cleared")
+	if after.Restricted() {
+		t.Fatalf("completed password change still resolved as %q", after.CredentialState)
+	}
+	for _, capability := range []Capability{
+		CapPasswordChange,
+		CapSessionTerminate,
+		CapAdminOperations,
+		CapFinancialOperations,
+		CapSecurityOperations,
+		CapRetentionOperations,
+		CapProviderOperations,
+		CapContentManagement,
+	} {
+		if decision := Authorize(after, capability); !decision.Allowed {
+			t.Errorf("normal Admin denied %s: %s", capability, decision.Reason)
+		}
+	}
+	if decision := Authorize(after, CapLearningAccess); decision.Allowed {
+		t.Error("normal Admin received ambient Student learning access")
 	}
 }
 
@@ -184,5 +202,3 @@ func TestResolveUnknownAndMalformedIdentifiers(t *testing.T) {
 		})
 	}
 }
-
-var _ = config.NewSecret
