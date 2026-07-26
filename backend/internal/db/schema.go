@@ -22,7 +22,7 @@ import (
 // authorization decision into an infrastructure fault.
 const (
 	MinSchemaVersion = 2
-	MaxSchemaVersion = 4
+	MaxSchemaVersion = 5
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

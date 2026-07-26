@@ -38,6 +38,7 @@ func NewRouter(
 	authenticator auth.Authenticator,
 	entitlements auth.EntitlementChecker,
 	principals identity.PrincipalResolver,
+	options ...RouterOption,
 ) (*gin.Engine, error) {
 	r, err := newEngine(cfg, logger)
 	if err != nil {
@@ -51,6 +52,15 @@ func NewRouter(
 		// forgetting an argument.
 		return nil, fmt.Errorf("principal resolver is required")
 	}
+	routerConfig := routerOptions{}
+	for _, option := range options {
+		if option == nil {
+			return nil, fmt.Errorf("router option is required")
+		}
+		if err := option(&routerConfig); err != nil {
+			return nil, fmt.Errorf("configuring router option: %w", err)
+		}
+	}
 
 	// Probes sit outside /api/v1: no version promise, no session, no CSRF, no
 	// authentication, and no idle-session extension.
@@ -60,6 +70,9 @@ func NewRouter(
 	h := &videoHandlers{svc: svc}
 
 	v1 := r.Group("/api/v1")
+	if routerConfig.admission != nil {
+		v1.GET("/session/bootstrap", routerConfig.admission.security.bootstrapHandler())
+	}
 
 	// Every protected group runs authentication → capability policy → ownership
 	// or Entitlement, in that order. The capability step is what refuses a
@@ -97,6 +110,29 @@ func NewRouter(
 	v1.GET("/videos/:videoID/manifest/*filepath", h.manifest)
 
 	return r, nil
+}
+
+type routerOptions struct {
+	admission *AdmissionFoundation
+}
+
+// RouterOption adds a validated optional product boundary to the router.
+type RouterOption func(*routerOptions) error
+
+// WithAdmissionFoundation mounts only the safe anonymous bootstrap. Student
+// commands remain absent until their domain service and ordered middleware
+// chain are supplied.
+func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("admission foundation is required")
+		}
+		if options.admission != nil {
+			return fmt.Errorf("anonymous admission is already configured")
+		}
+		options.admission = foundation
+		return nil
+	}
 }
 
 // newEngine composes the middleware chain and the fallback handlers, without

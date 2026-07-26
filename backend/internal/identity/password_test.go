@@ -25,7 +25,7 @@ func TestValidatePasswordLengthBounds(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := ValidatePassword(tc.password, nil)
+			err := ValidatePassword(tc.password)
 			if tc.wantErr && err == nil {
 				t.Fatalf("expected a policy error, got nil")
 			}
@@ -50,7 +50,7 @@ func TestValidatePasswordCountsRunesNotBytes(t *testing.T) {
 		t.Fatalf("test fixture is %d bytes; it must be multi-byte for this test to mean anything", len(arabic))
 	}
 
-	if err := ValidatePassword(arabic, nil); err != nil {
+	if err := ValidatePassword(arabic); err != nil {
 		t.Fatalf("a %d-rune Arabic passphrase was rejected: %v", len([]rune(arabic)), err)
 	}
 }
@@ -65,7 +65,7 @@ func TestValidatePasswordRejectsCommonValues(t *testing.T) {
 		"gradexadministrator",
 	} {
 		t.Run(password, func(t *testing.T) {
-			err := ValidatePassword(password, nil)
+			err := ValidatePassword(password)
 			if err == nil {
 				t.Fatalf("expected rejection for %q", password)
 			}
@@ -80,35 +80,12 @@ func TestValidatePasswordRejectsCommonValues(t *testing.T) {
 // rule, never the input.
 func TestValidatePasswordErrorNeverContainsThePassword(t *testing.T) {
 	secretish := "hunter2hunter2hunter2password"
-	err := ValidatePassword(secretish, nil)
+	err := ValidatePassword(secretish)
 	if err == nil {
 		t.Fatal("expected this password to be rejected")
 	}
 	if strings.Contains(err.Error(), secretish) || strings.Contains(err.Error(), "hunter2") {
 		t.Fatalf("policy error leaked the password: %q", err.Error())
-	}
-}
-
-type stubChecker struct {
-	compromised bool
-	err         error
-}
-
-func (s stubChecker) IsCompromised(string) (bool, error) { return s.compromised, s.err }
-
-func TestValidatePasswordConsultsCompromisedChecker(t *testing.T) {
-	err := ValidatePassword(goodPassword, stubChecker{compromised: true})
-	if !errors.Is(err, ErrPasswordPolicy) {
-		t.Fatalf("expected a policy rejection, got %v", err)
-	}
-}
-
-// A checker that cannot answer must not be read as answering "not
-// compromised".
-func TestValidatePasswordFailsClosedWhenCheckerErrors(t *testing.T) {
-	err := ValidatePassword(goodPassword, stubChecker{err: errors.New("provider unreachable")})
-	if err == nil {
-		t.Fatal("expected the password to be rejected when the checker failed")
 	}
 }
 

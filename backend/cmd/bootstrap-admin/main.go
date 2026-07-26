@@ -166,6 +166,19 @@ func run(args []string, stdout *os.File) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
+	var compromised identity.CompromisedRangeSource
+	switch cfg.Admission().PasswordScreenMode() {
+	case config.PasswordScreenDeterministic:
+		compromised, err = identity.NewDeterministicCompromisedSource()
+		if err != nil {
+			return fmt.Errorf("constructing deterministic compromised-password source: %w", err)
+		}
+	case config.PasswordScreenAdapter:
+		return errors.New("the approved compromised-password adapter is not wired; bootstrap fails closed")
+	default:
+		return errors.New("compromised-password screening is not configured; bootstrap fails closed")
+	}
+
 	// A single connection rather than a pool: this is one transaction that must
 	// hold an advisory lock, and a pool would add the possibility of the
 	// transaction and the lock landing on different connections.
@@ -181,6 +194,7 @@ func run(args []string, stdout *os.File) error {
 		DisplayName:         opts.displayName,
 		Password:            password,
 		DeploymentPrincipal: opts.principal,
+		Compromised:         compromised,
 	})
 	if err != nil {
 		return err

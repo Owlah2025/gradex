@@ -87,7 +87,16 @@ func request(operationID string) BootstrapRequest {
 		DisplayName:         "Platform Administrator",
 		Password:            config.NewSecret("correct-horse-battery-staple-7"),
 		DeploymentPrincipal: "deploy@ci",
+		Compromised:         clearCompromisedSource(),
 	}
+}
+
+func clearCompromisedSource() CompromisedRangeSource {
+	source, err := NewDeterministicCompromisedSource()
+	if err != nil {
+		panic("constructing deterministic clear source: " + err.Error())
+	}
+	return source
 }
 
 func TestBootstrapCreatesTheAdministrator(t *testing.T) {
@@ -102,22 +111,26 @@ func TestBootstrapCreatesTheAdministrator(t *testing.T) {
 		t.Fatal("the first bootstrap reported itself as a retry")
 	}
 
-	// The email is stored normalized, so a differently cased address cannot
-	// later register as a separate Account.
-	if result.Email != "admin@gradex.example" {
-		t.Fatalf("email was not normalized: %q", result.Email)
+	// The correspondence form is preserved while the separate normalized value
+	// remains the uniqueness key (S1B1 admission prerequisite).
+	if result.Email != "Admin@Gradex.Example" {
+		t.Fatalf("correspondence email was not preserved: %q", result.Email)
 	}
 
 	var (
 		role, status, credentialState string
+		normalizedEmail, email        string
 		verifiedAt                    *time.Time
 	)
 	if err := conn.QueryRow(ctx,
-		`SELECT a.role, a.status, c.state, a.email_verified_at
+		`SELECT a.role, a.status, c.state, a.normalized_email, a.email, a.email_verified_at
 		   FROM accounts a JOIN password_credentials c ON c.account_id = a.id
 		  WHERE a.id = $1`, result.AccountID,
-	).Scan(&role, &status, &credentialState, &verifiedAt); err != nil {
+	).Scan(&role, &status, &credentialState, &normalizedEmail, &email, &verifiedAt); err != nil {
 		t.Fatalf("reading the created Account: %v", err)
+	}
+	if normalizedEmail != "admin@gradex.example" || email != "Admin@Gradex.Example" {
+		t.Fatalf("email forms = normalized %q/correspondence %q", normalizedEmail, email)
 	}
 
 	if role != "ADMIN" {
@@ -170,6 +183,52 @@ func TestBootstrapCannotCompleteTwice(t *testing.T) {
 		}
 		if second.AccountID != first.AccountID {
 			t.Fatalf("retry returned a different Account: %q vs %q", second.AccountID, first.AccountID)
+		}
+		assertAdminCount(t, ctx, conn, 1)
+	})
+
+	t.Run("same operation ID with changed semantics fails closed", func(t *testing.T) {
+		tests := map[string]func(*BootstrapRequest){
+			"correspondence email": func(r *BootstrapRequest) { r.Email = "admin@gradex.example" },
+			"display name":         func(r *BootstrapRequest) { r.DisplayName = "Another Administrator" },
+			"principal":            func(r *BootstrapRequest) { r.DeploymentPrincipal = "other-deploy@ci" },
+			"password":             func(r *BootstrapRequest) { r.Password = config.NewSecret("a-different-secure-passphrase-8") },
+		}
+
+		for name, mutate := range tests {
+			t.Run(name, func(t *testing.T) {
+				freshSchema(t)
+				conn, ctx := connect(t)
+
+				if _, err := Bootstrap(ctx, conn, request("op-fingerprint")); err != nil {
+					t.Fatalf("first bootstrap: %v", err)
+				}
+				retry := request("op-fingerprint")
+				mutate(&retry)
+				if _, err := Bootstrap(ctx, conn, retry); !errors.Is(err, ErrBootstrapRequestMismatch) {
+					t.Fatalf("retry error = %v, want ErrBootstrapRequestMismatch", err)
+				}
+				assertAdminCount(t, ctx, conn, 1)
+			})
+		}
+	})
+
+	t.Run("legacy marker without fingerprint fails closed", func(t *testing.T) {
+		freshSchema(t)
+		conn, ctx := connect(t)
+
+		if _, err := Bootstrap(ctx, conn, request("op-legacy")); err != nil {
+			t.Fatalf("first bootstrap: %v", err)
+		}
+		if _, err := conn.Exec(ctx,
+			`UPDATE bootstrap_operations
+			    SET fingerprint_version = NULL, request_fingerprint = NULL
+			  WHERE singleton`,
+		); err != nil {
+			t.Fatalf("simulating legacy marker: %v", err)
+		}
+		if _, err := Bootstrap(ctx, conn, request("op-legacy")); !errors.Is(err, ErrBootstrapRetryUnverifiable) {
+			t.Fatalf("retry error = %v, want ErrBootstrapRetryUnverifiable", err)
 		}
 		assertAdminCount(t, ctx, conn, 1)
 	})

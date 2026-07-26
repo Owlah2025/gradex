@@ -1,10 +1,30 @@
 package identity
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 )
+
+type credentialPreparationMode uint8
+
+const (
+	credentialPrepareNew credentialPreparationMode = iota
+	credentialPrepareMandatoryChange
+	credentialPrepareVoluntaryChange
+	credentialVerifyStored
+)
+
+var errCredentialMismatch = errors.New("credential does not match stored hash")
+
+type credentialPreparation struct {
+	next       config.Secret
+	current    config.Secret
+	storedHash string
+	mode       credentialPreparationMode
+}
 
 // prepareCredential is the single production boundary at which password
 // plaintexts are read.
@@ -27,23 +47,35 @@ import (
 //
 // gradex:plaintext-boundary
 func prepareCredential(
-	next config.Secret,
-	current config.Secret,
-	storedHash string,
-	requireCurrent bool,
-	checker CompromisedChecker,
+	ctx context.Context,
+	preparation credentialPreparation,
+	source CompromisedRangeSource,
 ) (config.Secret, error) {
-	nextPlaintext := next.Expose()
+	nextPlaintext := preparation.next.Expose()
+
+	if preparation.mode == credentialVerifyStored {
+		if preparation.storedHash == "" {
+			return config.Secret{}, errors.New("stored credential hash is required for verification")
+		}
+		matches, err := VerifyPassword(preparation.storedHash, nextPlaintext)
+		if err != nil {
+			return config.Secret{}, fmt.Errorf("verifying stored credential: %w", err)
+		}
+		if !matches {
+			return config.Secret{}, errCredentialMismatch
+		}
+		return config.Secret{}, nil
+	}
 
 	// The current password is verified before the new one is validated, so a
 	// caller who cannot prove the existing credential learns nothing about the
 	// password policy from the shape of the error.
-	if requireCurrent {
-		currentPlaintext := current.Expose()
+	if preparation.mode == credentialPrepareVoluntaryChange {
+		currentPlaintext := preparation.current.Expose()
 		if currentPlaintext == "" {
 			return config.Secret{}, ErrCurrentPasswordRequired
 		}
-		ok, err := VerifyPassword(storedHash, currentPlaintext)
+		ok, err := VerifyPassword(preparation.storedHash, currentPlaintext)
 		if err != nil {
 			// A stored hash that cannot be parsed is an operational problem,
 			// not a wrong password, and must not be reported as one.
@@ -57,7 +89,10 @@ func prepareCredential(
 		}
 	}
 
-	if err := ValidatePassword(nextPlaintext, checker); err != nil {
+	if err := ValidatePassword(nextPlaintext); err != nil {
+		return config.Secret{}, err
+	}
+	if err := screenCompromised(ctx, nextPlaintext, source); err != nil {
 		return config.Secret{}, err
 	}
 
@@ -65,12 +100,26 @@ func prepareCredential(
 	// caller did not have to supply it — otherwise the bootstrap mandatory
 	// change could be "completed" by re-entering the temporary password, which
 	// would satisfy the workflow while changing nothing.
-	if storedHash != "" {
-		same, err := VerifyPassword(storedHash, nextPlaintext)
+	if preparation.storedHash != "" {
+		same, err := VerifyPassword(preparation.storedHash, nextPlaintext)
 		if err == nil && same {
 			return config.Secret{}, fmt.Errorf("%w: the new password matches the current one", ErrPasswordPolicy)
 		}
 	}
 
 	return HashPassword(nextPlaintext)
+}
+
+// verifyStoredCredential deliberately reuses prepareCredential so the
+// supplied Secret is exposed only inside the repository's one reviewed
+// password-plaintext boundary.
+func verifyStoredCredential(ctx context.Context, supplied config.Secret, storedHash string) error {
+	_, err := prepareCredential(
+		ctx,
+		credentialPreparation{
+			next: supplied, storedHash: storedHash, mode: credentialVerifyStored,
+		},
+		nil,
+	)
+	return err
 }

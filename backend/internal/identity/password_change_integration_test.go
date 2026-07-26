@@ -122,6 +122,7 @@ func TestPrepareSucceedsWithoutMutatingAnything(t *testing.T) {
 			PresentedGeneration: 1,
 			Kind:                BootstrapMandatoryChange,
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 		if err != nil {
 			t.Fatalf("preparing: %v", err)
@@ -153,6 +154,7 @@ func TestCompletePasswordChangeAtomicallyClearsRestrictionAndRotatesSession(t *t
 		PresentedGeneration: 1,
 		Kind:                BootstrapMandatoryChange,
 		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+		Compromised:         clearCompromisedSource(),
 	}, adminPasswordChangePolicy, now)
 	if err != nil {
 		t.Fatalf("completing password change: %v", err)
@@ -317,6 +319,7 @@ func TestCompletePasswordChangeRollsBackWhenAuditCannotCommit(t *testing.T) {
 		PresentedGeneration: 1,
 		Kind:                BootstrapMandatoryChange,
 		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+		Compromised:         clearCompromisedSource(),
 	}, adminPasswordChangePolicy, time.Now().UTC())
 	if err == nil {
 		t.Fatal("password change succeeded despite the required Audit write failing")
@@ -391,6 +394,7 @@ func TestPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
 				Kind:                tc.kind,
 				CurrentPassword:     tc.currentPassword,
 				NewPassword:         tc.newPassword,
+				Compromised:         clearCompromisedSource(),
 			}, adminPasswordChangePolicy, now)
 			if err != nil {
 				t.Fatalf("completing password change: %v", err)
@@ -436,6 +440,7 @@ func TestWrongCurrentPasswordIsRefusedAndChangesNothing(t *testing.T) {
 			Kind:                VoluntaryChange,
 			CurrentPassword:     config.NewSecret("not-the-current-password-at-all"),
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 
 		if !errors.Is(err, ErrCurrentPasswordIncorrect) {
@@ -458,6 +463,7 @@ func TestMissingCurrentPasswordIsRefusedForVoluntaryChange(t *testing.T) {
 			PresentedGeneration: 1,
 			Kind:                VoluntaryChange,
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 
 		if !errors.Is(err, ErrCurrentPasswordRequired) {
@@ -504,6 +510,7 @@ func TestStaleGenerationCannotPrepareAChange(t *testing.T) {
 				PresentedGeneration: 1, // the superseded one
 				Kind:                BootstrapMandatoryChange,
 				NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+				Compromised:         clearCompromisedSource(),
 			}, recentAuthWindow, time.Now().UTC())
 
 			if !errors.Is(err, ErrStaleGeneration) {
@@ -528,6 +535,7 @@ func TestStaleGenerationCannotPrepareAChange(t *testing.T) {
 				PresentedGeneration: 2,
 				Kind:                BootstrapMandatoryChange,
 				NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+				Compromised:         clearCompromisedSource(),
 			}, recentAuthWindow, time.Now().UTC())
 
 			if !errors.Is(err, ErrStaleGeneration) {
@@ -574,6 +582,7 @@ func TestInsufficientRecentAuthenticationIsRefused(t *testing.T) {
 					Kind:                tc.kind,
 					CurrentPassword:     tc.currentPassword,
 					NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+					Compromised:         clearCompromisedSource(),
 				}, recentAuthWindow, time.Now().UTC())
 
 				if !errors.Is(err, ErrRecentAuthRequired) {
@@ -603,6 +612,7 @@ func TestWeakPasswordDoesNotMutateCredentialsOrSessions(t *testing.T) {
 					PresentedGeneration: 1,
 					Kind:                BootstrapMandatoryChange,
 					NewPassword:         config.NewSecret(weak),
+					Compromised:         clearCompromisedSource(),
 				}, recentAuthWindow, time.Now().UTC())
 
 				if !errors.Is(err, ErrPasswordPolicy) {
@@ -643,6 +653,7 @@ func TestInactiveAccountCannotPrepareAPasswordChange(t *testing.T) {
 					PresentedGeneration: 1,
 					Kind:                BootstrapMandatoryChange,
 					NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+					Compromised:         clearCompromisedSource(),
 				}, recentAuthWindow, time.Now().UTC())
 
 				if !errors.Is(err, ErrSessionNotUsable) {
@@ -672,6 +683,7 @@ func TestStaleEpochSessionCannotPrepareAPasswordChange(t *testing.T) {
 			PresentedGeneration: 1,
 			Kind:                BootstrapMandatoryChange,
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 
 		if !errors.Is(err, ErrSessionNotUsable) {
@@ -712,6 +724,7 @@ func TestForeignSessionCannotPrepareAChange(t *testing.T) {
 			Kind:                VoluntaryChange,
 			CurrentPassword:     config.NewSecret("correct-horse-battery-staple-7"),
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 
 		if !errors.Is(err, ErrSessionNotUsable) {
@@ -741,6 +754,7 @@ func TestMandatoryKindIsRefusedOnAnActiveCredential(t *testing.T) {
 			PresentedGeneration: 1,
 			Kind:                BootstrapMandatoryChange,
 			NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+			Compromised:         clearCompromisedSource(),
 		}, recentAuthWindow, time.Now().UTC())
 
 		if !errors.Is(err, ErrCurrentPasswordRequired) {

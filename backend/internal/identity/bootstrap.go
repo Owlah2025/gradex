@@ -2,8 +2,12 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,7 +48,17 @@ var (
 	ErrInvalidEmail       = errors.New("email is not usable as a normalized address")
 	ErrInvalidOperationID = errors.New("operation ID is missing or malformed")
 	ErrInvalidDisplayName = errors.New("display name is missing")
+
+	// ErrBootstrapRequestMismatch means the operation ID exists but at least
+	// one semantic input differs from the completed operation.
+	ErrBootstrapRequestMismatch = errors.New("bootstrap retry does not match the completed request")
+
+	// ErrBootstrapRetryUnverifiable means a pre-fingerprint marker exists. It
+	// fails closed instead of guessing that the submitted retry is identical.
+	ErrBootstrapRetryUnverifiable = errors.New("bootstrap retry cannot be verified against the legacy marker")
 )
+
+const bootstrapFingerprintVersion int16 = 1
 
 // BootstrapRequest is the complete input to the operation. Every field is
 // required.
@@ -68,8 +82,9 @@ type BootstrapRequest struct {
 	// operation is attributable to something more specific than "a deployment".
 	DeploymentPrincipal string
 
-	// Compromised is optional; nil skips the compromised-set check.
-	Compromised CompromisedChecker
+	// Compromised is required. An unavailable or unconfigured source fails
+	// credential creation closed.
+	Compromised CompromisedRangeSource
 }
 
 // BootstrapResult describes what the operation did, or what the earlier
@@ -90,8 +105,15 @@ const maxDisplayNameRunes = 200
 // hashNewPassword validates and hashes a password with no existing credential
 // to check against. The plaintext read itself happens in prepareCredential,
 // which is the reviewed boundary.
-func hashNewPassword(password config.Secret, checker CompromisedChecker) (config.Secret, error) {
-	return prepareCredential(password, config.Secret{}, "", false, checker)
+func hashNewPassword(
+	ctx context.Context,
+	password config.Secret,
+	source CompromisedRangeSource,
+) (config.Secret, error) {
+	return prepareCredential(ctx, credentialPreparation{
+		next: password,
+		mode: credentialPrepareNew,
+	}, source)
 }
 
 // NormalizeEmail produces the form uniqueness is enforced on.
@@ -148,7 +170,8 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 			ErrInvalidDisplayName, maxDisplayNameRunes)
 	}
 
-	normalizedEmail, err := NormalizeEmail(req.Email)
+	correspondenceEmail := strings.TrimSpace(req.Email)
+	normalizedEmail, err := NormalizeEmail(correspondenceEmail)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -158,12 +181,19 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 		return BootstrapResult{}, errors.New("deployment principal is required")
 	}
 
+	requestFingerprint := bootstrapRequestFingerprint(
+		correspondenceEmail,
+		normalizedEmail,
+		displayName,
+		principal,
+	)
+
 	// Validation and hashing happen behind one call so the plaintext is read
 	// exactly once. Hashing is deliberately outside the transaction: Argon2id
 	// at these parameters takes hundreds of milliseconds, and holding the
 	// advisory lock across it would widen the window in which a concurrent
 	// attempt waits for no reason.
-	hash, err := hashNewPassword(req.Password, req.Compromised)
+	hash, err := hashNewPassword(ctx, req.Password, req.Compromised)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -200,23 +230,51 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 	// read cannot be invalidated by a concurrent attempt before this
 	// transaction commits.
 	var (
-		existingOperationID string
-		existingAccountID   string
-		existingCompletedAt time.Time
+		existingOperationID        string
+		existingAccountID          string
+		existingCompletedAt        time.Time
+		existingFingerprintVersion *int16
+		existingFingerprint        []byte
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT operation_id, account_id::text, completed_at FROM bootstrap_operations WHERE singleton`,
-	).Scan(&existingOperationID, &existingAccountID, &existingCompletedAt)
+		`SELECT operation_id, account_id::text, completed_at,
+		        fingerprint_version, request_fingerprint
+		   FROM bootstrap_operations WHERE singleton`,
+	).Scan(
+		&existingOperationID,
+		&existingAccountID,
+		&existingCompletedAt,
+		&existingFingerprintVersion,
+		&existingFingerprint,
+	)
 
 	switch {
 	case err == nil:
 		if existingOperationID == operationID {
+			if existingFingerprintVersion == nil || existingFingerprint == nil {
+				return BootstrapResult{}, ErrBootstrapRetryUnverifiable
+			}
+			if *existingFingerprintVersion != bootstrapFingerprintVersion ||
+				subtle.ConstantTimeCompare(existingFingerprint, requestFingerprint) != 1 {
+				return BootstrapResult{}, ErrBootstrapRequestMismatch
+			}
+
 			// A retry of the same operation. Read back the recorded result.
-			var email string
+			var email, storedHash string
 			if err := tx.QueryRow(ctx,
-				`SELECT email FROM accounts WHERE id = $1`, existingAccountID,
-			).Scan(&email); err != nil {
+				`SELECT a.email, c.password_hash
+				   FROM accounts a
+				   JOIN password_credentials c ON c.account_id = a.id
+				  WHERE a.id = $1`,
+				existingAccountID,
+			).Scan(&email, &storedHash); err != nil {
 				return BootstrapResult{}, fmt.Errorf("reading bootstrapped Account: %w", err)
+			}
+			if err := verifyStoredCredential(ctx, req.Password, storedHash); err != nil {
+				if errors.Is(err, errCredentialMismatch) {
+					return BootstrapResult{}, ErrBootstrapRequestMismatch
+				}
+				return BootstrapResult{}, fmt.Errorf("verifying bootstrap retry credential: %w", err)
 			}
 			return BootstrapResult{
 				AccountID:        existingAccountID,
@@ -260,7 +318,7 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 		`INSERT INTO accounts (normalized_email, email, role, status, display_name, email_verified_at)
 		 VALUES ($1, $2, 'ADMIN', 'ACTIVE', $3, now())
 		 RETURNING id::text, created_at`,
-		normalizedEmail, normalizedEmail, displayName,
+		normalizedEmail, correspondenceEmail, displayName,
 	).Scan(&accountID, &createdAt); err != nil {
 		return BootstrapResult{}, fmt.Errorf("creating bootstrap Admin Account: %w", err)
 	}
@@ -298,10 +356,11 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 
 	var completedAt time.Time
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO bootstrap_operations (operation_id, account_id)
-		 VALUES ($1, $2)
+		`INSERT INTO bootstrap_operations
+		   (operation_id, account_id, fingerprint_version, request_fingerprint)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING completed_at`,
-		operationID, accountID,
+		operationID, accountID, bootstrapFingerprintVersion, requestFingerprint,
 	).Scan(&completedAt); err != nil {
 		return BootstrapResult{}, fmt.Errorf("recording bootstrap completion: %w", err)
 	}
@@ -312,8 +371,33 @@ func Bootstrap(ctx context.Context, conn *pgx.Conn, req BootstrapRequest) (Boots
 
 	return BootstrapResult{
 		AccountID:   accountID,
-		Email:       normalizedEmail,
+		Email:       correspondenceEmail,
 		OperationID: operationID,
 		CompletedAt: completedAt,
 	}, nil
+}
+
+func bootstrapRequestFingerprint(
+	correspondenceEmail string,
+	normalizedEmail string,
+	displayName string,
+	deploymentPrincipal string,
+) []byte {
+	h := sha256.New()
+	writeFingerprintField(h, "command", "bootstrap-admin")
+	writeFingerprintField(h, "version", fmt.Sprint(bootstrapFingerprintVersion))
+	writeFingerprintField(h, "correspondence_email", correspondenceEmail)
+	writeFingerprintField(h, "normalized_email", normalizedEmail)
+	writeFingerprintField(h, "display_name", displayName)
+	writeFingerprintField(h, "deployment_principal", deploymentPrincipal)
+	return h.Sum(nil)
+}
+
+func writeFingerprintField(h hash.Hash, name string, value string) {
+	var size [4]byte
+	for _, field := range []string{name, value} {
+		binary.BigEndian.PutUint32(size[:], uint32(len(field)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write([]byte(field))
+	}
 }

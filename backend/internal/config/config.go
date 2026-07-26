@@ -15,6 +15,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -92,6 +93,62 @@ func (c Capability) Reason() string {
 func enabled() Capability               { return Capability{enabled: true} }
 func disabled(reason string) Capability { return Capability{reason: reason} }
 
+// PasswordScreenMode selects only the implementation boundary, never a
+// provider. The deterministic source is a local test fixture; adapter mode
+// remains unusable in production until LG-021 approval is recorded.
+type PasswordScreenMode string
+
+const (
+	PasswordScreenUnavailable   PasswordScreenMode = "unavailable"
+	PasswordScreenDeterministic PasswordScreenMode = "deterministic"
+	PasswordScreenAdapter       PasswordScreenMode = "adapter"
+)
+
+func (m PasswordScreenMode) Valid() bool {
+	switch m {
+	case PasswordScreenUnavailable, PasswordScreenDeterministic, PasswordScreenAdapter:
+		return true
+	}
+	return false
+}
+
+// AdmissionSettings is the complete immutable configuration for public
+// Student admission. Returning it by value prevents runtime retuning after
+// startup validation.
+type AdmissionSettings struct {
+	capability Capability
+
+	policySetID                string
+	passwordScreenMode         PasswordScreenMode
+	protectedPayloadKeyVersion string
+
+	anonymousSessionTTL        time.Duration
+	verificationTokenTTL       time.Duration
+	rateLimitTimeout           time.Duration
+	compromisedPasswordTimeout time.Duration
+
+	anonymousCookieSigningKey Secret
+	anonymousCSRFKey          Secret
+	limiterHMACKey            Secret
+	protectedPayloadKey       Secret
+}
+
+func (a AdmissionSettings) Enabled() bool                          { return a.capability.Enabled() }
+func (a AdmissionSettings) Reason() string                         { return a.capability.Reason() }
+func (a AdmissionSettings) PolicySetID() string                    { return a.policySetID }
+func (a AdmissionSettings) PasswordScreenMode() PasswordScreenMode { return a.passwordScreenMode }
+func (a AdmissionSettings) ProtectedPayloadKeyVersion() string     { return a.protectedPayloadKeyVersion }
+func (a AdmissionSettings) AnonymousSessionTTL() time.Duration     { return a.anonymousSessionTTL }
+func (a AdmissionSettings) VerificationTokenTTL() time.Duration    { return a.verificationTokenTTL }
+func (a AdmissionSettings) RateLimitTimeout() time.Duration        { return a.rateLimitTimeout }
+func (a AdmissionSettings) CompromisedPasswordTimeout() time.Duration {
+	return a.compromisedPasswordTimeout
+}
+func (a AdmissionSettings) AnonymousCookieSigningKey() Secret { return a.anonymousCookieSigningKey }
+func (a AdmissionSettings) AnonymousCSRFKey() Secret          { return a.anonymousCSRFKey }
+func (a AdmissionSettings) LimiterHMACKey() Secret            { return a.limiterHMACKey }
+func (a AdmissionSettings) ProtectedPayloadKey() Secret       { return a.protectedPayloadKey }
+
 // Config is the immutable runtime configuration. Construct it only through
 // Load or LoadFrom.
 type Config struct {
@@ -135,13 +192,30 @@ type Config struct {
 
 	authFakeMode bool
 
-	payments Capability
-	email    Capability
+	payments  Capability
+	email     Capability
+	admission AdmissionSettings
 }
 
 func (c *Config) Environment() Environment { return c.environment }
 func (c *Config) Port() string             { return c.port }
 func (c *Config) PublicOrigin() string     { return c.publicOrigin }
+
+// CanonicalPublicOrigin validates the exact browser-origin shape shared by
+// startup configuration and HTTP admission.
+func CanonicalPublicOrigin(raw string) (string, error) {
+	origin, err := url.Parse(raw)
+	if err != nil || origin.Scheme == "" || origin.Host == "" {
+		return "", errors.New("public origin must be an absolute HTTP origin")
+	}
+	if origin.Scheme != "http" && origin.Scheme != "https" {
+		return "", errors.New("public origin must use HTTP or HTTPS")
+	}
+	if origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+		return "", errors.New("public origin must not contain credentials, a path, query, or fragment")
+	}
+	return origin.Scheme + "://" + origin.Host, nil
+}
 
 // CORSAllowedOrigins returns a copy so a caller cannot mutate the accepted
 // origin set through the slice it was handed.
@@ -206,8 +280,9 @@ func (c *Config) FFprobeBinaryPath() string { return c.ffprobeBinaryPath }
 // to let it be true in production; see validate.
 func (c *Config) AuthFakeMode() bool { return c.authFakeMode }
 
-func (c *Config) Payments() Capability { return c.payments }
-func (c *Config) Email() Capability    { return c.email }
+func (c *Config) Payments() Capability         { return c.payments }
+func (c *Config) Email() Capability            { return c.email }
+func (c *Config) Admission() AdmissionSettings { return c.admission }
 
 // Lookup reads one setting. os.LookupEnv satisfies it; tests supply a map so
 // they never mutate the process environment.
@@ -282,6 +357,9 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	tapEnvironment := p.str("TAP_ENVIRONMENT", "test")
 	tapAdapterApproved := p.boolean("TAP_ADAPTER_APPROVED", false)
 	emailEnabled := p.boolean("EMAIL_ENABLED", false)
+	registrationEnabled := p.boolean("STUDENT_REGISTRATION_ENABLED", false)
+	registrationPolicyApproved := p.boolean("REGISTRATION_POLICY_APPROVED", false)
+	passwordAdapterApproved := p.boolean("COMPROMISED_PASSWORD_ADAPTER_APPROVED", false)
 
 	secrets := map[string]Secret{}
 	for _, ref := range []SecretRef{
@@ -291,6 +369,10 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		{Name: "PLAYBACK_TOKEN_SECRET", Required: true},
 		{Name: "TAP_SECRET"},
 		{Name: "EMAIL_API_KEY"},
+		{Name: "ANONYMOUS_COOKIE_SIGNING_KEY"},
+		{Name: "ANONYMOUS_CSRF_KEY"},
+		{Name: "ADMISSION_LIMITER_HMAC_KEY"},
+		{Name: "OUTBOX_PROTECTED_PAYLOAD_KEY"},
 	} {
 		s, err := resolver.Resolve(ref)
 		if err != nil {
@@ -310,6 +392,23 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 
 	cfg.payments = tapCapability(cfg.environment, tapEnabled, tapEnvironment, tapAdapterApproved, secrets["TAP_SECRET"], p)
 	cfg.email = emailCapability(emailEnabled, secrets["EMAIL_API_KEY"])
+	cfg.admission = admissionCapability(admissionCapabilityInput{
+		environment:                cfg.environment,
+		enabled:                    registrationEnabled,
+		policySetID:                p.str("REGISTRATION_POLICY_SET_ID", ""),
+		policyApproved:             registrationPolicyApproved,
+		passwordScreenMode:         PasswordScreenMode(p.str("PASSWORD_SCREEN_MODE", string(PasswordScreenUnavailable))),
+		passwordAdapterApproved:    passwordAdapterApproved,
+		protectedPayloadKeyVersion: p.str("OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", ""),
+		anonymousSessionTTL:        p.duration("ANONYMOUS_SESSION_TTL", 30*time.Minute),
+		verificationTokenTTL:       p.duration("VERIFICATION_TOKEN_TTL", 24*time.Hour),
+		rateLimitTimeout:           p.duration("ADMISSION_RATE_LIMIT_TIMEOUT", 100*time.Millisecond),
+		compromisedPasswordTimeout: p.duration("COMPROMISED_PASSWORD_TIMEOUT", 2*time.Second),
+		anonymousCookieSigningKey:  secrets["ANONYMOUS_COOKIE_SIGNING_KEY"],
+		anonymousCSRFKey:           secrets["ANONYMOUS_CSRF_KEY"],
+		limiterHMACKey:             secrets["ADMISSION_LIMITER_HMAC_KEY"],
+		protectedPayloadKey:        secrets["OUTBOX_PROTECTED_PAYLOAD_KEY"],
+	}, p)
 
 	p.rejectRetiredKeys()
 	cfg.validate(p)
@@ -318,6 +417,86 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+type admissionCapabilityInput struct {
+	environment                Environment
+	enabled                    bool
+	policySetID                string
+	policyApproved             bool
+	passwordScreenMode         PasswordScreenMode
+	passwordAdapterApproved    bool
+	protectedPayloadKeyVersion string
+	anonymousSessionTTL        time.Duration
+	verificationTokenTTL       time.Duration
+	rateLimitTimeout           time.Duration
+	compromisedPasswordTimeout time.Duration
+	anonymousCookieSigningKey  Secret
+	anonymousCSRFKey           Secret
+	limiterHMACKey             Secret
+	protectedPayloadKey        Secret
+}
+
+func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettings {
+	settings := AdmissionSettings{
+		capability:                 disabled("STUDENT_REGISTRATION_ENABLED is false"),
+		policySetID:                in.policySetID,
+		passwordScreenMode:         in.passwordScreenMode,
+		protectedPayloadKeyVersion: in.protectedPayloadKeyVersion,
+		anonymousSessionTTL:        in.anonymousSessionTTL,
+		verificationTokenTTL:       in.verificationTokenTTL,
+		rateLimitTimeout:           in.rateLimitTimeout,
+		compromisedPasswordTimeout: in.compromisedPasswordTimeout,
+		anonymousCookieSigningKey:  in.anonymousCookieSigningKey,
+		anonymousCSRFKey:           in.anonymousCSRFKey,
+		limiterHMACKey:             in.limiterHMACKey,
+		protectedPayloadKey:        in.protectedPayloadKey,
+	}
+
+	if !in.passwordScreenMode.Valid() {
+		p.errf("PASSWORD_SCREEN_MODE must be unavailable, deterministic, or adapter; got %q", in.passwordScreenMode)
+	}
+	if !in.enabled {
+		return settings
+	}
+
+	if in.policySetID == "" {
+		p.errf("REGISTRATION_POLICY_SET_ID is required when STUDENT_REGISTRATION_ENABLED=true")
+	}
+	if in.protectedPayloadKeyVersion == "" {
+		p.errf("OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION is required when STUDENT_REGISTRATION_ENABLED=true")
+	}
+	if in.passwordScreenMode == PasswordScreenUnavailable {
+		p.errf("PASSWORD_SCREEN_MODE must be deterministic or adapter when STUDENT_REGISTRATION_ENABLED=true")
+	}
+	for _, required := range []struct {
+		name  string
+		value Secret
+	}{
+		{"ANONYMOUS_COOKIE_SIGNING_KEY", in.anonymousCookieSigningKey},
+		{"ANONYMOUS_CSRF_KEY", in.anonymousCSRFKey},
+		{"ADMISSION_LIMITER_HMAC_KEY", in.limiterHMACKey},
+		{"OUTBOX_PROTECTED_PAYLOAD_KEY", in.protectedPayloadKey},
+	} {
+		if required.value.IsEmpty() {
+			p.errf("%s is required when STUDENT_REGISTRATION_ENABLED=true", required.name)
+		}
+	}
+
+	if in.environment.IsProduction() {
+		if !in.policyApproved {
+			p.errf("STUDENT_REGISTRATION_ENABLED=true in production requires REGISTRATION_POLICY_APPROVED=true (LG-011)")
+		}
+		if in.passwordScreenMode == PasswordScreenDeterministic {
+			p.errf("deterministic PASSWORD_SCREEN_MODE is not permitted in production")
+		}
+		if in.passwordScreenMode != PasswordScreenAdapter || !in.passwordAdapterApproved {
+			p.errf("production registration requires PASSWORD_SCREEN_MODE=adapter and COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)")
+		}
+	}
+
+	settings.capability = enabled()
+	return settings
 }
 
 // tapCapability applies the §11.2 rules for the payment provider. Live Tap
@@ -369,6 +548,11 @@ func (c *Config) validate(p *parser) {
 	if c.redisAddr == "" {
 		p.errf("REDIS_ADDR is required")
 	}
+	if c.admission.Enabled() {
+		if _, err := CanonicalPublicOrigin(c.publicOrigin); err != nil {
+			p.errf("PUBLIC_ORIGIN must be an exact HTTP origin when STUDENT_REGISTRATION_ENABLED=true")
+		}
+	}
 	if c.s3Endpoint == "" {
 		p.errf("S3_ENDPOINT is required")
 	}
@@ -390,6 +574,10 @@ func (c *Config) validate(p *parser) {
 		{"READINESS_TIMEOUT", c.readinessTimeout},
 		{"UPLOAD_URL_EXPIRY", c.uploadURLExpiry},
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
+		{"ANONYMOUS_SESSION_TTL", c.admission.anonymousSessionTTL},
+		{"VERIFICATION_TOKEN_TTL", c.admission.verificationTokenTTL},
+		{"ADMISSION_RATE_LIMIT_TIMEOUT", c.admission.rateLimitTimeout},
+		{"COMPROMISED_PASSWORD_TIMEOUT", c.admission.compromisedPasswordTimeout},
 	} {
 		if d.v <= 0 {
 			p.errf("%s must be positive, got %s", d.name, d.v)

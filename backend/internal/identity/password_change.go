@@ -36,7 +36,7 @@ type PasswordChangeRequest struct {
 	CurrentPassword config.Secret
 	NewPassword     config.Secret
 
-	Compromised CompromisedChecker
+	Compromised CompromisedRangeSource
 }
 
 // PreparedPasswordChange is a validated, not-yet-applied change.
@@ -465,13 +465,16 @@ func PreparePasswordChange(
 		return PreparedPasswordChange{}, err
 	}
 
-	newHash, err := prepareCredential(
-		req.NewPassword,
-		req.CurrentPassword,
-		storedHash,
-		req.Kind.RequiresCurrentPassword(),
-		req.Compromised,
-	)
+	mode := credentialPrepareMandatoryChange
+	if req.Kind.RequiresCurrentPassword() {
+		mode = credentialPrepareVoluntaryChange
+	}
+	newHash, err := prepareCredential(ctx, credentialPreparation{
+		next:       req.NewPassword,
+		current:    req.CurrentPassword,
+		storedHash: storedHash,
+		mode:       mode,
+	}, req.Compromised)
 	if err != nil {
 		return PreparedPasswordChange{}, err
 	}

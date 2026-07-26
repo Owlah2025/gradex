@@ -94,6 +94,7 @@ func TestCompletedPasswordChangeUnlocksNormalAdminAuthority(t *testing.T) {
 		PresentedGeneration: 1,
 		Kind:                BootstrapMandatoryChange,
 		NewPassword:         config.NewSecret("a-brand-new-launch-passphrase-9"),
+		Compromised:         clearCompromisedSource(),
 	}, adminPasswordChangePolicy, time.Now().UTC()); err != nil {
 		t.Fatalf("completing password change: %v", err)
 	}

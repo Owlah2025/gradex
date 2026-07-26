@@ -238,6 +238,173 @@ func TestDisabledGatedProviders(t *testing.T) {
 	})
 }
 
+func TestStudentRegistrationIsDisabledByDefault(t *testing.T) {
+	cfg := mustLoad(t, nil)
+	if cfg.Admission().Enabled() {
+		t.Fatal("Student registration must be disabled until its security and policy dependencies are configured")
+	}
+	if !strings.Contains(cfg.Admission().Reason(), "STUDENT_REGISTRATION_ENABLED is false") {
+		t.Errorf("unexpected reason %q", cfg.Admission().Reason())
+	}
+}
+
+func TestDevelopmentAdmissionConfigurationLoadsExplicitFixtures(t *testing.T) {
+	cfg := mustLoad(t, func(s map[string]string, sec MapSecretResolver) {
+		s["APP_ENV"] = "development"
+		s["STUDENT_REGISTRATION_ENABLED"] = "true"
+		s["REGISTRATION_POLICY_SET_ID"] = "dev-registration-v1"
+		s["PASSWORD_SCREEN_MODE"] = "deterministic"
+		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
+		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
+		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
+		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
+	})
+
+	admission := cfg.Admission()
+	if !admission.Enabled() {
+		t.Fatalf("admission disabled: %s", admission.Reason())
+	}
+	if admission.PolicySetID() != "dev-registration-v1" {
+		t.Errorf("PolicySetID = %q", admission.PolicySetID())
+	}
+	if admission.PasswordScreenMode() != PasswordScreenDeterministic {
+		t.Errorf("PasswordScreenMode = %q", admission.PasswordScreenMode())
+	}
+	if admission.AnonymousSessionTTL() != 30*time.Minute {
+		t.Errorf("AnonymousSessionTTL = %s, want 30m", admission.AnonymousSessionTTL())
+	}
+	if admission.VerificationTokenTTL() != 24*time.Hour {
+		t.Errorf("VerificationTokenTTL = %s, want 24h", admission.VerificationTokenTTL())
+	}
+	if admission.RateLimitTimeout() != 100*time.Millisecond {
+		t.Errorf("RateLimitTimeout = %s, want 100ms", admission.RateLimitTimeout())
+	}
+	if admission.CompromisedPasswordTimeout() != 2*time.Second {
+		t.Errorf("CompromisedPasswordTimeout = %s, want 2s", admission.CompromisedPasswordTimeout())
+	}
+	for name, secret := range map[string]Secret{
+		"anonymous cookie":  admission.AnonymousCookieSigningKey(),
+		"anonymous CSRF":    admission.AnonymousCSRFKey(),
+		"limiter HMAC":      admission.LimiterHMACKey(),
+		"protected payload": admission.ProtectedPayloadKey(),
+	} {
+		if secret.IsEmpty() {
+			t.Errorf("%s secret was not resolved", name)
+		}
+	}
+}
+
+func TestEnabledAdmissionRequiresEveryFailClosedDependency(t *testing.T) {
+	base := func(s map[string]string, sec MapSecretResolver) {
+		s["APP_ENV"] = "development"
+		s["STUDENT_REGISTRATION_ENABLED"] = "true"
+		s["REGISTRATION_POLICY_SET_ID"] = "dev-registration-v1"
+		s["PASSWORD_SCREEN_MODE"] = "deterministic"
+		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
+		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
+		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
+		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
+	}
+
+	tests := map[string]struct {
+		mutate func(map[string]string, MapSecretResolver)
+		want   string
+	}{
+		"policy set": {
+			mutate: func(s map[string]string, _ MapSecretResolver) { delete(s, "REGISTRATION_POLICY_SET_ID") },
+			want:   "REGISTRATION_POLICY_SET_ID is required",
+		},
+		"screen mode": {
+			mutate: func(s map[string]string, _ MapSecretResolver) { s["PASSWORD_SCREEN_MODE"] = "unavailable" },
+			want:   "PASSWORD_SCREEN_MODE",
+		},
+		"payload key version": {
+			mutate: func(s map[string]string, _ MapSecretResolver) { delete(s, "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION") },
+			want:   "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION is required",
+		},
+		"public origin": {
+			mutate: func(s map[string]string, _ MapSecretResolver) { delete(s, "PUBLIC_ORIGIN") },
+			want:   "PUBLIC_ORIGIN must be an exact HTTP origin",
+		},
+		"anonymous cookie key": {
+			mutate: func(_ map[string]string, sec MapSecretResolver) { delete(sec, "ANONYMOUS_COOKIE_SIGNING_KEY") },
+			want:   "ANONYMOUS_COOKIE_SIGNING_KEY is required",
+		},
+		"anonymous CSRF key": {
+			mutate: func(_ map[string]string, sec MapSecretResolver) { delete(sec, "ANONYMOUS_CSRF_KEY") },
+			want:   "ANONYMOUS_CSRF_KEY is required",
+		},
+		"limiter HMAC key": {
+			mutate: func(_ map[string]string, sec MapSecretResolver) { delete(sec, "ADMISSION_LIMITER_HMAC_KEY") },
+			want:   "ADMISSION_LIMITER_HMAC_KEY is required",
+		},
+		"protected payload key": {
+			mutate: func(_ map[string]string, sec MapSecretResolver) { delete(sec, "OUTBOX_PROTECTED_PAYLOAD_KEY") },
+			want:   "OUTBOX_PROTECTED_PAYLOAD_KEY is required",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+				base(s, sec)
+				tt.mutate(s, sec)
+			}, tt.want)
+		})
+	}
+}
+
+func TestProductionAdmissionRequiresApprovedPolicyAndPasswordAdapter(t *testing.T) {
+	configure := func(s map[string]string, sec MapSecretResolver) {
+		s["STUDENT_REGISTRATION_ENABLED"] = "true"
+		s["REGISTRATION_POLICY_SET_ID"] = "registration-v1"
+		s["REGISTRATION_POLICY_APPROVED"] = "true"
+		s["PASSWORD_SCREEN_MODE"] = "adapter"
+		s["COMPROMISED_PASSWORD_ADAPTER_APPROVED"] = "true"
+		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "prod-v1"
+		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
+		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
+		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
+	}
+
+	t.Run("policy approval", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configure(s, sec)
+			s["REGISTRATION_POLICY_APPROVED"] = "false"
+		}, "REGISTRATION_POLICY_APPROVED=true")
+	})
+	t.Run("password adapter approval", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configure(s, sec)
+			s["COMPROMISED_PASSWORD_ADAPTER_APPROVED"] = "false"
+		}, "COMPROMISED_PASSWORD_ADAPTER_APPROVED=true")
+	})
+	t.Run("deterministic fixture prohibited", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configure(s, sec)
+			s["PASSWORD_SCREEN_MODE"] = "deterministic"
+		}, "deterministic PASSWORD_SCREEN_MODE")
+	})
+}
+
+func TestAdmissionDurationsMustBePositive(t *testing.T) {
+	for _, key := range []string{
+		"ANONYMOUS_SESSION_TTL",
+		"VERIFICATION_TOKEN_TTL",
+		"ADMISSION_RATE_LIMIT_TIMEOUT",
+		"COMPROMISED_PASSWORD_TIMEOUT",
+	} {
+		t.Run(key, func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+				s[key] = "0s"
+			}, key+" must be positive")
+		})
+	}
+}
+
 // A renamed key must fail loudly. Silently falling back to the default would
 // drop an operator's deliberate setting with no signal.
 func TestRetiredKeysAreRejected(t *testing.T) {

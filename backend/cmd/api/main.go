@@ -16,9 +16,12 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
 	"github.com/Owlah2025/gradex/backend/internal/video"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -55,6 +58,20 @@ func main() {
 	redisHealth := queue.NewHealthClient(cfg.RedisAddr())
 	defer redisHealth.Close()
 
+	var routerOptions []httpapi.RouterOption
+	var admissionRedis *redis.Client
+	if cfg.Admission().Enabled() {
+		foundation, limiterClient, err := buildAdmissionFoundation(cfg)
+		if err != nil {
+			log.Fatalf("building Student admission foundation: %v", err)
+		}
+		admissionRedis = limiterClient
+		routerOptions = append(routerOptions, httpapi.WithAdmissionFoundation(foundation))
+	}
+	if admissionRedis != nil {
+		defer admissionRedis.Close()
+	}
+
 	svc := video.NewService(pool, storageClient, queueClient, cfg)
 
 	// Belt and braces: config validation already refuses AUTH_FAKE_MODE when
@@ -90,7 +107,16 @@ func main() {
 	// protected request rather than trusting anything carried in the session.
 	principals := identity.NewDBPrincipalResolver(pool)
 
-	router, err := httpapi.NewRouter(cfg, logger, reporter, svc, authenticator, entitlements, principals)
+	router, err := httpapi.NewRouter(
+		cfg,
+		logger,
+		reporter,
+		svc,
+		authenticator,
+		entitlements,
+		principals,
+		routerOptions...,
+	)
 	if err != nil {
 		log.Fatalf("building router: %v", err)
 	}
@@ -140,4 +166,101 @@ func main() {
 		log.Printf("graceful shutdown did not complete: %v", err)
 	}
 	log.Println("gradex API stopped")
+}
+
+func buildAdmissionFoundation(cfg *config.Config) (*httpapi.AdmissionFoundation, *redis.Client, error) {
+	admission := cfg.Admission()
+	if cfg.Environment() != config.EnvDevelopment {
+		return nil, nil, errors.New(
+			"approved production policy and compromised-password adapters are not integrated",
+		)
+	}
+
+	compromised, err := identity.NewDeterministicCompromisedSource()
+	if err != nil {
+		return nil, nil, err
+	}
+	policies, err := developmentPolicySets(admission.PolicySetID())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// These are deliberate signer/encryption boundaries. The values go
+	// directly from redacting config wrappers into their owning primitives.
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	limiter, err := ratelimit.New(
+		ratelimit.NewRedisStore(redisClient),
+		[]byte(admission.LimiterHMACKey().Expose()),
+		admission.RateLimitTimeout(),
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+
+	endpoints := []string{
+		"student-registrations",
+		"registration-policy-set",
+		"email-verification-requests",
+		"email-verifications",
+	}
+	endpointPolicies := make(map[string]ratelimit.Policy, len(endpoints))
+	for _, endpoint := range endpoints {
+		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
+	}
+
+	foundation, err := httpapi.NewAdmissionFoundation(httpapi.AdmissionFoundationOptions{
+		PublicOrigin:        cfg.PublicOrigin(),
+		CookieSigningKey:    admission.AnonymousCookieSigningKey().Expose(),
+		CSRFKey:             admission.AnonymousCSRFKey().Expose(),
+		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
+		Policies:            policies,
+		Compromised:         compromised,
+		Outbox:              writer,
+		Limiter:             limiter,
+		EndpointPolicies:    endpointPolicies,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+	return foundation, redisClient, nil
+}
+
+func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error) {
+	return identity.NewStaticPolicySetResolver(
+		identity.RegistrationPolicySet{
+			ID: id, Locale: identity.LocaleEnglish,
+			Policies: []identity.RegistrationPolicy{
+				{
+					Kind: identity.PolicyPrivacyNotice, Version: "dev-privacy-v1",
+					Label: "Privacy notice", URL: "/legal/privacy",
+				},
+				{
+					Kind: identity.PolicyTermsOfService, Version: "dev-terms-v1",
+					Label: "Terms of service", URL: "/legal/terms",
+				},
+			},
+		},
+		identity.RegistrationPolicySet{
+			ID: id, Locale: identity.LocaleArabic,
+			Policies: []identity.RegistrationPolicy{
+				{
+					Kind: identity.PolicyPrivacyNotice, Version: "dev-privacy-v1",
+					Label: "إشعار الخصوصية", URL: "/legal/privacy",
+				},
+				{
+					Kind: identity.PolicyTermsOfService, Version: "dev-terms-v1",
+					Label: "شروط الخدمة", URL: "/legal/terms",
+				},
+			},
+		},
+	)
 }

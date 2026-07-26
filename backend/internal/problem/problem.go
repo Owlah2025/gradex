@@ -79,9 +79,24 @@ func New(status int, slug, title, detail string) Problem {
 // JSON type, a body that is not what the media type promised. It deliberately
 // carries no parser detail: a decoder message quotes the offending input.
 func Malformed() Problem {
-	return New(http.StatusBadRequest, "malformed-request",
-		"Malformed request",
-		"The request body could not be parsed.")
+	return New(http.StatusBadRequest, "malformed-json",
+		"Malformed JSON",
+		"The JSON request body could not be parsed.")
+}
+
+// ContentTooLarge reports that the request body crossed the endpoint's fixed
+// byte limit. The configured limit is deliberately not reflected to callers.
+func ContentTooLarge() Problem {
+	return New(http.StatusRequestEntityTooLarge, "content-too-large",
+		"Request content too large",
+		"The request body is too large.")
+}
+
+// UnsupportedMediaType reports a request body that is not UTF-8 JSON.
+func UnsupportedMediaType() Problem {
+	return New(http.StatusUnsupportedMediaType, "unsupported-media-type",
+		"Unsupported media type",
+		"The request body must be UTF-8 JSON.")
 }
 
 // ValidationFailed reports a syntactically valid request whose field values are
@@ -90,6 +105,59 @@ func ValidationFailed() Problem {
 	return New(http.StatusUnprocessableEntity, "validation-failed",
 		"Request validation failed",
 		"One or more fields are invalid.")
+}
+
+// TokenInvalid deliberately collapses every unusable action-secret state.
+// Unknown, malformed, wrong-purpose, expired, consumed, and superseded values
+// must not become an oracle for Account or token lifecycle state (BR-008).
+func TokenInvalid() Problem {
+	return New(http.StatusBadRequest, "token-invalid",
+		"Link unavailable",
+		"This verification link cannot be used.")
+}
+
+// CSRFValidationFailed covers both an unusable anonymous synchronizer token
+// and an untrusted Origin/Referer. The response does not say which check
+// failed, so it cannot help a caller tune a cross-site request.
+func CSRFValidationFailed() Problem {
+	return New(http.StatusForbidden, "csrf-validation-failed",
+		"Request validation failed",
+		"The request could not be accepted from this browser context.")
+}
+
+// RateLimited is returned only after a configured policy was evaluated and
+// found exhausted. Infrastructure failure uses RateLimitingUnavailable
+// instead; calling both conditions "limited" would fabricate a quota decision.
+func RateLimited() Problem {
+	return New(http.StatusTooManyRequests, "rate-limited",
+		"Too many requests",
+		"Please wait before trying again.")
+}
+
+// RateLimitingUnavailable means neither Redis nor the policy's bounded local
+// fallback could make a safe decision.
+func RateLimitingUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "rate-limiting-unavailable",
+		"Service temporarily unavailable",
+		"This request cannot be accepted right now. Try again shortly.")
+}
+
+// RegistrationUnavailable is intentionally generic across missing current
+// policy and failed required credential screening. Those are distinct
+// protected diagnostics, not public response classes.
+func RegistrationUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "registration-unavailable",
+		"Registration temporarily unavailable",
+		"Registration cannot be completed right now. Try again shortly.")
+}
+
+// TransactionalDeliveryUnavailable means the durable source/outbox admission
+// boundary is unsafe. It says nothing about Account existence, a provider, or
+// whether any message could have been delivered.
+func TransactionalDeliveryUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "transactional-delivery-unavailable",
+		"Request temporarily unavailable",
+		"This request cannot be accepted right now. Try again shortly.")
 }
 
 // Unauthenticated reports missing or unusable authentication. Its companion

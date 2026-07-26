@@ -302,8 +302,8 @@ func TestRequestBodyFailures(t *testing.T) {
 			t.Fatalf("status = %d, want 400", rec.Code)
 		}
 		p := assertProblemEnvelope(t, rec)
-		if p.Code != "MALFORMED_REQUEST" {
-			t.Errorf("code = %q, want MALFORMED_REQUEST", p.Code)
+		if p.Code != "MALFORMED_JSON" {
+			t.Errorf("code = %q, want MALFORMED_JSON", p.Code)
 		}
 		for _, leaked := range []string{"secret-file.mp4", "unexpected end", "offset", "json:"} {
 			if strings.Contains(rec.Body.String(), leaked) {

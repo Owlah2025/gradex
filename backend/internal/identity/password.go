@@ -40,21 +40,11 @@ var ErrPasswordPolicy = errors.New("password does not meet policy")
 // It is not a breach-corpus check. The full compromised-credential requirement
 // needs a dataset and a lookup path that are not chosen yet, so this stays
 // honest about being a floor rather than pretending to be that check. The seam
-// is CompromisedChecker below.
+// is the required CompromisedRangeSource in compromised.go.
 var commonPasswords = []string{
 	"password", "passw0rd", "letmein", "welcome", "qwerty", "azerty",
 	"admin", "administrator", "gradex", "changeme", "secret", "iloveyou",
 	"123456", "1234567890", "abc123", "qwertyuiop", "asdfghjkl", "zxcvbnm",
-}
-
-// CompromisedChecker is the seam for the real compromised-password check once
-// LG-driven provider selection settles. Returning true rejects the password.
-//
-// It is an interface rather than a function field so the eventual
-// implementation can carry a client, a cache, and a fail-closed policy of its
-// own.
-type CompromisedChecker interface {
-	IsCompromised(password string) (bool, error)
 }
 
 // ValidatePassword applies the policy to a plaintext.
@@ -63,7 +53,7 @@ type CompromisedChecker interface {
 // message: returned errors describe the rule that failed, never the input that
 // failed it. A policy error is frequently the thing that gets pasted into a
 // deploy log.
-func ValidatePassword(password string, checker CompromisedChecker) error {
+func ValidatePassword(password string) error {
 	runes := utf8.RuneCountInString(password)
 	if runes < MinPasswordRunes {
 		return fmt.Errorf("%w: needs at least %d characters, got %d",
@@ -83,17 +73,6 @@ func ValidatePassword(password string, checker CompromisedChecker) error {
 		}
 	}
 
-	if checker != nil {
-		compromised, err := checker.IsCompromised(password)
-		if err != nil {
-			// Fail closed. A checker that cannot answer must not be read as
-			// having answered "not compromised".
-			return fmt.Errorf("checking password against compromised set: %w", err)
-		}
-		if compromised {
-			return fmt.Errorf("%w: appears in a known compromised set", ErrPasswordPolicy)
-		}
-	}
 	return nil
 }
 

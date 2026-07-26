@@ -92,17 +92,25 @@ func tableExists(t *testing.T, pool *pgxpool.Pool, name string) bool {
 // migrations that already exist and must not be edited; they are not a
 // specification for them.
 var (
-	initTables     = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
-	identityTables = []string{"accounts", "password_credentials", "bootstrap_operations"}
-	auditTables    = []string{"audit_events"}
-	sessionTables  = []string{"sessions", "session_credentials"}
+	initTables      = []string{"courses", "sections", "lessons", "videos", "progress", "fake_entitlements"}
+	identityTables  = []string{"accounts", "password_credentials", "bootstrap_operations"}
+	auditTables     = []string{"audit_events"}
+	sessionTables   = []string{"sessions", "session_credentials"}
+	admissionTables = []string{
+		"policy_acceptances",
+		"identity_action_secrets",
+		"identity_security_events",
+		"outbox_events",
+		"outbox_protected_payloads",
+	}
 )
 
 func allTables() []string {
 	all := append([]string{}, initTables...)
 	all = append(all, identityTables...)
 	all = append(all, auditTables...)
-	return append(all, sessionTables...)
+	all = append(all, sessionTables...)
+	return append(all, admissionTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -264,5 +272,139 @@ func TestSchemaOutsideSupportedRangeFailsReadiness(t *testing.T) {
 				t.Errorf("the error should name the version found, got %q", msg)
 			}
 		})
+	}
+}
+
+func TestStudentAdmissionSchemaInvariants(t *testing.T) {
+	freshDatabase(t)
+	pool := openPool(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var fingerprintColumns int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*)
+		   FROM information_schema.columns
+		  WHERE table_schema = 'public'
+		    AND table_name = 'bootstrap_operations'
+		    AND column_name IN ('fingerprint_version', 'request_fingerprint')`,
+	).Scan(&fingerprintColumns); err != nil {
+		t.Fatalf("checking bootstrap fingerprint columns: %v", err)
+	}
+	if fingerprintColumns != 2 {
+		t.Fatalf("bootstrap fingerprint column count = %d, want 2", fingerprintColumns)
+	}
+
+	var accountID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO accounts (normalized_email, email, role, status, display_name)
+		 VALUES ('student@example.com', 'Student@Example.com', 'STUDENT', 'PENDING_VERIFICATION', 'Student Name')
+		 RETURNING id::text`,
+	).Scan(&accountID); err != nil {
+		t.Fatalf("creating Account fixture: %v", err)
+	}
+
+	var acceptanceID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO policy_acceptances
+		   (account_id, policy_set_id, policy_kind, policy_version, locale, request_id)
+		 VALUES ($1, 'dev-v1', 'TERMS_OF_SERVICE', 'v1', 'en', 'request-1')
+		 RETURNING id::text`,
+		accountID,
+	).Scan(&acceptanceID); err != nil {
+		t.Fatalf("creating policy acceptance: %v", err)
+	}
+	assertStatementFails(t, pool, ctx,
+		"UPDATE policy_acceptances SET policy_version = 'v2' WHERE id = $1", acceptanceID)
+	assertStatementFails(t, pool, ctx,
+		"DELETE FROM policy_acceptances WHERE id = $1", acceptanceID)
+
+	var firstSecretID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES ($1, 'EMAIL_VERIFICATION', decode(repeat('aa', 32), 'hex'), now() + interval '1 hour')
+		 RETURNING id::text`,
+		accountID,
+	).Scan(&firstSecretID); err != nil {
+		t.Fatalf("creating action secret: %v", err)
+	}
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES ($1, 'EMAIL_VERIFICATION', decode(repeat('bb', 32), 'hex'), now() + interval '1 hour')`,
+		accountID,
+	)
+	if _, err := pool.Exec(ctx,
+		`UPDATE identity_action_secrets SET consumed_at = now() WHERE id = $1`,
+		firstSecretID,
+	); err != nil {
+		t.Fatalf("consuming action secret: %v", err)
+	}
+	assertStatementFails(t, pool, ctx,
+		`UPDATE identity_action_secrets SET consumed_at = consumed_at + interval '1 second' WHERE id = $1`,
+		firstSecretID,
+	)
+
+	var eventID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_security_events
+		   (event_type, account_id, account_revision, request_id, evidence)
+		 VALUES ('STUDENT_REGISTRATION_ACCEPTED', $1, 1, 'request-1', '{"schema_version":1}')
+		 RETURNING id::text`,
+		accountID,
+	).Scan(&eventID); err != nil {
+		t.Fatalf("creating Identity event: %v", err)
+	}
+	assertStatementFails(t, pool, ctx,
+		`UPDATE identity_security_events SET evidence = '{}' WHERE id = $1`,
+		eventID,
+	)
+
+	var outboxID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO outbox_events
+		   (event_type, schema_version, source_module, aggregate_type, aggregate_id,
+		    aggregate_revision, safe_payload, correlation_id)
+		 VALUES ('identity.email_verification_requested', 1, 'IDENTITY_AND_ACCESS',
+		         'ACCOUNT', $1, 1, '{"purpose":"EMAIL_VERIFICATION"}', 'request-1')
+		 RETURNING id::text`,
+		accountID,
+	).Scan(&outboxID); err != nil {
+		t.Fatalf("creating outbox event: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO outbox_protected_payloads (event_id, key_version, nonce, ciphertext)
+		 VALUES ($1, 'dev-v1', decode(repeat('cc', 12), 'hex'), decode(repeat('dd', 32), 'hex'))`,
+		outboxID,
+	); err != nil {
+		t.Fatalf("creating protected payload: %v", err)
+	}
+	assertStatementFails(t, pool, ctx,
+		`UPDATE outbox_events SET safe_payload = '{}' WHERE id = $1`,
+		outboxID,
+	)
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO outbox_protected_payloads (event_id, key_version, nonce, ciphertext)
+		 VALUES ($1, 'dev-v1', decode(repeat('ee', 12), 'hex'), decode(repeat('ff', 32), 'hex'))`,
+		outboxID,
+	)
+}
+
+func assertStatementFails(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	ctx context.Context,
+	statement string,
+	args ...any,
+) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, statement, args...); err == nil {
+		t.Fatalf("statement unexpectedly succeeded: %s", statement)
 	}
 }

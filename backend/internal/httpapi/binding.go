@@ -1,15 +1,22 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
+	"mime"
 	"reflect"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
 
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
+
+const strictJSONBodyContextKey = "strictJSONBody"
 
 // bindJSON decodes and validates a request body, writing the correct problem
 // and returning false when it cannot.
@@ -39,6 +46,168 @@ func bindJSON(c *gin.Context, dst any) bool {
 	// body, a truncated stream.
 	writeProblem(c, problem.Malformed())
 	return false
+}
+
+// bindStrictJSON enforces the public admission request boundary before any
+// security or domain work runs. It accepts exactly one bounded UTF-8 JSON
+// document whose declared object shape is unambiguous.
+func bindStrictJSON(c *gin.Context, dst any, maxBytes int64) bool {
+	mediaType, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") ||
+		hasUnsupportedMediaParameters(params) {
+		writeProblem(c, problem.UnsupportedMediaType())
+		return false
+	}
+
+	body, tooLarge, err := readBounded(c.Request.Body, maxBytes)
+	if err != nil {
+		writeProblem(c, problem.Malformed())
+		return false
+	}
+	if tooLarge {
+		writeProblem(c, problem.ContentTooLarge())
+		return false
+	}
+	if err := rejectDuplicateMembers(body); err != nil {
+		writeProblem(c, problem.Malformed())
+		return false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		writeProblem(c, problem.Malformed())
+		return false
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		writeProblem(c, problem.Malformed())
+		return false
+	}
+
+	if err := binding.Validator.ValidateStruct(dst); err != nil {
+		var validationErrs validator.ValidationErrors
+		if errors.As(err, &validationErrs) {
+			writeProblem(c, problem.ValidationFailed().
+				WithViolations(violationsFrom(validationErrs, dst)...))
+			return false
+		}
+		writeProblem(c, problem.Malformed())
+		return false
+	}
+	return true
+}
+
+// strictJSONMiddleware places structural admission before Origin/CSRF and rate
+// decisions in a route's handler chain. The final handler receives the exact
+// validated pointer through strictJSONBodyContextKey.
+func strictJSONMiddleware(factory func() any, maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		dst := factory()
+		if dst == nil || !bindStrictJSON(c, dst, maxBytes) {
+			return
+		}
+		c.Set(strictJSONBodyContextKey, dst)
+		c.Next()
+	}
+}
+
+func hasUnsupportedMediaParameters(params map[string]string) bool {
+	for name, value := range params {
+		if !strings.EqualFold(name, "charset") ||
+			(value != "" && !strings.EqualFold(value, "utf-8")) {
+			return true
+		}
+	}
+	return false
+}
+
+func readBounded(body io.Reader, maxBytes int64) ([]byte, bool, error) {
+	if maxBytes < 0 {
+		return nil, false, errors.New("negative body limit")
+	}
+	limited := io.LimitReader(body, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, int64(len(data)) > maxBytes, nil
+}
+
+func rejectDuplicateMembers(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := consumeJSONValue(decoder); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
+}
+
+func consumeJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			nameToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := nameToken.(string)
+			if !ok {
+				return errors.New("JSON object member name is not a string")
+			}
+			if _, duplicate := seen[name]; duplicate {
+				return errors.New("duplicate JSON object member")
+			}
+			seen[name] = struct{}{}
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return errors.New("unterminated JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return errors.New("unterminated JSON array")
+		}
+	default:
+		return errors.New("unexpected JSON delimiter")
+	}
+	return nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err == nil {
+		return errors.New("multiple JSON documents")
+	}
+	return err
 }
 
 // violationsFrom converts validator failures into the typed entries §2.3

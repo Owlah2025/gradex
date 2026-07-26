@@ -20,9 +20,9 @@ Write each named test first and observe the relevant failure before production i
 **Purpose**: Make the approved S1B1 boundaries executable without introducing provider or legal
 defaults.
 
-- [ ] T001 Freeze the S1B1 plan/task artifact set and verify every relative link and documented command in `specs/002-auth-rbac/` and `docs/superpowers/specs/2026-07-30-s1b-delivery-design.md`
-- [ ] T002 [P] Add typed development/test admission policy, anonymous-CSRF key, limiter-HMAC key, protected-payload key reference, and timeout settings with fail-closed production validation in `backend/internal/config/config.go`, `backend/internal/config/config_test.go`, and `backend/.env.example`
-- [ ] T003 [P] Add the S1B1 Problem Details constructors and fixed safe messages for `MALFORMED_JSON`, `TOKEN_INVALID`, `RATE_LIMITED`, `RATE_LIMITING_UNAVAILABLE`, `REGISTRATION_UNAVAILABLE`, and `TRANSACTIONAL_DELIVERY_UNAVAILABLE` in `backend/internal/problem/problem.go` and `backend/internal/problem/problem_test.go`
+- [X] T001 Freeze the S1B1 plan/task artifact set and verify every relative link and documented command in `specs/002-auth-rbac/` and `docs/superpowers/specs/2026-07-30-s1b-delivery-design.md`
+- [X] T002 [P] Add typed development/test admission policy, anonymous-CSRF key, limiter-HMAC key, protected-payload key reference, and timeout settings with fail-closed production validation in `backend/internal/config/config.go`, `backend/internal/config/config_test.go`, and `backend/.env.example`
+- [X] T003 [P] Add the S1B1 Problem Details constructors and fixed safe messages for `MALFORMED_JSON`, `TOKEN_INVALID`, `RATE_LIMITED`, `RATE_LIMITING_UNAVAILABLE`, `REGISTRATION_UNAVAILABLE`, and `TRANSACTIONAL_DELIVERY_UNAVAILABLE` in `backend/internal/problem/problem.go` and `backend/internal/problem/problem_test.go`
 
 **Checkpoint**: The contract has stable configuration and public error types, with no invented
 production provider/policy values.
@@ -38,35 +38,35 @@ public admission route.
 
 ### Bootstrap retry and correspondence-email hardening
 
-- [ ] T004 [P] Write failing BR-002/bootstrap tests for canonical fingerprint equivalence/mismatch, password equivalence, legacy fingerprint refusal, correspondence-email preservation, and concurrent identical retries in `backend/internal/identity/bootstrap_integration_test.go` and `backend/internal/identity/normalize_test.go`
-- [ ] T005 Implement the versioned canonical bootstrap fingerprint, constant-time comparison, recorded Argon2id password check, and preserved correspondence email in `backend/internal/identity/bootstrap.go`, `backend/cmd/bootstrap-admin/main.go`, and `backend/internal/db/migrations/0005_student_admission.up.sql`
+- [X] T004 [P] Write failing BR-002/bootstrap tests for canonical fingerprint equivalence/mismatch, password equivalence, legacy fingerprint refusal, correspondence-email preservation, and concurrent identical retries in `backend/internal/identity/bootstrap_integration_test.go` and `backend/internal/identity/normalize_test.go`
+- [X] T005 Implement the versioned canonical bootstrap fingerprint, constant-time comparison, recorded Argon2id password check, and preserved correspondence email in `backend/internal/identity/bootstrap.go`, `backend/cmd/bootstrap-admin/main.go`, and `backend/internal/db/migrations/0005_student_admission.up.sql`
 
 ### Required compromised-password boundary
 
-- [ ] T006 [P] Write failing BR-002 unit tests proving adapter plaintext/full-digest isolation, deterministic compromised/clear results, bounded/malformed response handling, and nil/unavailable fail-closed behavior in `backend/internal/identity/password_test.go` and `backend/internal/identity/credential_test.go`
-- [ ] T007 Replace the optional plaintext checker with the required provider-neutral range source inside the sole plaintext boundary and wire deterministic development/test plus explicit unavailable production behavior in `backend/internal/identity/password.go`, `backend/internal/identity/credential.go`, `backend/internal/identity/compromised.go`, `backend/internal/identity/bootstrap.go`, and `backend/cmd/bootstrap-admin/main.go`
+- [X] T006 [P] Write failing BR-002 unit tests proving adapter plaintext/full-digest isolation, deterministic compromised/clear results, bounded/malformed response handling, and nil/unavailable fail-closed behavior in `backend/internal/identity/password_test.go` and `backend/internal/identity/credential_test.go`
+- [X] T007 Replace the optional plaintext checker with the required provider-neutral range source inside the sole plaintext boundary and wire deterministic development/test plus explicit unavailable production behavior in `backend/internal/identity/password.go`, `backend/internal/identity/credential.go`, `backend/internal/identity/compromised.go`, `backend/internal/identity/bootstrap.go`, and `backend/cmd/bootstrap-admin/main.go`
 
 ### Migration and data invariants
 
-- [ ] T008 Write failing migration/invariant tests for bootstrap fingerprint columns, immutable policy acceptances, one-live-purpose-bound secret, append-only Identity events, immutable safe outbox event, and one protected payload in `backend/internal/db/migrate_integration_test.go`
-- [ ] T009 Implement and reverse migration 0005 with all constraints, partial indexes, one-way/append-only triggers, and safe legacy bootstrap behavior in `backend/internal/db/migrations/0005_student_admission.up.sql` and `backend/internal/db/migrations/0005_student_admission.down.sql`
-- [ ] T010 Update schema-version enforcement and hosted migration object assertions from 4 to 5 in `backend/internal/db/schema.go`, `backend/internal/db/migrate_integration_test.go`, and `.github/workflows/ci.yml`
+- [X] T008 Write failing migration/invariant tests for bootstrap fingerprint columns, immutable policy acceptances, one-live-purpose-bound secret, append-only Identity events, immutable safe outbox event, and one protected payload in `backend/internal/db/migrate_integration_test.go`
+- [X] T009 Implement and reverse migration 0005 with all constraints, partial indexes, one-way/append-only triggers, and safe legacy bootstrap behavior in `backend/internal/db/migrations/0005_student_admission.up.sql` and `backend/internal/db/migrations/0005_student_admission.down.sql`
+- [X] T010 Update schema-version enforcement and hosted migration object assertions from 4 to 5 in `backend/internal/db/schema.go`, `backend/internal/db/migrate_integration_test.go`, and `.github/workflows/ci.yml`
 
 ### Protected outbox intent
 
-- [ ] T011 [P] Write failing BR-120/122 unit/integration tests for authenticated encryption, associated-data binding, ciphertext canary absence, wrong-key rejection, atomic event/payload insertion, and rollback in `backend/internal/outbox/outbox_test.go` and `backend/internal/outbox/outbox_integration_test.go`
-- [ ] T012 Implement the transaction-scoped immutable event/protected-payload writer and required encryption adapter in `backend/internal/outbox/outbox.go`, `backend/internal/outbox/protected_payload.go`, and `backend/internal/outbox/types.go`
+- [X] T011 [P] Write failing BR-120/122 unit/integration tests for authenticated encryption, associated-data binding, ciphertext canary absence, wrong-key rejection, atomic event/payload insertion, and rollback in `backend/internal/outbox/outbox_test.go` and `backend/internal/outbox/outbox_integration_test.go`
+- [X] T012 Implement the transaction-scoped immutable event/protected-payload writer and required encryption adapter in `backend/internal/outbox/outbox.go`, `backend/internal/outbox/protected_payload.go`, and `backend/internal/outbox/types.go`
 
 ### Anonymous browser admission and strict JSON
 
-- [ ] T013 [P] Write failing HTTP tests for signed host-only anonymous cookie, browser-memory CSRF, exact Origin/Referer, method/media/body bounds, duplicate/unknown/trailing JSON rejection, and middleware order in `backend/internal/httpapi/admission_security_test.go` and `backend/internal/httpapi/binding_test.go`
-- [ ] T014 Implement anonymous security bootstrap, admission Origin/CSRF middleware, strict bounded JSON decoding, and no-store cookie/response behavior in `backend/internal/httpapi/anonymous_session.go`, `backend/internal/httpapi/admission_security.go`, `backend/internal/httpapi/binding.go`, and `backend/internal/httpapi/router.go`
+- [X] T013 [P] Write failing HTTP tests for signed host-only anonymous cookie, browser-memory CSRF, exact Origin/Referer, method/media/body bounds, duplicate/unknown/trailing JSON rejection, and middleware order in `backend/internal/httpapi/admission_security_test.go` and `backend/internal/httpapi/binding_test.go`
+- [X] T014 Implement anonymous security bootstrap, admission Origin/CSRF middleware, strict bounded JSON decoding, and no-store cookie/response behavior in `backend/internal/httpapi/anonymous_session.go`, `backend/internal/httpapi/admission_security.go`, `backend/internal/httpapi/binding.go`, and `backend/internal/httpapi/router.go`
 
 ### Layered limiter
 
-- [ ] T015 [P] Write failing FR-014 tests for versioned endpoint/identifier/network/anonymous/global dimensions, opaque HMAC keys, Redis atomic allow/deny, bounded strict-local fallback, true `429`, and unavailable `503` in `backend/internal/ratelimit/limiter_test.go` and `backend/internal/ratelimit/limiter_integration_test.go`
-- [ ] T016 Implement Redis-backed layered admission decisions, dedicated key derivation, circuit timeout, bounded strict-local fallback, and safe metrics outcome types in `backend/internal/ratelimit/limiter.go`, `backend/internal/ratelimit/redis.go`, `backend/internal/ratelimit/local.go`, and `backend/internal/ratelimit/policy.go`
-- [ ] T017 Compose the required policy resolver, credential screen, protected outbox writer, anonymous security keys, and rate limiter without mounting Student command routes yet in `backend/cmd/api/main.go` and `backend/internal/httpapi/router.go`
+- [X] T015 [P] Write failing FR-014 tests for versioned endpoint/identifier/network/anonymous/global dimensions, opaque HMAC keys, Redis atomic allow/deny, bounded strict-local fallback, true `429`, and unavailable `503` in `backend/internal/ratelimit/limiter_test.go` and `backend/internal/ratelimit/limiter_integration_test.go`
+- [X] T016 Implement Redis-backed layered admission decisions, dedicated key derivation, circuit timeout, bounded strict-local fallback, and safe metrics outcome types in `backend/internal/ratelimit/limiter.go`, `backend/internal/ratelimit/redis.go`, `backend/internal/ratelimit/local.go`, and `backend/internal/ratelimit/policy.go`
+- [X] T017 Compose the required policy resolver, credential screen, protected outbox writer, anonymous security keys, and rate limiter without mounting Student command routes yet in `backend/cmd/api/main.go` and `backend/internal/httpapi/router.go`
 
 **Checkpoint**: Bootstrap hardening, migration 0005, required password screening, protected outbox,
 strict anonymous browser admission, and rate-limit failure modes pass before User Story 1 work.
