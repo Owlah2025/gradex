@@ -133,10 +133,6 @@ func TestPrepareSucceedsWithoutMutatingAnything(t *testing.T) {
 		if prepared.CurrentGeneration != 1 {
 			t.Errorf("generation = %d, want 1", prepared.CurrentGeneration)
 		}
-		// The bootstrap Account's first session has no others to revoke.
-		if prepared.RevokeOtherSessions {
-			t.Error("the bootstrap mandatory change asked to revoke other sessions")
-		}
 	})
 
 	assertNothingMutated(t, conn, ctx, accountID, sessionID)
@@ -339,70 +335,91 @@ func TestCompletePasswordChangeRollsBackWhenAuditCannotCommit(t *testing.T) {
 	}
 }
 
-func TestVoluntaryPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
-	freshSchema(t)
-	conn, ctx := connect(t)
-	accountID, sessionID := bootstrapWithSession(t, conn, ctx)
+func TestPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		kind            PasswordChangeKind
+		currentPassword config.Secret
+		newPassword     config.Secret
+	}{
+		{
+			name:        "mandatory",
+			kind:        BootstrapMandatoryChange,
+			newPassword: config.NewSecret("a-mandatory-launch-passphrase-8"),
+		},
+		{
+			name:            "voluntary",
+			kind:            VoluntaryChange,
+			currentPassword: config.NewSecret("correct-horse-battery-staple-7"),
+			newPassword:     config.NewSecret("a-voluntary-launch-passphrase-8"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			freshSchema(t)
+			conn, ctx := connect(t)
+			accountID, sessionID := bootstrapWithSession(t, conn, ctx)
 
-	var otherSessionID string
-	now := time.Now().UTC()
-	if err := conn.QueryRow(ctx,
-		`INSERT INTO sessions
-		   (account_id, admitted_epoch, authenticated_at, last_activity_at,
-		    idle_expires_at, absolute_expires_at)
-		 VALUES ($1::uuid, 1, $2, $2, $3, $4)
-		 RETURNING id::text`,
-		accountID, now, now.Add(time.Hour), now.Add(12*time.Hour),
-	).Scan(&otherSessionID); err != nil {
-		t.Fatalf("creating other session: %v", err)
-	}
-	otherCredential, err := NewSessionCredential()
-	if err != nil {
-		t.Fatalf("minting other credential: %v", err)
-	}
-	if _, err := conn.Exec(ctx,
-		`INSERT INTO session_credentials
-		   (session_id, generation, credential_digest, csrf_digest)
-		 VALUES ($1::uuid, 1, $2, $3)`,
-		otherSessionID, otherCredential.CredentialDigest, otherCredential.CSRFDigest,
-	); err != nil {
-		t.Fatalf("inserting other credential: %v", err)
-	}
+			var otherSessionID string
+			now := time.Now().UTC()
+			if err := conn.QueryRow(ctx,
+				`INSERT INTO sessions
+				   (account_id, admitted_epoch, authenticated_at, last_activity_at,
+				    idle_expires_at, absolute_expires_at)
+				 VALUES ($1::uuid, 1, $2, $2, $3, $4)
+				 RETURNING id::text`,
+				accountID, now, now.Add(time.Hour), now.Add(12*time.Hour),
+			).Scan(&otherSessionID); err != nil {
+				t.Fatalf("creating other session: %v", err)
+			}
+			otherCredential, err := NewSessionCredential()
+			if err != nil {
+				t.Fatalf("minting other credential: %v", err)
+			}
+			if _, err := conn.Exec(ctx,
+				`INSERT INTO session_credentials
+				   (session_id, generation, credential_digest, csrf_digest)
+				 VALUES ($1::uuid, 1, $2, $3)`,
+				otherSessionID, otherCredential.CredentialDigest, otherCredential.CSRFDigest,
+			); err != nil {
+				t.Fatalf("inserting other credential: %v", err)
+			}
 
-	result, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
-		AccountID:           accountID,
-		SessionID:           sessionID,
-		PresentedGeneration: 1,
-		Kind:                VoluntaryChange,
-		CurrentPassword:     config.NewSecret("correct-horse-battery-staple-7"),
-		NewPassword:         config.NewSecret("a-voluntary-launch-passphrase-8"),
-	}, adminPasswordChangePolicy, now)
-	if err != nil {
-		t.Fatalf("completing voluntary change: %v", err)
-	}
-	if result.Generation != 2 {
-		t.Errorf("replacement generation = %d, want 2", result.Generation)
-	}
+			result, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+				AccountID:           accountID,
+				SessionID:           sessionID,
+				PresentedGeneration: 1,
+				Kind:                tc.kind,
+				CurrentPassword:     tc.currentPassword,
+				NewPassword:         tc.newPassword,
+			}, adminPasswordChangePolicy, now)
+			if err != nil {
+				t.Fatalf("completing password change: %v", err)
+			}
+			if result.Generation != 2 {
+				t.Errorf("replacement generation = %d, want 2", result.Generation)
+			}
 
-	var currentState, otherState, otherReason string
-	if err := conn.QueryRow(ctx,
-		`SELECT state::text FROM sessions WHERE id = $1::uuid`,
-		sessionID,
-	).Scan(&currentState); err != nil {
-		t.Fatalf("reading current session: %v", err)
-	}
-	if err := conn.QueryRow(ctx,
-		`SELECT state::text, revocation_reason::text
-		   FROM sessions WHERE id = $1::uuid`,
-		otherSessionID,
-	).Scan(&otherState, &otherReason); err != nil {
-		t.Fatalf("reading other session: %v", err)
-	}
-	if currentState != "ACTIVE" {
-		t.Errorf("current family state = %q, want ACTIVE", currentState)
-	}
-	if otherState != "REVOKED" || otherReason != "PASSWORD_CHANGE" {
-		t.Errorf("other family = %s/%s, want REVOKED/PASSWORD_CHANGE", otherState, otherReason)
+			var currentState, otherState, otherReason string
+			if err := conn.QueryRow(ctx,
+				`SELECT state::text FROM sessions WHERE id = $1::uuid`,
+				sessionID,
+			).Scan(&currentState); err != nil {
+				t.Fatalf("reading current session: %v", err)
+			}
+			if err := conn.QueryRow(ctx,
+				`SELECT state::text, revocation_reason::text
+				   FROM sessions WHERE id = $1::uuid`,
+				otherSessionID,
+			).Scan(&otherState, &otherReason); err != nil {
+				t.Fatalf("reading other session: %v", err)
+			}
+			if currentState != "ACTIVE" {
+				t.Errorf("current family state = %q, want ACTIVE", currentState)
+			}
+			if otherState != "REVOKED" || otherReason != "PASSWORD_CHANGE" {
+				t.Errorf("other family = %s/%s, want REVOKED/PASSWORD_CHANGE", otherState, otherReason)
+			}
+		})
 	}
 }
 

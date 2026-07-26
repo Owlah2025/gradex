@@ -60,14 +60,8 @@ type PreparedPasswordChange struct {
 	// Generation the session is currently on, proven under lock.
 	CurrentGeneration int
 
-	// Kind drives link 5's revocation policy: a voluntary change revokes all
-	// other sessions, and the bootstrap mandatory change has no others to
-	// revoke.
+	// Kind records which password-change flow was completed for Audit evidence.
 	Kind PasswordChangeKind
-
-	// RevokeOtherSessions is the policy decision, computed here so link 5
-	// applies it rather than re-deciding it.
-	RevokeOtherSessions bool
 }
 
 // PasswordChangePolicy contains the security windows established when the
@@ -112,7 +106,7 @@ type passwordChangeCommit struct {
 //   - replace the Argon2id password hash and clear CHANGE_REQUIRED;
 //   - supersede the admitted session credential and create its replacement;
 //   - re-establish the current family under the role-specific expiry windows;
-//   - revoke every other family when the change policy requires it; and
+//   - revoke every other family;
 //   - append privileged Identity Audit evidence.
 //
 // No HTTP response or cookie may be written until this function returns
@@ -296,9 +290,6 @@ func reestablishSession(ctx context.Context, tx pgx.Tx, change *passwordChangeCo
 }
 
 func revokeOtherSessions(ctx context.Context, tx pgx.Tx, change *passwordChangeCommit) error {
-	if !change.prepared.RevokeOtherSessions {
-		return nil
-	}
 	_, err := tx.Exec(ctx,
 		`UPDATE sessions
 		    SET state = 'REVOKED',
@@ -351,7 +342,7 @@ func appendPasswordChangeAudit(ctx context.Context, tx pgx.Tx, change *passwordC
 		change.prepared.SessionID,
 		change.prepared.CurrentGeneration,
 		change.nextGeneration,
-		change.prepared.RevokeOtherSessions,
+		true,
 	); err != nil {
 		return fmt.Errorf("recording password-change audit event: %w", err)
 	}
@@ -492,11 +483,6 @@ func PreparePasswordChange(
 		NewPasswordHash:   newHash,
 		CurrentGeneration: session.CurrentGeneration,
 		Kind:              req.Kind,
-		// A voluntary change revokes every other family (§4.3). The bootstrap
-		// mandatory change is the Account's first session, so there is nothing
-		// else to revoke and saying otherwise would imply work that never
-		// happens.
-		RevokeOtherSessions: req.Kind == VoluntaryChange,
 	}, nil
 }
 
