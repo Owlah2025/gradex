@@ -109,3 +109,18 @@ func DevelopmentPolicySetReadPolicy() Policy {
 		LocalMaxKeys: 4096,
 	}
 }
+
+func DevelopmentAnonymousBootstrapPolicy() Policy {
+	return Policy{
+		ID:       "anonymous-session-bootstrap-v1",
+		Category: "PUBLIC_IDENTITY_CAPABILITY",
+		Endpoint: "session-bootstrap",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 120, LocalLimit: 12},
+			{Dimension: DimensionNetwork, Limit: 60, LocalLimit: 8},
+			{Dimension: DimensionGlobal, Limit: 600, LocalLimit: 30},
+		},
+		LocalMaxKeys: 4096,
+	}
+}

@@ -186,6 +186,12 @@ func buildAdmissionFoundation(
 	if err != nil {
 		return nil, nil, err
 	}
+	compromisedSource, err := identity.NewTimeoutCompromisedSource(
+		compromised, admission.CompromisedPasswordTimeout(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
 	policies, err := developmentPolicySets(admission.PolicySetID())
 	if err != nil {
 		return nil, nil, err
@@ -213,20 +219,20 @@ func buildAdmissionFoundation(
 
 	endpoints := []string{
 		"student-registrations",
-		"registration-policy-set",
 		"email-verification-requests",
 		"email-verifications",
 	}
-	endpointPolicies := make(map[string]ratelimit.Policy, len(endpoints))
+	endpointPolicies := make(map[string]ratelimit.Policy, len(endpoints)+2)
 	for _, endpoint := range endpoints {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
+	endpointPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	endpointPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 
 	service, err := identity.NewAdmissionService(identity.AdmissionServiceOptions{
 		Pool:            pool,
 		Policies:        policies,
-		Compromised:     compromised,
+		Compromised:     compromisedSource,
 		Outbox:          writer,
 		VerificationTTL: admission.VerificationTokenTTL(),
 		Now:             time.Now,
@@ -239,8 +245,8 @@ func buildAdmissionFoundation(
 
 	foundation, err := httpapi.NewAdmissionFoundation(httpapi.AdmissionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
-		CookieSigningKey:    admission.AnonymousCookieSigningKey().Expose(),
-		CSRFKey:             admission.AnonymousCSRFKey().Expose(),
+		CookieSigningKey:    []byte(admission.AnonymousCookieSigningKey().Expose()),
+		CSRFKey:             []byte(admission.AnonymousCSRFKey().Expose()),
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Policies:            policies,
 		Service:             service,

@@ -178,6 +178,12 @@ func run(args []string, stdout *os.File) error {
 	default:
 		return errors.New("compromised-password screening is not configured; bootstrap fails closed")
 	}
+	compromised, err = identity.NewTimeoutCompromisedSource(
+		compromised, cfg.Admission().CompromisedPasswordTimeout(),
+	)
+	if err != nil {
+		return fmt.Errorf("configuring compromised-password timeout: %w", err)
+	}
 
 	// A single connection rather than a pool: this is one transaction that must
 	// hold an advisory lock, and a pool would add the possibility of the

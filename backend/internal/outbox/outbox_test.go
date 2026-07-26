@@ -70,6 +70,13 @@ func TestProtectedPayloadUsesAuthenticatedEncryption(t *testing.T) {
 	if got != payload {
 		t.Fatalf("round trip = %#v, want %#v", got, payload)
 	}
+	wrongWriter, err := NewWriter("test-v2", bytes.Repeat([]byte{0x24}, 32))
+	if err != nil {
+		t.Fatalf("constructing wrong-key writer: %v", err)
+	}
+	if _, err := openProtectedForTest(wrongWriter, event, protected); err == nil {
+		t.Fatal("a different configured key version authenticated the protected payload")
+	}
 
 	changed := event
 	changed.AggregateRevision++

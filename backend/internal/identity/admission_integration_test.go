@@ -161,6 +161,16 @@ func TestRegisterStudentCommitsCompletePendingIdentity(t *testing.T) {
 		t.Fatalf("registration facts = policies %d secrets %d security %d outbox %d payloads %d sessions %d",
 			policies, secrets, securityEvents, outboxEvents, payloads, sessions)
 	}
+	var outboxLocale, templateContract string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT safe_payload->>'locale', safe_payload->>'template_contract'
+		   FROM outbox_events`,
+	).Scan(&outboxLocale, &templateContract); err != nil {
+		t.Fatalf("reading verification outbox contract: %v", err)
+	}
+	if outboxLocale != "ar" || templateContract != verificationTemplateContract {
+		t.Fatalf("outbox contract = locale %q/template %q", outboxLocale, templateContract)
+	}
 	var acceptedSet, acceptedLocale, acceptedVersions string
 	if err := pool.QueryRow(context.Background(),
 		`SELECT min(policy_set_id), min(locale),
@@ -403,6 +413,26 @@ func TestExpiredVerificationBearerIsUniformlyInvalid(t *testing.T) {
 		context.Background(), deterministicBearer(0x60), "request-expired",
 	); !errors.Is(err, ErrTokenInvalid) {
 		t.Fatalf("expired bearer error = %v, want ErrTokenInvalid", err)
+	}
+}
+
+func TestWrongPurposeActionSecretIsRejectedAtPersistenceBoundary(t *testing.T) {
+	pool := admissionPool(t)
+	service := admissionService(t, pool, time.Now().UTC(), 0x65)
+	if err := service.RegisterStudent(context.Background(), studentRegistration()); err != nil {
+		t.Fatalf("registering: %v", err)
+	}
+	var accountID string
+	if err := pool.QueryRow(context.Background(), `SELECT id::text FROM accounts`).Scan(&accountID); err != nil {
+		t.Fatalf("reading Account: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, issued_at, expires_at)
+		 VALUES ($1::uuid, 'PASSWORD_RESET', decode(repeat('99', 32), 'hex'), now(), now() + interval '1 hour')`,
+		accountID,
+	); err == nil {
+		t.Fatal("persistence accepted an action secret outside the S1B1 verification purpose")
 	}
 }
 

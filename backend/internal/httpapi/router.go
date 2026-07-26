@@ -116,7 +116,11 @@ func mountAdmissionRoutes(v1 *gin.RouterGroup, foundation *AdmissionFoundation) 
 	handlers := &identityHandlers{
 		service: foundation.service, policies: foundation.policies,
 	}
-	v1.GET("/session/bootstrap", foundation.security.bootstrapHandler())
+	v1.GET(
+		"/session/bootstrap",
+		foundation.requireRateDecision("session-bootstrap", nil),
+		foundation.security.bootstrapHandler(),
+	)
 	v1.GET(
 		"/registration-policy-set",
 		foundation.security.requireAnonymous(),

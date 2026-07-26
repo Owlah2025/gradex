@@ -43,6 +43,10 @@ The cookie has no `Domain`. JavaScript never reads it. The CSRF token is kept in
 memory only and is never written to URL, localStorage, sessionStorage, IndexedDB, a JavaScript
 cookie, logs, analytics, or errors.
 
+Capability issuance is subject to the versioned network/global bootstrap policy. Exhaustion returns
+`429 RATE_LIMITED`; absence of a safe distributed or bounded fallback decision returns
+`503 RATE_LIMITING_UNAVAILABLE`. Neither failure issues or refreshes the anonymous cookie.
+
 ## Current registration policy set
 
 ### `GET /api/v1/registration-policy-set`

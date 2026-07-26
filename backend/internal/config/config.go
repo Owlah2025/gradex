@@ -456,6 +456,14 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 	if !in.passwordScreenMode.Valid() {
 		p.errf("PASSWORD_SCREEN_MODE must be unavailable, deterministic, or adapter; got %q", in.passwordScreenMode)
 	}
+	if in.environment.IsProduction() {
+		if in.passwordScreenMode == PasswordScreenDeterministic {
+			p.errf("deterministic PASSWORD_SCREEN_MODE is not permitted in production")
+		}
+		if in.passwordScreenMode == PasswordScreenAdapter && !in.passwordAdapterApproved {
+			p.errf("production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)")
+		}
+	}
 	if !in.enabled {
 		return settings
 	}
@@ -486,9 +494,6 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 	if in.environment.IsProduction() {
 		if !in.policyApproved {
 			p.errf("STUDENT_REGISTRATION_ENABLED=true in production requires REGISTRATION_POLICY_APPROVED=true (LG-011)")
-		}
-		if in.passwordScreenMode == PasswordScreenDeterministic {
-			p.errf("deterministic PASSWORD_SCREEN_MODE is not permitted in production")
 		}
 		if in.passwordScreenMode != PasswordScreenAdapter || !in.passwordAdapterApproved {
 			p.errf("production registration requires PASSWORD_SCREEN_MODE=adapter and COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)")

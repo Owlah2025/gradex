@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
@@ -49,15 +50,26 @@ func (f *AdmissionFoundation) requireRateDecision(
 
 func registrationIdentifier(c *gin.Context) string {
 	request := c.MustGet(strictJSONBodyContextKey).(*studentRegistrationRequest)
-	return strings.ToLower(strings.TrimSpace(request.Email))
+	return rateLimitEmailIdentifier(request.Email)
 }
 
 func verificationRequestIdentifier(c *gin.Context) string {
 	request := c.MustGet(strictJSONBodyContextKey).(*verificationRequestBody)
-	return strings.ToLower(strings.TrimSpace(request.Email))
+	return rateLimitEmailIdentifier(request.Email)
 }
 
 func verificationTokenIdentifier(c *gin.Context) string {
 	request := c.MustGet(strictJSONBodyContextKey).(*verificationConsumptionBody)
+	if _, err := identity.DigestActionSecret(request.Token); err != nil {
+		return "invalid-verification-token"
+	}
 	return request.Token
+}
+
+func rateLimitEmailIdentifier(raw string) string {
+	normalized, err := identity.NormalizeEmail(raw)
+	if err != nil {
+		return "invalid-email-address"
+	}
+	return strings.ToLower(normalized)
 }

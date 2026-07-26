@@ -17,7 +17,10 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
-const verificationTemplateContract = "student-email-verification-v1"
+const (
+	verificationTemplateContract       = "student-email-verification-v1"
+	minimumVerificationRequestDuration = 75 * time.Millisecond
+)
 
 type AdmissionService struct {
 	pool        *pgxpool.Pool
@@ -300,6 +303,8 @@ func (s *AdmissionService) appendVerificationOutbox(
 			SafePayload: map[string]any{
 				"purpose":           request.secret.Purpose,
 				"action_secret_id":  request.secret.ID,
+				"locale":            request.locale,
+				"template_contract": verificationTemplateContract,
 				"secret_expires_at": request.secret.ExpiresAt,
 			},
 		},
@@ -339,6 +344,7 @@ func (s *AdmissionService) RequestEmailVerification(
 		return fmt.Errorf("%w: protected payload reservation", ErrDeliveryUnavailable)
 	}
 
+	started := time.Now()
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("beginning verification request: %w", err)
@@ -350,7 +356,7 @@ func (s *AdmissionService) RequestEmailVerification(
 		return err
 	}
 	if !eligible {
-		return tx.Commit(ctx)
+		return commitVerificationRequest(ctx, tx, started)
 	}
 	if err := supersedeLiveVerificationSecret(ctx, tx, account.id, replacement); err != nil {
 		return err
@@ -380,8 +386,19 @@ func (s *AdmissionService) RequestEmailVerification(
 	}); err != nil {
 		return err
 	}
+	return commitVerificationRequest(ctx, tx, started)
+}
+
+func commitVerificationRequest(
+	ctx context.Context,
+	tx pgx.Tx,
+	started time.Time,
+) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing verification request: %w", err)
+	}
+	if remaining := time.Until(started.Add(minimumVerificationRequestDuration)); remaining > 0 {
+		time.Sleep(remaining)
 	}
 	return nil
 }

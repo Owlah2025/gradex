@@ -5,20 +5,24 @@ export function codePointLength(value: string) {
   return Array.from(value).length;
 }
 
+function isSupportedLetter(character: string) {
+  return (
+    /\p{Letter}/u.test(character) &&
+    /[\p{Script=Arabic}\p{Script=Latin}]/u.test(character)
+  );
+}
+
 export function validDisplayName(value: string) {
   const name = value.trim();
   const length = codePointLength(name);
   if (length < 2 || length > 50) return false;
   const characters = Array.from(name);
-  const letters = characters.filter((character) =>
-    /[\p{Script=Arabic}\p{Script=Latin}]/u.test(character),
-  );
+  const letters = characters.filter(isSupportedLetter);
   return (
     letters.length >= 2 &&
     characters.every((character) =>
-      /[\p{Script=Arabic}\p{Script=Latin}\p{Mark}\p{White_Space}'’\-]/u.test(
-        character,
-      ),
+      isSupportedLetter(character) ||
+      /[\p{Mark}\p{White_Space}'’\-]/u.test(character),
     )
   );
 }

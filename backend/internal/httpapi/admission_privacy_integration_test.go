@@ -109,9 +109,11 @@ func realAdmissionRouter(
 	}
 	readPolicy := ratelimit.DevelopmentPolicySetReadPolicy()
 	endpointPolicies[readPolicy.Endpoint] = readPolicy
+	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
+	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
-		PublicOrigin: "https://gradex.example", CookieSigningKey: strings.Repeat("a", 32),
-		CSRFKey: strings.Repeat("b", 32), AnonymousSessionTTL: time.Hour,
+		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
+		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
 		Policies: policies, Service: service,
 		Limiter: limiter, EndpointPolicies: endpointPolicies,
 	})
@@ -170,11 +172,13 @@ func assertPrivacyEquivalent(t *testing.T, first, second privacyResponse) {
 
 func assertSameTimingClass(t *testing.T, first, second time.Duration) {
 	t.Helper()
-	difference := first - second
-	if difference < 0 {
-		difference = -difference
+	faster, slower := first, second
+	if faster > slower {
+		faster, slower = slower, faster
 	}
-	if difference > 750*time.Millisecond {
+	difference := slower - faster
+	if difference > 150*time.Millisecond ||
+		slower > 3*faster+20*time.Millisecond {
 		t.Fatalf("hidden outcomes left timing class: %s versus %s", first, second)
 	}
 }
@@ -284,16 +288,13 @@ func TestAdmissionResponsesExcludeRequestCanaries(t *testing.T) {
 	)
 	assertResponseExcludesCanaries(t, invalid, invalidBearer)
 
-	deniedRouter := realAdmissionRouter(
-		t, pool, admissionRateStore{allowed: false},
-	)
-	deniedCookie, deniedCSRF := bootstrapAdmissionBrowser(t, deniedRouter)
+	deniedRouter := realAdmissionRouter(t, pool, admissionRateStore{allowed: false})
 	denied := postAdmission(
 		deniedRouter,
 		"/api/v1/email-verification-requests",
 		`{"email":"limiter-canary@example.com"}`,
-		deniedCookie,
-		deniedCSRF,
+		cookie,
+		csrf,
 	)
 	if denied.status != http.StatusTooManyRequests {
 		t.Fatalf("limiter canary status = %d, want 429", denied.status)

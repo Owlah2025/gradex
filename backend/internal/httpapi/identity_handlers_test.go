@@ -219,6 +219,10 @@ func TestCurrentPolicySetNegotiatesArabicAndRejectsUnsupportedLanguage(t *testin
 			!strings.Contains(response.Body.String(), "الخصوصية") {
 			t.Fatalf("Arabic policy response = %d %q", response.Code, response.Body.String())
 		}
+		if response.Header().Get("Cache-Control") != "no-store" ||
+			response.Header().Get("Vary") != "Accept-Language" {
+			t.Fatalf("Arabic policy cache headers = %#v", response.Header())
+		}
 	})
 	t.Run("unsupported", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "/policy", nil)

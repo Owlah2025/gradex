@@ -8,6 +8,14 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
+var requiredAdmissionPolicyEndpoints = [...]string{
+	"session-bootstrap",
+	"registration-policy-set",
+	"student-registrations",
+	"email-verification-requests",
+	"email-verifications",
+}
+
 // AdmissionFoundation is the fail-closed dependency set shared by every
 // public Identity command. Construction validates the complete set before the
 // bootstrap route is mounted; Student mutation routes are added separately.
@@ -21,8 +29,8 @@ type AdmissionFoundation struct {
 
 type AdmissionFoundationOptions struct {
 	PublicOrigin        string
-	CookieSigningKey    string
-	CSRFKey             string
+	CookieSigningKey    []byte
+	CSRFKey             []byte
 	AnonymousSessionTTL time.Duration
 	Policies            identity.PolicySetResolver
 	Service             admissionCommands
@@ -33,8 +41,8 @@ type AdmissionFoundationOptions struct {
 func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFoundation, error) {
 	security, err := newAnonymousSecurity(
 		options.PublicOrigin,
-		[]byte(options.CookieSigningKey),
-		[]byte(options.CSRFKey),
+		options.CookieSigningKey,
+		options.CSRFKey,
 		options.AnonymousSessionTTL,
 	)
 	if err != nil {
@@ -55,6 +63,11 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 			return nil, err
 		}
 		endpointPolicies[endpoint] = policy
+	}
+	for _, endpoint := range requiredAdmissionPolicyEndpoints {
+		if _, configured := endpointPolicies[endpoint]; !configured {
+			return nil, errors.New("required admission endpoint policy is missing")
+		}
 	}
 	return &AdmissionFoundation{
 		security:         security,

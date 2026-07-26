@@ -90,7 +90,7 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 		Status:          200,
 		DurationMillis:  12,
 		ResponseSize:    345,
-		LimiterOutcome:  "DISTRIBUTED_ALLOWED",
+		LimiterOutcome:  "ALLOW",
 	})
 
 	rec := decode(t, buf.String())
@@ -104,7 +104,7 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 		"status":            float64(200),
 		"duration_ms":       float64(12),
 		"response_size":     float64(345),
-		"limiter_outcome":   "DISTRIBUTED_ALLOWED",
+		"limiter_outcome":   "ALLOW",
 	} {
 		if rec[field] != want {
 			t.Errorf("%s = %v, want %v", field, rec[field], want)
@@ -125,7 +125,7 @@ func TestRequestCompletedUsesClosedFieldAllowlist(t *testing.T) {
 		Method:         "POST",
 		RouteTemplate:  "/api/v1/student-registrations",
 		Status:         202,
-		LimiterOutcome: "DISTRIBUTED_ALLOWED",
+		LimiterOutcome: "ALLOW",
 	})
 
 	rec := decode(t, buf.String())

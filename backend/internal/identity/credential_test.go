@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 )
@@ -17,12 +18,14 @@ type recordingRangeSource struct {
 	result       CompromisedRangeResult
 	err          error
 	request      CompromisedRangeLookup
+	deadline     time.Time
 }
 
 func (s *recordingRangeSource) Scheme() CompromisedLookupScheme { return s.scheme }
 func (s *recordingRangeSource) PrefixLength() int               { return s.prefixLength }
-func (s *recordingRangeSource) Lookup(_ context.Context, request CompromisedRangeLookup) (CompromisedRangeResult, error) {
+func (s *recordingRangeSource) Lookup(ctx context.Context, request CompromisedRangeLookup) (CompromisedRangeResult, error) {
 	s.request = request
+	s.deadline, _ = ctx.Deadline()
 	return s.result, s.err
 }
 
@@ -141,5 +144,27 @@ func TestPrepareCredentialRejectsOversizedCandidateSet(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected oversized source response to fail closed")
+	}
+}
+
+func TestTimeoutCompromisedSourceBoundsLookup(t *testing.T) {
+	source := sourceForPassword("another-long-passphrase")
+	const timeout = 75 * time.Millisecond
+	bounded, err := NewTimeoutCompromisedSource(source, timeout)
+	if err != nil {
+		t.Fatalf("constructing timeout source: %v", err)
+	}
+	started := time.Now()
+	if _, err := prepareCredential(
+		context.Background(), newCredentialPreparation(goodPassword), bounded,
+	); err != nil {
+		t.Fatalf("preparing credential: %v", err)
+	}
+	if source.deadline.IsZero() {
+		t.Fatal("compromised-password lookup received no deadline")
+	}
+	remaining := source.deadline.Sub(started)
+	if remaining <= 0 || remaining > timeout+25*time.Millisecond {
+		t.Fatalf("lookup deadline = %s after start, want at most %s", remaining, timeout)
 	}
 }

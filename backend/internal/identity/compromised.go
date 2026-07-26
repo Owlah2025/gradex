@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // CompromisedLookupScheme is the versioned one-way representation derived
@@ -47,6 +48,43 @@ type CompromisedRangeSource interface {
 	Scheme() CompromisedLookupScheme
 	PrefixLength() int
 	Lookup(context.Context, CompromisedRangeLookup) (CompromisedRangeResult, error)
+}
+
+type timeoutCompromisedSource struct {
+	source  CompromisedRangeSource
+	timeout time.Duration
+}
+
+// NewTimeoutCompromisedSource applies the configured whole-lookup deadline to
+// an otherwise provider-neutral screening source.
+func NewTimeoutCompromisedSource(
+	source CompromisedRangeSource,
+	timeout time.Duration,
+) (CompromisedRangeSource, error) {
+	if source == nil {
+		return nil, errors.New("compromised-password source is required")
+	}
+	if timeout <= 0 {
+		return nil, errors.New("compromised-password timeout must be positive")
+	}
+	return &timeoutCompromisedSource{source: source, timeout: timeout}, nil
+}
+
+func (s *timeoutCompromisedSource) Scheme() CompromisedLookupScheme {
+	return s.source.Scheme()
+}
+
+func (s *timeoutCompromisedSource) PrefixLength() int {
+	return s.source.PrefixLength()
+}
+
+func (s *timeoutCompromisedSource) Lookup(
+	ctx context.Context,
+	request CompromisedRangeLookup,
+) (CompromisedRangeResult, error) {
+	deadline, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	return s.source.Lookup(deadline, request)
 }
 
 func screenCompromised(

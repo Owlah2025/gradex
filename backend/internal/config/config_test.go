@@ -248,6 +248,18 @@ func TestStudentRegistrationIsDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestProductionRejectsCredentialScreeningFixturesWhenAdmissionIsDisabled(t *testing.T) {
+	wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+		s["STUDENT_REGISTRATION_ENABLED"] = "false"
+		s["PASSWORD_SCREEN_MODE"] = "deterministic"
+	}, "deterministic PASSWORD_SCREEN_MODE")
+
+	wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+		s["STUDENT_REGISTRATION_ENABLED"] = "false"
+		s["PASSWORD_SCREEN_MODE"] = "adapter"
+	}, "COMPROMISED_PASSWORD_ADAPTER_APPROVED")
+}
+
 func TestDevelopmentAdmissionConfigurationLoadsExplicitFixtures(t *testing.T) {
 	cfg := mustLoad(t, func(s map[string]string, sec MapSecretResolver) {
 		s["APP_ENV"] = "development"

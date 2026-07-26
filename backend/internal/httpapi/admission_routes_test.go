@@ -52,11 +52,14 @@ func mountedAdmissionRouter(
 	readPolicy := ratelimit.DevelopmentPolicySetReadPolicy()
 	readPolicy.LocalMaxKeys = localMaxKeys
 	endpointPolicies[readPolicy.Endpoint] = readPolicy
+	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
+	bootstrapPolicy.LocalMaxKeys = localMaxKeys
+	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
 
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",
-		CookieSigningKey:    strings.Repeat("a", 32),
-		CSRFKey:             strings.Repeat("b", 32),
+		CookieSigningKey:    bytes.Repeat([]byte("a"), 32),
+		CSRFKey:             bytes.Repeat([]byte("b"), 32),
 		AnonymousSessionTTL: time.Hour,
 		Policies:            policies,
 		Service:             &fakeAdmissionService{},
@@ -112,24 +115,40 @@ func admittedRegistrationRequest(
 // with no bounded local capacity yields 503 instead of a fabricated denial.
 func TestMountedAdmissionRoutesDistinguishLimiterDenyFromUnavailable(t *testing.T) {
 	t.Run("distributed deny", func(t *testing.T) {
+		browserRouter := mountedAdmissionRouter(t, admissionRateStore{allowed: true}, 64)
 		router := mountedAdmissionRouter(t, admissionRateStore{allowed: false}, 64)
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, admittedRegistrationRequest(t, router))
+		router.ServeHTTP(response, admittedRegistrationRequest(t, browserRouter))
 		if response.Code != http.StatusTooManyRequests ||
 			response.Header().Get("Retry-After") == "" {
 			t.Fatalf("deny response = %d headers %#v", response.Code, response.Header())
 		}
 	})
 	t.Run("unsafe fallback", func(t *testing.T) {
+		browserRouter := mountedAdmissionRouter(t, admissionRateStore{allowed: true}, 64)
 		router := mountedAdmissionRouter(
 			t, admissionRateStore{err: errors.New("dependency unavailable")}, 1,
 		)
 		response := httptest.NewRecorder()
-		router.ServeHTTP(response, admittedRegistrationRequest(t, router))
+		router.ServeHTTP(response, admittedRegistrationRequest(t, browserRouter))
 		if response.Code != http.StatusServiceUnavailable {
 			t.Fatalf("unavailable response = %d: %s", response.Code, response.Body.String())
 		}
 	})
+}
+
+func TestAnonymousBootstrapIsRateLimitedBeforeCapabilityIssuance(t *testing.T) {
+	router := mountedAdmissionRouter(t, admissionRateStore{allowed: false}, 64)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet, "/api/v1/session/bootstrap", nil,
+	))
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("bootstrap limit response = %d: %s", response.Code, response.Body.String())
+	}
+	if len(response.Result().Cookies()) != 0 {
+		t.Fatal("rate-limited bootstrap issued an anonymous capability cookie")
+	}
 }
 
 func TestMountedAdmissionRouteRunsStructureBeforeSecurityAndLimiter(t *testing.T) {

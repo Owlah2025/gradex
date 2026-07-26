@@ -59,7 +59,9 @@ func (h *identityHandlers) currentPolicySet(c *gin.Context) {
 		writeProblem(c, problem.RegistrationUnavailable())
 		return
 	}
+	c.Header("Cache-Control", "no-store")
 	c.Header("Content-Language", string(locale))
+	c.Header("Vary", "Accept-Language")
 	c.JSON(http.StatusOK, policySetResponse(set))
 }
 

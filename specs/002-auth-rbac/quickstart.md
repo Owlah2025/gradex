@@ -73,6 +73,7 @@ Expected:
 
 - anonymous bootstrap uses a host-only Secure/HttpOnly/Strict cookie and returns a memory-only CSRF
   value with `no-store`;
+- repeated anonymous capability issuance is network/global limited before a cookie is created;
 - missing/wrong Origin or CSRF fails before quota/domain mutation;
 - duplicate/unknown JSON is `MALFORMED_JSON`; semantic errors are `VALIDATION_FAILED`;
 - new/existing registration responses match in status, body bytes, meaningful headers, cookie
