@@ -66,6 +66,55 @@ type IssuedCredential struct {
 	CSRFDigest       string
 }
 
+// CredentialUseKind describes the authority a request is attempting to use.
+// Only an ordinary read can qualify as a benign in-flight request after
+// rotation; renewal and mutation boundaries always confirm reuse.
+type CredentialUseKind int
+
+const (
+	UseReadOnly CredentialUseKind = iota
+	UseStateChanging
+	UseSecuritySensitive
+	UseRenewal
+)
+
+// SupersededCredentialUse contains the non-secret evidence needed to classify
+// one presentation of a credential generation already replaced by the server.
+type SupersededCredentialUse struct {
+	Kind               CredentialUseKind
+	SupersededAt       time.Time
+	PriorStaleUseCount int
+}
+
+// StaleUseDecision is the only safe outcome of superseded credential use.
+type StaleUseDecision string
+
+const (
+	StaleUseRejectReplaced StaleUseDecision = "REJECT_REPLACED"
+	StaleUseRevokeFamily   StaleUseDecision = "REVOKE_FAMILY"
+)
+
+// ClassifySupersededCredentialUse permits one narrow concurrency explanation:
+// the first ordinary read arriving shortly after rotation. Every stronger,
+// repeated, late, or malformed presentation confirms reuse and revokes the
+// family.
+func ClassifySupersededCredentialUse(
+	use SupersededCredentialUse,
+	now time.Time,
+	classificationWindow time.Duration,
+) StaleUseDecision {
+	age := now.Sub(use.SupersededAt)
+	immediateFirstRead := use.Kind == UseReadOnly &&
+		use.PriorStaleUseCount == 0 &&
+		classificationWindow > 0 &&
+		age >= 0 &&
+		age <= classificationWindow
+	if immediateFirstRead {
+		return StaleUseRejectReplaced
+	}
+	return StaleUseRevokeFamily
+}
+
 // NewSessionCredential mints a credential and CSRF token with their digests.
 //
 // The digest is a plain SHA-256, not a password hash. That is deliberate and is

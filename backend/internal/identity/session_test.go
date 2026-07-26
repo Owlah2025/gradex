@@ -128,6 +128,65 @@ func TestSessionUsability(t *testing.T) {
 	}
 }
 
+func TestSupersededCredentialUseClassification(t *testing.T) {
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	replacedAt := now.Add(-2 * time.Second)
+	tests := map[string]struct {
+		use  SupersededCredentialUse
+		want StaleUseDecision
+	}{
+		"first immediate read is replacement": {
+			use: SupersededCredentialUse{
+				Kind: UseReadOnly, SupersededAt: replacedAt, PriorStaleUseCount: 0,
+			},
+			want: StaleUseRejectReplaced,
+		},
+		"second immediate read confirms reuse": {
+			use: SupersededCredentialUse{
+				Kind: UseReadOnly, SupersededAt: replacedAt, PriorStaleUseCount: 1,
+			},
+			want: StaleUseRevokeFamily,
+		},
+		"late read confirms reuse": {
+			use: SupersededCredentialUse{
+				Kind: UseReadOnly, SupersededAt: now.Add(-6 * time.Second),
+			},
+			want: StaleUseRevokeFamily,
+		},
+		"read at window boundary is replacement": {
+			use: SupersededCredentialUse{
+				Kind: UseReadOnly, SupersededAt: now.Add(-5 * time.Second),
+			},
+			want: StaleUseRejectReplaced,
+		},
+		"future supersession evidence fails closed": {
+			use: SupersededCredentialUse{
+				Kind: UseReadOnly, SupersededAt: now.Add(time.Second),
+			},
+			want: StaleUseRevokeFamily,
+		},
+		"renewal confirms reuse": {
+			use:  SupersededCredentialUse{Kind: UseRenewal, SupersededAt: replacedAt},
+			want: StaleUseRevokeFamily,
+		},
+		"mutation confirms reuse": {
+			use:  SupersededCredentialUse{Kind: UseStateChanging, SupersededAt: replacedAt},
+			want: StaleUseRevokeFamily,
+		},
+		"security-sensitive read confirms reuse": {
+			use:  SupersededCredentialUse{Kind: UseSecuritySensitive, SupersededAt: replacedAt},
+			want: StaleUseRevokeFamily,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := ClassifySupersededCredentialUse(test.use, now, 5*time.Second); got != test.want {
+				t.Fatalf("decision = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 // A leak of the sessions tables must not yield usable cookies, and two families
 // must never collide.
 func TestSessionCredentialsAreRandomAndStoredOnlyAsDigests(t *testing.T) {
