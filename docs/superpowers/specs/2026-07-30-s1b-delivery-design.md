@@ -1,6 +1,6 @@
 # S1B Student Authentication Delivery Design
 
-> Status: Written-spec review pending
+> Status: Developer-approved design
 > Schedule decision approved by the developer: 2026-07-26
 > Scheduled implementation window: 2026-07-30 through 2026-08-01
 > Governing feature: [Authentication and RBAC](../../../specs/002-auth-rbac/spec.md)
@@ -76,13 +76,17 @@ The S1B1 migration introduces only the durable structures needed by the admissio
 
 - purpose-bound Identity action-secret records with digest, Account, issue/expiry, consumption,
   supersession, and attempt evidence;
+- immutable versioned policy-acceptance evidence, with production registration unavailable until
+  the current bilingual policy set is configured and approved under `LG-011`;
 - append-only Identity registration/security evidence distinct from routine logs and privileged
   Audit;
 - the minimum shared `outbox_events` contract required to co-commit a versioned verification
-  notification intent.
+  notification intent, including the protected delivery payload that alone may carry the encrypted
+  bearer needed by the future delivery worker.
 
 S1B1 does not implement provider delivery attempts or the notification center; those remain owned by
 S9. The outbox row is durable source intent, not a claim that email was accepted or delivered.
+Ordinary outbox payloads, token rows, logs, and evidence contain no raw or reversible bearer.
 
 ### 4.3 Registration transaction
 

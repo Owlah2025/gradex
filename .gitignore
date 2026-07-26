@@ -1,5 +1,20 @@
 # Local secrets / environment config — never commit, use .env.example instead
 .env
+.env.*
+!.env.example
+
+# Go build/test outputs
+*.exe
+*.test
+*.out
+
+# Editors and operating-system metadata
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.idea/
+.vscode/
 
 # Personal Claude Code permissions/config — machine-local, not shared
 .claude/settings.local.json
