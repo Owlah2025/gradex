@@ -325,6 +325,9 @@ legacy authority after a context epoch changes.
 ## D-032 — Claude builds, agy reviews
 
 **Date:** 2026-07-25
+**Status:** Partially superseded by D-033. The temporary builder/reviewer seat assignment is no
+longer active; the `agy` fallback, disposable-worktree containment, and tainted/unavailable review
+rules remain in force.
 **Decision:** Reassign the delivery roles one seat: Claude becomes the builder and planner — owning
 slice planning, SpecKit, implementation, checks, evidence, and correction of findings — and `agy`
 (Google Antigravity CLI) becomes the independent read-only reviewer on model

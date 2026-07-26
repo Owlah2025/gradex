@@ -115,7 +115,9 @@ new feature work forward.
 ### `Close the day`
 
 1. Run the checks required by today's acceptance evidence.
-2. Dispatch `scripts/agy-review.sh <base>..<head>` on the exact stable commit range.
+2. Dispatch Claude's independent read-only review on the exact stable commit range from a
+   disposable detached worktree; use `scripts/agy-review.sh <base>..<head>` only when Claude is
+   unavailable.
 3. Correct and retest all critical/high findings.
 4. Record completed, incomplete, blocked, and deliberately deferred work.
 5. Update [STATUS.md](STATUS.md), gate evidence, confidence, and tomorrow's first task.

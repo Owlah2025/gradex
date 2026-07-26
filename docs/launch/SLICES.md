@@ -137,9 +137,10 @@ This order is mandatory. Authentication/RBAC cannot be implemented without resol
 no link may be started before the one above it is complete.
 
 All six links are implemented in their required order: link 1 at `90f92ec`, link 2 at `d85d5a0`,
-link 3 at `b17cd26`, link 4 at `dc68511`, link 5 at `4ba1632`, and link 6 at `ec8af3b`. S1A remains
-open until the checks and independent review in
-[the July 29 record](daily/2026-07-29.md#acceptance-evidence) are complete.
+link 3 at `b17cd26`, link 4 at `dc68511`, link 5 at `4ba1632`, and link 6 at `ec8af3b`. S1A closed
+at reviewed implementation head `70b4809`; the exact local checks, hosted CI run, review ranges,
+blocker corrections, and advisory dispositions are recorded in
+[the July 29 closeout](daily/2026-07-29.md#closeout).
 
 1. **Bootstrap schema/state.** An explicit Identity-owned constrained state for
    `PASSWORD_CHANGE_REQUIRED` — *not* an overload of `accounts.status`, which already reads `ACTIVE`
@@ -191,6 +192,12 @@ sessions with family-reuse detection; password reset and recovery; logout and re
 non-enumerating responses per the §5 privacy boundary; and the responsive Arabic/English Student
 authentication screens.
 
+S1B starts by resolving the three implementation advisories carried visibly from S1A's final
+independent review: bind the bootstrap operation ID to a request fingerprint, supply role-specific
+session and recent-authentication windows from typed configuration, and wire a known-compromised
+password checker before any user-facing credential-creation route opens. Preserve the supplied
+display/correspondence email while storing its normalized comparison form separately.
+
 ### 5.4 Staff lifecycle, enforcement, and authorization matrix (S1C)
 
 Admin staff invitations with initial-password setup for Instructors and Admins and their screens;
@@ -199,6 +206,10 @@ authorization matrix proven across every protected route that exists; the expand
 of bootstrap test 3; and the S1 integration review spanning S1A, S1B, and S1C together.
 
 This slice carries S1's complete close conditions. S2 does not start until it closes.
+
+S1C also reconciles the policy-denial vocabulary with API design §6.1, records whether password
+change actually revoked another family rather than restating policy, and proves the shorter Admin
+financial/security recent-authentication window before those capabilities are exposed.
 
 ## 6. MVP coverage map
 
