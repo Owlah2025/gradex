@@ -1,7 +1,7 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-31 — advanced by user
-> Last repository reconciliation: 2026-07-31 — synchronized start-of-day HEAD `d17a367`
+> Last repository reconciliation: 2026-07-31 — D-034 design head `5836b4a`, executable plan pending commit
 > Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 15 calendar days
@@ -31,8 +31,10 @@ implementation head `ad1b8f6`. The final independent result was 0 critical, 0 hi
 
 Day 9/S1B2 is `IN_PROGRESS` — see [the July 31 record](daily/2026-07-31.md). Its single outcome is
 an Active Account signing in through the same-origin cookie boundary, safely rotating one
-server-authoritative independently revocable family, and logging out. Implementation remains behind
-the written-design review and executable-plan gates.
+server-authoritative independently revocable family, and logging out. D-034 and the written design
+are developer-approved, and the focused executable plan under `specs/002-auth-rbac/s1b2/` passes
+its pre/post-design constitution gate. Implementation starts with T004–T012, the four bounded S1B1
+security/transport carryovers.
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -96,7 +98,8 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B2 authenticated sessions: first close S1B1's two medium review carryovers, then add
+Deliver S1B2 authenticated sessions: first close S1B1's explicit security/transport carryovers,
+beginning with T004's outside-development deterministic-screen validation test, then add
 role-scoped access windows, generic login, browser session/CSRF rotation, credential-reuse
 classification and family revocation, logout, and Arabic/English sign-in/session screens.
 
