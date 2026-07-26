@@ -378,3 +378,23 @@ original builder capacity unused; letting Codex approve its own work; discarding
 fallback and its proven containment harness.
 **Source:** Developer instruction during S1A on 2026-07-25: Codex quota returned and the launch
 workflow should return to its pre-exhaustion role assignment.
+
+## D-034 — Browser authentication uses one opaque server-managed session cookie
+
+**Date:** 2026-07-26
+**Decision:** Gradex uses one opaque, server-managed session credential stored in a `Secure`,
+`HttpOnly`, host-only cookie with explicit `SameSite=Strict` policy. References to separate access
+and refresh tokens in older requirements are superseded. Session renewal uses controlled
+session-credential and CSRF rotation; PostgreSQL stores only credential/CSRF digests and remains
+authoritative for role-specific idle/absolute expiry, generation, epoch, revocation, and confirmed
+reuse. Authentication credentials never enter browser storage or JavaScript-readable cookies.
+Confirmed reuse of a rotated credential revokes its entire family and requires reauthentication.
+Logout revokes server state before clearing the cookie.
+**Reason:** This matches the later approved same-origin security design and the existing immutable
+session-generation schema while keeping authentication bearers inaccessible to JavaScript. A second
+browser bearer or a Next.js token vault adds state, expiry, race, and operational boundaries without
+enough additional protection for the current modular-monolith architecture and launch timeline.
+**Alternatives rejected:** Separate access/refresh cookies; a Next.js token-vault/BFF; client-visible
+refresh tokens; local/session-storage credentials.
+**Source:** Developer approval during the schedule-advanced S1B2 start on 2026-07-26; see the
+[S1B2 authenticated-session design](superpowers/specs/2026-07-31-s1b2-authenticated-session-design.md).

@@ -32,7 +32,7 @@ implementation head `ad1b8f6`. The final independent result was 0 critical, 0 hi
 Day 9/S1B2 is `IN_PROGRESS` — see [the July 31 record](daily/2026-07-31.md). Its single outcome is
 an Active Account signing in through the same-origin cookie boundary, safely rotating one
 server-authoritative independently revocable family, and logging out. Implementation remains behind
-the browser-credential design approval gate.
+the written-design review and executable-plan gates.
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -42,7 +42,7 @@ before implementation rather than compressing failure paths:
 | Day | Slice | Contents |
 |---|---|---|
 | Jul 30 | S1B1 — Student admission | Registration, verification, privacy/abuse controls, durable delivery intent, admission screens |
-| Jul 31 | S1B2 — authenticated sessions | Role-scoped windows, login, cookie/CSRF, refresh rotation/reuse, logout, sign-in screens |
+| Jul 31 | S1B2 — authenticated sessions | Role-scoped windows, login, opaque cookie/CSRF rotation and reuse defense, logout, sign-in screens |
 | Aug 1 | S1B3 — recovery and integration | Password recovery, all-family invalidation, Student journey, S1B review |
 | Aug 2 | S1C — staff lifecycle and enforcement | Invitations, suspension enforcement, full authorization matrix, S1 integration review |
 | Aug 3 | S2 — Course authoring and review | Starts only after S1C closes |
@@ -317,6 +317,9 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 - D-033: Codex is the primary builder and planner; Claude is the independent read-only reviewer.
   Review uses a disposable detached worktree and frozen exact commit range. `agy` remains the
   approved fallback under D-032. A `TAINTED` or `UNAVAILABLE` run is never recorded as approval.
+- D-034: browser authentication uses one opaque server-managed credential in a `Secure`,
+  `HttpOnly`, host-only, `SameSite=Strict` cookie. Controlled renewal rotates the credential and
+  CSRF token; confirmed reuse revokes the family. Older dual-token wording is superseded.
 - Missed work becomes visible carryover and cannot be marked complete without evidence.
 - Developer-approved Day 8 replan: S1B1 July 30, S1B2 July 31, S1B3 August 1, S1C August 2, and S2
   August 3. S3–S8 remain `TBD`; no protected day or later runway date is silently reassigned.
@@ -343,7 +346,7 @@ Day 9/S1B2 is active in
 [SLICES.md §5.3.2](SLICES.md#532-s1b2--authenticated-sessions) and the
 [July 31 record](daily/2026-07-31.md).
 
-First resolve and approve the browser credential representation against the later same-origin
-system design, then freeze its route/cookie/CSRF contract and executable tasks. Implementation
-starts with the two medium S1B1 review carryovers before role-scoped windows, generic login,
-credential rotation/reuse classification, family revocation, logout, and bilingual session UI.
+Review the written D-034/S1B2 design reconciliation, then freeze its executable SpecKit plan and
+tasks. Implementation starts with the two medium S1B1 review carryovers before role-scoped windows,
+generic login, credential rotation/reuse classification, family revocation, logout, and bilingual
+session UI.

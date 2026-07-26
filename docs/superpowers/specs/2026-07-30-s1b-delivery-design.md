@@ -199,7 +199,7 @@ S1B3 additionally runs the complete Student authentication journey and records t
 
 - **Keep S1B on one day:** violates the delivery-capacity rule and makes security evidence the only
   available compression target.
-- **Use two days:** leaves login, refresh-reuse defense, logout, recovery, integration, UI, and
+- **Use two days:** leaves login, opaque credential-reuse defense, logout, recovery, integration, UI, and
   review in one overloaded day.
 - **Defer screens or recovery outside S1:** removes approved MVP scope from the slice rather than
   planning it honestly.

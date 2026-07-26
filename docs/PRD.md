@@ -76,7 +76,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 ### Identity and access
 
 - Student-only public registration with mandatory email verification.
-- Email/password login, rotating refresh sessions, password reset, and logout.
+- Email/password login, one opaque rotating server-managed cookie session, password reset, and
+  logout. Older access/refresh-token wording is superseded by D-034.
 - Admin invitation and initial-password setup for Instructors and additional Admins.
 - One out-of-band bootstrap Admin created during secure deployment.
 - Immediate enforcement of account suspension across protected actions.

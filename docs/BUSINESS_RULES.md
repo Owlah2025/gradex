@@ -1,7 +1,7 @@
 # Business Rules
 
 > Status: Active
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-26
 
 This document is the single source of truth for Gradex's business logic — the rules governing users, courses, enrollment, payments, refunds, video/progress, instructors, admin actions, access control, content lifecycle, and data integrity. Most rules below are extracted from [PRD.md](PRD.md) (and, where PRD.md explicitly defers to it, [video-streaming-design.md](superpowers/specs/2026-07-17-video-streaming-design.md)). A smaller set fill real gaps the PRD was silent on — those are tagged "Decision" or "new," dated, and cross-referenced to [DECISIONS.md](DECISIONS.md) where significant enough to warrant a log entry. Either way, nothing here is silently assumed — each rule cites where it comes from.
 
@@ -14,9 +14,9 @@ Business rules state *what must always be true*; they intentionally omit tunable
 - **BR-001** — Public self-registration creates Student accounts only. Email addresses are unique after normalization, but signup, verification, and recovery responses do not reveal whether an address is already registered. *(D-014; PRD §11 Authentication)*
 - **BR-002** — Passwords accept 15–128 Unicode characters (including spaces), have no composition or periodic-rotation rule, and are rejected when common or known-compromised. They are hashed with Argon2id before storage; neither plaintext nor a hash is returned by any API. *(D-014; PRD §6 Security, §11 Authentication)*
 - **BR-003** — Authentication failure returns a generic unauthorized response without revealing whether the email exists. *(PRD §11 Authentication)*
-- **BR-004** — Successful login issues a short-lived access token plus a rotating refresh token; the session is independently revocable, not solely reliant on token expiry. *(PRD §11 Authentication, §6 Security)*
-- **BR-005** — A refresh token that is expired, revoked, or reused after rotation is rejected with 401 — access cannot be renewed from it. *(PRD §11 Authentication)*
-- **BR-006** — Ordinary logout invalidates the refresh-token session; subsequent refresh calls with that token are rejected. The expiry behavior of an already-issued access token is a system-design choice constrained by BR-007's stronger suspension rule. *(D-014; PRD §11 Authentication)*
+- **BR-004** — Successful login creates an independently revocable server-authoritative session and issues one opaque credential in a `Secure`, `HttpOnly`, host-only cookie. Controlled renewal rotates that credential and its session-bound CSRF token; no authentication bearer is exposed to browser JavaScript or browser persistence. *(D-034; PRD §11 Authentication, §6 Security)*
+- **BR-005** — An expired, revoked, or superseded session credential cannot authenticate or renew access. Confirmed reuse after rotation revokes the entire session family and requires reauthentication. *(D-034; PRD §11 Authentication)*
+- **BR-006** — Ordinary logout revokes the current server-side session family before clearing the browser cookie; subsequent use of any family credential is rejected. *(D-014/D-034; PRD §11 Authentication)*
 - **BR-007** — A suspended account immediately loses all protected platform access, including from already active sessions, regardless of prior purchases. The later system design may use revocation, token versioning, an account-status check, or an equivalent mechanism, but it must deliver this outcome. *(D-014; PRD §11 Authentication)*
 - **BR-008** — A Student account remains `PENDING_VERIFICATION` and cannot sign in until an expiring, single-use email-verification token succeeds. Resend is rate-limited; changing an email requires verification of the new address. *(D-014; PRD §11 Authentication)*
 - **BR-009** — An Admin may create an expiring invitation for an Instructor or additional Admin, but no Account exists until valid invitation acceptance atomically consumes the token and creates it with the assigned role. An invitation address already attached to any Account is rejected. Every Account has exactly one role assigned at creation and immutable during MVP; there is no role conversion, identity merge, or multi-role membership. The one bootstrap Admin is created out-of-band during secure deployment, has no credential stored in the repository, and must change the initial password. *(D-014; PRD §11 Authentication)*

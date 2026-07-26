@@ -60,7 +60,7 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 ## SJ-04 — Sign In
 
 - **Goal:** Authenticate and continue the intended purchase/learning route.
-- **Actions:** Enter credentials; refresh/rotate session as needed.
+- **Actions:** Enter credentials; renew/rotate the opaque session credential as needed.
 - **Rules:** Generic credential failure (BR-003), revoked refresh rejection (BR-005), immediate
   suspension enforcement (BR-007).
 - **Edge cases:** Session expires during checkout; Account becomes suspended while active.

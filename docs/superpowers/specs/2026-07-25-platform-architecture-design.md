@@ -472,9 +472,9 @@ foundation and later operational runbooks.
   untrusted.
 - The API enforces authentication, role, ownership, Account status, resource state, and Entitlement
   on every protected action.
-- Session credentials, refresh-token families, and revocation state remain authoritative in
-  PostgreSQL. Rotation and immediate-suspension contracts are finalized during the July 27
-  security design.
+- Session credential families and revocation state remain authoritative in PostgreSQL. D-034
+  supersedes the older access/refresh-token representation with one opaque server-managed cookie;
+  rotation and immediate-suspension contracts are finalized in the July 27 security design.
 - Tap callbacks require provider-authenticity verification, replay protection, deduplication, and
   reconciliation.
 - Signed access is short-lived and scoped to the approved asset/version, actor, and operation.

@@ -195,8 +195,9 @@ through the real chain; it does not demonstrate coverage.
 
 ### 5.3 Student authentication and session lifecycle (S1B)
 
-Student registration with mandatory email verification; email/password login; rotating refresh
-sessions with family-reuse detection; password reset and recovery; logout and revocation;
+Student registration with mandatory email verification; email/password login; one opaque
+server-managed cookie session with credential-generation rotation and family-reuse detection;
+password reset and recovery; logout and revocation;
 non-enumerating responses per the §5 privacy boundary; and the responsive Arabic/English Student
 authentication screens.
 
@@ -247,7 +248,7 @@ Every PRD MVP bullet mapped to its one owning slice. This is the completeness ch
 | Capability | Slice |
 |---|---|
 | Student-only public registration with mandatory email verification | S1 |
-| Email/password login, rotating refresh sessions, password reset, logout | S1 |
+| Email/password login, opaque rotating cookie sessions, password reset, logout | S1 |
 | Admin invitation and initial-password setup for Instructors and Admins | S1 |
 | One out-of-band bootstrap Admin created during secure deployment | S1 |
 | Immediate enforcement of account suspension across protected actions | S1 |

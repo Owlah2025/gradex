@@ -4,7 +4,7 @@
 
 **Created**: 2026-07-22
 
-**Reconciled**: 2026-07-23
+**Reconciled**: 2026-07-26
 
 **Feature**: [spec.md](../spec.md)
 
@@ -38,6 +38,7 @@
 
 ## Notes
 
-System design must still choose token/session storage, TTLs, cookie/client handling, refresh-token
-reuse response, rate limits, email delivery, bootstrap operation, and the enforcement mechanism that
-makes suspension immediate. Those are deliberate design inputs, not unresolved product decisions.
+D-034 and the approved S1B2 design now choose one opaque server-managed cookie, PostgreSQL digest
+storage, controlled credential/CSRF rotation, and family revocation on confirmed reuse. Tunable
+TTLs, rate limits, email delivery, bootstrap operation, and immediate-suspension enforcement remain
+implementation/system-design inputs rather than unresolved product decisions.

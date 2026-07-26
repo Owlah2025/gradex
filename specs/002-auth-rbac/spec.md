@@ -71,29 +71,32 @@ role, and prove public registration cannot produce that role.
    it creates the bootstrap Admin without repository-stored credentials and requires an initial
    password change; it cannot be used as a public endpoint or repeated to mint Admins. *(BR-009)*
 
-### User Story 3 — User signs in, refreshes, recovers, and signs out (Priority: P1)
+### User Story 3 — User signs in, renews, recovers, and signs out (Priority: P1)
 
-An active Student, Instructor, or Admin signs in, remains authenticated through token rotation,
-recovers a forgotten password safely, and can end the current session.
+An active Student, Instructor, or Admin signs in, remains authenticated through controlled opaque
+session-credential rotation, recovers a forgotten password safely, and can end the current session.
 
-**Independent test**: Sign in, refresh through access-token expiry, reject reuse of the rotated
-refresh token, log out, and confirm that the session cannot refresh again; separately complete a
-single-use password reset.
+**Independent test**: Sign in, renew and rotate the opaque cookie credential and session-bound CSRF
+token, reject reuse of the superseded credential, log out, and confirm that no family credential
+can authenticate or renew again; separately complete a single-use password reset.
 
 **Acceptance scenarios**:
 
 1. **Given** an Active user submits correct credentials, **when** login succeeds, **then** Gradex
-   issues a short-lived access token and rotating refresh token tied to an independently revocable
-   session. *(BR-004)*
+   creates an independently revocable server-authoritative family, sets one opaque credential in a
+   `Secure`, `HttpOnly`, host-only cookie, and returns only the session-bound CSRF token to browser
+   memory. *(BR-004, D-034)*
 2. **Given** an invalid email/password combination, **when** login is attempted, **then** Gradex
    returns the same generic failure without confirming Account existence. *(BR-003)*
-3. **Given** a valid unrevoked refresh token, **when** refresh succeeds, **then** Gradex issues a new
-   access token and rotates the refresh token. *(BR-004, BR-005)*
-4. **Given** an expired, revoked, or previously used refresh token, **when** refresh is attempted,
-   **then** no token is issued. *(BR-005)*
-5. **Given** a user logs out, **when** logout completes, **then** the current refresh session is
-   invalidated; treatment of the already-issued access token follows the system design while still
-   satisfying immediate suspension separately. *(BR-006, BR-007)*
+3. **Given** a valid current session credential and CSRF token, **when** controlled renewal
+   succeeds, **then** Gradex atomically rotates both values and supersedes the prior generation.
+   *(BR-004, BR-005, D-034)*
+4. **Given** an expired, revoked, or superseded credential, **when** authentication or renewal is
+   attempted, **then** no replacement credential is issued; confirmed reuse revokes the family.
+   *(BR-005, D-034)*
+5. **Given** a user logs out, **when** logout completes, **then** the current server-side family is
+   revoked before the cookie is cleared and no family credential authenticates again.
+   *(BR-006, BR-007, D-034)*
 6. **Given** any password-reset request, **when** it is submitted, **then** the response is
    non-enumerating; a valid expiring single-use reset link accepts only a password satisfying the
    approved policy and cannot be reused. *(BR-001, BR-002, PRD §5 Authentication)*
@@ -123,8 +126,8 @@ Instructor, bypassing the frontend.
 An Admin suspends an Account and every existing or new session immediately loses protected access,
 regardless of previous purchases or ownership.
 
-**Independent test**: Suspend an Account while it has a valid access/refresh session, then prove its
-next protected request, refresh, fresh login, playback, and download are denied.
+**Independent test**: Suspend an Account while it has a valid opaque cookie session, then prove its
+next protected request, renewal, fresh login, playback, and download are denied.
 
 **Acceptance scenarios**:
 
@@ -187,12 +190,14 @@ next protected request, refresh, fresh login, playback, and download are denied.
 - **FR-006A**: Only Student Accounts MAY place Orders, receive ordinary Entitlements, create
   Enrollments, or record Progress. Instructor Accounts have no Student consumption capability;
   Admin protected-content access MUST use the separate audited preview path. *(BR-081/082)*
-- **FR-007**: Successful login MUST create an independently revocable session with a short-lived
-  access token and rotating refresh token. *(BR-004)*
-- **FR-008**: Expired, revoked, or reused refresh tokens MUST be rejected without new credentials.
-  *(BR-005)*
-- **FR-009**: Logout MUST invalidate the current refresh session; refresh after logout MUST fail.
-  *(BR-006)*
+- **FR-007**: Successful login MUST create an independently revocable server-authoritative session
+  with one opaque credential in a `Secure`, `HttpOnly`, host-only cookie and a distinct
+  session-bound CSRF token held only in browser memory. Separate access/refresh-token requirements
+  are superseded by D-034. *(BR-004)*
+- **FR-008**: Expired, revoked, or superseded session credentials MUST be rejected without new
+  credentials; confirmed reuse MUST revoke the complete family. *(BR-005)*
+- **FR-009**: Logout MUST revoke the current server-side family before clearing the browser cookie;
+  authentication or renewal after logout MUST fail. *(BR-006)*
 - **FR-010**: A suspended Account MUST immediately fail every new/existing-session protected action,
   refresh, and login independent of prior Entitlement. *(BR-007)*
 - **FR-011**: The backend MUST enforce the three roles—Student, Instructor, Admin—plus ownership and
@@ -203,7 +208,7 @@ next protected request, refresh, fresh login, playback, and download are denied.
   operations. Instructor roster access MUST be limited to BR-064's fields for an owned Course;
   authentication and authorization failures MUST not leak private/internal state. *(BR-003,
   BR-064, BR-101)*
-- **FR-014**: Auth, verification, invitation, reset, and refresh endpoints MUST be rate-limited,
+- **FR-014**: Auth, verification, invitation, reset, and session-renewal endpoints MUST be rate-limited,
   monitored, and audited in proportion to security risk. *(PRD §6 Security)*
 - **FR-015**: Security-sensitive events MUST generate the fixed required notification/audit events
   without allowing notification failure to roll back the auth state change. *(BR-120–BR-123)*
@@ -216,8 +221,8 @@ next protected request, refresh, fresh login, playback, and download are denied.
 - **Account**: Unique normalized email, internal identifier, password hash, exactly one immutable
   MVP role, verification/status fields, non-unique BR-105 display name, language/profile metadata,
   and security timestamps.
-- **Session**: Independently revocable login session associated with one Account and refresh-token
-  rotation state.
+- **Session**: Independently revocable login family associated with one Account and an immutable
+  chain of opaque cookie-credential/CSRF generations.
 - **Email Verification**: Expiring single-use proof that activates a pending Student or verifies a
   changed address.
 - **Staff Invitation**: Admin-created expiring single-use assignment for Instructor/Admin role.
@@ -236,8 +241,8 @@ next protected request, refresh, fresh login, playback, and download are denied.
   role; expired/revoked/reused invitations grant no access.
 - **SC-003**: 100% of tested role, ownership, status, and PII boundaries are enforced by direct backend
   calls even when the client is bypassed.
-- **SC-004**: A logged-out/revoked refresh session cannot obtain a token on its next attempt, and a
-  rotated refresh token cannot be reused.
+- **SC-004**: A logged-out/revoked session cannot authenticate or renew on its next attempt, and a
+  superseded opaque credential cannot be reused; confirmed reuse revokes the family.
 - **SC-005**: A suspended Account's next protected request is denied even when it presents a
   previously valid active-session credential.
 - **SC-006**: Registration, login, verification, recovery, and invitation responses do not allow an
@@ -250,9 +255,10 @@ next protected request, refresh, fresh login, playback, and download are denied.
 - Social login, MFA, passwordless login, public Instructor/Admin registration, role conversion,
   multi-role/organization Accounts, and Admin impersonation are outside MVP.
 - Admin is one flat MVP role; future sub-roles require a new approved decision/specification.
-- The exact token format, TTLs, cookie/storage strategy, session-family reuse response, email vendor,
-  and immediate-suspension mechanism are system-design decisions. They must preserve the outcomes in
-  this specification.
+- D-034 and the approved S1B2 design resolve browser credential format, cookie/storage strategy, and
+  session-family reuse response as one opaque server-managed cookie with controlled credential/CSRF
+  rotation and family revocation. Tunable TTLs, the email vendor, and immediate-suspension mechanism
+  remain owned by their implementation/system-design boundaries.
 - Public catalog browsing remains available without authentication; purchase and protected learning
   require an Active Student Account.
 
@@ -267,3 +273,12 @@ next protected request, refresh, fresh login, playback, and download are denied.
 - Suspension timing: resolved—immediate for all protected actions, including existing sessions; the
   system-design enforcement mechanism remains open.
 - Public registration: resolved—Student only, with email verification required before sign-in.
+
+### Session 2026-07-26
+
+- Browser credential representation: resolved—one opaque server-managed credential in a `Secure`,
+  `HttpOnly`, host-only, `SameSite=Strict` cookie. Separate access/refresh-token wording is
+  superseded by D-034.
+- Renewal/reuse: resolved—controlled renewal atomically rotates the cookie credential and
+  session-bound CSRF token; confirmed reuse revokes the complete family and requires normal
+  authentication.

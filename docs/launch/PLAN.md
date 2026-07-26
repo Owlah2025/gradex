@@ -304,7 +304,7 @@ and end it.
 - Supply role-specific idle/absolute expiry and recent-authentication configuration.
 - Implement generic login, the host-only cookie/CSRF boundary, and independently revocable session
   creation.
-- Implement credential-generation rotation, stale/reuse classification, family revocation, and
+- Implement opaque credential-generation rotation, stale/reuse classification, family revocation, and
   logout.
 - Complete responsive Arabic/English sign-in and session-state screens.
 
