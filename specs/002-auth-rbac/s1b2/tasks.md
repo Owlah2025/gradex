@@ -74,7 +74,7 @@ denial; compare every hidden login failure contract.
   tests in `backend/internal/identity/session_test.go`
 - [ ] T015 [US1] Add failing PostgreSQL login/create, renewal race, reuse revocation, mutation
   recheck, and logout tests in `backend/internal/identity/session_flow_integration_test.go`
-- [ ] T016 [US1] Implement typed Student/Instructor/Admin session profiles and sensitive-window
+- [x] T016 [US1] Implement typed Student/Instructor/Admin session profiles and sensitive-window
   configuration in `backend/internal/config/config.go`
 - [ ] T017 [US1] Implement non-secret authenticated-session facts and state decisions in
   `backend/internal/identity/session.go`

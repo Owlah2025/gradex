@@ -10,16 +10,14 @@ import (
 // Each test mutates one thing so a failure names exactly one cause.
 func validSettings() map[string]string {
 	return map[string]string{
-		"APP_ENV":                 "production",
-		"PUBLIC_ORIGIN":           "https://gradex.example",
-		"CORS_ALLOWED_ORIGINS":    "https://gradex.example",
-		"CORS_ALLOW_CREDENTIALS":  "true",
-		"REDIS_ADDR":              "redis:6379",
-		"S3_ENDPOINT":             "https://storage.example",
-		"S3_BUCKET":               "gradex-media",
-		"SESSION_IDLE_EXPIRY":     "12h",
-		"SESSION_ABSOLUTE_EXPIRY": "720h",
-		"AUTH_FAKE_MODE":          "false",
+		"APP_ENV":                "production",
+		"PUBLIC_ORIGIN":          "https://gradex.example",
+		"CORS_ALLOWED_ORIGINS":   "https://gradex.example",
+		"CORS_ALLOW_CREDENTIALS": "true",
+		"REDIS_ADDR":             "redis:6379",
+		"S3_ENDPOINT":            "https://storage.example",
+		"S3_BUCKET":              "gradex-media",
+		"AUTH_FAKE_MODE":         "false",
 	}
 }
 
@@ -69,8 +67,35 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if !cfg.Environment().IsProduction() {
 		t.Error("expected production environment")
 	}
-	if cfg.RecentAuthWindow() != 10*time.Minute {
-		t.Errorf("recent-authentication default = %s, want 10m", cfg.RecentAuthWindow())
+	sessions := cfg.Sessions()
+	for name, test := range map[string]struct {
+		window   SessionWindow
+		idle     time.Duration
+		absolute time.Duration
+	}{
+		"Student":    {sessions.Student(), 7 * 24 * time.Hour, 30 * 24 * time.Hour},
+		"Instructor": {sessions.Instructor(), time.Hour, 24 * time.Hour},
+		"Admin":      {sessions.Admin(), 30 * time.Minute, 12 * time.Hour},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if test.window.IdleExpiry() != test.idle {
+				t.Errorf("idle expiry = %s, want %s", test.window.IdleExpiry(), test.idle)
+			}
+			if test.window.AbsoluteExpiry() != test.absolute {
+				t.Errorf("absolute expiry = %s, want %s", test.window.AbsoluteExpiry(), test.absolute)
+			}
+		})
+	}
+	if sessions.GeneralRecentAuthWindow() != 10*time.Minute {
+		t.Errorf("general recent-authentication default = %s, want 10m",
+			sessions.GeneralRecentAuthWindow())
+	}
+	if sessions.HighestRiskRecentAuthWindow() != 5*time.Minute {
+		t.Errorf("highest-risk recent-authentication default = %s, want 5m",
+			sessions.HighestRiskRecentAuthWindow())
+	}
+	if sessions.StaleUseWindow() != 5*time.Second {
+		t.Errorf("stale-use default = %s, want 5s", sessions.StaleUseWindow())
 	}
 }
 
@@ -131,18 +156,25 @@ func TestPlaceholderPlaybackSecretRejectedInProduction(t *testing.T) {
 }
 
 func TestInvalidTimeoutRelationships(t *testing.T) {
-	t.Run("idle above absolute", func(t *testing.T) {
+	for _, role := range []string{"STUDENT", "INSTRUCTOR", "ADMIN"} {
+		t.Run(strings.ToLower(role)+" idle must precede absolute", func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+				s[role+"_SESSION_IDLE_EXPIRY"] = "800h"
+				s[role+"_SESSION_ABSOLUTE_EXPIRY"] = "800h"
+			}, role+"_SESSION_IDLE_EXPIRY")
+		})
+	}
+
+	t.Run("highest risk window cannot exceed general", func(t *testing.T) {
 		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
-			s["SESSION_IDLE_EXPIRY"] = "800h"
-		}, "must be less than SESSION_ABSOLUTE_EXPIRY")
+			s["HIGHEST_RISK_RECENT_AUTH_WINDOW"] = "15m"
+		}, "must not exceed GENERAL_RECENT_AUTH_WINDOW")
 	})
 
-	// Equal bounds make the absolute cap unreachable just as surely as an
-	// inverted pair does.
-	t.Run("idle equal to absolute", func(t *testing.T) {
+	t.Run("general recent auth must fit shortest idle window", func(t *testing.T) {
 		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
-			s["SESSION_IDLE_EXPIRY"] = "720h"
-		}, "must be less than SESSION_ABSOLUTE_EXPIRY")
+			s["GENERAL_RECENT_AUTH_WINDOW"] = "30m"
+		}, "must be less than ADMIN_SESSION_IDLE_EXPIRY")
 	})
 
 	t.Run("non-positive duration", func(t *testing.T) {
@@ -435,6 +467,9 @@ func TestRetiredKeysAreRejected(t *testing.T) {
 	for old, replacement := range map[string]string{
 		"UPLOAD_URL_EXPIRY_MINUTES":   "UPLOAD_URL_EXPIRY",
 		"PLAYBACK_URL_EXPIRY_MINUTES": "PLAYBACK_URL_EXPIRY",
+		"SESSION_IDLE_EXPIRY":         "role-specific",
+		"SESSION_ABSOLUTE_EXPIRY":     "role-specific",
+		"RECENT_AUTH_WINDOW":          "GENERAL_RECENT_AUTH_WINDOW",
 	} {
 		t.Run(old, func(t *testing.T) {
 			wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
@@ -455,13 +490,13 @@ func TestInvalidEnvironmentRejected(t *testing.T) {
 func TestLoadReportsAllFaultsTogether(t *testing.T) {
 	_, err := loadWith(t, func(s map[string]string, sec MapSecretResolver) {
 		s["PUBLIC_ORIGIN"] = "http://gradex.example"
-		s["SESSION_IDLE_EXPIRY"] = "800h"
+		s["STUDENT_SESSION_IDLE_EXPIRY"] = "800h"
 		delete(sec, "DATABASE_URL")
 	})
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, want := range []string{"https origin", "SESSION_ABSOLUTE_EXPIRY", "DATABASE_URL is required"} {
+	for _, want := range []string{"https origin", "STUDENT_SESSION_ABSOLUTE_EXPIRY", "DATABASE_URL is required"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("aggregated error missing %q: %v", want, err)
 		}

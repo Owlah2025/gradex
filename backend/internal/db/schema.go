@@ -21,10 +21,10 @@ import (
 // tables added by version 2, so serving against version 1 would turn every
 // authorization decision into an infrastructure fault.
 const (
-	MinSchemaVersion       int64 = 2
-	SessionSchemaVersion   int64 = 4
-	AdmissionSchemaVersion int64 = 5
-	MaxSchemaVersion       int64 = AdmissionSchemaVersion
+	MinSchemaVersion       = 2
+	SessionSchemaVersion   = 4
+	AdmissionSchemaVersion = 5
+	MaxSchemaVersion       = AdmissionSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

@@ -149,6 +149,39 @@ func (a AdmissionSettings) AnonymousCSRFKey() Secret          { return a.anonymo
 func (a AdmissionSettings) LimiterHMACKey() Secret            { return a.limiterHMACKey }
 func (a AdmissionSettings) ProtectedPayloadKey() Secret       { return a.protectedPayloadKey }
 
+// SessionWindow is one role's immutable server-authoritative lifetime.
+type SessionWindow struct {
+	idleExpiry     time.Duration
+	absoluteExpiry time.Duration
+}
+
+func (w SessionWindow) IdleExpiry() time.Duration     { return w.idleExpiry }
+func (w SessionWindow) AbsoluteExpiry() time.Duration { return w.absoluteExpiry }
+
+// SessionSettings contains every security window used by authenticated
+// sessions. Role windows are separate so a low-risk Student family cannot
+// silently become the policy for privileged Accounts.
+type SessionSettings struct {
+	student    SessionWindow
+	instructor SessionWindow
+	admin      SessionWindow
+
+	generalRecentAuthWindow     time.Duration
+	highestRiskRecentAuthWindow time.Duration
+	staleUseWindow              time.Duration
+}
+
+func (s SessionSettings) Student() SessionWindow    { return s.student }
+func (s SessionSettings) Instructor() SessionWindow { return s.instructor }
+func (s SessionSettings) Admin() SessionWindow      { return s.admin }
+func (s SessionSettings) GeneralRecentAuthWindow() time.Duration {
+	return s.generalRecentAuthWindow
+}
+func (s SessionSettings) HighestRiskRecentAuthWindow() time.Duration {
+	return s.highestRiskRecentAuthWindow
+}
+func (s SessionSettings) StaleUseWindow() time.Duration { return s.staleUseWindow }
+
 // Config is the immutable runtime configuration. Construct it only through
 // Load or LoadFrom.
 type Config struct {
@@ -168,9 +201,7 @@ type Config struct {
 	httpIdleTimeout  time.Duration
 	shutdownTimeout  time.Duration
 
-	sessionIdleExpiry     time.Duration
-	sessionAbsoluteExpiry time.Duration
-	recentAuthWindow      time.Duration
+	sessions SessionSettings
 
 	databaseURL Secret
 	redisAddr   string
@@ -247,16 +278,7 @@ func (c *Config) HTTPWriteTimeout() time.Duration { return c.httpWriteTimeout }
 func (c *Config) HTTPIdleTimeout() time.Duration  { return c.httpIdleTimeout }
 func (c *Config) ShutdownTimeout() time.Duration  { return c.shutdownTimeout }
 
-func (c *Config) SessionIdleExpiry() time.Duration     { return c.sessionIdleExpiry }
-func (c *Config) SessionAbsoluteExpiry() time.Duration { return c.sessionAbsoluteExpiry }
-
-// RecentAuthWindow is how recently a session must have proven a password before
-// it may perform a sensitive operation such as a voluntary password change.
-//
-// It is deliberately much shorter than the idle expiry: the threat it addresses
-// is an attacker at an already-authenticated session, which a long-lived
-// session does nothing to stop.
-func (c *Config) RecentAuthWindow() time.Duration { return c.recentAuthWindow }
+func (c *Config) Sessions() SessionSettings { return c.sessions }
 
 func (c *Config) DatabaseURL() Secret { return c.databaseURL }
 func (c *Config) RedisAddr() string   { return c.redisAddr }
@@ -330,9 +352,27 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		httpIdleTimeout:  p.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		shutdownTimeout:  p.duration("SHUTDOWN_TIMEOUT", 20*time.Second),
 
-		sessionIdleExpiry:     p.duration("SESSION_IDLE_EXPIRY", 12*time.Hour),
-		sessionAbsoluteExpiry: p.duration("SESSION_ABSOLUTE_EXPIRY", 720*time.Hour),
-		recentAuthWindow:      p.duration("RECENT_AUTH_WINDOW", 10*time.Minute),
+		sessions: SessionSettings{
+			student: SessionWindow{
+				idleExpiry:     p.duration("STUDENT_SESSION_IDLE_EXPIRY", 7*24*time.Hour),
+				absoluteExpiry: p.duration("STUDENT_SESSION_ABSOLUTE_EXPIRY", 30*24*time.Hour),
+			},
+			instructor: SessionWindow{
+				idleExpiry:     p.duration("INSTRUCTOR_SESSION_IDLE_EXPIRY", time.Hour),
+				absoluteExpiry: p.duration("INSTRUCTOR_SESSION_ABSOLUTE_EXPIRY", 24*time.Hour),
+			},
+			admin: SessionWindow{
+				idleExpiry:     p.duration("ADMIN_SESSION_IDLE_EXPIRY", 30*time.Minute),
+				absoluteExpiry: p.duration("ADMIN_SESSION_ABSOLUTE_EXPIRY", 12*time.Hour),
+			},
+			generalRecentAuthWindow: p.duration(
+				"GENERAL_RECENT_AUTH_WINDOW", 10*time.Minute,
+			),
+			highestRiskRecentAuthWindow: p.duration(
+				"HIGHEST_RISK_RECENT_AUTH_WINDOW", 5*time.Minute,
+			),
+			staleUseWindow: p.duration("SESSION_STALE_USE_WINDOW", 5*time.Second),
+		},
 
 		redisAddr: p.str("REDIS_ADDR", ""),
 
@@ -574,9 +614,15 @@ func (c *Config) validate(p *parser) {
 		{"HTTP_WRITE_TIMEOUT", c.httpWriteTimeout},
 		{"HTTP_IDLE_TIMEOUT", c.httpIdleTimeout},
 		{"SHUTDOWN_TIMEOUT", c.shutdownTimeout},
-		{"SESSION_IDLE_EXPIRY", c.sessionIdleExpiry},
-		{"SESSION_ABSOLUTE_EXPIRY", c.sessionAbsoluteExpiry},
-		{"RECENT_AUTH_WINDOW", c.recentAuthWindow},
+		{"STUDENT_SESSION_IDLE_EXPIRY", c.sessions.student.idleExpiry},
+		{"STUDENT_SESSION_ABSOLUTE_EXPIRY", c.sessions.student.absoluteExpiry},
+		{"INSTRUCTOR_SESSION_IDLE_EXPIRY", c.sessions.instructor.idleExpiry},
+		{"INSTRUCTOR_SESSION_ABSOLUTE_EXPIRY", c.sessions.instructor.absoluteExpiry},
+		{"ADMIN_SESSION_IDLE_EXPIRY", c.sessions.admin.idleExpiry},
+		{"ADMIN_SESSION_ABSOLUTE_EXPIRY", c.sessions.admin.absoluteExpiry},
+		{"GENERAL_RECENT_AUTH_WINDOW", c.sessions.generalRecentAuthWindow},
+		{"HIGHEST_RISK_RECENT_AUTH_WINDOW", c.sessions.highestRiskRecentAuthWindow},
+		{"SESSION_STALE_USE_WINDOW", c.sessions.staleUseWindow},
 		{"READINESS_TIMEOUT", c.readinessTimeout},
 		{"UPLOAD_URL_EXPIRY", c.uploadURLExpiry},
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
@@ -590,21 +636,27 @@ func (c *Config) validate(p *parser) {
 		}
 	}
 
-	// Named explicitly in §11.2 as an invalid configuration: an idle expiry
-	// above the absolute expiry makes the absolute bound unreachable, so the
-	// session would never actually be capped.
-	if c.sessionIdleExpiry > 0 && c.sessionAbsoluteExpiry > 0 && c.sessionIdleExpiry >= c.sessionAbsoluteExpiry {
-		p.errf("SESSION_IDLE_EXPIRY (%s) must be less than SESSION_ABSOLUTE_EXPIRY (%s)",
-			c.sessionIdleExpiry, c.sessionAbsoluteExpiry)
+	for _, role := range []struct {
+		name   string
+		window SessionWindow
+	}{
+		{"STUDENT", c.sessions.student},
+		{"INSTRUCTOR", c.sessions.instructor},
+		{"ADMIN", c.sessions.admin},
+	} {
+		if role.window.idleExpiry > 0 && role.window.absoluteExpiry > 0 &&
+			role.window.idleExpiry >= role.window.absoluteExpiry {
+			p.errf("%s_SESSION_IDLE_EXPIRY (%s) must be less than %s_SESSION_ABSOLUTE_EXPIRY (%s)",
+				role.name, role.window.idleExpiry, role.name, role.window.absoluteExpiry)
+		}
 	}
-
-	// A recent-authentication window at or above the idle expiry can never bind:
-	// any session still alive would satisfy it, so the requirement would be
-	// decorative. Refuse the configuration rather than ship a check that always
-	// passes.
-	if c.recentAuthWindow > 0 && c.sessionIdleExpiry > 0 && c.recentAuthWindow >= c.sessionIdleExpiry {
-		p.errf("RECENT_AUTH_WINDOW (%s) must be less than SESSION_IDLE_EXPIRY (%s), or it can never bind",
-			c.recentAuthWindow, c.sessionIdleExpiry)
+	if c.sessions.highestRiskRecentAuthWindow > c.sessions.generalRecentAuthWindow {
+		p.errf("HIGHEST_RISK_RECENT_AUTH_WINDOW (%s) must not exceed GENERAL_RECENT_AUTH_WINDOW (%s)",
+			c.sessions.highestRiskRecentAuthWindow, c.sessions.generalRecentAuthWindow)
+	}
+	if c.sessions.generalRecentAuthWindow >= c.sessions.admin.idleExpiry {
+		p.errf("GENERAL_RECENT_AUTH_WINDOW (%s) must be less than ADMIN_SESSION_IDLE_EXPIRY (%s)",
+			c.sessions.generalRecentAuthWindow, c.sessions.admin.idleExpiry)
 	}
 
 	if c.maxUploadSizeBytes <= 0 {
@@ -667,6 +719,9 @@ func (c *Config) validate(p *parser) {
 var retiredKeys = map[string]string{
 	"UPLOAD_URL_EXPIRY_MINUTES":   "UPLOAD_URL_EXPIRY (a duration, e.g. \"15m\")",
 	"PLAYBACK_URL_EXPIRY_MINUTES": "PLAYBACK_URL_EXPIRY (a duration, e.g. \"5m\")",
+	"SESSION_IDLE_EXPIRY":         "the role-specific *_SESSION_IDLE_EXPIRY settings",
+	"SESSION_ABSOLUTE_EXPIRY":     "the role-specific *_SESSION_ABSOLUTE_EXPIRY settings",
+	"RECENT_AUTH_WINDOW":          "GENERAL_RECENT_AUTH_WINDOW and HIGHEST_RISK_RECENT_AUTH_WINDOW",
 }
 
 func (p *parser) rejectRetiredKeys() {
