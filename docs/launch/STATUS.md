@@ -1,10 +1,10 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-30 — advanced by user
-> Last repository reconciliation: 2026-07-30 — S1B1 reviewed implementation head `ad1b8f6`
-> Scheduled day: Day 8 — Authentication and RBAC, S1B1 Student admission, `CLOSED`
+> Current schedule date: 2026-07-31 — advanced by user
+> Last repository reconciliation: 2026-07-31 — synchronized start-of-day HEAD `d17a367`
+> Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
-> Days remaining after today: 16 calendar days
+> Days remaining after today: 15 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
@@ -28,6 +28,11 @@ request/resend, exact-once verification consumption, policy retrieval, layered a
 durable protected delivery intent, and bilingual admission screens closed at reviewed
 implementation head `ad1b8f6`. The final independent result was 0 critical, 0 high, 2 medium, and
 7 low with verdict `APPROVE WITH FINDINGS`.
+
+Day 9/S1B2 is `IN_PROGRESS` — see [the July 31 record](daily/2026-07-31.md). Its single outcome is
+an Active Account signing in through the same-origin cookie boundary, safely rotating one
+server-authoritative independently revocable family, and logging out. Implementation remains behind
+the browser-credential design approval gate.
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -73,8 +78,7 @@ remains the approved fallback.
 Repository evidence at the latest reconciliation:
 
 - Current branch: `feature/002-authentication-rbac`.
-- The branch is synchronized through the Day 8 closeout; reviewed S1B1 implementation head is
-  `ad1b8f6`.
+- Current synchronized HEAD/upstream is `d17a367`; reviewed S1B1 implementation head is `ad1b8f6`.
 - Final S1B1 independent review covered exact range `3af09bb..ad1b8f6`; hosted CI run
   `30210367125` passed Backend, Frontend, Migrations, Admission Integration, and Guards.
 - The frontend contains the landing-page implementation.
@@ -83,15 +87,17 @@ Repository evidence at the latest reconciliation:
   resolver, and deny-by-default capability gate. S1B1 adds the public Student admission,
   verification, current-policy, and anonymous-bootstrap routes; the debug auth transport seam
   remains development-only while S1B2 builds authenticated browser sessions.
-- S1A and S1B1 are closed; S1B2 is next. Coupons have planning artifacts.
+- The ignored local backend environment now enables development admission without committing local
+  keys. Same-origin bootstrap, both localized policy reads, and synthetic registration passed.
+- S1A and S1B1 are closed; S1B2 is active. Coupons have planning artifacts.
 
 Re-evaluate these facts from Git and the repository at every `Start the day`; do not keep stale
 claims merely because they appear here.
 
 ## Active Outcome
 
-Start S1B2 authenticated sessions by closing S1B1's two medium review carryovers, then deliver
-role-scoped access windows, generic login, browser session/CSRF rotation, refresh-token reuse
+Deliver S1B2 authenticated sessions: first close S1B1's two medium review carryovers, then add
+role-scoped access windows, generic login, browser session/CSRF rotation, credential-reuse
 classification and family revocation, logout, and Arabic/English sign-in/session screens.
 
 ## Milestones
@@ -155,6 +161,12 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Start-of-day Day 9 reconciliation at `d17a367`: backend formatting, build, default/integration
+  vet, `go test -race ./...`, documentation guard, and exposure guard pass with the writable
+  `GOCACHE=/tmp/gradex-go-cache`. Frontend typecheck, lint, and production build pass. The default
+  Go-cache attempt was refused by the workspace sandbox before compilation; the supported
+  writable-cache rerun passed. The tracked working tree was clean before the Day 9 record was
+  created, with only the two user-owned untracked files present.
 - Exact reviewed S1B1 head `ad1b8f6` is green locally with PostgreSQL, Redis, and MinIO:
   formatting, build, default/integration vet, `go test -race ./...`, and the complete integration
   suite pass. Frontend lint, typecheck, production build, and responsive Arabic-first visual checks
@@ -327,12 +339,11 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 8/S1B1 is closed in
-[SLICES.md §5.3.1](SLICES.md#531-s1b1--student-admission) and the
-[July 30 record](daily/2026-07-30.md). The next active slice is Day 9/S1B2 authenticated sessions.
+Day 9/S1B2 is active in
+[SLICES.md §5.3.2](SLICES.md#532-s1b2--authenticated-sessions) and the
+[July 31 record](daily/2026-07-31.md).
 
-Start with the two medium S1B1 review carryovers: typed safe internal failure-stage telemetry and
-configuration rejection of deterministic compromised-password screening outside development.
-Then freeze S1B2's role-scoped window and browser-session contract before implementing login,
-cookie/CSRF rotation, refresh reuse classification/family revocation, logout, and the bilingual
-sign-in/session screens.
+First resolve and approve the browser credential representation against the later same-origin
+system design, then freeze its route/cookie/CSRF contract and executable tasks. Implementation
+starts with the two medium S1B1 review carryovers before role-scoped windows, generic login,
+credential rotation/reuse classification, family revocation, logout, and bilingual session UI.
