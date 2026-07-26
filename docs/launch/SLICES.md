@@ -15,7 +15,8 @@ rather than absorbed as improvisation during implementation.
    the split that removed it.
 3. A slice closes on its own acceptance evidence plus a recorded independent-review verdict against
    one exact commit range. Partial completion becomes visible carryover.
-4. Recovery days (July 31, August 7) take no new slice. They absorb carryover only.
+4. August 7 is the remaining protected recovery day and takes no new slice without explicit
+   developer approval.
 
 ## 2. Slice order
 
@@ -23,9 +24,11 @@ rather than absorbed as improvisation during implementation.
 |---|---|---|---|---|
 | S0 | Delivery foundation | Jul 28 | — (cross-cutting) | — |
 | S1A | Bootstrap and Admin security core | Jul 29 | Identity and Access, Audit | S0 |
-| S1B | Student authentication and session lifecycle | Jul 30 | Identity and Access, Audit | S1A |
-| S1C | Staff lifecycle, enforcement, and authorization matrix | Jul 31 | Identity and Access, Audit | S1B |
-| S2 | Course authoring and review | Aug 1 | Catalog and Authoring, Audit | S1C |
+| S1B1 | Student admission | Jul 30 | Identity and Access, Audit, Work Delivery | S1A |
+| S1B2 | Authenticated sessions | Jul 31 | Identity and Access, Audit | S1B1 |
+| S1B3 | Recovery and Student integration | Aug 1 | Identity and Access, Audit, Work Delivery | S1B2 |
+| S1C | Staff lifecycle, enforcement, and authorization matrix | Aug 2 | Identity and Access, Audit | S1B3 |
+| S2 | Course authoring and review | Aug 3 | Catalog and Authoring, Audit | S1C |
 | S3 | Public catalog, search, and shell | **TBD** | Catalog and Authoring | S2 |
 | S4 | Media pipeline, delivery, and Entitlement evaluation | **TBD** | Media and Assets, Entitlements | S1C, S2 |
 | S5 | Protected learning | **TBD** | Learning, Moderation | S3, S4 |
@@ -43,11 +46,11 @@ rather than absorbed as improvisation during implementation.
 
 Every `Depends on` entry points backwards. No forward dependency remains.
 
-**S3–S8 carry `TBD` days pending a developer decision (recorded 2026-07-29).** The S1A/S1B/S1C split
-moved S2 to August 1, which was S3's day; that displacement cascades through S8, whose next free slot
-is the protected August 7. Dependency *order* is unaffected — only the calendar mapping is open. These
-stay `TBD` rather than being shifted one day each, because silently absorbing the cascade into
-August 7 would spend the last protected recovery day without the developer deciding to spend it.
+**S3–S8 carry `TBD` days pending downstream schedule reconciliation (updated 2026-07-30).** The
+approved S1B1–S1B3 split moves S1C to August 2 and S2 to August 3. Six slices cannot fit into the
+remaining four dates before the fixed August 8 runway. Dependency *order* is unaffected; the
+calendar forecast is not. These rows stay `TBD` rather than silently compressing evidence, shifting
+the public target, or spending the protected August 7 recovery day.
 
 ## 3. Ordering decisions that removed forward dependencies
 
@@ -57,8 +60,8 @@ already defines, not by moving a calendar day.
 
 ### 3.1 Entitlement evaluation precedes Entitlement creation
 
-Media delivery (S4, Aug 2) and protected learning (S5, Aug 3) both gate on Entitlements — but
-Entitlements are created from verified payment in S7 (Aug 5). Read naively, S4 and S5 depend on S7.
+Media delivery (S4) and protected learning (S5) both gate on Entitlements — but Entitlements are
+created from verified payment in S7. Read naively, S4 and S5 depend on S7.
 
 The architecture already separates these concerns: the Entitlements module owns "grant records,
 validity, scope evaluation, expiry, and revocation," while creation is *triggered* by Commerce.
@@ -68,9 +71,9 @@ So the module splits across two slices:
   a Section grant covers only its Section), expiry, and revocation.
 - **S7 adds** the transactional creation of grants from verified payment and free grants.
 
-S4 and S5 are then fully testable on Aug 2–3, and S7 wires the real producer to an already-proven
+S4 and S5 are then fully testable before S7, and S7 wires the real producer to an already-proven
 consumer. This is the single most load-bearing ordering decision in the register: getting it wrong
-pushes all access-control verification to Aug 5.
+pushes access-control verification into payment implementation.
 
 **The S4 test path is not a production capability.** S4 exercises Entitlement evaluation through
 isolated integration fixtures or a non-production-only seed mechanism that cannot be enabled in
@@ -87,8 +90,8 @@ configuration, in the same way the current `AUTH_FAKE_MODE` seam must never reac
 
 ### 3.2 Authoring owns media *metadata*; the Media slice owns media *bytes*
 
-Course authoring (S2, Jul 30) covers "resources/labs metadata, preview metadata" while the upload,
-quarantine, scanning, and processing pipeline is S4 (Aug 2). S2 therefore creates and validates
+Course authoring (S2) covers "resources/labs metadata, preview metadata" while the upload,
+quarantine, scanning, and processing pipeline is S4. S2 therefore creates and validates
 references to Asset Versions and must not acquire its own upload or processing path. A Course
 revision references an exact `media_asset_version`; S2 owns that reference, S4 owns what it points at.
 
@@ -113,23 +116,28 @@ logging, error shape, or CI.
 
 The first product slice, and the one carrying the four M1 obligations.
 
-**Split three ways on 2026-07-29 by developer decision.** S1 as originally scoped did not fit one
-8–10 hour envelope, so [PLAN.md §2](PLAN.md#daily-capacity) required splitting it before
-implementation rather than compressing its failure paths or quality evidence:
+**Split by developer decision on 2026-07-29 and refined on 2026-07-30.** S1 as originally scoped
+did not fit one 8–10 hour envelope, and detailed Day 8 reconciliation showed S1B still combined
+three independent security boundaries. [PLAN.md §2](PLAN.md#daily-capacity) requires splitting
+before implementation rather than compressing failure paths or quality evidence:
 
 - **S1A (July 29)** — bootstrap and Admin security core: the six-link chain in §5.1 and its five
   close conditions in §5.2.
-- **S1B (July 30)** — Student authentication and session lifecycle (§5.3).
-- **S1C (July 31)** — staff invitations, suspension enforcement, the full authorization matrix, and
-  the S1 integration review (§5.4).
+- **S1B1 (July 30)** — Student admission (§5.3.1).
+- **S1B2 (July 31)** — authenticated sessions (§5.3.2).
+- **S1B3 (August 1)** — recovery and integrated Student proof (§5.3.3).
+- **S1C (August 2)** — staff invitations, suspension enforcement, the full authorization matrix,
+  and the S1 integration review (§5.4).
 
-S2 moved to August 1. July 31 was a protected recovery day and now carries S1C, so **August 7 is the
-next protected recovery point**. No MVP capability left the slice; only its calendar placement
-changed. Recorded in [the July 29 record](daily/2026-07-29.md).
+S2 moved to August 3. July 31's former recovery capacity now carries S1B2; **August 7 remains the
+next protected recovery point** and has not been spent. No MVP capability left the slice; only its
+calendar placement changed. The refinement is recorded in the
+[Day 8 record](daily/2026-07-30.md) and
+[S1B delivery design](../superpowers/specs/2026-07-30-s1b-delivery-design.md).
 
-**S1 does not close until S1C closes.** S1A and S1B each close on their own acceptance evidence and
-reviewer verdict, but the complete S1 close conditions — the full authorization matrix and
-enforcement proof — are S1C's. No S2 work begins before S1C closes.
+**S1 does not close until S1C closes.** S1A and each S1B sub-slice close on their own acceptance
+evidence and reviewer verdict, but the complete S1 close conditions — the full authorization matrix
+and enforcement proof — are S1C's. No S2 work begins before S1C closes.
 
 ### 5.1 Bootstrap chain — fixed order (S1A)
 
@@ -192,11 +200,30 @@ sessions with family-reuse detection; password reset and recovery; logout and re
 non-enumerating responses per the §5 privacy boundary; and the responsive Arabic/English Student
 authentication screens.
 
-S1B starts by resolving the three implementation advisories carried visibly from S1A's final
-independent review: bind the bootstrap operation ID to a request fingerprint, supply role-specific
-session and recent-authentication windows from typed configuration, and wire a known-compromised
-password checker before any user-facing credential-creation route opens. Preserve the supplied
-display/correspondence email while storing its normalized comparison form separately.
+The approved implementation boundary is detailed in the
+[S1B delivery design](../superpowers/specs/2026-07-30-s1b-delivery-design.md).
+
+#### 5.3.1 S1B1 — Student admission
+
+Resolve the S1A admission advisories: bind the bootstrap operation ID to a request fingerprint,
+preserve the supplied correspondence email separately from normalized comparison, and wire a
+known-compromised-password checker before public credential creation. Then deliver Student-only
+registration, verification request/resend, single-use verification consumption, layered rate
+limits, durable notification intent, and the Arabic/English admission screens.
+
+#### 5.3.2 S1B2 — Authenticated sessions
+
+Supply role-specific session and recent-authentication windows from typed configuration. Deliver
+generic login, host-only cookie and CSRF boundaries, independently revocable session creation,
+credential-generation rotation, stale/reuse classification, family revocation, logout, and the
+Arabic/English sign-in/session states.
+
+#### 5.3.3 S1B3 — Recovery and Student integration
+
+Deliver non-enumerating password reset request and single-use consumption, atomic password
+replacement and all-family invalidation, required Identity evidence and notification intent,
+recovery screens, the complete Student authentication journey, expanded S1B protected-route denial
+evidence, and the S1B-wide independent review.
 
 ### 5.4 Staff lifecycle, enforcement, and authorization matrix (S1C)
 

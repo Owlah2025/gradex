@@ -1,7 +1,7 @@
 # Gradex Launch Gates
 
 > Status: Active
-> Last Updated: 2026-07-29
+> Last Updated: 2026-07-30
 
 This register separates unresolved production-readiness work from approved product scope. An open
 gate does not silently become a requirement or assumed answer. It blocks the named milestone and
@@ -39,6 +39,7 @@ accepted launch-schedule risk rather than resolution evidence.
 | LG-018 | Select and validate transactional email delivery | Engineering + operations | Engineering starts provider/domain validation on August 6 for completion by August 12 | Approved provider/data-processing boundary, production sender domain with SPF/DKIM/DMARC, verified templates/links, bounce/suppression handling, rate limits, monitoring, and deliverability test evidence | Auth/notification adapter acceptance and production | OPEN |
 | LG-019 | Approve production operating and recovery envelope | Founder + engineering | Founder supplies budget/load/availability/RPO/RTO inputs on August 6; design remains provisional until then | System design/deployment record covering expected launch load/storage/egress, budget, availability, RPO/RTO, managed secrets, monitoring/alerting, incident runbooks, restore test, security review, and representative load test | Production architecture sign-off and release | OPEN |
 | LG-020 | Approve Instructor agreement and content-rights process | Founder + Kuwaiti counsel + operations | Founder sends the agreement/content-rights brief on August 6 | Signed bilingual/appropriate agreement covering content ownership/license/permissions, revenue share/effective version, payout/tax treatment, warranties, takedown/moderation, termination, and Course asset handoff; launch Courses have evidence | Instructor onboarding and public Course launch | OPEN |
+| LG-021 | Select and validate compromised-password screening source | Engineering + security | Engineering shortlists a privacy-preserving provider or licensed offline dataset on August 6 for validation by August 12 | Approved source and license; full passwords never leave the credential boundary; privacy-preserving query/storage contract; outage and fail-closed policy; deterministic test vectors; latency/error monitoring; successful staging validation | Credential-creation adapter acceptance and production registration/invitation/recovery/password change | OPEN |
 
 ### Effect on System Design
 
@@ -58,9 +59,12 @@ assumption as production policy.
 
 ### July 29 Architecture-Boundary Audit
 
-The July 29 deadline in [the launch plan](launch/PLAN.md#7-gate-deadlines) is met. All 14 open gates
-that affect architecture have a documented configurable, policy, evidence, or provider boundary in
-the approved design baseline:
+The July 29 deadline in [the launch plan](launch/PLAN.md#7-gate-deadlines) was met for all 14
+then-open gates that affected architecture. `LG-021` was added on July 30 when S1A review exposed
+the missing compromised-password production source; its provider boundary is recorded in the
+[S1B delivery design](superpowers/specs/2026-07-30-s1b-delivery-design.md#41-security-prerequisites).
+All 15 current architecture-affecting gates therefore have a documented configurable, policy,
+evidence, or provider boundary:
 
 | Gate | Documented boundary while open |
 |---|---|
@@ -78,6 +82,7 @@ the approved design baseline:
 | `LG-018` | Transactional email uses replaceable delivery attempts, provider/sender configuration, suppression, and monitoring; email failure cannot reverse the durable in-app notification or source action ([domain §15.1](superpowers/specs/2026-07-26-domain-data-state-design.md#151-durable-record-and-delivery-evidence)). |
 | `LG-019` | Load, cost, region, scaling, availability, backup, RPO, and RTO remain explicitly provisional; the split managed topology keeps services and providers independently replaceable until approval ([platform §§2–3](superpowers/specs/2026-07-25-platform-architecture-design.md#2-architecture-decision)). |
 | `LG-020` | Identity and Moderation retain immutable versioned agreement and content-rights evidence without inventing terms ([platform §14](superpowers/specs/2026-07-25-platform-architecture-design.md#14-open-decisions-and-gates)). |
+| `LG-021` | Credential creation depends on a provider-neutral compromised-password checker; unavailable or unconfigured screening fails the affected command closed, local tests use a deterministic adapter, and production activation waits for source/license/privacy/availability evidence ([S1B delivery design §4.1](superpowers/specs/2026-07-30-s1b-delivery-design.md#41-security-prerequisites)). |
 
 `LG-005`–`LG-007` and `LG-011`–`LG-013` do not introduce an additional architecture choice:
 they resolve regulatory/licensing findings, commercial-account prerequisites, published policy

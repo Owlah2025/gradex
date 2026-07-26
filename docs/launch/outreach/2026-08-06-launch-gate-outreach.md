@@ -40,7 +40,7 @@ Do not change a message to `SENT` until it has actually left the sender's accoun
 | Legal and policy | LG-002, LG-004–006, LG-011, LG-020 | `[COUNSEL_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
 | Finance and accounting | LG-001, LG-007, LG-016–017 | `[ACCOUNTING_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
 | Tap activation and technical contract | LG-007–010, LG-017 | `[TAP_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
-| Operations and infrastructure | LG-013–015, LG-018–019 | `[OPERATIONS_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
+| Operations and infrastructure | LG-013–015, LG-018–019, LG-021 | `[OPERATIONS_CONTACT_NAME]` | DRAFT | — | 2026-08-09 | 2026-08-07 |
 
 ## Message 1 — Kuwaiti Counsel
 
@@ -169,6 +169,9 @@ execute the following operational inputs:
 5. Schedule the platform-owned UI/player accessibility audit and the hosted-checkout assessment
    without claiming complete product-level conformance while captions/transcripts remain outside
    MVP.
+6. Shortlist a privacy-preserving compromised-password screening provider or licensed offline
+   dataset, including source/license terms, the no-plaintext query/storage boundary, fail-closed
+   outage behavior, deterministic test vectors, latency/error monitoring, and staging validation.
 
 Please acknowledge ownership on 6 August. Provide load, budget, availability, recovery, and
 provider-shortlist inputs by 8 August. Production validation evidence remains required by

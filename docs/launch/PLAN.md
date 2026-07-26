@@ -257,9 +257,9 @@ in the supported environment; CI exercises backend tests, frontend lint/typechec
 #### Wednesday, July 29 — Bootstrap and Admin security core (S1A)
 
 > Replanned 2026-07-29: the original single-day Authentication/RBAC slice did not fit the §2
-> envelope, so it was split into S1A (July 29), S1B (July 30), and S1C (July 31) before
-> implementation, and Course authoring moved to August 1. No MVP capability was removed. See
-> [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac).
+> envelope, so it was split before implementation. That split was refined on July 30 into S1B1,
+> S1B2, and S1B3; S1C now closes S1 on August 2 and Course authoring moves to August 3. No MVP
+> capability was removed. See [SLICES.md §5](SLICES.md#5-s1--identity-sessions-and-rbac).
 
 **Outcome:** Deliver the secure bootstrap Admin operation and deny-by-default backend authorization.
 
@@ -274,20 +274,62 @@ in the supported environment; CI exercises backend tests, frontend lint/typechec
 plaintext bootstrap password never reaches storage, logs, argv, or telemetry; critical/high review
 findings are resolved.
 
-#### Thursday, July 30 — Student authentication and session lifecycle (S1B)
+#### Thursday, July 30 — Student admission (S1B1)
 
-**Outcome:** Let a Student register, verify, sign in, and hold a safely rotating session.
+> Replanned 2026-07-30 with developer approval: S1B did not fit one daily capacity envelope and is
+> now split into S1B1–S1B3. See the
+> [S1B delivery design](../superpowers/specs/2026-07-30-s1b-delivery-design.md) and
+> [Day 8 record](daily/2026-07-30.md).
 
-- Implement Student registration with mandatory email verification and email/password login.
-- Implement rotating refresh sessions with family-reuse detection, logout, and revocation.
-- Implement password reset and recovery with safe non-enumerating responses per the §5 privacy
-  boundary.
-- Complete the responsive Arabic/English Student authentication screens.
+**Outcome:** Let a visitor register only as a pending Student and verify exactly once without
+exposing Account existence.
 
-**Exit evidence:** the Student authentication journey passes end-to-end; a replayed refresh token
-kills its family; recovery and registration responses do not disclose whether an address exists.
+- Resolve S1A's admission advisories: bootstrap request fingerprint, original-email preservation,
+  and mandatory compromised-password screening.
+- Implement the purpose-bound action-secret, Identity security-evidence, and durable notification
+  outbox-intent boundary.
+- Implement registration, verification request/resend, and verification consumption with layered
+  rate limits and uniform public responses.
+- Complete responsive Arabic/English registration and verification screens.
 
-#### Friday, July 31 — Staff lifecycle, enforcement, and authorization matrix (S1C)
+**Exit evidence:** registration creates no privileged role or session; hidden Account outcomes are
+non-enumerating; verification is digest-only, expiring, single-use, concurrency-safe, and atomic
+with its required evidence and delivery intent.
+
+#### Friday, July 31 — Authenticated sessions (S1B2)
+
+**Outcome:** Let an Active Account sign in, rotate a server-authoritative browser session safely,
+and end it.
+
+- Supply role-specific idle/absolute expiry and recent-authentication configuration.
+- Implement generic login, the host-only cookie/CSRF boundary, and independently revocable session
+  creation.
+- Implement credential-generation rotation, stale/reuse classification, family revocation, and
+  logout.
+- Complete responsive Arabic/English sign-in and session-state screens.
+
+**Exit evidence:** unverified/inactive/unknown login reveals no hidden state; a replayed rotated
+credential cannot renew access and confirms reuse under the approved classification policy; logout
+invalidates the current family.
+
+#### Saturday, August 1 — Recovery and Student integration (S1B3)
+
+**Outcome:** Complete S1B with safe password recovery and one integrated Student authentication
+journey.
+
+- Implement non-enumerating reset request and expiring single-use reset consumption.
+- Atomically replace the password, revoke every family, write Identity security evidence and outbox
+  intent, and require normal login afterward.
+- Complete recovery screens and run
+  `register → verify → login → rotate → reject reuse → logout → recover → login`.
+- Expand the staged bootstrap-Admin denial proof across S1B's protected Identity surface and run
+  the S1B-wide independent review.
+
+**Exit evidence:** recovery never enumerates Accounts or issues a session, reset secrets cannot be
+reused, all prior families are invalid, the Student journey passes end to end, and no critical/high
+review finding remains.
+
+#### Sunday, August 2 — Staff lifecycle, enforcement, and authorization matrix (S1C)
 
 **Outcome:** Complete S1 by closing the staff and enforcement half of identity.
 
@@ -302,14 +344,14 @@ kills its family; recovery and registration responses do not disclose whether an
 suspended account loses protected access immediately rather than at next token expiry; S1's complete
 close conditions are satisfied before any S2 work begins.
 
-> Replanned 2026-07-29: July 31 was a protected recovery/spillover day and now carries S1C. That
-> buffer is spent, leaving **August 7 as the next protected recovery point**. Any slip in S1A, S1B,
-> S1C, or S2 must travel to August 7 to find slack. Recorded in
-> [the July 29 record](daily/2026-07-29.md).
+> Replanned 2026-07-30: the approved S1B1–S1B3 split moves S1C from July 31 to August 2 and S2 to
+> August 3. August 7 remains the next protected recovery point and is not silently spent. S3–S8
+> remain `TBD`, and the fixed August 8–15 runway is forecast-at-risk until the downstream calendar
+> is reconciled.
 
 ### Week 2 — Product and Revenue Journey
 
-#### Saturday, August 1 — Course authoring and review
+#### Monday, August 3 — Course authoring and review
 
 **Outcome:** Let an Instructor create a Course and an Admin safely publish it.
 
@@ -323,16 +365,14 @@ close conditions are satisfied before any S2 work begins.
 **Exit evidence:** Instructors cannot publish or change prices; draft content does not leak; the
 live revision remains stable until replacement approval.
 
-> **Unresolved downstream conflict, recorded 2026-07-29.** August 1 previously carried S3 (catalog,
-> search, and public shell). Moving S2 here leaves S3 without a day, and the same displacement
-> cascades through S4–S8, whose next free slot is the protected August 7. This is a scheduling
-> decision for the developer and has not been resolved unilaterally. Until it is,
-> [SLICES.md §2](SLICES.md#2-slice-order) carries `TBD` days for S3 onward rather than dates that
-> would misrepresent the forecast.
+> **Unresolved downstream conflict, updated 2026-07-30.** S2 now occupies August 3. S3–S8 cannot
+> all fit before the fixed August 8 runway without compressing slices or spending the protected
+> August 7 recovery day. Neither is assumed. [SLICES.md §2](SLICES.md#2-slice-order) keeps S3–S8
+> `TBD` until the downstream forecast is explicitly reconciled.
 
 #### Date TBD — Catalog, search, and public experience
 
-> Displaced by the 2026-07-29 replan; awaiting the developer's downstream scheduling decision. Its
+> Displaced by the 2026-07-30 replan; awaiting downstream schedule reconciliation. Its
 > scope and exit evidence are unchanged.
 
 **Outcome:** Let Students find and understand purchasable Courses and Sections.
@@ -344,7 +384,7 @@ live revision remains stable until replacement approval.
 **Exit evidence:** search and filters compose; only Published Courses appear; Course/Section prices
 and purchase targets remain consistent in both languages.
 
-#### Sunday, August 2 — Media, Resources, and Labs
+#### Date TBD — Media, Resources, and Labs
 
 **Outcome:** Produce and deliver safe protected learning assets.
 
@@ -356,7 +396,7 @@ and purchase targets remain consistent in both languages.
 **Exit evidence:** real media completes upload-to-HLS; failures are observable/retryable; unsafe or
 unscanned downloads fail closed; duplicate completion calls are harmless.
 
-#### Monday, August 3 — Protected learning
+#### Date TBD — Protected learning
 
 **Outcome:** Let entitled Students learn and resume safely.
 
@@ -368,7 +408,7 @@ unscanned downloads fail closed; duplicate completion calls are harmless.
 Section; revoked/expired/suspended/non-entitled access is denied; progress failure does not stop
 playback.
 
-#### Tuesday, August 4 — Orders, checkout, and coupons
+#### Date TBD — Orders, checkout, and coupons
 
 **Outcome:** Create a server-priced, idempotent order for one Course or Section.
 
@@ -380,7 +420,7 @@ playback.
 **Exit evidence:** the client cannot change price/discount; duplicate requests do not duplicate
 orders; free orders do not call Tap; coupon consumption occurs only on payment success/free grant.
 
-#### Wednesday, August 5 — Payments, entitlements, and refunds
+#### Date TBD — Payments, entitlements, and refunds
 
 **Outcome:** Turn verified payment state into recoverable access.
 
@@ -396,7 +436,7 @@ Red.
 
 ### Week 3 — Operations, Integration, and Production Readiness
 
-#### Thursday, August 6 — Instructor and Admin operations
+#### Date TBD — Instructor and Admin operations
 
 **Outcome:** Operate and support the launch without direct database editing.
 
@@ -509,11 +549,11 @@ go/no-go within 48 hours.
 
 | Deadline | Required result |
 |---|---|
-| July 23 | All LG-001–LG-020 entries have a real owner, next action, evidence target, and deadline |
+| July 23 | All then-existing LG-001–LG-020 entries have a real owner, next action, evidence target, and deadline |
 | July 29 | Every architecture-affecting open gate has a documented configurable/provider boundary |
 | August 5 | LG-007–LG-010 payment/commercial evidence resolved |
 | August 9 | LG-001–LG-006, LG-011–LG-013, LG-016–LG-017, and LG-020 resolved |
-| August 12 | LG-014, LG-015, LG-018, and LG-019 resolved |
+| August 12 | LG-014, LG-015, LG-018, LG-019, and LG-021 resolved |
 | August 13 | Every required gate is `RESOLVED` with linked or summarized evidence |
 
 An unmet deadline makes launch confidence Red unless the gate is already resolved by equivalent
