@@ -37,21 +37,37 @@ func (w *Writer) Append(
 	event Event,
 	protected any,
 ) (string, error) {
+	reservation, err := w.ReserveProtectedPayload(ctx)
+	if err != nil {
+		return "", err
+	}
+	return w.AppendReserved(ctx, tx, ReservedAppend{
+		Event: event, Protected: protected, Reservation: reservation,
+	})
+}
+
+// AppendReserved consumes nonce material obtained before any hidden-state
+// lookup and inserts both immutable rows through the caller's transaction.
+func (w *Writer) AppendReserved(
+	ctx context.Context,
+	tx pgx.Tx,
+	request ReservedAppend,
+) (string, error) {
 	if tx == nil {
 		return "", errors.New("outbox append requires a transaction")
 	}
-	if strings.TrimSpace(event.ID) == "" {
-		event.ID = uuid.NewString()
+	if strings.TrimSpace(request.Event.ID) == "" {
+		request.Event.ID = uuid.NewString()
 	}
-	if err := w.validateEvent(event); err != nil {
+	if err := w.validateEvent(request.Event); err != nil {
 		return "", err
 	}
 
-	safePayload, err := json.Marshal(event.SafePayload)
+	safePayload, err := json.Marshal(request.Event.SafePayload)
 	if err != nil {
 		return "", fmt.Errorf("encoding safe outbox payload: %w", err)
 	}
-	sealed, err := w.protect(ctx, event, protected)
+	sealed, err := w.protect(ctx, request.Event, request.Protected, request.Reservation)
 	if err != nil {
 		return "", err
 	}
@@ -64,16 +80,16 @@ func (w *Writer) Append(
 		   $1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8,
 		   COALESCE($9::timestamptz, now()), $10
 		 )`,
-		event.ID,
-		event.Type,
-		event.SchemaVersion,
-		event.SourceModule,
-		event.AggregateType,
-		event.AggregateID,
-		event.AggregateRevision,
+		request.Event.ID,
+		request.Event.Type,
+		request.Event.SchemaVersion,
+		request.Event.SourceModule,
+		request.Event.AggregateType,
+		request.Event.AggregateID,
+		request.Event.AggregateRevision,
 		safePayload,
-		event.AvailableAt,
-		event.CorrelationID,
+		request.Event.AvailableAt,
+		request.Event.CorrelationID,
 	); err != nil {
 		return "", fmt.Errorf("inserting outbox event: %w", err)
 	}
@@ -81,14 +97,14 @@ func (w *Writer) Append(
 		`INSERT INTO outbox_protected_payloads
 		   (event_id, key_version, nonce, ciphertext)
 		 VALUES ($1::uuid, $2, $3, $4)`,
-		event.ID,
+		request.Event.ID,
 		sealed.KeyVersion,
 		sealed.Nonce,
 		sealed.Ciphertext,
 	); err != nil {
 		return "", fmt.Errorf("inserting protected outbox payload: %w", err)
 	}
-	return event.ID, nil
+	return request.Event.ID, nil
 }
 
 func (w *Writer) validateEvent(event Event) error {

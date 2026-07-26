@@ -20,7 +20,7 @@ export function Navbar({ authState = "guest" }: { authState?: AuthState }) {
   return (
     <header className="sticky top-0 z-50 h-16 border-b border-border bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-full max-w-container items-center gap-5 px-5 sm:px-6">
-        <Logo />
+        <Logo ariaLabel={t.meta.logoHomeAria} />
 
         <nav aria-label="Primary" className="ms-2 hidden lg:flex lg:items-center lg:gap-1">
           {navItems.map((item) => (

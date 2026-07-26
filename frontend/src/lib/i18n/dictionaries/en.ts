@@ -5,6 +5,7 @@ export const en = {
     openMenu: "Open menu",
     closeMenu: "Close menu",
     skipToContent: "Skip to content",
+    logoHomeAria: "Gradex home",
   },
   nav: {
     courses: "Courses",
@@ -16,6 +17,67 @@ export const en = {
     browse: "Browse courses",
     dashboard: "Go to dashboard",
     notifications: "Notifications",
+  },
+  auth: {
+    shell: {
+      eyebrow: "Student access",
+      sideTitle: "Start with one clear next step.",
+      sideBody:
+        "Create your Student account, confirm your email, then return to sign in when access opens.",
+      privacy: "Your password and verification link stay in this browser flow only.",
+      language: "Language",
+      steps: ["Create account", "Confirm email", "Sign in"],
+    },
+    register: {
+      title: "Create your Student account",
+      intro: "Use an email you can open now. We’ll ask you to confirm it next.",
+      displayName: "Display name",
+      displayHint: "2–50 Arabic or Latin characters. This can be changed later.",
+      email: "Email address",
+      password: "Password",
+      passwordHint: "15–128 characters. Spaces are welcome; there are no symbol rules.",
+      policiesLoading: "Loading the current terms…",
+      policiesUnavailable: "The current terms could not be loaded.",
+      acceptPrefix: "I have read and accept",
+      create: "Create account",
+      creating: "Creating account…",
+      invalidName: "Enter a name using 2–50 Arabic or Latin characters.",
+      invalidEmail: "Enter a complete email address.",
+      invalidPassword: "Use between 15 and 128 characters.",
+      acceptPolicies: "Accept each current policy to continue.",
+      failed: "The account request could not be accepted.",
+    },
+    verify: {
+      title: "Check your email",
+      intro:
+        "Enter your email to request a fresh verification link. The response is the same whether or not an account is found.",
+      email: "Email address",
+      send: "Request verification link",
+      sending: "Requesting…",
+      acceptedTitle: "Request accepted",
+      acceptedBody:
+        "If this address is eligible, a new link will be prepared. Check your inbox and spam folder.",
+      retry: "Try again",
+      limited: "Too many attempts. Wait a little before trying again.",
+      unavailable: "Verification requests are temporarily unavailable. Try again shortly.",
+    },
+    result: {
+      title: "Confirming your email",
+      intro: "Keep this page open while Gradex checks the one-time link.",
+      checking: "Checking the verification link…",
+      successTitle: "Email confirmed",
+      successBody:
+        "Your Student account is active. Sign in becomes available in the next launch step.",
+      invalidTitle: "This link is unavailable",
+      invalidBody:
+        "The link may be expired, already used, or replaced. Request a fresh link to continue.",
+      requestNew: "Request a new link",
+      login: "Go to login",
+    },
+    common: {
+      required: "This field is required.",
+      backHome: "Back to courses",
+    },
   },
   hero: {
     eyebrow: "University courses · Kuwait",

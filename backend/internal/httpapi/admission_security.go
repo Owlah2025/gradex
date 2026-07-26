@@ -29,6 +29,19 @@ func (s *anonymousSecurity) requireAdmission() gin.HandlerFunc {
 	}
 }
 
+func (s *anonymousSecurity) requireAnonymous() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		payload, ok := s.validCookiePayload(c.Request)
+		if !ok {
+			c.Header("Cache-Control", "no-store")
+			writeProblem(c, problem.CSRFValidationFailed())
+			return
+		}
+		c.Set(anonymousIDContextKey, base64.RawURLEncoding.EncodeToString(payload[9:]))
+		c.Next()
+	}
+}
+
 func (s *anonymousSecurity) hasTrustedBrowserOrigin(request *http.Request) bool {
 	if origin := request.Header.Get("Origin"); origin != "" {
 		return origin == s.publicOrigin

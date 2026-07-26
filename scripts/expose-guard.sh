@@ -50,6 +50,9 @@ ALLOWLIST=(
   # restriction state, Audit, and session rotation commit atomically. No
   # password plaintext is read here.
   "internal/identity/password_change.go"
+  # Argon2id credential hash and fresh action bearer cross directly into
+  # PostgreSQL and authenticated outbox encryption during atomic admission.
+  "internal/identity/admission.go"
   # The password-plaintext boundary itself. See check 4.
   "internal/identity/credential.go"
 )

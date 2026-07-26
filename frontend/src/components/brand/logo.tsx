@@ -9,14 +9,16 @@ import { siteConfig } from "@/config/site";
 export function Logo({
   className,
   href = "/",
+  ariaLabel = `${siteConfig.name} home`,
 }: {
   className?: string;
   href?: string;
+  ariaLabel?: string;
 }) {
   return (
     <Link
       href={href}
-      aria-label={`${siteConfig.name} home`}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         className,

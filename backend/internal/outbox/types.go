@@ -3,7 +3,10 @@
 // future dispatcher lifecycle.
 package outbox
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 // Event is the safe immutable portion of one asynchronous intent.
 type Event struct {
@@ -33,4 +36,17 @@ type protectedPayload struct {
 	KeyVersion string
 	Nonce      []byte
 	Ciphertext []byte
+}
+
+// ProtectedPayloadReservation holds fresh nonce material reserved before a
+// hidden Account lookup. Its fields stay opaque outside this package.
+type ProtectedPayloadReservation struct {
+	nonce []byte
+	used  *atomic.Bool
+}
+
+type ReservedAppend struct {
+	Event       Event
+	Protected   any
+	Reservation ProtectedPayloadReservation
 }

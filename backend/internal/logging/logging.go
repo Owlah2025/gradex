@@ -95,6 +95,7 @@ type RequestEvent struct {
 	DurationMillis  int64
 	ResponseSize    int
 	SafeErrorCode   string
+	LimiterOutcome  string
 	// Routine marks a high-frequency endpoint whose successful attempts are
 	// not worth an info line. Failures ignore it.
 	Routine bool
@@ -117,6 +118,9 @@ func (l *Logger) RequestCompleted(ev RequestEvent) {
 	}
 	if ev.SafeErrorCode != "" {
 		attrs = append(attrs, slog.String("safe_error_code", Sanitize(ev.SafeErrorCode)))
+	}
+	if ev.LimiterOutcome != "" {
+		attrs = append(attrs, slog.String("limiter_outcome", Sanitize(ev.LimiterOutcome)))
 	}
 
 	switch {

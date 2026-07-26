@@ -90,6 +90,7 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 		Status:          200,
 		DurationMillis:  12,
 		ResponseSize:    345,
+		LimiterOutcome:  "DISTRIBUTED_ALLOWED",
 	})
 
 	rec := decode(t, buf.String())
@@ -103,6 +104,7 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 		"status":            float64(200),
 		"duration_ms":       float64(12),
 		"response_size":     float64(345),
+		"limiter_outcome":   "DISTRIBUTED_ALLOWED",
 	} {
 		if rec[field] != want {
 			t.Errorf("%s = %v, want %v", field, rec[field], want)
@@ -113,6 +115,39 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 	}
 	if _, ok := rec["time"]; ok {
 		t.Error("slog's default time key should have been renamed")
+	}
+}
+
+func TestRequestCompletedUsesClosedFieldAllowlist(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "gradex-api", "production", slog.LevelInfo).RequestCompleted(RequestEvent{
+		RequestID:      "request-id",
+		Method:         "POST",
+		RouteTemplate:  "/api/v1/student-registrations",
+		Status:         202,
+		LimiterOutcome: "DISTRIBUTED_ALLOWED",
+	})
+
+	rec := decode(t, buf.String())
+	allowed := map[string]bool{
+		"timestamp": true, "level": true, "msg": true,
+		"service": true, "environment": true,
+		"request_id": true, "method": true, "route_template": true,
+		"status": true, "duration_ms": true, "response_size": true,
+		"limiter_outcome": true,
+	}
+	for field := range rec {
+		if !allowed[field] {
+			t.Errorf("request log emitted non-allowlisted field %q", field)
+		}
+	}
+	for _, forbidden := range []string{
+		"email", "identifier", "identifier_hmac", "password", "password_hash",
+		"token", "digest", "query", "cookie", "csrf", "body", "provider_payload",
+	} {
+		if _, present := rec[forbidden]; present {
+			t.Errorf("request log emitted forbidden field %q", forbidden)
+		}
 	}
 }
 

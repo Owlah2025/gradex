@@ -15,6 +15,7 @@ func TestAdmissionProblemsHaveFixedSafeContracts(t *testing.T) {
 		"malformed JSON":                   {Malformed(), http.StatusBadRequest, "MALFORMED_JSON"},
 		"content too large":                {ContentTooLarge(), http.StatusRequestEntityTooLarge, "CONTENT_TOO_LARGE"},
 		"unsupported media type":           {UnsupportedMediaType(), http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE"},
+		"not acceptable":                   {NotAcceptable(), http.StatusNotAcceptable, "NOT_ACCEPTABLE"},
 		"invalid token":                    {TokenInvalid(), http.StatusBadRequest, "TOKEN_INVALID"},
 		"rate limited":                     {RateLimited(), http.StatusTooManyRequests, "RATE_LIMITED"},
 		"rate limiting unavailable":        {RateLimitingUnavailable(), http.StatusServiceUnavailable, "RATE_LIMITING_UNAVAILABLE"},

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
 )
 
 const protectedPayloadKeyBytes = 32
@@ -50,6 +51,7 @@ func (w *Writer) protect(
 	ctx context.Context,
 	event Event,
 	payload any,
+	reservation ProtectedPayloadReservation,
 ) (protectedPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return protectedPayload{}, err
@@ -62,19 +64,39 @@ func (w *Writer) protect(
 		return protectedPayload{}, errors.New("protected outbox payload is required")
 	}
 
-	nonce := make([]byte, w.aead.NonceSize())
-	if _, err := io.ReadFull(w.random, nonce); err != nil {
-		return protectedPayload{}, fmt.Errorf("generating protected outbox nonce: %w", err)
+	if len(reservation.nonce) != w.aead.NonceSize() {
+		return protectedPayload{}, errors.New("protected outbox reservation is invalid")
+	}
+	if reservation.used == nil {
+		return protectedPayload{}, errors.New("protected outbox reservation is invalid")
 	}
 	aad, err := eventAssociatedData(event)
 	if err != nil {
 		return protectedPayload{}, err
 	}
+	if !reservation.used.CompareAndSwap(false, true) {
+		return protectedPayload{}, errors.New("protected outbox reservation was already used")
+	}
 	return protectedPayload{
 		KeyVersion: w.keyVersion,
-		Nonce:      nonce,
-		Ciphertext: w.aead.Seal(nil, nonce, plaintext, aad),
+		Nonce:      append([]byte(nil), reservation.nonce...),
+		Ciphertext: w.aead.Seal(nil, reservation.nonce, plaintext, aad),
 	}, nil
+}
+
+// ReserveProtectedPayload performs the only fallible entropy read before a
+// caller resolves hidden Account state.
+func (w *Writer) ReserveProtectedPayload(
+	ctx context.Context,
+) (ProtectedPayloadReservation, error) {
+	if err := ctx.Err(); err != nil {
+		return ProtectedPayloadReservation{}, err
+	}
+	nonce := make([]byte, w.aead.NonceSize())
+	if _, err := io.ReadFull(w.random, nonce); err != nil {
+		return ProtectedPayloadReservation{}, fmt.Errorf("generating protected outbox nonce: %w", err)
+	}
+	return ProtectedPayloadReservation{nonce: nonce, used: &atomic.Bool{}}, nil
 }
 
 func eventAssociatedData(event Event) ([]byte, error) {

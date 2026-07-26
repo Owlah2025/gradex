@@ -84,6 +84,7 @@ func requestLogger(logger *logging.Logger) gin.HandlerFunc {
 			DurationMillis:  time.Since(start).Milliseconds(),
 			ResponseSize:    size,
 			SafeErrorCode:   c.GetString(ctxSafeErrorCodeKey),
+			LimiterOutcome:  c.GetString(limiterOutcomeContextKey),
 			Routine:         isProbePath(routeTemplateOf(c)),
 		})
 	}

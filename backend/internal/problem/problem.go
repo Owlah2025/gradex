@@ -99,6 +99,12 @@ func UnsupportedMediaType() Problem {
 		"The request body must be UTF-8 JSON.")
 }
 
+func NotAcceptable() Problem {
+	return New(http.StatusNotAcceptable, "not-acceptable",
+		"Unsupported response representation",
+		"The requested response language or representation is not available.")
+}
+
 // ValidationFailed reports a syntactically valid request whose field values are
 // semantically unacceptable. Attach Violations to say which.
 func ValidationFailed() Problem {

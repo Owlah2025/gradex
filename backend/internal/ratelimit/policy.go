@@ -93,3 +93,19 @@ func DevelopmentAdmissionPolicy(endpoint string) Policy {
 		LocalMaxKeys: 4096,
 	}
 }
+
+func DevelopmentPolicySetReadPolicy() Policy {
+	return Policy{
+		ID:       "registration-policy-set-v1",
+		Category: "PUBLIC_IDENTITY_READ",
+		Endpoint: "registration-policy-set",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 120, LocalLimit: 12},
+			{Dimension: DimensionNetwork, Limit: 60, LocalLimit: 8},
+			{Dimension: DimensionAnonymous, Limit: 30, LocalLimit: 4},
+			{Dimension: DimensionGlobal, Limit: 600, LocalLimit: 30},
+		},
+		LocalMaxKeys: 4096,
+	}
+}

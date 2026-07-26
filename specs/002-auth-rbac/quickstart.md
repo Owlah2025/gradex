@@ -9,7 +9,10 @@ LG-003, LG-004, LG-011, LG-015, LG-018, LG-019, or LG-021.
 - Go toolchain from `backend/go.mod`
 - Node.js 22 and npm
 - `curl` and `jq` for optional transport checks
-- development/test-only policy, encryption-key, and compromised-password fixtures configured
+- `backend/.env` copied from the current `backend/.env.example`; retired settings such as
+  `UPLOAD_URL_EXPIRY_MINUTES` and `PLAYBACK_URL_EXPIRY_MINUTES` must not remain
+- development/test-only policy, independent 32-byte admission keys, and compromised-password
+  fixtures configured; set `STUDENT_REGISTRATION_ENABLED=true` for the browser smoke
 - no production credentials or providers
 
 Keep the user-owned root files outside this workflow. Run commands from the paths shown.
@@ -101,6 +104,10 @@ npm run typecheck
 npm run build
 npm run dev
 ```
+
+In a second terminal, run `make run-api` from `backend/`. In development only, Next proxies relative
+`/api/*` calls to the local Go API on `127.0.0.1:8080`; deployed builds retain the same-origin
+relative request path and do not install that rewrite.
 
 Inspect:
 

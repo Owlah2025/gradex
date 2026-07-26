@@ -46,7 +46,11 @@ func TestProtectedPayloadUsesAuthenticatedEncryption(t *testing.T) {
 		ExpiresAt:         time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
 	}
 
-	protected, err := writer.protect(context.Background(), event, payload)
+	reservation, err := writer.ReserveProtectedPayload(context.Background())
+	if err != nil {
+		t.Fatalf("reserving payload: %v", err)
+	}
+	protected, err := writer.protect(context.Background(), event, payload, reservation)
 	if err != nil {
 		t.Fatalf("protecting payload: %v", err)
 	}
@@ -71,6 +75,38 @@ func TestProtectedPayloadUsesAuthenticatedEncryption(t *testing.T) {
 	changed.AggregateRevision++
 	if _, err := openProtectedForTest(writer, changed, protected); err == nil {
 		t.Fatal("changed associated event data authenticated successfully")
+	}
+}
+
+func TestProtectedPayloadReservationIsSingleUseAcrossCopies(t *testing.T) {
+	writer, err := NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("constructing writer: %v", err)
+	}
+	event := Event{
+		ID:                "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Type:              "identity.email_verification_requested",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "ACCOUNT",
+		AggregateID:       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+		AggregateRevision: 1,
+		CorrelationID:     "request-1",
+	}
+	reservation, err := writer.ReserveProtectedPayload(context.Background())
+	if err != nil {
+		t.Fatalf("reserving payload: %v", err)
+	}
+	copied := reservation
+	if _, err := writer.protect(
+		context.Background(), event, map[string]string{"value": "first"}, reservation,
+	); err != nil {
+		t.Fatalf("using reservation: %v", err)
+	}
+	if _, err := writer.protect(
+		context.Background(), event, map[string]string{"value": "second"}, copied,
+	); err == nil {
+		t.Fatal("a copied reservation reused authenticated-encryption nonce material")
 	}
 }
 

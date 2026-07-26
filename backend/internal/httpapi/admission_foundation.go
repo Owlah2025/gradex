@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
-	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
@@ -14,9 +13,8 @@ import (
 // bootstrap route is mounted; Student mutation routes are added separately.
 type AdmissionFoundation struct {
 	security         *anonymousSecurity
+	service          admissionCommands
 	policies         identity.PolicySetResolver
-	compromised      identity.CompromisedRangeSource
-	outbox           *outbox.Writer
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
 }
@@ -27,8 +25,7 @@ type AdmissionFoundationOptions struct {
 	CSRFKey             string
 	AnonymousSessionTTL time.Duration
 	Policies            identity.PolicySetResolver
-	Compromised         identity.CompromisedRangeSource
-	Outbox              *outbox.Writer
+	Service             admissionCommands
 	Limiter             *ratelimit.Limiter
 	EndpointPolicies    map[string]ratelimit.Policy
 }
@@ -43,8 +40,7 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 	if err != nil {
 		return nil, err
 	}
-	if options.Policies == nil || options.Compromised == nil ||
-		options.Outbox == nil || options.Limiter == nil {
+	if options.Policies == nil || options.Service == nil || options.Limiter == nil {
 		return nil, errors.New("admission foundation dependencies are required")
 	}
 	if len(options.EndpointPolicies) == 0 {
@@ -62,9 +58,8 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 	}
 	return &AdmissionFoundation{
 		security:         security,
+		service:          options.Service,
 		policies:         options.Policies,
-		compromised:      options.Compromised,
-		outbox:           options.Outbox,
 		limiter:          options.Limiter,
 		endpointPolicies: endpointPolicies,
 	}, nil

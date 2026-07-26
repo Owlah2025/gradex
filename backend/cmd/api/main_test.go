@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // S1B1 T017: every admission dependency composes at startup while Student
@@ -35,7 +37,12 @@ func TestBuildDevelopmentAdmissionFoundation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
 	}
-	foundation, client, err := buildAdmissionFoundation(cfg)
+	pool, err := pgxpool.New(context.Background(), "postgres://test:test@localhost/test")
+	if err != nil {
+		t.Fatalf("constructing test pool: %v", err)
+	}
+	defer pool.Close()
+	foundation, client, err := buildAdmissionFoundation(cfg, pool)
 	if err != nil {
 		t.Fatalf("building foundation: %v", err)
 	}

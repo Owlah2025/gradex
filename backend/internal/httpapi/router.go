@@ -71,7 +71,7 @@ func NewRouter(
 
 	v1 := r.Group("/api/v1")
 	if routerConfig.admission != nil {
-		v1.GET("/session/bootstrap", routerConfig.admission.security.bootstrapHandler())
+		mountAdmissionRoutes(v1, routerConfig.admission)
 	}
 
 	// Every protected group runs authentication → capability policy → ownership
@@ -112,6 +112,40 @@ func NewRouter(
 	return r, nil
 }
 
+func mountAdmissionRoutes(v1 *gin.RouterGroup, foundation *AdmissionFoundation) {
+	handlers := &identityHandlers{
+		service: foundation.service, policies: foundation.policies,
+	}
+	v1.GET("/session/bootstrap", foundation.security.bootstrapHandler())
+	v1.GET(
+		"/registration-policy-set",
+		foundation.security.requireAnonymous(),
+		foundation.requireRateDecision("registration-policy-set", nil),
+		handlers.currentPolicySet,
+	)
+	v1.POST(
+		"/student-registrations",
+		strictJSONMiddleware(func() any { return &studentRegistrationRequest{} }, registrationBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("student-registrations", registrationIdentifier),
+		handlers.registerBoundStudent,
+	)
+	v1.POST(
+		"/email-verification-requests",
+		strictJSONMiddleware(func() any { return &verificationRequestBody{} }, verificationRequestBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("email-verification-requests", verificationRequestIdentifier),
+		handlers.requestBoundVerification,
+	)
+	v1.POST(
+		"/email-verifications",
+		strictJSONMiddleware(func() any { return &verificationConsumptionBody{} }, verificationConsumptionBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("email-verifications", verificationTokenIdentifier),
+		handlers.consumeBoundVerification,
+	)
+}
+
 type routerOptions struct {
 	admission *AdmissionFoundation
 }
@@ -119,9 +153,9 @@ type routerOptions struct {
 // RouterOption adds a validated optional product boundary to the router.
 type RouterOption func(*routerOptions) error
 
-// WithAdmissionFoundation mounts only the safe anonymous bootstrap. Student
-// commands remain absent until their domain service and ordered middleware
-// chain are supplied.
+// WithAdmissionFoundation mounts the anonymous bootstrap, policy read, and
+// Student admission commands only after their complete fail-closed dependency
+// set and ordered middleware chain have been constructed.
 func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
 	return func(options *routerOptions) error {
 		if foundation == nil {

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
@@ -21,6 +23,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
 	"github.com/Owlah2025/gradex/backend/internal/video"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -61,7 +64,7 @@ func main() {
 	var routerOptions []httpapi.RouterOption
 	var admissionRedis *redis.Client
 	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildAdmissionFoundation(cfg)
+		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool)
 		if err != nil {
 			log.Fatalf("building Student admission foundation: %v", err)
 		}
@@ -168,7 +171,10 @@ func main() {
 	log.Println("gradex API stopped")
 }
 
-func buildAdmissionFoundation(cfg *config.Config) (*httpapi.AdmissionFoundation, *redis.Client, error) {
+func buildAdmissionFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*httpapi.AdmissionFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
 	if cfg.Environment() != config.EnvDevelopment {
 		return nil, nil, errors.New(
@@ -215,6 +221,21 @@ func buildAdmissionFoundation(cfg *config.Config) (*httpapi.AdmissionFoundation,
 	for _, endpoint := range endpoints {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
+	endpointPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
+
+	service, err := identity.NewAdmissionService(identity.AdmissionServiceOptions{
+		Pool:            pool,
+		Policies:        policies,
+		Compromised:     compromised,
+		Outbox:          writer,
+		VerificationTTL: admission.VerificationTokenTTL(),
+		Now:             time.Now,
+		Random:          rand.Reader,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
 
 	foundation, err := httpapi.NewAdmissionFoundation(httpapi.AdmissionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
@@ -222,8 +243,7 @@ func buildAdmissionFoundation(cfg *config.Config) (*httpapi.AdmissionFoundation,
 		CSRFKey:             admission.AnonymousCSRFKey().Expose(),
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Policies:            policies,
-		Compromised:         compromised,
-		Outbox:              writer,
+		Service:             service,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})
