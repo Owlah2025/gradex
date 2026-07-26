@@ -56,6 +56,7 @@ func (h *identityHandlers) currentPolicySet(c *gin.Context) {
 	set, err := h.policies.Current(c.Request.Context(), locale)
 	if err != nil {
 		c.Header("Cache-Control", "no-store")
+		setAdmissionFailureStage(c, admissionFailureStageDomain)
 		writeProblem(c, problem.RegistrationUnavailable())
 		return
 	}
@@ -170,6 +171,7 @@ func writeAdmissionSuccess(c *gin.Context, status int, body gin.H) {
 
 func (h *identityHandlers) writeAdmissionError(c *gin.Context, err error) {
 	c.Header("Cache-Control", "no-store")
+	setAdmissionFailureStage(c, admissionFailureStageDomain)
 	switch {
 	case errors.Is(err, identity.ErrTokenInvalid):
 		writeProblem(c, problem.TokenInvalid())

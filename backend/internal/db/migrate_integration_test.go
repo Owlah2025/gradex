@@ -275,6 +275,33 @@ func TestSchemaOutsideSupportedRangeFailsReadiness(t *testing.T) {
 	}
 }
 
+func TestCapabilityAwareSchemaMinimum(t *testing.T) {
+	freshDatabase(t)
+	pool := openPool(t)
+	m := openMigrator(t)
+	if err := m.Migrate(uint(SessionSchemaVersion)); err != nil {
+		t.Fatalf("migrating to the session capability schema: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	if err := CheckSchemaAtLeast(ctx, pool, SessionSchemaVersion); err != nil {
+		t.Fatalf("session capability rejected schema %d: %v", SessionSchemaVersion, err)
+	}
+	err := CheckSchemaAtLeast(ctx, pool, AdmissionSchemaVersion)
+	if !errors.Is(err, ErrSchemaIncompatible) {
+		t.Fatalf("admission capability accepted schema %d: %v", SessionSchemaVersion, err)
+	}
+
+	if err := m.Migrate(uint(AdmissionSchemaVersion)); err != nil {
+		t.Fatalf("migrating to the admission capability schema: %v", err)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, AdmissionSchemaVersion); err != nil {
+		t.Fatalf("admission capability rejected schema %d: %v", AdmissionSchemaVersion, err)
+	}
+}
+
 func TestStudentAdmissionSchemaInvariants(t *testing.T) {
 	freshDatabase(t)
 	pool := openPool(t)

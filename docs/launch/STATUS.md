@@ -98,10 +98,11 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B2 authenticated sessions: first close S1B1's explicit security/transport carryovers,
-beginning with T004's outside-development deterministic-screen validation test, then add
-role-scoped access windows, generic login, browser session/CSRF rotation, credential-reuse
-classification and family revocation, logout, and Arabic/English sign-in/session screens.
+Deliver S1B2 authenticated sessions. The explicit S1B1 security/transport carryovers are closed in
+the working implementation with focused unit/race/vet and real PostgreSQL readiness evidence. Next,
+T013 begins the role-scoped access windows, generic login, browser session/CSRF rotation,
+credential-reuse classification and family revocation, logout, and Arabic/English sign-in/session
+screens.
 
 ## Milestones
 
@@ -144,7 +145,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1B1 review carryovers precede staging/session expansion | Codex | Add typed safe failure-stage telemetry and reject deterministic password screening outside development before S1B2 session work | July 31 | Focused configuration/composition and telemetry tests plus no critical/high review finding |
+| S1B1 review carryovers precede staging/session expansion | Codex | Freeze the green carryover checkpoint, then begin S1B2 role-session configuration at T013 | July 31 | Focused configuration/composition/telemetry tests and PostgreSQL schema-floor proof pass; exact-range review remains at slice close |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1B split moves S1C and S2 two days | Codex | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
 | S3–S8 cannot fit before the fixed August 8 runway | Developer + Codex | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |

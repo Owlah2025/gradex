@@ -32,6 +32,16 @@ func mountedAdmissionRouter(
 	localMaxKeys int,
 ) *gin.Engine {
 	t.Helper()
+	return mountedAdmissionRouterWithObserver(t, store, localMaxKeys, nil)
+}
+
+func mountedAdmissionRouterWithObserver(
+	t *testing.T,
+	store admissionRateStore,
+	localMaxKeys int,
+	observe func(*gin.Context),
+) *gin.Engine {
+	t.Helper()
 	english, arabic := identityPolicySets()
 	policies, err := identity.NewStaticPolicySetResolver(english, arabic)
 	if err != nil {
@@ -70,6 +80,12 @@ func mountedAdmissionRouter(
 		t.Fatalf("constructing admission foundation: %v", err)
 	}
 	router := gin.New()
+	if observe != nil {
+		router.Use(func(c *gin.Context) {
+			c.Next()
+			observe(c)
+		})
+	}
 	mountAdmissionRoutes(router.Group("/api/v1"), foundation)
 	return router
 }
@@ -152,7 +168,15 @@ func TestAnonymousBootstrapIsRateLimitedBeforeCapabilityIssuance(t *testing.T) {
 }
 
 func TestMountedAdmissionRouteRunsStructureBeforeSecurityAndLimiter(t *testing.T) {
-	router := mountedAdmissionRouter(t, admissionRateStore{allowed: true}, 64)
+	var observedStage string
+	router := mountedAdmissionRouterWithObserver(
+		t,
+		admissionRateStore{allowed: true},
+		64,
+		func(c *gin.Context) {
+			observedStage = string(admissionFailureStageOf(c))
+		},
+	)
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/student-registrations",
@@ -163,5 +187,8 @@ func TestMountedAdmissionRouteRunsStructureBeforeSecurityAndLimiter(t *testing.T
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want malformed 400: %s", response.Code, response.Body.String())
+	}
+	if observedStage != string(admissionFailureStageStructure) {
+		t.Fatalf("failure stage = %q, want %q", observedStage, admissionFailureStageStructure)
 	}
 }

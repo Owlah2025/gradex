@@ -87,18 +87,44 @@ func LevelFromString(level string) slog.Level {
 // /api/v1/lessons/:lessonID/video/publish — never the literal path, which
 // carries identifiers and can carry tokens.
 type RequestEvent struct {
-	RequestID       string
-	ParentRequestID string
-	Method          string
-	RouteTemplate   string
-	Status          int
-	DurationMillis  int64
-	ResponseSize    int
-	SafeErrorCode   string
-	LimiterOutcome  string
+	RequestID             string
+	ParentRequestID       string
+	Method                string
+	RouteTemplate         string
+	Status                int
+	DurationMillis        int64
+	ResponseSize          int
+	SafeErrorCode         string
+	LimiterOutcome        string
+	AdmissionFailureStage AdmissionFailureStage
 	// Routine marks a high-frequency endpoint whose successful attempts are
 	// not worth an info line. Failures ignore it.
 	Routine bool
+}
+
+// AdmissionFailureStage is a closed diagnostic classification for public
+// Identity admission. It identifies only which fail-closed boundary stopped a
+// request; it never carries the underlying error, Account state, identifier,
+// credential, or request data.
+type AdmissionFailureStage string
+
+const (
+	AdmissionFailureStructure       AdmissionFailureStage = "STRUCTURE"
+	AdmissionFailureBrowserSecurity AdmissionFailureStage = "BROWSER_SECURITY"
+	AdmissionFailureRateDecision    AdmissionFailureStage = "RATE_DECISION"
+	AdmissionFailureDomain          AdmissionFailureStage = "DOMAIN"
+)
+
+func (s AdmissionFailureStage) valid() bool {
+	switch s {
+	case AdmissionFailureStructure,
+		AdmissionFailureBrowserSecurity,
+		AdmissionFailureRateDecision,
+		AdmissionFailureDomain:
+		return true
+	default:
+		return false
+	}
 }
 
 // RequestCompleted logs one finished request at a level chosen from its
@@ -121,6 +147,11 @@ func (l *Logger) RequestCompleted(ev RequestEvent) {
 	}
 	if ev.LimiterOutcome != "" {
 		attrs = append(attrs, slog.String("limiter_outcome", Sanitize(ev.LimiterOutcome)))
+	}
+	if ev.AdmissionFailureStage.valid() {
+		attrs = append(attrs,
+			slog.String("admission_failure_stage", string(ev.AdmissionFailureStage)),
+		)
 	}
 
 	switch {

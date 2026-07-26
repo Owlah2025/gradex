@@ -231,6 +231,58 @@ func TestProblemDetailsCarryTheTrustedID(t *testing.T) {
 	}
 }
 
+func TestRequestLogCarriesOnlyTypedAdmissionFailureStage(t *testing.T) {
+	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
+		"APP_ENV":     "development",
+		"REDIS_ADDR":  "localhost:6379",
+		"S3_ENDPOINT": "http://localhost:9000",
+		"S3_BUCKET":   "gradex-test",
+	}), config.MapSecretResolver{
+		"DATABASE_URL":          "postgres://x",
+		"S3_ACCESS_KEY":         "a",
+		"S3_SECRET_KEY":         "b",
+		"PLAYBACK_TOKEN_SECRET": "c",
+	})
+	if err != nil {
+		t.Fatalf("loading test config: %v", err)
+	}
+
+	buf := &syncBuffer{}
+	logger := logging.New(buf, "gradex-api-test", "development", logging.LevelFromString("info"))
+	router, err := newEngine(cfg, logger)
+	if err != nil {
+		t.Fatalf("building engine: %v", err)
+	}
+	router.POST("/api/v1/admission", func(c *gin.Context) {
+		setAdmissionFailureStage(c, admissionFailureStageDomain)
+		writeProblem(c, problem.RegistrationUnavailable())
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/admission",
+		strings.NewReader(`{"email":"student@example.com","password":"secret-token"}`),
+	)
+	response := do(router, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.Code)
+	}
+
+	record := buf.requestRecord(t)
+	if got := record["admission_failure_stage"]; got != string(admissionFailureStageDomain) {
+		t.Fatalf("admission_failure_stage = %v", got)
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("encoding log record: %v", err)
+	}
+	for _, forbidden := range []string{"student@example.com", "secret-token", "email", "password"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Errorf("request log leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 // A panic must produce the generic envelope: no panic text, no stack, nothing
 // the handler happened to be holding.
 func TestPanicReturnsGenericSafeProblem(t *testing.T) {

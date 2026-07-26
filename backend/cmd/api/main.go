@@ -95,7 +95,9 @@ func main() {
 		health.Check{
 			Name:     "schema",
 			Required: true,
-			Probe:    func(ctx context.Context) error { return db.CheckSchema(ctx, pool) },
+			Probe: func(ctx context.Context) error {
+				return db.CheckSchemaAtLeast(ctx, pool, requiredSchemaVersion(cfg))
+			},
 		},
 		health.Check{
 			Name: "redis",
@@ -169,6 +171,16 @@ func main() {
 		log.Printf("graceful shutdown did not complete: %v", err)
 	}
 	log.Println("gradex API stopped")
+}
+
+func requiredSchemaVersion(cfg *config.Config) int64 {
+	if cfg.Admission().Enabled() {
+		return db.AdmissionSchemaVersion
+	}
+	if !cfg.AuthFakeMode() {
+		return db.SessionSchemaVersion
+	}
+	return db.MinSchemaVersion
 }
 
 func buildAdmissionFoundation(

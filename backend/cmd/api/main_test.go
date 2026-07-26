@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -78,5 +79,70 @@ func TestBuildAdmissionFoundationRejectsNonDevelopmentFixtures(t *testing.T) {
 	defer pool.Close()
 	if _, _, err := buildAdmissionFoundation(cfg, pool); err == nil {
 		t.Fatal("production API composed development admission fixtures")
+	}
+}
+
+func TestRequiredSchemaVersionFollowsEnabledCapabilities(t *testing.T) {
+	tests := map[string]struct {
+		settings map[string]string
+		secrets  config.MapSecretResolver
+		want     int64
+	}{
+		"development fake auth": {
+			settings: map[string]string{
+				"APP_ENV": "development", "AUTH_FAKE_MODE": "true",
+				"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
+				"S3_BUCKET": "gradex-test",
+			},
+			secrets: config.MapSecretResolver{
+				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+			},
+			want: db.MinSchemaVersion,
+		},
+		"real sessions": {
+			settings: map[string]string{
+				"APP_ENV": "development", "AUTH_FAKE_MODE": "false",
+				"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
+				"S3_BUCKET": "gradex-test",
+			},
+			secrets: config.MapSecretResolver{
+				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+			},
+			want: db.SessionSchemaVersion,
+		},
+		"Student admission": {
+			settings: map[string]string{
+				"APP_ENV": "development", "AUTH_FAKE_MODE": "true",
+				"PUBLIC_ORIGIN": "http://localhost:3000", "REDIS_ADDR": "localhost:6379",
+				"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
+				"STUDENT_REGISTRATION_ENABLED":         "true",
+				"REGISTRATION_POLICY_SET_ID":           "dev-registration-v1",
+				"PASSWORD_SCREEN_MODE":                 "deterministic",
+				"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "dev-v1",
+			},
+			secrets: config.MapSecretResolver{
+				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+				"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
+				"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+				"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
+				"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
+			},
+			want: db.AdmissionSchemaVersion,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := config.LoadFrom(config.MapLookup(test.settings), test.secrets)
+			if err != nil {
+				t.Fatalf("loading config: %v", err)
+			}
+			if got := requiredSchemaVersion(cfg); got != test.want {
+				t.Fatalf("required schema = %d, want %d", got, test.want)
+			}
+		})
 	}
 }

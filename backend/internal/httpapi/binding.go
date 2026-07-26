@@ -52,6 +52,17 @@ func bindJSON(c *gin.Context, dst any) bool {
 // security or domain work runs. It accepts exactly one bounded UTF-8 JSON
 // document whose declared object shape is unambiguous.
 func bindStrictJSON(c *gin.Context, dst any, maxBytes int64) bool {
+	// Strict admission responses are credential/privacy sensitive even when
+	// decoding fails before a handler runs. Set this before inspecting the
+	// body so every exit path is non-cacheable.
+	c.Header("Cache-Control", "no-store")
+	valid := false
+	defer func() {
+		if !valid {
+			setAdmissionFailureStage(c, admissionFailureStageStructure)
+		}
+	}()
+
 	mediaType, params, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || !strings.EqualFold(mediaType, "application/json") ||
 		hasUnsupportedMediaParameters(params) {
@@ -94,6 +105,7 @@ func bindStrictJSON(c *gin.Context, dst any, maxBytes int64) bool {
 		writeProblem(c, problem.Malformed())
 		return false
 	}
+	valid = true
 	return true
 }
 

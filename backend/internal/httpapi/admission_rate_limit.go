@@ -35,6 +35,7 @@ func (f *AdmissionFoundation) requireRateDecision(
 		}
 
 		c.Header("Cache-Control", "no-store")
+		setAdmissionFailureStage(c, admissionFailureStageRateDecision)
 		if decision.Outcome == ratelimit.OutcomeDenied ||
 			decision.Outcome == ratelimit.OutcomeFallbackDenied {
 			retrySeconds := int(math.Ceil(decision.RetryAfter.Seconds()))

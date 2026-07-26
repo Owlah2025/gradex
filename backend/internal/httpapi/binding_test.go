@@ -103,6 +103,9 @@ func TestStrictJSONRejectsAmbiguousOrUnsupportedBodies(t *testing.T) {
 			if tt.wantCode == "" {
 				return
 			}
+			if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+				t.Errorf("Cache-Control = %q, want no-store before strict binding can fail", got)
+			}
 			if recorder.Header().Get("Content-Type") != problem.ContentType {
 				t.Errorf("Content-Type = %q", recorder.Header().Get("Content-Type"))
 			}

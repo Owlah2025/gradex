@@ -21,8 +21,10 @@ import (
 // tables added by version 2, so serving against version 1 would turn every
 // authorization decision into an infrastructure fault.
 const (
-	MinSchemaVersion = 2
-	MaxSchemaVersion = 5
+	MinSchemaVersion       int64 = 2
+	SessionSchemaVersion   int64 = 4
+	AdmissionSchemaVersion int64 = 5
+	MaxSchemaVersion       int64 = AdmissionSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
@@ -85,6 +87,26 @@ func ReadSchemaState(ctx context.Context, pool *pgxpool.Pool) (SchemaState, erro
 // this — the process starts, so an operator can reach its logs, but it
 // receives no traffic until the schema is one this build understands.
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	return CheckSchemaAtLeast(ctx, pool, MinSchemaVersion)
+}
+
+// CheckSchemaAtLeast applies the build's supported range plus the migration
+// floor required by the capabilities this process has actually enabled.
+//
+// A fake-auth development API can still exercise the version-2 authorization
+// seam. Real authenticated sessions require version 4, and Student admission
+// requires version 5. Keeping the floor at composition avoids reporting ready
+// against a database that is globally supported but lacks an enabled route's
+// tables.
+func CheckSchemaAtLeast(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	requiredMinimum int64,
+) error {
+	if requiredMinimum < MinSchemaVersion || requiredMinimum > MaxSchemaVersion {
+		return fmt.Errorf("%w: required minimum %d is outside build range %d..%d",
+			ErrSchemaIncompatible, requiredMinimum, MinSchemaVersion, MaxSchemaVersion)
+	}
 	state, err := ReadSchemaState(ctx, pool)
 	if err != nil {
 		return err
@@ -92,9 +114,9 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	if state.Dirty {
 		return fmt.Errorf("%w: version %d", ErrSchemaDirty, state.Version)
 	}
-	if state.Version < MinSchemaVersion || state.Version > MaxSchemaVersion {
+	if state.Version < requiredMinimum || state.Version > MaxSchemaVersion {
 		return fmt.Errorf("%w: found %d, this build supports %d..%d",
-			ErrSchemaIncompatible, state.Version, MinSchemaVersion, MaxSchemaVersion)
+			ErrSchemaIncompatible, state.Version, requiredMinimum, MaxSchemaVersion)
 	}
 	return nil
 }

@@ -456,10 +456,11 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 	if !in.passwordScreenMode.Valid() {
 		p.errf("PASSWORD_SCREEN_MODE must be unavailable, deterministic, or adapter; got %q", in.passwordScreenMode)
 	}
+	if in.environment != EnvDevelopment &&
+		in.passwordScreenMode == PasswordScreenDeterministic {
+		p.errf("deterministic PASSWORD_SCREEN_MODE is permitted only in development")
+	}
 	if in.environment.IsProduction() {
-		if in.passwordScreenMode == PasswordScreenDeterministic {
-			p.errf("deterministic PASSWORD_SCREEN_MODE is not permitted in production")
-		}
 		if in.passwordScreenMode == PasswordScreenAdapter && !in.passwordAdapterApproved {
 			p.errf("production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)")
 		}

@@ -15,12 +15,14 @@ func (s *anonymousSecurity) requireAdmission() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !s.hasTrustedBrowserOrigin(c.Request) {
 			c.Header("Cache-Control", "no-store")
+			setAdmissionFailureStage(c, admissionFailureStageBrowserSecurity)
 			writeProblem(c, problem.CSRFValidationFailed())
 			return
 		}
 		payload, ok := s.validCookiePayload(c.Request)
 		if !ok || !secureTokenEqual(c.GetHeader(csrfHeaderName), s.csrfToken(payload)) {
 			c.Header("Cache-Control", "no-store")
+			setAdmissionFailureStage(c, admissionFailureStageBrowserSecurity)
 			writeProblem(c, problem.CSRFValidationFailed())
 			return
 		}
@@ -34,6 +36,7 @@ func (s *anonymousSecurity) requireAnonymous() gin.HandlerFunc {
 		payload, ok := s.validCookiePayload(c.Request)
 		if !ok {
 			c.Header("Cache-Control", "no-store")
+			setAdmissionFailureStage(c, admissionFailureStageBrowserSecurity)
 			writeProblem(c, problem.CSRFValidationFailed())
 			return
 		}

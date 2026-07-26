@@ -260,6 +260,18 @@ func TestProductionRejectsCredentialScreeningFixturesWhenAdmissionIsDisabled(t *
 	}, "COMPROMISED_PASSWORD_ADAPTER_APPROVED")
 }
 
+func TestDeterministicCredentialScreeningIsDevelopmentOnly(t *testing.T) {
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment, func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+				s["APP_ENV"] = environment
+				s["STUDENT_REGISTRATION_ENABLED"] = "false"
+				s["PASSWORD_SCREEN_MODE"] = "deterministic"
+			}, "deterministic PASSWORD_SCREEN_MODE is permitted only in development")
+		})
+	}
+}
+
 func TestDevelopmentAdmissionConfigurationLoadsExplicitFixtures(t *testing.T) {
 	cfg := mustLoad(t, func(s map[string]string, sec MapSecretResolver) {
 		s["APP_ENV"] = "development"

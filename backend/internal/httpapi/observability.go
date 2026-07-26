@@ -16,7 +16,30 @@ import (
 
 // ctxSafeErrorCodeKey carries the Problem Details code a handler produced, so
 // the request log can record it without re-deriving it from the response body.
-const ctxSafeErrorCodeKey = "safeErrorCode"
+const (
+	ctxSafeErrorCodeKey             = "safeErrorCode"
+	admissionFailureStageContextKey = "admissionFailureStage"
+)
+
+const (
+	admissionFailureStageStructure       = logging.AdmissionFailureStructure
+	admissionFailureStageBrowserSecurity = logging.AdmissionFailureBrowserSecurity
+	admissionFailureStageRateDecision    = logging.AdmissionFailureRateDecision
+	admissionFailureStageDomain          = logging.AdmissionFailureDomain
+)
+
+func setAdmissionFailureStage(c *gin.Context, stage logging.AdmissionFailureStage) {
+	c.Set(admissionFailureStageContextKey, stage)
+}
+
+func admissionFailureStageOf(c *gin.Context) logging.AdmissionFailureStage {
+	value, exists := c.Get(admissionFailureStageContextKey)
+	if !exists {
+		return ""
+	}
+	stage, _ := value.(logging.AdmissionFailureStage)
+	return stage
+}
 
 // unmatchedRoute stands in for the route template when no route matched. The
 // literal path must never reach a log: it carries identifiers, and on a
@@ -76,16 +99,17 @@ func requestLogger(logger *logging.Logger) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 		logger.RequestCompleted(logging.RequestEvent{
-			RequestID:       requestid.FromContext(ctx),
-			ParentRequestID: requestid.ParentFromContext(ctx),
-			Method:          c.Request.Method,
-			RouteTemplate:   routeTemplateOf(c),
-			Status:          c.Writer.Status(),
-			DurationMillis:  time.Since(start).Milliseconds(),
-			ResponseSize:    size,
-			SafeErrorCode:   c.GetString(ctxSafeErrorCodeKey),
-			LimiterOutcome:  c.GetString(limiterOutcomeContextKey),
-			Routine:         isProbePath(routeTemplateOf(c)),
+			RequestID:             requestid.FromContext(ctx),
+			ParentRequestID:       requestid.ParentFromContext(ctx),
+			Method:                c.Request.Method,
+			RouteTemplate:         routeTemplateOf(c),
+			Status:                c.Writer.Status(),
+			DurationMillis:        time.Since(start).Milliseconds(),
+			ResponseSize:          size,
+			SafeErrorCode:         c.GetString(ctxSafeErrorCodeKey),
+			LimiterOutcome:        c.GetString(limiterOutcomeContextKey),
+			AdmissionFailureStage: admissionFailureStageOf(c),
+			Routine:               isProbePath(routeTemplateOf(c)),
 		})
 	}
 }

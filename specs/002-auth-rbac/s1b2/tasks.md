@@ -21,7 +21,7 @@ D-034 are cited at the behavior boundaries.
   `docs/launch/daily/2026-07-31.md`, and the S1B2 design
 - [x] T002 Create the focused specification, plan, research, data model, API contract, quickstart,
   and task graph in `specs/002-auth-rbac/s1b2/`
-- [ ] T003 Record the approved plan and next executable task in
+- [x] T003 Record the approved plan and next executable task in
   `docs/launch/daily/2026-07-31.md` and `docs/launch/STATUS.md`
 
 ---
@@ -31,24 +31,24 @@ D-034 are cited at the behavior boundaries.
 **Purpose**: Close the explicit security and transport prerequisites before credential-bearing
 routes. This phase blocks User Story 1.
 
-- [ ] T004 [P] Add failing environment-validation tests for deterministic password screening
+- [x] T004 [P] Add failing environment-validation tests for deterministic password screening
   outside development in `backend/internal/config/config_test.go`
-- [ ] T005 [P] Add failing strict-binding no-store tests in
+- [x] T005 [P] Add failing strict-binding no-store tests in
   `backend/internal/httpapi/binding_test.go`
-- [ ] T006 [P] Add failing capability-aware schema readiness tests in
+- [x] T006 [P] Add failing capability-aware schema readiness tests in
   `backend/internal/db/migrate_integration_test.go` and `backend/internal/httpapi/health_test.go`
-- [ ] T007 Add failing safe admission-stage telemetry tests without hidden-state/PII leakage in
+- [x] T007 Add failing safe admission-stage telemetry tests without hidden-state/PII leakage in
   `backend/internal/httpapi/observability_test.go` and `backend/internal/httpapi/admission_routes_test.go`
-- [ ] T008 Reject deterministic password screening outside development and validate real-screen
+- [x] T008 Reject deterministic password screening outside development and validate real-screen
   composition in `backend/internal/config/config.go` and `backend/cmd/api/main.go`
-- [ ] T009 Set `Cache-Control: no-store` before strict body binding can fail in
+- [x] T009 Set `Cache-Control: no-store` before strict body binding can fail in
   `backend/internal/httpapi/binding.go`
-- [ ] T010 Make schema checks accept the minimum required migration for each enabled capability in
+- [x] T010 Make schema checks accept the minimum required migration for each enabled capability in
   `backend/internal/db/schema.go`, `backend/internal/health/health.go`, and `backend/cmd/api/main.go`
-- [ ] T011 Emit allowlisted admission failure stages through
+- [x] T011 Emit allowlisted admission failure stages through
   `backend/internal/httpapi/observability.go`, `backend/internal/httpapi/admission_security.go`, and
   `backend/internal/logging/logging.go`
-- [ ] T012 Run the focused carryover tests and update evidence in
+- [x] T012 Run the focused carryover tests and update evidence in
   `docs/launch/daily/2026-07-31.md`
 
 **Checkpoint**: Staging/production fixture misuse fails closed, schema-4/schema-5 readiness follows
