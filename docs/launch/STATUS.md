@@ -1,8 +1,8 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-30 — advanced by user
-> Last repository reconciliation: 2026-07-30 — S1A closeout HEAD `f8a15f7`
-> Scheduled day: Day 8 — Authentication and RBAC, S1B1 Student admission, `IN_PROGRESS`
+> Last repository reconciliation: 2026-07-30 — S1B1 reviewed implementation head `ad1b8f6`
+> Scheduled day: Day 8 — Authentication and RBAC, S1B1 Student admission, `CLOSED`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 16 calendar days
 > Launch confidence: **Red**
@@ -17,15 +17,17 @@ because it is driven by the 21 open launch gates and by how little of the produc
 not by design-review state, which is sound. S1B's approved three-part split adds two critical-path
 days, moves S1C to August 2 and S2 to August 3, and leaves six downstream slices competing for four
 dates before the fixed August 8 runway. `LG-021` also adds an unresolved production dependency for
-compromised-password screening. The delivery foundation and S1A are sound, but the remaining
+compromised-password screening. The delivery foundation, S1A, and S1B1 are sound, but the remaining
 full-MVP forecast is not yet credible.
 
 ## Current Phase
 
-Day 7/S1A is `CLOSED` — see [the July 29 record](daily/2026-07-29.md). Its six-link bootstrap chain
-closed at reviewed implementation head `70b4809`; closeout commit `f8a15f7` is pushed and green on
-hosted CI. Day 8/S1B1 is `IN_PROGRESS` — see
-[the July 30 record](daily/2026-07-30.md).
+Day 7/S1A is `CLOSED` — see [the July 29 record](daily/2026-07-29.md). Day 8/S1B1 is also
+`CLOSED` — see [the July 30 record](daily/2026-07-30.md). Student registration, verification
+request/resend, exact-once verification consumption, policy retrieval, layered abuse controls,
+durable protected delivery intent, and bilingual admission screens closed at reviewed
+implementation head `ad1b8f6`. The final independent result was 0 critical, 0 high, 2 medium, and
+7 low with verdict `APPROVE WITH FINDINGS`.
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -58,6 +60,11 @@ password/session/CSRF rotation, other-family revocation, and normal Admin author
 implemented. The complete local gate, hosted CI run `30180591201`, gate-boundary audit, and final
 frozen-range independent review all passed S1A's acceptance contract.
 
+Day 8 landed the admission foundation through `f4fb096`, the complete Student admission slice
+through `3a9493f`, and independent-review remediation through `ad1b8f6`. The corrected exact range
+`3af09bb..ad1b8f6` passed full local PostgreSQL/Redis/MinIO gates, the frontend production build,
+documentation and exposure guards, hosted CI run `30210367125`, and clean detached-worktree review.
+
 Delivery roles returned on 2026-07-25 under
 [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review): Codex resumed the
 builder/planner seat when its quota returned, Claude resumed independent read-only review, and `agy`
@@ -66,25 +73,26 @@ remains the approved fallback.
 Repository evidence at the latest reconciliation:
 
 - Current branch: `feature/002-authentication-rbac`.
-- Current HEAD/upstream: `f8a15f7`; hosted CI run `30181079456` passed all four jobs.
-- Reviewed S1A implementation head: `70b4809`; the final independent review covered exact range
-  `9bbdd49..70b4809`.
+- The branch is synchronized through the Day 8 closeout; reviewed S1B1 implementation head is
+  `ad1b8f6`.
+- Final S1B1 independent review covered exact range `3af09bb..ad1b8f6`; hosted CI run
+  `30210367125` passed Backend, Frontend, Migrations, Admission Integration, and Guards.
 - The frontend contains the landing-page implementation.
 - The backend contains the delivery foundation, the legacy video-processing/playback slice, and
   S1A's production Identity schema, bootstrap command, session/password-change core, principal
-  resolver, and deny-by-default capability gate. The debug auth transport seam remains
-  development-only while S1B builds the real Student authentication transport.
-- S1A is closed; S1B1 is active. No public Identity route exists yet. Coupons have planning
-  artifacts.
+  resolver, and deny-by-default capability gate. S1B1 adds the public Student admission,
+  verification, current-policy, and anonymous-bootstrap routes; the debug auth transport seam
+  remains development-only while S1B2 builds authenticated browser sessions.
+- S1A and S1B1 are closed; S1B2 is next. Coupons have planning artifacts.
 
 Re-evaluate these facts from Git and the repository at every `Start the day`; do not keep stale
 claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B1 Student admission: resolve the credential-creation advisories, then implement
-Student-only registration, verification request/resend and single-use consumption, privacy-safe
-rate limits, durable delivery intent, and Arabic/English admission screens.
+Start S1B2 authenticated sessions by closing S1B1's two medium review carryovers, then deliver
+role-scoped access windows, generic login, browser session/CSRF rotation, refresh-token reuse
+classification and family revocation, logout, and Arabic/English sign-in/session screens.
 
 ## Milestones
 
@@ -92,7 +100,7 @@ rate limits, durable delivery intent, and Arabic/English admission screens.
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at reviewed head `70b4809`. S1B is split into S1B1 (Jul 30), S1B2 (Jul 31), and S1B3 (Aug 1); S1C closes M2 on Aug 2 |
+| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at reviewed head `70b4809`; S1B1 closed at reviewed head `ad1b8f6`. S1B2 (Jul 31), S1B3 (Aug 1), and S1C (Aug 2) remain |
 | M3 — Product/revenue journey | **TBD — replan required** | Not started | Authoring through verified entitlement; S3–S8 dates are unresolved |
 | M4 — Complete MVP operations | **TBD — replan required** | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | **At risk** | E2E, infrastructure, security, load, accessibility depend on the unresolved downstream map |
@@ -102,10 +110,16 @@ rate limits, durable delivery intent, and Arabic/English admission screens.
 
 ## Carryover
 
-No S1A acceptance blocker carries over. Its final review approved the slice with findings. S1B1
-owns bootstrap request fingerprinting, original-email preservation, and compromised-password
-screening; S1B2 owns role-specific session/recent-authentication configuration. These are visible
-required work, not accepted launch risks.
+No S1A or S1B1 acceptance blocker carries over; both final reviews approved their slices with no
+critical/high finding. S1B1 completed bootstrap request fingerprinting, original-email
+preservation, and mandatory compromised-password screening.
+
+S1B2 starts with two explicit medium carryovers: add typed safe internal admission-failure stage
+telemetry without exposing raw causes, and reject deterministic compromised-password screening
+outside development before any staging bootstrap. S1B2 also owns capability-aware schema readiness
+and transport-wide `no-store` on strict-binding errors. S1B3 owns a separate immutable bearer-attempt
+evidence boundary; S1C reconciles the safe policy-read Origin wording; S9 retains outbox
+dispatcher-health admission. These are scheduled work, not hidden acceptance blockers.
 
 No incomplete July 28 `Must`, `Should`, or `Could` work; Day 6 closed complete. No incomplete July 26
 or July 27 work either. The July 27 `Could` item — non-binding JSON examples — was deferred by
@@ -121,7 +135,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1A review advisories precede public authentication | Codex | Resolve fingerprinting, original-email preservation, and compromised-password checking in S1B1; role-scoped windows in S1B2 | July 31 | Sub-slice tests prove each behavior and each review records no critical/high finding |
+| S1B1 review carryovers precede staging/session expansion | Codex | Add typed safe failure-stage telemetry and reject deterministic password screening outside development before S1B2 session work | July 31 | Focused configuration/composition and telemetry tests plus no critical/high review finding |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1B split moves S1C and S2 two days | Codex | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
 | S3–S8 cannot fit before the fixed August 8 runway | Developer + Codex | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
@@ -141,6 +155,20 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Exact reviewed S1B1 head `ad1b8f6` is green locally with PostgreSQL, Redis, and MinIO:
+  formatting, build, default/integration vet, `go test -race ./...`, and the complete integration
+  suite pass. Frontend lint, typecheck, production build, and responsive Arabic-first visual checks
+  pass. `scripts/docs-guard.sh` passes across 117 Markdown files; `scripts/expose-guard.sh` passes
+  with 10 approved `Expose` call sites, one password-plaintext boundary, and two reviewed plaintext
+  reads.
+- Hosted CI
+  [run 30210367125](https://github.com/Owlah2025/gradex/actions/runs/30210367125) completed
+  successfully on exact reviewed S1B1 head `ad1b8f6`; Backend, Frontend, Migrations, Admission
+  Integration, and Guards all passed.
+- The complete development path was exercised from the Next frontend through its development-only
+  same-origin rewrite to the Go API: anonymous bootstrap, Arabic policy retrieval, eligible
+  registration, and a case-variant hidden duplicate passed; both registration outcomes returned
+  byte-identical generic 202 responses.
 - Exact reviewed head `70b4809` is green locally with PostgreSQL at schema version 4, Redis, MinIO,
   and the
   documented published-video fixture available: backend build, default/integration vet,
@@ -206,6 +234,22 @@ Fast-follow gates are outside this count. Recalculate from
   changes; no test or independent-review rerun was required.
 
 ## Latest Review
+
+S1B1 passed final independent read-only review at exact range `3af09bb..ad1b8f6`, reviewed by Claude
+Opus at high effort under [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review):
+**0 critical, 0 high, 2 medium, 7 low**, verdict **APPROVE WITH FINDINGS**. All nine dimensions were
+checked, and the disposable detached worktree remained clean.
+
+The first full-range pass over `3af09bb..3a9493f` correctly rejected the slice with 0 critical,
+1 high, 6 medium, and 6 low because production could disable Student registration while still using
+the deterministic password-screening fixture for bootstrap Admin creation. `ad1b8f6` made
+production screening validation independent of the registration flag and resolved the associated
+outbox-contract, timeout, anonymous-bootstrap rate-limit, timing, purpose-binding, signing-key,
+limiter-cardinality, policy-cache, Unicode-validation, logging-fixture, and composition-test
+findings. The two remaining medium findings and every low disposition are recorded in the
+[July 30 closeout](daily/2026-07-30.md#closeout).
+
+Earlier:
 
 S1A passed final independent read-only review at exact range `9bbdd49..70b4809`, reviewed by Claude
 Opus at high effort under [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review):
@@ -283,12 +327,12 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 8/S1B1 is active in
+Day 8/S1B1 is closed in
 [SLICES.md §5.3.1](SLICES.md#531-s1b1--student-admission) and the
-[July 30 record](daily/2026-07-30.md).
+[July 30 record](daily/2026-07-30.md). The next active slice is Day 9/S1B2 authenticated sessions.
 
-First freeze the reviewed S1B delivery design and launch-record changes. Implementation then starts
-with the three admission prerequisites and migration boundary: bootstrap request fingerprinting,
-original-email preservation, required compromised-password screening, purpose-bound action-secret
-state, Identity security evidence, and durable verification outbox intent. No public route mounts
-before those invariants pass.
+Start with the two medium S1B1 review carryovers: typed safe internal failure-stage telemetry and
+configuration rejection of deterministic compromised-password screening outside development.
+Then freeze S1B2's role-scoped window and browser-session contract before implementing login,
+cookie/CSRF rotation, refresh reuse classification/family revocation, logout, and the bilingual
+sign-in/session screens.

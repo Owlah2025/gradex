@@ -123,8 +123,8 @@ S1B2 login is still absent.
 - [x] T034 [P] Add a PostgreSQL/Redis-backed hosted Admission Integration job that runs S1B1 concurrency, rollback, privacy, and migration evidence in `.github/workflows/ci.yml`
 - [x] T035 Run every command and browser scenario in `specs/002-auth-rbac/quickstart.md`, fix failures in their owning files, and record the exact evidence in `docs/launch/daily/2026-07-30.md`
 - [x] T036 Apply `clean-code-guard`, `test-guard`, and `docs-guard` to the complete S1B1 diff and resolve every critical/high issue in the affected production, test, and documentation files
-- [ ] T037 Freeze and push the exact implementation commit range, record green hosted CI, and obtain independent read-only Claude review from a disposable detached worktree in `docs/launch/daily/2026-07-30.md`
-- [ ] T038 Reconcile completed tasks, actual commit/CI/review evidence, unresolved lower-severity dispositions, and the next S1B2 handoff in `specs/002-auth-rbac/tasks.md`, `docs/launch/STATUS.md`, and `docs/launch/daily/2026-07-30.md`
+- [x] T037 Freeze and push the exact implementation commit range, record green hosted CI, and obtain independent read-only Claude review from a disposable detached worktree in `docs/launch/daily/2026-07-30.md`
+- [x] T038 Reconcile completed tasks, actual commit/CI/review evidence, unresolved lower-severity dispositions, and the next S1B2 handoff in `specs/002-auth-rbac/tasks.md`, `docs/launch/STATUS.md`, and `docs/launch/daily/2026-07-30.md`
 
 ---
 
