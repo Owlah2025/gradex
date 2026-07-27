@@ -1,16 +1,22 @@
 # Gradex MVP Launch Workflow
 
 > Status: Active
-> Schedule: 2026-07-23 through 2026-08-15
-> Public go-live target: 2026-08-15, readiness-gated
+> Schedule: 2026-07-23 through the September public target, date not yet set
+> Public go-live target: **September, exact date unset**, readiness-gated. August 15 was **retired as
+> non-credible** on 2026-08-02 under
+> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september);
+> full PRD scope is preserved and the exact date is selected only after the August 6 outreach results
+> and a critical-path rebaseline of S2–S16
 > Delivery team: Solo developer, Claude builder, `agy` reviewer for the active S1C slice (see
 > [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews)); the standing assignment is
 > Codex builder and Claude reviewer under
 > [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review), which stays paused
 > until Codex availability is explicitly reverified
-> Downstream forecast: August 8 is recorded as no longer credible and a full-PRD August 15 launch as
-> not forecastable — see [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
-> and [DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md)
+> Downstream forecast: August 8 and the August 15 full-PRD target are retired as non-credible
+> ([D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy),
+> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september));
+> the dated calendar below from August 8 onward is **historical**, not a forecast, until the rebaseline
+> — see [DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md)
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -565,7 +571,14 @@ required gate is `RESOLVED`; otherwise record a formal no-go forecast.
 **Exit evidence:** production health, monitoring, backups, commerce, access, learning, and support
 are verified; release and rollback versions are recorded.
 
-#### Saturday, August 15 — Public go/no-go
+#### Public go/no-go — date unset, moved out of August
+
+> **August 15 was retired as non-credible on 2026-08-02** under
+> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september).
+> Full PRD scope is preserved and the target moves into September. **No exact date is set here**, and
+> none may be recorded until the August 6 outreach results exist and S2–S16 have been rebaselined
+> against them. The August 8–14 outcomes above keep their content and lose their dates in the same
+> rebaseline; they are retained as the ordered runway, not as a forecast.
 
 Launch only when every criterion in §8 passes. If any fails, keep public commerce disabled,
 preserve the tested environment, record the blocker/owner/evidence required, and schedule the next

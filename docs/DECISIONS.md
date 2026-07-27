@@ -541,3 +541,49 @@ authority (both are canonical changes reserved to the developer under
 (the status quo that produced this decision).
 **Source:** Downstream-calendar reconciliation performed 2026-08-02 before S1C planning, at developer
 instruction, and recorded in [DOWNSTREAM_RECONCILIATION.md](launch/DOWNSTREAM_RECONCILIATION.md).
+
+## D-039 — Remedy A adopted: scope preserved, public target moves to September
+
+**Date:** 2026-08-02
+**Status:** Active. Supersedes the August 15 public go-live target recorded in
+[PLAN.md](launch/PLAN.md) and resolves the remedy decision left open by
+[D-038](#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy).
+**Decision:** **Retire the August 8 runway start and the August 15 full-PRD public launch target as
+non-credible.** Gradex preserves full PRD scope and moves the public target into September.
+
+**No exact September date is set.** "Early-to-mid September" was a derived forecast in the
+reconciliation, resting on estimates with a single calibration point, 21 open launch gates, and
+external dependencies nobody has contacted yet. It is a forecast hypothesis, not an evidence-backed
+date, and it must not be committed to publicly or recorded as a target. The exact public date is
+selected only after two inputs exist:
+
+1. the August 6 outreach results — acknowledged requests with delivery dates from counsel, accounting,
+   Tap, email, hosting, and malware scanning; and
+2. a critical-path rebaseline of S2–S16 performed against those results.
+
+**Remedy B (reduce launch scope) is not adopted and is not rejected.** It remains available after the
+August 6 outreach, as an optimization of the new plan rather than an attempt to rescue August 15. A
+scope cut decided now would buy nothing if Tap activation or counsel lead times independently push past
+any August date, and would permanently lose capability for no schedule gain.
+
+**Remedy C (change the operating envelope) is rejected.** Spending the protected August 7 recovery day
+or compressing slices below the [PLAN.md §2](launch/PLAN.md#daily-capacity) envelope attacks the one
+part of this delivery that is demonstrably working: slice quality and evidence integrity.
+
+**Reason:** D-038 established on date arithmetic alone — six slices, three dates — that August 8 could
+not hold, and that a full-PRD August 15 launch was not forecastable. Leaving a retired target in the
+plan while knowing it is dead is the failure mode the launch protocol exists to prevent: every
+downstream confidence, gate deadline, and go/no-go criterion would continue to be measured against a
+date already known to be false. The asymmetry decides which remedy: missing a self-imposed date on a
+pre-launch product with no announced launch and no promised counterparty costs credibility with nobody,
+while launching a payment and media platform on a compressed security gate costs money, student trust,
+and possibly Kuwait Digital Commerce Law exposure that cannot be rolled back.
+**Alternatives rejected:** Keeping August 15 and cutting scope to fit (Remedy B alone recovers roughly
+half the deficit and reaches office hours — the follow-up loop the product exists to deliver — and the
+cut would be decided blind to the outreach results); spending August 7 or compressing the envelope
+(Remedy C, one day against a twenty-day gap, paid for by removing the evidence that catches the exact
+defect class the last two carryovers were); naming an exact September date now (would replace one
+uncredible target with another and repeat the error being corrected); leaving the remedy undecided past
+August 4 (the first unassigned date would then be spent against a conflict rather than a plan).
+**Source:** Developer decision on 2026-08-02, on the analysis in
+[DOWNSTREAM_RECONCILIATION.md](launch/DOWNSTREAM_RECONCILIATION.md).

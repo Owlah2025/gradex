@@ -3,16 +3,16 @@
 > Current schedule date: 2026-08-02 — advanced by user
 > Last repository reconciliation: 2026-08-02 — start of day at `881639d`; S1B3 confirmed closed at reviewed head `9d3db91`
 > Scheduled day: Day 11 — Authentication and RBAC, S1C Staff lifecycle, enforcement, and authorization matrix, `PLANNED`
-> Target public go-live: 2026-08-15 — **recorded as not forecastable at full PRD scope, see [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)**
-> Days remaining after today: 13 calendar days
+> Target public go-live: **September, exact date unset.** August 15 retired as non-credible on 2026-08-02 under [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september); scope preserved
+> Days remaining: **not countable** until the rebaseline sets a date
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
 platform architecture, and domain/data/state design are approved, but API/security design and
 implementation are not complete, the operating envelope remains provisional, and the founder
 deliberately deferred all external-owner outreach to August 6. All 21 required entries in
-[LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
-This compressed response window can move the readiness-gated August 15 launch. Confidence stays Red
+[LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, and their August 9 and 12 deadlines are now
+themselves subject to the rebaseline below rather than being fixed. Confidence stays Red
 because it is driven by the 21 open launch gates and by how little of the product is implemented —
 not by design-review state, which is sound. `LG-021` also adds an unresolved production dependency for
 compromised-password screening. The delivery foundation, S1A, and S1B are sound, but the remaining
@@ -24,11 +24,19 @@ Six slices (S3–S8) have three available dates (August 4–6), and nine feature
 dates before the August 10 integration runway. **August 8 is no longer a credible runway start, and a
 full-PRD August 15 launch is not forecastable.** That result needs no velocity assumption — it is
 arithmetic on dates — and the observed velocity makes it worse: S1 was scoped as one day and took five.
-Three remedies await a developer decision in
-[DOWNSTREAM_RECONCILIATION.md §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval),
-with the recommendation being **move the public target and preserve scope**, holding a scope reduction
-in reserve until the August 6 outreach returns. Red is therefore now driven by a *recorded* forecast
-failure with a named remedy set, not by an unexamined one.
+**The developer adopted Remedy A the same day
+([D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)):
+August 8 and the August 15 full-PRD target are retired as non-credible, full PRD scope is preserved, and
+the public target moves into September.** No exact September date is set, and none may be recorded until
+the August 6 outreach results exist and S2–S16 are rebaselined against them — "early-to-mid September"
+was a forecast hypothesis behind 21 open gates and four uncontacted external dependencies, and replacing
+one uncredible date with another would repeat the error being corrected. Remedy B (scope reduction) stays
+available afterwards as an optimization of the new plan, not as a rescue of August 15. Remedy C
+(compressing the envelope or spending August 7) is **rejected**.
+
+Red therefore no longer means "the August 15 forecast is failing" — that target is gone. It means the
+21 open gates and the unimplemented majority of the product still stand between here and any date, and
+no credible date exists yet to measure against.
 
 ## Current Phase
 
@@ -84,9 +92,9 @@ before implementation rather than compressing failure paths:
 | Aug 3 | S2 — Course authoring and review | Starts only after S1C closes |
 
 No MVP capability left the slice. **S1 does not close until S1C closes**, and no S2 work begins
-before it does. **August 7 remains the next protected recovery point** and is not silently spent.
-S3–S8 remain `TBD`, and the August 8–15 runway is forecast-at-risk until downstream dates are
-reconciled.
+before it does. **August 7 remains the next protected recovery point** and is not silently spent —
+under D-039 spending it was explicitly rejected. S3–S8 remain `TBD`, and the August 8–15 runway is
+retired rather than merely at risk.
 
 The Day 6 delivery foundation is verified on hosted infrastructure rather than only on the
 developer's workstation: typed two-layer configuration with fail-closed validation, structured
@@ -222,7 +230,7 @@ August 2. S1C inherits four carryovers and three unexamined judgement calls, all
 | M5 — Integrated production candidate | August 12 | **Not forecastable** | Depends on S1A–S10; the feature slices feeding it have no credible dates (D-038) |
 | M6 — Staging acceptance | August 13 | **Not forecastable** | UAT and all-gate audit, downstream of M5 |
 | M7 — Production soft launch | August 14 | **Not forecastable** | Smoke tests and rollback rehearsal, downstream of M6 |
-| M8 — Public go/no-go | August 15 | **Not forecastable at full PRD scope** | Every criterion in PLAN.md §8. D-038 records the date as unsupportable without a developer remedy |
+| M8 — Public go/no-go | **September, date unset** | **Retired and awaiting rebaseline** | Every criterion in PLAN.md §8. August 15 retired under [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september); scope preserved, exact date set only after the August 6 outreach and an S2–S16 rebaseline |
 
 ## Carryover
 
@@ -283,7 +291,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| **Downstream remedy undecided: S3–S8 have no credible dates and August 15 is not forecastable** | Developer | Choose Remedy A (move the target, preserve scope — **recommended**), B (reduce launch scope, partial at best), or C (change the envelope, recommended against) in [the reconciliation §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval) | **August 4**, before the first unassigned date is spent | A recorded decision adopting one or more remedies, with dated S3–S10 or an approved public-target change |
+| **Critical-path rebaseline of S2–S16 is owed; no public date exists** | Developer + builder seat | Remedy A is adopted (D-039). Rebaseline S2–S16 against the August 6 outreach results, then set the September date. Do not publish a date before both | **After August 6 outreach returns** | Dated S2–S16 with acknowledged external delivery dates, and a recorded public target |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1 does not close until S1C closes | Claude, builder under D-037 | Deliver S1C's eleven acceptance items, then the S1 integration review by `agy` | August 2 | S1C closes on a frozen exact range with no critical or high finding |
 | Three slices are blocked on external parties not yet contacted | Developer/founder | S4 needs a malware scanner, S6/S7 need live Tap, S9 needs a verified sender, S10 needs counsel and accounting | August 6 | Acknowledged requests with delivery dates; no engineering rate substitutes for these |
@@ -524,8 +532,8 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
   point.
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
-- August 15 is readiness-gated — and under D-038 it is additionally recorded as not forecastable at
-  full PRD scope until a developer remedy is chosen.
+- The public target is readiness-gated and, under D-039, is **September with no exact date**. August 15
+  is retired. A forecast range is not a target and is not to be published as one.
 - D-033: Codex is the standing builder and planner; Claude is the standing independent read-only
   reviewer. Review uses a disposable detached worktree and frozen exact commit range. A `TAINTED` or
   `UNAVAILABLE` run is never recorded as approval.
@@ -537,8 +545,12 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
   Codex availability is **explicitly reverified** — silence is not a return of quota. D-035 (S1B2) and
   D-036 (S1B3) are expired and historical.
 - D-038 (active): August 8 is recorded as no longer a credible runway start and a full-PRD August 15
-  launch as not forecastable. S3–S8 stay `TBD`. Three remedies await a developer decision by August 4;
-  none is adopted, and the recommendation is to move the public target and preserve scope.
+  launch as not forecastable. S3–S8 stay `TBD`.
+- D-039 (active): **Remedy A adopted.** August 8 and the August 15 full-PRD target are retired as
+  non-credible, full PRD scope is preserved, and the public target moves into September with **no exact
+  date set** until the August 6 outreach results and an S2–S16 rebaseline exist. Remedy B stays
+  available afterwards as an optimization; Remedy C — compressing the envelope or spending August 7 —
+  is **rejected**. A September range must not be committed to publicly as a target.
 - **A frontend production build is not local build evidence unless `.next` was removed first.** In
   force from August 2 regardless of whether `CARRYOVER-LOCAL-BUILD-CACHE` is fixed. A build claim that
   does not say "clean" is to be read as not having been made.
@@ -589,6 +601,13 @@ If the day overruns, S1C becomes visibly incomplete rather than compressed. The 
 developer-approved `S1C2` on August 4 carrying the remainder — recorded, dated, and counted against the
 downstream deficit — not a `Must` with its failure paths removed.
 
-One developer decision is outstanding and dated **August 4**: choose a downstream remedy from
-[the reconciliation §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval). It does
-not block S1C, whose contents are identical under all three remedies.
+The downstream remedy is **decided**: Remedy A under
+[D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september). What
+is now owed is the **critical-path rebaseline of S2–S16**, due after the August 6 outreach returns, and
+it must precede any public date. It does not block S1C.
+
+Two plan corrections were applied by developer review before implementation and are recorded in place in
+the August 2 record: Must 4's suspension evidence is now **three independently mutation-checked proofs**
+rather than one test that could not detect its own vacuity, and the **Admin recent-authentication
+window** is enforced at the backend boundary inside Musts 3, 4, and 5 instead of being named in the
+inputs and scheduled nowhere.

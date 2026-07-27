@@ -130,7 +130,15 @@ that expanded, not the ones that held.
 ## 5. Remedies requiring developer approval
 
 Exactly three remedies exist. Each is a canonical change reserved to the developer under
-[PLAN.md §3](PLAN.md#replan), and **none is adopted by this document.** They are mutually combinable.
+[PLAN.md §3](PLAN.md#replan), and none was adopted by this document as first written. They are mutually
+combinable.
+
+> **Resolved the same day.** The developer adopted **Remedy A** on 2026-08-02, recorded as
+> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september).
+> August 8 and the August 15 full-PRD target are retired as non-credible, full scope is preserved, and
+> the public target moves into September with **no exact date set** — see §6. **Remedy B is not
+> adopted and not rejected**, and remains available after the August 6 outreach as an optimization of
+> the new plan. **Remedy C is rejected.**
 
 ### Remedy A — Move the public launch date, full PRD preserved
 
@@ -181,7 +189,29 @@ project with no second reader.
 Spending August 7 belongs here too, and is worth one day against a twenty-day gap while removing the
 only recovery point before the runway.
 
-## 6. Recommendation
+## 6. Recommendation, and the decision taken
+
+**Decided 2026-08-02: Remedy A, recorded as
+[D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september).**
+August 8 and the August 15 full-PRD target are retired. Full PRD scope is preserved. The public target
+moves into September.
+
+**One important amendment to what §4 said.** The "early-to-mid September" range in §4 must **not** be
+recorded as a target or committed to publicly. It is a forecast hypothesis derived from §3's estimates,
+which have a single calibration point, and it sits behind 21 open launch gates and four external
+dependencies nobody has contacted. Replacing one uncredible date with another would repeat the exact
+error being corrected here. **No exact public date is set until two inputs exist:**
+
+1. the August 6 outreach results — acknowledged requests with delivery dates from counsel, accounting,
+   Tap, email, hosting, and malware scanning; and
+2. a critical-path rebaseline of S2–S16 against those results.
+
+**Remedy B remains available afterwards**, as an optimization of the new plan rather than a rescue of
+August 15 — deciding it now would be deciding it blind to the outreach. **Remedy C is rejected**: it
+attacks slice quality and evidence integrity, which is the part of this delivery that is currently
+working.
+
+The original recommendation, retained for the record:
 
 **Remedy A, with Remedy B held in reserve.**
 
