@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ import {
   validEmail,
   validPassword,
 } from "@/lib/identity/validation";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type FieldErrors = Partial<Record<"display_name" | "email" | "password" | "policy", string>>;
@@ -33,6 +34,7 @@ function focusFirstError(errors: FieldErrors, refs: FieldRefs) {
 export function RegistrationForm() {
   const { locale, t } = useLocale();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [policySet, setPolicySet] = React.useState<RegistrationPolicySet | null>(null);
   const [policyError, setPolicyError] = React.useState(false);
   const [accepted, setAccepted] = React.useState<Record<string, boolean>>({});
@@ -87,7 +89,10 @@ export function RegistrationForm() {
         policy_set_id: policySet.id,
       });
       setFields({ displayName: "", email: "", password: "" });
-      router.push("/verify-email");
+      // Carry the requested destination to the next admission step. It is
+      // revalidated inside withReturnTo, so a hostile value is dropped here
+      // rather than trusted because an earlier screen saw it.
+      router.push(withReturnTo("/verify-email", searchParams.get("returnTo")));
     } catch (error) {
       if (error instanceof ProblemError && error.problem.errors?.length) {
         const backendErrors: FieldErrors = {};

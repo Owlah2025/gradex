@@ -69,3 +69,24 @@ export function postLoginDestination(
 ): string {
   return safeReturnTo(requested) ?? roleRoot(role);
 }
+
+/**
+ * Carries a caller destination across one admission hop.
+ *
+ * The Student journey crosses several screens before a session exists —
+ * register, verify, sign in — and a destination requested at the start has to
+ * survive to the end without becoming a redirect the attacker controls.
+ *
+ * `requested` is re-validated here rather than trusted because it has just come
+ * off a URL. Every hop is an entry point, so every hop revalidates: a hostile
+ * value is dropped and the plain step path is returned, which loses the
+ * destination and keeps the journey working. It is never propagated
+ * unvalidated on the assumption that an earlier screen already checked it.
+ *
+ * `step` is an internal path this code chooses, never caller input.
+ */
+export function withReturnTo(step: string, requested: unknown): string {
+  const destination = safeReturnTo(requested);
+  if (destination === null) return step;
+  return `${step}?returnTo=${encodeURIComponent(destination)}`;
+}

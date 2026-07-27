@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,14 @@ import {
   releaseFragmentToken,
   scrubTokenFragment,
 } from "@/lib/identity/validation";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type VerificationState = "checking" | "success" | "invalid";
 
 export function VerificationConsumer() {
   const { locale, t } = useLocale();
+  const searchParams = useSearchParams();
   const [state, setState] = React.useState<VerificationState>("checking");
   const started = React.useRef(false);
 
@@ -62,7 +65,9 @@ export function VerificationConsumer() {
           {t.auth.result.successBody}
         </Alert>
         <Button asChild className="w-full" size="lg">
-          <Link href="/login">{t.auth.result.login}</Link>
+          <Link href={withReturnTo("/login", searchParams.get("returnTo"))}>
+            {t.auth.result.login}
+          </Link>
         </Button>
       </div>
     );

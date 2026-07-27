@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   scrubTokenFragment,
   validPassword,
 } from "@/lib/identity/validation";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type ResetState = "capturing" | "ready" | "missing" | "done";
@@ -51,6 +53,7 @@ type ResetErrorKey =
  */
 export function RecoveryResetForm() {
   const { locale, t } = useLocale();
+  const searchParams = useSearchParams();
   const [state, setState] = React.useState<ResetState>("capturing");
   const [password, setPassword] = React.useState("");
   const [confirmation, setConfirmation] = React.useState("");
@@ -153,7 +156,9 @@ export function RecoveryResetForm() {
       <div className="space-y-5">
         <Alert tone="error" title={t.auth.resetPassword.missingToken} />
         <Button asChild className="w-full" size="lg">
-          <Link href="/recover">{t.auth.resetPassword.requestNew}</Link>
+          <Link href={withReturnTo("/recover", searchParams.get("returnTo"))}>
+            {t.auth.resetPassword.requestNew}
+          </Link>
         </Button>
       </div>
     );
@@ -166,7 +171,9 @@ export function RecoveryResetForm() {
           {t.auth.resetPassword.successBody}
         </Alert>
         <Button asChild className="w-full" size="lg">
-          <Link href="/login">{t.auth.resetPassword.goToSignIn}</Link>
+          <Link href={withReturnTo("/login", searchParams.get("returnTo"))}>
+            {t.auth.resetPassword.goToSignIn}
+          </Link>
         </Button>
       </div>
     );

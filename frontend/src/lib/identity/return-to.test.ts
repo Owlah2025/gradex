@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postLoginDestination, roleRoot, safeReturnTo } from "./return-to";
+import {
+  postLoginDestination,
+  roleRoot,
+  safeReturnTo,
+  withReturnTo,
+} from "./return-to";
 
 test("keeps internal paths, including query and fragment", () => {
   assert.equal(safeReturnTo("/courses"), "/courses");
@@ -59,4 +64,60 @@ test("prefers a safe destination and falls back to the role root", () => {
     roleRoot("STUDENT"),
   );
   assert.equal(postLoginDestination("ADMIN", null), roleRoot("ADMIN"));
+});
+
+test("carries a validated destination across an admission hop", () => {
+  assert.equal(
+    withReturnTo("/verify-email", "/courses/kuwait-101"),
+    "/verify-email?returnTo=%2Fcourses%2Fkuwait-101",
+  );
+  assert.equal(
+    withReturnTo("/login", "/courses?page=2"),
+    "/login?returnTo=%2Fcourses%3Fpage%3D2",
+  );
+});
+
+test("drops a hostile destination at every admission hop", () => {
+  // Each hop is its own entry point, so each revalidates rather than trusting
+  // that an earlier screen checked the value. A hostile destination must not
+  // survive the hop in any form, raw or encoded.
+  const hostile = [
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "/\\evil.example",
+    "\\\\evil.example",
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "http://evil.example",
+    "/courses\u0000",
+    "/courses\nSet-Cookie: a=b",
+  ];
+  for (const step of ["/login", "/register", "/verify-email", "/recover"]) {
+    for (const value of hostile) {
+      assert.equal(
+        withReturnTo(step, value),
+        step,
+        `expected ${step} to drop ${JSON.stringify(value)}`,
+      );
+    }
+  }
+});
+
+test("does not let an admission step become its own destination", () => {
+  // Forwarding a destination that points back into admission would loop the
+  // journey, so those roots are refused and the hop stays plain.
+  for (const looping of [
+    "/login",
+    "/register",
+    "/verify-email",
+    "/api/v1/session",
+  ]) {
+    assert.equal(withReturnTo("/verify-email", looping), "/verify-email");
+  }
+});
+
+test("treats absent and non-string destinations as no destination", () => {
+  for (const empty of [null, undefined, "", 42, {}, []]) {
+    assert.equal(withReturnTo("/login", empty), "/login");
+  }
 });

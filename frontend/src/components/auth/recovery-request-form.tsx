@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { requestPasswordReset } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import { validEmail } from "@/lib/identity/validation";
+import { withReturnTo } from "@/lib/identity/return-to";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 /**
@@ -28,6 +30,7 @@ type RecoverErrorKey = "invalidEmail" | "limited" | "unavailable" | "failed";
  */
 export function RecoveryRequestForm() {
   const { locale, t } = useLocale();
+  const searchParams = useSearchParams();
   const [email, setEmail] = React.useState("");
   const [error, setError] = React.useState<RecoverErrorKey | null>(null);
   const [accepted, setAccepted] = React.useState(false);
@@ -92,7 +95,10 @@ export function RecoveryRequestForm() {
         {submitting ? t.auth.recover.sending : t.auth.recover.send}
       </Button>
       <p className="text-center text-sm">
-        <Link className="underline" href="/login">
+        <Link
+          className="underline"
+          href={withReturnTo("/login", searchParams.get("returnTo"))}
+        >
           {t.auth.recover.backToSignIn}
         </Link>
       </p>

@@ -10,7 +10,7 @@ import { Alert } from "@/components/ui/alert";
 import { createSession } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import { validEmail } from "@/lib/identity/validation";
-import { postLoginDestination } from "@/lib/identity/return-to";
+import { postLoginDestination, withReturnTo } from "@/lib/identity/return-to";
 import { setSession } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
@@ -155,14 +155,20 @@ export function LoginForm() {
       </Button>
 
       <p className="text-center text-sm">
-        <Link className="underline" href="/recover">
+        <Link
+          className="underline"
+          href={withReturnTo("/recover", searchParams.get("returnTo"))}
+        >
           {t.auth.login.forgotPassword}
         </Link>
       </p>
 
       <p className="text-center text-sm text-muted-foreground">
         {t.auth.login.noAccount}{" "}
-        <Link className="font-bold text-primary underline" href="/register">
+        <Link
+          className="font-bold text-primary underline"
+          href={withReturnTo("/register", searchParams.get("returnTo"))}
+        >
           {t.auth.login.createAccount}
         </Link>
       </p>
