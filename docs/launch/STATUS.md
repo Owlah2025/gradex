@@ -1,8 +1,8 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-08-01 — advanced by user
-> Last repository reconciliation: 2026-08-01 — clean tree at `3b2f7a8`, backend and frontend gates green
-> Scheduled day: Day 10 — Authentication and RBAC, S1B3 Recovery and Student integration, `IN_PROGRESS`
+> Last repository reconciliation: 2026-08-01 — S1B3 closed at reviewed head `9d3db91` with green hosted CI
+> Scheduled day: Day 10 — Authentication and RBAC, S1B3 Recovery and Student integration, `CLOSED`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 14 calendar days
 > Launch confidence: **Red**
@@ -43,6 +43,22 @@ process facts came out of that failure and are carried into S1B3: the full local
 while the range was red on CI, because no local script asserts schema version at all, and an
 independent reviewer returned 0/0/0/0 on a range that did not build, because the review dimensions
 cover the diff rather than gate execution. **A verdict alone is not evidence that a range passes.**
+
+Day 10/S1B3 is `CLOSED` at reviewed implementation head `9d3db91` — see
+[the August 1 record](daily/2026-08-01.md#closeout). **This completes S1B.** Password recovery is
+non-enumerating at the transport boundary, reset secrets are digest-only, purpose-bound, expiring,
+and single-use under contention, completion atomically replaces the credential while revoking every
+family and advancing the session epoch, and the complete Student journey passes end to end through
+one cookie jar. The single frozen range `3b2f7a8..9d3db91` returned `APPROVE` with 0 critical,
+0 high, 0 medium, and 0 low.
+
+Two defects in already-shipped S1B1 code surfaced while building this slice and were fixed: a
+supersession timestamp that inverted under concurrency and returned a 500 on an ordinary second
+request, and a one-time-token fragment scrub that hydration silently undid, leaving the secret in the
+address bar. Neither was introduced by S1B3.
+
+S1B3 also closed both S1B2 carryovers and opened two of its own, both instances of the same class —
+a local gate that reads green while testing less than the hosted one. See Carryover below.
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -86,7 +102,12 @@ builder/planner seat when its quota returned, Claude resumed independent read-on
 remains the approved fallback.
 
 **Roles moved again mid-S1B2 on 2026-07-31 under
-[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews).** Codex exhausted its quota with
+[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews), and were reassigned for S1B3
+under [D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews).** Both are scoped to a
+single slice and expire with it; **D-036 expired at this closeout, so the S1C seats are unassigned.**
+The S1B2 history below is retained for the record.
+
+ Codex exhausted its quota with
 the S1B2 backend complete but the frontend, verification, and review work outstanding, so Claude
 takes the builder/planner seat for the remainder of this slice and `agy` takes the independent
 read-only reviewer seat under D-032's containment harness. Codex's S1B2 work is inherited unchanged
@@ -97,8 +118,10 @@ may explicitly restore D-033's assignment.
 Repository evidence at the latest reconciliation:
 
 - Current branch: `feature/002-authentication-rbac`.
-- Current synchronized implementation HEAD/upstream is `24b0d21`; reviewed S1B1 implementation
-  head is `ad1b8f6`.
+- Current synchronized implementation HEAD/upstream is `9d3db91`, which is also the reviewed S1B3
+  head. Earlier reviewed heads: S1A `70b4809`, S1B1 `ad1b8f6`, S1B2 `7d8710e`.
+- The database schema is at version 7. The build supports 2 through 7, and CI derives the expected
+  version from `db.MaxSchemaVersion` rather than a hardcoded literal.
 - Final S1B1 independent review covered exact range `3af09bb..ad1b8f6`; hosted CI run
   `30210367125` passed Backend, Frontend, Migrations, Admission Integration, and Guards.
 - The frontend contains the landing-page implementation.
@@ -106,29 +129,41 @@ Repository evidence at the latest reconciliation:
   S1A's production Identity schema, bootstrap command, session/password-change core, principal
   resolver, and deny-by-default capability gate. S1B1 adds the public Student admission,
   verification, current-policy, and anonymous-bootstrap routes; the debug auth transport seam
-  remains development-only while S1B2 builds authenticated browser sessions.
+  remains development-only. S1B2 added the authenticated session boundary, and S1B3 added password
+  recovery request and completion plus the bilingual recovery screens.
+- The frontend now contains the complete S1B admission and session journey: registration,
+  verification, sign-in, session state, and recovery, in Arabic and English.
 - The ignored local backend environment now enables development admission without committing local
   keys. Same-origin bootstrap, both localized policy reads, and synthetic registration passed.
-- S1A and S1B1 are closed; S1B2 is active. Coupons have planning artifacts.
+- S1A, S1B1, S1B2, and S1B3 are closed, so S1B is complete. S1C is next and unstarted. Coupons have
+  planning artifacts.
 
 Re-evaluate these facts from Git and the repository at every `Start the day`; do not keep stale
 claims merely because they appear here.
 
 ## Active Outcome
 
-S1B2 authenticated sessions is delivered and closed. All 41 tasks in
-`specs/002-auth-rbac/s1b2/tasks.md` are complete.
+S1B3 recovery and Student integration is delivered and closed, completing S1B.
 
 All local gates are green: backend formatting, build, vet on both tag sets, `go test -race ./...`,
-and the complete integration suite under race against real PostgreSQL at schema 6, Redis, and MinIO;
-frontend typecheck, lint, 13 `node:test` logic cases, and the production build; documentation and
-exposure guards. The complete browser journey — sign in, reload, sign out — was exercised end to end
-with clean database, log, and browser-storage canary sweeps. Hosted CI passed all five jobs on the
-exact reviewed head.
+and the complete integration suite under race against real PostgreSQL at schema 7, Redis, and MinIO;
+frontend typecheck, lint, 21 `node:test` logic cases, and a clean production build with `.next`
+removed first; documentation and exposure guards. Hosted CI passed all five jobs on the exact
+reviewed head `9d3db91`.
 
-Next is Day 10/S1B3 — recovery and integration: password recovery, all-family invalidation, the
-integrated Student journey, and S1B review. S1B3 also inherits the two S1B2 carryovers recorded
-below.
+Migration `0007` widened the closed action-secret purpose and security-event allowlists. The CI
+schema assertion now derives its expected version from `db.MaxSchemaVersion` through a
+`migrate max-version` subcommand, and it tracked to schema 7 with no manual edit — the exact drift
+that failed S1B2's hosted CI.
+
+Two defects in already-shipped S1B1 code surfaced and were fixed while building this slice: a
+supersession timestamp that inverted under concurrency and returned a 500 on an ordinary second
+request, and a one-time-token fragment scrub that hydration silently undid, leaving the secret in the
+address bar. Neither was introduced by S1B3; both were found because this slice exercised those paths
+harder.
+
+Next is Day 11/S1C — staff lifecycle, enforcement, and the full authorization matrix, scheduled for
+August 2. S1C inherits four carryovers and three unexamined judgement calls, all recorded below.
 
 ## Milestones
 
@@ -136,7 +171,7 @@ below.
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at reviewed head `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`. S1B3 (Aug 1) and S1C (Aug 2) remain |
+| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`; S1B3 at `9d3db91`. **S1B is complete**; only S1C (Aug 2) remains |
 | M3 — Product/revenue journey | **TBD — replan required** | Not started | Authoring through verified entitlement; S3–S8 dates are unresolved |
 | M4 — Complete MVP operations | **TBD — replan required** | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | **At risk** | E2E, infrastructure, security, load, accessibility depend on the unresolved downstream map |
@@ -155,20 +190,35 @@ stage telemetry, and rejection of deterministic compromised-password screening o
 Capability-aware schema readiness and transport-wide `no-store` on strict-binding errors are closed
 in the same commit.
 
-S1B2 hands two new carryovers to S1B3, both recorded in the
-[July 31 closeout](daily/2026-07-31.md#closeout):
+S1B2's two carryovers are both **closed** by S1B3: `CARRYOVER-S1B2-RETURNTO` by Must 5, which carries
+the validated destination across every admission hop, and `CARRYOVER-S1B2-CI-DRIFT` by Must 1, which
+derives the CI schema assertion from `db.MaxSchemaVersion`.
 
-- `CARRYOVER-S1B2-RETURNTO`: the validated internal `returnTo` is implemented for sign-in only and is
-  not carried across the registration or verification screens. This was the S1B2 `Should` and it was
-  not delivered. S1B3 owns the integrated Student journey and absorbs it.
-- `CARRYOVER-S1B2-CI-DRIFT`: the CI schema-version assertion is a hardcoded literal kept in step by
-  comment alone and will drift again at migration `0007`, and no local gate mirrors it. Derive it
-  from `MaxSchemaVersion`, mirror it locally so it fails before push, or both. Deliberately deferred
-  rather than expanding a slice mid-closeout.
+S1B3 hands four carryovers and three unexamined judgement calls to S1C, all recorded in the
+[August 1 closeout](daily/2026-08-01.md#closeout):
 
-S1B3 owns a separate immutable bearer-attempt evidence boundary; S1C reconciles the safe policy-read
-Origin wording; S9 retains outbox dispatcher-health admission. These are scheduled work, not hidden
-acceptance blockers.
+- `CARRYOVER-DOCS-GUARD-UNTRACKED`: `scripts/docs-guard.sh` enumerates with `git ls-files` and
+  silently skips untracked Markdown, so it can report success against a file it never opened. Local
+  and advisory; hosted guard evidence is unaffected.
+- `CARRYOVER-LOCAL-BUILD-CACHE`: `npm run build` reuses `.next`, so prerender-time failures stay
+  invisible locally. This let a `Suspense` defect reach hosted CI. Until fixed, a frontend build
+  offered as pre-push evidence must clear `.next` first.
+- `CARRYOVER-S1B3-VOLUNTARY-CHANGE-EVIDENCE`: the undelivered S1B3 `Should` — observed evidence that
+  voluntary password change revokes another family, rather than restated policy. The recovery path is
+  proven; the voluntary-change path is a different code path and is not.
+- `CARRYOVER-S1B3-DENIAL-VOCABULARY`: the undelivered S1B3 `Could` — reconcile the S1B-wide
+  policy-denial vocabulary against API design §6.1.
+- **Three judgement calls the S1B3 review did not address by name**: that `CHANGE_REQUIRED` stays
+  recovery-eligible and is cleared by recovery, that role is deliberately absent from recovery
+  eligibility so staff retain a self-service path, and the `recovery.go` exposure-guard allowlist
+  entry. All three were raised before dispatch and the report returned `OPEN QUESTIONS: none`. S1C
+  should confirm or overturn them rather than inherit them as settled.
+
+The first two are the same class — **a local gate that reads green while testing less than the hosted
+one** — and two instances surfaced in a single day, which is worth treating as a pattern.
+
+S1C reconciles the safe policy-read Origin wording; S9 retains outbox dispatcher-health admission.
+These are scheduled work, not hidden acceptance blockers.
 
 No incomplete July 28 `Must`, `Should`, or `Could` work; Day 6 closed complete. No incomplete July 26
 or July 27 work either. The July 27 `Could` item — non-binding JSON examples — was deferred by
@@ -184,7 +234,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1C builder/reviewer seats unassigned; D-036 covers S1B3 only | Developer | Name the S1C seats explicitly at S1C start of day; D-036 expires when S1B3 closes | August 2 | Dated decision record naming the S1C builder and reviewer |
+| S1C builder/reviewer seats unassigned; D-036 expired at S1B3 closeout | Developer | Name the S1C seats explicitly before implementation starts | August 2 | Dated decision record naming the S1C builder and reviewer |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1B split moves S1C and S2 two days | Current builder seat | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
 | S3–S8 cannot fit before the fixed August 8 runway | Developer + current builder seat | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
@@ -204,6 +254,19 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Hosted CI [run 30265328569](https://github.com/Owlah2025/gradex/actions/runs/30265328569) passed
+  all five jobs — Backend, Frontend, Migrations, Admission Integration, and Guards — on exact
+  reviewed S1B3 head `9d3db91`.
+- Every S1B3 checkpoint carried its own CI evidence as it landed: `a75662a`, `a79fe0b`, `0be4878`,
+  and `e0e4ea0` green; `d79cbf9` **red** on the Frontend build and corrected by `c39a650`.
+- Run `30264250133` on `c39a650` failed Migrations at "Initialize containers", a runner step that
+  precedes any repository code. The preceding run passed Migrations and `c39a650` changed only
+  frontend pages and one document, so it was treated as infrastructure flake; run `30265328569`
+  confirmed that with no migration change in between.
+- The complete S1B3 local suite is green with PostgreSQL at schema 7, Redis, and MinIO: backend
+  formatting, build, vet on default and `integration` tags, `go test -race ./...`, and the full
+  integration suite under race. Frontend typecheck, lint, 21 `node:test` logic cases, and a
+  production build run with `.next` removed first.
 - Hosted CI [run 30251188682](https://github.com/Owlah2025/gradex/actions/runs/30251188682) passed
   all five jobs — Backend, Frontend, Migrations, Admission Integration, and Guards — on exact
   reviewed S1B2 head `7d8710e`.
@@ -297,6 +360,23 @@ Fast-follow gates are outside this count. Recalculate from
   changes; no test or independent-review rerun was required.
 
 ## Latest Review
+
+S1B3 passed independent read-only review at exact range `3b2f7a8..9d3db91`, reviewed by `agy` on
+`gemini-3.1-pro-high` through `scripts/agy-review.sh` under
+[D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews): **0 critical, 0 high, 0 medium,
+0 low**, verdict **APPROVE**. All nine dimensions were reported verified, the run reported
+`touched files: 0`, and the disposable detached worktree was confirmed unmodified on exit.
+
+One frozen range sufficed, unlike S1B2's two, because every checkpoint was pushed and CI-verified as
+it landed rather than at the end. Claude authored all eight commits and reviewed none.
+
+Three judgement calls were raised for the reviewer before dispatch — `CHANGE_REQUIRED` remaining
+recovery-eligible, role being absent from recovery eligibility, and the `recovery.go` exposure-guard
+allowlist entry. The report returned `OPEN QUESTIONS: none` and addressed none of them by name. A
+clean verdict is not the same as independent examination of those three, so they are carried to S1C
+as open judgement rather than settled precedent.
+
+Earlier:
 
 S1B2 passed independent read-only review under
 [D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews) across two consecutive frozen
@@ -416,14 +496,24 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 10/S1B3 is `IN_PROGRESS` — see [the August 1 record](daily/2026-08-01.md). Its outcome is safe
-password recovery plus one integrated Student authentication journey, closing S1B. Seven `Must`
-items are scheduled: dispose of the CI schema-drift carryover, non-enumerating reset request and
-single-use consumption, atomic password replacement with all-family invalidation, bilingual recovery
-screens, the `returnTo` carryover inside the integrated journey, the end-to-end Student journey with
-expanded bootstrap-Admin denial proof, and S1B-wide verification and independent review.
+Day 10/S1B3 is `CLOSED` at reviewed head `9d3db91`, completing S1B — see
+[the August 1 closeout](daily/2026-08-01.md#closeout). Day 11/S1C — staff lifecycle, enforcement, and
+the full authorization matrix — is next, scheduled for August 2 in
+[SLICES.md §5.4](SLICES.md#54-staff-lifecycle-enforcement-and-authorization-matrix-s1c).
 
-Seats are assigned under [D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews): Claude
-builds and plans S1B3, `agy` on `gemini-3.1-pro-high` reviews read-only. D-036 exists because D-035
-was scoped to S1B2 and expired when that slice closed at `7d8710e`; it is likewise scoped to S1B3
-alone, so S1C requires its own assignment. D-033 stays paused — Codex quota has not returned.
+Start the day by reconciling repository evidence, then plan S1C: Admin staff invitations with
+initial-password setup for Instructors and Admins and their screens, immediate suspension enforcement
+across new *and* existing sessions, the full role and ownership authorization matrix proven across
+every protected route that exists, the expanded full-surface rerun of bootstrap test 3, and the S1
+integration review spanning S1A, S1B, and S1C together.
+
+**S1C carries S1's complete close conditions. S1 does not close until S1C closes**, and no S2 work
+begins before it does.
+
+S1C must also dispose of four inherited carryovers and confirm or overturn three judgement calls the
+S1B3 review did not examine by name — all listed under Carryover above. Two of the carryovers are the
+same class of defect, a local gate that reads green while testing less than the hosted one.
+
+**The S1C builder and reviewer seats are unassigned, and this blocks implementation.** D-036 was
+scoped to S1B3 and expired with this closeout; seats never renew implicitly. D-033 stays paused
+because its precondition, returned Codex quota, has not been met.
