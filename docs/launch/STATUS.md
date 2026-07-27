@@ -2,10 +2,10 @@
 
 > Current date: **2026-07-27 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: 2026-07-27 at `c65cd53`; S1B3 confirmed closed at reviewed head `9d3db91`
-> Active slice: S1C — staff lifecycle, enforcement, and authorization matrix. Musts 1–2 complete at `c65cd53`; Musts 3–7 frozen for implementation in [specs/002-auth-rbac/s1c/](../../specs/002-auth-rbac/s1c/plan.md)
+> Last repository reconciliation: **2026-07-28 (D2) at `7e48ef5`**; all local gates re-run green on that tree
+> Active slice: S1C — staff lifecycle, enforcement, and authorization matrix. **Musts 1–6 complete; Must 7 open on a review obligation, not a build one.** The range `c65cd53..506e0b4` contains both Antigravity- and Claude-authored implementation and has no admissible independent verdict. Day record: [2026-07-28-d2.md](daily/2026-07-28-d2.md)
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
-> Days remaining: **19**
+> Days remaining: **18**
 > Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
 > Launch confidence: **Amber**
 
