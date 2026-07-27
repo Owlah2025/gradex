@@ -28,6 +28,13 @@ func NewStaffService(
 	if pool == nil {
 		return nil, errors.New("pgx pool is required for StaffService")
 	}
+	// The invitation's delivery intent is co-committed with its Identity
+	// evidence, so the writer is part of the invariant rather than an optional
+	// dependency. A nil writer would commit invitations that can never be
+	// delivered, silently.
+	if writer == nil {
+		return nil, errors.New("outbox writer is required for StaffService")
+	}
 	return &StaffService{
 		pool:        pool,
 		outbox:      writer,

@@ -102,6 +102,9 @@ type staffHandlers struct {
 type createInvitationRequest struct {
 	Email string        `json:"email" binding:"required"`
 	Role  identity.Role `json:"role" binding:"required"`
+	// Optional. Omitted means the request's Accept-Language, which itself falls
+	// back to the platform default of Arabic.
+	Locale identity.Locale `json:"locale"`
 }
 
 type invitationPreviewRequest struct {
@@ -139,16 +142,34 @@ func (h *staffHandlers) createInvitation(c *gin.Context) {
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())
 
+	// The invitee has no Account yet, so the notification locale comes from the
+	// inviting request: an explicit body field, else Accept-Language, else the
+	// platform default. Same resolution the admission surface already uses.
+	locale := req.Locale
+	if locale == "" {
+		resolved, ok := requestedLocale(c.GetHeader("Accept-Language"))
+		if !ok {
+			writeProblem(c, problem.ValidationFailed())
+			return
+		}
+		locale = resolved
+	}
+
 	issued, err := h.service.CreateStaffInvitation(c.Request.Context(), identity.CreateStaffInvitationRequest{
 		ActorPrincipal:   principal,
 		ActorSession:     session,
 		RecentAuthWindow: h.recentAuthWindow,
 		Email:            req.Email,
 		Role:             req.Role,
+		Locale:           locale,
 		Now:              now,
 		RequestID:        reqID,
 	})
 	if err != nil {
+		if errors.Is(err, identity.ErrInvalidLocale) {
+			writeProblem(c, problem.ValidationFailed())
+			return
+		}
 		if errors.Is(err, identity.ErrAccountAlreadyExists) {
 			writeProblem(c, problem.StateConflict())
 			return

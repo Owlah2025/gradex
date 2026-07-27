@@ -54,10 +54,15 @@ type CreateStaffInvitationRequest struct {
 	RecentAuthWindow time.Duration
 	Email            string
 	Role             Role
-	TTL              time.Duration
-	Now              time.Time
-	RequestID        string
-	Outbox           *outbox.Writer
+	// Locale addresses the invitation notification. The invitee has no Account
+	// yet, so unlike recovery — which reads the locale off the Account — it is
+	// supplied by the inviting Admin. Empty means the platform default, Arabic,
+	// matching the Accept-Language fallback the admission surface already uses.
+	Locale    Locale
+	TTL       time.Duration
+	Now       time.Time
+	RequestID string
+	Outbox    *outbox.Writer
 }
 
 type IssuedStaffInvitation struct {
@@ -111,6 +116,18 @@ func CreateStaffInvitation(
 
 	if req.Role != RoleInstructor && req.Role != RoleAdmin {
 		return IssuedStaffInvitation{}, fmt.Errorf("invalid invited role %q: only INSTRUCTOR or ADMIN can be invited", req.Role)
+	}
+
+	if req.Outbox == nil {
+		return IssuedStaffInvitation{}, errors.New("outbox writer is required to create a staff invitation")
+	}
+
+	locale := req.Locale
+	if locale == "" {
+		locale = LocaleArabic
+	}
+	if !locale.Valid() {
+		return IssuedStaffInvitation{}, ErrInvalidLocale
 	}
 
 	normalizedEmail, err := NormalizeEmail(req.Email)
@@ -215,32 +232,34 @@ func CreateStaffInvitation(
 		return IssuedStaffInvitation{}, fmt.Errorf("writing STAFF_INVITATION_CREATED evidence: %w", err)
 	}
 
-	// H3: Co-commit durable outbox intent inside the same transaction
-	if req.Outbox != nil {
-		_, err := req.Outbox.Append(ctx, tx, outbox.Event{
-			Type:              "identity.staff_invitation_created",
-			SchemaVersion:     1,
-			SourceModule:      "IDENTITY_AND_ACCESS",
-			AggregateType:     "STAFF_INVITATION",
-			AggregateID:       invitationID,
-			AggregateRevision: 1,
-			CorrelationID:     req.RequestID,
-			SafePayload: map[string]any{
-				"action_secret_id":  issuedSecret.ID,
-				"purpose":           string(ActionStaffInvitation),
-				"invited_role":      string(req.Role),
-				"secret_expires_at": issuedSecret.ExpiresAt,
-			},
-		}, outbox.VerificationDelivery{
-			Destination:       normalizedEmail,
-			Locale:            "en",
-			TemplateContract:  "staff-invitation-v1",
-			VerificationToken: issuedSecret.Bearer.Expose(),
-			ExpiresAt:         issuedSecret.ExpiresAt,
-		})
-		if err != nil {
-			return IssuedStaffInvitation{}, fmt.Errorf("writing staff invitation outbox intent: %w", err)
-		}
+	// The delivery intent is co-committed with the evidence above, inside this
+	// transaction. It is part of the invariant, not an optional extra: an
+	// invitation that commits without one can never be delivered and nothing
+	// downstream would report it.
+	_, err = req.Outbox.Append(ctx, tx, outbox.Event{
+		Type:              "identity.staff_invitation_created",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "STAFF_INVITATION",
+		AggregateID:       invitationID,
+		AggregateRevision: 1,
+		CorrelationID:     req.RequestID,
+		SafePayload: map[string]any{
+			"action_secret_id":  issuedSecret.ID,
+			"purpose":           string(ActionStaffInvitation),
+			"invited_role":      string(req.Role),
+			"locale":            string(locale),
+			"secret_expires_at": issuedSecret.ExpiresAt,
+		},
+	}, outbox.VerificationDelivery{
+		Destination:       normalizedEmail,
+		Locale:            string(locale),
+		TemplateContract:  "staff-invitation-v1",
+		VerificationToken: issuedSecret.Bearer.Expose(),
+		ExpiresAt:         issuedSecret.ExpiresAt,
+	})
+	if err != nil {
+		return IssuedStaffInvitation{}, fmt.Errorf("writing staff invitation outbox intent: %w", err)
 	}
 
 	invitation := StaffInvitation{

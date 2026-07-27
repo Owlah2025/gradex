@@ -3,13 +3,27 @@
 package identity
 
 import (
+	"bytes"
 	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
+
+// testInvitationOutbox builds the writer CreateStaffInvitation requires. The
+// delivery intent is co-committed with the invitation, so there is no valid
+// call without one.
+func testInvitationOutbox(t *testing.T) *outbox.Writer {
+	t.Helper()
+	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x51}, 32))
+	if err != nil {
+		t.Fatalf("constructing invitation outbox writer: %v", err)
+	}
+	return writer
+}
 
 // TestInvitationInvariantsI1_I9 tests the nine invitation boundary invariants.
 func TestInvitationInvariants(t *testing.T) {
@@ -37,6 +51,7 @@ func TestInvitationInvariants(t *testing.T) {
 		defer func() { _ = tx.Rollback(ctx) }()
 
 		_, err = CreateStaffInvitation(ctx, tx, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   studentP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -60,6 +75,7 @@ func TestInvitationInvariants(t *testing.T) {
 
 		tx1, _ := conn.Begin(ctx)
 		issued1, err := CreateStaffInvitation(ctx, tx1, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   adminP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -90,6 +106,7 @@ func TestInvitationInvariants(t *testing.T) {
 		// Re-invite same email -> supersedes old invitation
 		tx2, _ := conn.Begin(ctx)
 		issued2, err := CreateStaffInvitation(ctx, tx2, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   adminP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -142,6 +159,7 @@ func TestInvitationInvariants(t *testing.T) {
 
 		tx1, _ := conn.Begin(ctx)
 		issued, err := CreateStaffInvitation(ctx, tx1, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   adminP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -238,6 +256,7 @@ func TestInvitationInvariants(t *testing.T) {
 
 		tx1, _ := conn.Begin(ctx)
 		issued, err := CreateStaffInvitation(ctx, tx1, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   tempAdminP,
 			ActorSession:     tempAdminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -292,6 +311,7 @@ func TestInvitationInvariants(t *testing.T) {
 		// Create an invitation for a target email
 		tx1, _ := conn.Begin(ctx)
 		issued, err := CreateStaffInvitation(ctx, tx1, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   adminP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -342,6 +362,7 @@ func TestInvitationInvariants(t *testing.T) {
 
 		tx1, _ := conn.Begin(ctx)
 		issued, err := CreateStaffInvitation(ctx, tx1, CreateStaffInvitationRequest{
+			Outbox:           testInvitationOutbox(t),
 			ActorPrincipal:   adminP,
 			ActorSession:     adminSess,
 			RecentAuthWindow: 10 * time.Minute,
@@ -423,4 +444,100 @@ func TestInvitationInvariants(t *testing.T) {
 
 func minute(m int) time.Duration {
 	return time.Duration(m) * time.Minute
+}
+
+// The invitation's delivery intent is co-committed with its Identity evidence,
+// so a missing outbox writer must refuse the command rather than commit an
+// invitation nobody can ever deliver. Both the construction boundary and the
+// domain command are asserted, because either one alone leaves the other open.
+func TestInvitationRefusesWithoutOutboxWriter(t *testing.T) {
+	freshSchema(t)
+	p, ctx := pool(t)
+
+	now := time.Now().UTC()
+	_, adminP := createTestAdmin(t, p, "outbox_guard_admin@example.com")
+	adminSess := Session{AuthenticatedAt: now}
+
+	t.Run("service construction refuses a nil writer", func(t *testing.T) {
+		if _, err := NewStaffService(p, nil, nil); err == nil {
+			t.Fatal("NewStaffService accepted a nil outbox writer")
+		}
+	})
+
+	t.Run("domain command refuses a nil writer", func(t *testing.T) {
+		tx, err := p.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		if _, err := CreateStaffInvitation(ctx, tx, CreateStaffInvitationRequest{
+			ActorPrincipal:   adminP,
+			ActorSession:     adminSess,
+			RecentAuthWindow: 10 * time.Minute,
+			Email:            "no_outbox@example.com",
+			Role:             RoleInstructor,
+			Now:              now,
+			RequestID:        "req-outbox-guard",
+			Outbox:           nil,
+		}); err == nil {
+			t.Fatal("CreateStaffInvitation committed an invitation with no delivery intent")
+		}
+	})
+
+	t.Run("omitted locale defaults to Arabic, not English", func(t *testing.T) {
+		tx, err := p.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		if _, err := CreateStaffInvitation(ctx, tx, CreateStaffInvitationRequest{
+			ActorPrincipal:   adminP,
+			ActorSession:     adminSess,
+			RecentAuthWindow: 10 * time.Minute,
+			Email:            "locale_default@example.com",
+			Role:             RoleInstructor,
+			Now:              now,
+			RequestID:        "req-locale-default",
+			Outbox:           testInvitationOutbox(t),
+		}); err != nil {
+			t.Fatalf("creating invitation: %v", err)
+		}
+
+		var locale string
+		if err := tx.QueryRow(ctx,
+			`SELECT safe_payload->>'locale' FROM outbox_events
+			  WHERE event_type = 'identity.staff_invitation_created'
+			  ORDER BY occurred_at DESC LIMIT 1`,
+		).Scan(&locale); err != nil {
+			t.Fatalf("reading outbox locale: %v", err)
+		}
+		if locale != string(LocaleArabic) {
+			t.Fatalf("invitation locale = %q, want %q — Arabic is the platform default",
+				locale, LocaleArabic)
+		}
+	})
+
+	t.Run("an invalid locale is refused", func(t *testing.T) {
+		tx, err := p.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		if _, err := CreateStaffInvitation(ctx, tx, CreateStaffInvitationRequest{
+			ActorPrincipal:   adminP,
+			ActorSession:     adminSess,
+			RecentAuthWindow: 10 * time.Minute,
+			Email:            "bad_locale@example.com",
+			Role:             RoleInstructor,
+			Locale:           Locale("fr"),
+			Now:              now,
+			RequestID:        "req-locale-invalid",
+			Outbox:           testInvitationOutbox(t),
+		}); !errors.Is(err, ErrInvalidLocale) {
+			t.Fatalf("invalid locale returned %v, want ErrInvalidLocale", err)
+		}
+	})
 }
