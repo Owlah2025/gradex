@@ -485,10 +485,17 @@ introduced **three fail-open constructions of its own** — conditional CSRF, a 
 default, and an optional outbox intent — so the range was rejected a second time at
 0 critical, 1 high, 3 medium.
 
-Round two closed the conditional CSRF and the silent default before hitting the quota limit. **Two
-findings remain open and the slice cannot close on them:** the invitation outbox intent is skipped
-when its writer is nil, and the notification locale is hardcoded to `"en"` on an Arabic-default
-platform.
+Round two closed the conditional CSRF and the silent default before hitting the quota limit. The
+last two findings — the optional invitation outbox intent and the hardcoded `"en"` locale — were
+closed at `506e0b4` **by Claude, on the developer's explicit instruction**, because Antigravity's
+quota did not return inside the working session. Both new assertions were mutation-checked.
+
+**That creates a review boundary the slice must not be closed across.** `506e0b4` is
+Claude-authored implementation inside a range Claude reviews, so **S1C cannot close on Claude's
+review alone.** It needs an independent pass over `c65cd53..506e0b4` once Antigravity's quota
+returns, or a recorded developer risk acceptance naming the exposure. Never-self-approve is not
+waived by the developer having asked for the code — the same rule that made Antigravity's
+self-review inadmissible applies here symmetrically.
 
 The pattern across both rounds is one class — **a control that silently degrades instead of
 refusing** — and it is worth naming because five separate instances appeared in a slice whose whole
@@ -648,13 +655,11 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 **Close S1C's two remaining review findings, then re-review the full range.** S1C is at `0b1f150`
 and rejected; it does not close on the current head.
 
-1. **Dispatch the two-finding delta to Antigravity when its quota resets** (round two hit
-   `RESOURCE_EXHAUSTED` on 2026-07-27 at about 19:54 with a stated ~1h46m reset). The brief is
-   prepared and resumes conversation `7c5eb593` so the implementer keeps its context:
-   - make the invitation outbox intent mandatory — `NewStaffService` must reject a nil writer and
-     `CreateStaffInvitation` must not skip the append;
-   - carry the recipient's locale instead of the hardcoded `"en"`, matching the mechanism the S1B1
-     admission and S1B3 recovery paths already use.
+1. **Obtain an independent review of `c65cd53..506e0b4`.** Every finding is closed and every gate is
+   green, but the range now contains both Antigravity-authored and Claude-authored implementation,
+   so neither party can close it alone. Dispatch to Antigravity when its quota returns, or record a
+   developer risk acceptance naming exactly which commits are unreviewed by an independent party
+   (`506e0b4`, and the `router.go` repair inside `0b1f150`).
 2. **Re-review the corrected range plus the authorization, session, and suspension boundaries it
    touches.** Reproduce the matrix drift cases and the fail-closed probes again rather than trusting
    the previous round's evidence — the harness changed under them.
