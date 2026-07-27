@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,7 +12,16 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
+)
+
+const (
+	staffInvitationBodyLimit  int64 = 1024
+	staffPreviewBodyLimit     int64 = 512
+	staffCompletionBodyLimit  int64 = 2048
+	staffSuspendBodyLimit     int64 = 512
+	staffReinstateBodyLimit   int64 = 512
 )
 
 type staffService interface {
@@ -21,15 +31,60 @@ type staffService interface {
 	RevokeStaffInvitation(ctx context.Context, req identity.RevokeStaffInvitationRequest) error
 	SuspendAccount(ctx context.Context, req identity.SuspendAccountRequest) (identity.SuspendAccountResult, error)
 	ReinstateAccount(ctx context.Context, req identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error)
+	ListPendingInvitations(ctx context.Context, principal identity.Principal) ([]identity.StaffInvitation, error)
 }
 
 type StaffFoundation struct {
-	service     staffService
-	compromised identity.CompromisedRangeSource
+	service          staffService
+	compromised      identity.CompromisedRangeSource
+	limiter          *ratelimit.Limiter
+	endpointPolicies map[string]ratelimit.Policy
 }
 
-func NewStaffFoundation(service staffService, compromised identity.CompromisedRangeSource) *StaffFoundation {
-	return &StaffFoundation{service: service, compromised: compromised}
+type StaffFoundationOptions struct {
+	Service          staffService
+	Compromised      identity.CompromisedRangeSource
+	Limiter          *ratelimit.Limiter
+	EndpointPolicies map[string]ratelimit.Policy
+}
+
+var requiredStaffPolicyEndpoints = [...]string{
+	"staff-invitations-create",
+	"staff-invitations-preview",
+	"staff-invitations-complete",
+}
+
+func NewStaffFoundation(options StaffFoundationOptions) (*StaffFoundation, error) {
+	if options.Service == nil {
+		return nil, errors.New("staff service is required")
+	}
+	if options.Limiter == nil {
+		return nil, errors.New("staff rate limiter is required")
+	}
+	if len(options.EndpointPolicies) == 0 {
+		return nil, errors.New("staff endpoint policies are required")
+	}
+	endpointPolicies := make(map[string]ratelimit.Policy, len(options.EndpointPolicies))
+	for endpoint, policy := range options.EndpointPolicies {
+		if endpoint == "" || endpoint != policy.Endpoint {
+			return nil, errors.New("staff endpoint policy key does not match its endpoint")
+		}
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		endpointPolicies[endpoint] = policy
+	}
+	for _, endpoint := range requiredStaffPolicyEndpoints {
+		if _, configured := endpointPolicies[endpoint]; !configured {
+			return nil, fmt.Errorf("required staff endpoint policy %q is missing", endpoint)
+		}
+	}
+	return &StaffFoundation{
+		service:          options.Service,
+		compromised:      options.Compromised,
+		limiter:          options.Limiter,
+		endpointPolicies: endpointPolicies,
+	}, nil
 }
 
 type staffHandlers struct {
@@ -72,12 +127,7 @@ func (h *staffHandlers) createInvitation(c *gin.Context) {
 		writeProblem(c, problem.Unauthenticated())
 		return
 	}
-
-	var req createInvitationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeProblem(c, problem.ValidationFailed())
-		return
-	}
+	req := c.MustGet(strictJSONBodyContextKey).(*createInvitationRequest)
 
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())
@@ -118,23 +168,38 @@ func (h *staffHandlers) createInvitation(c *gin.Context) {
 }
 
 func (h *staffHandlers) listInvitations(c *gin.Context) {
-	_, ok := principalFrom(c)
+	principal, ok := principalFrom(c)
 	if !ok {
 		writeProblem(c, problem.NotAuthorized())
 		return
 	}
-	// Stub/response for listing pending invitations
-	c.JSON(http.StatusOK, gin.H{
-		"invitations": []gin.H{},
-	})
+
+	invitations, err := h.service.ListPendingInvitations(c.Request.Context(), principal)
+	if err != nil {
+		if errors.Is(err, identity.ErrUnauthorized) {
+			writeProblem(c, problem.NotAuthorized())
+			return
+		}
+		writeProblem(c, problem.Internal(requestid.FromContext(c.Request.Context())))
+		return
+	}
+
+	items := make([]gin.H, 0, len(invitations))
+	for _, inv := range invitations {
+		items = append(items, gin.H{
+			"id":           inv.ID,
+			"email":        inv.Email,
+			"invited_role": inv.InvitedRole,
+			"state":        inv.State,
+			"created_at":   inv.CreatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"invitations": items})
 }
 
 func (h *staffHandlers) previewInvitation(c *gin.Context) {
-	var req invitationPreviewRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeProblem(c, problem.ValidationFailed())
-		return
-	}
+	req := c.MustGet(strictJSONBodyContextKey).(*invitationPreviewRequest)
 
 	now := time.Now().UTC()
 	prev, err := h.service.PreviewStaffInvitation(c.Request.Context(), req.Bearer, now)
@@ -155,11 +220,7 @@ func (h *staffHandlers) previewInvitation(c *gin.Context) {
 }
 
 func (h *staffHandlers) completeInvitation(c *gin.Context) {
-	var req completeInvitationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeProblem(c, problem.ValidationFailed())
-		return
-	}
+	req := c.MustGet(strictJSONBodyContextKey).(*completeInvitationRequest)
 
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())
@@ -310,7 +371,12 @@ func (h *staffHandlers) reinstateStaff(c *gin.Context) {
 
 	subjectID := c.Param("id")
 	var req reinstateStaffRequest
-	_ = c.ShouldBindJSON(&req)
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeProblem(c, problem.ValidationFailed())
+			return
+		}
+	}
 
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())

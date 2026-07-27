@@ -281,9 +281,19 @@ func mountStaffRoutes(
 ) {
 	staffH := &staffHandlers{service: foundation.service, compromised: foundation.compromised}
 
-	// Anonymous / public endpoints
-	v1.POST("/staff/invitations/preview", staffH.previewInvitation)
-	v1.POST("/staff/invitations/complete", staffH.completeInvitation)
+	// Anonymous / public endpoints with rate limiting and body size limits
+	v1.POST(
+		"/staff/invitations/preview",
+		strictJSONMiddleware(func() any { return &invitationPreviewRequest{} }, staffPreviewBodyLimit),
+		foundation.requireStaffRateDecision("staff-invitations-preview", staffPreviewBearerIdentifier),
+		staffH.previewInvitation,
+	)
+	v1.POST(
+		"/staff/invitations/complete",
+		strictJSONMiddleware(func() any { return &completeInvitationRequest{} }, staffCompletionBodyLimit),
+		foundation.requireStaffRateDecision("staff-invitations-complete", staffCompletionBearerIdentifier),
+		staffH.completeInvitation,
+	)
 
 	// Protected endpoints (require auth + CapAdminOperations capability)
 	staffGroup := v1.Group("/staff")
@@ -292,7 +302,11 @@ func mountStaffRoutes(
 		requireCapability(principals, logger, identity.CapAdminOperations),
 	)
 	{
-		staffGroup.POST("/invitations", staffH.createInvitation)
+		staffGroup.POST("/invitations",
+			strictJSONMiddleware(func() any { return &createInvitationRequest{} }, staffInvitationBodyLimit),
+			foundation.requireStaffRateDecision("staff-invitations-create", staffInvitationEmailIdentifier),
+			staffH.createInvitation,
+		)
 		staffGroup.GET("/invitations", staffH.listInvitations)
 		staffGroup.POST("/invitations/:id/revoke", staffH.revokeInvitation)
 		staffGroup.POST("/:id/suspend", staffH.suspendStaff)

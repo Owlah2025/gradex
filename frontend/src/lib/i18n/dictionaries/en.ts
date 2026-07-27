@@ -136,6 +136,10 @@ export const en = {
       password: "Password",
       completeOnboarding: "Complete Onboarding",
       completingOnboarding: "Completing onboarding…",
+      accountId: "Account ID",
+      inviteSuccess: "Invitation sent successfully.",
+      suspendSuccess: "Account suspended.",
+      reinstateSuccess: "Account reinstated.",
     },
     resetPassword: {
       title: "Choose a new password",

@@ -42,6 +42,7 @@ export function StaffManagement() {
 
       if (!res.ok) throw new Error("Invite failed");
       setInviteStatus("success");
+      setInviteMsg(t.auth.staff.inviteSuccess);
       setInviteEmail("");
     } catch {
       setInviteStatus("error");
@@ -63,6 +64,7 @@ export function StaffManagement() {
 
       if (!res.ok) throw new Error("Suspend failed");
       setSuspendStatus("success");
+      setSuspendMsg(t.auth.staff.suspendSuccess);
       setSuspendID("");
       setSuspendReason("");
     } catch {
@@ -85,6 +87,7 @@ export function StaffManagement() {
 
       if (!res.ok) throw new Error("Reinstate failed");
       setReinstateStatus("success");
+      setReinstateMsg(t.auth.staff.reinstateSuccess);
       setReinstateID("");
       setReinstateReason("");
     } catch {
@@ -143,7 +146,7 @@ export function StaffManagement() {
 
         <form onSubmit={handleSuspend} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field htmlFor="suspend-account-id" label="Account ID">
+            <Field htmlFor="suspend-account-id" label={t.auth.staff.accountId}>
               <Input
                 id="suspend-account-id"
                 type="text"
@@ -180,7 +183,7 @@ export function StaffManagement() {
 
         <form onSubmit={handleReinstate} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field htmlFor="reinstate-account-id" label="Account ID">
+            <Field htmlFor="reinstate-account-id" label={t.auth.staff.accountId}>
               <Input
                 id="reinstate-account-id"
                 type="text"

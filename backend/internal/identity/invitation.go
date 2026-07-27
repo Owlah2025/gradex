@@ -506,3 +506,41 @@ func RevokeStaffInvitation(
 
 	return nil
 }
+
+// ListPendingInvitations returns all PENDING invitations. Authorization is the caller's responsibility.
+func ListPendingInvitations(
+	ctx context.Context,
+	tx pgx.Tx,
+	actorPrincipal Principal,
+) ([]StaffInvitation, error) {
+	decision := Authorize(actorPrincipal, CapAdminOperations)
+	if !decision.Allowed {
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, decision.Reason)
+	}
+
+	rows, err := tx.Query(ctx,
+		`SELECT id::text, normalized_email, email, invited_role, inviter_account_id::text, state, created_at, updated_at
+		   FROM staff_invitations
+		  WHERE state = 'PENDING'
+		  ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing pending invitations: %w", err)
+	}
+	defer rows.Close()
+
+	var invitations []StaffInvitation
+	for rows.Next() {
+		var inv StaffInvitation
+		var role, state string
+		if err := rows.Scan(&inv.ID, &inv.NormalizedEmail, &inv.Email, &role, &inv.InviterAccountID, &state, &inv.CreatedAt, &inv.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning invitation row: %w", err)
+		}
+		inv.InvitedRole = Role(role)
+		inv.State = StaffInvitationState(state)
+		invitations = append(invitations, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating invitation rows: %w", err)
+	}
+	return invitations, nil
+}

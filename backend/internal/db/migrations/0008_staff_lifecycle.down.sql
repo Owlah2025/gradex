@@ -23,6 +23,8 @@ ALTER TABLE identity_security_events
 ALTER TABLE identity_action_secrets
     DROP CONSTRAINT identity_action_secrets_account_id_purpose;
 
+DELETE FROM identity_action_secrets WHERE purpose = 'STAFF_INVITATION';
+
 ALTER TABLE identity_action_secrets
     ALTER COLUMN account_id SET NOT NULL;
 

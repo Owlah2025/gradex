@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/video"
 )
 
@@ -51,17 +53,38 @@ func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engi
 	reporter := health.New(time.Second)
 	reporter.MarkStarted()
 
+	staffLimiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
+	staffPolicies := map[string]ratelimit.Policy{
+		"staff-invitations-create":   ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-create"),
+		"staff-invitations-preview":  ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-preview"),
+		"staff-invitations-complete": ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-complete"),
+	}
+	staffFoundation, err := NewStaffFoundation(StaffFoundationOptions{
+		Service:          fakeStaffService{},
+		Limiter:          staffLimiter,
+		EndpointPolicies: staffPolicies,
+	})
+	if err != nil {
+		t.Fatalf("constructing staff foundation: %v", err)
+	}
+
 	// Entitlements allow everything, so nothing downstream of the capability
 	// policy can be the reason a request is refused. If a call is denied here,
 	// the policy denied it.
 	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
 		fakeEntitlements{allowed: true}, principals,
-		WithStaffFoundation(NewStaffFoundation(fakeStaffService{}, nil)),
+		WithStaffFoundation(staffFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
 	return r, buf
+}
+
+type fakeRateStore struct{}
+
+func (fakeRateStore) Decide(context.Context, []ratelimit.Entry) (bool, error) {
+	return true, nil
 }
 
 type fakeStaffService struct{}
@@ -83,6 +106,9 @@ func (fakeStaffService) SuspendAccount(context.Context, identity.SuspendAccountR
 }
 func (fakeStaffService) ReinstateAccount(context.Context, identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error) {
 	return identity.ReinstateAccountResult{}, nil
+}
+func (fakeStaffService) ListPendingInvitations(context.Context, identity.Principal) ([]identity.StaffInvitation, error) {
+	return nil, nil
 }
 
 // protectedRoutes is every route that requires a capability decision. Bootstrap

@@ -192,3 +192,23 @@ func DevelopmentLoginPolicy() Policy {
 		LocalMaxKeys: 4096,
 	}
 }
+
+// DevelopmentStaffInvitationPolicy is a conservative fixture for staff
+// invitation endpoints. Creation is admin-only so the limit is generous;
+// preview and completion are anonymous and must be tighter to prevent
+// bearer brute-forcing.
+func DevelopmentStaffInvitationPolicy(endpoint string) Policy {
+	return Policy{
+		ID:       endpoint + "-v1",
+		Category: "STAFF_LIFECYCLE",
+		Endpoint: endpoint,
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 20, LocalLimit: 3},
+			{Dimension: DimensionIdentifier, Limit: 5, LocalLimit: 2},
+			{Dimension: DimensionNetwork, Limit: 10, LocalLimit: 2},
+			{Dimension: DimensionGlobal, Limit: 60, LocalLimit: 8},
+		},
+		LocalMaxKeys: 4096,
+	}
+}

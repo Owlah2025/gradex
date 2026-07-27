@@ -136,6 +136,10 @@ export const ar: Dictionary = {
       password: "كلمة المرور",
       completeOnboarding: "إكمال الانضمام",
       completingOnboarding: "جاري إكمال الانضمام…",
+      accountId: "معرّف الحساب",
+      inviteSuccess: "تم إرسال الدعوة بنجاح.",
+      suspendSuccess: "تم تعليق الحساب.",
+      reinstateSuccess: "تم إعادة تفعيل الحساب.",
     },
     resetPassword: {
       title: "اختر كلمة مرور جديدة",
