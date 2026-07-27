@@ -40,6 +40,16 @@ const migrationsSource = "file://internal/db/migrations"
 // forever instead of failing the release.
 const lockTimeout = 30 * time.Second
 
+// maxVersionCommand names the subcommand that prints db.MaxSchemaVersion.
+//
+// It exists so the migration contract has exactly one authority. CI previously
+// asserted the post-migration schema version as a hardcoded literal kept in
+// step with the Go constant by comment alone; migration 0006 raised the
+// constant, the literal was not updated, and the Migrations job failed on an
+// otherwise sound slice. Reading the value from the binary makes that class of
+// drift unrepresentable rather than merely discouraged.
+const maxVersionCommand = "max-version"
+
 func main() {
 	// The DSN is scrubbed from every message: it carries the database
 	// password, and a migration failure is exactly when output gets pasted
@@ -80,7 +90,7 @@ func newScrubber() func(string) string {
 }
 
 func usage() error {
-	return errors.New("usage: migrate <up|down|version> [steps]")
+	return errors.New("usage: migrate <up|down|version|max-version> [steps]")
 }
 
 func run() error {
@@ -88,6 +98,14 @@ func run() error {
 	args := flag.Args()
 	if len(args) == 0 {
 		return usage()
+	}
+
+	// max-version reports the schema version this build targets. It answers a
+	// question about the compiled binary, not about any database, so it runs
+	// before configuration loading: CI must be able to ask what version to
+	// expect without a reachable database or a valid DSN.
+	if args[0] == maxVersionCommand {
+		return maxVersion()
 	}
 
 	cfg, err := config.Load()
@@ -162,6 +180,13 @@ func down(m *migrate.Migrate, cfg *config.Config, args []string) error {
 
 func version(m *migrate.Migrate) error {
 	return report(m, "version")
+}
+
+// maxVersion prints the highest schema version this build supports, as a bare
+// integer on stdout so a shell can capture it without parsing prose.
+func maxVersion() error {
+	_, err := fmt.Fprintf(os.Stdout, "%d\n", db.MaxSchemaVersion)
+	return err
 }
 
 // requireClean refuses to act on a database left dirty by a failed migration.

@@ -165,17 +165,35 @@ jobs:
       - name: Verify schema version and expected objects
         working-directory: backend
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          # The expected version is read from the build under test rather than
+          # written here. A literal kept in step with db.MaxSchemaVersion by
+          # comment alone already drifted once: migration 0006 raised the
+          # constant, this assertion still said 5, and the job failed on an
+          # otherwise sound slice. There is now one authority for the number.
+          expected="$(go run ./cmd/migrate max-version)"
+          case "$expected" in
+            ''|*[!0-9]*)
+              echo "migrate max-version returned a non-numeric value: '$expected'" >&2
+              exit 1
+              ;;
+          esac
+          echo "asserting post-migration schema version $expected"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v expected="$expected" <<'SQL'
+          -- psql does not substitute :variables inside $$-quoted blocks, so the
+          -- expected version is stored in a session setting first, outside the
+          -- dollar quotes, and read back inside.
+          SELECT set_config('gradex.expected_schema_version', :'expected', false);
+
           DO $$
           DECLARE
             v bigint;
             d boolean;
             missing text;
+            expected bigint := current_setting('gradex.expected_schema_version')::bigint;
           BEGIN
             SELECT version, dirty INTO v, d FROM schema_migrations ORDER BY version DESC LIMIT 1;
-            -- Keep in step with MaxSchemaVersion in internal/db/schema.go.
-            IF v IS DISTINCT FROM 6 THEN
-              RAISE EXCEPTION 'schema version is %, expected 6', v;
+            IF v IS DISTINCT FROM expected THEN
+              RAISE EXCEPTION 'schema version is %, expected %', v, expected;
             END IF;
             IF d THEN
               RAISE EXCEPTION 'schema is dirty after a successful migration';
