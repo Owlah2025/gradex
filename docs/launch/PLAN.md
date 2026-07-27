@@ -3,10 +3,14 @@
 > Status: Active
 > Schedule: 2026-07-23 through 2026-08-15
 > Public go-live target: 2026-08-15, readiness-gated
-> Delivery team: Solo developer, Claude builder, `agy` reviewer for the active S1B2 handoff (see
-> [D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews)); the standing assignment is
+> Delivery team: Solo developer, Claude builder, `agy` reviewer for the active S1C slice (see
+> [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews)); the standing assignment is
 > Codex builder and Claude reviewer under
-> [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)
+> [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review), which stays paused
+> until Codex availability is explicitly reverified
+> Downstream forecast: August 8 is recorded as no longer credible and a full-PRD August 15 launch as
+> not forecastable — see [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
+> and [DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md)
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -39,11 +43,15 @@ the source-of-truth order in [the documentation index](../README.md#source-of-tr
 - **Developer/product owner:** approves product decisions, external commitments, accepted risks,
   scope changes, and the public go/no-go decision.
 - **Builder:** plans and implements one bounded slice, runs its checks, documents evidence, and
-  corrects review findings. Standing holder is Codex; **Claude holds this seat for the active S1B2
-  slice** under [D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews).
+  corrects review findings. Standing holder is Codex; **Claude holds this seat for the active S1C
+  slice** under [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews).
 - **Reviewer:** reviews the exact commit range without editing it, checking requirements, security,
   privacy, authorization, idempotency, concurrency, tests, observability, and scope. Standing holder
-  is Claude; **`agy` holds this seat for the active S1B2 slice** under D-035.
+  is Claude; **`agy` holds this seat for the active S1C slice** under D-037.
+
+Seat decisions are scoped to one slice and expire at its frozen reviewed head. They never renew
+implicitly: the next slice requires its own dated assignment, and D-033's restoration requires Codex
+availability to be explicitly reverified rather than assumed from silence.
 
 The reviewer must not review a moving target. Record the reviewed commit range in the daily record.
 Critical and high findings return to the builder and must be rechecked before the slice closes.
@@ -65,8 +73,9 @@ must never be recorded as one:
   silence.
 
 `agy` reviews through `scripts/agy-review.sh <base>..<head>` under D-032's existing containment
-rules. It is the approved fallback whenever Claude is unavailable, and under D-035 it is the
-**assigned** reviewer for S1B2 because Claude authors that range.
+rules. It is the approved fallback whenever Claude is unavailable, and under D-037 it is the
+**assigned** reviewer for S1C because Claude authors that range — including the S1 integration review,
+whose scope contains Claude-authored commits.
 
 ### Work-in-progress rule
 
@@ -123,7 +132,7 @@ new feature work forward.
 
 1. Run the checks required by today's acceptance evidence.
 2. Dispatch the independent read-only review on the exact stable commit range from a disposable
-   detached worktree, using whichever model did not author the range. While D-035 is active that is
+   detached worktree, using whichever model did not author the range. While D-037 is active that is
    `scripts/agy-review.sh <base>..<head>`.
 3. Correct and retest all critical/high findings.
 4. Record completed, incomplete, blocked, and deliberately deferred work.
@@ -352,9 +361,16 @@ suspended account loses protected access immediately rather than at next token e
 close conditions are satisfied before any S2 work begins.
 
 > Replanned 2026-07-30: the approved S1B1–S1B3 split moves S1C from July 31 to August 2 and S2 to
-> August 3. August 7 remains the next protected recovery point and is not silently spent. S3–S8
-> remain `TBD`, and the fixed August 8–15 runway is forecast-at-risk until the downstream calendar
-> is reconciled.
+> August 3. August 7 remains the next protected recovery point and is not silently spent.
+>
+> **Reconciled 2026-08-02 as [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy).**
+> The August 8–15 runway is no longer merely "at risk": August 8 is recorded as **not credible** and a
+> full-PRD August 15 launch as **not forecastable**. Six slices (S3–S8) have three available dates
+> (August 4–6), and nine feature slices (S2–S10) have six dates before the August 10 integration
+> runway. S3–S8 stay `TBD` rather than receive dates the evidence contradicts. Three remedies await a
+> developer decision in
+> [DOWNSTREAM_RECONCILIATION.md §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval);
+> none is adopted, and none of them changes S1C.
 
 ### Week 2 — Product and Revenue Journey
 
@@ -372,10 +388,13 @@ close conditions are satisfied before any S2 work begins.
 **Exit evidence:** Instructors cannot publish or change prices; draft content does not leak; the
 live revision remains stable until replacement approval.
 
-> **Unresolved downstream conflict, updated 2026-07-30.** S2 now occupies August 3. S3–S8 cannot
-> all fit before the fixed August 8 runway without compressing slices or spending the protected
-> August 7 recovery day. Neither is assumed. [SLICES.md §2](SLICES.md#2-slice-order) keeps S3–S8
-> `TBD` until the downstream forecast is explicitly reconciled.
+> **Downstream conflict reconciled 2026-08-02, and the answer is negative.** S2 occupies August 3.
+> S3–S8 do not fit before the fixed August 8 runway: six slices, three dates, with no velocity
+> assumption required to reach that result. Compressing slices and spending the protected August 7
+> recovery day are both still refused. [SLICES.md §2](SLICES.md#2-slice-order) keeps S3–S8 `TBD`,
+> now on a recorded verdict rather than pending analysis — see
+> [DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md) and
+> [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy).
 
 #### Date TBD — Catalog, search, and public experience
 

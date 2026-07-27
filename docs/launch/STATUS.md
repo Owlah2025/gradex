@@ -1,10 +1,10 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-08-01 — advanced by user
-> Last repository reconciliation: 2026-08-01 — S1B3 closed at reviewed head `9d3db91` with green hosted CI
-> Scheduled day: Day 10 — Authentication and RBAC, S1B3 Recovery and Student integration, `CLOSED`
-> Target public go-live: 2026-08-15
-> Days remaining after today: 14 calendar days
+> Current schedule date: 2026-08-02 — advanced by user
+> Last repository reconciliation: 2026-08-02 — start of day at `881639d`; S1B3 confirmed closed at reviewed head `9d3db91`
+> Scheduled day: Day 11 — Authentication and RBAC, S1C Staff lifecycle, enforcement, and authorization matrix, `PLANNED`
+> Target public go-live: 2026-08-15 — **recorded as not forecastable at full PRD scope, see [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)**
+> Days remaining after today: 13 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
@@ -14,11 +14,21 @@ deliberately deferred all external-owner outreach to August 6. All 21 required e
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) remain open, with several still required by August 9 or 12.
 This compressed response window can move the readiness-gated August 15 launch. Confidence stays Red
 because it is driven by the 21 open launch gates and by how little of the product is implemented —
-not by design-review state, which is sound. S1B's approved three-part split adds two critical-path
-days, moves S1C to August 2 and S2 to August 3, and leaves six downstream slices competing for four
-dates before the fixed August 8 runway. `LG-021` also adds an unresolved production dependency for
-compromised-password screening. The delivery foundation, S1A, and S1B1 are sound, but the remaining
-full-MVP forecast is not yet credible.
+not by design-review state, which is sound. `LG-021` also adds an unresolved production dependency for
+compromised-password screening. The delivery foundation, S1A, and S1B are sound, but the remaining
+full-MVP forecast is not credible.
+
+**The downstream calendar was reconciled on 2026-08-02 and the answer is negative
+([D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)).**
+Six slices (S3–S8) have three available dates (August 4–6), and nine feature slices (S2–S10) have six
+dates before the August 10 integration runway. **August 8 is no longer a credible runway start, and a
+full-PRD August 15 launch is not forecastable.** That result needs no velocity assumption — it is
+arithmetic on dates — and the observed velocity makes it worse: S1 was scoped as one day and took five.
+Three remedies await a developer decision in
+[DOWNSTREAM_RECONCILIATION.md §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval),
+with the recommendation being **move the public target and preserve scope**, holding a scope reduction
+in reserve until the August 6 outreach returns. Red is therefore now driven by a *recorded* forecast
+failure with a named remedy set, not by an unexamined one.
 
 ## Current Phase
 
@@ -102,9 +112,20 @@ builder/planner seat when its quota returned, Claude resumed independent read-on
 remains the approved fallback.
 
 **Roles moved again mid-S1B2 on 2026-07-31 under
-[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews), and were reassigned for S1B3
-under [D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews).** Both are scoped to a
-single slice and expire with it; **D-036 expired at this closeout, so the S1C seats are unassigned.**
+[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews), were reassigned for S1B3 under
+[D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews), and are assigned for S1C under
+[D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews): Claude builds, `agy` on
+`gemini-3.1-pro-high` reviews through `scripts/agy-review.sh`.** Each is scoped to a single slice and
+expires at that slice's frozen reviewed head; D-036 expired at the S1B3 closeout and D-037 replaced it
+rather than extending it. Seats never renew implicitly, so S2 needs its own dated assignment.
+
+**D-033 remains paused, and its restoration now requires explicit reverification.** Its precondition is
+returned Codex quota; no report of quota is not a return of quota, and work must not begin under D-033
+until availability is verified rather than assumed.
+
+Under D-037 the **S1 integration review** spanning S1A, S1B, and S1C is also dispatched to `agy`, not
+self-checked: its scope contains Claude-authored commits.
+
 The S1B2 history below is retained for the record.
 
  Codex exhausted its quota with
@@ -117,9 +138,18 @@ may explicitly restore D-033's assignment.
 
 Repository evidence at the latest reconciliation:
 
-- Current branch: `feature/002-authentication-rbac`.
-- Current synchronized implementation HEAD/upstream is `9d3db91`, which is also the reviewed S1B3
-  head. Earlier reviewed heads: S1A `70b4809`, S1B1 `ad1b8f6`, S1B2 `7d8710e`.
+- Current branch: `feature/002-authentication-rbac`, synchronized with upstream at `881639d`, the S1B3
+  closeout commit.
+- The latest reviewed implementation head is `9d3db91` (S1B3). Earlier reviewed heads: S1A `70b4809`,
+  S1B1 `ad1b8f6`, S1B2 `7d8710e`.
+- Start-of-day Day 11 gates pass at `881639d`: backend `gofmt`, `go build ./...`, `go vet ./...`,
+  `go vet -tags=integration ./...`, and `go test ./...`; frontend `typecheck`, `lint`, 21 of 21
+  `node:test` cases, and a **clean** production build with `.next` removed first; documentation and
+  exposure guards.
+- The only untracked file is the user-owned `.caveman.json`.
+  **`Gradex_Financial_Model_v1.xlsx` is no longer present in the working tree**, contrary to the
+  inventory carried in earlier records. It was never tracked and no launch work touched it; the absence
+  is recorded as a correction, not acted on.
 - The database schema is at version 7. The build supports 2 through 7, and CI derives the expected
   version from `db.MaxSchemaVersion` rather than a hardcoded literal.
 - Final S1B1 independent review covered exact range `3af09bb..ad1b8f6`; hosted CI run
@@ -143,7 +173,22 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-S1B3 recovery and Student integration is delivered and closed, completing S1B.
+**Day 11/S1C is `PLANNED` — see [the August 2 record](daily/2026-08-02.md).** Close S1 by delivering
+the staff and enforcement half of identity: Admin staff invitations with invitee-chosen initial
+passwords, immediate suspension enforcement across new *and already-issued* sessions, the full role and
+ownership authorization matrix across every mounted protected route, the final full-surface rerun of
+bootstrap test 3, and the S1 integration review across S1A, S1B, and S1C together.
+
+Seats are assigned as [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews), closing the
+open-seat blocker recorded at S1B3 closeout. Two start-of-day decisions were recorded before any
+implementation: D-037 and D-038.
+
+S1C's inherited inputs are separated in the daily record into three kinds with different obligations —
+**functional** work to build, **policy** calls to confirm or overturn, and **gate-fidelity** carryovers
+to fix before their own evidence is trusted. The gate-fidelity fixes run first, because one of them
+already misreported at start of day.
+
+Earlier: S1B3 recovery and Student integration is delivered and closed, completing S1B.
 
 All local gates are green: backend formatting, build, vet on both tag sets, `go test -race ./...`,
 and the complete integration suite under race against real PostgreSQL at schema 7, Redis, and MinIO;
@@ -171,13 +216,13 @@ August 2. S1C inherits four carryovers and three unexamined judgement calls, all
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`; S1B3 at `9d3db91`. **S1B is complete**; only S1C (Aug 2) remains |
-| M3 — Product/revenue journey | **TBD — replan required** | Not started | Authoring through verified entitlement; S3–S8 dates are unresolved |
-| M4 — Complete MVP operations | **TBD — replan required** | Not started | Admin/Instructor, office hours, notifications, payouts |
-| M5 — Integrated production candidate | August 12 | **At risk** | E2E, infrastructure, security, load, accessibility depend on the unresolved downstream map |
-| M6 — Staging acceptance | August 13 | **At risk** | UAT and all-gate audit |
-| M7 — Production soft launch | August 14 | **At risk** | Smoke tests and rollback rehearsal |
-| M8 — Public go/no-go | August 15 | **At risk, readiness-gated** | Every criterion in PLAN.md §8 |
+| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`; S1B3 at `9d3db91`. **S1B is complete**; S1C is `PLANNED` for Aug 2 and carries S1's close conditions |
+| M3 — Product/revenue journey | **TBD — developer remedy required** | Not started | Authoring through verified entitlement. S3–S8 undated on a recorded verdict, not pending analysis: [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy) |
+| M4 — Complete MVP operations | **TBD — developer remedy required** | Not started | Admin/Instructor, office hours, notifications, payouts — all downstream of the undated S3–S8 block |
+| M5 — Integrated production candidate | August 12 | **Not forecastable** | Depends on S1A–S10; the feature slices feeding it have no credible dates (D-038) |
+| M6 — Staging acceptance | August 13 | **Not forecastable** | UAT and all-gate audit, downstream of M5 |
+| M7 — Production soft launch | August 14 | **Not forecastable** | Smoke tests and rollback rehearsal, downstream of M6 |
+| M8 — Public go/no-go | August 15 | **Not forecastable at full PRD scope** | Every criterion in PLAN.md §8. D-038 records the date as unsupportable without a developer remedy |
 
 ## Carryover
 
@@ -195,7 +240,11 @@ the validated destination across every admission hop, and `CARRYOVER-S1B2-CI-DRI
 derives the CI schema assertion from `db.MaxSchemaVersion`.
 
 S1B3 hands four carryovers and three unexamined judgement calls to S1C, all recorded in the
-[August 1 closeout](daily/2026-08-01.md#closeout):
+[August 1 closeout](daily/2026-08-01.md#closeout). **They are accepted into S1C separated by the kind
+of obligation they carry** — functional work to build, policy calls to confirm or overturn, and
+gate-fidelity gates to fix before their own evidence is trusted — in
+[the August 2 record](daily/2026-08-02.md#inherited-inputs). Collapsing the three kinds into one list is
+how a policy question gets closed by an implementation that assumed it.
 
 - `CARRYOVER-DOCS-GUARD-UNTRACKED`: `scripts/docs-guard.sh` enumerates with `git ls-files` and
   silently skips untracked Markdown, so it can report success against a file it never opened. Local
@@ -234,10 +283,10 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1C builder/reviewer seats unassigned; D-036 expired at S1B3 closeout | Developer | Name the S1C seats explicitly before implementation starts | August 2 | Dated decision record naming the S1C builder and reviewer |
+| **Downstream remedy undecided: S3–S8 have no credible dates and August 15 is not forecastable** | Developer | Choose Remedy A (move the target, preserve scope — **recommended**), B (reduce launch scope, partial at best), or C (change the envelope, recommended against) in [the reconciliation §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval) | **August 4**, before the first unassigned date is spent | A recorded decision adopting one or more remedies, with dated S3–S10 or an approved public-target change |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
-| S1B split moves S1C and S2 two days | Current builder seat | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
-| S3–S8 cannot fit before the fixed August 8 runway | Developer + current builder seat | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
+| S1 does not close until S1C closes | Claude, builder under D-037 | Deliver S1C's eleven acceptance items, then the S1 integration review by `agy` | August 2 | S1C closes on a frozen exact range with no critical or high finding |
+| Three slices are blocked on external parties not yet contacted | Developer/founder | S4 needs a malware scanner, S6/S7 need live Tap, S9 needs a verified sender, S10 needs counsel and accounting | August 6 | Acknowledged requests with delivery dates; no engineering rate substitutes for these |
 | Landing FAQ still promises fixed 150-day access | Developer + Codex | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -254,6 +303,18 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- **Start-of-day Day 11 reconciliation at `881639d`.** Backend `gofmt` clean, `go build ./...`,
+  `go vet ./...`, `go vet -tags=integration ./...`, and `go test ./...` all pass with
+  `GOCACHE=/tmp/gradex-go-cache`. Frontend `typecheck`, `lint`, and 21 of 21 `node:test` cases pass,
+  and the production build passes **with `.next` removed first** — twelve routes, all static except the
+  OpenGraph image. `scripts/docs-guard.sh` passes across 129 Markdown files and
+  `scripts/expose-guard.sh` passes with 12 approved `Expose` call sites, 1 password-plaintext boundary,
+  and 2 reviewed plaintext reads. Integration suites were not rerun: no application code changed since
+  the S1B3 evidence below.
+- **`CARRYOVER-DOCS-GUARD-UNTRACKED` misreported at start of day, as predicted.** The first guard run
+  returned `ok (128 Markdown files checked)` while never opening the newly written August 2 record or
+  the reconciliation document, because both were untracked. Staging them produced 129 files and a real
+  check. This is the second observed instance of the defect and it is now scheduled as S1C Must 1.
 - Hosted CI [run 30265328569](https://github.com/Owlah2025/gradex/actions/runs/30265328569) passed
   all five jobs — Backend, Frontend, Migrations, Admission Integration, and Guards — on exact
   reviewed S1B3 head `9d3db91`.
@@ -463,14 +524,24 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
   point.
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
-- August 15 is readiness-gated.
+- August 15 is readiness-gated — and under D-038 it is additionally recorded as not forecastable at
+  full PRD scope until a developer remedy is chosen.
 - D-033: Codex is the standing builder and planner; Claude is the standing independent read-only
   reviewer. Review uses a disposable detached worktree and frozen exact commit range. A `TAINTED` or
   `UNAVAILABLE` run is never recorded as approval.
-- D-035 (active, temporary): for the remainder of S1B2, Claude holds the builder/planner seat and
-  `agy` on `gemini-3.1-pro-high` holds the independent read-only reviewer seat, dispatched through
-  `scripts/agy-review.sh`. D-033's containment and never-self-approve rules are unchanged. The
-  developer restores D-033's seats explicitly when Codex quota returns.
+- D-037 (active, scoped to S1C): Claude holds the builder/planner seat and `agy` on
+  `gemini-3.1-pro-high` holds the independent read-only reviewer seat, dispatched through
+  `scripts/agy-review.sh`. It **expires at S1C's frozen reviewed head**; S2 needs its own dated
+  assignment. The S1 integration review also goes to `agy`, because its scope contains Claude-authored
+  commits. D-033's containment and never-self-approve rules are unchanged, and D-033 stays paused until
+  Codex availability is **explicitly reverified** — silence is not a return of quota. D-035 (S1B2) and
+  D-036 (S1B3) are expired and historical.
+- D-038 (active): August 8 is recorded as no longer a credible runway start and a full-PRD August 15
+  launch as not forecastable. S3–S8 stay `TBD`. Three remedies await a developer decision by August 4;
+  none is adopted, and the recommendation is to move the public target and preserve scope.
+- **A frontend production build is not local build evidence unless `.next` was removed first.** In
+  force from August 2 regardless of whether `CARRYOVER-LOCAL-BUILD-CACHE` is fixed. A build claim that
+  does not say "clean" is to be read as not having been made.
 - D-034: browser authentication uses one opaque server-managed credential in a `Secure`,
   `HttpOnly`, host-only, `SameSite=Strict` cookie. Controlled renewal rotates the credential and
   CSRF token; confirmed reuse revokes the family. Older dual-token wording is superseded.
@@ -496,24 +567,28 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 10/S1B3 is `CLOSED` at reviewed head `9d3db91`, completing S1B — see
-[the August 1 closeout](daily/2026-08-01.md#closeout). Day 11/S1C — staff lifecycle, enforcement, and
-the full authorization matrix — is next, scheduled for August 2 in
-[SLICES.md §5.4](SLICES.md#54-staff-lifecycle-enforcement-and-authorization-matrix-s1c).
+Day 11/S1C is `PLANNED` — see [the August 2 record](daily/2026-08-02.md). Two decisions were recorded
+before any implementation, as required:
+[D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews) assigns the S1C seats, and
+[D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
+records the downstream-calendar verdict. **The open-seat blocker is closed.**
 
-Start the day by reconciling repository evidence, then plan S1C: Admin staff invitations with
-initial-password setup for Instructors and Admins and their screens, immediate suspension enforcement
-across new *and* existing sessions, the full role and ownership authorization matrix proven across
-every protected route that exists, the expanded full-surface rerun of bootstrap test 3, and the S1
-integration review spanning S1A, S1B, and S1C together.
+Begin execution at Must 1 of the August 2 record: **fix both gate-fidelity carryovers before producing
+any evidence with them.** `CARRYOVER-DOCS-GUARD-UNTRACKED` already misreported at start of day, and
+`CARRYOVER-LOCAL-BUILD-CACHE` sits directly in the path of today's staff screens. Both fixes must be
+negative-tested — a repair to a green-reading gate that is not proven to fail is the same defect wearing
+a different label. Then Must 2, the three inherited policy dispositions, because two of them are design
+inputs to staff invitation rather than commentary on it.
 
 **S1C carries S1's complete close conditions. S1 does not close until S1C closes**, and no S2 work
-begins before it does.
+begins before it does. **S1B is not reopened** unless S1C surfaces a concrete defect in it; a suspicion
+is not a defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that
+closed it.
 
-S1C must also dispose of four inherited carryovers and confirm or overturn three judgement calls the
-S1B3 review did not examine by name — all listed under Carryover above. Two of the carryovers are the
-same class of defect, a local gate that reads green while testing less than the hosted one.
+If the day overruns, S1C becomes visibly incomplete rather than compressed. The correct response is a
+developer-approved `S1C2` on August 4 carrying the remainder — recorded, dated, and counted against the
+downstream deficit — not a `Must` with its failure paths removed.
 
-**The S1C builder and reviewer seats are unassigned, and this blocks implementation.** D-036 was
-scoped to S1B3 and expired with this closeout; seats never renew implicitly. D-033 stays paused
-because its precondition, returned Codex quota, has not been met.
+One developer decision is outstanding and dated **August 4**: choose a downstream remedy from
+[the reconciliation §5](DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval). It does
+not block S1C, whose contents are identical under all three remedies.

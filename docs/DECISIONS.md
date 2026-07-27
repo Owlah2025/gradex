@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-07-25
+> Last Updated: 2026-08-02
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -462,3 +462,82 @@ external check); dropping the reviewer seat for speed (a slice cannot close on i
 assessment).
 **Source:** Developer instruction on 2026-08-01 at S1B3 start of day, in response to the recorded
 open-seat blocker.
+
+## D-037 — Claude builds S1C and agy reviews
+
+**Date:** 2026-08-02
+**Status:** Active. Scoped to the S1C slice only. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+**Decision:** Claude holds the builder and planner seat for S1C — staff lifecycle, suspension
+enforcement, and the full authorization matrix — and `agy` (Google Antigravity CLI,
+`gemini-3.1-pro-high`) holds the independent read-only reviewer seat under
+[D-032](#d-032--claude-builds-agy-reviews)'s containment harness, dispatched through
+`scripts/agy-review.sh <base>..<head>` against
+[the review brief template](launch/review/REVIEW_BRIEF_TEMPLATE.md). Claude must not review any S1C
+range it authors, including the S1 integration review that spans S1A, S1B, and S1C together: an
+integration review whose scope contains Claude-authored commits is dispatched to `agy`, not
+self-checked.
+
+This decision **expires at S1C's frozen reviewed head** — the exact commit that carries S1C's
+recorded reviewer verdict. It does not survive to S2, and seats never renew implicitly. S2 requires
+its own dated assignment.
+
+**D-033 stays paused.** Its stated precondition is returned Codex quota, and that has not been
+reverified. Codex availability must be explicitly reverified before work begins under D-033 again;
+absence of a report is not a return of quota.
+
+**Reason:** [D-036](#d-036--claude-builds-s1b3-and-agy-reviews) was scoped to S1B3 and expired at
+reviewed head `9d3db91`, leaving the S1C seats unassigned and recorded as a blocker in
+[STATUS.md](launch/STATUS.md). S1C carries S1's complete close conditions — the full role and
+ownership authorization matrix and immediate suspension enforcement — so it is the least acceptable
+slice on which to leave the reviewing seat ambiguous. The arrangement is evidenced rather than
+assumed: across S1B2 and S1B3 it produced three frozen ranges, all independently reviewed to
+`APPROVE`, each reporting `touched files: 0` with a clean disposable worktree on exit.
+**Alternatives rejected:** Treating D-036 as implicitly covering S1C (its own text scopes it to one
+slice, and silently widening a seat decision is the failure mode the launch protocol forbids);
+restoring D-033 without reverifying Codex availability (guessing at a precondition is how an
+unstaffed builder seat becomes invisible); Claude building and also reviewing the S1 integration
+range (a slice never closes on its builder's own assessment, and this is the range where that matters
+most); dropping the reviewer seat to buy back critical-path hours at Red confidence.
+**Source:** Developer instruction on 2026-08-02 at S1C start of day.
+
+## D-038 — August 8 is no longer a credible runway start; S3–S8 remain undated pending a developer remedy
+
+**Date:** 2026-08-02
+**Status:** Active. Records a forecast, not a scope or date change. The three remedies in
+[the downstream reconciliation](launch/DOWNSTREAM_RECONCILIATION.md#5-remedies-requiring-developer-approval)
+require explicit developer approval and are not adopted by this decision.
+**Decision:** Record explicitly, on repository evidence, that **the fixed August 8 runway start is no
+longer credible** and that a full-PRD public launch on **August 15 is not forecastable** from the
+current calendar. S3–S8 therefore stay `TBD` in [SLICES.md §2](launch/SLICES.md#2-slice-order) rather
+than receiving dates the evidence cannot support. Their dependency *order* is unchanged and remains
+correct; only the calendar is unresolved.
+
+The arithmetic is not close. Nine undelivered feature slices (S2–S10) compete for six remaining
+feature dates (August 3, 4, 5, 6, 8, 9), a deficit of at least three days *before* any velocity
+correction. The only completed product slice, S1, was scoped as one day and took five —
+S1A, S1B1, S1B2, S1B3, and S1C. At that observed expansion the remaining feature work does not fit
+the runway by a margin measured in weeks, not hours. The final week also already assigns work to all
+seven days of August 9–15, which violates the plan's own six-workdays-per-week rule.
+
+What this decision does **not** do: compress a slice below the
+[PLAN.md §2](launch/PLAN.md#daily-capacity) envelope, spend the protected August 7 recovery day,
+remove a PRD capability, or move the public target. Each of those is a developer decision, and three
+of them are offered as dated remedies in the reconciliation.
+
+**Reason:** The conflict has carried the label "unresolved" since 2026-07-30 with a July 31 deadline
+that has now passed, and carrying it a third time would let the launch forecast rest on dates nobody
+has checked. [PLAN.md §9](launch/PLAN.md#9-workflow-validation) requires that a missed calendar day
+be reconciled from Git evidence before replanning, and §5 makes an unresolvable required forecast a
+Red condition. Recording the forecast honestly costs nothing and is available without developer
+authority; assigning invented dates would manufacture the appearance of a plan while removing the
+signal that a remedy is needed.
+**Alternatives rejected:** Assigning one date per slice to August 4–6 (three dates for six slices —
+arithmetically impossible without compressing evidence); spending August 7 (protected, and spending
+it silently is explicitly forbidden); adopting a scope reduction or a new launch date on Claude's own
+authority (both are canonical changes reserved to the developer under
+[PLAN.md §3](launch/PLAN.md#replan)); leaving the rows `TBD` with no recorded verdict a third time
+(the status quo that produced this decision).
+**Source:** Downstream-calendar reconciliation performed 2026-08-02 before S1C planning, at developer
+instruction, and recorded in [DOWNSTREAM_RECONCILIATION.md](launch/DOWNSTREAM_RECONCILIATION.md).

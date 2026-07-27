@@ -46,11 +46,17 @@ rather than absorbed as improvisation during implementation.
 
 Every `Depends on` entry points backwards. No forward dependency remains.
 
-**S3–S8 carry `TBD` days pending downstream schedule reconciliation (updated 2026-07-30).** The
-approved S1B1–S1B3 split moves S1C to August 2 and S2 to August 3. Six slices cannot fit into the
-remaining four dates before the fixed August 8 runway. Dependency *order* is unaffected; the
-calendar forecast is not. These rows stay `TBD` rather than silently compressing evidence, shifting
-the public target, or spending the protected August 7 recovery day.
+**S3–S8 carry `TBD` days on a recorded verdict, not pending analysis (reconciled 2026-08-02).** The
+downstream calendar was reconciled before S1C planning and the result is negative: **six slices have
+three available dates** (August 4, 5, and 6), so August 8 is no longer a credible runway start and a
+full-PRD August 15 launch is not forecastable. Dependency *order* is unaffected and remains correct;
+only the calendar is unresolved. These rows stay `TBD` rather than silently compressing evidence,
+shifting the public target, or spending the protected August 7 recovery day — each of which is a
+developer decision.
+
+The per-slice dependency map, derived sizing, and the three remedies awaiting developer approval are in
+[DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md), recorded as
+[D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy).
 
 ## 3. Ordering decisions that removed forward dependencies
 
