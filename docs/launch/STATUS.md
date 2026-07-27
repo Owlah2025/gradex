@@ -358,6 +358,13 @@ Fast-follow gates are outside this count. Recalculate from
   returned `ok (128 Markdown files checked)` while never opening the newly written August 2 record or
   the reconciliation document, because both were untracked. Staging them produced 129 files and a real
   check. This is the second observed instance of the defect and it is now scheduled as S1C Must 1.
+- **Hosted CI [run 30290157849](https://github.com/Owlah2025/gradex/actions/runs/30290157849) passed
+  all five jobs — Backend, Migrations, Admission Integration, Frontend, and Guards — on exact head
+  `3c16122`, the S1C closeout head.** The complete local suite was re-run by the reviewer on the same
+  tree rather than accepted from the builder's report: backend `gofmt`, build, `vet` on both tag sets,
+  `go test -count=1 -race ./...`, and the full integration suite under race against real PostgreSQL at
+  schema 8, Redis, and MinIO; frontend `typecheck`, `lint`, 21 of 21 `node:test` cases, and a clean
+  production build with `.next` removed first; both guards.
 - Hosted CI [run 30265328569](https://github.com/Owlah2025/gradex/actions/runs/30265328569) passed
   all five jobs — Backend, Frontend, Migrations, Admission Integration, and Guards — on exact
   reviewed S1B3 head `9d3db91`.
@@ -663,8 +670,9 @@ and rejected; it does not close on the current head.
 2. **Re-review the corrected range plus the authorization, session, and suspension boundaries it
    touches.** Reproduce the matrix drift cases and the fail-closed probes again rather than trusting
    the previous round's evidence — the harness changed under them.
-3. **Verify hosted CI on the exact reviewed head.** No CI run has been cited on `6a9e2da`, `4cf3e6e`,
-   or `0b1f150`; the local suite is green but that is not the same evidence.
+3. ~~Verify hosted CI on the exact reviewed head.~~ **Done.** Hosted CI
+   [run 30290157849](https://github.com/Owlah2025/gradex/actions/runs/30290157849) passed all five
+   jobs on exact head `3c16122`.
 4. **Then, and only then, S1 closes** and S2 planning begins per
    [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan), which allocates
    July 29 to S1C remediation and review and July 30 to S2 implementation.
