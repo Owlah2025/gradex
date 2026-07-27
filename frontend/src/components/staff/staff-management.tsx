@@ -194,6 +194,7 @@ export function StaffManagement() {
                 type="text"
                 value={reinstateReason}
                 onChange={(e) => setReinstateReason(e.target.value)}
+                required
                 disabled={reinstateStatus === "submitting"}
               />
             </Field>

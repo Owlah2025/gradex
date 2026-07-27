@@ -127,7 +127,7 @@ export const en = {
       suspendAction: "Suspend Account",
       suspending: "Suspending account…",
       reinstateTitle: "Reinstate Account",
-      reinstateReason: "Reason for reinstatement (optional)",
+      reinstateReason: "Reason for reinstatement",
       reinstateAction: "Reinstate Account",
       reinstating: "Reinstating account…",
       onboardTitle: "Complete Staff Onboarding",

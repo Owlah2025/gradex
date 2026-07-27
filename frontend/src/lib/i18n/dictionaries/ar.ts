@@ -127,7 +127,7 @@ export const ar: Dictionary = {
       suspendAction: "تعليق الحساب",
       suspending: "جاري تعليق الحساب…",
       reinstateTitle: "إعادة تفعيل الحساب",
-      reinstateReason: "سبب إعادة التفعيل (اختياري)",
+      reinstateReason: "سبب إعادة التفعيل",
       reinstateAction: "إعادة تفعيل الحساب",
       reinstating: "جاري إعادة التفعيل…",
       onboardTitle: "إكمال الانضمام لطاقم العمل",
