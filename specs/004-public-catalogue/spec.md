@@ -20,8 +20,9 @@ BR-158, BR-161, BR-162. Traceability is carried per requirement below, per Const
 
 **Scope authority**: [AUGUST_15_EXECUTION_PLAN.md §2.2](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#22-reduced-slices--launch-critical-core-retained-remainder-reclassified)
 reduces S3. What it moved out is recorded in [§Deferred](#deferred-by-scope-decision-not-dropped) with
-its destination, and **one of those deferrals is challenged in [§Open Decisions](#open-decisions) rather
-than silently implemented.**
+its destination. One of those deferrals was challenged rather than silently implemented, and the
+developer **overturned** it on 2026-07-28 — see
+[§Resolved Decisions](#resolved-decisions).
 
 ---
 
@@ -53,8 +54,13 @@ whole security surface of this slice. See FR-002 and FR-003.
 Everything else here is presentation. This is not:
 
 > **A Course that is not `PUBLISHED` must be indistinguishable from a Course that does not exist**,
-> on every public route, for every caller, including by exact identifier, including by timing, and
-> including in error messages.
+> on every public route, for every caller, including by exact identifier and including in error
+> messages.
+
+The guarantee is **exact** on response content — status, headers, schema, body — and **bounded** on
+timing: measured against a documented tolerance, never claimed as proven. That distinction is
+[OD-002](#resolved-decisions) and it is load-bearing, because a specification that promises timing
+indistinguishability promises something it cannot deliver and invites a test that asserts it.
 
 S2 protects private drafts behind ownership. S3 opens a set of routes that deliberately serve
 anonymous callers, and it reads the same tables. Every leak class this project has already paid for
@@ -83,8 +89,8 @@ payment, entitlement, learning — is reachable if a visitor cannot find a Cours
    Archived, and emergency-suspended Courses, **when** an anonymous visitor opens the catalogue,
    **then** only the Published ones appear, and the count matches exactly.
 2. **Given** the identifier of a non-Published Course, **when** the visitor requests it directly by
-   that exact identifier, **then** the response is byte-identical to the response for an identifier
-   that has never existed.
+   that exact identifier, **then** the response is identical in status, headers, schema, and body to
+   the response for an identifier that has never existed.
 3. **Given** a Published Course, **when** the visitor opens its detail page, **then** the title,
    description, Instructor display name, all three taxonomy dimensions, the Section outline, and both
    the full-Course and per-Section prices are shown.
@@ -210,7 +216,25 @@ makes the catalogue feel like a product rather than a list, but it does not bloc
 - **FR-022**: System MUST restrict search results to Published Courses using the **same** FR-002
   predicate the list and detail routes use, not a separate status condition in the query. *(BR-161)*
 - **FR-023**: System MUST match case-insensitively and MUST match Arabic and English content
-  simultaneously regardless of interface language. *(BR-162)*
+  simultaneously regardless of interface language, applying **one** normalization function identically
+  to stored searchable text and to the incoming query. The normalization implemented in S3 is exactly:
+  alef/hamza folding (`أ إ آ ٱ` → `ا`), alef maqsura (`ى` → `ي`), taa marbuta (`ة` → `ه`),
+  Arabic-Indic digits (`٠–٩` → `0–9`), removal of tashkeel/diacritics and tatweel, Unicode case
+  folding, and collapsing of leading, trailing, and repeated whitespace. *(BR-162 — see the
+  traceability note below)*
+- **FR-023a**: System MUST treat a query that normalizes to empty — for example one containing only
+  diacritics, tatweel, or whitespace — exactly as an absent query, returning the unfiltered published
+  list rather than an error or an empty result.
+- **FR-023b**: System MUST NOT implement stemming, fuzzy or edit-distance matching, weighted or
+  relevance ranking, or any external search service. Matching is deterministic substring matching over
+  normalized text, and result ordering is stable and documented rather than scored. *(BR-161)*
+
+> **BR-162 traceability, stated exactly.** FR-023 implements the **matching** behaviour BR-162
+> specifies and **all** of the folds it enumerates. BR-162's sentence *"ranked by relevance"* belongs
+> to BR-161 and is **not** implemented in S3 — ranking is deferred to S18. This specification therefore
+> claims **partial** BR-162 compliance: complete on normalization and matching, absent on ranking. It
+> does not claim the rest. *(Resolved by the developer on 2026-07-28 — see
+> [OD-001](#od-001--resolved-adjust--normalization-in-s3-ranking-deferred).)*
 - **FR-024**: System MUST treat an empty, whitespace-only, over-long, or metacharacter-bearing query
   as an ordinary input producing a well-formed result, never an error revealing internals.
 - **FR-025**: System MUST NOT apply personalization, recommendation, or paid placement. *(BR-161)*
@@ -230,8 +254,15 @@ Instructor display name, all owned by S2 and S1. Any storage this slice adds —
 - **SC-001**: Across a fixture catalogue containing every non-Published state, **zero** non-Published
   Courses appear in any list, detail, or search response, proven by enumerating the live public route
   table rather than by testing a chosen subset.
-- **SC-002**: A direct request for a non-Published Course by exact identifier is byte-identical to a
-  request for a never-existing identifier — same status, same body, same headers.
+- **SC-002**: A direct request for a non-Published Course by exact identifier is identical to a
+  request for a never-existing identifier in **status, headers, response schema, and body**. This is
+  the exact guarantee; it is asserted on the full response, not the status code.
+- **SC-008**: The timing **distribution** of hidden-identifier and absent-identifier lookups is
+  compared over a sample against a **documented tolerance**, and the observation is recorded as
+  statistical evidence rather than as a proof of indistinguishability. A run outside tolerance is a
+  finding with an owner, not a silent pass; a run inside it is not a guarantee.
+- **SC-009**: A query normalizing to empty returns the unfiltered published list, identically to an
+  absent query.
 - **SC-003**: A first-time visitor receives Arabic with RTL direction; a stored preference survives
   navigation and a new session.
 - **SC-004**: Every public screen renders without clipping, mirroring, or overlap at phone, tablet,
@@ -254,39 +285,56 @@ with destination S18. None is deleted from the PRD.
 |---|---|---|
 | Multi-dimension filtering by Major, Subject, Study Year | Launch catalogue is 8–12 Courses; browsing is navigable without it | S18 |
 | Relevance ranking and sort options | Same; result sets are small enough that ordering is not a discovery problem | S18 |
-| Arabic normalization of queries | **Challenged — see below** | S18 *(proposed: pull into S3)* |
+| Arabic query normalization | **Overturned — pulled into S3** by the developer on 2026-07-28 | **S3** |
+
+Ranking and filtering remain deferred. Their deferral is **not** weakened by OD-001's resolution, and
+FR-023b forbids implementing them by accident.
 
 ---
 
-## Open Decisions
+## Resolved Decisions
 
-### OD-001 — Deferring Arabic normalization makes Arabic search fail, not degrade
+### OD-001 — RESOLVED `ADJUST` — normalization in S3, ranking deferred
 
-**This needs a developer decision before implementation, and the recommendation is to overturn the
-deferral.**
+**Decided by the developer, 2026-07-28.** §2.2 deferred "Arabic-normalized ranked search" as one item,
+bundling a genuinely optional feature with a non-optional one:
 
-§2.2 defers "Arabic-normalized ranked search" to post-launch as one item. That bundles two things with
-very different costs:
+- **Relevance ranking** is optional at 8–12 Courses. **Stays deferred** to S18.
+- **Arabic normalization** is what makes matching work at all in the product's default language.
+  Without alef/hamza folding a visitor searching `احياء` does not match a Course titled `أحياء`. The
+  failure mode is not "results ordered badly" — it is "nothing found for a correctly spelled query".
+  **Pulled into S3.**
 
-- **Relevance ranking** is genuinely optional at 8–12 Courses. Deferring it is sound.
-- **Arabic normalization** (BR-162) is not a ranking feature. It is what makes matching *work* at all
-  in the product's default language. Arabic is routinely typed with different hamza forms (`أ إ آ ٱ`),
-  with or without diacritics, with `ة`/`ه` and `ى`/`ي` interchanged, and with Arabic-Indic digits.
-  Without folding, a visitor searching `احياء` does not match a Course titled `أحياء`.
+**Scope admitted to S3**: one shared normalization function applied identically to stored searchable
+text and to the incoming query; the folds enumerated in FR-023; migration and backfill for existing
+published records; red-first tests. See FR-023, FR-023a, FR-023b, and
+[data-model.md](data-model.md).
 
-The failure mode is not "results are ordered badly". It is "the search box returns nothing for a
-correctly spelled query", on an Arabic-default platform, for the majority of real queries.
+**Explicitly excluded**: stemming, fuzzy or edit-distance matching, weighted or relevance ranking,
+external search infrastructure, and multi-dimension filtering. S3 must not expand into a search
+subsystem; if normalization cannot fit cleanly within the slice, that is evidence to surface, not
+licence to grow.
 
-**Recommendation**: pull normalization into S3 as a shared normalize-on-write/normalize-on-query
-function plus one generated column. Estimated 2–3 hours against an 8h slice. Keep ranking and
-filtering deferred as §2.2 decided.
+### OD-002 — RESOLVED — the timing claim was an overclaim, and is withdrawn
 
-**If the deferral stands as written**, then FR-023 must be weakened to English-only matching and this
-specification must say so plainly, rather than claiming BR-162 compliance it does not have. Silently
-shipping a search box that fails in Arabic is the outcome this entry exists to prevent.
+**Raised by the developer, 2026-07-28**, against this specification's own earlier wording.
 
-**Status**: OPEN. Requires the developer. FR-023 is written assuming the recommendation is accepted;
-if it is rejected, FR-023 and SC-005's Arabic case change with it.
+An earlier draft of [plan.md](plan.md) stated that putting the visibility predicate in the `WHERE`
+clause made a hidden row and an absent row "take the same path". **That was an overclaim and it is
+withdrawn.** Query-boundary filtering removes the *application-level* branch, which is necessary but
+not sufficient: index traversal, buffer cache state, row width, and planner behaviour can all still
+differ measurably between a row that exists-but-is-hidden and a row that does not exist.
+
+What S3 claims instead, and proves:
+
+1. The predicate stays inside the database query boundary. *(FR-002, unchanged)*
+2. Responses are identical in **status, headers, schema, and body**. *(FR-003 — this is the exact,
+   provable guarantee)*
+3. Timing is checked by a **distribution** test against a **documented tolerance**, and the result is
+   reported as a statistical observation, not a proof. *(SC-008)*
+
+No test asserts nanosecond equality, and no document here calls a statistical property formally
+proven.
 
 ---
 

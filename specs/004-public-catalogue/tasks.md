@@ -7,8 +7,9 @@
 
 **Blocked until S2 closes** on an independent verdict. Frozen and ready, not active.
 
-**Blocked on a developer decision**: [OD-001](spec.md#open-decisions) — whether Arabic query
-normalization is in S3 or deferred. Phase 5 changes shape depending on the answer. **Do not guess it.**
+**[OD-001](spec.md#resolved-decisions) resolved `ADJUST` on 2026-07-28**: Arabic query normalization
+is **in** S3; relevance ranking and multi-dimension filtering stay deferred to S18. FR-023b forbids
+implementing the deferred parts by accident.
 
 ---
 
@@ -58,10 +59,14 @@ No route is mounted yet.
       through `PublishedOnly`. A new public route that queries the catalog tables directly **must fail
       this test.** Derive the route list; never hand-maintain it
 - [ ] T008 Prove the enumeration case: request every non-Published state by **exact identifier** and
-      assert the response is byte-identical to a never-existing identifier — status, body, and headers
-- [ ] T009 Implement the detail lookup with the predicate **in the WHERE clause**. Do **not**
-      fetch-then-check in application code: that returns faster for an absent row than for a hidden
-      one, which is a timing oracle. This task is where that mistake gets made by default
+      assert the response is identical to a never-existing identifier in **status, headers, response
+      schema, and body**. This is the exact, provable guarantee — assert on the full response, not the
+      status code. Timing is **not** claimed here; it is measured separately in T038
+- [ ] T009 Implement the detail lookup with the predicate **inside the query boundary**. Do **not**
+      fetch-then-check in application code: that returns measurably faster for an absent row than for
+      a hidden one, and closing that branch is **necessary but not sufficient** — see
+      [plan.md](plan.md#the-timing-claim-stated-honestly). This task is where the mistake gets made by
+      default
 
 **Checkpoint 2 — MANDATORY REVIEW GATE.** Do not proceed to Phase 3 until T007 and T008 pass *and*
 their mutations have been run. This is the only checkpoint in S3 that blocks on evidence rather than
@@ -71,6 +76,8 @@ Required mutations, each of which must turn a test red:
 1. Remove one of the four exclusions from `PublishedOnly` → T007 or T008 fails.
 2. Add a public route that queries the catalog tables directly → T007 fails and **names that route**.
 3. Make the hidden-Course path return `403` instead of `404` → T008 fails.
+4. Add a cause-varying `detail` field to the hidden-Course response → T008 fails on the body
+   assertion. Included because a differing body is the leak that survives a matching status code.
 
 ## Phase 3 — Catalogue list and Course detail (backend)
 
@@ -107,38 +114,77 @@ Required mutations, each of which must turn a test red:
 
 **Checkpoint 4** — a visitor can browse and evaluate a Course in Arabic and English.
 
-## Phase 5 — Search
+## Phase 5 — Search and Arabic normalization
 
-> **Shape depends on [OD-001](spec.md#open-decisions).** Written assuming the recommendation is
-> accepted. If the developer rejects it, T024 drops, FR-023 weakens to English-only, and
-> [spec.md](spec.md) is amended to stop claiming BR-162 compliance. **Do not resolve this by choosing.**
+> **Red-first is mandatory in this phase.** Every test below is written and **observed failing**
+> before its implementation exists, and the failure output is recorded. Arabic normalization is the
+> one area of this slice where a test can pass for the wrong reason — an English-only assertion looks
+> identical whether folding works or is absent entirely — so "I wrote the test after and it passed" is
+> not evidence here.
 
-- [ ] T023 Add migration `0010_catalog_search` — additive: one generated column, one index. No
-      constraint on existing tables, no modification of any existing migration file
-- [ ] T024 Implement the shared normalize function in `backend/internal/catalogpublic/search.go`:
-      fold tashkeel, tatweel, alef variants (`أ إ آ ٱ` → `ا`), alef maqsura (`ى` → `ي`), taa marbuta
-      (`ة` → `ه`), and Arabic-Indic digits (`٠–٩` → `0–9`); case-insensitive (BR-162)
-- [ ] T025 Apply normalization **identically on write and on query** through that one function.
-      Asymmetry is the failure mode; assert both directions
-- [ ] T026 Populate the column from title, description, Instructor display name, and taxonomy
-      labels/code — **for Published Courses' public fields only.** A Draft title must not sit in a
-      searchable column waiting for a query bug. Deliberately redundant with T002
-- [ ] T027 Route search through the **same** `PublishedOnly` predicate — not a separate status
-      condition in the search query (FR-022)
-- [ ] T028 Prove the leak cases: a Lesson title, a Resource filename, and a Draft Course's title each
-      return nothing
-- [ ] T029 Prove degenerate inputs: empty, whitespace-only, over-long, and SQL/regex metacharacter
-      queries each return a well-formed result and never an error disclosing internals
-- [ ] T030 Raise `db.MaxSchemaVersion` to 10 and confirm CI **derives** the assertion from that
+- [ ] T023 Add migration `0010_catalog_search`. Additive only: the `catalog_normalize_ar` function,
+      one generated column, one index. No constraint on any existing table, and **no modification of
+      any existing migration file** — their checksums are enforced
+- [ ] T023a **Verify the backfill, do not assume it.** `ALTER TABLE … ADD COLUMN … GENERATED … STORED`
+      computes the value for existing rows as part of the statement. Assert after `up` that every
+      pre-existing Published Course has non-empty `search_text` and that a known Arabic title is
+      present in folded form. A migration that leaves the existing catalogue unsearchable passes every
+      schema assertion while being obvious to a visitor
+- [ ] T024 Implement `catalog_normalize_ar` as an `IMMUTABLE STRICT` SQL function — **the single
+      definition of normalization in the system.** Exactly the transformations in
+      [data-model.md](data-model.md#1-the-normalize-function--the-single-definition): alef/hamza
+      folding, alef maqsura, taa marbuta, Arabic-Indic digits, tashkeel and tatweel removal, Unicode
+      case folding, and whitespace collapse
+- [ ] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
+      same SQL function inside the query. If a Go helper appears, write/query asymmetry has become
+      representable again and the guarantee is gone. The review checks for its absence
+- [ ] T026 Generate the stored column from **title and description only** (same-row constraint,
+      [R-005](research.md#r-005--the-cross-table-constraint)), with `coalesce` so a null description
+      cannot null the column and silently drop the Course from search. Populate for **Published**
+      Courses only — deliberately redundant with T002
+- [ ] T027 Normalize the joined fields — Instructor display name, taxonomy labels and code — **at
+      query time through the same function**, and route the whole search through the **same**
+      `PublishedOnly` predicate rather than a separate status condition (FR-022)
+
+### Red-first test set — each observed failing before its implementation
+
+- [ ] T028 [RED] **Normalized Arabic queries.** `احياء` matches a Course titled `أحياء`; a query
+      written with tashkeel matches a title without it; a tatweel-padded query matches; Arabic-Indic
+      digits match Western ones. Each assertion must fail before T024 exists
+- [ ] T029 [RED] **Mixed Arabic/Latin content.** A Course whose title mixes both scripts is matched by
+      an Arabic fragment and by a Latin fragment; a Latin query is case-insensitive; normalization of
+      the Arabic portion does not corrupt the Latin portion
+- [ ] T030 [RED] **Write/query symmetry.** Assert matching in **both** directions — stored-folded
+      against raw query, and raw stored against folded query. This is a regression guard: T025 makes
+      the asymmetry unrepresentable, and this test is what notices if someone reintroduces a Go
+      normalizer
+- [ ] T031 [RED] **Empty normalized query.** A query of only diacritics, only tatweel, or only
+      whitespace normalizes to empty and MUST behave exactly as an absent query — the unfiltered
+      published list, not an error and not an empty result (FR-023a, SC-009)
+- [ ] T032 [RED] **Unpublished non-disclosure through search.** A Lesson title, a Resource filename,
+      a Draft Course's title, and a Delisted Course's title each return nothing — including when
+      queried in normalized Arabic form. Normalization must not become a path around `PublishedOnly`
+- [ ] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
+      return a well-formed result and never an error disclosing internals (FR-024)
+- [ ] T034 Confirm no stemming, fuzzy matching, ranking, or external search dependency was introduced
+      (FR-023b). Result ordering is stable and documented, not scored
+- [ ] T035 Raise `db.MaxSchemaVersion` to 10 and confirm CI **derives** the assertion from that
       constant rather than carrying a literal
 
-**Checkpoint 5** — search finds published Courses and reveals nothing else.
+**Checkpoint 5** — search finds published Courses in both languages, reveals nothing else, and every
+red-first test was observed failing first.
 
 ## Phase 6 — Performance and polish
 
-- [ ] T031 Verify SC-006: p95 LCP under 2.5s on representative Kuwait 4G for the list and detail pages
-- [ ] T032 Confirm indexes support the list, detail, and search paths at launch catalogue size
-- [ ] T033 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
+- [ ] T036 Verify SC-006: p95 LCP under 2.5s on representative Kuwait 4G for the list and detail pages
+- [ ] T037 Confirm indexes support the list and detail paths, and that the unindexed joined-field
+      search stays inside budget at launch catalogue size ([R-005](research.md#r-005--the-cross-table-constraint))
+- [ ] T038 **Timing-distribution check (SC-008).** Sample hidden-identifier and absent-identifier
+      lookups, compare the distributions against a **documented tolerance**, and record the result as
+      a statistical observation. **No nanosecond-equality assertion**, and no wording that calls a
+      statistical property proven. Outside tolerance is a finding with an owner; inside tolerance is
+      not a guarantee
+- [ ] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
       build with `.next` removed first
 
 ---
@@ -151,10 +197,10 @@ Required mutations, each of which must turn a test red:
 | 2 | Phase 1 | Routes cannot be safe before the predicate exists |
 | 3 | **Checkpoint 2** | Hard gate on evidence, not completion |
 | 4 | Phase 3 | Screens render the API's projections |
-| 5 | Phase 1, **OD-001** | Search reuses `PublishedOnly`; its shape needs the decision |
+| 5 | Phase 1 | Search reuses `PublishedOnly`. OD-001 is resolved, so the shape is fixed |
 | 6 | Phases 3–5 | Measures the finished paths |
 
-**Phase 5 may run in parallel with Phase 4** once OD-001 is answered — they share no file. Phase 3 may
+**Phase 5 may run in parallel with Phase 4** — they share no file. Phase 3 may
 not overlap Phase 2: it depends on the checkpoint.
 
 ## Parallel opportunities
@@ -169,15 +215,30 @@ not overlap Phase 2: it depends on the checkpoint.
 | **2** | **Phase 3 — hard gate** | T007 and T008 pass **and** all three mutations turn a test red |
 | 3 | Phase 4 | No PII, no Lesson content, no protected media in any public response |
 | 4 | — | Responsive audit passes in both directions at three widths |
-| 5 | — | All four leak cases and all four degenerate inputs proven |
+| 5 | — | All leak cases and degenerate inputs proven; **every red-first test observed failing before implementation** |
 | Final | Slice closure | Full gate suite; independent Tier 1 review by Claude on a frozen exact range |
 
 ## Task count
 
-33 tasks. T024 and its assertions drop if OD-001 is rejected, leaving 31.
+**40 tasks** (T001–T039 plus T023a). Phase 5 grew from 8 to 13 with OD-001's resolution and the
+red-first requirement; nothing was removed to accommodate it, and the slice estimate moves from 8h to
+**10–11h**. That increase is reported rather than absorbed — see
+[§Scope honesty](#scope-honesty).
+
+## Scope honesty
+
+OD-001 admitted real work into a slice that was already sized. Recorded plainly:
+
+- **In**: one SQL normalize function, one generated column with verified backfill, query-time
+  normalization of joined fields, six red-first test groups.
+- **Still out**: ranking, multi-dimension filtering, sort options, stemming, fuzzy matching, external
+  search infrastructure. FR-023b makes their absence a requirement rather than an omission.
+- **Estimate impact**: +2–3h on an 8h slice. If implementation shows normalization cannot fit
+  cleanly, **that is evidence to surface**, not licence to grow into a search subsystem — the
+  fallback is to narrow the fold set, not to add machinery.
 
 ## MVP scope
 
-Every task above is required for launch except T031–T032, which are measurement rather than
-behaviour and may be recorded as findings if the target is missed, per PLAN.md's rule that a
-performance target is not waived silently.
+Every task above is required for launch except T036–T038, which are measurement rather than behaviour
+and may be recorded as findings if a target is missed, per PLAN.md's rule that a performance target is
+not waived silently. T038 in particular reports an observation; it cannot "fail" into a guarantee.

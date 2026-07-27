@@ -697,9 +697,13 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 - The approved documentation/specification baseline ends at commit `1f63a59`.
 - Claude is the default SpecKit integration; the Codex integration remains installed but unused.
 - Local `gradex-spec-review.zip` bundles are generated review artifacts and are ignored.
-- The four consolidated external/operations messages are prepared as drafts in the
-  [August 6 outreach pack](outreach/2026-08-06-launch-gate-outreach.md); `DRAFT` never counts as
-  sent evidence.
+- **Three** consolidated external messages are prepared as drafts in the
+  [outreach pack](outreach/2026-08-06-launch-gate-outreach.md); `DRAFT` never counts as sent
+  evidence. It held **four** until `caf301b`, when the Operations message was reclassified into
+  founder task work because its recipient was the founder — nothing sent, merged, or dropped, and its
+  six gates (`LG-013`–`LG-015`, `LG-018`, `LG-019`, `LG-021`) moved with it. Every reply date was
+  rebased for a July 28 send; the file name still carries the retired August 6 date because two
+  **closed** day records link to it.
 - Founder decision on 2026-07-23: external/provider outreach is deferred to August 6. That
   scheduling decision did not change required gate statuses.
 - D-025: use a split managed PaaS around the modular monolith; the edge frontend, Go API, Go worker,
@@ -715,7 +719,8 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 **Send the August 6 outreach pack.** It is the only remaining item that costs no engineering time and
 gets strictly worse by waiting, and it gates seven launch-blocking items that no amount of code can
-close. All four messages are still `DRAFT` with unreplaced recipient placeholders.
+close. **All three messages are still `DRAFT`** with unreplaced recipient placeholders, and their
+reply dates are now rebased for a July 28 send rather than August 6.
 
 Then, and concurrently, as scheduled in [the D3 record](daily/2026-07-28-d3.md):
 

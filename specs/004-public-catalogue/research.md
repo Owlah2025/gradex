@@ -32,13 +32,41 @@ of that lesson, and it is why R-001's answer is a *test strategy* and not only a
 |---|---|
 | Normalize the query only, match against raw stored text | Asymmetric by construction: `احياء` still fails to match a stored `أحياء`. This is the failure mode, not a lighter version of the fix |
 | Application-maintained normalized column | A second source of truth for the text the catalogue is judged on. It drifts the first time a title changes through a path that forgot to update it |
+| A Go normalize function plus a SQL expression | **Two implementations of one rule.** They diverge silently: English tests keep passing while Arabic stops matching. Rejected in favour of a single `IMMUTABLE` SQL function used by both sides, which makes asymmetry unrepresentable rather than merely tested |
 | PostgreSQL full-text search with an Arabic configuration | Correct long-term answer and out of scope: it brings ranking, which §2.2 explicitly deferred. Adopting it here would smuggle a deferred feature in as an implementation detail |
 | `unaccent` extension | Handles diacritics but not alef-variant folding, taa marbuta, alef maqsura, or Arabic-Indic digits — most of BR-162 |
 
-**Open**: whether this is in S3 at all. See [OD-001](spec.md#open-decisions). The recommendation is to
-accept it, on the grounds that the deferral bundles a genuinely optional feature (ranking) with a
-non-optional one (matching working in the default language). **The decision is the developer's and the
-tasks file does not guess it.**
+**Resolved 2026-07-28 — `ADJUST`.** The developer pulled normalization into S3 and kept ranking and
+filtering deferred, on the grounds that §2.2's single line bundled a genuinely optional feature
+(ranking) with a non-optional one (matching working in the product's default language). See
+[OD-001](spec.md#resolved-decisions).
+
+## R-005 — The cross-table constraint
+
+**Found while reconciling this plan to the OD-001 decision, and it invalidated the first draft of
+[data-model.md](data-model.md).**
+
+That draft specified one generated column covering Course title, description, Instructor display name,
+and taxonomy labels. **It is not implementable.** A PostgreSQL generated column may reference only
+columns of its own row, and three of those four fields live in other tables.
+
+**Options considered**
+
+| Option | Verdict |
+|---|---|
+| Trigger fabric on `catalog`, taxonomy assignment, and `identity` | **Rejected.** A denormalization subsystem plus a module-boundary violation — a trigger in the catalogue firing on identity writes — in a slice explicitly told not to expand into a search subsystem |
+| Materialized view refreshed on a schedule | **Rejected.** Introduces staleness into a correctness-adjacent surface, and a refresh job is operational machinery S3 does not otherwise need |
+| Application-maintained column written in S2's transactions | **Rejected.** Requires editing S2 while it is being implemented, and re-creates the second-source-of-truth problem R-002 rejected |
+| **Split by locality**: generate same-row fields, normalize joined fields at query time | **Adopted** |
+
+The adopted split keeps one shared function across both sides, so the OD-001 guarantee holds. Its cost
+is that joined-field matching is unindexed.
+
+**When that cost becomes real**: a sequential scan with two joins over normalized text stays
+comfortably inside the 2.5s p95 LCP budget into the **low hundreds** of Courses. Past roughly
+**500 Courses** it should be revisited — and the right answer then is PostgreSQL full-text search with
+an Arabic configuration, adopted **together with ranking** in S18, rather than a trigger fabric bolted
+on earlier. Recorded here so the threshold is a documented trigger rather than a surprise.
 
 ## R-003 — Reusing the S1B locale mechanism
 

@@ -10,6 +10,8 @@ mutation**. A test that passes against broken code is not evidence.
 No new dependency:
 
 - PostgreSQL at schema **10**, Redis, MinIO
+- Fixture Courses with **Arabic**, **English**, and **mixed-script** titles, plus one pre-existing
+  Published Course created *before* migration `0010` so the backfill is exercised rather than assumed
 - `GOCACHE=/tmp/gradex-go-cache` — the workspace sandbox refuses the default
 - A fixture catalogue containing **every** lifecycle state: Published, Draft, Pending Review, Changes
   Requested, Delisted, Archived, a Published Course with an active emergency suspension, a Published
@@ -53,18 +55,32 @@ having been made (Decisions in Force, in effect since D1).
 the catalog tables directly. Each must turn a test red, and the second must **name the offending
 route**.
 
-## Scenario 2 — A hidden Course is indistinguishable from a missing one (FR-003, SC-002)
+## Scenario 2 — A hidden Course is indistinguishable from a missing one (FR-003, SC-002, SC-008)
 
-Request a Draft Course by exact identifier and a never-existing identifier. Compare the full
-responses: status, body, **and headers**.
+Two parts, with **different strengths of guarantee**. Keeping them separate is the point.
 
-**They must be byte-identical.** Assert on the whole response, not on the status code — a differing
-`detail` field or `Cache-Control` is the leak.
+### 2a — Response equivalence (proven)
 
-**Mutation**: return `403` for the hidden case. The assertion must fail.
+Request a Draft Course by exact identifier and a never-existing identifier. Compare **status, headers,
+response schema, and body**.
 
-**Also check timing**: confirm the predicate is in the `WHERE` clause rather than fetch-then-check in
-application code. A hidden row and an absent row must take the same path.
+They must be identical. Assert on the whole response, not on the status code — a differing `detail`
+field or `Cache-Control` is the leak.
+
+**Mutations**: return `403` for the hidden case; add a cause-varying `detail`. Each must fail.
+
+### 2b — Timing distribution (measured, not proven)
+
+Confirm structurally that the predicate sits inside the query boundary rather than fetch-then-check in
+application code. Then sample both lookups and compare their **distributions against a documented
+tolerance**.
+
+**This is a regression detector, not a proof.** Record the tolerance, the sample size, and the observed
+result. A run outside tolerance is a finding with an owner. A run inside it does **not** establish
+indistinguishability, and no document may describe it as though it does.
+
+**Do not** assert nanosecond equality. Two timing samples are never equal, and a test demanding it
+would be deleted by the first engineer it failed — which is worse than not having it.
 
 ## Scenario 3 — Arabic by default, and the layout follows (FR-015–FR-017, SC-003)
 
@@ -91,13 +107,25 @@ why it runs against the payload rather than the page, where an unrendered field 
 
 1. A query matching title, description, Instructor display name, and taxonomy code each return the
    right Published Courses.
-2. **Subject to [OD-001](spec.md#open-decisions)**: `احياء` matches a Course titled `أحياء`; a query
-   with diacritics matches text without them; Arabic-Indic digits match Western ones.
-3. Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each return a well-formed result and
+2. **Arabic normalization** ([OD-001](spec.md#resolved-decisions), resolved `ADJUST`): `احياء` matches
+   a Course titled `أحياء`; a query with tashkeel matches text without it; a tatweel-padded query
+   matches; Arabic-Indic digits match Western ones.
+3. **Mixed Arabic/Latin**: a Course titled in both scripts is found by a fragment of either; the Latin
+   fragment matches case-insensitively; folding the Arabic portion does not corrupt the Latin one.
+4. **Empty normalized query**: a query of only diacritics, only tatweel, or only whitespace normalizes
+   to empty and returns the **unfiltered published list** — identical to an absent query, not an error
+   and not an empty result (FR-023a, SC-009).
+5. Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each return a well-formed result and
    never an error disclosing internals.
+6. **Non-disclosure survives normalization**: a Draft or Delisted Course's title, queried in normalized
+   Arabic form, returns nothing. Normalization must not become a path around `PublishedOnly`.
+
+**Every test in this scenario is written red-first** and observed failing before its implementation
+exists. Arabic normalization is the one place in this slice where a test passes for the wrong reason:
+an English-only assertion looks identical whether folding works or is absent entirely.
 
 **Mutation**: apply normalization on write but not on query. Case 2 must fail — this is the asymmetry
-the shared function exists to prevent, and it passes every naive test that only searches English.
+the single SQL function exists to make unrepresentable, and it passes every naive English-only test.
 
 ## Scenario 6 — The suspended-Instructor case (FR-007, BR-065)
 

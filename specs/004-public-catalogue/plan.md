@@ -31,14 +31,15 @@ plan therefore spends its structure on that one problem and keeps everything els
 | New package | `backend/internal/catalogpublic` — public read surface only |
 | Reads from | `catalog` (S2) tables; no new authority |
 | Frontend | Next.js App Router, extending `frontend/src/lib/i18n` |
-| New storage | One generated/normalized search column and its index. **No new table.** |
+| New storage | One `IMMUTABLE` SQL normalize function, one generated column, one index. **No new table.** |
 | Auth | None. These routes are deliberately anonymous |
 | Migration | `0010_catalog_search` — additive only |
 
 ## Constitution Check
 
 - **I — one source of truth**: S3 adds no authority. Every field it renders is owned by S2 or S1. The
-  search column is derived and reproducible from its source columns.
+  stored search column is generated from its own row's columns; joined fields are normalized at read
+  time and stored nowhere.
 - **II — deny by default**: inverted here and stated explicitly, because a public route is an
   allow-by-default surface. The compensating control is that **publication is the allowlist**: the
   shared predicate returns rows only for the one state that is public, so a new route inherits the
@@ -81,47 +82,127 @@ middleware cannot filter rows it never sees. Enforcing it at the query boundary 
 that cannot be bypassed by a handler that constructs its own query — so the test asserts the query
 boundary, not the route table alone.
 
-## The enumeration case, resolved
+## The enumeration case
 
-FR-003 requires a non-Published Course to be indistinguishable from a non-existent one. Three ways
-this leaks, all closed here rather than left to the implementer:
+FR-003 requires a non-Published Course to be indistinguishable from a non-existent one. Three leak
+channels, with **different strengths of guarantee** — and the difference is stated rather than
+flattened:
 
-| Leak | Resolution |
-|---|---|
-| Different status codes (`403` vs `404`) | Both paths return the **same** `404` Problem Details document. There is one not-found response constructor for the public surface and handlers cannot build another |
-| Different bodies or headers | The response is constructed before the lookup result is known to differ — same envelope, same `Cache-Control`, no `detail` field that varies with cause |
-| Timing | The query is a single indexed lookup with the predicate **in the WHERE clause**, so a hidden row and an absent row take the same path. Do **not** fetch-then-check in application code: that returns faster for a missing row than for a hidden one |
+| Leak | Resolution | Strength |
+|---|---|---|
+| Different status codes (`403` vs `404`) | Both paths return the **same** `404` Problem Details document, from one constructor handlers cannot bypass | **Proven** by assertion |
+| Different bodies, headers, or schema | The envelope is constructed before the lookup outcome is known — same `Cache-Control`, no cause-varying `detail` | **Proven** by assertion on the full response |
+| Timing | Predicate **inside** the query boundary, never fetch-then-check in application code | **Reduced, not eliminated.** See below |
 
-The third is the one that gets implemented wrong by default, because fetch-then-check reads more
-naturally. It is called out in the tasks file at the task that would introduce it.
+### The timing claim, stated honestly
+
+An earlier draft of this plan said the `WHERE`-clause predicate made a hidden row and an absent row
+"take the same path". **That was an overclaim and it is withdrawn** ([OD-002](spec.md#resolved-decisions)).
+
+Keeping the predicate in the query boundary removes the *application-level* branch — a fetch-then-check
+in Go returns measurably faster for an absent row than for a hidden one, and that is a real oracle
+worth closing. But closing it is **necessary, not sufficient**. Index traversal, buffer cache state,
+row width, and planner behaviour can still differ between a row that exists-but-is-hidden and a row
+that does not exist. No amount of SQL structuring makes that difference provably zero.
+
+So S3 claims exactly this, and no more:
+
+1. **Proven**: responses identical in status, headers, schema, and body.
+2. **Structural**: no application-level branch on visibility.
+3. **Measured**: a timing **distribution** test over a sample, against a **documented tolerance**,
+   reported as a statistical observation.
+
+The measurement is a regression detector, not a proof. A run inside tolerance does not establish
+indistinguishability; a run outside it is a finding with an owner. **No test asserts nanosecond
+equality**, because equality of two timing samples is not a property that can hold, and a test that
+demands it would be deleted by the first person it failed.
 
 ## Search
 
-Scoped to what §2.2 retained plus the OD-001 recommendation, and **OD-001 is unresolved** — see
-[spec.md §Open Decisions](spec.md#open-decisions). The plan below assumes it is accepted; if the
-developer rejects it, T-search-2 drops and FR-023 weakens to English-only.
+**[OD-001](spec.md#resolved-decisions) is resolved `ADJUST`**: normalization is in S3; ranking and
+filtering stay deferred to S18.
 
-- Matching is a substring/prefix match over a normalized text column, not a ranking engine. No
-  `tsvector` weighting, no trigram scoring, no relevance ordering — those are the deferred parts.
-- The normalized column is **generated from** title, description, Instructor display name, and
-  taxonomy labels/code. It is derived, so it cannot disagree with its sources.
-- Normalization is one function applied identically on write and on query. Applying it to stored text
-  but not to the query, or vice versa, is the failure mode; a single shared function is what prevents
-  it, and the test asserts both directions.
-- The column is populated **only for Published Courses' public fields**. A Draft Course's title must
-  not sit in a searchable column waiting for a query bug to surface it. Defence in depth behind
-  `PublishedOnly`, deliberately redundant.
+### One implementation, not two
+
+The requirement is that stored text and incoming query pass through *the same* normalization. The
+obvious construction — a Go function for the query and a SQL expression for the stored column — is
+**two** implementations of one rule, and their divergence is silent: English tests keep passing while
+Arabic quietly stops matching. That is precisely the failure mode this work exists to prevent.
+
+So normalization is implemented **once, in SQL**, as an `IMMUTABLE` function:
+
+```
+catalog_normalize_ar(text) RETURNS text   -- IMMUTABLE, the single definition
+```
+
+- The stored searchable column is **generated** by that function.
+- The incoming query is normalized by **the same function**, called in the query itself, rather than
+  pre-normalized in Go.
+
+There is no Go normalization code, so write/query asymmetry is not merely tested against — it is
+**unrepresentable**. That is the whole reason for choosing SQL over Go here, and it is why the
+"assert both directions" test is a regression guard rather than the primary control.
+
+### What the function does — enumerated, not gestured at
+
+Exactly, per FR-023: alef/hamza folding (`أ إ آ ٱ` → `ا`); alef maqsura (`ى` → `ي`); taa marbuta
+(`ة` → `ه`); Arabic-Indic digits (`٠–٩` → `0–9`); removal of tashkeel/diacritics and tatweel; Unicode
+case folding; collapse of leading, trailing, and repeated whitespace.
+
+`ة` → `ه` and `ى` → `ي` are **deliberate over-matching**. They will occasionally merge two genuinely
+different words. BR-162 requires them, and at 8–12 Courses a false positive costs a visitor one glance
+while a false negative costs a sale — recorded so the tradeoff is a decision rather than an accident.
+
+Not implemented, per FR-023b: stemming, fuzzy/edit-distance matching, weighted or relevance ranking,
+external search infrastructure.
+
+### The cross-table constraint — a real finding against this plan's first draft
+
+An earlier draft specified one generated column covering title, description, Instructor display name,
+and taxonomy labels. **That is not implementable**: a PostgreSQL generated column may only reference
+columns of its own row, and three of those four fields live in other tables.
+
+Rather than build the machinery that would make it possible — triggers on `catalog`, on taxonomy
+assignment, and on `identity` display-name changes, which is a denormalization subsystem and a
+module-boundary violation — S3 splits by where the data lives:
+
+| Field | Where normalized | Why |
+|---|---|---|
+| Course title, description | **Stored** generated column, backfilled by migration `0010` | Same row; generation makes drift impossible |
+| Instructor display name, taxonomy labels/code | **Query-time**, same function applied in the join | Cross-table; at launch catalogue size a join scan is free |
+
+Both sides use `catalog_normalize_ar`, so the "one shared function" guarantee holds across the split.
+This keeps S3 inside its slice — no trigger fabric, no cross-module coupling, no search subsystem — and
+the cost is that joined-field search does not use an index. At 8–12 Courses that is not a cost. **It
+becomes one somewhere in the hundreds**, and that threshold is recorded in
+[research.md](research.md) as the trigger for revisiting it in S18 alongside ranking.
+
+### Population boundary
+
+The stored column carries text for **Published** Courses only. A Draft title must not sit in a
+searchable column waiting for a query bug to surface it — deliberately redundant with `PublishedOnly`,
+which remains the control.
 
 ## Data integrity
 
-S3 writes no domain data, so the integrity question is narrow: **can the derived search column drift
+S3 writes no domain data, so the integrity question is narrow: **can the derived search text drift
 from its sources?**
 
-It cannot, because it is a generated column maintained by the database rather than by application
-code. Migration `0010` is additive — one column, one index — and adds no constraint to existing
-tables. If a future change makes generation impractical, the fallback is a trigger, **not** an
-application-level write path; a search column maintained by the application is a second source of
-truth for text the catalogue is judged on.
+It cannot, and for two different reasons depending on the field:
+
+- **Stored** (title, description): a generated column maintained by the database, not by application
+  code. Drift is structurally impossible.
+- **Query-time** (display name, taxonomy labels): nothing is stored, so there is nothing to drift
+  *from*. The normalization is applied to live values at read time.
+
+Migration `0010` is additive — one function, one column, one index — and adds no constraint to any
+existing table. Backfill of existing published records is handled by the `ALTER TABLE … ADD COLUMN …
+GENERATED` itself, which computes the value for every existing row; it is verified rather than
+assumed (T023a).
+
+**The fallback if generation proves impractical is a trigger, never an application write path.** A
+search column maintained by application code is a second source of truth for the text the catalogue is
+judged on, and it desynchronizes the first time a title changes through a path that forgot it.
 
 ## Project Structure
 
@@ -129,7 +210,7 @@ truth for text the catalogue is judged on.
 
 ```
 specs/004-public-catalogue/
-├── spec.md          # 25 requirements, 7 success criteria, OD-001
+├── spec.md          # 28 requirements, 9 success criteria, OD-001/OD-002 resolved
 ├── plan.md          # this file
 ├── research.md      # the two decisions with real alternatives
 ├── data-model.md    # migration 0010, additive
@@ -146,7 +227,7 @@ backend/internal/catalogpublic/
 ├── doc.go              # module boundary: public reads only, no writes, no authority
 ├── visibility.go       # PublishedOnly — the single predicate
 ├── repository.go       # list, detail, search; every query via PublishedOnly
-├── search.go           # the shared normalize function (OD-001 dependent)
+├── search.go           # query construction; normalization lives in SQL, not here
 └── handlers.go         # thin; no status comparison, one not-found constructor
 
 backend/internal/httpapi/
@@ -179,5 +260,6 @@ would read like a reasonable default while doing it.
 | Choice | Simpler alternative | Why the simpler one was rejected |
 |---|---|---|
 | A derived enforcement test over `r.Routes()` | Code review and convention | Convention failed in S1C and the derived matrix caught it. Same defect class, same answer |
-| A generated search column | Search the source columns with `ILIKE` directly | Normalization must apply identically on write and query; a generated column makes that structural instead of remembered |
+| Normalization implemented once in SQL | A Go normalize function plus a SQL expression | Two implementations of one rule diverge silently — English keeps passing while Arabic stops matching. One `IMMUTABLE` SQL function makes asymmetry unrepresentable |
+| Stored generation for same-row fields, query-time for joined fields | One column covering all four fields | Not implementable: a generated column cannot reference other tables. The alternative was a trigger fabric across three tables — a denormalization subsystem S3 must not become |
 | One `PublishedOnly` predicate | A status filter per query | Four separate exclusions applied per-site is exactly how a route ends up with three of them |

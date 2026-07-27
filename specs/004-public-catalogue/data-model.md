@@ -21,56 +21,95 @@ Every field S3 renders is owned elsewhere:
 
 ## Migration `0010_catalog_search`
 
-Additive only. One column, one index. It modifies no existing table's constraints and **no existing
-migration file** — `scripts/docs-guard.sh` enforces the checksums of applied migrations, and
-`0001_init` onward are applied to real databases.
+Additive only: one function, one column, one index. It modifies no existing table's constraints and
+**no existing migration file** — `scripts/docs-guard.sh` enforces the checksums of applied migrations,
+and `0001_init` onward are applied to real databases.
 
-### The column
+### 1. The normalize function — the single definition
 
-A **generated** column on the Course table holding normalized searchable text, derived from:
+```sql
+CREATE FUNCTION catalog_normalize_ar(input text) RETURNS text
+  LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+```
 
-- Course title (Arabic and English as authored)
-- Authored description
-- Owning Instructor display name *(BR-105)*
-- Assigned taxonomy term labels and the optional Subject code *(BR-157, BR-158)*
+This is **the only implementation of normalization in the system.** It is called both to generate the
+stored column and to normalize the incoming query, so write/query asymmetry — the failure mode where
+English keeps matching while Arabic silently stops — is not merely tested against but
+**unrepresentable**. There is deliberately **no Go equivalent**; adding one would recreate the exact
+divergence this design exists to prevent. See [plan.md §Search](plan.md#search).
 
-Generated rather than application-maintained, deliberately. A search column written by application
-code is a second source of truth for the text the catalogue is judged on, and it drifts the first time
-a title is updated through a path that forgot it. Generation makes drift structurally impossible.
+`IMMUTABLE` is required for the generated column and for expression indexing. It is honest here: the
+transformation depends only on its input, with no locale, collation, or time dependency.
 
-If a source field's normalization cannot be expressed as a generated column in PostgreSQL — Arabic
-folding may require an `IMMUTABLE` helper function — the fallback is a **trigger**, not an application
-write path. Record which was used and why.
+**Transformations, exactly** (FR-023, BR-162):
 
-### Population boundary
+| Class | Rule |
+|---|---|
+| Alef/hamza folding | `أ` `إ` `آ` `ٱ` → `ا` |
+| Alef maqsura | `ى` → `ي` |
+| Taa marbuta | `ة` → `ه` |
+| Arabic-Indic digits | `٠١٢٣٤٥٦٧٨٩` → `0123456789` |
+| Tashkeel / diacritics | `U+064B`–`U+0652`, `U+0670`, `U+0653`–`U+0655` removed |
+| Tatweel | `U+0640` removed |
+| Case | Unicode case folding (affects Latin; Arabic is caseless) |
+| Whitespace | Leading and trailing trimmed; internal runs collapsed to one space |
 
-The column carries text for **Published Courses' public fields only**. A Draft Course's title must not
-sit in a searchable column waiting for a query bug to surface it.
+`ة` → `ه` and `ى` → `ي` **over-match by design** and will occasionally merge genuinely different
+words. BR-162 requires them, and at launch catalogue size a false positive costs one glance while a
+false negative costs a sale. Recorded so it reads as a decision, not an oversight.
 
-This is deliberately redundant with `PublishedOnly` ([plan.md](plan.md#authorization--how-a-public-slice-stays-safe)).
-Defence in depth is the point: the predicate is the control, and this is what limits the blast radius
-if the predicate is ever bypassed.
+### 2. The generated column — same-row fields only
 
-### The index
+```sql
+ALTER TABLE <course table>
+  ADD COLUMN search_text text
+  GENERATED ALWAYS AS (catalog_normalize_ar(coalesce(title,'') || ' ' || coalesce(description,'')))
+  STORED;
+```
 
-One index supporting the substring/prefix match the retained scope needs. **Not** a ranking structure
-— relevance ranking is deferred to S18 per
-[§2.2](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#22-reduced-slices--launch-critical-core-retained-remainder-reclassified).
+**Only title and description.** A PostgreSQL generated column may reference only columns of its own
+row, and the Instructor display name and taxonomy labels live in other tables. That constraint is
+real and it invalidated this document's first draft, which specified all four fields in one column.
 
-### Down migration
+The rejected alternative was a trigger fabric over `catalog`, taxonomy assignment, and `identity` —
+a denormalization subsystem plus a module-boundary violation, in a slice explicitly told not to grow
+into a search subsystem. See [research.md §R-005](research.md#r-005--the-cross-table-constraint).
 
-Drops the index and the column. It must leave no orphaned function or type. Verify `up` → `down` →
-`up` against real PostgreSQL rather than by inspection, and confirm the schema version reports 10.
+`coalesce` is deliberate: a `NULL` description must not null the whole column and silently remove the
+Course from search.
+
+### 3. Backfill of existing published records
+
+**`ALTER TABLE … ADD COLUMN … GENERATED … STORED` computes the value for every existing row** as part
+of the statement. Backfill is therefore inherent to the migration rather than a follow-up script.
+
+It is **verified, not assumed** (T023a): after `up`, assert that every pre-existing Published Course
+has a non-empty `search_text` and that a known Arabic title is present in folded form. A migration
+that adds a column and leaves the existing catalogue unsearchable would pass every schema assertion
+while making search work only for Courses created afterwards — a defect that is invisible to structure
+checks and obvious to a visitor.
+
+Note the table rewrite this implies: `STORED` generation rewrites the table. At launch catalogue size
+that is instant. Recorded because it is a lock worth knowing about, not because it is a risk here.
+
+### 4. The index
+
+One index over `search_text` supporting the substring match FR-023b permits. **Not** a ranking
+structure — ranking is deferred to S18.
+
+Joined fields (display name, taxonomy labels) are normalized **at query time** through the same
+function and are deliberately **not indexed**. At 8–12 Courses the join scan is free. See
+[research.md §R-005](research.md#r-005--the-cross-table-constraint) for the catalogue size at which
+that stops being true.
+
+### 5. Down migration
+
+Drops the index, the column, and the function, in that order. It must leave no orphaned function or
+type. Verify `up` → `down` → `up` against real PostgreSQL rather than by inspection, and confirm the
+schema version reports 10 at each `up`.
 
 ## Schema version
 
 `db.MaxSchemaVersion` rises to **10** (T030). CI derives its assertion from that constant through the
 `migrate max-version` subcommand rather than a literal — a hardcoded version is the exact drift that
 failed hosted CI during S1B2.
-
-## OD-001 dependency
-
-This entire migration exists to serve normalized search. If
-[OD-001](spec.md#open-decisions) is rejected and Arabic normalization is deferred, the column is still
-useful for case-insensitive English matching, but its Arabic folding drops and the specification must
-stop claiming BR-162 compliance. **Do not resolve OD-001 by implementing one of its branches.**

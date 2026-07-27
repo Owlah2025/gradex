@@ -45,11 +45,16 @@ and per-Section prices where individually priced), and the public preview refere
 `PENDING_REVIEW`, `CHANGES_REQUESTED`, `DELISTED`, `ARCHIVED`, and any Course under an active
 emergency access suspension.
 
-**The two 404s are byte-identical** — same status, same body, same headers, no cause-varying `detail`.
-Produced by one constructor; a handler may not build another. See
-[FR-003](../spec.md#requirements-mandatory) and the timing note in
-[plan.md](../plan.md#the-enumeration-case-resolved): the predicate goes in the `WHERE` clause, because
-fetch-then-check returns faster for an absent row than for a hidden one.
+**The two 404s are identical in status, headers, response schema, and body** — no cause-varying
+`detail`. Produced by one constructor; a handler may not build another. See
+[FR-003](../spec.md#requirements-mandatory).
+
+**Timing is a separate and weaker claim, and this contract does not overstate it.** The predicate sits
+inside the query boundary rather than in a fetch-then-check application branch, which removes a real
+oracle but does not make the two paths provably equal. Timing is **measured** against a documented
+tolerance and reported as a statistical observation — see
+[plan.md](../plan.md#the-timing-claim-stated-honestly) and SC-008. No part of this contract guarantees
+timing indistinguishability.
 
 **No 403 exists on this surface.** A `403` would answer the question a `404` exists to refuse.
 
@@ -59,8 +64,16 @@ Search is the `q` parameter on the list route, **not a separate endpoint**. One 
 one projection — a separate search endpoint would be a second place to forget the visibility filter.
 
 - Matches title, description, Instructor display name, and taxonomy labels/code *(BR-161)*.
-- Case-insensitive; matches Arabic and English simultaneously regardless of interface language
-  *(BR-162, subject to [OD-001](../spec.md#open-decisions))*.
+- Case-insensitive; matches Arabic and English simultaneously regardless of interface language,
+  through **one** `IMMUTABLE` SQL normalization function applied identically to stored text and to the
+  incoming query *(BR-162 matching behaviour; [OD-001](../spec.md#resolved-decisions) resolved
+  `ADJUST`)*. Normalization covers alef/hamza folding, alef maqsura, taa marbuta, Arabic-Indic digits,
+  tashkeel and tatweel removal, case folding, and whitespace collapse.
+- A query that **normalizes to empty** — only diacritics, tatweel, or whitespace — behaves exactly as
+  an absent `q`: the unfiltered published list, not an error and not an empty result.
+- **No stemming, fuzzy or edit-distance matching, weighted ranking, or external search service.**
+  BR-162's *"ranked by relevance"* clause is **not** implemented in S3; ranking is deferred to S18, so
+  this surface claims **partial** BR-162 compliance — complete on matching, absent on ranking.
 - Restricted to Published Courses through the **same** `PublishedOnly` predicate the unfiltered list
   uses — never a separate status condition in the search query *(FR-022)*.
 - Empty, whitespace-only, over-long, and metacharacter-bearing queries return a well-formed result,
