@@ -204,10 +204,18 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-**S1C is `IN REVIEW REMEDIATION` at `0b1f150`, not closed.** Musts 1–2 landed at `c65cd53`; Musts 3–7
-were implemented by Antigravity at `6a9e2da` and `4cf3e6e`, reviewed by Claude, **rejected**, and are
-now two findings short of re-review. S1 does not close until S1C closes, and no S2 work begins before
-it does.
+**S1C is `CLOSED` at reviewed head `edd6508`. S1 is complete.** All eleven acceptance items are
+satisfied, the full authorization matrix is derived from the live router rather than hand-maintained,
+and the staff surface now matches its frozen §7 contract exactly. **S2 implementation is unblocked**
+and starts from the frozen plan in
+[specs/003-course-authoring/](../../specs/003-course-authoring/plan.md).
+
+**S2 planning is complete and frozen** — spec, plan, research, data model, three API contracts, 64
+tasks, and the Antigravity handoff brief. No S2 implementation commit exists yet.
+
+Historical, retained for the record: S1C was rejected three times before closing. The first rejection
+followed Antigravity reviewing its own range and returning `APPROVE — 0 critical` while missing three
+criticals; that self-review is recorded as a process violation rather than absorbed.
 
 Seats are **[D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)**,
 standing and not per-slice: Claude plans with SpecKit, Antigravity implements, Claude reviews and
@@ -259,7 +267,7 @@ August 2. S1C inherits four carryovers and three unexamined judgement calls, all
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`; S1B3 at `9d3db91`. **S1B is complete**; S1C is `PLANNED` for Aug 2 and carries S1's close conditions |
+| M2 — Authentication/RBAC vertical slice | July 29–August 2 | **Completed** | S1A `70b4809`; S1B1 `ad1b8f6`; S1B2 `7d8710e`; S1B3 `9d3db91`; **S1C `edd6508`**. All five slices closed on independent verdicts with hosted CI green on each exact reviewed head. **S1 is complete** |
 | M3 — Product/revenue journey | **TBD — developer remedy required** | Not started | Authoring through verified entitlement. S3–S8 undated on a recorded verdict, not pending analysis: [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy) |
 | M4 — Complete MVP operations | **TBD — developer remedy required** | Not started | Admin/Instructor, office hours, notifications, payouts — all downstream of the undated S3–S8 block |
 | M5 — Integrated production candidate | August 12 | **Not forecastable** | Depends on S1A–S10; the feature slices feeding it have no credible dates (D-038) |
@@ -289,9 +297,13 @@ gate-fidelity gates to fix before their own evidence is trusted — in
 [the August 2 record](daily/2026-08-02.md#inherited-inputs). Collapsing the three kinds into one list is
 how a policy question gets closed by an implementation that assumed it.
 
-- `CARRYOVER-DOCS-GUARD-UNTRACKED`: `scripts/docs-guard.sh` enumerates with `git ls-files` and
-  silently skips untracked Markdown, so it can report success against a file it never opened. Local
-  and advisory; hosted guard evidence is unaffected.
+- `CARRYOVER-DOCS-GUARD-UNTRACKED`: **closed** by `8b016d5`, which made the guard enumerate untracked
+  Markdown too.
+- **`CARRYOVER-DOCS-GUARD-IGNORED-TARGETS` (new, 2026-07-28)**: `scripts/docs-guard.sh` resolves link
+  targets against the filesystem rather than against tracked files, so a link into a git-ignored but
+  locally present directory passes here and fails in CI. It did exactly that on `5f1188a`. **Fourth
+  observed instance of the class — a local gate reading green while testing less than the hosted
+  one.** Reproduce with a shallow clone into a temp directory, which is what `actions/checkout` does.
 - `CARRYOVER-LOCAL-BUILD-CACHE`: `npm run build` reuses `.next`, so prerender-time failures stay
   invisible locally. This let a `Suspense` defect reach hosted CI. Until fixed, a frontend build
   offered as pre-push evidence must clear `.next` first.
@@ -472,21 +484,37 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-**S1C was REJECTED again on 2026-07-28 at exact range `c65cd53..506e0b4` by an independent `agy`
-review on `gemini-3.1-pro-high`: 0 critical, 2 high, 1 low, verdict `REJECT`.** The run reported
-`touched files: 0` and its disposable worktree was clean. Two earlier dispatches the same evening
-returned `UNAVAILABLE` on an account-wide quota limit and were recorded as such, never as passes.
+**S1C is CLOSED. S1 is complete.** Exact range `c65cd53..edd6508` passed independent read-only review
+by `agy` on `gemini-3.1-pro-high`: **0 critical, 0 high, 0 medium, 0 low, verdict `APPROVE`**, with
+`touched files: 0` and a clean disposable worktree. Hosted CI
+[run 30299076346](https://github.com/Owlah2025/gradex/actions/runs/30299076346) passed all five jobs
+on that same exact head.
 
-The two high findings are contract-parity defects against the frozen
-[S1C spec §7](../../specs/002-auth-rbac/s1c/spec.md): every mounted staff route uses a different path
-or method than the contract specifies, and suspension/reinstatement are gated on `ADMIN_OPERATIONS`
-where §7 requires `SECURITY_OPERATIONS`. The low is two declared-but-unused body-limit constants
-beside two mutation routes that bypass `strictJSONMiddleware` entirely. **All three were reproduced
-independently against the code before being accepted.**
+It took six dispatches:
 
-**Claude reviewed this same range at Tier 3 and found none of them.** That is the strongest available
-evidence for the never-self-approve rule, and it is recorded here rather than smoothed over: the
-range was twenty minutes away from closing on a developer risk acceptance instead.
+| # | Range | Result |
+|---|---|---|
+| 1–2 | `c65cd53..506e0b4` | `UNAVAILABLE` — account-wide quota, recorded as such and never as a pass |
+| 3 | `c65cd53..506e0b4` | **`REJECT`** — 0/2/0/1 |
+| 4 | `c65cd53..41f50aa` | **`REJECT`** — 0/1/1/0 |
+| 5 | `c65cd53..5f1188a` | `APPROVE` — 0/0/0/0 |
+| 6 | `c65cd53..edd6508` | **`APPROVE` — 0/0/0/0**, the closing verdict |
+
+Round 3 found that every mounted staff route diverged from the frozen
+[S1C spec §7](../../specs/002-auth-rbac/s1c/spec.md) on path, method, or both, that suspension was
+gated on `ADMIN_OPERATIONS` where §7 requires `SECURITY_OPERATIONS`, and that both suspension routes
+bypassed strict binding with their declared body limits unreferenced. Round 4 then caught a
+regression the fix itself introduced — a required backend field still labelled "(optional)" in both
+dictionaries. Every finding was reproduced against the code before being accepted.
+
+**Claude reviewed the same range at Tier 3 and found none of the round-3 findings.** That is the
+strongest evidence this project has produced for its own never-self-approve rule, and it is recorded
+plainly: the range was twenty minutes from closing on a developer risk acceptance instead.
+
+Round 5 raised, then round 6 dispositioned, a medium about S2 specification files appearing in the
+range. **Disposition: not a defect.** The S2 planning commits sit between the review points on a
+linear history, so no range excludes them; planning commits no behaviour. Recorded by name rather
+than allowed to vanish between rounds.
 
 Earlier: **S1C was REJECTED at exact range `c65cd53..4cf3e6e`, reviewed by Claude at Tier 3 under
 [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews):
@@ -675,28 +703,26 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Close S1C's two remaining review findings, then re-review the full range.** S1C is at `0b1f150`
-and rejected; it does not close on the current head.
+**Send the August 6 outreach pack.** It is the only remaining item that costs no engineering time and
+gets strictly worse by waiting, and it gates seven launch-blocking items that no amount of code can
+close. All four messages are still `DRAFT` with unreplaced recipient placeholders.
 
-1. **Obtain an independent review of `c65cd53..506e0b4`.** Every finding is closed and every gate is
-   green, but the range now contains both Antigravity-authored and Claude-authored implementation,
-   so neither party can close it alone. Dispatch to Antigravity when its quota returns, or record a
-   developer risk acceptance naming exactly which commits are unreviewed by an independent party
-   (`506e0b4`, and the `router.go` repair inside `0b1f150`).
-2. **Re-review the corrected range plus the authorization, session, and suspension boundaries it
-   touches.** Reproduce the matrix drift cases and the fail-closed probes again rather than trusting
-   the previous round's evidence — the harness changed under them.
-3. ~~Verify hosted CI on the exact reviewed head.~~ **Done.** Hosted CI
-   [run 30290157849](https://github.com/Owlah2025/gradex/actions/runs/30290157849) passed all five
-   jobs on exact head `3c16122`.
-4. **Then, and only then, S1 closes** and S2 planning begins per
-   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan), which allocates
-   July 29 to S1C remediation and review and July 30 to S2 implementation.
+Then, and concurrently:
 
-**S1C carries S1's complete close conditions. S1 does not close until S1C closes**, and no S2 work
-begins before it does. **S1B is not reopened** unless S1C surfaces a concrete defect in it; a
-suspicion is not a defect, and reopening a reviewed slice on suspicion discards the frozen-range
-evidence that closed it.
+1. **Begin S2 implementation** from the frozen plan. S1 is closed, so the gate that blocked it is
+   gone. Antigravity builds from
+   [tasks.md](../../specs/003-course-authoring/tasks.md); the brief is
+   [handoff.md](../../specs/003-course-authoring/handoff.md). Foundational tasks T005–T011 block
+   every user story and come first.
+2. **Claude freezes the S3 and S4 plans** while S2 is implemented, per
+   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan). S4 is the largest
+   slice and is deliberately planned early.
+3. **Fix `CARRYOVER-DOCS-GUARD-IGNORED-TARGETS`** before it costs another CI round trip. Now is the
+   right moment: no range is under review.
+
+**S1B and S1C are not reopened** unless a concrete defect surfaces in them. A suspicion is not a
+defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that closed
+it.
 
 The August 6 outreach is now the largest launch risk and is due **July 28** under
 [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
