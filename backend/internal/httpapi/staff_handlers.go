@@ -107,9 +107,9 @@ type createInvitationRequest struct {
 	Locale identity.Locale `json:"locale"`
 }
 
-type invitationPreviewRequest struct {
-	Bearer string `json:"bearer" binding:"required"`
-}
+// invitationBearerHeader carries the one-time invitation secret on the GET
+// preview route defined by §7.
+const invitationBearerHeader = "X-Gradex-Invitation-Bearer"
 
 type completeInvitationRequest struct {
 	Bearer      string `json:"bearer" binding:"required"`
@@ -121,8 +121,12 @@ type suspendStaffRequest struct {
 	Reason string `json:"reason" binding:"required"`
 }
 
+// Reinstatement carries a required reason for the same purpose suspension does.
+// It was previously optional, which let a privileged account-status change be
+// recorded with an empty explanation — the same "control that degrades rather
+// than refuses" pattern this slice was rejected for elsewhere.
 type reinstateStaffRequest struct {
-	Reason string `json:"reason"`
+	Reason string `json:"reason" binding:"required"`
 }
 
 func (h *staffHandlers) createInvitation(c *gin.Context) {
@@ -227,10 +231,22 @@ func (h *staffHandlers) listInvitations(c *gin.Context) {
 }
 
 func (h *staffHandlers) previewInvitation(c *gin.Context) {
-	req := c.MustGet(strictJSONBodyContextKey).(*invitationPreviewRequest)
+	// §7 specifies GET, so the bearer travels in a header: a GET body is not
+	// reliably carried, and a query parameter would put a one-time secret into
+	// access logs, referrers, and browser history.
+	bearer := c.GetHeader(invitationBearerHeader)
+
+	// The response describes an invitation secret's state, so it is never
+	// cacheable — set before any exit path, as the strict-binding boundary does.
+	c.Header("Cache-Control", "no-store")
+
+	if bearer == "" {
+		writeProblem(c, problem.TokenInvalid())
+		return
+	}
 
 	now := time.Now().UTC()
-	prev, err := h.service.PreviewStaffInvitation(c.Request.Context(), req.Bearer, now)
+	prev, err := h.service.PreviewStaffInvitation(c.Request.Context(), bearer, now)
 	if err != nil {
 		if errors.Is(err, identity.ErrInvitationInvalid) {
 			writeProblem(c, problem.TokenInvalid())
@@ -346,11 +362,7 @@ func (h *staffHandlers) suspendStaff(c *gin.Context) {
 	}
 
 	subjectID := c.Param("id")
-	var req suspendStaffRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		writeProblem(c, problem.ValidationFailed())
-		return
-	}
+	req := c.MustGet(strictJSONBodyContextKey).(*suspendStaffRequest)
 
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())
@@ -398,13 +410,7 @@ func (h *staffHandlers) reinstateStaff(c *gin.Context) {
 	}
 
 	subjectID := c.Param("id")
-	var req reinstateStaffRequest
-	if c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			writeProblem(c, problem.ValidationFailed())
-			return
-		}
-	}
+	req := c.MustGet(strictJSONBodyContextKey).(*reinstateStaffRequest)
 
 	now := time.Now().UTC()
 	reqID := requestid.FromContext(c.Request.Context())

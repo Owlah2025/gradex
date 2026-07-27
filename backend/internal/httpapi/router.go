@@ -293,46 +293,72 @@ func mountStaffRoutes(
 		recentAuthWindow: foundation.recentAuthWindow,
 	}
 
-	// Anonymous / public endpoints with rate limiting and body size limits
-	v1.POST(
-		"/staff/invitations/preview",
-		strictJSONMiddleware(func() any { return &invitationPreviewRequest{} }, staffPreviewBodyLimit),
+	// Paths, methods, and capabilities below are the frozen contract in
+	// specs/002-auth-rbac/s1c/spec.md §7. An independent review rejected the
+	// earlier mounting because it diverged from that contract on every route;
+	// the contract is the authority, so the routes moved rather than the spec.
+
+	// Anonymous. The preview bearer travels in a header rather than a body
+	// because §7 specifies GET, and a GET body is not reliably carried. The
+	// handler sets no-store so the one-time secret's response is never cached.
+	v1.GET(
+		"/staff-invitations/preview",
 		foundation.requireStaffRateDecision("staff-invitations-preview", staffPreviewBearerIdentifier),
 		staffH.previewInvitation,
 	)
 	v1.POST(
-		"/staff/invitations/complete",
+		"/staff-invitation-completions",
 		strictJSONMiddleware(func() any { return &completeInvitationRequest{} }, staffCompletionBodyLimit),
 		foundation.requireStaffRateDecision("staff-invitations-complete", staffCompletionBearerIdentifier),
 		staffH.completeInvitation,
 	)
 
-	// Protected read endpoints (GET /staff/invitations)
-	staffGroup := v1.Group("/staff")
-	staffGroup.Use(
+	// Protected read.
+	staffReadGroup := v1.Group("/staff-invitations")
+	staffReadGroup.Use(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapAdminOperations),
 	)
 	{
-		staffGroup.GET("/invitations", staffH.listInvitations)
+		staffReadGroup.GET("", staffH.listInvitations)
 	}
 
-	// Protected state-changing endpoints (POST) carry S1B2 session mutation security, requireAuth, and capability checks.
-	staffMutationGroup := v1.Group("/staff")
-	staffMutationGroup.Use(
+	// Invitation mutations carry S1B2 session mutation security, requireAuth,
+	// and ADMIN_OPERATIONS per §7.
+	invitationMutationGroup := v1.Group("/staff-invitations")
+	invitationMutationGroup.Use(
 		sessionFoundation.requireSessionMutationSecurity(),
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapAdminOperations),
 	)
 	{
-		staffMutationGroup.POST("/invitations",
+		invitationMutationGroup.POST("",
 			strictJSONMiddleware(func() any { return &createInvitationRequest{} }, staffInvitationBodyLimit),
 			foundation.requireStaffRateDecision("staff-invitations-create", staffInvitationEmailIdentifier),
 			staffH.createInvitation,
 		)
-		staffMutationGroup.POST("/invitations/:id/revoke", staffH.revokeInvitation)
-		staffMutationGroup.POST("/:id/suspend", staffH.suspendStaff)
-		staffMutationGroup.POST("/:id/reinstate", staffH.reinstateStaff)
+		invitationMutationGroup.DELETE("/:id", staffH.revokeInvitation)
+	}
+
+	// Suspension is a SECURITY_OPERATIONS action, not an ADMIN_OPERATIONS one.
+	// Today every Admin holds both, so this is not an escalation fix — it is the
+	// difference between the gate that is documented and the gate that runs, and
+	// it stops mattering only until the role set diversifies.
+	suspensionGroup := v1.Group("/accounts")
+	suspensionGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapSecurityOperations),
+	)
+	{
+		suspensionGroup.POST("/:id/suspension",
+			strictJSONMiddleware(func() any { return &suspendStaffRequest{} }, staffSuspendBodyLimit),
+			staffH.suspendStaff,
+		)
+		suspensionGroup.DELETE("/:id/suspension",
+			strictJSONMiddleware(func() any { return &reinstateStaffRequest{} }, staffReinstateBodyLimit),
+			staffH.reinstateStaff,
+		)
 	}
 }
 

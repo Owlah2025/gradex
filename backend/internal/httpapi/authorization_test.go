@@ -251,15 +251,15 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/password-reset-requests":           {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
 	"POST /api/v1/password-resets":                   {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
 	"POST /api/v1/sessions":                          {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
-	"POST /api/v1/staff/invitations/preview":         {Method: http.MethodPost, Path: "/api/v1/staff/invitations/preview", Class: ClassAnonymous},
-	"POST /api/v1/staff/invitations/complete":        {Method: http.MethodPost, Path: "/api/v1/staff/invitations/complete", Class: ClassAnonymous},
+	"GET /api/v1/staff-invitations/preview":          {Method: http.MethodGet, Path: "/api/v1/staff-invitations/preview", Class: ClassAnonymous},
+	"POST /api/v1/staff-invitation-completions":      {Method: http.MethodPost, Path: "/api/v1/staff-invitation-completions", Class: ClassAnonymous},
 	"GET /api/v1/videos/:videoID/manifest/*filepath": {Method: http.MethodGet, Path: "/api/v1/videos/:videoID/manifest/*filepath", Class: ClassAnonymous},
 
 	"GET /api/v1/session":           {Method: http.MethodGet, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 	"POST /api/v1/session-renewals": {Method: http.MethodPost, Path: "/api/v1/session-renewals", Class: ClassAuthenticatedSessionLifecycle},
 	"DELETE /api/v1/session":        {Method: http.MethodDelete, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 
-	"GET /api/v1/staff/invitations": {Method: http.MethodGet, Path: "/api/v1/staff/invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/staff-invitations": {Method: http.MethodGet, Path: "/api/v1/staff-invitations", Class: ClassCapabilityProtected},
 
 	"POST /api/v1/lessons/:lessonID/video/upload-url":  {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/upload-url", Class: ClassOwnershipProtected},
 	"POST /api/v1/lessons/:lessonID/video/complete":    {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/complete", Class: ClassOwnershipProtected},
@@ -268,10 +268,10 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/lessons/:lessonID/video/playback-url": {Method: http.MethodGet, Path: "/api/v1/lessons/:lessonID/video/playback-url", Class: ClassOwnershipProtected},
 	"POST /api/v1/lessons/:lessonID/progress":          {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/progress", Class: ClassOwnershipProtected},
 
-	"POST /api/v1/staff/invitations":            {Method: http.MethodPost, Path: "/api/v1/staff/invitations", Class: ClassRecentAuthRequired},
-	"POST /api/v1/staff/invitations/:id/revoke": {Method: http.MethodPost, Path: "/api/v1/staff/invitations/:id/revoke", Class: ClassRecentAuthRequired},
-	"POST /api/v1/staff/:id/suspend":            {Method: http.MethodPost, Path: "/api/v1/staff/:id/suspend", Class: ClassRecentAuthRequired},
-	"POST /api/v1/staff/:id/reinstate":          {Method: http.MethodPost, Path: "/api/v1/staff/:id/reinstate", Class: ClassRecentAuthRequired},
+	"POST /api/v1/staff-invitations":         {Method: http.MethodPost, Path: "/api/v1/staff-invitations", Class: ClassRecentAuthRequired},
+	"DELETE /api/v1/staff-invitations/:id":   {Method: http.MethodDelete, Path: "/api/v1/staff-invitations/:id", Class: ClassRecentAuthRequired},
+	"POST /api/v1/accounts/:id/suspension":   {Method: http.MethodPost, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
+	"DELETE /api/v1/accounts/:id/suspension": {Method: http.MethodDelete, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
 }
 
 func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
@@ -442,10 +442,10 @@ func TestFreshAdminSucceedsAndStaleAdminIsRefusedOnStaffEndpoints(t *testing.T) 
 		path   string
 		body   []byte
 	}{
-		{"create-invitation", http.MethodPost, "/api/v1/staff/invitations", []byte(`{"email":"staff@example.com","role":"INSTRUCTOR"}`)},
-		{"revoke-invitation", http.MethodPost, "/api/v1/staff/invitations/inv-99/revoke", nil},
-		{"suspend-account", http.MethodPost, "/api/v1/staff/acct-99/suspend", []byte(`{"reason":"violation"}`)},
-		{"reinstate-account", http.MethodPost, "/api/v1/staff/acct-99/reinstate", []byte(`{"reason":"remedied"}`)},
+		{"create-invitation", http.MethodPost, "/api/v1/staff-invitations", []byte(`{"email":"staff@example.com","role":"INSTRUCTOR"}`)},
+		{"revoke-invitation", http.MethodDelete, "/api/v1/staff-invitations/inv-99", nil},
+		{"suspend-account", http.MethodPost, "/api/v1/accounts/acct-99/suspension", []byte(`{"reason":"violation"}`)},
+		{"reinstate-account", http.MethodDelete, "/api/v1/accounts/acct-99/suspension", []byte(`{"reason":"remedied"}`)},
 	}
 
 	for _, ep := range endpoints {

@@ -41,11 +41,11 @@ func (f *StaffFoundation) requireStaffRateDecision(
 }
 
 func staffPreviewBearerIdentifier(c *gin.Context) string {
-	request := c.MustGet(strictJSONBodyContextKey).(*invitationPreviewRequest)
-	if _, err := identity.DigestActionSecret(request.Bearer); err != nil {
+	bearer := c.GetHeader(invitationBearerHeader)
+	if _, err := identity.DigestActionSecret(bearer); err != nil {
 		return "invalid-staff-bearer"
 	}
-	return request.Bearer
+	return bearer
 }
 
 func staffCompletionBearerIdentifier(c *gin.Context) string {

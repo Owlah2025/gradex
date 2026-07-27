@@ -146,7 +146,7 @@ export function createStaffInvitation(
     invited_role: string;
     bearer: string;
     created_at: string;
-  }>("/staff/invitations", "POST", locale, csrf, { email, role });
+  }>("/staff-invitations", "POST", locale, csrf, { email, role });
 }
 
 export function suspendStaffAccount(
@@ -159,7 +159,9 @@ export function suspendStaffAccount(
     already_suspended: boolean;
     revision: number;
     epoch: number;
-  }>(`/staff/${encodeURIComponent(accountID)}/suspend`, "POST", locale, csrf, { reason });
+  }>(`/accounts/${encodeURIComponent(accountID)}/suspension`, "POST", locale, csrf, {
+    reason,
+  });
 }
 
 export function reinstateStaffAccount(
@@ -170,5 +172,7 @@ export function reinstateStaffAccount(
 ) {
   return authenticatedRequest<{
     already_active: boolean;
-  }>(`/staff/${encodeURIComponent(accountID)}/reinstate`, "POST", locale, csrf, { reason });
+  }>(`/accounts/${encodeURIComponent(accountID)}/suspension`, "DELETE", locale, csrf, {
+    reason,
+  });
 }

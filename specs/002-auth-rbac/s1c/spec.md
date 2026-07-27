@@ -122,6 +122,16 @@ every denial.
 `POST /staff-invitation-completions` accepts the bearer, a display name, and a password. It accepts
 **no role field.** It returns `201` with no session cookie.
 
+`GET /staff-invitations/preview` carries the bearer in the `X-Gradex-Invitation-Bearer` header. The
+method is `GET`, so a request body is not reliably carried, and a query parameter would place a
+one-time secret into access logs, referrer headers, and browser history. The response sets
+`Cache-Control: no-store`. *(Transport detail recorded 2026-07-28 while closing the review finding
+that the mounted routes diverged from this section. The contract specified `GET`, so the routes moved
+to match it rather than the method being rewritten to suit what had shipped.)*
+
+Reinstatement requires a non-empty reason, exactly as suspension does. *(Tightened 2026-07-28: it was
+optional, which allowed a privileged account-status change to be recorded with no explanation.)*
+
 ## 8. Authorization matrix
 
 The matrix is **mechanically derived from the mounted router**, not hand-maintained. Each mounted

@@ -48,7 +48,7 @@ export function OnboardingForm() {
 
     setState("submitting");
     try {
-      const res = await fetch("/api/v1/staff/invitations/complete", {
+      const res = await fetch("/api/v1/staff-invitation-completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
