@@ -1,9 +1,10 @@
 # Gradex Launch Status
 
-> Current date: **2026-07-27 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D2) at `7e48ef5`**; all local gates re-run green on that tree
-> Active slice: S1C — staff lifecycle, enforcement, and authorization matrix. **Musts 1–6 complete; Must 7 open on a review obligation, not a build one.** The range `c65cd53..506e0b4` contains both Antigravity- and Claude-authored implementation and has no admissible independent verdict. Day record: [2026-07-28-d2.md](daily/2026-07-28-d2.md)
+> Last repository reconciliation: **2026-07-28 (D3) at `93eb745`**; all local gates re-run green on that tree
+> Active slice: **S2 — Course authoring and review. Planning frozen, implementation starting at T001.** S1C is `CLOSED` at reviewed head `edd6508` and **S1 is complete**. Day record: [2026-07-28-d3.md](daily/2026-07-28-d3.md); D2 closed at [2026-07-28-d2.md](daily/2026-07-28-d2.md)
+> Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
 > Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
@@ -358,6 +359,15 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- **Start-of-day D3 reconciliation at `93eb745`, 2026-07-28.** Backend `gofmt` clean, `go build ./...`,
+  `go vet ./...`, `go vet -tags=integration ./...`, and `go test ./...` all pass with
+  `GOCACHE=/tmp/gradex-go-cache`. Frontend `typecheck`, `lint`, and 21 of 21 `node:test` cases pass.
+  `scripts/docs-guard.sh` ok across 94 Markdown files; `scripts/expose-guard.sh` ok with 13 approved
+  `Expose` call sites, 1 password-plaintext boundary, and 2 reviewed plaintext reads. Integration
+  suites and the production build were **not** rerun: no application code has changed since hosted CI
+  run 30299076346 passed all five jobs on `edd6508`, and the only commit since is documentation
+  (`93eb745`). Branch synchronized with upstream; the only untracked file is the user-owned
+  `.caveman.json`.
 - **Start-of-day Day 11 reconciliation at `881639d`.** Backend `gofmt` clean, `go build ./...`,
   `go vet ./...`, `go vet -tags=integration ./...`, and `go test ./...` all pass with
   `GOCACHE=/tmp/gradex-go-cache`. Frontend `typecheck`, `lint`, and 21 of 21 `node:test` cases pass,
@@ -707,18 +717,20 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 gets strictly worse by waiting, and it gates seven launch-blocking items that no amount of code can
 close. All four messages are still `DRAFT` with unreplaced recipient placeholders.
 
-Then, and concurrently:
+Then, and concurrently, as scheduled in [the D3 record](daily/2026-07-28-d3.md):
 
 1. **Begin S2 implementation** from the frozen plan. S1 is closed, so the gate that blocked it is
    gone. Antigravity builds from
    [tasks.md](../../specs/003-course-authoring/tasks.md); the brief is
-   [handoff.md](../../specs/003-course-authoring/handoff.md). Foundational tasks T005–T011 block
-   every user story and come first.
-2. **Claude freezes the S3 and S4 plans** while S2 is implemented, per
-   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan). S4 is the largest
-   slice and is deliberately planned early.
+   [handoff.md](../../specs/003-course-authoring/handoff.md). **Today is T001–T011 only** — Phase 2
+   blocks every user story, so there is nothing to gain by starting a story before it lands.
+2. **Claude freezes the S3 plan** (`specs/004-public-catalogue/`) while S2 is implemented, per
+   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan). No S3 contract may
+   overlap the S2 surface being built. S4 is planned on D4 and is deliberately early, being the
+   largest slice.
 3. **Fix `CARRYOVER-DOCS-GUARD-IGNORED-TARGETS`** before it costs another CI round trip. Now is the
-   right moment: no range is under review.
+   right moment: no range is under review. **Assigned to Antigravity**, because Claude fixing the gate
+   that validates Claude's own documentation is a self-check on the tooling.
 
 **S1B and S1C are not reopened** unless a concrete defect surfaces in them. A suspicion is not a
 defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that closed
