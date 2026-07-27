@@ -11,11 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 const (
-	passwordResetTemplateContract = "account-password-reset-v1"
+	passwordResetTemplateContract          = "account-password-reset-v1"
+	passwordResetCompletedTemplateContract = "account-password-reset-completed-v1"
 
 	// minimumPasswordResetRequestDuration floors how long a reset request takes
 	// regardless of outcome. Non-enumeration is not achieved by returning the
@@ -33,35 +35,38 @@ const (
 // identity_action_secrets machinery rather than introducing a parallel secret
 // store with its own expiry and single-use rules to get wrong.
 type RecoveryService struct {
-	pool     *pgxpool.Pool
-	outbox   *outbox.Writer
-	resetTTL time.Duration
-	now      func() time.Time
-	random   io.Reader
-	randomMu sync.Mutex
+	pool        *pgxpool.Pool
+	outbox      *outbox.Writer
+	compromised CompromisedRangeSource
+	resetTTL    time.Duration
+	now         func() time.Time
+	random      io.Reader
+	randomMu    sync.Mutex
 }
 
 type RecoveryServiceOptions struct {
-	Pool     *pgxpool.Pool
-	Outbox   *outbox.Writer
-	ResetTTL time.Duration
-	Now      func() time.Time
-	Random   io.Reader
+	Pool        *pgxpool.Pool
+	Outbox      *outbox.Writer
+	Compromised CompromisedRangeSource
+	ResetTTL    time.Duration
+	Now         func() time.Time
+	Random      io.Reader
 }
 
 func NewRecoveryService(options RecoveryServiceOptions) (*RecoveryService, error) {
-	if options.Pool == nil || options.Outbox == nil {
+	if options.Pool == nil || options.Outbox == nil || options.Compromised == nil {
 		return nil, errors.New("recovery service dependencies are required")
 	}
 	if options.ResetTTL <= 0 || options.Now == nil || options.Random == nil {
 		return nil, errors.New("recovery clock, randomness, and reset TTL are required")
 	}
 	return &RecoveryService{
-		pool:     options.Pool,
-		outbox:   options.Outbox,
-		resetTTL: options.ResetTTL,
-		now:      options.Now,
-		random:   options.Random,
+		pool:        options.Pool,
+		outbox:      options.Outbox,
+		compromised: options.Compromised,
+		resetTTL:    options.ResetTTL,
+		now:         options.Now,
+		random:      options.Random,
 	}, nil
 }
 
@@ -372,4 +377,252 @@ func consumeResetSecret(ctx context.Context, tx pgx.Tx, secretID string, now tim
 		return fmt.Errorf("consuming reset secret: %w", err)
 	}
 	return nil
+}
+
+// PasswordResetCompletion presents a reset secret together with the new
+// password. There is no Account identifier: the secret is the only thing that
+// names an Account here, so a caller cannot aim a valid secret at a different
+// one.
+type PasswordResetCompletion struct {
+	Token     string
+	Password  config.Secret
+	RequestID string
+}
+
+// CompletePasswordReset replaces the password and invalidates every session.
+//
+// Everything commits in one transaction: secret consumption, credential
+// replacement, revocation of every family, session-epoch advancement, Account
+// revision advancement, security evidence, and notification intent. A partial
+// application is the failure this ordering exists to prevent — a consumed
+// secret without a new password strands the Account, and a new password
+// without consumption leaves the secret replayable.
+//
+// Recovery issues no session. A recovered Account must log in normally, so a
+// mailbox compromise cannot be converted straight into an authenticated
+// browser session.
+func (s *RecoveryService) CompletePasswordReset(
+	ctx context.Context,
+	completion PasswordResetCompletion,
+) error {
+	requestID, err := validateRequestID(completion.RequestID)
+	if err != nil {
+		return err
+	}
+	digest, err := DigestActionSecret(completion.Token)
+	if err != nil {
+		return ErrTokenInvalid
+	}
+	// Hashing happens before the transaction opens. Argon2id is deliberately
+	// expensive, and holding the Account row lock across it would let a burst
+	// of resets serialise behind each other. It also means an invalid secret
+	// costs the same work as a valid one.
+	credentialHash, err := hashNewPassword(ctx, completion.Password, s.compromised)
+	if err != nil {
+		if errors.Is(err, ErrPasswordPolicy) {
+			return err
+		}
+		return fmt.Errorf("%w: credential screening", ErrAdmissionUnavailable)
+	}
+	// Reserved before the transaction opens, matching the request path: the
+	// only fallible entropy read must not happen while Account rows are locked.
+	reservation, err := s.outbox.ReserveProtectedPayload(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: protected payload reservation", ErrDeliveryUnavailable)
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("beginning password reset: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	now := s.now().UTC()
+	secretID, accountID, secretValid, err := lockResetSecret(ctx, tx, digest, now)
+	if err != nil {
+		return err
+	}
+	if !secretValid {
+		return ErrTokenInvalid
+	}
+	account, eligible, err := lockRecoverableAccountByID(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	// An Account suspended between request and completion must not be revived
+	// by a secret issued while it was still active.
+	if !eligible {
+		return ErrTokenInvalid
+	}
+
+	if err := replaceRecoveredCredential(ctx, tx, accountID, credentialHash, now); err != nil {
+		return err
+	}
+	if err := revokeAllSessionFamilies(ctx, tx, accountID, now); err != nil {
+		return err
+	}
+	revision, err := advanceRecoveredAccount(ctx, tx, accountID, now)
+	if err != nil {
+		return err
+	}
+	if err := consumeResetSecret(ctx, tx, secretID, now); err != nil {
+		return err
+	}
+	if err := appendIdentitySecurityEvent(
+		ctx, tx, securityEventAppend{
+			eventType:      "PASSWORD_RESET_COMPLETED",
+			accountID:      accountID,
+			actionSecretID: secretID,
+			revision:       revision,
+			requestID:      requestID,
+			evidence: map[string]any{
+				"schema_version": 1,
+				"outcome_class":  "COMPLETED",
+			},
+		},
+	); err != nil {
+		return err
+	}
+	if _, err := s.outbox.AppendReserved(ctx, tx, outbox.ReservedAppend{
+		Event: outbox.Event{
+			Type:              "identity.password_reset_completed",
+			SchemaVersion:     1,
+			SourceModule:      "IDENTITY_AND_ACCESS",
+			AggregateType:     "ACCOUNT",
+			AggregateID:       accountID,
+			AggregateRevision: revision,
+			CorrelationID:     requestID,
+			SafePayload: map[string]any{
+				"locale":            account.locale,
+				"template_contract": passwordResetCompletedTemplateContract,
+				"reset_at":          now,
+			},
+		},
+		// A completion notice carries no actionable secret, but the destination
+		// is PII, so it stays inside authenticated ciphertext.
+		Protected: outbox.NoticeDelivery{
+			Destination:      account.email,
+			Locale:           string(account.locale),
+			TemplateContract: passwordResetCompletedTemplateContract,
+		},
+		Reservation: reservation,
+	}); err != nil {
+		return fmt.Errorf("%w: %v", ErrDeliveryUnavailable, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing password reset: %w", err)
+	}
+	return nil
+}
+
+// lockRecoverableAccountByID re-checks eligibility against the locked row at
+// completion time, using the Account the secret itself names.
+func lockRecoverableAccountByID(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+) (recoverableAccount, bool, error) {
+	var account recoverableAccount
+	var status string
+	var emailVerifiedAt *time.Time
+	var credentialState *string
+	err := tx.QueryRow(ctx,
+		`SELECT a.id::text, a.email, a.locale, a.revision, a.status,
+		        a.email_verified_at, c.state::text
+		   FROM accounts a
+		   LEFT JOIN password_credentials c ON c.account_id = a.id
+		  WHERE a.id = $1::uuid
+		  FOR UPDATE OF a`,
+		accountID,
+	).Scan(
+		&account.id, &account.email, &account.locale,
+		&account.revision, &status, &emailVerifiedAt, &credentialState,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return recoverableAccount{}, false, nil
+	}
+	if err != nil {
+		return recoverableAccount{}, false, fmt.Errorf("locking recovered Account: %w", err)
+	}
+	eligible := status == "ACTIVE" && emailVerifiedAt != nil && credentialState != nil
+	return account, eligible, nil
+}
+
+func replaceRecoveredCredential(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	credentialHash config.Secret,
+	now time.Time,
+) error {
+	// An encoded Argon2id hash, not password plaintext. Exposing the wrapper
+	// here hands it to PostgreSQL and nowhere else.
+	tag, err := tx.Exec(ctx,
+		`UPDATE password_credentials
+		    SET password_hash = $2, state = 'ACTIVE', password_changed_at = $3
+		  WHERE account_id = $1::uuid`,
+		accountID, credentialHash.Expose(), now,
+	)
+	if err != nil {
+		return fmt.Errorf("replacing recovered credential: %w", err)
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf(
+			"replacing recovered credential: expected one row, changed %d", tag.RowsAffected(),
+		)
+	}
+	return nil
+}
+
+// revokeAllSessionFamilies revokes every family, with no surviving session.
+//
+// This differs from a voluntary password change, which deliberately preserves
+// the caller's own family. Recovery has no authenticated caller to preserve,
+// and the reason it is invoked is that control of the credential is in doubt.
+func revokeAllSessionFamilies(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	now time.Time,
+) error {
+	if _, err := tx.Exec(ctx,
+		`UPDATE sessions
+		    SET state = 'REVOKED',
+		        revoked_at = $2,
+		        revocation_reason = 'PASSWORD_RESET',
+		        updated_at = $2
+		  WHERE account_id = $1::uuid
+		    AND state = 'ACTIVE'`,
+		accountID, now,
+	); err != nil {
+		return fmt.Errorf("revoking session families on recovery: %w", err)
+	}
+	return nil
+}
+
+// advanceRecoveredAccount bumps both the revision and the session epoch.
+//
+// Revoking the rows above only invalidates families that exist now. Advancing
+// the epoch invalidates every family admitted under the old one, which closes
+// the window where a family created concurrently with this transaction would
+// otherwise survive a reset.
+func advanceRecoveredAccount(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	now time.Time,
+) (int, error) {
+	var revision int
+	if err := tx.QueryRow(ctx,
+		`UPDATE accounts
+		    SET revision = revision + 1,
+		        session_epoch = session_epoch + 1,
+		        updated_at = $2
+		  WHERE id = $1::uuid
+		 RETURNING revision`,
+		accountID, now,
+	).Scan(&revision); err != nil {
+		return 0, fmt.Errorf("advancing recovered Account: %w", err)
+	}
+	return revision, nil
 }

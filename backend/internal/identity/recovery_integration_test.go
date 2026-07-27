@@ -5,6 +5,7 @@ package identity
 import (
 	"bytes"
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
@@ -31,11 +33,12 @@ func recoveryService(
 		randomness = append(randomness, bytes.Repeat([]byte{randomByte + offset}, 32)...)
 	}
 	service, err := NewRecoveryService(RecoveryServiceOptions{
-		Pool:     pool,
-		Outbox:   writer,
-		ResetTTL: time.Hour,
-		Now:      func() time.Time { return now },
-		Random:   bytes.NewReader(randomness),
+		Pool:        pool,
+		Outbox:      writer,
+		Compromised: clearCompromisedSource(),
+		ResetTTL:    time.Hour,
+		Now:         func() time.Time { return now },
+		Random:      bytes.NewReader(randomness),
 	})
 	if err != nil {
 		t.Fatalf("constructing recovery service: %v", err)
@@ -325,5 +328,226 @@ func TestResetRequestSupersedesPreviousLiveSecret(t *testing.T) {
 	}
 	if consumed {
 		t.Fatal("a superseded reset secret was still accepted")
+	}
+}
+
+// plantSessionFamilies inserts live families directly so recovery has
+// something real to invalidate.
+func plantSessionFamilies(t *testing.T, pool *pgxpool.Pool, accountID string, count int) {
+	t.Helper()
+	for index := 0; index < count; index++ {
+		if _, err := pool.Exec(context.Background(),
+			`INSERT INTO sessions
+			   (account_id, admitted_epoch, idle_expires_at, absolute_expires_at)
+			 SELECT $1::uuid, session_epoch, now() + interval '1 day', now() + interval '7 days'
+			   FROM accounts WHERE id = $1::uuid`,
+			accountID,
+		); err != nil {
+			t.Fatalf("planting session family: %v", err)
+		}
+	}
+}
+
+func accountFacts(t *testing.T, pool *pgxpool.Pool) (id string, revision int, epoch int, hash string) {
+	t.Helper()
+	if err := pool.QueryRow(context.Background(),
+		`SELECT a.id::text, a.revision, a.session_epoch, c.password_hash
+		   FROM accounts a JOIN password_credentials c ON c.account_id = a.id`,
+	).Scan(&id, &revision, &epoch, &hash); err != nil {
+		t.Fatalf("reading Account facts: %v", err)
+	}
+	return id, revision, epoch, hash
+}
+
+func issuedResetBearer(t *testing.T, pool *pgxpool.Pool, service *RecoveryService, fill byte) string {
+	t.Helper()
+	if err := service.RequestPasswordReset(context.Background(), PasswordResetRequest{
+		Email: studentRegistration().Email, RequestID: "request-reset-1",
+	}); err != nil {
+		t.Fatalf("requesting reset: %v", err)
+	}
+	if live := countLiveResetSecrets(t, pool); live != 1 {
+		t.Fatalf("live reset secrets after request = %d, want 1", live)
+	}
+	return deterministicBearer(fill)
+}
+
+// TestCompletePasswordResetIsAtomicAndInvalidatesEverySession is the Must 3
+// stop condition: one transaction replaces the credential, revokes every
+// family, advances revision and epoch, consumes the secret, and records
+// evidence plus notification intent.
+func TestCompletePasswordResetIsAtomicAndInvalidatesEverySession(t *testing.T) {
+	pool := admissionPool(t)
+	activeStudent(t, pool, 0x81)
+	now := time.Now().UTC()
+	service := recoveryService(t, pool, now, 0x91)
+	accountID, revisionBefore, epochBefore, hashBefore := accountFacts(t, pool)
+	plantSessionFamilies(t, pool, accountID, 3)
+	bearer := issuedResetBearer(t, pool, service, 0x91)
+
+	if err := service.CompletePasswordReset(context.Background(), PasswordResetCompletion{
+		Token:     bearer,
+		Password:  config.NewSecret("a different sufficiently long passphrase"),
+		RequestID: "request-complete-1",
+	}); err != nil {
+		t.Fatalf("completing reset: %v", err)
+	}
+
+	_, revisionAfter, epochAfter, hashAfter := accountFacts(t, pool)
+	if hashAfter == hashBefore {
+		t.Fatal("password hash was not replaced")
+	}
+	if revisionAfter != revisionBefore+1 {
+		t.Fatalf("revision = %d, want %d", revisionAfter, revisionBefore+1)
+	}
+	if epochAfter != epochBefore+1 {
+		t.Fatalf("session epoch = %d, want %d", epochAfter, epochBefore+1)
+	}
+
+	var live int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM sessions WHERE account_id = $1::uuid AND state = 'ACTIVE'`,
+		accountID,
+	).Scan(&live); err != nil {
+		t.Fatalf("counting live families: %v", err)
+	}
+	if live != 0 {
+		t.Fatalf("live session families after recovery = %d, want 0", live)
+	}
+	var revokedForReset int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM sessions
+		  WHERE account_id = $1::uuid AND state = 'REVOKED'
+		    AND revocation_reason = 'PASSWORD_RESET'`,
+		accountID,
+	).Scan(&revokedForReset); err != nil {
+		t.Fatalf("counting revoked families: %v", err)
+	}
+	if revokedForReset != 3 {
+		t.Fatalf("families revoked as PASSWORD_RESET = %d, want 3", revokedForReset)
+	}
+
+	// Recovery must not hand back a session: no family may be created by it.
+	var created int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM sessions WHERE account_id = $1::uuid`, accountID,
+	).Scan(&created); err != nil {
+		t.Fatalf("counting all families: %v", err)
+	}
+	if created != 3 {
+		t.Fatalf("total families = %d, want the original 3 and no new session", created)
+	}
+
+	if live := countLiveResetSecrets(t, pool); live != 0 {
+		t.Fatalf("live reset secrets after completion = %d, want 0", live)
+	}
+	var events int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM identity_security_events
+		  WHERE account_id = $1::uuid AND event_type = 'PASSWORD_RESET_COMPLETED'`,
+		accountID,
+	).Scan(&events); err != nil {
+		t.Fatalf("counting completion evidence: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("PASSWORD_RESET_COMPLETED events = %d, want 1", events)
+	}
+	var intents int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM outbox_events WHERE event_type = 'identity.password_reset_completed'`,
+	).Scan(&intents); err != nil {
+		t.Fatalf("counting notification intent: %v", err)
+	}
+	if intents != 1 {
+		t.Fatalf("completion outbox intents = %d, want 1", intents)
+	}
+}
+
+// TestCompletedResetSecretCannotBeReplayed proves the consumed secret is spent
+// for good, and that the second attempt changes nothing.
+func TestCompletedResetSecretCannotBeReplayed(t *testing.T) {
+	pool := admissionPool(t)
+	activeStudent(t, pool, 0x82)
+	now := time.Now().UTC()
+	service := recoveryService(t, pool, now, 0x92)
+	bearer := issuedResetBearer(t, pool, service, 0x92)
+
+	completion := PasswordResetCompletion{
+		Token:     bearer,
+		Password:  config.NewSecret("a different sufficiently long passphrase"),
+		RequestID: "request-complete-1",
+	}
+	if err := service.CompletePasswordReset(context.Background(), completion); err != nil {
+		t.Fatalf("first completion: %v", err)
+	}
+	_, revisionAfterFirst, epochAfterFirst, hashAfterFirst := accountFacts(t, pool)
+
+	completion.RequestID = "request-complete-2"
+	completion.Password = config.NewSecret("yet another sufficiently long phrase")
+	if err := service.CompletePasswordReset(context.Background(), completion); !errors.Is(
+		err, ErrTokenInvalid,
+	) {
+		t.Fatalf("replayed completion error = %v, want ErrTokenInvalid", err)
+	}
+	_, revisionAfterSecond, epochAfterSecond, hashAfterSecond := accountFacts(t, pool)
+	if revisionAfterSecond != revisionAfterFirst ||
+		epochAfterSecond != epochAfterFirst ||
+		hashAfterSecond != hashAfterFirst {
+		t.Fatal("a replayed reset mutated Account state")
+	}
+}
+
+// TestSuspensionBetweenRequestAndCompletionBlocksRecovery proves eligibility is
+// re-checked against the locked row at completion time, so a secret issued
+// while an Account was active cannot revive it after suspension.
+func TestSuspensionBetweenRequestAndCompletionBlocksRecovery(t *testing.T) {
+	pool := admissionPool(t)
+	activeStudent(t, pool, 0x83)
+	now := time.Now().UTC()
+	service := recoveryService(t, pool, now, 0x93)
+	bearer := issuedResetBearer(t, pool, service, 0x93)
+
+	accountID, _, _, hashBefore := accountFacts(t, pool)
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, accountID,
+	); err != nil {
+		t.Fatalf("suspending Account: %v", err)
+	}
+
+	if err := service.CompletePasswordReset(context.Background(), PasswordResetCompletion{
+		Token:     bearer,
+		Password:  config.NewSecret("a different sufficiently long passphrase"),
+		RequestID: "request-complete-1",
+	}); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("suspended completion error = %v, want ErrTokenInvalid", err)
+	}
+	_, _, _, hashAfter := accountFacts(t, pool)
+	if hashAfter != hashBefore {
+		t.Fatal("a suspended Account's password was replaced by recovery")
+	}
+	if live := countLiveResetSecrets(t, pool); live != 1 {
+		t.Fatalf("live reset secrets = %d; a refused completion must not consume", live)
+	}
+}
+
+// TestWeakRecoveryPasswordIsRefusedWithoutConsumingTheSecret proves password
+// policy runs before anything is spent, so a rejected password leaves the user
+// able to try again with the same link.
+func TestWeakRecoveryPasswordIsRefusedWithoutConsumingTheSecret(t *testing.T) {
+	pool := admissionPool(t)
+	activeStudent(t, pool, 0x84)
+	now := time.Now().UTC()
+	service := recoveryService(t, pool, now, 0x94)
+	bearer := issuedResetBearer(t, pool, service, 0x94)
+
+	if err := service.CompletePasswordReset(context.Background(), PasswordResetCompletion{
+		Token:     bearer,
+		Password:  config.NewSecret("short"),
+		RequestID: "request-complete-1",
+	}); !errors.Is(err, ErrPasswordPolicy) {
+		t.Fatalf("weak password error = %v, want ErrPasswordPolicy", err)
+	}
+	if live := countLiveResetSecrets(t, pool); live != 1 {
+		t.Fatalf("live reset secrets = %d; a refused password must not consume", live)
 	}
 }

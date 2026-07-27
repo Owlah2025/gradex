@@ -321,11 +321,12 @@ func buildAdmissionFoundation(
 	}
 
 	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
-		Pool:     pool,
-		Outbox:   writer,
-		ResetTTL: admission.PasswordResetTokenTTL(),
-		Now:      time.Now,
-		Random:   rand.Reader,
+		Pool:        pool,
+		Outbox:      writer,
+		Compromised: compromisedSource,
+		ResetTTL:    admission.PasswordResetTokenTTL(),
+		Now:         time.Now,
+		Random:      rand.Reader,
 	})
 	if err != nil {
 		_ = redisClient.Close()

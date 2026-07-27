@@ -32,6 +32,19 @@ type VerificationDelivery struct {
 	ExpiresAt         time.Time `json:"expires_at"`
 }
 
+// NoticeDelivery is a message that carries no actionable secret — a statement
+// that something already happened, such as a completed password reset.
+//
+// It is a distinct type from VerificationDelivery rather than that struct with
+// an empty token, so the ciphertext cannot be read as carrying a usable token
+// and a future consumer cannot mistake an absent one for a blank one. The
+// destination is still PII, so this remains a protected payload.
+type NoticeDelivery struct {
+	Destination      string `json:"destination"`
+	Locale           string `json:"locale"`
+	TemplateContract string `json:"template_contract"`
+}
+
 type protectedPayload struct {
 	KeyVersion string
 	Nonce      []byte

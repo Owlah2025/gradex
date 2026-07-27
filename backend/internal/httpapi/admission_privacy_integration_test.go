@@ -103,7 +103,8 @@ func realAdmissionRouter(
 		)
 	}
 	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
-		Pool: pool, Outbox: writer, ResetTTL: time.Hour, Now: time.Now,
+		Pool: pool, Outbox: writer, Compromised: compromised,
+		ResetTTL: time.Hour, Now: time.Now,
 		Random: bytes.NewReader(recoveryRandomness),
 	})
 	if err != nil {
