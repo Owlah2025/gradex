@@ -90,6 +90,27 @@ def enumerate_markdown():
     return files
 
 
+def git_index_entries():
+    """Build index files and directory prefixes from git index (cached files)."""
+    out = subprocess.run(
+        ["git", "ls-files", "--cached"],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    files = set()
+    dirs = {".", ""}
+    for p in out:
+        if not p:
+            continue
+        files.add(p)
+        d = os.path.dirname(p)
+        while d:
+            dirs.add(d)
+            dirs.add(os.path.normpath(d))
+            d = os.path.dirname(d)
+    return files, dirs
+
+
+index_files, index_dirs = git_index_entries()
 tracked = enumerate_markdown()
 
 FENCE = re.compile(r"^```.*?^```", re.M | re.S)
@@ -132,8 +153,19 @@ for doc in tracked:
         resolved = doc if path == "" else os.path.normpath(
             os.path.join(os.path.dirname(doc), path))
 
-        if not os.path.exists(resolved):
-            print(f"docs-guard: {doc}: link target does not exist: {target}", file=sys.stderr)
+        # Self-anchor links (`path == ""`) point to headings within `doc` itself.
+        # `doc` is currently being read so it exists by construction; skip the index
+        # check when `path == ""` so untracked work-in-progress Markdown documents can
+        # reference their own anchors without needing to be staged first.
+        # For explicit target paths (`path != ""`), require the target file or directory
+        # prefix to be staged in the git index (`git ls-files --cached`). This is deliberate
+        # because hosted CI runs `actions/checkout`, which only materializes tracked files.
+        # If a developer hits "link target is not in git index", run `git add <target>`.
+        if path != "" and resolved not in index_files and resolved not in index_dirs:
+            if os.path.exists(resolved):
+                print(f"docs-guard: {doc}: link target is not in git index: {target}", file=sys.stderr)
+            else:
+                print(f"docs-guard: {doc}: link target does not exist: {target}", file=sys.stderr)
             failures += 1
             continue
 
