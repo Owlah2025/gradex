@@ -174,8 +174,8 @@ jobs:
           BEGIN
             SELECT version, dirty INTO v, d FROM schema_migrations ORDER BY version DESC LIMIT 1;
             -- Keep in step with MaxSchemaVersion in internal/db/schema.go.
-            IF v IS DISTINCT FROM 5 THEN
-              RAISE EXCEPTION 'schema version is %, expected 5', v;
+            IF v IS DISTINCT FROM 6 THEN
+              RAISE EXCEPTION 'schema version is %, expected 6', v;
             END IF;
             IF d THEN
               RAISE EXCEPTION 'schema is dirty after a successful migration';
