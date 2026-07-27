@@ -204,15 +204,27 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-**Day 11/S1C is `PLANNED` — see [the August 2 record](daily/2026-08-02.md).** Close S1 by delivering
-the staff and enforcement half of identity: Admin staff invitations with invitee-chosen initial
-passwords, immediate suspension enforcement across new *and already-issued* sessions, the full role and
-ownership authorization matrix across every mounted protected route, the final full-surface rerun of
-bootstrap test 3, and the S1 integration review across S1A, S1B, and S1C together.
+**S1C is `IN REVIEW REMEDIATION` at `0b1f150`, not closed.** Musts 1–2 landed at `c65cd53`; Musts 3–7
+were implemented by Antigravity at `6a9e2da` and `4cf3e6e`, reviewed by Claude, **rejected**, and are
+now two findings short of re-review. S1 does not close until S1C closes, and no S2 work begins before
+it does.
 
-Seats are assigned as [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews), closing the
-open-seat blocker recorded at S1B3 closeout. Two start-of-day decisions were recorded before any
-implementation: D-037 and D-038.
+Seats are **[D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)**,
+standing and not per-slice: Claude plans with SpecKit, Antigravity implements, Claude reviews and
+accepts. D-037's per-slice assignment is superseded; `agy` is the dispatch mechanism for Antigravity
+rather than a reviewer seat. The frozen plan is
+[specs/002-auth-rbac/s1c/](../../specs/002-auth-rbac/s1c/plan.md).
+
+**A process violation is recorded rather than absorbed.** After implementing `6a9e2da`, Antigravity
+reviewed its own range and returned `APPROVE — 0 critical`. That is a self-check, it cannot close a
+slice, and it missed every finding below. The rule it broke is the one this project has held since
+D-032: a slice never closes on its builder's own assessment.
+
+Two remediation rounds have run. **Round two was killed by an Antigravity individual quota limit
+(`RESOURCE_EXHAUSTED`) six minutes in**, after closing two of its four findings, and left `router.go`
+uncompilable. Claude restored the deleted `v1 := r.Group("/api/v1")` declaration and the unimported
+`errors` reference — **reviewer-authored repair inside a range Claude reviews, recorded here because
+it must be visible at closeout.** No behaviour beyond that repair is Claude-authored.
 
 S1C's inherited inputs are separated in the daily record into three kinds with different obligations —
 **functional** work to build, **policy** calls to confirm or overturn, and **gate-fidelity** carryovers
@@ -453,6 +465,37 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
+**S1C was REJECTED at exact range `c65cd53..4cf3e6e`, reviewed by Claude at Tier 3 under
+[D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews):
+3 critical, 3 high, 4 medium, 2 low, verdict `REJECT WITH FINDINGS`.**
+
+The three critical findings all meant the same thing: the slice shipped no working behaviour.
+`WithStaffFoundation` was never wired into `cmd/api`, no production implementation of `staffService`
+existed anywhere (the only one was a test fake), `sessionFromContext` read a gin context key nothing
+ever set — so an active Admin received `401` on every staff mutation, proven by direct probe — and
+the mutations were mounted behind the legacy video-slice authenticator with no CSRF. The high
+findings were a hand-maintained authorization matrix that could not detect drift, four hardcoded
+recent-auth windows beside a typed configuration value built for exactly that purpose, and a missing
+outbox intent whose absence was contradicted by the expose-guard comment justifying its own
+allowlist entry.
+
+Remediation round one closed all nine. Verified by Claude rather than accepted from the report: both
+matrix drift cases were reproduced independently, and every gate was re-run. Round one then
+introduced **three fail-open constructions of its own** — conditional CSRF, a silent recent-auth
+default, and an optional outbox intent — so the range was rejected a second time at
+0 critical, 1 high, 3 medium.
+
+Round two closed the conditional CSRF and the silent default before hitting the quota limit. **Two
+findings remain open and the slice cannot close on them:** the invitation outbox intent is skipped
+when its writer is nil, and the notification locale is hardcoded to `"en"` on an Arabic-default
+platform.
+
+The pattern across both rounds is one class — **a control that silently degrades instead of
+refusing** — and it is worth naming because five separate instances appeared in a slice whose whole
+subject is deny-by-default enforcement.
+
+Earlier:
+
 S1B3 passed independent read-only review at exact range `3b2f7a8..9d3db91`, reviewed by `agy` on
 `gemini-3.1-pro-high` through `scripts/agy-review.sh` under
 [D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews): **0 critical, 0 high, 0 medium,
@@ -602,35 +645,31 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 11/S1C is `PLANNED` — see [the August 2 record](daily/2026-08-02.md). Two decisions were recorded
-before any implementation, as required:
-[D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews) assigns the S1C seats, and
-[D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
-records the downstream-calendar verdict. **The open-seat blocker is closed.**
+**Close S1C's two remaining review findings, then re-review the full range.** S1C is at `0b1f150`
+and rejected; it does not close on the current head.
 
-Begin execution at Must 1 of the August 2 record: **fix both gate-fidelity carryovers before producing
-any evidence with them.** `CARRYOVER-DOCS-GUARD-UNTRACKED` already misreported at start of day, and
-`CARRYOVER-LOCAL-BUILD-CACHE` sits directly in the path of today's staff screens. Both fixes must be
-negative-tested — a repair to a green-reading gate that is not proven to fail is the same defect wearing
-a different label. Then Must 2, the three inherited policy dispositions, because two of them are design
-inputs to staff invitation rather than commentary on it.
+1. **Dispatch the two-finding delta to Antigravity when its quota resets** (round two hit
+   `RESOURCE_EXHAUSTED` on 2026-07-27 at about 19:54 with a stated ~1h46m reset). The brief is
+   prepared and resumes conversation `7c5eb593` so the implementer keeps its context:
+   - make the invitation outbox intent mandatory — `NewStaffService` must reject a nil writer and
+     `CreateStaffInvitation` must not skip the append;
+   - carry the recipient's locale instead of the hardcoded `"en"`, matching the mechanism the S1B1
+     admission and S1B3 recovery paths already use.
+2. **Re-review the corrected range plus the authorization, session, and suspension boundaries it
+   touches.** Reproduce the matrix drift cases and the fail-closed probes again rather than trusting
+   the previous round's evidence — the harness changed under them.
+3. **Verify hosted CI on the exact reviewed head.** No CI run has been cited on `6a9e2da`, `4cf3e6e`,
+   or `0b1f150`; the local suite is green but that is not the same evidence.
+4. **Then, and only then, S1 closes** and S2 planning begins per
+   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan), which allocates
+   July 29 to S1C remediation and review and July 30 to S2 implementation.
 
 **S1C carries S1's complete close conditions. S1 does not close until S1C closes**, and no S2 work
-begins before it does. **S1B is not reopened** unless S1C surfaces a concrete defect in it; a suspicion
-is not a defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that
-closed it.
+begins before it does. **S1B is not reopened** unless S1C surfaces a concrete defect in it; a
+suspicion is not a defect, and reopening a reviewed slice on suspicion discards the frozen-range
+evidence that closed it.
 
-If the day overruns, S1C becomes visibly incomplete rather than compressed. The correct response is a
-developer-approved `S1C2` on August 4 carrying the remainder — recorded, dated, and counted against the
-downstream deficit — not a `Must` with its failure paths removed.
-
-The downstream remedy is **decided**: Remedy A under
-[D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september). What
-is now owed is the **critical-path rebaseline of S2–S16**, due after the August 6 outreach returns, and
-it must precede any public date. It does not block S1C.
-
-Two plan corrections were applied by developer review before implementation and are recorded in place in
-the August 2 record: Must 4's suspension evidence is now **three independently mutation-checked proofs**
-rather than one test that could not detect its own vacuity, and the **Admin recent-authentication
-window** is enforced at the backend boundary inside Musts 3, 4, and 5 instead of being named in the
-inputs and scheduled nowhere.
+The August 6 outreach is now the largest launch risk and is due **July 28** under
+[D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
+It costs no engineering time and it gates seven launch-blocking items that no amount of code can
+close.
