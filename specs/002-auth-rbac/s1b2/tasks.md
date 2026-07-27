@@ -170,10 +170,10 @@ PostgreSQL; browser storage and database canaries contain no plaintext credentia
 - [x] T039 Synchronize implemented contracts and launch state in
   `specs/002-auth-rbac/s1b2/contracts/session-api.md`, `docs/launch/STATUS.md`,
   `docs/launch/SLICES.md`, and `docs/launch/daily/2026-07-31.md`
-- [ ] T040 Freeze and push the exact implementation range, verify hosted CI, and dispatch `agy`
+- [x] T040 Freeze and push the exact implementation range, verify hosted CI, and dispatch `agy`
   read-only review from a disposable detached worktree under D-035. Claude cannot review this range
   because it authors part of it
-- [ ] T041 Resolve every critical/high review finding, rerun affected/full gates, record the final
+- [x] T041 Resolve every critical/high review finding, rerun affected/full gates, record the final
   reviewed head and verdict, and close Day 9 only when all acceptance evidence exists
 
 ---

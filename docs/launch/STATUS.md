@@ -1,8 +1,8 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-31 — advanced by user
-> Last repository reconciliation: 2026-07-31 — backend session HTTP boundary verified in working tree
-> Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `IN_PROGRESS`
+> Last repository reconciliation: 2026-07-31 — S1B2 closed at reviewed head `7d8710e` with green hosted CI
+> Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `CLOSED`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 15 calendar days
 > Launch confidence: **Red**
@@ -29,12 +29,20 @@ durable protected delivery intent, and bilingual admission screens closed at rev
 implementation head `ad1b8f6`. The final independent result was 0 critical, 0 high, 2 medium, and
 7 low with verdict `APPROVE WITH FINDINGS`.
 
-Day 9/S1B2 is `IN_PROGRESS` — see [the July 31 record](daily/2026-07-31.md). Its single outcome is
-an Active Account signing in through the same-origin cookie boundary, safely rotating one
-server-authoritative independently revocable family, and logging out. D-034 and the written design
-are developer-approved, and the focused executable plan under `specs/002-auth-rbac/s1b2/` passes
-its pre/post-design constitution gate. Implementation starts with T004–T012, the four bounded S1B1
-security/transport carryovers.
+Day 9/S1B2 is `CLOSED` at reviewed implementation head `7d8710e` — see
+[the July 31 record](daily/2026-07-31.md). An Active Account signs in through the same-origin cookie
+boundary, rotates one server-authoritative independently revocable family, and logs out. Role-scoped
+windows, generic login, generation-bound CSRF, superseded-use classification, family revocation on
+confirmed reuse, logout, and bilingual sign-in and session-state screens are implemented. Two
+consecutive frozen ranges were independently reviewed by `agy` and both returned `APPROVE` with
+0 critical, 0 high, 0 medium, and 0 low.
+
+The slice needed a second range because the first did not pass hosted CI. Migration `0006` raised the
+schema to version 6, but the Migrations job still asserted version 5; `7d8710e` corrects it. Two
+process facts came out of that failure and are carried into S1B3: the full local gate suite was green
+while the range was red on CI, because no local script asserts schema version at all, and an
+independent reviewer returned 0/0/0/0 on a range that did not build, because the review dimensions
+cover the diff rather than gate execution. **A verdict alone is not evidence that a range passes.**
 
 **S1B was split three ways on 2026-07-30 by developer decision.** Detailed reconciliation showed
 that registration, rotating sessions, recovery, abuse controls, delivery intent, and bilingual UI
@@ -108,22 +116,19 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B2 authenticated sessions. The S1B1 carryovers, PostgreSQL family/generation core, public
-Problem Details, hardened single-cookie boundary, origin/generation-bound CSRF enforcement,
-layered session rate decisions, login/resolution/renewal/logout routes, and real-session startup
-composition are implemented. T030–T038 add the memory-only frontend session store, the safe internal
-`returnTo` boundary, bilingual sign-in and session-state screens, reload rehydration, and a real
-header sign-out.
+S1B2 authenticated sessions is delivered and closed. All 41 tasks in
+`specs/002-auth-rbac/s1b2/tasks.md` are complete.
 
-All local gates are green on the working tree: backend formatting, build, vet on both tag sets,
-`go test -race ./...`, and the complete integration suite under race against real PostgreSQL at
-schema 6, Redis, and MinIO; frontend typecheck, lint, 13 `node:test` logic cases, and the production
-build; documentation and exposure guards. The complete browser journey — sign in, reload, sign out —
-was exercised end to end with clean database, log, and browser-storage canary sweeps.
+All local gates are green: backend formatting, build, vet on both tag sets, `go test -race ./...`,
+and the complete integration suite under race against real PostgreSQL at schema 6, Redis, and MinIO;
+frontend typecheck, lint, 13 `node:test` logic cases, and the production build; documentation and
+exposure guards. The complete browser journey — sign in, reload, sign out — was exercised end to end
+with clean database, log, and browser-storage canary sweeps. Hosted CI passed all five jobs on the
+exact reviewed head.
 
-Next, T039–T041: freeze and push the exact range, verify hosted CI, and dispatch the independent
-`agy` review under D-035. **Nothing has been pushed yet** — the frozen range awaits developer
-approval before it leaves the machine.
+Next is Day 10/S1B3 — recovery and integration: password recovery, all-family invalidation, the
+integrated Student journey, and S1B review. S1B3 also inherits the two S1B2 carryovers recorded
+below.
 
 ## Milestones
 
@@ -131,7 +136,7 @@ approval before it leaves the machine.
 |---|---|---|---|
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
-| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at reviewed head `70b4809`; S1B1 closed at reviewed head `ad1b8f6`. S1B2 (Jul 31), S1B3 (Aug 1), and S1C (Aug 2) remain |
+| M2 — Authentication/RBAC vertical slice | July 29–August 2 | In progress | S1A closed at reviewed head `70b4809`; S1B1 at `ad1b8f6`; S1B2 at `7d8710e`. S1B3 (Aug 1) and S1C (Aug 2) remain |
 | M3 — Product/revenue journey | **TBD — replan required** | Not started | Authoring through verified entitlement; S3–S8 dates are unresolved |
 | M4 — Complete MVP operations | **TBD — replan required** | Not started | Admin/Instructor, office hours, notifications, payouts |
 | M5 — Integrated production candidate | August 12 | **At risk** | E2E, infrastructure, security, load, accessibility depend on the unresolved downstream map |
@@ -145,12 +150,25 @@ No S1A or S1B1 acceptance blocker carries over; both final reviews approved thei
 critical/high finding. S1B1 completed bootstrap request fingerprinting, original-email
 preservation, and mandatory compromised-password screening.
 
-S1B2 starts with two explicit medium carryovers: add typed safe internal admission-failure stage
-telemetry without exposing raw causes, and reject deterministic compromised-password screening
-outside development before any staging bootstrap. S1B2 also owns capability-aware schema readiness
-and transport-wide `no-store` on strict-binding errors. S1B3 owns a separate immutable bearer-attempt
-evidence boundary; S1C reconciles the safe policy-read Origin wording; S9 retains outbox
-dispatcher-health admission. These are scheduled work, not hidden acceptance blockers.
+S1B2's two inherited medium carryovers are closed in `916bc52`: typed safe internal admission-failure
+stage telemetry, and rejection of deterministic compromised-password screening outside development.
+Capability-aware schema readiness and transport-wide `no-store` on strict-binding errors are closed
+in the same commit.
+
+S1B2 hands two new carryovers to S1B3, both recorded in the
+[July 31 closeout](daily/2026-07-31.md#closeout):
+
+- `CARRYOVER-S1B2-RETURNTO`: the validated internal `returnTo` is implemented for sign-in only and is
+  not carried across the registration or verification screens. This was the S1B2 `Should` and it was
+  not delivered. S1B3 owns the integrated Student journey and absorbs it.
+- `CARRYOVER-S1B2-CI-DRIFT`: the CI schema-version assertion is a hardcoded literal kept in step by
+  comment alone and will drift again at migration `0007`, and no local gate mirrors it. Derive it
+  from `MaxSchemaVersion`, mirror it locally so it fails before push, or both. Deliberately deferred
+  rather than expanding a slice mid-closeout.
+
+S1B3 owns a separate immutable bearer-attempt evidence boundary; S1C reconciles the safe policy-read
+Origin wording; S9 retains outbox dispatcher-health admission. These are scheduled work, not hidden
+acceptance blockers.
 
 No incomplete July 28 `Must`, `Should`, or `Could` work; Day 6 closed complete. No incomplete July 26
 or July 27 work either. The July 27 `Could` item — non-binding JSON examples — was deferred by
@@ -166,7 +184,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1B2 builder seat changed hands mid-slice (D-035) | Claude (builder), `agy` (reviewer) | Commit Codex's inherited backend tree on verified gates, then continue at T030 | July 31 | Inherited tree passes local gates before new work lands; exact-range `agy` review at slice close |
+| Builder seat still held by Claude under D-035 beyond S1B2 | Developer | Confirm whether Claude continues building S1B3 with `agy` reviewing, or D-033 is restored now that S1B2 closed | August 1 | Explicit developer instruction naming the builder and reviewer seats for S1B3 |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1B split moves S1C and S2 two days | Current builder seat | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
 | S3–S8 cannot fit before the fixed August 8 runway | Developer + current builder seat | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
@@ -186,6 +204,14 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- Hosted CI [run 30251188682](https://github.com/Owlah2025/gradex/actions/runs/30251188682) passed
+  all five jobs — Backend, Frontend, Migrations, Admission Integration, and Guards — on exact
+  reviewed S1B2 head `7d8710e`.
+- Hosted CI [run 30250723457](https://github.com/Owlah2025/gradex/actions/runs/30250723457) **failed**
+  on `e21d0e4`: Backend, Frontend, Admission Integration, and Guards passed, and Migrations failed at
+  "Verify schema version and expected objects" because the job asserted schema 5 after migration
+  `0006` raised the schema to 6. Recorded rather than discarded — it is the evidence that CI enforces
+  the migration contract, and that the local suite does not.
 - Start-of-day Day 9 reconciliation at `d17a367`: backend formatting, build, default/integration
   vet, `go test -race ./...`, documentation guard, and exposure guard pass with the writable
   `GOCACHE=/tmp/gradex-go-cache`. Frontend typecheck, lint, and production build pass. The default
@@ -271,6 +297,25 @@ Fast-follow gates are outside this count. Recalculate from
   changes; no test or independent-review rerun was required.
 
 ## Latest Review
+
+S1B2 passed independent read-only review under
+[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews) across two consecutive frozen
+ranges, both reviewed by `agy` on `gemini-3.1-pro-high` through `scripts/agy-review.sh`:
+
+| Range | Contents | Counts (C/H/M/L) | Verdict |
+|---|---|---:|---|
+| `ad1b8f6..e21d0e4` | S1B2 implementation | 0/0/0/0 | `APPROVE` |
+| `e21d0e4..7d8710e` | CI schema-assertion correction | 0/0/0/0 | `APPROVE` |
+
+Both runs reported `touched files: 0`, both disposable detached worktrees were confirmed unmodified
+on exit, and the `agy` settings file was restored. No run was `TAINTED`, `UNAVAILABLE`, or
+`INCONCLUSIVE`. Claude authored part of both ranges and reviewed neither, so the slice did not close
+on its builder's own assessment.
+
+The correction was split into its own reviewed range deliberately. Folding a Claude-authored fix into
+an already-approved range would have shipped an unreviewed change under an earlier verdict.
+
+Earlier:
 
 S1B1 passed final independent read-only review at exact range `3af09bb..ad1b8f6`, reviewed by Claude
 Opus at high effort under [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review):
@@ -371,11 +416,14 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 9/S1B2 is active in
-[SLICES.md §5.3.2](SLICES.md#532-s1b2--authenticated-sessions) and the
-[July 31 record](daily/2026-07-31.md).
+Day 9/S1B2 is `CLOSED` at reviewed head `7d8710e`. Day 10/S1B3 — recovery and integration — is next,
+scheduled for August 1 in [SLICES.md](SLICES.md).
 
-Review the written D-034/S1B2 design reconciliation, then freeze its executable SpecKit plan and
-tasks. Implementation starts with the two medium S1B1 review carryovers before role-scoped windows,
-generic login, credential rotation/reuse classification, family revocation, logout, and bilingual
-session UI.
+Start the day by reconciling repository evidence, then plan S1B3: password recovery, all-family
+invalidation on password change, the integrated Student journey, and the S1B review that closes
+S1B as a whole. S1B3 also absorbs `CARRYOVER-S1B2-RETURNTO` and should dispose of
+`CARRYOVER-S1B2-CI-DRIFT` explicitly rather than carrying it forward silently.
+
+**The builder and reviewer seats for S1B3 are not yet assigned.** D-035 scoped Claude's builder seat
+to "the remainder of this slice", and that slice is closed. Restoring D-033 requires an explicit
+developer instruction; until one is given, the seats are open, not implicitly renewed.
