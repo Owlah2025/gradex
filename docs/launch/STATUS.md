@@ -472,7 +472,23 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Review
 
-**S1C was REJECTED at exact range `c65cd53..4cf3e6e`, reviewed by Claude at Tier 3 under
+**S1C was REJECTED again on 2026-07-28 at exact range `c65cd53..506e0b4` by an independent `agy`
+review on `gemini-3.1-pro-high`: 0 critical, 2 high, 1 low, verdict `REJECT`.** The run reported
+`touched files: 0` and its disposable worktree was clean. Two earlier dispatches the same evening
+returned `UNAVAILABLE` on an account-wide quota limit and were recorded as such, never as passes.
+
+The two high findings are contract-parity defects against the frozen
+[S1C spec §7](../../specs/002-auth-rbac/s1c/spec.md): every mounted staff route uses a different path
+or method than the contract specifies, and suspension/reinstatement are gated on `ADMIN_OPERATIONS`
+where §7 requires `SECURITY_OPERATIONS`. The low is two declared-but-unused body-limit constants
+beside two mutation routes that bypass `strictJSONMiddleware` entirely. **All three were reproduced
+independently against the code before being accepted.**
+
+**Claude reviewed this same range at Tier 3 and found none of them.** That is the strongest available
+evidence for the never-self-approve rule, and it is recorded here rather than smoothed over: the
+range was twenty minutes away from closing on a developer risk acceptance instead.
+
+Earlier: **S1C was REJECTED at exact range `c65cd53..4cf3e6e`, reviewed by Claude at Tier 3 under
 [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews):
 3 critical, 3 high, 4 medium, 2 low, verdict `REJECT WITH FINDINGS`.**
 
