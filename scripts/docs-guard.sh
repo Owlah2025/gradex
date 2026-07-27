@@ -63,14 +63,34 @@ import os, re, sys, subprocess
 root = sys.argv[1]
 os.chdir(root)
 
-tracked = [
-    p for p in subprocess.run(
-        ["git", "ls-files", "*.md"], capture_output=True, text=True, check=True
+def enumerate_markdown():
+    """Every Markdown file this repository owns, tracked or not.
+
+    WHY --others: enumerating with plain `git ls-files` skipped untracked files
+    silently, so the guard could report success against a document it had never
+    opened. It did exactly that on 2026-08-02, passing with "128 files checked"
+    without reading the record being written at the time. --exclude-standard
+    keeps .gitignore authoritative, so genuinely ignored files stay skipped;
+    what returns is work-in-progress, which is precisely what a pre-commit
+    check exists to read.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
+        capture_output=True, text=True, check=True,
     ).stdout.splitlines()
-    # .agents/ and .claude/ hold vendored tooling, not Gradex documentation.
-    # Their contents are not ours to keep link-clean.
-    if p and not p.startswith((".agents/", ".claude/", "frontend/node_modules/"))
-]
+    seen, files = set(), []
+    for p in out:
+        # .agents/ and .claude/ hold vendored tooling, not Gradex documentation.
+        # Their contents are not ours to keep link-clean.
+        if not p or p.startswith((".agents/", ".claude/", "frontend/node_modules/")):
+            continue
+        if p not in seen:
+            seen.add(p)
+            files.append(p)
+    return files
+
+
+tracked = enumerate_markdown()
 
 FENCE = re.compile(r"^```.*?^```", re.M | re.S)
 INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -195,7 +215,29 @@ for artifact in "${GENERATED_ARTIFACTS[@]}"; do
   fi
 done
 
+# Counted with the same enumeration and the same exclusions the link/anchor
+# check uses, so the reported number cannot describe a wider set than was
+# actually read. It previously did: `git ls-files '*.md' | wc -l` reported 130
+# while the check itself skipped .agents/, .claude/, and node_modules and read
+# about 79. A guard that overstates its own coverage is the same defect class as
+# one that skips untracked files.
+#
+# `|| true` on grep is deliberate: grep exits 1 on no matches, and under
+# `set -o pipefail` that aborts the script with no message — which is exactly
+# what happened on a tree with no untracked Markdown.
+count_markdown() {
+  git ls-files "$@" --exclude-standard -- '*.md' \
+    | { grep -vE '^(\.agents/|\.claude/|frontend/node_modules/)' || true; } \
+    | sort -u | wc -l | tr -d ' '
+}
+
 if [ "$fail" -eq 0 ]; then
-  echo "docs-guard: ok ($(git ls-files '*.md' | wc -l | tr -d ' ') Markdown files checked)"
+  md_all=$(count_markdown --cached --others)
+  md_untracked=$(count_markdown --others)
+  if [ "$md_untracked" -gt 0 ]; then
+    echo "docs-guard: ok ($md_all Markdown files checked, $md_untracked untracked)"
+  else
+    echo "docs-guard: ok ($md_all Markdown files checked)"
+  fi
 fi
 exit "$fail"
