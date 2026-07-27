@@ -434,3 +434,31 @@ test-backed implementation and burns critical-path hours); recording D-032 as si
 (its `Status` field is already historical, and the launch record needs a dated entry naming the
 exact S1B2 handoff point).
 **Source:** Developer instruction on 2026-07-31 after Codex quota exhaustion during S1B2.
+
+## D-036 — Claude builds S1B3 and agy reviews
+
+**Date:** 2026-08-01
+**Status:** Active. Extends [D-035](#d-035--claude-builds-s1b2-and-agy-reviews)'s seat assignment to
+the S1B3 slice and continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s. D-033's frozen-range,
+disposable-worktree, and never-self-approve rules remain in force unchanged.
+**Decision:** Claude holds the builder and planner seat for S1B3, and `agy`
+(Google Antigravity CLI, `gemini-3.1-pro-high`) holds the independent read-only reviewer seat under
+D-032's containment harness, dispatched through `scripts/agy-review.sh <base>..<head>`. Claude must
+not review any S1B3 range it authors. This decision is scoped to S1B3 and expires when that slice
+closes; the seats for S1C require their own explicit assignment and do not renew implicitly.
+**Reason:** D-035 was scoped to "the remainder of the active S1B2 slice", and S1B2 closed at reviewed
+head `7d8710e`. Continuing to build under an expired decision would leave the seats unrecorded during
+a Red-confidence slice, which is exactly the ambiguity the never-self-approve rule exists to prevent.
+The arrangement is also evidenced rather than assumed: across S1B2 it produced two frozen ranges,
+both independently reviewed to `APPROVE` with zero findings, with `touched files: 0` and clean
+disposable worktrees on both runs. Codex quota has not been reported as returned, so D-033's
+restoration condition is still unmet.
+**Alternatives rejected:** Treating D-035 as implicitly covering S1B3 (its own text scopes it to one
+slice, and silently widening a seat decision is the failure mode the launch protocol forbids);
+restoring D-033 now (its stated precondition, returned Codex quota, has not been met, and guessing
+would stall the critical path); Claude building and reviewing its own S1B3 range (removes the only
+external check); dropping the reviewer seat for speed (a slice cannot close on its builder's own
+assessment).
+**Source:** Developer instruction on 2026-08-01 at S1B3 start of day, in response to the recorded
+open-seat blocker.

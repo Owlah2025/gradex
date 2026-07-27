@@ -1,10 +1,10 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-07-31 — advanced by user
-> Last repository reconciliation: 2026-07-31 — S1B2 closed at reviewed head `7d8710e` with green hosted CI
-> Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `CLOSED`
+> Current schedule date: 2026-08-01 — advanced by user
+> Last repository reconciliation: 2026-08-01 — clean tree at `3b2f7a8`, backend and frontend gates green
+> Scheduled day: Day 10 — Authentication and RBAC, S1B3 Recovery and Student integration, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
-> Days remaining after today: 15 calendar days
+> Days remaining after today: 14 calendar days
 > Launch confidence: **Red**
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
@@ -184,7 +184,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| Builder seat still held by Claude under D-035 beyond S1B2 | Developer | Confirm whether Claude continues building S1B3 with `agy` reviewing, or D-033 is restored now that S1B2 closed | August 1 | Explicit developer instruction naming the builder and reviewer seats for S1B3 |
+| S1C builder/reviewer seats unassigned; D-036 covers S1B3 only | Developer | Name the S1C seats explicitly at S1C start of day; D-036 expires when S1B3 closes | August 2 | Dated decision record naming the S1C builder and reviewer |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1B split moves S1C and S2 two days | Current builder seat | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
 | S3–S8 cannot fit before the fixed August 8 runway | Developer + current builder seat | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
@@ -416,14 +416,14 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-Day 9/S1B2 is `CLOSED` at reviewed head `7d8710e`. Day 10/S1B3 — recovery and integration — is next,
-scheduled for August 1 in [SLICES.md](SLICES.md).
+Day 10/S1B3 is `IN_PROGRESS` — see [the August 1 record](daily/2026-08-01.md). Its outcome is safe
+password recovery plus one integrated Student authentication journey, closing S1B. Seven `Must`
+items are scheduled: dispose of the CI schema-drift carryover, non-enumerating reset request and
+single-use consumption, atomic password replacement with all-family invalidation, bilingual recovery
+screens, the `returnTo` carryover inside the integrated journey, the end-to-end Student journey with
+expanded bootstrap-Admin denial proof, and S1B-wide verification and independent review.
 
-Start the day by reconciling repository evidence, then plan S1B3: password recovery, all-family
-invalidation on password change, the integrated Student journey, and the S1B review that closes
-S1B as a whole. S1B3 also absorbs `CARRYOVER-S1B2-RETURNTO` and should dispose of
-`CARRYOVER-S1B2-CI-DRIFT` explicitly rather than carrying it forward silently.
-
-**The builder and reviewer seats for S1B3 are not yet assigned.** D-035 scoped Claude's builder seat
-to "the remainder of this slice", and that slice is closed. Restoring D-033 requires an explicit
-developer instruction; until one is given, the seats are open, not implicitly renewed.
+Seats are assigned under [D-036](../DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews): Claude
+builds and plans S1B3, `agy` on `gemini-3.1-pro-high` reviews read-only. D-036 exists because D-035
+was scoped to S1B2 and expired when that slice closed at `7d8710e`; it is likewise scoped to S1B3
+alone, so S1C requires its own assignment. D-033 stays paused — Codex quota has not returned.

@@ -17,13 +17,17 @@ user-owned working-tree changes. Do not mark work complete without the evidence 
 current daily record.
 
 Under the current launch workflow
-([D-035](docs/DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews)), **Claude is the builder and
-planner for the active S1B2 slice** and `agy` is the independent read-only reviewer, dispatched
-through `scripts/agy-review.sh <base>..<head>`. Codex exhausted its quota mid-slice; its S1B2 work
-through T029 is inherited unchanged, not rewritten. Route all `agy` work through the `agy-delegate`
+([D-036](docs/DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews)), **Claude is the builder and
+planner for the active S1B3 slice** and `agy` is the independent read-only reviewer, dispatched
+through `scripts/agy-review.sh <base>..<head>`. Route all `agy` work through the `agy-delegate`
 skill.
 
-Do not review the S1B2 range Claude authors. That is a self-check, not a review, and it cannot close
+D-036 is scoped to S1B3 alone and expires when that slice closes. Seats never renew implicitly —
+S1C requires its own dated assignment. S1B2 ran under the equivalent
+[D-035](docs/DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews) and closed at reviewed head
+`7d8710e`; Codex's inherited S1B2 work was never rewritten.
+
+Do not review the S1B3 range Claude authors. That is a self-check, not a review, and it cannot close
 the slice.
 
 The standing assignment
