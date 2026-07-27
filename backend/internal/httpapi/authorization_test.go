@@ -623,4 +623,39 @@ func TestRouterRefusesToBuildWithoutAPrincipalResolver(t *testing.T) {
 	}
 }
 
+func TestOwnedResourceRoutesDerivedSweep(t *testing.T) {
+	instructor := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleInstructor,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}
+
+	r, _ := authzRouter(t, fixedPrincipals{principal: instructor})
+	routes := r.Routes()
+
+	for _, rt := range routes {
+		if !(strings.HasPrefix(rt.Path, "/api/v1/courses/:id") || strings.HasPrefix(rt.Path, "/api/v1/courses/:courseID")) {
+			continue
+		}
+
+		execPath := rt.Path
+		execPath = strings.ReplaceAll(execPath, ":id", "course-99")
+		execPath = strings.ReplaceAll(execPath, ":courseID", "course-99")
+
+		var body []byte
+		if rt.Method == http.MethodPost || rt.Method == http.MethodPut || rt.Method == http.MethodPatch {
+			body = []byte(`{}`)
+		}
+
+		req := newAuthenticatedRequest(rt.Method, execPath, body)
+		rec := do(r, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("owned route %s %s did not enforce RequireCourseOwnership (status = %d, want 403)",
+				rt.Method, rt.Path, rec.Code)
+		}
+	}
+}
+
 var _ = video.Service(fakeService{})

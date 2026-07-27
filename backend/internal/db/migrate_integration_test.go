@@ -103,7 +103,15 @@ var (
 		"outbox_events",
 		"outbox_protected_payloads",
 	}
-	staffTables = []string{"staff_invitations"}
+	staffTables   = []string{"staff_invitations"}
+	catalogTables = []string{
+		"taxonomy_terms",
+		"course_revisions",
+		"course_sections",
+		"course_lessons",
+		"lesson_files",
+		"course_price_changes",
+	}
 )
 
 func allTables() []string {
@@ -112,7 +120,8 @@ func allTables() []string {
 	all = append(all, auditTables...)
 	all = append(all, sessionTables...)
 	all = append(all, admissionTables...)
-	return append(all, staffTables...)
+	all = append(all, staffTables...)
+	return append(all, catalogTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,

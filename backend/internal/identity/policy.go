@@ -28,6 +28,11 @@ const (
 	// action; whether this Student may reach this Course is a separate
 	// Entitlement decision owned by S4.
 	CapLearningAccess Capability = "LEARNING_ACCESS"
+
+	// S2 Catalogue capability set — Admin only.
+	CapCatalogPublish  Capability = "CATALOG_PUBLISH"
+	CapCatalogPricing  Capability = "CATALOG_PRICING"
+	CapCatalogTaxonomy Capability = "CATALOG_TAXONOMY"
 )
 
 // AllCapabilities is the closed set, used by tests to prove the policy is total
@@ -43,6 +48,9 @@ var AllCapabilities = []Capability{
 	CapProviderOperations,
 	CapContentManagement,
 	CapLearningAccess,
+	CapCatalogPublish,
+	CapCatalogPricing,
+	CapCatalogTaxonomy,
 }
 
 // DenyReason is the typed reason a decision was negative.
@@ -137,7 +145,8 @@ func Authorize(p Principal, c Capability) Decision {
 	case RoleAdmin:
 		switch c {
 		case CapAdminOperations, CapFinancialOperations, CapSecurityOperations,
-			CapRetentionOperations, CapProviderOperations, CapContentManagement:
+			CapRetentionOperations, CapProviderOperations, CapContentManagement,
+			CapCatalogPublish, CapCatalogPricing, CapCatalogTaxonomy:
 			return allow()
 		}
 		// Deliberately not CapLearningAccess. Admin access to protected content
