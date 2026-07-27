@@ -67,6 +67,17 @@ func passwordResetIdentifier(c *gin.Context) string {
 	return rateLimitEmailIdentifier(request.Email)
 }
 
+// passwordResetTokenIdentifier keys the limiter on the presented secret so
+// guessing attempts are budgeted per token rather than per address, and a
+// malformed value collapses to one bucket instead of minting unlimited keys.
+func passwordResetTokenIdentifier(c *gin.Context) string {
+	request := c.MustGet(strictJSONBodyContextKey).(*passwordResetCompletionBody)
+	if _, err := identity.DigestActionSecret(request.Token); err != nil {
+		return "invalid-password-reset-token"
+	}
+	return request.Token
+}
+
 func verificationTokenIdentifier(c *gin.Context) string {
 	request := c.MustGet(strictJSONBodyContextKey).(*verificationConsumptionBody)
 	if _, err := identity.DigestActionSecret(request.Token); err != nil {

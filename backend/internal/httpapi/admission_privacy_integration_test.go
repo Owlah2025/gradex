@@ -119,7 +119,7 @@ func realAdmissionRouter(
 	endpointPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
-		"password-reset-requests",
+		"password-reset-requests", "password-resets",
 	} {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}

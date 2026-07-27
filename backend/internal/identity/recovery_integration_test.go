@@ -551,3 +551,190 @@ func TestWeakRecoveryPasswordIsRefusedWithoutConsumingTheSecret(t *testing.T) {
 		t.Fatalf("live reset secrets = %d; a refused password must not consume", live)
 	}
 }
+
+// countingCompromisedSource records how many times screening was reached.
+//
+// screenCompromised runs immediately before HashPassword inside
+// prepareCredential, and nothing else in the completion path calls it. A zero
+// count therefore proves the Argon2id hash was never reached either — this is
+// a structural consequence of that ordering, not an inference from timing.
+type countingCompromisedSource struct {
+	inner  CompromisedRangeSource
+	mutex  sync.Mutex
+	visits int
+}
+
+func (c *countingCompromisedSource) Scheme() CompromisedLookupScheme {
+	return c.inner.Scheme()
+}
+
+func (c *countingCompromisedSource) PrefixLength() int { return c.inner.PrefixLength() }
+
+func (c *countingCompromisedSource) Lookup(
+	ctx context.Context,
+	lookup CompromisedRangeLookup,
+) (CompromisedRangeResult, error) {
+	c.mutex.Lock()
+	c.visits++
+	c.mutex.Unlock()
+	return c.inner.Lookup(ctx, lookup)
+}
+
+func (c *countingCompromisedSource) count() int {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.visits
+}
+
+// TestRefusedResetTokensNeverReachPasswordHashing guards the CPU-exhaustion
+// boundary on the unauthenticated completion endpoint.
+//
+// Completion is the only anonymous route that can reach Argon2id. Without the
+// preflight, posting arbitrary tokens would force a full hash plus a
+// compromised-password screen per request at no cost to the attacker.
+//
+// The assertion is an invocation count on an injected screener, not elapsed
+// time: a timing comparison is too environment-sensitive to be the proof.
+func TestRefusedResetTokensNeverReachPasswordHashing(t *testing.T) {
+	newPassword := config.NewSecret("a different sufficiently long passphrase")
+
+	tests := []struct {
+		scenario string
+		// token returns the bearer to present, after any setup that makes it
+		// unusable has been applied.
+		token func(t *testing.T, pool *pgxpool.Pool, service *RecoveryService) string
+	}{
+		{
+			scenario: "unknown",
+			token: func(*testing.T, *pgxpool.Pool, *RecoveryService) string {
+				return deterministicBearer(0xEE)
+			},
+		},
+		{
+			scenario: "wrong purpose",
+			token: func(t *testing.T, pool *pgxpool.Pool, _ *RecoveryService) string {
+				// A live EMAIL_VERIFICATION secret exists for this Account from
+				// registration; present it to the recovery endpoint.
+				return deterministicBearer(0x86)
+			},
+		},
+		{
+			scenario: "consumed",
+			token: func(t *testing.T, pool *pgxpool.Pool, service *RecoveryService) string {
+				bearer := issuedResetBearer(t, pool, service, 0x96)
+				digest, err := DigestActionSecret(bearer)
+				if err != nil {
+					t.Fatalf("digesting bearer: %v", err)
+				}
+				consumed, err := attemptConsumption(pool, digest, time.Now().UTC())
+				if err != nil || !consumed {
+					t.Fatalf("pre-consuming secret = %v, %v", consumed, err)
+				}
+				return bearer
+			},
+		},
+		{
+			scenario: "superseded",
+			token: func(t *testing.T, pool *pgxpool.Pool, service *RecoveryService) string {
+				first := issuedResetBearer(t, pool, service, 0x96)
+				// A second request supersedes the first.
+				if err := service.RequestPasswordReset(
+					context.Background(), PasswordResetRequest{
+						Email: studentRegistration().Email, RequestID: "request-reset-2",
+					},
+				); err != nil {
+					t.Fatalf("reissuing reset: %v", err)
+				}
+				return first
+			},
+		},
+		{
+			scenario: "expired",
+			token: func(t *testing.T, pool *pgxpool.Pool, service *RecoveryService) string {
+				// Expiry is reached by moving the completing service's clock
+				// past the one-hour TTL, not by rewriting the row: the schema
+				// refuses that, because action-secret issuance is immutable.
+				return issuedResetBearer(t, pool, service, 0x96)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.scenario, func(t *testing.T) {
+			pool := admissionPool(t)
+			activeStudent(t, pool, 0x86)
+			// The issuing service uses the real clock so "expired" can be made
+			// to bite; the counting service is what the assertion watches.
+			issuer := recoveryService(t, pool, time.Now().UTC(), 0x96)
+			bearer := test.token(t, pool, issuer)
+
+			screener := &countingCompromisedSource{inner: clearCompromisedSource()}
+			writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x51}, 32))
+			if err != nil {
+				t.Fatalf("constructing outbox writer: %v", err)
+			}
+			guarded, err := NewRecoveryService(RecoveryServiceOptions{
+				Pool: pool, Outbox: writer, Compromised: screener,
+				ResetTTL: time.Hour,
+				// Far enough ahead that an expired secret is unambiguously past
+				// its window at completion time.
+				Now:    func() time.Time { return time.Now().UTC().Add(2 * time.Hour) },
+				Random: bytes.NewReader(bytes.Repeat([]byte{0xC1}, 32*8)),
+			})
+			if err != nil {
+				t.Fatalf("constructing guarded recovery service: %v", err)
+			}
+
+			if err := guarded.CompletePasswordReset(
+				context.Background(), PasswordResetCompletion{
+					Token: bearer, Password: newPassword, RequestID: "request-refused-1",
+				},
+			); !errors.Is(err, ErrTokenInvalid) {
+				t.Fatalf("completion error = %v, want ErrTokenInvalid", err)
+			}
+			if visits := screener.count(); visits != 0 {
+				t.Fatalf(
+					"compromised-password screener called %d times for a %s secret; "+
+						"refusal must happen before password hashing",
+					visits, test.scenario,
+				)
+			}
+		})
+	}
+}
+
+// TestAcceptedResetReachesPasswordHashing is the counterpart: it proves the
+// zero counts above come from the preflight refusing, not from the screener
+// being unreachable in this harness.
+func TestAcceptedResetReachesPasswordHashing(t *testing.T) {
+	pool := admissionPool(t)
+	activeStudent(t, pool, 0x87)
+	now := time.Now().UTC()
+	issuer := recoveryService(t, pool, now, 0x97)
+	bearer := issuedResetBearer(t, pool, issuer, 0x97)
+
+	screener := &countingCompromisedSource{inner: clearCompromisedSource()}
+	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x51}, 32))
+	if err != nil {
+		t.Fatalf("constructing outbox writer: %v", err)
+	}
+	guarded, err := NewRecoveryService(RecoveryServiceOptions{
+		Pool: pool, Outbox: writer, Compromised: screener,
+		ResetTTL: time.Hour, Now: func() time.Time { return now },
+		Random: bytes.NewReader(bytes.Repeat([]byte{0xC2}, 32*8)),
+	})
+	if err != nil {
+		t.Fatalf("constructing guarded recovery service: %v", err)
+	}
+
+	if err := guarded.CompletePasswordReset(context.Background(), PasswordResetCompletion{
+		Token:     bearer,
+		Password:  config.NewSecret("a different sufficiently long passphrase"),
+		RequestID: "request-accepted-1",
+	}); err != nil {
+		t.Fatalf("completing reset: %v", err)
+	}
+	if visits := screener.count(); visits != 1 {
+		t.Fatalf("screener called %d times for an accepted reset, want 1", visits)
+	}
+}

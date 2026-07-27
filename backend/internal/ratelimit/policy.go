@@ -128,6 +128,36 @@ func DevelopmentAnonymousBootstrapPolicy() Policy {
 // DevelopmentSessionPolicy is a conservative fixture for authenticated
 // session traffic. The identifier input is already a one-way digest of the
 // presented opaque authority and is HMAC-keyed again by the limiter.
+// DevelopmentPasswordResetCompletionPolicy bounds the unauthenticated reset
+// completion endpoint far more tightly than the generic admission policy.
+//
+// Completion is the only anonymous route that can reach Argon2id, so it is the
+// cheapest request an attacker can send for the most server CPU. The generic
+// policy is a poor fit for it: its identifier dimension keys on the presented
+// token, and an attacker varies that freely, so that dimension contributes no
+// protection at all against random-token flooding. The limits that actually
+// bind here are network, endpoint, and global, and they are set well below the
+// admission defaults.
+//
+// A service-side preflight rejects unknown tokens before any hashing, so these
+// limits are the second line rather than the only one.
+func DevelopmentPasswordResetCompletionPolicy() Policy {
+	return Policy{
+		ID:       "password-resets-v1",
+		Category: "PUBLIC_IDENTITY_CREDENTIAL",
+		Endpoint: "password-resets",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 20, LocalLimit: 3},
+			{Dimension: DimensionIdentifier, Limit: 5, LocalLimit: 2},
+			{Dimension: DimensionNetwork, Limit: 10, LocalLimit: 2},
+			{Dimension: DimensionAnonymous, Limit: 5, LocalLimit: 2},
+			{Dimension: DimensionGlobal, Limit: 60, LocalLimit: 8},
+		},
+		LocalMaxKeys: 4096,
+	}
+}
+
 func DevelopmentSessionPolicy(endpoint string) Policy {
 	return Policy{
 		ID:       endpoint + "-v1",

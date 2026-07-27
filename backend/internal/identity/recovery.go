@@ -256,20 +256,28 @@ func supersedeLiveResetSecret(
 	if err != nil {
 		return fmt.Errorf("locking live reset secret: %w", err)
 	}
-	// superseded_at is clamped to at least the superseded row's own issued_at.
+	// superseded_at records when supersession actually happened, so it is taken
+	// here — after the Account row lock has been acquired — rather than from the
+	// replacement's pre-transaction timestamp.
 	//
-	// The replacement's timestamp is taken before this transaction begins and
-	// before it waits on the Account row lock, so lock order and generation
-	// order can invert under concurrency: a request that generated its secret
-	// earlier may acquire the lock later and try to stamp an older
-	// superseded_at onto a newer row. That violates the
-	// identity_action_secrets_superseded_after_issue constraint and surfaces as
-	// a 500 on an otherwise ordinary second reset request.
+	// Using the replacement's timestamp was wrong twice over. It is generated
+	// before this transaction begins and before it waits on the lock, so lock
+	// order and generation order invert under concurrency: an older
+	// superseded_at could land on a newer row, violating
+	// identity_action_secrets_superseded_after_issue and surfacing as a 500 on
+	// an ordinary second reset request. Clamping that value with GREATEST fixed
+	// the crash but recorded a fictional time.
+	//
+	// clock_timestamp() is the statement clock, not transaction start, so it is
+	// the real moment. GREATEST still guards the constraint against clock skew
+	// between the application clock that wrote issued_at and the database
+	// clock, which is a correctness backstop rather than the normal path.
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity_action_secrets
-		    SET superseded_at = GREATEST(issued_at, $1), superseded_by_id = $2::uuid
-		  WHERE id = $3::uuid`,
-		replacement.IssuedAt, replacement.ID, currentID,
+		    SET superseded_at = GREATEST(issued_at, clock_timestamp()),
+		        superseded_by_id = $1::uuid
+		  WHERE id = $2::uuid`,
+		replacement.ID, currentID,
 	); err != nil {
 		return fmt.Errorf("superseding reset secret: %w", err)
 	}
@@ -413,10 +421,28 @@ func (s *RecoveryService) CompletePasswordReset(
 	if err != nil {
 		return ErrTokenInvalid
 	}
-	// Hashing happens before the transaction opens. Argon2id is deliberately
+	// Cheap, non-consuming preflight before any expensive work.
+	//
+	// This endpoint is unauthenticated, so without it an attacker could post
+	// arbitrary random tokens and force a full Argon2id hash plus a
+	// compromised-password screen per request — CPU exhaustion that costs the
+	// attacker nothing. A digest lookup on an indexed column costs far less
+	// than the work it now guards.
+	//
+	// The check is advisory only. It takes no lock and its result is never
+	// trusted for the decision: the locked revalidation inside the transaction
+	// below remains authoritative, so nothing here can be raced into accepting
+	// a secret that is not live.
+	live, err := resetSecretIsPlausiblyLive(ctx, s.pool, digest, s.now().UTC())
+	if err != nil {
+		return err
+	}
+	if !live {
+		return ErrTokenInvalid
+	}
+	// Hashing happens outside the transaction. Argon2id is deliberately
 	// expensive, and holding the Account row lock across it would let a burst
-	// of resets serialise behind each other. It also means an invalid secret
-	// costs the same work as a valid one.
+	// of resets serialise behind each other.
 	credentialHash, err := hashNewPassword(ctx, completion.Password, s.compromised)
 	if err != nil {
 		if errors.Is(err, ErrPasswordPolicy) {
@@ -625,4 +651,34 @@ func advanceRecoveredAccount(
 		return 0, fmt.Errorf("advancing recovered Account: %w", err)
 	}
 	return revision, nil
+}
+
+// resetSecretIsPlausiblyLive reports whether a digest currently refers to a
+// usable PASSWORD_RESET secret, without locking or consuming anything.
+//
+// It exists purely to keep unauthenticated callers from reaching Argon2id with
+// a token they do not hold. Purpose is part of the predicate, so a
+// verification secret does not qualify here either. A true result is not a
+// decision — lockResetSecret re-checks the same facts under a row lock, and
+// that check is the authoritative one.
+func resetSecretIsPlausiblyLive(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	digest []byte,
+	now time.Time,
+) (bool, error) {
+	var live bool
+	err := pool.QueryRow(ctx,
+		`SELECT consumed_at IS NULL AND superseded_at IS NULL AND expires_at > $2
+		   FROM identity_action_secrets
+		  WHERE secret_digest = $1 AND purpose = 'PASSWORD_RESET'`,
+		digest, now,
+	).Scan(&live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("preflighting reset secret: %w", err)
+	}
+	return live, nil
 }

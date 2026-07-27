@@ -100,3 +100,36 @@ export function renewSession(csrf: string, locale: "ar" | "en") {
 export function deleteSession(csrf: string, locale: "ar" | "en") {
   return authenticatedRequest<null>("/session", "DELETE", locale, csrf);
 }
+
+/**
+ * Requests a password reset link.
+ *
+ * The response is deliberately uninformative: the server answers identically
+ * for unknown, unverified, suspended, and eligible addresses, so callers must
+ * not branch on it to say whether an account exists.
+ */
+export function requestPasswordReset(email: string, locale: "ar" | "en") {
+  return postJSON<{ code: "PASSWORD_RESET_REQUEST_ACCEPTED" }>(
+    "/password-reset-requests",
+    { email },
+    locale,
+  );
+}
+
+/**
+ * Consumes a reset link and replaces the password.
+ *
+ * No session is returned. Every family is invalidated server-side, so the
+ * caller must sign in normally afterwards.
+ */
+export function completePasswordReset(
+  token: string,
+  password: string,
+  locale: "ar" | "en",
+) {
+  return postJSON<{ status: "PASSWORD_RESET" }>(
+    "/password-resets",
+    { token, password },
+    locale,
+  );
+}

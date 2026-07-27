@@ -81,6 +81,7 @@ export const en = {
       password: "Password",
       signIn: "Sign in",
       signingIn: "Signing in…",
+      forgotPassword: "Forgot your password?",
       noAccount: "Need an account?",
       createAccount: "Create one",
       invalidEmail: "Enter a complete email address.",
@@ -91,6 +92,46 @@ export const en = {
       failed: "The email or password is incorrect.",
       limited: "Too many attempts. Wait a little before trying again.",
       unavailable: "Sign-in is temporarily unavailable. Try again shortly.",
+    },
+    recover: {
+      title: "Reset your password",
+      intro:
+        "Enter your email and we will prepare a reset link. The response is the same whether or not an account is found.",
+      email: "Email address",
+      send: "Send reset link",
+      sending: "Sending…",
+      acceptedTitle: "Check your email",
+      acceptedBody:
+        "If this address belongs to an active account, a reset link is on its way. The link can be used once and expires.",
+      invalidEmail: "Enter a complete email address.",
+      limited: "Too many attempts. Wait a little before trying again.",
+      unavailable: "Password reset is temporarily unavailable. Try again shortly.",
+      failed: "The request could not be completed. Try again shortly.",
+      backToSignIn: "Back to sign in",
+    },
+    resetPassword: {
+      title: "Choose a new password",
+      intro: "This link works once. After resetting, sign in with your new password.",
+      checking: "Opening your reset link…",
+      password: "New password",
+      confirm: "Confirm new password",
+      submit: "Reset password",
+      submitting: "Resetting…",
+      mismatch: "Both passwords must match.",
+      weak: "Choose a longer password. Use at least 15 characters.",
+      // One message for expired, already used, superseded, and unknown links.
+      // The server refuses all four identically and the interface must not
+      // narrow it back down.
+      invalidLink: "This reset link is no longer valid. Request a new one.",
+      limited: "Too many attempts. Wait a little before trying again.",
+      unavailable: "Password reset is temporarily unavailable. Try again shortly.",
+      failed: "The password could not be reset. Try again shortly.",
+      successTitle: "Password reset",
+      successBody:
+        "Every signed-in device was signed out. Sign in with your new password to continue.",
+      goToSignIn: "Go to sign in",
+      missingToken: "This page needs a reset link. Request one to continue.",
+      requestNew: "Request a new link",
     },
     session: {
       expiredTitle: "Your session ended",

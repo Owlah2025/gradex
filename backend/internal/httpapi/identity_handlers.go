@@ -19,6 +19,7 @@ const (
 	verificationRequestBodyLimit     int64 = 512
 	verificationConsumptionBodyLimit int64 = 512
 	passwordResetRequestBodyLimit    int64 = 512
+	passwordResetCompletionBodyLimit int64 = 2048
 )
 
 type admissionCommands interface {
@@ -27,14 +28,17 @@ type admissionCommands interface {
 	VerifyEmail(context.Context, string, string) error
 }
 
-// recoveryCommands is deliberately request-only in S1B3's Must 2. Reset
-// completion is absent from this interface, and therefore unroutable, until it
-// can consume the secret in the same transaction as password replacement,
+// recoveryCommands is the recovery surface reachable over HTTP.
+//
+// Completion was deliberately withheld from this interface until it could
+// consume the secret in the same transaction as password replacement,
 // revision/epoch advancement, all-family invalidation, security evidence, and
 // outbox intent. A reachable consumption route that did less than that would
 // burn a reset secret without replacing a password and strand the Account.
+// CompletePasswordReset now satisfies that whole contract, so it is routable.
 type recoveryCommands interface {
 	RequestPasswordReset(context.Context, identity.PasswordResetRequest) error
+	CompletePasswordReset(context.Context, identity.PasswordResetCompletion) error
 }
 
 type identityHandlers struct {
@@ -61,6 +65,11 @@ type verificationConsumptionBody struct {
 
 type passwordResetRequestBody struct {
 	Email string `json:"email" binding:"required"`
+}
+
+type passwordResetCompletionBody struct {
+	Token    string `json:"token" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 func (h *identityHandlers) currentPolicySet(c *gin.Context) {
@@ -209,6 +218,35 @@ func (h *identityHandlers) requestPasswordReset(
 func (h *identityHandlers) requestBoundPasswordReset(c *gin.Context) {
 	request := c.MustGet(strictJSONBodyContextKey).(*passwordResetRequestBody)
 	h.requestPasswordReset(c, request)
+}
+
+// completePasswordReset returns no session on success.
+//
+// The 200 body says only that the password was replaced. A caller must sign in
+// normally afterwards, so reaching the mailbox cannot be converted directly
+// into an authenticated browser session.
+func (h *identityHandlers) completePasswordReset(
+	c *gin.Context,
+	request *passwordResetCompletionBody,
+) {
+	err := h.recovery.CompletePasswordReset(
+		c.Request.Context(),
+		identity.PasswordResetCompletion{
+			Token:     request.Token,
+			Password:  config.NewSecret(request.Password),
+			RequestID: requestid.FromContext(c.Request.Context()),
+		},
+	)
+	if err != nil {
+		h.writeAdmissionError(c, err)
+		return
+	}
+	writeAdmissionSuccess(c, http.StatusOK, gin.H{"status": "PASSWORD_RESET"})
+}
+
+func (h *identityHandlers) completeBoundPasswordReset(c *gin.Context) {
+	request := c.MustGet(strictJSONBodyContextKey).(*passwordResetCompletionBody)
+	h.completePasswordReset(c, request)
 }
 
 func writeAdmissionSuccess(c *gin.Context, status int, body gin.H) {

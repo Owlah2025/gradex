@@ -458,18 +458,20 @@ func supersedeLiveVerificationSecret(
 	if err != nil {
 		return fmt.Errorf("locking live verification secret: %w", err)
 	}
-	// Clamped for the same reason as the reset path in recovery.go: the
-	// replacement timestamp predates both this transaction and its wait on the
-	// Account row lock, so concurrent resend requests can invert generation
-	// order against lock order and stamp an older superseded_at onto a newer
-	// row. This was latent in S1B1 rather than introduced by S1B3 — the
-	// existing concurrency test freezes the clock, so every issued_at is equal
-	// and the inversion never occurs there.
+	// Stamped from the statement clock after the Account row lock, for the same
+	// reason as the reset path in recovery.go: the replacement timestamp
+	// predates both this transaction and its wait on the lock, so concurrent
+	// resend requests invert generation order against lock order and stamp an
+	// older superseded_at onto a newer row. This was latent in S1B1 rather than
+	// introduced by S1B3 — the existing concurrency test freezes the clock, so
+	// every issued_at is equal and the inversion never occurs there. GREATEST
+	// remains only as a clock-skew backstop for the constraint.
 	if _, err := tx.Exec(ctx,
 		`UPDATE identity_action_secrets
-		    SET superseded_at = GREATEST(issued_at, $1), superseded_by_id = $2::uuid
-		  WHERE id = $3::uuid`,
-		replacement.IssuedAt, replacement.ID, currentID,
+		    SET superseded_at = GREATEST(issued_at, clock_timestamp()),
+		        superseded_by_id = $1::uuid
+		  WHERE id = $2::uuid`,
+		replacement.ID, currentID,
 	); err != nil {
 		return fmt.Errorf("superseding verification secret: %w", err)
 	}

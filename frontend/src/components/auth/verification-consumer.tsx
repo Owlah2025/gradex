@@ -5,7 +5,12 @@ import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { consumeEmailVerification } from "@/lib/api/identity";
-import { takeVerificationTokenFromFragment } from "@/lib/identity/validation";
+import { ProblemError } from "@/lib/api/problem";
+import {
+  captureTokenFromFragment,
+  releaseFragmentToken,
+  scrubTokenFragment,
+} from "@/lib/identity/validation";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type VerificationState = "checking" | "success" | "invalid";
@@ -18,14 +23,33 @@ export function VerificationConsumer() {
   React.useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const token = takeVerificationTokenFromFragment();
+    // Capture is monotonic and document-scoped, so cleaning the address bar
+    // cannot make an already-seen token look absent. Coupling the two was the
+    // defect that let a successful scrub read back as a missing link.
+    const token = captureTokenFromFragment("EMAIL_VERIFICATION");
+    scrubTokenFragment();
     if (!token) {
       setState("invalid");
       return;
     }
     consumeEmailVerification(token, locale)
-      .then(() => setState("success"))
-      .catch(() => setState("invalid"));
+      .then(() => {
+        // Terminal success: release the raw bearer.
+        releaseFragmentToken("EMAIL_VERIFICATION");
+        setState("success");
+      })
+      .catch((caught) => {
+        // Release only on a definitive refusal. A transport failure or 5xx may
+        // leave the secret live, and the holder must be able to retry with the
+        // link they were sent.
+        if (
+          caught instanceof ProblemError &&
+          caught.problem.code === "TOKEN_INVALID"
+        ) {
+          releaseFragmentToken("EMAIL_VERIFICATION");
+        }
+        setState("invalid");
+      });
   }, [locale]);
 
   if (state === "checking") {

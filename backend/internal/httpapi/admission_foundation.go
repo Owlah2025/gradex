@@ -15,6 +15,7 @@ var requiredAdmissionPolicyEndpoints = [...]string{
 	"email-verification-requests",
 	"email-verifications",
 	"password-reset-requests",
+	"password-resets",
 }
 
 // AdmissionFoundation is the fail-closed dependency set shared by every

@@ -303,6 +303,9 @@ func buildAdmissionFoundation(
 	for _, endpoint := range endpoints {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
+	// Completion gets its own stricter policy rather than the generic
+	// admission one: it is the only anonymous route that reaches Argon2id.
+	endpointPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
 	endpointPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	endpointPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 

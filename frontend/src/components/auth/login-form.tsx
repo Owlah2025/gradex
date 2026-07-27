@@ -154,6 +154,12 @@ export function LoginForm() {
         {submitting ? t.auth.login.signingIn : t.auth.login.signIn}
       </Button>
 
+      <p className="text-center text-sm">
+        <Link className="underline" href="/recover">
+          {t.auth.login.forgotPassword}
+        </Link>
+      </p>
+
       <p className="text-center text-sm text-muted-foreground">
         {t.auth.login.noAccount}{" "}
         <Link className="font-bold text-primary underline" href="/register">

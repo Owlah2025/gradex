@@ -43,8 +43,10 @@ func (f *fakeAdmissionService) VerifyEmail(context.Context, string, string) erro
 // exposes only the reset request, mirroring recoveryCommands: there is no
 // completion operation to fake because none is routable yet.
 type fakeRecoveryService struct {
-	requestErr error
-	requests   int
+	requestErr  error
+	completeErr error
+	requests    int
+	completions int
 }
 
 func (f *fakeRecoveryService) RequestPasswordReset(
@@ -53,6 +55,14 @@ func (f *fakeRecoveryService) RequestPasswordReset(
 ) error {
 	f.requests++
 	return f.requestErr
+}
+
+func (f *fakeRecoveryService) CompletePasswordReset(
+	context.Context,
+	identity.PasswordResetCompletion,
+) error {
+	f.completions++
+	return f.completeErr
 }
 
 func admissionHandlerRouter(t *testing.T, service *fakeAdmissionService) *gin.Engine {
