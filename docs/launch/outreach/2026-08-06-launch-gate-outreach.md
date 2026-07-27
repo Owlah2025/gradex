@@ -1,7 +1,7 @@
 # Launch-Gate Outreach Pack
 
-> Status: **READY TO SEND** — recipient placeholders outstanding; every reply date rebased for a
-> **2026-07-28** send
+> Status: **PARTIALLY BLOCKED** — Tap is ready to send; legal and accounting have **no recipient**
+> and require sourcing first. Every reply date rebased for a **2026-07-28** send
 > Public go-live target: 2026-08-15
 > Prepared: 2026-07-23 · Rebased: 2026-07-28
 > Send date: **2026-07-28**, pulled forward nine days from the 2026-08-06 date the founder set on
@@ -62,9 +62,54 @@ placeholder — it is false evidence in the one register those decisions are mad
 
 | Request | Gates | Recipient | Status | Sent at | Ack due | Substantive reply due | Follow-up if silent |
 |---|---|---|---|---|---|---|---|
-| Legal and policy | LG-002, LG-004–006, LG-011, LG-020 | `[COUNSEL_NAME]` | DRAFT | — | 2026-07-30 | 2026-08-02 initial, 2026-08-06 final | 2026-07-31 |
-| Finance and accounting | LG-001, LG-007, LG-016–017 | `[ACCOUNTING_CONTACT_NAME]` | DRAFT | — | 2026-07-30 | 2026-08-02 initial, 2026-08-06 final | 2026-07-31 |
-| Tap activation and technical contract | LG-007–010, LG-017 | `[TAP_CONTACT_NAME]` | DRAFT | — | 2026-07-30 | 2026-08-02 docs and test vectors, 2026-08-07 activation | 2026-07-31 |
+| Legal and policy | LG-002, LG-004–006, LG-011, LG-020 | **NONE — not yet engaged** | **BLOCKED** | — | — | — | — |
+| Finance and accounting | LG-001, LG-007, LG-016–017 | **NONE — not yet engaged** | **BLOCKED** | — | — | — | — |
+| Tap activation and technical contract | LG-007–010, LG-017 | Tap merchant-onboarding intake | DRAFT | — | 2026-07-30 | 2026-08-02 docs and test vectors, 2026-08-07 activation | 2026-07-31 |
+
+> **`BLOCKED` is a distinct state from `DRAFT` and was added on 2026-07-28.** `DRAFT` means the
+> message is written and waiting to be sent. `BLOCKED` means **there is no recipient to send it to.**
+> Collapsing the two would let a gate with no path forward read as a gate awaiting a click, which is
+> the single most expensive misreading available in this register.
+>
+> The founder confirmed on 2026-07-28 that **no Kuwaiti counsel and no accountant are engaged.** The
+> preceding task is therefore not *send* but *source and engage*, and that work has its own lead time
+> which nothing in this plan has ever budgeted. See
+> [§Sourcing](#sourcing--the-precondition-nobody-costed).
+
+## Sourcing — the precondition nobody costed
+
+Every version of this pack, since 2026-07-23, assumed a counsel and an accountant existed and were
+merely uncontacted. **They do not exist.** That assumption is now corrected rather than carried.
+
+| Need | Gates behind it | Cutover-blocking? | Status |
+|---|---|---|---|
+| Kuwaiti counsel | LG-002, LG-004, LG-005, LG-006, LG-011, LG-020 | **Yes** — LG-005, LG-006, LG-011 | Not engaged |
+| Accountant / finance adviser | LG-001, LG-007, LG-016, LG-017 | **Yes** — LG-007 | Not engaged |
+| Tap contact | LG-007–010, LG-017 | **Yes** — LG-007, LG-008, LG-010 | Public intake exists; sendable today |
+
+**Only the Tap message can be sent without sourcing anything**, because Tap publishes a merchant
+onboarding and support intake that accepts an unsolicited application. That message alone carries
+three of the seven cutover-blockers, which is why it should go today rather than wait for the others.
+
+### What sourcing actually requires
+
+Neither of these is a same-day action, and neither is engineering work:
+
+1. **Kuwaiti counsel** with commercial/digital-commerce competence. Needed for the Digital Commerce
+   Law registration question, which — per the founder's earlier research — may itself be a
+   registration with its own statutory lead time. **A blocking registration discovered on August 10
+   does not move August 15; it moves the launch.** That is the single question worth asking first,
+   before the full six-item brief.
+2. **An accountant** able to approve one platform-wide revenue-share percentage and the KWD
+   tax/invoice/retention treatment. `LG-012` launch prices are due August 11 and are computed against
+   that percentage, so this is on the critical path and not merely compliance hygiene.
+
+### Recommended first action, ahead of the full brief
+
+Do not wait to have the perfect firm before asking the one question that can move the date. A single
+scoped enquiry — *"does the Digital Commerce Law require a registration for a Kuwait-based online
+course platform, and what is its lead time?"* — can go to several candidate firms at once and is
+cheap to answer. The full six-item brief in Message 1 follows once one is engaged.
 
 Message 4's gates — LG-013–015, LG-018–019, LG-021 — are tracked in
 [§Founder Operational Decisions](#founder-operational-decisions) instead. They are founder work, not

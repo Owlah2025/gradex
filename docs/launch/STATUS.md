@@ -3,14 +3,37 @@
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
 > Last repository reconciliation: **2026-07-28 (D3) at `93eb745`**; all local gates re-run green on that tree
-> Active slice: **S2 — Course authoring and review. Planning frozen, implementation starting at T001.** S1C is `CLOSED` at reviewed head `edd6508` and **S1 is complete**. Day record: [2026-07-28-d3.md](daily/2026-07-28-d3.md); D2 closed at [2026-07-28-d2.md](daily/2026-07-28-d2.md)
+> Active slice: **S2 — Course authoring and review. Foundation T001–T011 closed at `71ad368`; user stories not started.** S1 is complete. Day record: [2026-07-28-d3.md](daily/2026-07-28-d3.md), `CLOSED`
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
 > Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
-> Launch confidence: **Amber**
+> Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
-Confidence moves from Red to Amber, and the reason is arithmetic rather than optimism.
+## Why Red, as of 2026-07-28
+
+**There is no Kuwaiti counsel and no accountant engaged.** The founder confirmed it at D3 closeout.
+Every version of the outreach plan since 2026-07-23 assumed both existed and were merely uncontacted,
+so the task was recorded for five days as *send the messages* when it was always *source and engage*.
+
+[PLAN.md §5](PLAN.md#5-launch-confidence) makes confidence Red when **a required gate lacks a credible
+resolution path.** `LG-005`, `LG-006`, and `LG-011` are legal cutover-blockers due **August 12** whose
+path today begins with finding a lawyer: no owner, no candidate, no dated action, no known sourcing
+lead time. Fifteen days out, against one day of float.
+
+`LG-007` is in the same position behind the missing accountant, and `LG-012` launch prices are due
+August 11 computed against a revenue share only an accountant can approve.
+
+**This is not the July 29 outreach trigger firing.** That trigger measured a *delay* in sending
+messages that had recipients. This is a missing precondition, which is a different and worse fact.
+
+**Engineering is not the cause and cannot be the fix.** D3 closed three of four Musts with independent
+verification and hosted CI green. The forecast still got worse, which is exactly why confidence is
+driven by the gate register rather than by delivery velocity.
+
+The historical Amber assessment below is retained for the record.
+
+Confidence moved from Red to Amber on 2026-07-27, and the reason was arithmetic rather than optimism.
 [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
 measured the remaining runway in *schedule* days and treated them as real days; the repository's
 schedule calendar ran six days ahead of the real one, and eleven schedule days (S0 through the S1C
@@ -338,7 +361,10 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
-| Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
+| **No Kuwaiti counsel is engaged — blocks LG-005, LG-006, LG-011 (cutover-blocking) plus LG-002, LG-004, LG-020** | Developer/founder | **Source and engage.** Ask the Digital Commerce Law registration/lead-time question first, to several candidates at once — it is the one answer that can move the date rather than the content | **Immediately** | An engaged firm, then acknowledged receipt of the Message 1 brief |
+| **No accountant is engaged — blocks LG-007 (cutover-blocking) plus LG-001, LG-016, LG-017** | Developer/founder | **Source and engage.** LG-012 launch prices are due August 11 and are computed against the revenue share only they approve | **Immediately** | An engaged adviser, then an approved revenue-share percentage with an effective date |
+| Tap message is sendable today and is not blocked | Developer/founder | Send to Tap's merchant-onboarding intake; it needs no named contact and carries LG-007, LG-008, LG-010 | **2026-07-29** | A `SENT` row with a real timestamp |
+| Required launch gates are all open | Role owners in LAUNCH_GATES.md | 21 of 21 `OPEN`, zero `RESOLVED`. Unchanged on 2026-07-28: no gate weakened, merged, or completed on engineering progress | August 6 | Named contacts plus acknowledged requests/delivery dates |
 | **Critical-path rebaseline of S2–S16 is owed; no public date exists** | Developer + builder seat | Remedy A is adopted (D-039). Rebaseline S2–S16 against the August 6 outreach results, then set the September date. Do not publish a date before both | **After August 6 outreach returns** | Dated S2–S16 with acknowledged external delivery dates, and a recorded public target |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1 does not close until S1C closes | Claude, builder under D-037 | Deliver S1C's eleven acceptance items, then the S1 integration review by `agy` | August 2 | S1C closes on a frozen exact range with no critical or high finding |
@@ -717,10 +743,14 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Send the August 6 outreach pack.** It is the only remaining item that costs no engineering time and
-gets strictly worse by waiting, and it gates seven launch-blocking items that no amount of code can
-close. **All three messages are still `DRAFT`** with unreplaced recipient placeholders, and their
-reply dates are now rebased for a July 28 send rather than August 6.
+**Source Kuwaiti counsel.** Not send — source. Two of the three messages have **no recipient**, which
+is a `BLOCKED` state distinct from `DRAFT`, and it is the highest-priority item on the project ahead
+of all engineering work. Ask the Digital Commerce Law registration question first and to several
+candidates at once: a blocking registration discovered on August 10 does not move August 15, it moves
+the launch.
+
+**Then send the Tap message**, which needs no named contact and carries three of the seven
+cutover-blockers.
 
 Then, and concurrently, as scheduled in [the D3 record](daily/2026-07-28-d3.md):
 
