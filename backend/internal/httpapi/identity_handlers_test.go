@@ -39,6 +39,22 @@ func (f *fakeAdmissionService) VerifyEmail(context.Context, string, string) erro
 	return f.verifyErr
 }
 
+// fakeRecoveryService stands in for RecoveryService at the route boundary. It
+// exposes only the reset request, mirroring recoveryCommands: there is no
+// completion operation to fake because none is routable yet.
+type fakeRecoveryService struct {
+	requestErr error
+	requests   int
+}
+
+func (f *fakeRecoveryService) RequestPasswordReset(
+	context.Context,
+	identity.PasswordResetRequest,
+) error {
+	f.requests++
+	return f.requestErr
+}
+
 func admissionHandlerRouter(t *testing.T, service *fakeAdmissionService) *gin.Engine {
 	t.Helper()
 	english, arabic := identityPolicySets()
@@ -46,7 +62,9 @@ func admissionHandlerRouter(t *testing.T, service *fakeAdmissionService) *gin.En
 	if err != nil {
 		t.Fatalf("constructing policies: %v", err)
 	}
-	handlers := &identityHandlers{service: service, policies: policies}
+	handlers := &identityHandlers{
+		service: service, recovery: &fakeRecoveryService{}, policies: policies,
+	}
 	router := gin.New()
 	router.GET("/policy", handlers.currentPolicySet)
 	router.POST("/register", func(c *gin.Context) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,6 +96,19 @@ func realAdmissionRouter(
 	if err != nil {
 		t.Fatalf("constructing admission service: %v", err)
 	}
+	recoveryRandomness := make([]byte, 0, 32*16)
+	for offset := byte(0); offset < 16; offset++ {
+		recoveryRandomness = append(
+			recoveryRandomness, bytes.Repeat([]byte{0xA1 + offset}, 32)...,
+		)
+	}
+	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
+		Pool: pool, Outbox: writer, ResetTTL: time.Hour, Now: time.Now,
+		Random: bytes.NewReader(recoveryRandomness),
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery service: %v", err)
+	}
 	limiter, err := ratelimit.New(
 		rateStore, bytes.Repeat([]byte{0x31}, 32), time.Second,
 	)
@@ -104,6 +118,7 @@ func realAdmissionRouter(
 	endpointPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"password-reset-requests",
 	} {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
@@ -114,7 +129,7 @@ func realAdmissionRouter(
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
 		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
-		Policies: policies, Service: service,
+		Policies: policies, Service: service, Recovery: recovery,
 		Limiter: limiter, EndpointPolicies: endpointPolicies,
 	})
 	if err != nil {
@@ -300,4 +315,239 @@ func TestAdmissionResponsesExcludeRequestCanaries(t *testing.T) {
 		t.Fatalf("limiter canary status = %d, want 429", denied.status)
 	}
 	assertResponseExcludesCanaries(t, denied, "limiter-canary@example.com")
+}
+
+// registerAccountInState registers an Account through the real route and then
+// forces the lifecycle state under test.
+//
+// Activation is applied directly rather than by consuming a verification token
+// because the state under test is the Account lifecycle, not the token path,
+// and predicting the issued bearer would couple this privacy test to the
+// admission service's randomness ordering.
+func registerAccountInState(
+	t *testing.T,
+	router *gin.Engine,
+	pool *pgxpool.Pool,
+	cookie *http.Cookie,
+	csrf string,
+	email string,
+	status string,
+	verified bool,
+) {
+	t.Helper()
+	registration := `{"display_name":"Nora Ahmed","email":"` + email + `",` +
+		`"password":"correct horse battery staple","locale":"en",` +
+		`"policy_set_id":"registration-v1"}`
+	accepted := postAdmission(
+		router, "/api/v1/student-registrations", registration, cookie, csrf,
+	)
+	if accepted.status != http.StatusAccepted {
+		t.Fatalf("registering %s: status %d", email, accepted.status)
+	}
+	if status == "PENDING_VERIFICATION" && !verified {
+		return
+	}
+	var verifiedAt any
+	if verified {
+		verifiedAt = time.Now().UTC()
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE accounts
+		    SET status = $1::account_status, email_verified_at = $2
+		  WHERE normalized_email = lower($3)`,
+		status, verifiedAt, email,
+	); err != nil {
+		t.Fatalf("forcing %s into %s: %v", email, status, err)
+	}
+}
+
+func liveResetSecretCount(t *testing.T, pool *pgxpool.Pool) int {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM identity_action_secrets
+		  WHERE purpose = 'PASSWORD_RESET'
+		    AND consumed_at IS NULL AND superseded_at IS NULL`,
+	).Scan(&count); err != nil {
+		t.Fatalf("counting live reset secrets: %v", err)
+	}
+	return count
+}
+
+// TestPasswordResetRequestIsHTTPEquivalentAcrossAccountStates is the
+// non-enumeration proof at the transport boundary.
+//
+// Comparing the service's return value is not sufficient evidence: a caller
+// enumerates over the complete response. This asserts status, exact body bytes,
+// Content-Type, Cache-Control, Set-Cookie, Location, and timing class are
+// indistinguishable across unknown, unverified, active, and suspended Accounts.
+func TestPasswordResetRequestIsHTTPEquivalentAcrossAccountStates(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	router := realAdmissionRouter(t, pool, admissionRateStore{allowed: true})
+	cookie, csrf := bootstrapAdmissionBrowser(t, router)
+
+	registerAccountInState(
+		t, router, pool, cookie, csrf,
+		"pending@example.com", "PENDING_VERIFICATION", false,
+	)
+	registerAccountInState(
+		t, router, pool, cookie, csrf,
+		"active@example.com", "ACTIVE", true,
+	)
+	registerAccountInState(
+		t, router, pool, cookie, csrf,
+		"suspended@example.com", "SUSPENDED", true,
+	)
+
+	states := []struct {
+		name  string
+		email string
+	}{
+		{"unknown", "absent@example.com"},
+		{"unverified", "pending@example.com"},
+		{"active", "active@example.com"},
+		{"suspended", "suspended@example.com"},
+	}
+
+	responses := make(map[string]privacyResponse, len(states))
+	for _, state := range states {
+		responses[state.name] = postAdmission(
+			router,
+			"/api/v1/password-reset-requests",
+			`{"email":"`+state.email+`"}`,
+			cookie,
+			csrf,
+		)
+	}
+
+	baseline := responses["unknown"]
+	if baseline.status != http.StatusAccepted || baseline.cacheControl != "no-store" {
+		t.Fatalf("reset acknowledgment = %+v, want 202 with no-store", baseline)
+	}
+	for _, state := range states[1:] {
+		assertPrivacyEquivalent(t, baseline, responses[state.name])
+		assertSameTimingClass(t, baseline.duration, responses[state.name].duration)
+	}
+
+	// Exactly one of the four states is eligible, so the observable HTTP
+	// equivalence above is hiding a real difference rather than describing four
+	// identical no-ops.
+	if live := liveResetSecretCount(t, pool); live != 1 {
+		t.Fatalf("live reset secrets = %d, want exactly 1 (the active Account)", live)
+	}
+	var owner string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT a.normalized_email
+		   FROM identity_action_secrets s
+		   JOIN accounts a ON a.id = s.account_id
+		  WHERE s.purpose = 'PASSWORD_RESET'
+		    AND s.consumed_at IS NULL AND s.superseded_at IS NULL`,
+	).Scan(&owner); err != nil {
+		t.Fatalf("reading reset secret owner: %v", err)
+	}
+	if owner != "active@example.com" {
+		t.Fatalf("reset secret issued to %q, want the active Account", owner)
+	}
+}
+
+// TestConcurrentPasswordResetRequestsLeaveOneLiveSecret proves issuance stays
+// deterministic under the one-live-secret-per-purpose constraint when the same
+// eligible Account is targeted concurrently.
+func TestConcurrentPasswordResetRequestsLeaveOneLiveSecret(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	router := realAdmissionRouter(t, pool, admissionRateStore{allowed: true})
+	cookie, csrf := bootstrapAdmissionBrowser(t, router)
+	registerAccountInState(
+		t, router, pool, cookie, csrf,
+		"active@example.com", "ACTIVE", true,
+	)
+
+	const attempts = 5
+	var wait sync.WaitGroup
+	var mutex sync.Mutex
+	statuses := make(map[int]int)
+	for index := 0; index < attempts; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			response := postAdmission(
+				router,
+				"/api/v1/password-reset-requests",
+				`{"email":"active@example.com"}`,
+				cookie,
+				csrf,
+			)
+			mutex.Lock()
+			defer mutex.Unlock()
+			statuses[response.status]++
+		}()
+	}
+	wait.Wait()
+
+	if statuses[http.StatusAccepted] != attempts {
+		t.Fatalf("concurrent reset statuses = %v, want %d accepted", statuses, attempts)
+	}
+	if live := liveResetSecretCount(t, pool); live != 1 {
+		t.Fatalf("live reset secrets after concurrent requests = %d, want 1", live)
+	}
+}
+
+// TestConcurrentVerificationResendsSurviveClockOrdering is a regression test
+// for a latent S1B1 defect that S1B3 surfaced.
+//
+// Supersession stamped superseded_at from a timestamp taken before the
+// transaction began and before it waited on the Account row lock. Under
+// concurrency, lock order and generation order invert, so an older
+// superseded_at could be written onto a newer row and trip the
+// identity_action_secrets_superseded_after_issue constraint — a 500 on an
+// ordinary resend.
+//
+// The existing identity-package concurrency test cannot catch this because it
+// injects a frozen clock, making every issued_at equal. This one runs through
+// the real router on the real clock.
+func TestConcurrentVerificationResendsSurviveClockOrdering(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	router := realAdmissionRouter(t, pool, admissionRateStore{allowed: true})
+	cookie, csrf := bootstrapAdmissionBrowser(t, router)
+	registerAccountInState(
+		t, router, pool, cookie, csrf,
+		"resend@example.com", "PENDING_VERIFICATION", false,
+	)
+
+	const attempts = 5
+	var wait sync.WaitGroup
+	var mutex sync.Mutex
+	statuses := make(map[int]int)
+	for index := 0; index < attempts; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			response := postAdmission(
+				router,
+				"/api/v1/email-verification-requests",
+				`{"email":"resend@example.com"}`,
+				cookie,
+				csrf,
+			)
+			mutex.Lock()
+			defer mutex.Unlock()
+			statuses[response.status]++
+		}()
+	}
+	wait.Wait()
+
+	if statuses[http.StatusAccepted] != attempts {
+		t.Fatalf("concurrent resend statuses = %v, want %d accepted", statuses, attempts)
+	}
+	var live int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM identity_action_secrets
+		  WHERE purpose = 'EMAIL_VERIFICATION'
+		    AND consumed_at IS NULL AND superseded_at IS NULL`,
+	).Scan(&live); err != nil {
+		t.Fatalf("counting live verification secrets: %v", err)
+	}
+	if live != 1 {
+		t.Fatalf("live verification secrets after concurrent resends = %d, want 1", live)
+	}
 }

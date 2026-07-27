@@ -54,6 +54,7 @@ func mountedAdmissionRouterWithObserver(
 	endpointPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"password-reset-requests",
 	} {
 		policy := ratelimit.DevelopmentAdmissionPolicy(endpoint)
 		policy.LocalMaxKeys = localMaxKeys
@@ -73,6 +74,7 @@ func mountedAdmissionRouterWithObserver(
 		AnonymousSessionTTL: time.Hour,
 		Policies:            policies,
 		Service:             &fakeAdmissionService{},
+		Recovery:            &fakeRecoveryService{},
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})

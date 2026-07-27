@@ -53,6 +53,12 @@ ALLOWLIST=(
   # Argon2id credential hash and fresh action bearer cross directly into
   # PostgreSQL and authenticated outbox encryption during atomic admission.
   "internal/identity/admission.go"
+  # The fresh password-reset bearer crosses directly into authenticated outbox
+  # encryption inside the atomic reset-request transaction, and no further. It
+  # is never logged, never returned in a response, and never stored: only its
+  # SHA-256 digest reaches identity_action_secrets. Same boundary and same
+  # reasoning as admission.go above, for the PASSWORD_RESET purpose.
+  "internal/identity/recovery.go"
   # The password-plaintext boundary itself. See check 4.
   "internal/identity/credential.go"
   # Opaque session and CSRF plaintext cross only into the hardened cookie and

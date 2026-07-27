@@ -124,6 +124,7 @@ type AdmissionSettings struct {
 
 	anonymousSessionTTL        time.Duration
 	verificationTokenTTL       time.Duration
+	passwordResetTokenTTL      time.Duration
 	rateLimitTimeout           time.Duration
 	compromisedPasswordTimeout time.Duration
 
@@ -140,6 +141,7 @@ func (a AdmissionSettings) PasswordScreenMode() PasswordScreenMode { return a.pa
 func (a AdmissionSettings) ProtectedPayloadKeyVersion() string     { return a.protectedPayloadKeyVersion }
 func (a AdmissionSettings) AnonymousSessionTTL() time.Duration     { return a.anonymousSessionTTL }
 func (a AdmissionSettings) VerificationTokenTTL() time.Duration    { return a.verificationTokenTTL }
+func (a AdmissionSettings) PasswordResetTokenTTL() time.Duration   { return a.passwordResetTokenTTL }
 func (a AdmissionSettings) RateLimitTimeout() time.Duration        { return a.rateLimitTimeout }
 func (a AdmissionSettings) CompromisedPasswordTimeout() time.Duration {
 	return a.compromisedPasswordTimeout
@@ -451,6 +453,10 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		protectedPayloadKeyVersion: p.str("OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", ""),
 		anonymousSessionTTL:        p.duration("ANONYMOUS_SESSION_TTL", 30*time.Minute),
 		verificationTokenTTL:       p.duration("VERIFICATION_TOKEN_TTL", 24*time.Hour),
+		// Shorter than email verification on purpose: a reset secret replaces a
+		// password, so its window of usefulness to an attacker who reaches the
+		// mailbox is worth less time.
+		passwordResetTokenTTL:      p.duration("PASSWORD_RESET_TOKEN_TTL", time.Hour),
 		rateLimitTimeout:           p.duration("ADMISSION_RATE_LIMIT_TIMEOUT", 100*time.Millisecond),
 		compromisedPasswordTimeout: p.duration("COMPROMISED_PASSWORD_TIMEOUT", 2*time.Second),
 		anonymousCookieSigningKey:  secrets["ANONYMOUS_COOKIE_SIGNING_KEY"],
@@ -478,6 +484,7 @@ type admissionCapabilityInput struct {
 	protectedPayloadKeyVersion string
 	anonymousSessionTTL        time.Duration
 	verificationTokenTTL       time.Duration
+	passwordResetTokenTTL      time.Duration
 	rateLimitTimeout           time.Duration
 	compromisedPasswordTimeout time.Duration
 	anonymousCookieSigningKey  Secret
@@ -494,6 +501,7 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 		protectedPayloadKeyVersion: in.protectedPayloadKeyVersion,
 		anonymousSessionTTL:        in.anonymousSessionTTL,
 		verificationTokenTTL:       in.verificationTokenTTL,
+		passwordResetTokenTTL:      in.passwordResetTokenTTL,
 		rateLimitTimeout:           in.rateLimitTimeout,
 		compromisedPasswordTimeout: in.compromisedPasswordTimeout,
 		anonymousCookieSigningKey:  in.anonymousCookieSigningKey,
@@ -657,6 +665,7 @@ func (c *Config) validate(p *parser) {
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
 		{"ANONYMOUS_SESSION_TTL", c.admission.anonymousSessionTTL},
 		{"VERIFICATION_TOKEN_TTL", c.admission.verificationTokenTTL},
+		{"PASSWORD_RESET_TOKEN_TTL", c.admission.passwordResetTokenTTL},
 		{"ADMISSION_RATE_LIMIT_TIMEOUT", c.admission.rateLimitTimeout},
 		{"COMPROMISED_PASSWORD_TIMEOUT", c.admission.compromisedPasswordTimeout},
 	} {

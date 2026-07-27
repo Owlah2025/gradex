@@ -17,7 +17,17 @@ const actionSecretBytes = 32
 
 type ActionSecretPurpose string
 
-const ActionEmailVerification ActionSecretPurpose = "EMAIL_VERIFICATION"
+const (
+	ActionEmailVerification ActionSecretPurpose = "EMAIL_VERIFICATION"
+	ActionPasswordReset     ActionSecretPurpose = "PASSWORD_RESET"
+)
+
+// valid reports whether the purpose is one the database allowlist admits.
+// Keeping this beside the constants means a new purpose fails in Go before it
+// reaches the identity_action_secrets CHECK constraint.
+func (p ActionSecretPurpose) valid() bool {
+	return p == ActionEmailVerification || p == ActionPasswordReset
+}
 
 var ErrTokenInvalid = errors.New("action secret is invalid")
 
@@ -31,12 +41,16 @@ type IssuedActionSecret struct {
 }
 
 type actionSecretOptions struct {
-	Now    time.Time
-	TTL    time.Duration
-	Random io.Reader
+	Purpose ActionSecretPurpose
+	Now     time.Time
+	TTL     time.Duration
+	Random  io.Reader
 }
 
 func newActionSecret(options actionSecretOptions) (IssuedActionSecret, error) {
+	if !options.Purpose.valid() {
+		return IssuedActionSecret{}, errors.New("action-secret purpose is required")
+	}
 	if options.Now.IsZero() {
 		return IssuedActionSecret{}, errors.New("action-secret clock is required")
 	}
@@ -55,7 +69,7 @@ func newActionSecret(options actionSecretOptions) (IssuedActionSecret, error) {
 	digest := sha256.Sum256([]byte(bearer))
 	return IssuedActionSecret{
 		ID:        uuid.NewString(),
-		Purpose:   ActionEmailVerification,
+		Purpose:   options.Purpose,
 		Bearer:    config.NewSecret(bearer),
 		Digest:    digest[:],
 		IssuedAt:  options.Now,

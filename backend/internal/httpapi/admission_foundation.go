@@ -14,6 +14,7 @@ var requiredAdmissionPolicyEndpoints = [...]string{
 	"student-registrations",
 	"email-verification-requests",
 	"email-verifications",
+	"password-reset-requests",
 }
 
 // AdmissionFoundation is the fail-closed dependency set shared by every
@@ -22,6 +23,7 @@ var requiredAdmissionPolicyEndpoints = [...]string{
 type AdmissionFoundation struct {
 	security         *anonymousSecurity
 	service          admissionCommands
+	recovery         recoveryCommands
 	policies         identity.PolicySetResolver
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
@@ -34,6 +36,7 @@ type AdmissionFoundationOptions struct {
 	AnonymousSessionTTL time.Duration
 	Policies            identity.PolicySetResolver
 	Service             admissionCommands
+	Recovery            recoveryCommands
 	Limiter             *ratelimit.Limiter
 	EndpointPolicies    map[string]ratelimit.Policy
 }
@@ -48,7 +51,8 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 	if err != nil {
 		return nil, err
 	}
-	if options.Policies == nil || options.Service == nil || options.Limiter == nil {
+	if options.Policies == nil || options.Service == nil ||
+		options.Recovery == nil || options.Limiter == nil {
 		return nil, errors.New("admission foundation dependencies are required")
 	}
 	if len(options.EndpointPolicies) == 0 {
@@ -72,6 +76,7 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 	return &AdmissionFoundation{
 		security:         security,
 		service:          options.Service,
+		recovery:         options.Recovery,
 		policies:         options.Policies,
 		limiter:          options.Limiter,
 		endpointPolicies: endpointPolicies,

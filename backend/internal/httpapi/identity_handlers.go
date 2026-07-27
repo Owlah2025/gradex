@@ -18,6 +18,7 @@ const (
 	registrationBodyLimit            int64 = 2048
 	verificationRequestBodyLimit     int64 = 512
 	verificationConsumptionBodyLimit int64 = 512
+	passwordResetRequestBodyLimit    int64 = 512
 )
 
 type admissionCommands interface {
@@ -26,8 +27,19 @@ type admissionCommands interface {
 	VerifyEmail(context.Context, string, string) error
 }
 
+// recoveryCommands is deliberately request-only in S1B3's Must 2. Reset
+// completion is absent from this interface, and therefore unroutable, until it
+// can consume the secret in the same transaction as password replacement,
+// revision/epoch advancement, all-family invalidation, security evidence, and
+// outbox intent. A reachable consumption route that did less than that would
+// burn a reset secret without replacing a password and strand the Account.
+type recoveryCommands interface {
+	RequestPasswordReset(context.Context, identity.PasswordResetRequest) error
+}
+
 type identityHandlers struct {
 	service  admissionCommands
+	recovery recoveryCommands
 	policies identity.PolicySetResolver
 }
 
@@ -45,6 +57,10 @@ type verificationRequestBody struct {
 
 type verificationConsumptionBody struct {
 	Token string `json:"token" binding:"required"`
+}
+
+type passwordResetRequestBody struct {
+	Email string `json:"email" binding:"required"`
 }
 
 func (h *identityHandlers) currentPolicySet(c *gin.Context) {
@@ -162,6 +178,37 @@ func (h *identityHandlers) consumeVerification(
 func (h *identityHandlers) consumeBoundVerification(c *gin.Context) {
 	request := c.MustGet(strictJSONBodyContextKey).(*verificationConsumptionBody)
 	h.consumeVerification(c, request)
+}
+
+// requestPasswordReset answers identically for every Account state.
+//
+// The single success response is written unconditionally on a nil error, and
+// the service returns nil for unknown, unverified, suspended, and eligible
+// addresses alike. Only infrastructure faults branch, and those are states of
+// the system rather than facts about an Account.
+func (h *identityHandlers) requestPasswordReset(
+	c *gin.Context,
+	request *passwordResetRequestBody,
+) {
+	err := h.recovery.RequestPasswordReset(
+		c.Request.Context(),
+		identity.PasswordResetRequest{
+			Email:     request.Email,
+			RequestID: requestid.FromContext(c.Request.Context()),
+		},
+	)
+	if err != nil {
+		h.writeAdmissionError(c, err)
+		return
+	}
+	writeAdmissionSuccess(c, http.StatusAccepted, gin.H{
+		"code": "PASSWORD_RESET_REQUEST_ACCEPTED",
+	})
+}
+
+func (h *identityHandlers) requestBoundPasswordReset(c *gin.Context) {
+	request := c.MustGet(strictJSONBodyContextKey).(*passwordResetRequestBody)
+	h.requestPasswordReset(c, request)
 }
 
 func writeAdmissionSuccess(c *gin.Context, status int, body gin.H) {

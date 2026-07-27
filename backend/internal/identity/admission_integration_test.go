@@ -416,6 +416,15 @@ func TestExpiredVerificationBearerIsUniformlyInvalid(t *testing.T) {
 	}
 }
 
+// TestWrongPurposeActionSecretIsRejectedAtPersistenceBoundary asserts that the
+// action-secret purpose allowlist is closed at the database, not merely
+// respected by application code.
+//
+// The example purpose changed in S1B3. This test previously used
+// 'PASSWORD_RESET' as its out-of-allowlist value; migration 0007 admits that
+// purpose for password recovery, so continuing to use it would have asserted
+// the opposite of the intended property. The guarded property is unchanged —
+// only the example needed to move to a purpose the schema still refuses.
 func TestWrongPurposeActionSecretIsRejectedAtPersistenceBoundary(t *testing.T) {
 	pool := admissionPool(t)
 	service := admissionService(t, pool, time.Now().UTC(), 0x65)
@@ -429,10 +438,10 @@ func TestWrongPurposeActionSecretIsRejectedAtPersistenceBoundary(t *testing.T) {
 	if _, err := pool.Exec(context.Background(),
 		`INSERT INTO identity_action_secrets
 		   (account_id, purpose, secret_digest, issued_at, expires_at)
-		 VALUES ($1::uuid, 'PASSWORD_RESET', decode(repeat('99', 32), 'hex'), now(), now() + interval '1 hour')`,
+		 VALUES ($1::uuid, 'ACCOUNT_DELETION', decode(repeat('99', 32), 'hex'), now(), now() + interval '1 hour')`,
 		accountID,
 	); err == nil {
-		t.Fatal("persistence accepted an action secret outside the S1B1 verification purpose")
+		t.Fatal("persistence accepted an action secret outside the closed purpose allowlist")
 	}
 }
 

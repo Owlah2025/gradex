@@ -297,6 +297,7 @@ func buildAdmissionFoundation(
 		"student-registrations",
 		"email-verification-requests",
 		"email-verifications",
+		"password-reset-requests",
 	}
 	endpointPolicies := make(map[string]ratelimit.Policy, len(endpoints)+2)
 	for _, endpoint := range endpoints {
@@ -319,6 +320,18 @@ func buildAdmissionFoundation(
 		return nil, nil, err
 	}
 
+	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
+		Pool:     pool,
+		Outbox:   writer,
+		ResetTTL: admission.PasswordResetTokenTTL(),
+		Now:      time.Now,
+		Random:   rand.Reader,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+
 	foundation, err := httpapi.NewAdmissionFoundation(httpapi.AdmissionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
 		CookieSigningKey:    []byte(admission.AnonymousCookieSigningKey().Expose()),
@@ -326,6 +339,7 @@ func buildAdmissionFoundation(
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Policies:            policies,
 		Service:             service,
+		Recovery:            recovery,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})

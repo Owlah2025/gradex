@@ -127,7 +127,8 @@ func mountAdmissionRoutesWithBootstrap(
 	includeBootstrap bool,
 ) {
 	handlers := &identityHandlers{
-		service: foundation.service, policies: foundation.policies,
+		service: foundation.service, recovery: foundation.recovery,
+		policies: foundation.policies,
 	}
 	if includeBootstrap {
 		v1.GET(
@@ -162,6 +163,16 @@ func mountAdmissionRoutesWithBootstrap(
 		foundation.security.requireAdmission(),
 		foundation.requireRateDecision("email-verifications", verificationTokenIdentifier),
 		handlers.consumeBoundVerification,
+	)
+	// Reset request only. The matching completion route is deliberately absent
+	// until Must 3 can consume the secret atomically with password replacement
+	// and all-family invalidation.
+	v1.POST(
+		"/password-reset-requests",
+		strictJSONMiddleware(func() any { return &passwordResetRequestBody{} }, passwordResetRequestBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("password-reset-requests", passwordResetIdentifier),
+		handlers.requestBoundPasswordReset,
 	)
 }
 
