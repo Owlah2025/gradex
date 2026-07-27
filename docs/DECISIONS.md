@@ -587,3 +587,105 @@ uncredible target with another and repeat the error being corrected); leaving th
 August 4 (the first unassigned date would then be spent against a conflict rather than a plan).
 **Source:** Developer decision on 2026-08-02, on the analysis in
 [DOWNSTREAM_RECONCILIATION.md](launch/DOWNSTREAM_RECONCILIATION.md).
+
+## D-040 — August 15 restored as the hard MVP launch date; Claude plans, Antigravity implements, Claude reviews
+
+**Date:** 2026-07-27
+**Status:** Active. Supersedes [D-039](#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)
+**on the launch date only** — D-039's evidence, risk analysis, and rejection of envelope compression
+survive intact and are carried forward. Replaces the S1C-scoped seat assignment in
+[D-037](#d-037--claude-builds-s1c-and-agy-reviews) with a standing workflow that does not expire per
+slice. Continues to pause [D-033](#d-033--codex-resumes-building-and-claude-resumes-review).
+
+**Decision:** Two things are decided together, because neither holds without the other.
+
+### 1. August 15, 2026 is the hard MVP public launch date
+
+Restored by product-owner decision. It is a commitment, not a forecast, and it takes priority over
+non-critical scope and visual polish. What it does **not** take priority over is fixed below.
+
+**Every requirement is classified into exactly one of three categories**, recorded in
+[the August 15 scope matrix](launch/AUGUST_15_EXECUTION_PLAN.md#2-scope-matrix):
+
+- **A — Launch Critical.** Required for the critical student journey, security, authorization,
+  payment correctness, access control, data integrity, a legal launch blocker, or basic production
+  operation. Complete by August 15.
+- **B — Manual but Supported.** The behaviour remains available, but an authorised Admin performs
+  part of it by hand. Manual operation must still be authorised, auditable, documented, and safe.
+- **C — Post-Launch.** Explicitly deferred, with a recorded reason and a post-launch destination.
+
+**No feature disappears silently.** Every deferral is recorded in
+[the execution plan](launch/AUGUST_15_EXECUTION_PLAN.md) and in
+[STATUS.md](launch/STATUS.md). A requirement that is not in one of the three categories is not
+deferred — it is unclassified, and that is a planning defect to fix, not a scope reduction.
+
+**These may not be sacrificed for the date, under any pressure:** backend-enforced authorization,
+ownership checks, account-suspension enforcement, payment-callback verification, callback idempotency
+and replay handling, order/payment state integrity, entitlement provenance, short-lived signed media
+access, private-draft and protected-download controls, database constraints, negative tests on
+critical boundaries, audit records for sensitive actions, backups with a tested restore, and minimum
+monitoring. Speed is bought from scope, polish, and automation — never from these.
+
+**The schedule arithmetic that retired August 15 was measured on the wrong calendar.** D-038 counted
+remaining *schedule* days (August 3–9) as if they were real days. They are not: the repository's
+schedule calendar runs ahead of the real calendar, and every record from Day 6 through the Day 11
+S1C plan — eleven schedule days, S0 through S1C — was produced across the five real days
+2026-07-23 to 2026-07-27, at roughly 2.2 schedule-days per real day. On the real calendar, today is
+July 27 and 19 calendar days remain. D-038's deficit was an artifact of double-counting elapsed time.
+Its *qualitative* warnings — 21 open gates, four uncontacted external dependencies, S1 expanding
+fivefold against its estimate — are unaffected and remain live risks.
+
+### 2. The feature-development workflow is fixed and standing
+
+```text
+Claude plans the feature using SpecKit
+→ Antigravity implements the frozen plan
+→ Claude performs the final review
+→ Antigravity fixes Claude's findings
+→ Claude re-reviews and either accepts or rejects the slice
+```
+
+- **Claude** owns repository analysis, feature planning, SpecKit artifacts, architectural decisions,
+  implementation instructions, review, acceptance, and documentation consistency. Claude does **not**
+  perform the primary implementation.
+- **Antigravity** owns implementation, tests, migrations, frontend, backend, and fixing findings.
+  Antigravity does **not** redesign the feature or change frozen decisions.
+- No slice is complete until Claude explicitly marks it accepted. Review returns exactly one of
+  `ACCEPT`, `ACCEPT WITH LOW-RISK FOLLOW-UP`, `REJECT WITH FINDINGS`, or
+  `BLOCKED BY PRODUCT DECISION`.
+- Review depth is risk-based: Tier 1 standard (CRUD, display, admin tables), Tier 2 sensitive
+  (ownership, publication transitions, resource access, refund administration, earnings, account
+  state), Tier 3 critical (authentication, sessions, payment callbacks, idempotency, entitlement
+  creation and evaluation, suspension, signed playback, protected downloads, refund effects on
+  access). Tier 3 depth is not applied to ordinary UI work.
+- **This assignment is standing and does not expire per slice.** It replaces the per-slice seat
+  decisions D-035 through D-037, which are historical. `agy` and Codex hold no seat under it.
+
+**No further planning agent, architecture reviewer, implementation workflow, or approval authority is
+introduced.**
+
+**The never-self-approve rule survives unchanged.** Claude reviews what Antigravity implements, so a
+slice still never closes on its builder's own assessment. Reviews run against one frozen exact commit
+range with read-only tools in a disposable detached worktree. A review with no retrievable verdict is
+`UNAVAILABLE`, not approval.
+
+**Reason:** The product owner accepted the schedule risk and requires execution rather than further
+forecasting. Restoring the date without also fixing the workflow would restore the condition that
+produced the deficit — one agent planning, building, and negotiating its own evidence, at roughly one
+slice per day. The workflow change is what makes the date arithmetically reachable: planning and
+implementation run concurrently on non-overlapping contracts, and Claude's capacity moves from
+building to specifying and reviewing. The three-category scope policy is what makes it *safely*
+reachable — the date is paid for out of category B and C, never out of the quality boundaries listed
+above.
+
+**Alternatives rejected:** Keeping the September target (the product owner has decided; and the date
+arithmetic behind September was computed on the schedule calendar, not the real one); restoring
+August 15 without a scope policy (a date with no recorded classification produces silent deferral,
+which is the failure mode the launch protocol exists to prevent); restoring August 15 while keeping
+one agent as builder-planner (the observed constraint is the single agent's serialized capacity, not
+the calendar); compressing the daily envelope or spending the protected recovery day (D-039's
+Remedy C rejection stands — the correction comes from parallelism and scope, not from removing
+evidence); deleting D-038/D-039 rather than superseding them (their evidence about open gates and
+external lead times is still the live risk register).
+
+**Source:** Product-owner instruction on 2026-07-27, on repository evidence reconciled the same day.

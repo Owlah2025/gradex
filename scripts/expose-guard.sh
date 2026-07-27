@@ -61,6 +61,9 @@ ALLOWLIST=(
   "internal/identity/recovery.go"
   # The password-plaintext boundary itself. See check 4.
   "internal/identity/credential.go"
+  # The fresh staff-invitation bearer crosses directly into response and
+  # outbox encryption, and no further. Same reasoning as recovery.go above.
+  "internal/identity/invitation.go"
   # Opaque session and CSRF plaintext cross only into the hardened cookie and
   # no-store JSON body after their authoritative transaction has committed.
   "internal/auth/session_response.go"

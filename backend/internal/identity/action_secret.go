@@ -20,13 +20,14 @@ type ActionSecretPurpose string
 const (
 	ActionEmailVerification ActionSecretPurpose = "EMAIL_VERIFICATION"
 	ActionPasswordReset     ActionSecretPurpose = "PASSWORD_RESET"
+	ActionStaffInvitation   ActionSecretPurpose = "STAFF_INVITATION"
 )
 
 // valid reports whether the purpose is one the database allowlist admits.
 // Keeping this beside the constants means a new purpose fails in Go before it
 // reaches the identity_action_secrets CHECK constraint.
 func (p ActionSecretPurpose) valid() bool {
-	return p == ActionEmailVerification || p == ActionPasswordReset
+	return p == ActionEmailVerification || p == ActionPasswordReset || p == ActionStaffInvitation
 }
 
 var ErrTokenInvalid = errors.New("action secret is invalid")

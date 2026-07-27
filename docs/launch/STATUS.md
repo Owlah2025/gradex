@@ -1,11 +1,34 @@
 # Gradex Launch Status
 
-> Current schedule date: 2026-08-02 — advanced by user
-> Last repository reconciliation: 2026-08-02 — start of day at `881639d`; S1B3 confirmed closed at reviewed head `9d3db91`
-> Scheduled day: Day 11 — Authentication and RBAC, S1C Staff lifecycle, enforcement, and authorization matrix, `PLANNED`
-> Target public go-live: **September, exact date unset.** August 15 retired as non-credible on 2026-08-02 under [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september); scope preserved
-> Days remaining: **not countable** until the rebaseline sets a date
-> Launch confidence: **Red**
+> Current date: **2026-07-27 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
+> Last repository reconciliation: 2026-07-27 at `c65cd53`; S1B3 confirmed closed at reviewed head `9d3db91`
+> Active slice: S1C — staff lifecycle, enforcement, and authorization matrix. Musts 1–2 complete at `c65cd53`; Musts 3–7 frozen for implementation in [specs/002-auth-rbac/s1c/](../../specs/002-auth-rbac/s1c/plan.md)
+> Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
+> Days remaining: **19**
+> Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
+> Launch confidence: **Amber**
+
+Confidence moves from Red to Amber, and the reason is arithmetic rather than optimism.
+[D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy)
+measured the remaining runway in *schedule* days and treated them as real days; the repository's
+schedule calendar ran six days ahead of the real one, and eleven schedule days (S0 through the S1C
+plan) were produced across five real days. Nineteen real days remain, not seven, and the delivery
+workflow changed under D-040 so that planning and implementation now run concurrently.
+
+Amber, not Green, because **the 21 open launch gates are unchanged and are now the binding
+constraint** — not engineering capacity. `LG-005`, `LG-006`, `LG-007`, `LG-008`, `LG-010`, `LG-011`,
+and `LG-012` can each stop the cutover regardless of how much code is finished, and no manual path
+substitutes for any of them. The outreach that closes them was scheduled for August 6 and is now due
+**July 28**; it is the highest-value schedule action available and it costs no engineering time.
+
+Scope is classified rather than cut blind: every remaining requirement is Launch Critical, Manual but
+Supported, or Post-Launch in
+[the August 15 scope matrix](AUGUST_15_EXECUTION_PLAN.md#2-scope-matrix). Nothing is silently
+dropped, and no security, payment-correctness, authorization, data-integrity, or protected-media
+control is traded for the date.
+
+The historical Red assessment below is retained for the record.
 
 Red means the full-MVP public-launch forecast is not yet credible. The documentation baseline,
 platform architecture, and domain/data/state design are approved, but API/security design and

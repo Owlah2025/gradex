@@ -103,6 +103,7 @@ var (
 		"outbox_events",
 		"outbox_protected_payloads",
 	}
+	staffTables = []string{"staff_invitations"}
 )
 
 func allTables() []string {
@@ -110,7 +111,8 @@ func allTables() []string {
 	all = append(all, identityTables...)
 	all = append(all, auditTables...)
 	all = append(all, sessionTables...)
-	return append(all, admissionTables...)
+	all = append(all, admissionTables...)
+	return append(all, staffTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -433,5 +435,102 @@ func assertStatementFails(
 	t.Helper()
 	if _, err := pool.Exec(ctx, statement, args...); err == nil {
 		t.Fatalf("statement unexpectedly succeeded: %s", statement)
+	}
+}
+
+func TestStaffLifecycleSchemaInvariants(t *testing.T) {
+	freshDatabase(t)
+	pool := openPool(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var adminAccountID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO accounts (normalized_email, email, role, status, display_name)
+		 VALUES ('admin@example.com', 'Admin@Example.com', 'ADMIN', 'ACTIVE', 'Admin User')
+		 RETURNING id::text`,
+	).Scan(&adminAccountID); err != nil {
+		t.Fatalf("creating Admin Account fixture: %v", err)
+	}
+
+	// 1. STAFF_INVITATION action secret with NULL account_id succeeds.
+	var secretID1 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES (NULL, 'STAFF_INVITATION', decode(repeat('a1', 32), 'hex'), now() + interval '1 hour')
+		 RETURNING id::text`,
+	).Scan(&secretID1); err != nil {
+		t.Fatalf("creating STAFF_INVITATION secret: %v", err)
+	}
+
+	// EMAIL_VERIFICATION action secret with NULL account_id must fail.
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES (NULL, 'EMAIL_VERIFICATION', decode(repeat('a2', 32), 'hex'), now() + interval '1 hour')`,
+	)
+
+	// 2. staff_invitations insertion and partial unique index on PENDING normalized_email.
+	var invID1 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO staff_invitations
+		   (normalized_email, email, invited_role, inviter_account_id, state, action_secret_id)
+		 VALUES ('instructor@example.com', 'Instructor@Example.com', 'INSTRUCTOR', $1, 'PENDING', $2)
+		 RETURNING id::text`,
+		adminAccountID, secretID1,
+	).Scan(&invID1); err != nil {
+		t.Fatalf("creating staff_invitation: %v", err)
+	}
+
+	// Inserting second PENDING invitation for same normalized email must fail.
+	var secretID2 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES (NULL, 'STAFF_INVITATION', decode(repeat('b1', 32), 'hex'), now() + interval '1 hour')
+		 RETURNING id::text`,
+	).Scan(&secretID2); err != nil {
+		t.Fatalf("creating second STAFF_INVITATION secret: %v", err)
+	}
+
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO staff_invitations
+		   (normalized_email, email, invited_role, inviter_account_id, state, action_secret_id)
+		 VALUES ('instructor@example.com', 'Instructor@Example.com', 'INSTRUCTOR', $1, 'PENDING', $2)`,
+		adminAccountID, secretID2,
+	)
+
+	// Transitioning first invitation to SUPERSEDED allows new PENDING invitation.
+	if _, err := pool.Exec(ctx,
+		`UPDATE staff_invitations SET state = 'SUPERSEDED' WHERE id = $1`,
+		invID1,
+	); err != nil {
+		t.Fatalf("updating invitation state to SUPERSEDED: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO staff_invitations
+		   (normalized_email, email, invited_role, inviter_account_id, state, action_secret_id)
+		 VALUES ('instructor@example.com', 'Instructor@Example.com', 'INSTRUCTOR', $1, 'PENDING', $2)`,
+		adminAccountID, secretID2,
+	); err != nil {
+		t.Fatalf("inserting second PENDING invitation after first was SUPERSEDED: %v", err)
+	}
+
+	// 3. Security events for ACCOUNT_SUSPENDED and ACCOUNT_REINSTATED.
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO identity_security_events
+		   (event_type, account_id, account_revision, request_id, evidence)
+		 VALUES ('ACCOUNT_SUSPENDED', $1, 1, 'req-1', '{"reason":"ACCOUNT_SUSPENDED"}'),
+		        ('ACCOUNT_REINSTATED', $1, 1, 'req-2', '{"reason":"REINSTATED"}')`,
+		adminAccountID,
+	); err != nil {
+		t.Fatalf("creating suspension security events: %v", err)
 	}
 }

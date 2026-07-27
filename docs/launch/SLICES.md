@@ -27,26 +27,37 @@ rather than absorbed as improvisation during implementation.
 | S1B1 | Student admission | Jul 30 | Identity and Access, Audit, Work Delivery | S1A |
 | S1B2 | Authenticated sessions | Jul 31 | Identity and Access, Audit | S1B1 |
 | S1B3 | Recovery and Student integration | Aug 1 | Identity and Access, Audit, Work Delivery | S1B2 |
-| S1C | Staff lifecycle, enforcement, and authorization matrix | Aug 2 | Identity and Access, Audit | S1B3 |
-| S2 | Course authoring and review | Aug 3 | Catalog and Authoring, Audit | S1C |
-| S3 | Public catalog, search, and shell | **TBD** | Catalog and Authoring | S2 |
-| S4 | Media pipeline, delivery, and Entitlement evaluation | **TBD** | Media and Assets, Entitlements | S1C, S2 |
-| S5 | Protected learning | **TBD** | Learning, Moderation | S3, S4 |
-| S6 | Orders, checkout, and coupons | **TBD** | Commerce | S2, S4 |
-| S7 | Payments, entitlement grants, and refunds | **TBD** | Commerce, Entitlements, Audit | S6 |
-| S8 | Instructor and Admin operations | **TBD** | Reporting and Payouts, Moderation, Audit | S5, S7 |
-| S9 | Office hours and notifications | Aug 8 | Office Hours, Notifications | S4, S5 |
-| S10 | Revenue, payouts, compliance, and recovery | Aug 9 | Reporting and Payouts | S7, S8 |
-| S11 | End-to-end integration | Aug 10 | all | S1A–S10 |
-| S12 | Production infrastructure and observability | Aug 11 | operational | S11 |
-| S13 | Security and quality gate | Aug 12 | all | S12 |
-| S14 | Staging acceptance and gate audit | Aug 13 | all | S13 |
-| S15 | Blocker-only soft launch | Aug 14 | operational | S14 |
-| S16 | Public go/no-go | Aug 15 | — | S15 |
+| S1C | Staff lifecycle, enforcement, and authorization matrix | **Jul 27–28** | Identity and Access, Audit | S1B3 |
+| S2 | Course authoring and review | **Jul 29–31** | Catalog and Authoring, Audit | S1C |
+| S3 | Public catalog and shell (ranked search deferred) | **Aug 1** | Catalog and Authoring | S2 |
+| S4 | Media pipeline, delivery, and Entitlement evaluation | **Aug 3–5** | Media and Assets, Entitlements | S1C, S2 |
+| S5 | Protected learning | **Aug 5–6** | Learning, Moderation | S3, S4 |
+| S6 | Orders, checkout, and coupons | **Aug 8** | Commerce | S2, S4 |
+| S7 | Payments, entitlement grants, and refunds | **Aug 10–11** | Commerce, Entitlements, Audit | S6 |
+| S8 | Admin support operations (reduced; analytics/moderation deferred) | **Aug 12** | Reporting and Payouts, Moderation, Audit | S5, S7 |
+| S9 | Transactional notifications only; **office hours deferred post-launch** | folded into S4/S7 | Office Hours, Notifications | S4, S5 |
+| S10 | Bilingual legal/support pages (reduced; revenue/payouts manual) | **Aug 12** | Reporting and Payouts | S7, S8 |
+| S11 | End-to-end integration | **Aug 13** | all | S1A–S10 |
+| S12 | Production infrastructure and observability | **Aug 7** | operational | S11 |
+| S13 | Security and quality gate | **Aug 13** | all | S12 |
+| S14 | Staging acceptance and gate audit | **Aug 14** | all | S13 |
+| S15 | Production rehearsal and soft launch | **Aug 14** | operational | S14 |
+| S16 | Public go/no-go | **Aug 15** | — | S15 |
 
 Every `Depends on` entry points backwards. No forward dependency remains.
 
-**S3–S8 carry `TBD` days on a recorded verdict, not pending analysis (reconciled 2026-08-02).** The
+**S3–S8 are dated again as of 2026-07-27 under
+[D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+and the dates above are real-calendar dates.** The calendar authority is now
+[AUGUST_15_EXECUTION_PLAN.md](AUGUST_15_EXECUTION_PLAN.md), which also records which behaviour in each
+slice is Launch Critical, which becomes an authorised manual operation, and which is deferred with a
+recorded destination. **Dependency order is unchanged** — every `Depends on` entry still points
+backwards, and §3's separation of Entitlement evaluation from Entitlement creation is untouched.
+S12 moves *earlier* than the original calendar so staging exists eight days before cutover.
+
+The superseded reconciliation verdict is retained below for the record.
+
+**S3–S8 carried `TBD` days on a recorded verdict, not pending analysis (reconciled 2026-08-02).** The
 downstream calendar was reconciled before S1C planning and the result is negative: **six slices have
 three available dates** (August 4, 5, and 6), so August 8 is no longer a credible runway start and a
 full-PRD August 15 launch is not forecastable. Dependency *order* is unaffected and remains correct;

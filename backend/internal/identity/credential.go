@@ -110,6 +110,16 @@ func prepareCredential(
 	return HashPassword(nextPlaintext)
 }
 
+func PrepareNewCredential(ctx context.Context, newPassword config.Secret, source CompromisedRangeSource) (config.Secret, error) {
+	return prepareCredential(
+		ctx,
+		credentialPreparation{
+			next: newPassword, mode: credentialPrepareNew,
+		},
+		source,
+	)
+}
+
 // verifyStoredCredential deliberately reuses prepareCredential so the
 // supplied Secret is exposed only inside the repository's one reviewed
 // password-plaintext boundary.

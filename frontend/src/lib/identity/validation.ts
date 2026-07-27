@@ -52,7 +52,10 @@ export function validEmail(value: string) {
  * crossed two credential purposes on its own, which is not a boundary to leave
  * to the server.
  */
-export type FragmentTokenPurpose = "EMAIL_VERIFICATION" | "PASSWORD_RESET";
+export type FragmentTokenPurpose =
+  | "EMAIL_VERIFICATION"
+  | "PASSWORD_RESET"
+  | "STAFF_INVITATION";
 
 type FragmentCapture = { token: string | null; spent: boolean };
 

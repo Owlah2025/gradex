@@ -78,6 +78,9 @@ func NewRouter(
 			v1, routerConfig.admission, routerConfig.sessions == nil,
 		)
 	}
+	if routerConfig.staff != nil {
+		mountStaffRoutes(v1, routerConfig.staff, authenticator, principals, logger)
+	}
 
 	// Every protected group runs authentication → capability policy → ownership
 	// or Entitlement, in that order. The capability step is what refuses a
@@ -183,10 +186,25 @@ func mountAdmissionRoutesWithBootstrap(
 type routerOptions struct {
 	admission *AdmissionFoundation
 	sessions  *SessionFoundation
+	staff     *StaffFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
 type RouterOption func(*routerOptions) error
+
+// WithStaffFoundation mounts staff lifecycle, invitation, and suspension routes.
+func WithStaffFoundation(foundation *StaffFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("staff foundation is required")
+		}
+		if options.staff != nil {
+			return fmt.Errorf("staff lifecycle is already configured")
+		}
+		options.staff = foundation
+		return nil
+	}
+}
 
 // WithAdmissionFoundation mounts the anonymous bootstrap, policy read, and
 // Student admission commands only after their complete fail-closed dependency
@@ -252,6 +270,34 @@ func mountSessionRoutes(v1 *gin.RouterGroup, foundation *SessionFoundation) {
 		foundation.requireSessionRateDecision("session-logout", sessionRateIdentifier),
 		handlers.logout,
 	)
+}
+
+func mountStaffRoutes(
+	v1 *gin.RouterGroup,
+	foundation *StaffFoundation,
+	authenticator auth.Authenticator,
+	principals identity.PrincipalResolver,
+	logger *logging.Logger,
+) {
+	staffH := &staffHandlers{service: foundation.service, compromised: foundation.compromised}
+
+	// Anonymous / public endpoints
+	v1.POST("/staff/invitations/preview", staffH.previewInvitation)
+	v1.POST("/staff/invitations/complete", staffH.completeInvitation)
+
+	// Protected endpoints (require auth + CapAdminOperations capability)
+	staffGroup := v1.Group("/staff")
+	staffGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapAdminOperations),
+	)
+	{
+		staffGroup.POST("/invitations", staffH.createInvitation)
+		staffGroup.GET("/invitations", staffH.listInvitations)
+		staffGroup.POST("/invitations/:id/revoke", staffH.revokeInvitation)
+		staffGroup.POST("/:id/suspend", staffH.suspendStaff)
+		staffGroup.POST("/:id/reinstate", staffH.reinstateStaff)
+	}
 }
 
 // newEngine composes the middleware chain and the fallback handlers, without

@@ -61,6 +61,7 @@ const (
 	DenyPasswordChangeRequired DenyReason = "PASSWORD_CHANGE_REQUIRED"
 	DenyRoleLacksCapability    DenyReason = "ROLE_LACKS_CAPABILITY"
 	DenyUnknownCapability      DenyReason = "UNKNOWN_CAPABILITY"
+	DenyRecentAuthRequired     DenyReason = "RECENT_AUTH_REQUIRED"
 	// DenyPrincipalNotFound is produced by the resolution step rather than by
 	// Authorize, but it is a policy outcome and belongs in the same typed set
 	// so monitoring sees one vocabulary of refusal reasons.

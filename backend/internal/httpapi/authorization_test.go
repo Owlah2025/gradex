@@ -55,11 +55,34 @@ func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engi
 	// policy can be the reason a request is refused. If a call is denied here,
 	// the policy denied it.
 	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
-		fakeEntitlements{allowed: true}, principals)
+		fakeEntitlements{allowed: true}, principals,
+		WithStaffFoundation(NewStaffFoundation(fakeStaffService{}, nil)),
+	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
 	return r, buf
+}
+
+type fakeStaffService struct{}
+
+func (fakeStaffService) CreateStaffInvitation(context.Context, identity.CreateStaffInvitationRequest) (identity.IssuedStaffInvitation, error) {
+	return identity.IssuedStaffInvitation{}, nil
+}
+func (fakeStaffService) PreviewStaffInvitation(context.Context, string, time.Time) (identity.StaffInvitationPreview, error) {
+	return identity.StaffInvitationPreview{}, nil
+}
+func (fakeStaffService) CompleteStaffInvitation(context.Context, identity.CompleteStaffInvitationRequest) (identity.CompleteStaffInvitationResult, error) {
+	return identity.CompleteStaffInvitationResult{}, nil
+}
+func (fakeStaffService) RevokeStaffInvitation(context.Context, identity.RevokeStaffInvitationRequest) error {
+	return nil
+}
+func (fakeStaffService) SuspendAccount(context.Context, identity.SuspendAccountRequest) (identity.SuspendAccountResult, error) {
+	return identity.SuspendAccountResult{}, nil
+}
+func (fakeStaffService) ReinstateAccount(context.Context, identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error) {
+	return identity.ReinstateAccountResult{}, nil
 }
 
 // protectedRoutes is every route that requires a capability decision. Bootstrap
@@ -72,6 +95,11 @@ var protectedRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/api/v1/lessons/lesson-99/video/publish"},
 	{http.MethodGet, "/api/v1/lessons/lesson-99/video/playback-url"},
 	{http.MethodPost, "/api/v1/lessons/lesson-99/progress"},
+	{http.MethodPost, "/api/v1/staff/invitations"},
+	{http.MethodGet, "/api/v1/staff/invitations"},
+	{http.MethodPost, "/api/v1/staff/invitations/inv-99/revoke"},
+	{http.MethodPost, "/api/v1/staff/acct-99/suspend"},
+	{http.MethodPost, "/api/v1/staff/acct-99/reinstate"},
 }
 
 // Bootstrap close condition 3, initial end-to-end denial evidence.
