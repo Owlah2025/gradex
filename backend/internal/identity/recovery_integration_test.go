@@ -738,3 +738,90 @@ func TestAcceptedResetReachesPasswordHashing(t *testing.T) {
 		t.Fatalf("screener called %d times for an accepted reset, want 1", visits)
 	}
 }
+
+// TestBootstrapAdminRecoveryRotatesWithoutGrantingAccess extends the staged
+// bootstrap-Admin denial evidence across S1B's recovery surface.
+//
+// S1B added no new capability-gated route — its routes are either anonymous or
+// session-lifecycle — so the protected-route table in the httpapi package is
+// unchanged. What S1B did add is a second way to replace the bootstrap
+// Administrator's out-of-band password, and that path has to be shown not to
+// weaken the restriction it satisfies.
+//
+// The restriction exists so a password delivered out of band is replaced.
+// Recovery replaces it, and additionally requires control of the Admin mailbox,
+// revokes every family, and issues no session. Clearing CHANGE_REQUIRED
+// afterwards is therefore correct rather than a bypass — but only because
+// recovery grants no access of its own, which is what this asserts.
+func TestBootstrapAdminRecoveryRotatesWithoutGrantingAccess(t *testing.T) {
+	pool := admissionPool(t)
+	conn, ctx := connect(t)
+	if _, err := Bootstrap(ctx, conn, request("op-recovery-1")); err != nil {
+		t.Fatalf("bootstrapping Admin: %v", err)
+	}
+
+	var accountID, credentialState, accountStatus string
+	if err := pool.QueryRow(ctx,
+		`SELECT a.id::text, c.state::text, a.status::text
+		   FROM accounts a JOIN password_credentials c ON c.account_id = a.id`,
+	).Scan(&accountID, &credentialState, &accountStatus); err != nil {
+		t.Fatalf("reading bootstrap Admin: %v", err)
+	}
+	if credentialState != "CHANGE_REQUIRED" || accountStatus != "ACTIVE" {
+		t.Fatalf(
+			"bootstrap Admin = %s/%s, want ACTIVE/CHANGE_REQUIRED",
+			accountStatus, credentialState,
+		)
+	}
+	plantSessionFamilies(t, pool, accountID, 2)
+
+	now := time.Now().UTC()
+	service := recoveryService(t, pool, now, 0x98)
+	if err := service.RequestPasswordReset(ctx, PasswordResetRequest{
+		Email: "Admin@Gradex.Example", RequestID: "request-admin-reset-1",
+	}); err != nil {
+		t.Fatalf("requesting Admin reset: %v", err)
+	}
+	if live := countLiveResetSecrets(t, pool); live != 1 {
+		t.Fatalf("live reset secrets = %d, want 1; recovery must reach a restricted Admin", live)
+	}
+
+	if err := service.CompletePasswordReset(ctx, PasswordResetCompletion{
+		Token:     deterministicBearer(0x98),
+		Password:  config.NewSecret("quiet lantern beside seventeen rivers"),
+		RequestID: "request-admin-reset-2",
+	}); err != nil {
+		t.Fatalf("completing Admin reset: %v", err)
+	}
+
+	// The out-of-band password is gone and the restriction it justified is
+	// satisfied, so the credential is unrestricted again.
+	if err := pool.QueryRow(ctx,
+		`SELECT c.state::text FROM password_credentials c WHERE c.account_id = $1::uuid`,
+		accountID,
+	).Scan(&credentialState); err != nil {
+		t.Fatalf("re-reading credential: %v", err)
+	}
+	if credentialState != "ACTIVE" {
+		t.Fatalf("credential state after recovery = %s, want ACTIVE", credentialState)
+	}
+
+	// Recovery granted no access of its own: every family the Admin had is
+	// revoked, and none was created.
+	var live, total int
+	if err := pool.QueryRow(ctx,
+		`SELECT
+		   count(*) FILTER (WHERE state = 'ACTIVE'),
+		   count(*)
+		 FROM sessions WHERE account_id = $1::uuid`,
+		accountID,
+	).Scan(&live, &total); err != nil {
+		t.Fatalf("counting Admin families: %v", err)
+	}
+	if live != 0 {
+		t.Fatalf("live Admin families after recovery = %d, want 0", live)
+	}
+	if total != 2 {
+		t.Fatalf("Admin families = %d, want the original 2 and no new session", total)
+	}
+}
