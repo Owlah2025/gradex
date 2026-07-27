@@ -1,9 +1,11 @@
 package identity
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -14,6 +16,8 @@ import (
 // Session credential sizing. 32 bytes of CSPRNG output is the security floor
 // for a bearer-equivalent value; the cookie carries the base64url encoding.
 const sessionCredentialBytes = 32
+
+const sessionCSRFDomain = "gradex-session-csrf-v1"
 
 // SessionState mirrors the session_state enum.
 type SessionState string
@@ -138,6 +142,72 @@ func NewSessionCredential() (IssuedCredential, error) {
 		CredentialDigest: DigestToken(credential),
 		CSRFDigest:       DigestToken(csrf),
 	}, nil
+}
+
+// NewSessionCredentialForGeneration mints the opaque bearer and derives a
+// generation-bound CSRF token using a separate server key. The derivation lets
+// a no-store session read restore browser-memory CSRF state after reload while
+// PostgreSQL retains only a digest.
+func NewSessionCredentialForGeneration(
+	csrfKey []byte,
+	sessionID string,
+	generation int,
+) (IssuedCredential, error) {
+	credential, err := randomToken()
+	if err != nil {
+		return IssuedCredential{}, fmt.Errorf("generating session credential: %w", err)
+	}
+	credentialDigest := DigestToken(credential)
+	csrfPlaintext, err := deriveSessionCSRFToken(csrfKey, sessionID, generation, credentialDigest)
+	if err != nil {
+		return IssuedCredential{}, err
+	}
+	return IssuedCredential{
+		Credential:       config.NewSecret(credential),
+		CSRFToken:        config.NewSecret(csrfPlaintext),
+		CredentialDigest: credentialDigest,
+		CSRFDigest:       DigestToken(csrfPlaintext),
+	}, nil
+}
+
+// DeriveSessionCSRFToken reconstructs the browser-memory token from
+// server-held key material and non-secret generation facts.
+func DeriveSessionCSRFToken(
+	csrfKey []byte,
+	sessionID string,
+	generation int,
+	credentialDigest string,
+) (config.Secret, error) {
+	csrfPlaintext, err := deriveSessionCSRFToken(
+		csrfKey, sessionID, generation, credentialDigest,
+	)
+	if err != nil {
+		return config.Secret{}, err
+	}
+	return config.NewSecret(csrfPlaintext), nil
+}
+
+func deriveSessionCSRFToken(
+	csrfKey []byte,
+	sessionID string,
+	generation int,
+	credentialDigest string,
+) (string, error) {
+	if len(csrfKey) < sessionCredentialBytes {
+		return "", errors.New("session CSRF key must contain at least 32 bytes")
+	}
+	if sessionID == "" || generation < 1 || credentialDigest == "" {
+		return "", errors.New("complete session generation facts are required")
+	}
+	mac := hmac.New(sha256.New, csrfKey)
+	_, _ = mac.Write([]byte(sessionCSRFDomain))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(sessionID))
+	var generationBytes [8]byte
+	binary.BigEndian.PutUint64(generationBytes[:], uint64(generation))
+	_, _ = mac.Write(generationBytes[:])
+	_, _ = mac.Write([]byte(credentialDigest))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 func randomToken() (string, error) {

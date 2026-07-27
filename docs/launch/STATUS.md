@@ -98,11 +98,10 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B2 authenticated sessions. The explicit S1B1 security/transport carryovers are closed in
-the working implementation with focused unit/race/vet and real PostgreSQL readiness evidence. Next,
-T013 begins the role-scoped access windows, generic login, browser session/CSRF rotation,
-credential-reuse classification and family revocation, logout, and Arabic/English sign-in/session
-screens.
+Deliver S1B2 authenticated sessions. The explicit S1B1 security/transport carryovers and the
+PostgreSQL family/generation core are implemented with focused unit/race/vet, migration-lifecycle,
+and complete Identity integration evidence. Next, T019 begins the public Problem Details and HTTP
+cookie/CSRF contract before Arabic/English sign-in/session screens.
 
 ## Milestones
 

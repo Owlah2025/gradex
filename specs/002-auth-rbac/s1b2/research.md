@@ -3,11 +3,13 @@
 ## R1 — Credential model
 
 **Decision:** Use one 32-byte opaque random session credential in
-`__Host-gradex_session`; store only its SHA-256 digest. Return an independently generated CSRF
-token in no-store JSON and store only its digest.
+`__Host-gradex_session`; store only its SHA-256 digest. Derive the CSRF token with a separate server
+HMAC key from immutable family/generation facts, return it in no-store JSON, and store only its
+digest.
 
 **Rationale:** D-034 is authoritative and keeps authentication credentials inaccessible to
-JavaScript while preserving explicit server-side revocation and rotation.
+JavaScript while preserving explicit server-side revocation and rotation. Keyed derivation lets a
+session read restore the memory-only CSRF token after reload without plaintext database storage.
 
 **Alternatives rejected:** Dual access/refresh cookies and a Next.js token vault add state,
 rotation paths, and failure modes without an approved launch requirement. Browser storage exposes
@@ -16,8 +18,8 @@ credentials to JavaScript.
 ## R2 — Existing database model
 
 **Decision:** Reuse migration 0004's `sessions` family and immutable
-`session_credentials` generations. Do not add a migration unless implementation proves a missing
-database invariant.
+`session_credentials` generations. Migration 0006 expands only the closed Identity security-event
+allowlist after implementation proved that migration 0005 could not accept S1B2 evidence.
 
 **Rationale:** The schema already models current generation, ACTIVE/REVOKED/EXPIRED state,
 role-independent expiry timestamps, supersession links, stale-use counters, and

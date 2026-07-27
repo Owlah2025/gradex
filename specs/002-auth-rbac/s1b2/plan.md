@@ -66,8 +66,10 @@ screen, and the existing `sessions`/`session_credentials` tables
 
 ### Post-design re-check
 
-PASS. Phase 1 introduces no new service, dependency, migration, business behavior, or source-document
-conflict. The selected contracts preserve all pre-research gates.
+PASS. Phase 1 introduces no new service, dependency, business behavior, or source-document conflict.
+Implementation subsequently proved that the migration-5 security-event allowlist could not accept
+S1B2 evidence, so migration 0006 expands that CHECK constraint without adding session storage. The
+selected contracts and migration clarification preserve all pre-research gates.
 
 ## Project Structure
 

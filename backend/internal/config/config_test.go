@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ func validSecrets() MapSecretResolver {
 		"S3_ACCESS_KEY":         "access",
 		"S3_SECRET_KEY":         "secret",
 		"PLAYBACK_TOKEN_SECRET": "9f2c1de4a7b3085c6e1d4f7a2b9c0e3d",
+		"SESSION_CSRF_KEY":      strings.Repeat("s", 32),
 	}
 }
 
@@ -97,6 +99,11 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if sessions.StaleUseWindow() != 5*time.Second {
 		t.Errorf("stale-use default = %s, want 5s", sessions.StaleUseWindow())
 	}
+	if sessions.CSRFKey().IsEmpty() || strings.Contains(
+		fmt.Sprintf("%v", sessions.CSRFKey()), strings.Repeat("s", 32),
+	) {
+		t.Error("session CSRF key is absent or printable")
+	}
 }
 
 // Production origin rules. There is no environment in which an http production
@@ -138,7 +145,10 @@ func TestInvalidProductionOrigin(t *testing.T) {
 }
 
 func TestMissingRequiredSecretsBlockStartup(t *testing.T) {
-	for _, name := range []string{"DATABASE_URL", "S3_ACCESS_KEY", "S3_SECRET_KEY", "PLAYBACK_TOKEN_SECRET"} {
+	for _, name := range []string{
+		"DATABASE_URL", "S3_ACCESS_KEY", "S3_SECRET_KEY",
+		"PLAYBACK_TOKEN_SECRET", "SESSION_CSRF_KEY",
+	} {
 		t.Run(name, func(t *testing.T) {
 			wantErrContaining(t, func(_ map[string]string, sec MapSecretResolver) {
 				delete(sec, name)

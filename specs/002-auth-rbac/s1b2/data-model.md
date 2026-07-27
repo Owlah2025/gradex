@@ -46,7 +46,7 @@ Relevant fields:
 
 - `session_id`, `generation`: composite identity.
 - `credential_digest`: unique SHA-256 digest of the opaque browser cookie.
-- `csrf_digest`: SHA-256 digest of the independently random CSRF token.
+- `csrf_digest`: SHA-256 digest of the independently keyed pseudorandom CSRF token.
 - `state`: `CURRENT` or `SUPERSEDED`.
 - `issued_at`, `superseded_at`, `replaced_by_generation`.
 - `stale_use_count`, `first_stale_use_at`, `last_stale_use_at`: safe reuse evidence.
@@ -68,7 +68,8 @@ cookies, plaintext CSRF tokens, or hidden Account-state distinctions.
 
 - `SessionCredential`: 32 random bytes encoded for the cookie; exists only at creation/request
   boundaries and in secret-aware wrappers.
-- `CSRFToken`: independently random; returned in no-store JSON and held in frontend memory only.
+- `CSRFToken`: derived by server HMAC from immutable generation facts with a separate key; returned
+  in no-store JSON and held in frontend memory only.
 - `AuthenticatedSession`: non-secret account/family/generation/role/expiry facts placed in request
   context.
 
@@ -107,3 +108,9 @@ idle/absolute/account/epoch failure:
   cookie.
 - **Protected mutation:** resolve and validate Origin/CSRF, then recheck Account status, epoch,
   family state/expiry, and current generation immediately before domain commit.
+
+## Migration clarification
+
+Migration `0006_authenticated_sessions` expands the closed `identity_security_events.event_type`
+constraint for S1B2 session evidence. Migration 0004 already supplies all family/generation storage;
+no new session table or column is introduced.

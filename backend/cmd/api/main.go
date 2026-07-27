@@ -175,10 +175,10 @@ func main() {
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
 	if cfg.Admission().Enabled() {
-		return db.AdmissionSchemaVersion
+		return db.AuthenticatedSessionSchemaVersion
 	}
 	if !cfg.AuthFakeMode() {
-		return db.SessionSchemaVersion
+		return db.AuthenticatedSessionSchemaVersion
 	}
 	return db.MinSchemaVersion
 }

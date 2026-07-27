@@ -169,6 +169,7 @@ type SessionSettings struct {
 	generalRecentAuthWindow     time.Duration
 	highestRiskRecentAuthWindow time.Duration
 	staleUseWindow              time.Duration
+	csrfKey                     Secret
 }
 
 func (s SessionSettings) Student() SessionWindow    { return s.student }
@@ -181,6 +182,7 @@ func (s SessionSettings) HighestRiskRecentAuthWindow() time.Duration {
 	return s.highestRiskRecentAuthWindow
 }
 func (s SessionSettings) StaleUseWindow() time.Duration { return s.staleUseWindow }
+func (s SessionSettings) CSRFKey() Secret               { return s.csrfKey }
 
 // Config is the immutable runtime configuration. Construct it only through
 // Load or LoadFrom.
@@ -413,6 +415,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		{Name: "ANONYMOUS_CSRF_KEY"},
 		{Name: "ADMISSION_LIMITER_HMAC_KEY"},
 		{Name: "OUTBOX_PROTECTED_PAYLOAD_KEY"},
+		{Name: "SESSION_CSRF_KEY"},
 	} {
 		s, err := resolver.Resolve(ref)
 		if err != nil {
@@ -429,6 +432,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	cfg.s3AccessKey = secrets["S3_ACCESS_KEY"]
 	cfg.s3SecretKey = secrets["S3_SECRET_KEY"]
 	cfg.playbackTokenSecret = secrets["PLAYBACK_TOKEN_SECRET"]
+	cfg.sessions.csrfKey = secrets["SESSION_CSRF_KEY"]
 
 	cfg.payments = tapCapability(cfg.environment, tapEnabled, tapEnvironment, tapAdapterApproved, secrets["TAP_SECRET"], p)
 	cfg.email = emailCapability(emailEnabled, secrets["EMAIL_API_KEY"])
@@ -593,6 +597,9 @@ func (c *Config) validate(p *parser) {
 
 	if c.redisAddr == "" {
 		p.errf("REDIS_ADDR is required")
+	}
+	if c.environment != EnvDevelopment && c.sessions.csrfKey.IsEmpty() {
+		p.errf("SESSION_CSRF_KEY is required outside development")
 	}
 	if c.admission.Enabled() {
 		if _, err := CanonicalPublicOrigin(c.publicOrigin); err != nil {

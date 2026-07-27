@@ -71,9 +71,10 @@ login-failure contract for unknown, wrong-password, unverified, and inactive sta
 - **S2-FR-005:** The browser MUST receive only `__Host-gradex_session` with `Secure`, `HttpOnly`,
   host-only, `Path=/`, and `SameSite=Strict`; PostgreSQL MUST store only its digest. *(BR-004,
   D-034)*
-- **S2-FR-006:** The CSRF token MUST be independently random, stored only as a digest, returned only
-  in no-store JSON, held only in browser memory, and required with trusted Origin/Referer for every
-  state-changing cookie-authenticated request.
+- **S2-FR-006:** The CSRF token MUST be independently keyed and pseudorandom, stored only as a
+  digest, reconstructable only by the server from immutable generation facts and a separate HMAC
+  key, returned only in no-store JSON, held only in browser memory, and required with trusted
+  Origin/Referer for every state-changing cookie-authenticated request.
 - **S2-FR-007:** Only the current credential generation of an Active, epoch-current, unexpired
   family MAY authenticate; reads MUST NOT extend idle expiry unless explicitly classified as
   meaningful activity.
@@ -105,4 +106,3 @@ login-failure contract for unknown, wrong-password, unverified, and inactive sta
 - **S2-SC-006:** Every role uses its configured server-authoritative idle/absolute window.
 - **S2-SC-007:** Frontend lint, typecheck, production build, responsive bilingual inspection, full
   local gates, hosted CI, and independent review pass with no critical/high finding.
-

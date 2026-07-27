@@ -1,6 +1,7 @@
 package identity
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -222,5 +223,39 @@ func TestSessionCredentialsAreRandomAndStoredOnlyAsDigests(t *testing.T) {
 		if strings.Contains(rendered, first.Credential.Expose()) {
 			t.Fatalf("formatting the credential with %s leaked it", verb)
 		}
+	}
+}
+
+func TestGenerationBoundCSRFCanBeRehydratedWithoutDatabasePlaintext(t *testing.T) {
+	key := bytes.Repeat([]byte{0x71}, 32)
+	issued, err := NewSessionCredentialForGeneration(key, "session-1", 1)
+	if err != nil {
+		t.Fatalf("minting generation: %v", err)
+	}
+	rehydrated, err := DeriveSessionCSRFToken(
+		key, "session-1", 1, issued.CredentialDigest,
+	)
+	if err != nil {
+		t.Fatalf("rehydrating CSRF: %v", err)
+	}
+	if rehydrated.Expose() != issued.CSRFToken.Expose() {
+		t.Fatal("rehydrated CSRF token differs from the issued value")
+	}
+	if DigestToken(rehydrated.Expose()) != issued.CSRFDigest {
+		t.Fatal("rehydrated CSRF token does not match the stored digest")
+	}
+
+	next, err := DeriveSessionCSRFToken(key, "session-1", 2, issued.CredentialDigest)
+	if err != nil {
+		t.Fatalf("deriving next generation: %v", err)
+	}
+	if next.Expose() == rehydrated.Expose() {
+		t.Fatal("generation rotation did not rotate CSRF")
+	}
+
+	if _, err := NewSessionCredentialForGeneration(
+		bytes.Repeat([]byte{0x71}, 31), "session-1", 1,
+	); err == nil {
+		t.Fatal("short session CSRF key was accepted")
 	}
 }

@@ -100,9 +100,17 @@ const (
 // requires an explicit Expose() at the one call site that writes to the
 // database, which is greppable in review.
 func HashPassword(password string) (config.Secret, error) {
+	encoded, err := hashPasswordEncoded(password)
+	if err != nil {
+		return config.Secret{}, err
+	}
+	return config.NewSecret(encoded), nil
+}
+
+func hashPasswordEncoded(password string) (string, error) {
 	salt := make([]byte, argonSaltLength)
 	if _, err := rand.Read(salt); err != nil {
-		return config.Secret{}, fmt.Errorf("generating password salt: %w", err)
+		return "", fmt.Errorf("generating password salt: %w", err)
 	}
 
 	key := argon2.IDKey([]byte(password), salt, argonTimeCost, argonMemoryKiB, argonThreads, argonKeyLength)
@@ -114,7 +122,7 @@ func HashPassword(password string) (config.Secret, error) {
 		base64.RawStdEncoding.EncodeToString(salt),
 		base64.RawStdEncoding.EncodeToString(key),
 	)
-	return config.NewSecret(encoded), nil
+	return encoded, nil
 }
 
 // VerifyPassword reports whether a plaintext matches an encoded hash.

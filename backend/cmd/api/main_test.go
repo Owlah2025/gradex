@@ -68,6 +68,7 @@ func TestBuildAdmissionFoundationRejectsNonDevelopmentFixtures(t *testing.T) {
 		"S3_ACCESS_KEY":         "a",
 		"S3_SECRET_KEY":         "b",
 		"PLAYBACK_TOKEN_SECRET": "playback",
+		"SESSION_CSRF_KEY":      strings.Repeat("s", 32),
 	})
 	if err != nil {
 		t.Fatalf("loading production config: %v", err)
@@ -110,7 +111,7 @@ func TestRequiredSchemaVersionFollowsEnabledCapabilities(t *testing.T) {
 				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
 				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
 			},
-			want: db.SessionSchemaVersion,
+			want: db.AuthenticatedSessionSchemaVersion,
 		},
 		"Student admission": {
 			settings: map[string]string{
@@ -130,7 +131,7 @@ func TestRequiredSchemaVersionFollowsEnabledCapabilities(t *testing.T) {
 				"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 				"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
 			},
-			want: db.AdmissionSchemaVersion,
+			want: db.AuthenticatedSessionSchemaVersion,
 		},
 	}
 

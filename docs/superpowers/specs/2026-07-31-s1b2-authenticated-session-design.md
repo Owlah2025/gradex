@@ -50,7 +50,10 @@ current generation, authentication/activity times, role-derived idle and absolut
 revocation evidence.
 
 Each `session_credentials` row is one immutable credential generation. PostgreSQL stores only the
-SHA-256 digest of the 32-byte random credential and its independently generated CSRF-token digest.
+SHA-256 digest of the 32-byte random credential and its independently keyed pseudorandom CSRF-token
+digest. The CSRF token is derived with a separate server HMAC key from immutable family/generation
+facts, so `GET /api/v1/session` can restore browser-memory CSRF state after reload without storing
+the token plaintext or rotating on an ordinary read.
 Only the current generation of an Active, unexpired, epoch-current family authenticates.
 
 Login creates a new family and generation 1. It does not promote or descend from the anonymous

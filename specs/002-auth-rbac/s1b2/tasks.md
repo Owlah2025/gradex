@@ -70,15 +70,15 @@ denial; compare every hidden login failure contract.
 
 - [ ] T013 [P] [US1] Add failing role-window, recent-auth, stale-classification, cookie, and
   dummy-hash validation tests in `backend/internal/config/config_test.go`
-- [ ] T014 [P] [US1] Add failing session resolution, expiry, and stale-use classification unit
+- [x] T014 [P] [US1] Add failing session resolution, expiry, and stale-use classification unit
   tests in `backend/internal/identity/session_test.go`
-- [ ] T015 [US1] Add failing PostgreSQL login/create, renewal race, reuse revocation, mutation
+- [x] T015 [US1] Add failing PostgreSQL login/create, renewal race, reuse revocation, mutation
   recheck, and logout tests in `backend/internal/identity/session_flow_integration_test.go`
 - [x] T016 [US1] Implement typed Student/Instructor/Admin session profiles and sensitive-window
   configuration in `backend/internal/config/config.go`
-- [ ] T017 [US1] Implement non-secret authenticated-session facts and state decisions in
+- [x] T017 [US1] Implement non-secret authenticated-session facts and state decisions in
   `backend/internal/identity/session.go`
-- [ ] T018 [US1] Implement PostgreSQL login, resolution, atomic rotation, stale evidence,
+- [x] T018 [US1] Implement PostgreSQL login, resolution, atomic rotation, stale evidence,
   family-revocation, and logout transactions in `backend/internal/identity/session_repository.go`,
   reusing the proven rotation boundary from `backend/internal/identity/password_change.go`
 
