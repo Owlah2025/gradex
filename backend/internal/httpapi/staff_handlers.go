@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	staffInvitationBodyLimit  int64 = 1024
-	staffPreviewBodyLimit     int64 = 512
-	staffCompletionBodyLimit  int64 = 2048
-	staffSuspendBodyLimit     int64 = 512
-	staffReinstateBodyLimit   int64 = 512
+	staffInvitationBodyLimit int64 = 1024
+	staffPreviewBodyLimit    int64 = 512
+	staffCompletionBodyLimit int64 = 2048
+	staffSuspendBodyLimit    int64 = 512
+	staffReinstateBodyLimit  int64 = 512
 )
 
 type staffService interface {
@@ -39,6 +39,7 @@ type StaffFoundation struct {
 	compromised      identity.CompromisedRangeSource
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
+	recentAuthWindow time.Duration
 }
 
 type StaffFoundationOptions struct {
@@ -46,6 +47,7 @@ type StaffFoundationOptions struct {
 	Compromised      identity.CompromisedRangeSource
 	Limiter          *ratelimit.Limiter
 	EndpointPolicies map[string]ratelimit.Policy
+	RecentAuthWindow time.Duration
 }
 
 var requiredStaffPolicyEndpoints = [...]string{
@@ -79,17 +81,22 @@ func NewStaffFoundation(options StaffFoundationOptions) (*StaffFoundation, error
 			return nil, fmt.Errorf("required staff endpoint policy %q is missing", endpoint)
 		}
 	}
+	if options.RecentAuthWindow <= 0 {
+		return nil, errors.New("staff recent authentication window must be positive")
+	}
 	return &StaffFoundation{
 		service:          options.Service,
 		compromised:      options.Compromised,
 		limiter:          options.Limiter,
 		endpointPolicies: endpointPolicies,
+		recentAuthWindow: options.RecentAuthWindow,
 	}, nil
 }
 
 type staffHandlers struct {
-	service     staffService
-	compromised identity.CompromisedRangeSource
+	service          staffService
+	compromised      identity.CompromisedRangeSource
+	recentAuthWindow time.Duration
 }
 
 type createInvitationRequest struct {
@@ -135,7 +142,7 @@ func (h *staffHandlers) createInvitation(c *gin.Context) {
 	issued, err := h.service.CreateStaffInvitation(c.Request.Context(), identity.CreateStaffInvitationRequest{
 		ActorPrincipal:   principal,
 		ActorSession:     session,
-		RecentAuthWindow: 10 * time.Minute,
+		RecentAuthWindow: h.recentAuthWindow,
 		Email:            req.Email,
 		Role:             req.Role,
 		Now:              now,
@@ -283,7 +290,7 @@ func (h *staffHandlers) revokeInvitation(c *gin.Context) {
 	err := h.service.RevokeStaffInvitation(c.Request.Context(), identity.RevokeStaffInvitationRequest{
 		ActorPrincipal:   principal,
 		ActorSession:     session,
-		RecentAuthWindow: 10 * time.Minute,
+		RecentAuthWindow: h.recentAuthWindow,
 		InvitationID:     invitationID,
 		Now:              now,
 		RequestID:        reqID,
@@ -330,7 +337,7 @@ func (h *staffHandlers) suspendStaff(c *gin.Context) {
 	res, err := h.service.SuspendAccount(c.Request.Context(), identity.SuspendAccountRequest{
 		ActorPrincipal:   principal,
 		ActorSession:     session,
-		RecentAuthWindow: 10 * time.Minute,
+		RecentAuthWindow: h.recentAuthWindow,
 		SubjectAccountID: subjectID,
 		Reason:           req.Reason,
 		Now:              now,
@@ -384,7 +391,7 @@ func (h *staffHandlers) reinstateStaff(c *gin.Context) {
 	res, err := h.service.ReinstateAccount(c.Request.Context(), identity.ReinstateAccountRequest{
 		ActorPrincipal:   principal,
 		ActorSession:     session,
-		RecentAuthWindow: 10 * time.Minute,
+		RecentAuthWindow: h.recentAuthWindow,
 		SubjectAccountID: subjectID,
 		Reason:           req.Reason,
 		Now:              now,

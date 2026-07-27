@@ -77,18 +77,21 @@ export async function authenticatedRequest<T>(
   method: "GET" | "POST" | "DELETE",
   language: "ar" | "en",
   csrf?: string,
+  body?: unknown,
 ): Promise<T | null> {
   const headers: Record<string, string> = {
     Accept: "application/json, application/problem+json",
     "Accept-Language": language,
   };
   if (csrf) headers["X-CSRF-Token"] = csrf;
+  if (body !== undefined) headers["Content-Type"] = "application/json";
 
   const response = await fetch(`${apiBase}${path}`, {
     method,
     credentials: "same-origin",
     cache: "no-store",
     headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   if (response.status === 204) return null;

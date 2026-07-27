@@ -133,3 +133,42 @@ export function completePasswordReset(
     locale,
   );
 }
+
+export function createStaffInvitation(
+  email: string,
+  role: "INSTRUCTOR" | "ADMIN",
+  locale: "ar" | "en",
+  csrf?: string,
+) {
+  return authenticatedRequest<{
+    id: string;
+    email: string;
+    invited_role: string;
+    bearer: string;
+    created_at: string;
+  }>("/staff/invitations", "POST", locale, csrf, { email, role });
+}
+
+export function suspendStaffAccount(
+  accountID: string,
+  reason: string,
+  locale: "ar" | "en",
+  csrf?: string,
+) {
+  return authenticatedRequest<{
+    already_suspended: boolean;
+    revision: number;
+    epoch: number;
+  }>(`/staff/${encodeURIComponent(accountID)}/suspend`, "POST", locale, csrf, { reason });
+}
+
+export function reinstateStaffAccount(
+  accountID: string,
+  reason: string,
+  locale: "ar" | "en",
+  csrf?: string,
+) {
+  return authenticatedRequest<{
+    already_active: boolean;
+  }>(`/staff/${encodeURIComponent(accountID)}/reinstate`, "POST", locale, csrf, { reason });
+}

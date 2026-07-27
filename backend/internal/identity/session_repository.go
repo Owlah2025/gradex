@@ -56,6 +56,8 @@ type AuthenticatedSession struct {
 	Role              Role
 	CredentialState   CredentialState
 	Generation        int
+	AuthenticatedAt   time.Time
+	ReauthenticatedAt *time.Time
 	IdleExpiresAt     time.Time
 	AbsoluteExpiresAt time.Time
 }
@@ -226,6 +228,7 @@ func (r *SessionRepository) prepareSession(
 		Role:              candidate.role,
 		CredentialState:   candidate.credentialState,
 		Generation:        1,
+		AuthenticatedAt:   now,
 		IdleExpiresAt:     now.Add(window.IdleExpiry()),
 		AbsoluteExpiresAt: now.Add(window.AbsoluteExpiry()),
 	}}, nil
@@ -427,8 +430,8 @@ func loadSessionRecord(
 ) (sessionRecord, error) {
 	return scanSessionRecord(tx.QueryRow(ctx,
 		`SELECT a.id::text, s.id::text, a.display_name, a.role::text,
-		        pc.state::text, c.generation, s.idle_expires_at,
-		        s.absolute_expires_at, a.status::text, a.session_epoch,
+		        pc.state::text, c.generation, s.authenticated_at, s.reauthenticated_at,
+		        s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
 		        s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
 		        c.credential_digest, c.csrf_digest, c.superseded_at,
 		        c.stale_use_count, a.revision
@@ -450,8 +453,8 @@ func loadSessionGeneration(
 ) (sessionRecord, error) {
 	return scanSessionRecord(tx.QueryRow(ctx,
 		`SELECT a.id::text, s.id::text, a.display_name, a.role::text,
-		        pc.state::text, c.generation, s.idle_expires_at,
-		        s.absolute_expires_at, a.status::text, a.session_epoch,
+		        pc.state::text, c.generation, s.authenticated_at, s.reauthenticated_at,
+		        s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
 		        s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
 		        c.credential_digest, c.csrf_digest, c.superseded_at,
 		        c.stale_use_count, a.revision
@@ -475,6 +478,8 @@ func scanSessionRecord(row pgx.Row) (sessionRecord, error) {
 		&record.session.Role,
 		&record.session.CredentialState,
 		&record.session.Generation,
+		&record.session.AuthenticatedAt,
+		&record.session.ReauthenticatedAt,
 		&record.session.IdleExpiresAt,
 		&record.session.AbsoluteExpiresAt,
 		&record.accountStatus,

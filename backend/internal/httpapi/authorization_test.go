@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -35,6 +37,19 @@ func (f fixedPrincipals) ResolvePrincipal(context.Context, string) (identity.Pri
 }
 
 func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engine, *syncBuffer) {
+	now := time.Now().UTC()
+	return authzRouterWithSession(t, principals, identity.Session{
+		ID:                "fake-session-id",
+		AccountID:         "11111111-1111-1111-1111-111111111111",
+		State:             identity.SessionActive,
+		AuthenticatedAt:   now,
+		AdmittedEpoch:     0,
+		IdleExpiresAt:     now.Add(24 * time.Hour),
+		AbsoluteExpiresAt: now.Add(24 * time.Hour),
+	})
+}
+
+func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver, session identity.Session) (*gin.Engine, *syncBuffer) {
 	t.Helper()
 
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
@@ -53,7 +68,7 @@ func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engi
 	reporter := health.New(time.Second)
 	reporter.MarkStarted()
 
-	staffLimiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
+	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
 	staffPolicies := map[string]ratelimit.Policy{
 		"staff-invitations-create":   ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-create"),
 		"staff-invitations-preview":  ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-preview"),
@@ -61,24 +76,107 @@ func authzRouter(t *testing.T, principals identity.PrincipalResolver) (*gin.Engi
 	}
 	staffFoundation, err := NewStaffFoundation(StaffFoundationOptions{
 		Service:          fakeStaffService{},
-		Limiter:          staffLimiter,
+		Limiter:          limiter,
 		EndpointPolicies: staffPolicies,
+		RecentAuthWindow: 10 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("constructing staff foundation: %v", err)
 	}
 
-	// Entitlements allow everything, so nothing downstream of the capability
-	// policy can be the reason a request is refused. If a call is denied here,
-	// the policy denied it.
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
+	sessionPolicies := map[string]ratelimit.Policy{
+		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
+		"sessions":           ratelimit.DevelopmentLoginPolicy(),
+		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
+		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
+		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
+	}
+	sessionRepo := &fakeSessionRepository{
+		view: identity.SessionView{
+			Session: identity.AuthenticatedSession{
+				AccountID:         session.AccountID,
+				SessionID:         session.ID,
+				Role:              identity.RoleAdmin,
+				CredentialState:   identity.CredentialActive,
+				AuthenticatedAt:   session.AuthenticatedAt,
+				ReauthenticatedAt: session.ReauthenticatedAt,
+				IdleExpiresAt:     session.IdleExpiresAt,
+				AbsoluteExpiresAt: session.AbsoluteExpiresAt,
+			},
+		},
+	}
+	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{
+		PublicOrigin:        "https://gradex.example",
+		CookieSigningKey:    bytes.Repeat([]byte{0x31}, 32),
+		AnonymousCSRFKey:    bytes.Repeat([]byte{0x32}, 32),
+		AnonymousSessionTTL: 24 * time.Hour,
+		Repository:          sessionRepo,
+		Limiter:             limiter,
+		EndpointPolicies:    sessionPolicies,
+	})
+	if err != nil {
+		t.Fatalf("constructing session foundation: %v", err)
+	}
+
+	admissionPolicies := make(map[string]ratelimit.Policy)
+	for _, endpoint := range []string{
+		"student-registrations", "email-verification-requests", "email-verifications",
+		"password-reset-requests", "password-resets",
+	} {
+		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
+	}
+	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
+	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
+
+	english, arabic := identityPolicySets()
+	policies, err := identity.NewStaticPolicySetResolver(english, arabic)
+	if err != nil {
+		t.Fatalf("constructing policy resolver: %v", err)
+	}
+
+	admissionFoundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
+		PublicOrigin:        "https://gradex.example",
+		CookieSigningKey:    bytes.Repeat([]byte{0x31}, 32),
+		CSRFKey:             bytes.Repeat([]byte{0x32}, 32),
+		AnonymousSessionTTL: 24 * time.Hour,
+		Policies:            policies,
+		Service:             &fakeAdmissionService{},
+		Recovery:            &fakeRecoveryService{},
+		Limiter:             limiter,
+		EndpointPolicies:    admissionPolicies,
+	})
+	if err != nil {
+		t.Fatalf("constructing admission foundation: %v", err)
+	}
+
+	r, err := NewRouter(cfg, logger, reporter, fakeService{}, sessionFoundation.authenticator,
 		fakeEntitlements{allowed: true}, principals,
 		WithStaffFoundation(staffFoundation),
+		WithSessionFoundation(sessionFoundation),
+		WithAdmissionFoundation(admissionFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
 	return r, buf
+}
+
+func newAuthenticatedRequest(method, path string, body []byte) *http.Request {
+	var req *http.Request
+	if len(body) > 0 {
+		req = httptest.NewRequest(method, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	req.Header.Set("Origin", "https://gradex.example")
+	validToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x41}, 32))
+	req.AddCookie(&http.Cookie{
+		Name:  auth.SessionCookieName,
+		Value: validToken,
+	})
+	req.Header.Set("X-CSRF-Token", validToken)
+	return req
 }
 
 type fakeRateStore struct{}
@@ -89,52 +187,137 @@ func (fakeRateStore) Decide(context.Context, []ratelimit.Entry) (bool, error) {
 
 type fakeStaffService struct{}
 
-func (fakeStaffService) CreateStaffInvitation(context.Context, identity.CreateStaffInvitationRequest) (identity.IssuedStaffInvitation, error) {
+func (fakeStaffService) CreateStaffInvitation(_ context.Context, req identity.CreateStaffInvitationRequest) (identity.IssuedStaffInvitation, error) {
+	if err := identity.CheckRecentAuthentication(req.ActorSession, req.RecentAuthWindow, req.Now); err != nil {
+		return identity.IssuedStaffInvitation{}, err
+	}
 	return identity.IssuedStaffInvitation{}, nil
 }
+
 func (fakeStaffService) PreviewStaffInvitation(context.Context, string, time.Time) (identity.StaffInvitationPreview, error) {
 	return identity.StaffInvitationPreview{}, nil
 }
+
 func (fakeStaffService) CompleteStaffInvitation(context.Context, identity.CompleteStaffInvitationRequest) (identity.CompleteStaffInvitationResult, error) {
 	return identity.CompleteStaffInvitationResult{}, nil
 }
-func (fakeStaffService) RevokeStaffInvitation(context.Context, identity.RevokeStaffInvitationRequest) error {
-	return nil
+
+func (fakeStaffService) RevokeStaffInvitation(_ context.Context, req identity.RevokeStaffInvitationRequest) error {
+	return identity.CheckRecentAuthentication(req.ActorSession, req.RecentAuthWindow, req.Now)
 }
-func (fakeStaffService) SuspendAccount(context.Context, identity.SuspendAccountRequest) (identity.SuspendAccountResult, error) {
+
+func (fakeStaffService) SuspendAccount(_ context.Context, req identity.SuspendAccountRequest) (identity.SuspendAccountResult, error) {
+	if err := identity.CheckRecentAuthentication(req.ActorSession, req.RecentAuthWindow, req.Now); err != nil {
+		return identity.SuspendAccountResult{}, err
+	}
 	return identity.SuspendAccountResult{}, nil
 }
-func (fakeStaffService) ReinstateAccount(context.Context, identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error) {
+
+func (fakeStaffService) ReinstateAccount(_ context.Context, req identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error) {
+	if err := identity.CheckRecentAuthentication(req.ActorSession, req.RecentAuthWindow, req.Now); err != nil {
+		return identity.ReinstateAccountResult{}, err
+	}
 	return identity.ReinstateAccountResult{}, nil
 }
+
 func (fakeStaffService) ListPendingInvitations(context.Context, identity.Principal) ([]identity.StaffInvitation, error) {
 	return nil, nil
 }
 
-// protectedRoutes is every route that requires a capability decision. Bootstrap
-// close condition 3 asserts against these — real routes running the real
-// middleware and policy chain — not against Authorize() in isolation.
-var protectedRoutes = []struct{ method, path string }{
-	{http.MethodPost, "/api/v1/lessons/lesson-99/video/upload-url"},
-	{http.MethodPost, "/api/v1/lessons/lesson-99/video/complete"},
-	{http.MethodPost, "/api/v1/lessons/lesson-99/video/retry"},
-	{http.MethodPost, "/api/v1/lessons/lesson-99/video/publish"},
-	{http.MethodGet, "/api/v1/lessons/lesson-99/video/playback-url"},
-	{http.MethodPost, "/api/v1/lessons/lesson-99/progress"},
-	{http.MethodPost, "/api/v1/staff/invitations"},
-	{http.MethodGet, "/api/v1/staff/invitations"},
-	{http.MethodPost, "/api/v1/staff/invitations/inv-99/revoke"},
-	{http.MethodPost, "/api/v1/staff/acct-99/suspend"},
-	{http.MethodPost, "/api/v1/staff/acct-99/reinstate"},
+type RouteClass string
+
+const (
+	ClassAnonymous                     RouteClass = "ANONYMOUS"
+	ClassAuthenticatedSessionLifecycle RouteClass = "AUTHENTICATED_SESSION_LIFECYCLE"
+	ClassCapabilityProtected           RouteClass = "CAPABILITY_PROTECTED"
+	ClassOwnershipProtected            RouteClass = "OWNERSHIP_PROTECTED"
+	ClassRecentAuthRequired            RouteClass = "RECENT_AUTH_REQUIRED"
+)
+
+type RouteMatrixEntry struct {
+	Method string
+	Path   string
+	Class  RouteClass
+}
+
+var expectedRouteMatrix = map[string]RouteMatrixEntry{
+	"GET /healthz":                                   {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
+	"GET /readyz":                                    {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
+	"GET /api/v1/session/bootstrap":                  {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
+	"GET /api/v1/registration-policy-set":            {Method: http.MethodGet, Path: "/api/v1/registration-policy-set", Class: ClassAnonymous},
+	"POST /api/v1/student-registrations":             {Method: http.MethodPost, Path: "/api/v1/student-registrations", Class: ClassAnonymous},
+	"POST /api/v1/email-verification-requests":       {Method: http.MethodPost, Path: "/api/v1/email-verification-requests", Class: ClassAnonymous},
+	"POST /api/v1/email-verifications":               {Method: http.MethodPost, Path: "/api/v1/email-verifications", Class: ClassAnonymous},
+	"POST /api/v1/password-reset-requests":           {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
+	"POST /api/v1/password-resets":                   {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
+	"POST /api/v1/sessions":                          {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
+	"POST /api/v1/staff/invitations/preview":         {Method: http.MethodPost, Path: "/api/v1/staff/invitations/preview", Class: ClassAnonymous},
+	"POST /api/v1/staff/invitations/complete":        {Method: http.MethodPost, Path: "/api/v1/staff/invitations/complete", Class: ClassAnonymous},
+	"GET /api/v1/videos/:videoID/manifest/*filepath": {Method: http.MethodGet, Path: "/api/v1/videos/:videoID/manifest/*filepath", Class: ClassAnonymous},
+
+	"GET /api/v1/session":           {Method: http.MethodGet, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
+	"POST /api/v1/session-renewals": {Method: http.MethodPost, Path: "/api/v1/session-renewals", Class: ClassAuthenticatedSessionLifecycle},
+	"DELETE /api/v1/session":        {Method: http.MethodDelete, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
+
+	"GET /api/v1/staff/invitations": {Method: http.MethodGet, Path: "/api/v1/staff/invitations", Class: ClassCapabilityProtected},
+
+	"POST /api/v1/lessons/:lessonID/video/upload-url":  {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/upload-url", Class: ClassOwnershipProtected},
+	"POST /api/v1/lessons/:lessonID/video/complete":    {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/complete", Class: ClassOwnershipProtected},
+	"POST /api/v1/lessons/:lessonID/video/retry":       {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/retry", Class: ClassOwnershipProtected},
+	"POST /api/v1/lessons/:lessonID/video/publish":     {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/publish", Class: ClassOwnershipProtected},
+	"GET /api/v1/lessons/:lessonID/video/playback-url": {Method: http.MethodGet, Path: "/api/v1/lessons/:lessonID/video/playback-url", Class: ClassOwnershipProtected},
+	"POST /api/v1/lessons/:lessonID/progress":          {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/progress", Class: ClassOwnershipProtected},
+
+	"POST /api/v1/staff/invitations":            {Method: http.MethodPost, Path: "/api/v1/staff/invitations", Class: ClassRecentAuthRequired},
+	"POST /api/v1/staff/invitations/:id/revoke": {Method: http.MethodPost, Path: "/api/v1/staff/invitations/:id/revoke", Class: ClassRecentAuthRequired},
+	"POST /api/v1/staff/:id/suspend":            {Method: http.MethodPost, Path: "/api/v1/staff/:id/suspend", Class: ClassRecentAuthRequired},
+	"POST /api/v1/staff/:id/reinstate":          {Method: http.MethodPost, Path: "/api/v1/staff/:id/reinstate", Class: ClassRecentAuthRequired},
+}
+
+func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
+	routes := r.Routes()
+	var result []struct{ method, path string }
+	for _, rt := range routes {
+		key := rt.Method + " " + rt.Path
+		entry, ok := expectedRouteMatrix[key]
+		if !ok {
+			continue
+		}
+		if entry.Class == ClassAnonymous || entry.Class == ClassAuthenticatedSessionLifecycle {
+			continue
+		}
+		execPath := rt.Path
+		execPath = strings.ReplaceAll(execPath, ":lessonID", "lesson-99")
+		execPath = strings.ReplaceAll(execPath, ":id", "acct-99")
+		result = append(result, struct{ method, path string }{
+			method: rt.Method,
+			path:   execPath,
+		})
+	}
+	return result
+}
+
+func TestAuthorizationMatrixMatchesMountedRouter(t *testing.T) {
+	r, _ := authzRouter(t, fixedPrincipals{})
+	routes := r.Routes()
+
+	mountedMap := make(map[string]bool)
+	for _, rt := range routes {
+		key := rt.Method + " " + rt.Path
+		mountedMap[key] = true
+		if _, ok := expectedRouteMatrix[key]; !ok {
+			t.Fatalf("mounted route %s has no authorization matrix row", key)
+		}
+	}
+
+	for key := range expectedRouteMatrix {
+		if !mountedMap[key] {
+			t.Fatalf("matrix row %s references a route no longer mounted", key)
+		}
+	}
 }
 
 // Bootstrap close condition 3, initial end-to-end denial evidence.
-//
-// The restricted bootstrap Administrator authenticates successfully and is then
-// refused every protected route that exists today. This is the *initial*
-// evidence: the full protected Identity and staff surface does not exist until
-// S1C, and this assertion is rerun and expanded there. Passing here proves the
-// deny path works through the real chain; it does not prove coverage.
 func TestRestrictedBootstrapAdminIsDeniedOnRealProtectedRoutes(t *testing.T) {
 	bootstrapAdmin := identity.Principal{
 		AccountID:       "11111111-1111-1111-1111-111111111111",
@@ -143,44 +326,47 @@ func TestRestrictedBootstrapAdminIsDeniedOnRealProtectedRoutes(t *testing.T) {
 		CredentialState: identity.CredentialChangeRequired,
 	}
 
+	r, _ := authzRouter(t, fixedPrincipals{principal: bootstrapAdmin})
+	protectedRoutes := derivedProtectedRoutes(r)
+
 	if len(protectedRoutes) == 0 {
-		t.Fatal("no protected routes to assert against; this test would pass vacuously")
+		t.Fatal("no protected routes derived from router; this test would pass vacuously")
 	}
 
 	for _, route := range protectedRoutes {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			r, buf := authzRouter(t, fixedPrincipals{principal: bootstrapAdmin})
 
-			rec := do(r, httptest.NewRequest(route.method, route.path, nil))
+			var body []byte
+			if route.method == http.MethodPost {
+				body = []byte(`{"email":"test@example.com","role":"INSTRUCTOR","reason":"test"}`)
+			}
+			req := newAuthenticatedRequest(route.method, route.path, body)
+			rec := do(r, req)
 
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
 			}
 
-			// The refusal is uniform. §5 forbids a response that distinguishes
-			// "must change password" from "wrong role" from "no such Account".
 			p := assertProblemEnvelope(t, rec)
 			if p.Code != "NOT_AUTHORIZED" {
 				t.Errorf("code = %q, want NOT_AUTHORIZED", p.Code)
 			}
-			body := rec.Body.String()
+			bodyStr := rec.Body.String()
 			for _, leak := range []string{
 				"PASSWORD_CHANGE_REQUIRED", "CHANGE_REQUIRED", "bootstrap",
 				"ADMIN", "suspended", "credential",
 			} {
-				if strings.Contains(body, leak) {
-					t.Errorf("response leaked policy state %q: %s", leak, body)
+				if strings.Contains(bodyStr, leak) {
+					t.Errorf("response leaked policy state %q: %s", leak, bodyStr)
 				}
 			}
 
-			// The typed reason belongs in security monitoring instead (§6.1).
 			assertDenyLogged(t, buf, "PASSWORD_CHANGE_REQUIRED")
 		})
 	}
 }
 
-// The same Account, one state change later, is allowed. Without this the test
-// above would pass against a policy that simply denies everything.
 func TestUnrestrictedAdminReachesContentManagementRoutes(t *testing.T) {
 	admin := identity.Principal{
 		AccountID:       "11111111-1111-1111-1111-111111111111",
@@ -190,7 +376,8 @@ func TestUnrestrictedAdminReachesContentManagementRoutes(t *testing.T) {
 	}
 
 	r, _ := authzRouter(t, fixedPrincipals{principal: admin})
-	rec := do(r, httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil))
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	rec := do(r, req)
 
 	if rec.Code == http.StatusForbidden {
 		t.Fatalf("an ordinary Admin was refused content management: %s", rec.Body.String())
@@ -205,10 +392,18 @@ func TestSuspendedAccountIsDeniedOnRealProtectedRoutes(t *testing.T) {
 		CredentialState: identity.CredentialActive,
 	}
 
+	r, _ := authzRouter(t, fixedPrincipals{principal: suspended})
+	protectedRoutes := derivedProtectedRoutes(r)
+
 	for _, route := range protectedRoutes {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
 			r, buf := authzRouter(t, fixedPrincipals{principal: suspended})
-			rec := do(r, httptest.NewRequest(route.method, route.path, nil))
+			var body []byte
+			if route.method == http.MethodPost {
+				body = []byte(`{"email":"test@example.com","role":"INSTRUCTOR","reason":"test"}`)
+			}
+			req := newAuthenticatedRequest(route.method, route.path, body)
+			rec := do(r, req)
 
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", rec.Code)
@@ -218,12 +413,73 @@ func TestSuspendedAccountIsDeniedOnRealProtectedRoutes(t *testing.T) {
 	}
 }
 
-// An authenticated identifier with no Account is refused, not admitted. This is
-// the fail-closed half of deny-by-default: authentication is not authorization.
+func TestFreshAdminSucceedsAndStaleAdminIsRefusedOnStaffEndpoints(t *testing.T) {
+	admin := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleAdmin,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}
+
+	now := time.Now().UTC()
+	freshSession := identity.Session{
+		ID:              "fresh-session",
+		AccountID:       admin.AccountID,
+		State:           identity.SessionActive,
+		AuthenticatedAt: now,
+	}
+
+	staleSession := identity.Session{
+		ID:              "stale-session",
+		AccountID:       admin.AccountID,
+		State:           identity.SessionActive,
+		AuthenticatedAt: now.Add(-2 * time.Hour),
+	}
+
+	endpoints := []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"create-invitation", http.MethodPost, "/api/v1/staff/invitations", []byte(`{"email":"staff@example.com","role":"INSTRUCTOR"}`)},
+		{"revoke-invitation", http.MethodPost, "/api/v1/staff/invitations/inv-99/revoke", nil},
+		{"suspend-account", http.MethodPost, "/api/v1/staff/acct-99/suspend", []byte(`{"reason":"violation"}`)},
+		{"reinstate-account", http.MethodPost, "/api/v1/staff/acct-99/reinstate", []byte(`{"reason":"remedied"}`)},
+	}
+
+	for _, ep := range endpoints {
+		t.Run(ep.name+"_FRESH_ADMIN_SUCCEEDS", func(t *testing.T) {
+			r, _ := authzRouterWithSession(t, fixedPrincipals{principal: admin}, freshSession)
+			req := newAuthenticatedRequest(ep.method, ep.path, ep.body)
+			rec := do(r, req)
+
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Fatalf("fresh admin was refused with status %d: %s", rec.Code, rec.Body.String())
+			}
+		})
+
+		t.Run(ep.name+"_STALE_ADMIN_REFUSED", func(t *testing.T) {
+			r, _ := authzRouterWithSession(t, fixedPrincipals{principal: admin}, staleSession)
+			req := newAuthenticatedRequest(ep.method, ep.path, ep.body)
+			rec := do(r, req)
+
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("stale admin got status %d, want 403: %s", rec.Code, rec.Body.String())
+			}
+			p := assertProblemEnvelope(t, rec)
+			if p.Code != "NOT_AUTHORIZED" {
+				t.Errorf("code = %q, want NOT_AUTHORIZED", p.Code)
+			}
+		})
+	}
+}
+
 func TestUnknownPrincipalIsDenied(t *testing.T) {
 	r, buf := authzRouter(t, fixedPrincipals{err: identity.ErrPrincipalNotFound})
 
-	rec := do(r, httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil))
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	rec := do(r, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -231,14 +487,13 @@ func TestUnknownPrincipalIsDenied(t *testing.T) {
 	assertDenyLogged(t, buf, "PRINCIPAL_NOT_FOUND")
 }
 
-// A resolution failure is a fault, not a denial. Counting it as a refusal would
-// make a database outage look like an authorization event.
 func TestPrincipalResolutionFailureIsAFaultNotADenial(t *testing.T) {
 	r, buf := authzRouter(t, fixedPrincipals{
 		err: errors.New(`pq: duplicate key value violates unique constraint "videos_lesson_id_key"`),
 	})
 
-	rec := do(r, httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil))
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	rec := do(r, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
@@ -256,8 +511,6 @@ func TestPrincipalResolutionFailureIsAFaultNotADenial(t *testing.T) {
 	}
 }
 
-// assertDenyLogged checks the typed reason reached security monitoring, and
-// that the log line carries no Account identifier.
 func assertDenyLogged(t *testing.T, buf *syncBuffer, wantReason string) {
 	t.Helper()
 
@@ -281,9 +534,6 @@ func assertDenyLogged(t *testing.T, buf *syncBuffer, wantReason string) {
 		if rec["capability"] == nil || rec["capability"] == "" {
 			t.Error("the denial log has no capability")
 		}
-		// Correlation happens through the request ID and Audit. A log shipped
-		// to a monitoring provider must not become a directory of who was
-		// refused what.
 		for _, forbidden := range []string{"account_id", "principal", "email"} {
 			if _, present := rec[forbidden]; present {
 				t.Errorf("the denial log carries %q", forbidden)
@@ -296,10 +546,6 @@ func assertDenyLogged(t *testing.T, buf *syncBuffer, wantReason string) {
 	}
 }
 
-// The policy runs before ownership and Entitlement checks. If it ran after, a
-// restricted principal's refusal would depend on an unrelated lookup happening
-// to fail first — and would silently start passing whenever that lookup
-// succeeded.
 func TestCapabilityPolicyRunsBeforeOwnershipChecks(t *testing.T) {
 	restricted := identity.Principal{
 		AccountID:       "11111111-1111-1111-1111-111111111111",
@@ -324,17 +570,17 @@ func TestCapabilityPolicyRunsBeforeOwnershipChecks(t *testing.T) {
 	reporter := health.New(time.Second)
 	reporter.MarkStarted()
 
-	// The entitlement checker fails loudly if it is ever consulted.
 	var entitlementConsulted bool
 	tripwire := trippingEntitlements{consulted: &entitlementConsulted}
 
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{}, tripwire,
-		fixedPrincipals{principal: restricted})
+	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
+		tripwire, fixedPrincipals{principal: restricted})
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
 
-	rec := do(r, httptest.NewRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil))
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	rec := do(r, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -356,9 +602,6 @@ func (e trippingEntitlements) IsInstructorForLesson(context.Context, string, str
 	return true, nil
 }
 
-// A router without a principal resolver must not be constructible. Otherwise a
-// future call site could ship protected routes with no capability decision by
-// omitting an argument.
 func TestRouterRefusesToBuildWithoutAPrincipalResolver(t *testing.T) {
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",

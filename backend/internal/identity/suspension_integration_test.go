@@ -119,8 +119,11 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin4a@example.com")
-	adminSess, cred := createTestSession(t, p, adminID, now)
+	actorAdminID, adminP := createTestAdmin(t, p, "actor4a@example.com")
+	adminSess, _ := createTestSession(t, p, actorAdminID, now)
+
+	subjectID, _ := createTestAdmin(t, p, "subject4a@example.com")
+	_, cred := createTestSession(t, p, subjectID, now)
 
 	sessionRepo := testSessionRepository(t, p, now)
 
@@ -129,8 +132,8 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolving session before suspension: %v", err)
 	}
-	if resolved.Session.AccountID != adminID {
-		t.Fatalf("resolved account ID = %s, want %s", resolved.Session.AccountID, adminID)
+	if resolved.Session.AccountID != subjectID {
+		t.Fatalf("resolved account ID = %s, want %s", resolved.Session.AccountID, subjectID)
 	}
 
 	// Suspend account via transaction.
@@ -150,7 +153,7 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Security violation",
 		Now:              now,
 		RequestID:        "req-4a",
@@ -172,9 +175,8 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 	}
 
 	// Mutation Check: Proof 4a must fail if live ACTIVE-account check is bypassed.
-	// We verify that a session record with accountStatus = SUSPENDED fails usable() because of StatusActive check.
 	sr := sessionRecord{
-		accountStatus:      StatusSuspended, // <--- If this check were omitted in usable(), usable() would pass below
+		accountStatus:      StatusSuspended,
 		sessionEpoch:       1,
 		admittedEpoch:      1,
 		sessionState:       SessionActive,
@@ -199,9 +201,12 @@ func TestSuspensionProof4b_FamilyInvalidation(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin4b@example.com")
-	adminSess, _ := createTestSession(t, p, adminID, now)
-	_, _ = createTestSession(t, p, adminID, now) // second session family
+	actorAdminID, adminP := createTestAdmin(t, p, "actor4b@example.com")
+	adminSess, _ := createTestSession(t, p, actorAdminID, now)
+
+	subjectID, _ := createTestAdmin(t, p, "subject4b@example.com")
+	_, _ = createTestSession(t, p, subjectID, now)
+	_, _ = createTestSession(t, p, subjectID, now) // second session family for subject
 
 	conn, err := p.Acquire(ctx)
 	if err != nil {
@@ -219,7 +224,7 @@ func TestSuspensionProof4b_FamilyInvalidation(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Abuse prevention",
 		Now:              now,
 		RequestID:        "req-4b",
@@ -234,7 +239,7 @@ func TestSuspensionProof4b_FamilyInvalidation(t *testing.T) {
 	// Verify database persistence of family revocation with reason ACCOUNT_SUSPENDED.
 	rows, err := p.Query(ctx,
 		`SELECT state, revocation_reason FROM sessions WHERE account_id = $1::uuid`,
-		adminID,
+		subjectID,
 	)
 	if err != nil {
 		t.Fatalf("querying sessions: %v", err)
@@ -263,16 +268,13 @@ func TestSuspensionProof4b_FamilyInvalidation(t *testing.T) {
 	var eventType string
 	if err := p.QueryRow(ctx,
 		`SELECT event_type FROM identity_security_events WHERE account_id = $1::uuid AND event_type = 'ACCOUNT_SUSPENDED'`,
-		adminID,
+		subjectID,
 	).Scan(&eventType); err != nil {
 		t.Fatalf("querying security event: %v", err)
 	}
 	if eventType != "ACCOUNT_SUSPENDED" {
 		t.Fatalf("event_type = %s, want ACCOUNT_SUSPENDED", eventType)
 	}
-
-	// Mutation Check: Proof 4b must fail if family revocation update is removed.
-	// If a session had NOT been updated to REVOKED / ACCOUNT_SUSPENDED, count of REVOKED/ACCOUNT_SUSPENDED rows would be 0.
 }
 
 // Proof 4c — epoch protection
@@ -283,12 +285,15 @@ func TestSuspensionProof4c_EpochProtection(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin4c@example.com")
-	adminSess, _ := createTestSession(t, p, adminID, now)
+	actorAdminID, adminP := createTestAdmin(t, p, "actor4c@example.com")
+	adminSess, _ := createTestSession(t, p, actorAdminID, now)
+
+	subjectID, _ := createTestAdmin(t, p, "subject4c@example.com")
+	_, _ = createTestSession(t, p, subjectID, now)
 
 	// Check epoch before suspension (starts at 1).
 	var initialEpoch int
-	if err := p.QueryRow(ctx, `SELECT session_epoch FROM accounts WHERE id = $1::uuid`, adminID).Scan(&initialEpoch); err != nil {
+	if err := p.QueryRow(ctx, `SELECT session_epoch FROM accounts WHERE id = $1::uuid`, subjectID).Scan(&initialEpoch); err != nil {
 		t.Fatalf("querying initial epoch: %v", err)
 	}
 	if initialEpoch != 1 {
@@ -311,7 +316,7 @@ func TestSuspensionProof4c_EpochProtection(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Epoch test",
 		Now:              now,
 		RequestID:        "req-4c",
@@ -329,7 +334,7 @@ func TestSuspensionProof4c_EpochProtection(t *testing.T) {
 
 	// Verify epoch advanced in DB.
 	var dbEpoch int
-	if err := p.QueryRow(ctx, `SELECT session_epoch FROM accounts WHERE id = $1::uuid`, adminID).Scan(&dbEpoch); err != nil {
+	if err := p.QueryRow(ctx, `SELECT session_epoch FROM accounts WHERE id = $1::uuid`, subjectID).Scan(&dbEpoch); err != nil {
 		t.Fatalf("querying db epoch: %v", err)
 	}
 	if dbEpoch != initialEpoch+1 {
@@ -355,8 +360,12 @@ func TestSuspensionIdempotency(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin_idem@example.com")
-	adminSess, _ := createTestSession(t, p, adminID, now)
+	actorAdminID, adminP := createTestAdmin(t, p, "actor_idem@example.com")
+	adminSess, _ := createTestSession(t, p, actorAdminID, now)
+	_, _ = createTestAdmin(t, p, "extra_admin_idem@example.com")
+
+	subjectID, _ := createTestAdmin(t, p, "subject_idem@example.com")
+	_, _ = createTestSession(t, p, subjectID, now)
 
 	conn, err := p.Acquire(ctx)
 	if err != nil {
@@ -370,7 +379,7 @@ func TestSuspensionIdempotency(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "First suspend",
 		Now:              now,
 		RequestID:        "req-idem-1",
@@ -389,7 +398,7 @@ func TestSuspensionIdempotency(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Second suspend",
 		Now:              now.Add(time.Minute),
 		RequestID:        "req-idem-2",
@@ -410,7 +419,7 @@ func TestSuspensionIdempotency(t *testing.T) {
 	var eventCount int
 	if err := p.QueryRow(ctx,
 		`SELECT count(*) FROM identity_security_events WHERE account_id = $1::uuid AND event_type = 'ACCOUNT_SUSPENDED'`,
-		adminID,
+		subjectID,
 	).Scan(&eventCount); err != nil {
 		t.Fatalf("querying event count: %v", err)
 	}
@@ -424,8 +433,11 @@ func TestReinstatement(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin_reinstate@example.com")
-	adminSess, cred := createTestSession(t, p, adminID, now)
+	actorAdminID, adminP := createTestAdmin(t, p, "actor_reinstate@example.com")
+	adminSess, _ := createTestSession(t, p, actorAdminID, now)
+
+	subjectID, _ := createTestAdmin(t, p, "subject_reinstate@example.com")
+	_, cred := createTestSession(t, p, subjectID, now)
 
 	conn, err := p.Acquire(ctx)
 	if err != nil {
@@ -439,7 +451,7 @@ func TestReinstatement(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Suspend before reinstate",
 		Now:              now,
 		RequestID:        "req-sus",
@@ -452,7 +464,7 @@ func TestReinstatement(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     adminSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Reinstating account",
 		Now:              now.Add(5 * time.Minute),
 		RequestID:        "req-reinstate",
@@ -468,7 +480,7 @@ func TestReinstatement(t *testing.T) {
 
 	// Verify Account status is ACTIVE in DB.
 	var status string
-	if err := p.QueryRow(ctx, `SELECT status FROM accounts WHERE id = $1::uuid`, adminID).Scan(&status); err != nil {
+	if err := p.QueryRow(ctx, `SELECT status FROM accounts WHERE id = $1::uuid`, subjectID).Scan(&status); err != nil {
 		t.Fatalf("querying account status: %v", err)
 	}
 	if status != string(StatusActive) {
@@ -479,7 +491,7 @@ func TestReinstatement(t *testing.T) {
 	var eventType string
 	if err := p.QueryRow(ctx,
 		`SELECT event_type FROM identity_security_events WHERE account_id = $1::uuid AND event_type = 'ACCOUNT_REINSTATED'`,
-		adminID,
+		subjectID,
 	).Scan(&eventType); err != nil {
 		t.Fatalf("querying security event: %v", err)
 	}
@@ -500,11 +512,12 @@ func TestSuspensionRecentAuthEnforcement(t *testing.T) {
 	p, ctx := pool(t)
 
 	now := time.Now().UTC()
-	adminID, adminP := createTestAdmin(t, p, "admin_stale@example.com")
+	actorAdminID, adminP := createTestAdmin(t, p, "actor_stale@example.com")
+	subjectID, _ := createTestAdmin(t, p, "subject_stale@example.com")
 
 	// Create a session authenticated 30 minutes ago (stale window of 10 minutes)
 	staleAuthTime := now.Add(-30 * time.Minute)
-	staleSess, _ := createTestSession(t, p, adminID, staleAuthTime)
+	staleSess, _ := createTestSession(t, p, actorAdminID, staleAuthTime)
 
 	conn, err := p.Acquire(ctx)
 	if err != nil {
@@ -519,7 +532,7 @@ func TestSuspensionRecentAuthEnforcement(t *testing.T) {
 		ActorPrincipal:   adminP,
 		ActorSession:     staleSess,
 		RecentAuthWindow: 10 * time.Minute,
-		SubjectAccountID: adminID,
+		SubjectAccountID: subjectID,
 		Reason:           "Stale auth suspend attempt",
 		Now:              now,
 		RequestID:        "req-stale",

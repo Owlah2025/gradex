@@ -69,6 +69,13 @@ func NewRouter(
 
 	h := &videoHandlers{svc: svc}
 
+	// Staff mutations carry the S1B2 session and CSRF boundary. Without a
+	// session foundation there is nothing to carry it, so the router refuses to
+	// build rather than silently mounting Admin state changes unprotected.
+	if routerConfig.staff != nil && routerConfig.sessions == nil {
+		return nil, fmt.Errorf("staff foundation requires a session foundation")
+	}
+
 	v1 := r.Group("/api/v1")
 	if routerConfig.sessions != nil {
 		mountSessionRoutes(v1, routerConfig.sessions)
@@ -79,7 +86,7 @@ func NewRouter(
 		)
 	}
 	if routerConfig.staff != nil {
-		mountStaffRoutes(v1, routerConfig.staff, authenticator, principals, logger)
+		mountStaffRoutes(v1, routerConfig.staff, routerConfig.sessions, authenticator, principals, logger)
 	}
 
 	// Every protected group runs authentication → capability policy → ownership
@@ -275,11 +282,16 @@ func mountSessionRoutes(v1 *gin.RouterGroup, foundation *SessionFoundation) {
 func mountStaffRoutes(
 	v1 *gin.RouterGroup,
 	foundation *StaffFoundation,
+	sessionFoundation *SessionFoundation,
 	authenticator auth.Authenticator,
 	principals identity.PrincipalResolver,
 	logger *logging.Logger,
 ) {
-	staffH := &staffHandlers{service: foundation.service, compromised: foundation.compromised}
+	staffH := &staffHandlers{
+		service:          foundation.service,
+		compromised:      foundation.compromised,
+		recentAuthWindow: foundation.recentAuthWindow,
+	}
 
 	// Anonymous / public endpoints with rate limiting and body size limits
 	v1.POST(
@@ -295,22 +307,32 @@ func mountStaffRoutes(
 		staffH.completeInvitation,
 	)
 
-	// Protected endpoints (require auth + CapAdminOperations capability)
+	// Protected read endpoints (GET /staff/invitations)
 	staffGroup := v1.Group("/staff")
 	staffGroup.Use(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapAdminOperations),
 	)
 	{
-		staffGroup.POST("/invitations",
+		staffGroup.GET("/invitations", staffH.listInvitations)
+	}
+
+	// Protected state-changing endpoints (POST) carry S1B2 session mutation security, requireAuth, and capability checks.
+	staffMutationGroup := v1.Group("/staff")
+	staffMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapAdminOperations),
+	)
+	{
+		staffMutationGroup.POST("/invitations",
 			strictJSONMiddleware(func() any { return &createInvitationRequest{} }, staffInvitationBodyLimit),
 			foundation.requireStaffRateDecision("staff-invitations-create", staffInvitationEmailIdentifier),
 			staffH.createInvitation,
 		)
-		staffGroup.GET("/invitations", staffH.listInvitations)
-		staffGroup.POST("/invitations/:id/revoke", staffH.revokeInvitation)
-		staffGroup.POST("/:id/suspend", staffH.suspendStaff)
-		staffGroup.POST("/:id/reinstate", staffH.reinstateStaff)
+		staffMutationGroup.POST("/invitations/:id/revoke", staffH.revokeInvitation)
+		staffMutationGroup.POST("/:id/suspend", staffH.suspendStaff)
+		staffMutationGroup.POST("/:id/reinstate", staffH.reinstateStaff)
 	}
 }
 

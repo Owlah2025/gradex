@@ -199,7 +199,7 @@ password, no bearer, and no secret digest reaches logs or telemetry.
 | I1 | The **invitation row is authoritative for the invited role.** The client cannot submit or modify the role during completion |
 | I2 | The secret is purpose-bound, digest-only, expiring, supersedable, single-use |
 | I3 | The inviter must possess the capability to invite **that exact role** |
-| I4 | An Admin must not invite a role above their permitted ceiling |
+| I4 | An Admin must not invite a role above their permitted ceiling (under the Gradex three-role model `STUDENT` / `INSTRUCTOR` / `ADMIN`, `ADMIN` is the top ceiling so I4 collapses into I3) |
 | I5 | No password credential and no session exists before successful completion |
 | I6 | Completion atomically consumes the invitation and creates the credential |
 | I7 | Two concurrent completions produce **exactly one** winner — under real PostgreSQL contention |

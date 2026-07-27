@@ -87,6 +87,19 @@ func main() {
 		defer admissionRedis.Close()
 	}
 
+	var staffRedis *redis.Client
+	if cfg.Admission().Enabled() {
+		foundation, limiterClient, err := buildStaffFoundation(cfg, pool)
+		if err != nil {
+			log.Fatalf("building Staff foundation: %v", err)
+		}
+		staffRedis = limiterClient
+		routerOptions = append(routerOptions, httpapi.WithStaffFoundation(foundation))
+	}
+	if staffRedis != nil {
+		defer staffRedis.Close()
+	}
+
 	svc := video.NewService(pool, storageClient, queueClient, cfg)
 
 	var authenticator auth.Authenticator
@@ -383,4 +396,70 @@ func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error)
 			},
 		},
 	)
+}
+
+func buildStaffFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*httpapi.StaffFoundation, *redis.Client, error) {
+	admission := cfg.Admission()
+	if cfg.Environment() != config.EnvDevelopment {
+		return nil, nil, errors.New(
+			"approved production policy and compromised-password adapters are not integrated",
+		)
+	}
+
+	compromised, err := identity.NewDeterministicCompromisedSource()
+	if err != nil {
+		return nil, nil, err
+	}
+	compromisedSource, err := identity.NewTimeoutCompromisedSource(
+		compromised, admission.CompromisedPasswordTimeout(),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	service, err := identity.NewStaffService(pool, writer, compromisedSource)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	limiter, err := ratelimit.New(
+		ratelimit.NewRedisStore(redisClient),
+		[]byte(admission.LimiterHMACKey().Expose()),
+		admission.RateLimitTimeout(),
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+
+	endpointPolicies := map[string]ratelimit.Policy{
+		"staff-invitations-create":   ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-create"),
+		"staff-invitations-preview":  ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-preview"),
+		"staff-invitations-complete": ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-complete"),
+	}
+
+	foundation, err := httpapi.NewStaffFoundation(httpapi.StaffFoundationOptions{
+		Service:          service,
+		Compromised:      compromisedSource,
+		Limiter:          limiter,
+		EndpointPolicies: endpointPolicies,
+		RecentAuthWindow: cfg.Sessions().HighestRiskRecentAuthWindow(),
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+	return foundation, redisClient, nil
 }

@@ -6,9 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import {
+  createStaffInvitation,
+  suspendStaffAccount,
+  reinstateStaffAccount,
+} from "@/lib/api/identity";
+import { currentCSRFToken } from "@/lib/identity/session";
 
 export function StaffManagement() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
 
   // Invite state
   const [inviteEmail, setInviteEmail] = React.useState("");
@@ -34,13 +40,9 @@ export function StaffManagement() {
     setInviteMsg(null);
 
     try {
-      const res = await fetch("/api/v1/staff/invitations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
-      });
+      const csrf = currentCSRFToken() ?? undefined;
+      await createStaffInvitation(inviteEmail, inviteRole, locale, csrf);
 
-      if (!res.ok) throw new Error("Invite failed");
       setInviteStatus("success");
       setInviteMsg(t.auth.staff.inviteSuccess);
       setInviteEmail("");
@@ -56,13 +58,9 @@ export function StaffManagement() {
     setSuspendMsg(null);
 
     try {
-      const res = await fetch(`/api/v1/staff/${encodeURIComponent(suspendID)}/suspend`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: suspendReason }),
-      });
+      const csrf = currentCSRFToken() ?? undefined;
+      await suspendStaffAccount(suspendID, suspendReason, locale, csrf);
 
-      if (!res.ok) throw new Error("Suspend failed");
       setSuspendStatus("success");
       setSuspendMsg(t.auth.staff.suspendSuccess);
       setSuspendID("");
@@ -79,13 +77,9 @@ export function StaffManagement() {
     setReinstateMsg(null);
 
     try {
-      const res = await fetch(`/api/v1/staff/${encodeURIComponent(reinstateID)}/reinstate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: reinstateReason }),
-      });
+      const csrf = currentCSRFToken() ?? undefined;
+      await reinstateStaffAccount(reinstateID, reinstateReason, locale, csrf);
 
-      if (!res.ok) throw new Error("Reinstate failed");
       setReinstateStatus("success");
       setReinstateMsg(t.auth.staff.reinstateSuccess);
       setReinstateID("");

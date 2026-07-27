@@ -64,23 +64,42 @@ func SuspendAccount(
 		return SuspendAccountResult{}, errors.New("subject account ID is required")
 	}
 
+	// M2: Self-suspension guard
+	if req.ActorPrincipal.AccountID == req.SubjectAccountID {
+		return SuspendAccountResult{}, fmt.Errorf("%w: self-suspension is not permitted", ErrUnauthorized)
+	}
+
+	var subjectRole string
 	var currentStatus string
 	var currentRevision int
 	var currentEpoch int
 
 	err := tx.QueryRow(ctx,
-		`SELECT status, revision, session_epoch
+		`SELECT role::text, status, revision, session_epoch
 		   FROM accounts
 		  WHERE id = $1::uuid
 		    FOR UPDATE`,
 		req.SubjectAccountID,
-	).Scan(&currentStatus, &currentRevision, &currentEpoch)
+	).Scan(&subjectRole, &currentStatus, &currentRevision, &currentEpoch)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SuspendAccountResult{}, ErrAccountNotFound
 	}
 	if err != nil {
 		return SuspendAccountResult{}, fmt.Errorf("locking account for suspension: %w", err)
+	}
+
+	// M2: Last active Admin guard
+	if subjectRole == string(RoleAdmin) {
+		var activeAdminCount int
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM accounts WHERE role = 'ADMIN' AND status = 'ACTIVE'`,
+		).Scan(&activeAdminCount); err != nil {
+			return SuspendAccountResult{}, fmt.Errorf("counting active admin accounts: %w", err)
+		}
+		if activeAdminCount <= 1 {
+			return SuspendAccountResult{}, fmt.Errorf("%w: cannot suspend the last active Admin", ErrUnauthorized)
+		}
 	}
 
 	if currentStatus == string(StatusSuspended) {

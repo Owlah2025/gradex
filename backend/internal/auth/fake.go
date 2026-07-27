@@ -3,9 +3,12 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
 // FakeAuthenticator trusts a plain header instead of validating a real JWT.
@@ -21,6 +24,15 @@ func (f *FakeAuthenticator) UserFromRequest(c *gin.Context) (string, error) {
 	if userID == "" {
 		return "", fmt.Errorf("missing X-Debug-User-ID header (fake auth mode)")
 	}
+	now := time.Now().UTC()
+	c.Set("authenticated_session", identity.Session{
+		ID:                "fake-session-id",
+		AccountID:         userID,
+		State:             identity.SessionActive,
+		AuthenticatedAt:   now,
+		IdleExpiresAt:     now.Add(24 * time.Hour),
+		AbsoluteExpiresAt: now.Add(24 * time.Hour),
+	})
 	return userID, nil
 }
 

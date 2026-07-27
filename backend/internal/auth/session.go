@@ -69,6 +69,16 @@ func (a *SessionAuthenticator) UserFromRequest(c *gin.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	c.Set("authenticated_session", identity.Session{
+		ID:                view.Session.SessionID,
+		AccountID:         view.Session.AccountID,
+		State:             identity.SessionActive,
+		CurrentGeneration: view.Session.Generation,
+		AuthenticatedAt:   view.Session.AuthenticatedAt,
+		ReauthenticatedAt: view.Session.ReauthenticatedAt,
+		IdleExpiresAt:     view.Session.IdleExpiresAt,
+		AbsoluteExpiresAt: view.Session.AbsoluteExpiresAt,
+	})
 	return view.Session.AccountID, nil
 }
 

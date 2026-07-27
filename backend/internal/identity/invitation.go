@@ -9,8 +9,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 var (
@@ -55,6 +57,7 @@ type CreateStaffInvitationRequest struct {
 	TTL              time.Duration
 	Now              time.Time
 	RequestID        string
+	Outbox           *outbox.Writer
 }
 
 type IssuedStaffInvitation struct {
@@ -113,6 +116,11 @@ func CreateStaffInvitation(
 	normalizedEmail, err := NormalizeEmail(req.Email)
 	if err != nil {
 		return IssuedStaffInvitation{}, fmt.Errorf("normalizing invitation email: %w", err)
+	}
+
+	// M3: Advisory lock on normalized email to serialize concurrent invitation creation for the same email
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, normalizedEmail); err != nil {
+		return IssuedStaffInvitation{}, fmt.Errorf("locking normalized invitation email: %w", err)
 	}
 
 	// BR-009: Reject if email address already belongs to any Account.
@@ -183,6 +191,10 @@ func CreateStaffInvitation(
 		 VALUES ($1::uuid, $2, $3, $4, $5::uuid, 'PENDING', $6::uuid, $7, $7)`,
 		invitationID, normalizedEmail, strings.TrimSpace(req.Email), string(req.Role), req.ActorPrincipal.AccountID, issuedSecret.ID, req.Now,
 	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return IssuedStaffInvitation{}, ErrAccountAlreadyExists
+		}
 		return IssuedStaffInvitation{}, fmt.Errorf("inserting staff invitation: %w", err)
 	}
 
@@ -201,6 +213,34 @@ func CreateStaffInvitation(
 		evidence:  evidence,
 	}); err != nil {
 		return IssuedStaffInvitation{}, fmt.Errorf("writing STAFF_INVITATION_CREATED evidence: %w", err)
+	}
+
+	// H3: Co-commit durable outbox intent inside the same transaction
+	if req.Outbox != nil {
+		_, err := req.Outbox.Append(ctx, tx, outbox.Event{
+			Type:              "identity.staff_invitation_created",
+			SchemaVersion:     1,
+			SourceModule:      "IDENTITY_AND_ACCESS",
+			AggregateType:     "STAFF_INVITATION",
+			AggregateID:       invitationID,
+			AggregateRevision: 1,
+			CorrelationID:     req.RequestID,
+			SafePayload: map[string]any{
+				"action_secret_id":  issuedSecret.ID,
+				"purpose":           string(ActionStaffInvitation),
+				"invited_role":      string(req.Role),
+				"secret_expires_at": issuedSecret.ExpiresAt,
+			},
+		}, outbox.VerificationDelivery{
+			Destination:       normalizedEmail,
+			Locale:            "en",
+			TemplateContract:  "staff-invitation-v1",
+			VerificationToken: issuedSecret.Bearer.Expose(),
+			ExpiresAt:         issuedSecret.ExpiresAt,
+		})
+		if err != nil {
+			return IssuedStaffInvitation{}, fmt.Errorf("writing staff invitation outbox intent: %w", err)
+		}
 	}
 
 	invitation := StaffInvitation{
