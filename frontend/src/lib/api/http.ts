@@ -64,6 +64,37 @@ export async function postJSON<T>(
   return readJSON<T>(response);
 }
 
+/**
+ * Calls a cookie-authenticated route.
+ *
+ * Unlike the anonymous helpers, this never bootstraps anonymous admission: an
+ * authenticated call either carries usable session authority or must fail so
+ * the caller can recover. `csrf` is the in-memory session token and is required
+ * for every state-changing method. A `204` resolves to null.
+ */
+export async function authenticatedRequest<T>(
+  path: string,
+  method: "GET" | "POST" | "DELETE",
+  language: "ar" | "en",
+  csrf?: string,
+): Promise<T | null> {
+  const headers: Record<string, string> = {
+    Accept: "application/json, application/problem+json",
+    "Accept-Language": language,
+  };
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+
+  const response = await fetch(`${apiBase}${path}`, {
+    method,
+    credentials: "same-origin",
+    cache: "no-store",
+    headers,
+  });
+
+  if (response.status === 204) return null;
+  return readJSON<T>(response);
+}
+
 async function readJSON<T>(response: Response): Promise<T> {
   const body: unknown = await response.json().catch(() => null);
   if (response.ok) return body as T;

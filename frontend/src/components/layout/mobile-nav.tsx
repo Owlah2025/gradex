@@ -15,7 +15,7 @@ import { AuthActions, type AuthState } from "./auth-actions";
 import { navItems } from "./nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
-export function MobileNav({ authState = "guest" }: { authState?: AuthState }) {
+export function MobileNav({ authState }: { authState?: AuthState }) {
   const { t } = useLocale();
   const [open, setOpen] = React.useState(false);
 

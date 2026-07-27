@@ -1,4 +1,5 @@
-import { getJSON, postJSON } from "./http";
+import { authenticatedRequest, getJSON, postJSON } from "./http";
+import type { AuthenticatedSession } from "@/lib/identity/session";
 
 export type Policy = {
   kind: "PRIVACY_NOTICE" | "TERMS_OF_SERVICE";
@@ -52,4 +53,50 @@ export function consumeEmailVerification(
     { token },
     locale,
   );
+}
+
+/**
+ * Signs in and creates one server-managed session family.
+ *
+ * Login sits behind the same anonymous origin/CSRF admission boundary as
+ * registration, so it reuses `postJSON`. The response carries the session
+ * representation; the credential itself arrives only as a `__Host-` cookie.
+ */
+export function createSession(
+  email: string,
+  password: string,
+  locale: "ar" | "en",
+) {
+  return postJSON<AuthenticatedSession>(
+    "/sessions",
+    { email, password },
+    locale,
+  );
+}
+
+/**
+ * Resolves the current cookie and rehydrates the in-memory CSRF token after a
+ * reload. This read does not rotate credentials or extend idle expiry.
+ */
+export function getSession(locale: "ar" | "en") {
+  return authenticatedRequest<AuthenticatedSession>(
+    "/session",
+    "GET",
+    locale,
+  ) as Promise<AuthenticatedSession>;
+}
+
+/** Deliberately rotates the credential and CSRF token together. */
+export function renewSession(csrf: string, locale: "ar" | "en") {
+  return authenticatedRequest<AuthenticatedSession>(
+    "/session-renewals",
+    "POST",
+    locale,
+    csrf,
+  ) as Promise<AuthenticatedSession>;
+}
+
+/** Revokes the current family server-side, then clears the cookie. */
+export function deleteSession(csrf: string, locale: "ar" | "en") {
+  return authenticatedRequest<null>("/session", "DELETE", locale, csrf);
 }

@@ -74,6 +74,40 @@ export const en = {
       requestNew: "Request a new link",
       login: "Go to login",
     },
+    login: {
+      title: "Sign in to Gradex",
+      intro: "Use the email and password you confirmed for your account.",
+      email: "Email address",
+      password: "Password",
+      signIn: "Sign in",
+      signingIn: "Signing in…",
+      noAccount: "Need an account?",
+      createAccount: "Create one",
+      invalidEmail: "Enter a complete email address.",
+      invalidPassword: "Enter your password.",
+      // Deliberately one message for unknown email, wrong password, unverified,
+      // and inactive. The server hides which one occurred and the interface
+      // must not narrow it back down.
+      failed: "The email or password is incorrect.",
+      limited: "Too many attempts. Wait a little before trying again.",
+      unavailable: "Sign-in is temporarily unavailable. Try again shortly.",
+    },
+    session: {
+      expiredTitle: "Your session ended",
+      expiredBody: "Sign in again to pick up where you left off.",
+      replacedTitle: "This session was replaced",
+      replacedBody:
+        "Your account was refreshed in another tab or window. Sign in again to continue.",
+      reuseTitle: "This session was closed for your safety",
+      reuseBody:
+        "An out-of-date session credential was presented, so every session for your account was ended. Sign in again to continue.",
+      signedOutTitle: "You are signed out",
+      signedOutBody: "Your session was ended on this device.",
+      signOut: "Sign out",
+      signingOut: "Signing out…",
+      signIn: "Sign in",
+      retry: "Try again",
+    },
     common: {
       required: "This field is required.",
       backHome: "Back to courses",

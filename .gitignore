@@ -26,3 +26,6 @@ Thumbs.db
 # Independent-review run artifacts from scripts/agy-review.sh — the verdict and finding
 # dispositions are transcribed into the daily record, which is the committed evidence
 /docs/launch/review/artifacts/
+
+# Compiled frontend logic tests (node:test output)
+.frontend-test-build/

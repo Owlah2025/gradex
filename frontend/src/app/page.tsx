@@ -16,7 +16,9 @@ import { FinalCta } from "@/components/sections/final-cta";
 export default function LandingPage() {
   return (
     <>
-      <Navbar authState="guest" />
+      {/* No authState override: the header follows the real session, so a
+          signed-in visitor sees dashboard/sign-out instead of sign-in. */}
+      <Navbar />
       <main id="main">
         <Hero />
         <FeaturedCourses />

@@ -14,7 +14,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
  * Sticky, frosted 64px header. Primary nav collapses into a sheet below lg;
  * theme + language toggles stay visible at every breakpoint.
  */
-export function Navbar({ authState = "guest" }: { authState?: AuthState }) {
+export function Navbar({ authState }: { authState?: AuthState }) {
   const { t } = useLocale();
 
   return (

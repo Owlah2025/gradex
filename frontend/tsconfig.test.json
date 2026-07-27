@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": false,
+    "incremental": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "outDir": "../.frontend-test-build",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src/lib/identity/**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -111,9 +111,19 @@ claims merely because they appear here.
 Deliver S1B2 authenticated sessions. The S1B1 carryovers, PostgreSQL family/generation core, public
 Problem Details, hardened single-cookie boundary, origin/generation-bound CSRF enforcement,
 layered session rate decisions, login/resolution/renewal/logout routes, and real-session startup
-composition are implemented. Unit/race/vet, full Identity/HTTP PostgreSQL integration, exposure
-guard, and live bootstrap/policy checks pass. Next, T030 begins the memory-only frontend session
-store and safe `returnTo` tests before the bilingual sign-in/session screens.
+composition are implemented. T030–T038 add the memory-only frontend session store, the safe internal
+`returnTo` boundary, bilingual sign-in and session-state screens, reload rehydration, and a real
+header sign-out.
+
+All local gates are green on the working tree: backend formatting, build, vet on both tag sets,
+`go test -race ./...`, and the complete integration suite under race against real PostgreSQL at
+schema 6, Redis, and MinIO; frontend typecheck, lint, 13 `node:test` logic cases, and the production
+build; documentation and exposure guards. The complete browser journey — sign in, reload, sign out —
+was exercised end to end with clean database, log, and browser-storage canary sweeps.
+
+Next, T039–T041: freeze and push the exact range, verify hosted CI, and dispatch the independent
+`agy` review under D-035. **Nothing has been pushed yet** — the frozen range awaits developer
+approval before it leaves the machine.
 
 ## Milestones
 

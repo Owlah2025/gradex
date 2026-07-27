@@ -123,10 +123,13 @@ denial; compare every hidden login failure contract.
 
 ### Frontend tests and implementation
 
-- [ ] T030 [P] [US1] Add safe internal `returnTo` and memory-only session-store unit tests in
+- [x] T030 [P] [US1] Add safe internal `returnTo` and memory-only session-store unit tests in
   `frontend/src/lib/identity/session.test.ts` and `frontend/src/lib/identity/return-to.test.ts`,
-  run through Node's built-in `node:test` runner under a new `npm run test` script
-- [ ] T031 [US1] **Downgraded on 2026-07-31 by developer decision.** Bilingual login and
+  compiled by the `typescript` already in devDependencies through `tsconfig.test.json` and run on
+  Node's built-in `node:test` runner under a new `npm run test` script, wired into the CI Frontend
+  job. No test framework was added. Local Node reports `ERR_NO_TYPESCRIPT`, so native type
+  stripping is not relied on; the compile step makes the runner work on any Node 22 build
+- [x] T031 [US1] **Downgraded on 2026-07-31 by developer decision.** Bilingual login and
   session-state interaction coverage is manual RTL/LTR, keyboard, failure, return, and logout
   inspection per `quickstart.md`, recorded in `docs/launch/daily/2026-07-31.md`, instead of
   automated tests in `frontend/src/components/auth/login-form.test.tsx`
@@ -138,14 +141,14 @@ denial; compare every hidden login failure contract.
   Red-confidence day. T030's pure-TS logic — including the security-relevant `returnTo`
   open-redirect boundary — is still covered automatically, because `node:test` needs no new runtime
   dependency. Component-level test infrastructure is visible carryover, not a silent skip.
-- [ ] T032 [US1] Implement session API calls with `credentials: include`, no persistence, safe
+- [x] T032 [US1] Implement session API calls with `credentials: include`, no persistence, safe
   Problem parsing, and in-memory CSRF rehydration in `frontend/src/lib/api/identity.ts` and
   `frontend/src/lib/identity/session.ts`
-- [ ] T033 [US1] Implement safe internal `returnTo` validation and role-root selection in
+- [x] T033 [US1] Implement safe internal `returnTo` validation and role-root selection in
   `frontend/src/lib/identity/return-to.ts`
-- [ ] T034 [US1] Add Arabic/English login, expired/replaced/reuse/logout copy in
+- [x] T034 [US1] Add Arabic/English login, expired/replaced/reuse/logout copy in
   `frontend/src/lib/i18n/dictionaries/ar.ts` and `frontend/src/lib/i18n/dictionaries/en.ts`
-- [ ] T035 [US1] Implement accessible responsive sign-in and session-state UI in
+- [x] T035 [US1] Implement accessible responsive sign-in and session-state UI in
   `frontend/src/components/auth/login-form.tsx`, `frontend/src/app/(auth)/login/page.tsx`, and
   existing navigation auth actions
 
@@ -158,13 +161,13 @@ PostgreSQL; browser storage and database canaries contain no plaintext credentia
 
 **Purpose**: Prove the frozen slice and close it with repository evidence.
 
-- [ ] T036 [P] Run frontend typecheck, lint, production build, and Arabic/English responsive,
+- [x] T036 [P] Run frontend typecheck, lint, production build, and Arabic/English responsive,
   keyboard, RTL/LTR, failure, return, and logout inspection per `quickstart.md`
-- [ ] T037 Run backend formatting, build, vet, race, PostgreSQL/Redis/MinIO integration, migration,
+- [x] T037 Run backend formatting, build, vet, race, PostgreSQL/Redis/MinIO integration, migration,
   docs, and exposure gates; run clean-code and test quality reviews over changed production/tests
-- [ ] T038 Run database/browser/log canary sweeps for plaintext cookie, CSRF, password, raw email,
+- [x] T038 Run database/browser/log canary sweeps for plaintext cookie, CSRF, password, raw email,
   and hidden-state leakage; record results in `docs/launch/daily/2026-07-31.md`
-- [ ] T039 Synchronize implemented contracts and launch state in
+- [x] T039 Synchronize implemented contracts and launch state in
   `specs/002-auth-rbac/s1b2/contracts/session-api.md`, `docs/launch/STATUS.md`,
   `docs/launch/SLICES.md`, and `docs/launch/daily/2026-07-31.md`
 - [ ] T040 Freeze and push the exact implementation range, verify hosted CI, and dispatch `agy`

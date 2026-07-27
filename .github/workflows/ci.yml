@@ -102,6 +102,13 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
+      # Compiles the pure-TS identity logic with the TypeScript already in
+      # devDependencies and runs it under node:test. No test framework is
+      # added, so this stays inside the slice's no-new-dependency gate.
+      - name: Test
+        working-directory: frontend
+        run: npm test
+
       - name: Build
         working-directory: frontend
         run: npm run build
