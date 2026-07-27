@@ -24,11 +24,14 @@ func validSettings() map[string]string {
 
 func validSecrets() MapSecretResolver {
 	return MapSecretResolver{
-		"DATABASE_URL":          "postgres://gradex:pw@db:5432/gradex",
-		"S3_ACCESS_KEY":         "access",
-		"S3_SECRET_KEY":         "secret",
-		"PLAYBACK_TOKEN_SECRET": "9f2c1de4a7b3085c6e1d4f7a2b9c0e3d",
-		"SESSION_CSRF_KEY":      strings.Repeat("s", 32),
+		"DATABASE_URL":                 "postgres://gradex:pw@db:5432/gradex",
+		"S3_ACCESS_KEY":                "access",
+		"S3_SECRET_KEY":                "secret",
+		"PLAYBACK_TOKEN_SECRET":        "9f2c1de4a7b3085c6e1d4f7a2b9c0e3d",
+		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
+		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
+		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 	}
 }
 
@@ -70,6 +73,9 @@ func TestValidProductionConfigLoads(t *testing.T) {
 		t.Error("expected production environment")
 	}
 	sessions := cfg.Sessions()
+	if !sessions.Enabled() {
+		t.Fatal("production authenticated sessions are disabled")
+	}
 	for name, test := range map[string]struct {
 		window   SessionWindow
 		idle     time.Duration
@@ -148,6 +154,8 @@ func TestMissingRequiredSecretsBlockStartup(t *testing.T) {
 	for _, name := range []string{
 		"DATABASE_URL", "S3_ACCESS_KEY", "S3_SECRET_KEY",
 		"PLAYBACK_TOKEN_SECRET", "SESSION_CSRF_KEY",
+		"ANONYMOUS_COOKIE_SIGNING_KEY", "ANONYMOUS_CSRF_KEY",
+		"ADMISSION_LIMITER_HMAC_KEY",
 	} {
 		t.Run(name, func(t *testing.T) {
 			wantErrContaining(t, func(_ map[string]string, sec MapSecretResolver) {
@@ -530,11 +538,12 @@ func TestCORSOriginsAreCopiedOut(t *testing.T) {
 }
 
 func TestDefaultsApplyOutsideProduction(t *testing.T) {
-	cfg := mustLoad(t, func(s map[string]string, _ MapSecretResolver) {
+	cfg := mustLoad(t, func(s map[string]string, secrets MapSecretResolver) {
 		s["APP_ENV"] = "development"
 		delete(s, "PUBLIC_ORIGIN")
 		delete(s, "CORS_ALLOWED_ORIGINS")
 		delete(s, "CORS_ALLOW_CREDENTIALS")
+		delete(secrets, "SESSION_CSRF_KEY")
 	})
 	if cfg.HTTPReadTimeout() != 15*time.Second {
 		t.Errorf("HTTPReadTimeout = %s, want 15s", cfg.HTTPReadTimeout())

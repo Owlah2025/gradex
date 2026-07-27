@@ -53,6 +53,39 @@ func TestBuildDevelopmentAdmissionFoundation(t *testing.T) {
 	_ = client.Close()
 }
 
+func TestBuildAuthenticatedSessionFoundation(t *testing.T) {
+	settings := config.MapLookup(map[string]string{
+		"APP_ENV": "development", "PUBLIC_ORIGIN": "http://localhost:3000",
+		"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
+		"S3_BUCKET": "gradex-test",
+	})
+	secrets := config.MapSecretResolver{
+		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "playback",
+		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
+		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
+		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
+	}
+	cfg, err := config.LoadFrom(settings, secrets)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(), "postgres://test:test@localhost/test")
+	if err != nil {
+		t.Fatalf("constructing test pool: %v", err)
+	}
+	defer pool.Close()
+	foundation, repository, client, err := buildSessionFoundation(cfg, pool)
+	if err != nil {
+		t.Fatalf("building session foundation: %v", err)
+	}
+	if foundation == nil || repository == nil || client == nil {
+		t.Fatal("session composition omitted a required dependency")
+	}
+	_ = client.Close()
+}
+
 func TestBuildAdmissionFoundationRejectsNonDevelopmentFixtures(t *testing.T) {
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV":                      "production",
@@ -64,11 +97,14 @@ func TestBuildAdmissionFoundationRejectsNonDevelopmentFixtures(t *testing.T) {
 		"PASSWORD_SCREEN_MODE":         "unavailable",
 		"STUDENT_REGISTRATION_ENABLED": "false",
 	}), config.MapSecretResolver{
-		"DATABASE_URL":          "postgres://x",
-		"S3_ACCESS_KEY":         "a",
-		"S3_SECRET_KEY":         "b",
-		"PLAYBACK_TOKEN_SECRET": "playback",
-		"SESSION_CSRF_KEY":      strings.Repeat("s", 32),
+		"DATABASE_URL":                 "postgres://x",
+		"S3_ACCESS_KEY":                "a",
+		"S3_SECRET_KEY":                "b",
+		"PLAYBACK_TOKEN_SECRET":        "playback",
+		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
+		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
+		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 	})
 	if err != nil {
 		t.Fatalf("loading production config: %v", err)

@@ -174,6 +174,57 @@ func Unauthenticated() Problem {
 		"This resource requires an authenticated session.")
 }
 
+// AuthenticationFailed deliberately collapses every syntactically admissible
+// login denial. Unknown email, wrong password, unverified Account, inactive
+// Account, and a candidate that changed during admission all share this body.
+func AuthenticationFailed() Problem {
+	return New(http.StatusUnauthorized, "authentication-failed",
+		"Authentication failed",
+		"The email or password is incorrect.")
+}
+
+// SessionReplaced reports the one tolerated immediate, non-sensitive
+// presentation of a superseded session value. It does not disclose generation
+// numbers or whether a replacement remains usable.
+func SessionReplaced() Problem {
+	return New(http.StatusUnauthorized, "session-replaced",
+		"Session replaced",
+		"This session has been replaced. Sign in again to continue.")
+}
+
+// SessionReuseDetected reports confirmed replay after the family has been
+// revoked. The same response is used regardless of which generation or
+// request class supplied the evidence.
+func SessionReuseDetected() Problem {
+	return New(http.StatusUnauthorized, "session-reuse-detected",
+		"Session unavailable",
+		"This session can no longer be used. Sign in again to continue.")
+}
+
+// SessionCSRFFailed reports a missing or mismatched authenticated-session CSRF
+// value without reflecting the value or explaining how the check failed.
+func SessionCSRFFailed() Problem {
+	return New(http.StatusForbidden, "csrf-failed",
+		"Request validation failed",
+		"The request could not be validated for this session.")
+}
+
+// OriginNotAllowed is distinct from CSRF failure for clients while still
+// withholding the configured trusted origin.
+func OriginNotAllowed() Problem {
+	return New(http.StatusForbidden, "origin-not-allowed",
+		"Browser origin not allowed",
+		"This request is not allowed from the current browser origin.")
+}
+
+// AuthenticationUnavailable is the fail-closed result when session admission
+// or resolution cannot make an authoritative decision.
+func AuthenticationUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "authentication-unavailable",
+		"Authentication temporarily unavailable",
+		"Authentication cannot be completed right now. Try again shortly.")
+}
+
 // NotAuthorized reports an authenticated principal without authority here.
 //
 // The detail is deliberately uniform: §6.1 keeps typed policy reasons —

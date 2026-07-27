@@ -62,6 +62,18 @@ func main() {
 	defer redisHealth.Close()
 
 	var routerOptions []httpapi.RouterOption
+	var sessionRepository *identity.SessionRepository
+	var sessionRedis *redis.Client
+	if cfg.Sessions().Enabled() {
+		var sessionFoundation *httpapi.SessionFoundation
+		sessionFoundation, sessionRepository, sessionRedis, err = buildSessionFoundation(cfg, pool)
+		if err != nil {
+			log.Fatalf("building authenticated-session foundation: %v", err)
+		}
+		defer sessionRedis.Close()
+		routerOptions = append(routerOptions, httpapi.WithSessionFoundation(sessionFoundation))
+	}
+
 	var admissionRedis *redis.Client
 	if cfg.Admission().Enabled() {
 		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool)
@@ -77,13 +89,18 @@ func main() {
 
 	svc := video.NewService(pool, storageClient, queueClient, cfg)
 
-	// Belt and braces: config validation already refuses AUTH_FAKE_MODE when
-	// APP_ENV=production, and the real authenticator does not exist yet, so the
-	// API still refuses to start without the development seam.
-	if !cfg.AuthFakeMode() {
-		log.Fatal("real auth is not implemented yet — set AUTH_FAKE_MODE=true (dev/test only)")
+	var authenticator auth.Authenticator
+	if cfg.AuthFakeMode() {
+		authenticator = auth.NewFakeAuthenticator()
+	} else {
+		if sessionRepository == nil {
+			log.Fatal("SESSION_CSRF_KEY is required when AUTH_FAKE_MODE=false")
+		}
+		authenticator, err = auth.NewSessionAuthenticator(sessionRepository)
+		if err != nil {
+			log.Fatalf("building session authenticator: %v", err)
+		}
 	}
-	authenticator := auth.NewFakeAuthenticator()
 	entitlements := auth.NewFakeEntitlementChecker(pool)
 
 	reporter := health.New(cfg.ReadinessTimeout(),
@@ -173,8 +190,55 @@ func main() {
 	log.Println("gradex API stopped")
 }
 
+func buildSessionFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*httpapi.SessionFoundation, *identity.SessionRepository, *redis.Client, error) {
+	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
+		Pool: pool, Settings: cfg.Sessions(),
+		CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now,
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	admission := cfg.Admission()
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	limiter, err := ratelimit.New(
+		ratelimit.NewRedisStore(redisClient),
+		[]byte(admission.LimiterHMACKey().Expose()),
+		admission.RateLimitTimeout(),
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+
+	endpointPolicies := map[string]ratelimit.Policy{
+		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
+		"sessions":           ratelimit.DevelopmentLoginPolicy(),
+		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
+		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
+		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
+	}
+	foundation, err := httpapi.NewSessionFoundation(httpapi.SessionFoundationOptions{
+		PublicOrigin:        cfg.PublicOrigin(),
+		CookieSigningKey:    []byte(admission.AnonymousCookieSigningKey().Expose()),
+		AnonymousCSRFKey:    []byte(admission.AnonymousCSRFKey().Expose()),
+		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
+		Repository:          repository,
+		Limiter:             limiter,
+		EndpointPolicies:    endpointPolicies,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+	return foundation, repository, redisClient, nil
+}
+
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	if cfg.Admission().Enabled() {
+	if cfg.Admission().Enabled() || cfg.Sessions().Enabled() {
 		return db.AuthenticatedSessionSchemaVersion
 	}
 	if !cfg.AuthFakeMode() {

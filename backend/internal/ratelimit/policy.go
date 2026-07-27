@@ -124,3 +124,41 @@ func DevelopmentAnonymousBootstrapPolicy() Policy {
 		LocalMaxKeys: 4096,
 	}
 }
+
+// DevelopmentSessionPolicy is a conservative fixture for authenticated
+// session traffic. The identifier input is already a one-way digest of the
+// presented opaque authority and is HMAC-keyed again by the limiter.
+func DevelopmentSessionPolicy(endpoint string) Policy {
+	return Policy{
+		ID:       endpoint + "-v1",
+		Category: "AUTHENTICATED_SESSION",
+		Endpoint: endpoint,
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 120, LocalLimit: 12},
+			{Dimension: DimensionIdentifier, Limit: 30, LocalLimit: 4},
+			{Dimension: DimensionNetwork, Limit: 60, LocalLimit: 8},
+			{Dimension: DimensionGlobal, Limit: 600, LocalLimit: 30},
+		},
+		LocalMaxKeys: 4096,
+	}
+}
+
+// DevelopmentLoginPolicy adds the anonymous-browser layer to the keyed
+// normalized-email, network, endpoint, and global layers.
+func DevelopmentLoginPolicy() Policy {
+	return Policy{
+		ID:       "sessions-v1",
+		Category: "PUBLIC_AUTHENTICATION",
+		Endpoint: "sessions",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 60, LocalLimit: 6},
+			{Dimension: DimensionIdentifier, Limit: 6, LocalLimit: 2},
+			{Dimension: DimensionNetwork, Limit: 30, LocalLimit: 4},
+			{Dimension: DimensionAnonymous, Limit: 10, LocalLimit: 2},
+			{Dimension: DimensionGlobal, Limit: 300, LocalLimit: 20},
+		},
+		LocalMaxKeys: 4096,
+	}
+}

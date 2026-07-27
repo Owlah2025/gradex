@@ -184,6 +184,11 @@ func (s SessionSettings) HighestRiskRecentAuthWindow() time.Duration {
 func (s SessionSettings) StaleUseWindow() time.Duration { return s.staleUseWindow }
 func (s SessionSettings) CSRFKey() Secret               { return s.csrfKey }
 
+// Enabled reports whether the real authenticated-session boundary is
+// configured. Development may omit it while retaining the fake auth seam;
+// non-development validation requires it.
+func (s SessionSettings) Enabled() bool { return !s.csrfKey.IsEmpty() }
+
 // Config is the immutable runtime configuration. Construct it only through
 // Load or LoadFrom.
 type Config struct {
@@ -600,6 +605,23 @@ func (c *Config) validate(p *parser) {
 	}
 	if c.environment != EnvDevelopment && c.sessions.csrfKey.IsEmpty() {
 		p.errf("SESSION_CSRF_KEY is required outside development")
+	}
+	if c.sessions.Enabled() {
+		if _, err := CanonicalPublicOrigin(c.publicOrigin); err != nil {
+			p.errf("PUBLIC_ORIGIN must be an exact HTTP origin when authenticated sessions are enabled")
+		}
+		for _, required := range []struct {
+			name  string
+			value Secret
+		}{
+			{"ANONYMOUS_COOKIE_SIGNING_KEY", c.admission.anonymousCookieSigningKey},
+			{"ANONYMOUS_CSRF_KEY", c.admission.anonymousCSRFKey},
+			{"ADMISSION_LIMITER_HMAC_KEY", c.admission.limiterHMACKey},
+		} {
+			if required.value.IsEmpty() {
+				p.errf("%s is required when authenticated sessions are enabled", required.name)
+			}
+		}
 	}
 	if c.admission.Enabled() {
 		if _, err := CanonicalPublicOrigin(c.publicOrigin); err != nil {

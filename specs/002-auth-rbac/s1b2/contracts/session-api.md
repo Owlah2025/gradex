@@ -53,7 +53,7 @@ Public failure for unknown email, wrong password, unverified Account, or inactiv
 
 ```json
 {
-  "type": "https://gradex.example/problems/authentication-failed",
+  "type": "https://api.gradex.com/problems/authentication-failed",
   "title": "Authentication failed",
   "status": 401,
   "code": "AUTHENTICATION_FAILED",
@@ -66,8 +66,10 @@ production-comparable verification path. Validation failures that can be used to
 Account existence collapse to the same public authentication failure once the body is syntactically
 admissible.
 
-Other failures: `400 INVALID_REQUEST`, `403 ORIGIN_NOT_ALLOWED`, `429 RATE_LIMITED`, or fail-closed
-`503 ADMISSION_UNAVAILABLE`. Login never creates a partial family on failure.
+Other failures use the shared strict-admission boundary:
+`400 MALFORMED_JSON`, `413 CONTENT_TOO_LARGE`, `415 UNSUPPORTED_MEDIA_TYPE`,
+`403 CSRF_VALIDATION_FAILED`, `429 RATE_LIMITED`, or fail-closed
+`503 AUTHENTICATION_UNAVAILABLE`. Login never creates a partial family on failure.
 
 ## GET `/api/v1/session`
 

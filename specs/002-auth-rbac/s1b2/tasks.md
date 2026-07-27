@@ -68,8 +68,9 @@ denial; compare every hidden login failure contract.
 
 ### Configuration and domain tests
 
-- [ ] T013 [P] [US1] Add failing role-window, recent-auth, stale-classification, cookie, and
-  dummy-hash validation tests in `backend/internal/config/config_test.go`
+- [x] T013 [P] [US1] Add failing role-window, recent-auth, stale-classification, cookie, and
+  dummy-hash validation tests in `backend/internal/config/config_test.go`,
+  `backend/internal/identity/session_test.go`, and `backend/internal/auth/session_test.go`
 - [x] T014 [P] [US1] Add failing session resolution, expiry, and stale-use classification unit
   tests in `backend/internal/identity/session_test.go`
 - [x] T015 [US1] Add failing PostgreSQL login/create, renewal race, reuse revocation, mutation
@@ -84,35 +85,41 @@ denial; compare every hidden login failure contract.
 
 ### HTTP contract tests
 
-- [ ] T019 [P] [US1] Add failing Problem Details and stable authentication-challenge tests in
+- [x] T019 [P] [US1] Add failing Problem Details and stable authentication-challenge tests in
   `backend/internal/problem/problem_test.go`
-- [ ] T020 [US1] Add failing hidden-state login equivalence and digest-only success contract tests
+- [x] T020 [US1] Add failing hidden-state login equivalence and digest-only success contract tests
   in `backend/internal/httpapi/session_routes_integration_test.go`
-- [ ] T021 [US1] Add failing cookie, no-store, CSRF/origin, resolution, renewal-race, stale/reuse,
+- [x] T021 [US1] Add failing cookie, no-store, CSRF/origin, resolution, renewal-race, stale/reuse,
   and logout contract tests in `backend/internal/httpapi/session_routes_integration_test.go`
-- [ ] T022 [US1] Add failing layered login and authenticated-session rate-decision tests in
-  `backend/internal/httpapi/session_rate_limit_test.go`
+- [x] T022 [US1] Add failing layered login and authenticated-session rate-decision tests in
+  `backend/internal/httpapi/session_routes_test.go`; the planned separate
+  `session_rate_limit_test.go` was not created, and the rate-decision cases live beside the other
+  route tests
 
 ### Backend implementation
 
-- [ ] T023 [US1] Add generic authentication, replacement, reuse, and CSRF Problem Details in
+- [x] T023 [US1] Add generic authentication, replacement, reuse, and CSRF Problem Details in
   `backend/internal/problem/problem.go`
-- [ ] T024 [US1] Implement session-cookie parsing and typed request authentication while preserving
-  the existing user-ID authorization seam in `backend/internal/auth/auth.go` and
-  `backend/internal/auth/session.go`
-- [ ] T025 [US1] Implement trusted-origin and generation-bound CSRF middleware for state-changing
+- [x] T024 [US1] Implement session-cookie parsing and typed request authentication while preserving
+  the existing user-ID authorization seam in the new `backend/internal/auth/session.go` and
+  `backend/internal/auth/session_response.go`; `auth.go` needed no change because the seam is
+  satisfied through `SessionAuthenticator.UserFromRequest`
+- [x] T025 [US1] Implement trusted-origin and generation-bound CSRF middleware for state-changing
   cookie-authenticated requests in `backend/internal/httpapi/session_security.go`
-- [ ] T026 [US1] Implement layered login/session rate decisions with keyed identifier digests in
+- [x] T026 [US1] Implement layered login/session rate decisions with keyed identifier digests in
   `backend/internal/httpapi/session_rate_limit.go`
-- [ ] T027 [US1] Implement `POST /sessions`, `GET /session`, `POST /session-renewals`, and
+- [x] T027 [US1] Implement `POST /sessions`, `GET /session`, `POST /session-renewals`, and
   `DELETE /session` with commit-before-cookie behavior in
   `backend/internal/httpapi/session_handlers.go`
-- [ ] T028 [US1] Register real-session composition and routes without breaking the
+- [x] T028 [US1] Register real-session composition and routes without breaking the
   development-only fake-auth seam in `backend/internal/httpapi/router.go` and
   `backend/cmd/api/main.go`
-- [ ] T029 [US1] Append allowlisted login, rotation, stale-use, reuse, and logout evidence without
+- [x] T029 [US1] Append allowlisted login, rotation, stale-use, reuse, and logout evidence without
   credential, CSRF, password, email, or hidden-state leakage through
-  `backend/internal/identity/security_event.go` and `backend/internal/httpapi/observability.go`
+  `backend/internal/identity/session_repository.go` and `backend/internal/httpapi/observability.go`;
+  the existing `appendIdentitySecurityEvent` helper in
+  `backend/internal/identity/security_event.go` was reused unchanged, with the closed event
+  allowlist widened by migration `0006_authenticated_sessions`
 
 ### Frontend tests and implementation
 

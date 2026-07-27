@@ -55,6 +55,9 @@ ALLOWLIST=(
   "internal/identity/admission.go"
   # The password-plaintext boundary itself. See check 4.
   "internal/identity/credential.go"
+  # Opaque session and CSRF plaintext cross only into the hardened cookie and
+  # no-store JSON body after their authoritative transaction has committed.
+  "internal/auth/session_response.go"
 )
 
 # The one production file permitted to read a password plaintext, the marker

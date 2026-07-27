@@ -70,8 +70,13 @@ func NewRouter(
 	h := &videoHandlers{svc: svc}
 
 	v1 := r.Group("/api/v1")
+	if routerConfig.sessions != nil {
+		mountSessionRoutes(v1, routerConfig.sessions)
+	}
 	if routerConfig.admission != nil {
-		mountAdmissionRoutes(v1, routerConfig.admission)
+		mountAdmissionRoutesWithBootstrap(
+			v1, routerConfig.admission, routerConfig.sessions == nil,
+		)
 	}
 
 	// Every protected group runs authentication → capability policy → ownership
@@ -113,14 +118,24 @@ func NewRouter(
 }
 
 func mountAdmissionRoutes(v1 *gin.RouterGroup, foundation *AdmissionFoundation) {
+	mountAdmissionRoutesWithBootstrap(v1, foundation, true)
+}
+
+func mountAdmissionRoutesWithBootstrap(
+	v1 *gin.RouterGroup,
+	foundation *AdmissionFoundation,
+	includeBootstrap bool,
+) {
 	handlers := &identityHandlers{
 		service: foundation.service, policies: foundation.policies,
 	}
-	v1.GET(
-		"/session/bootstrap",
-		foundation.requireRateDecision("session-bootstrap", nil),
-		foundation.security.bootstrapHandler(),
-	)
+	if includeBootstrap {
+		v1.GET(
+			"/session/bootstrap",
+			foundation.requireRateDecision("session-bootstrap", nil),
+			foundation.security.bootstrapHandler(),
+		)
+	}
 	v1.GET(
 		"/registration-policy-set",
 		foundation.security.requireAnonymous(),
@@ -152,6 +167,7 @@ func mountAdmissionRoutes(v1 *gin.RouterGroup, foundation *AdmissionFoundation) 
 
 type routerOptions struct {
 	admission *AdmissionFoundation
+	sessions  *SessionFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
@@ -171,6 +187,56 @@ func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
 		options.admission = foundation
 		return nil
 	}
+}
+
+// WithSessionFoundation mounts the anonymous login bootstrap and complete
+// server-managed session boundary.
+func WithSessionFoundation(foundation *SessionFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("session foundation is required")
+		}
+		if options.sessions != nil {
+			return fmt.Errorf("authenticated sessions are already configured")
+		}
+		options.sessions = foundation
+		return nil
+	}
+}
+
+func mountSessionRoutes(v1 *gin.RouterGroup, foundation *SessionFoundation) {
+	handlers := &sessionHandlers{
+		repository: foundation.repository, authenticator: foundation.authenticator,
+	}
+	v1.GET(
+		"/session/bootstrap",
+		foundation.requireSessionRateDecision("session-bootstrap", nil),
+		foundation.security.bootstrapHandler(),
+	)
+	v1.POST(
+		"/sessions",
+		strictJSONMiddleware(func() any { return &sessionLoginRequest{} }, sessionLoginBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireSessionRateDecision("sessions", loginRateIdentifier),
+		handlers.login,
+	)
+	v1.GET(
+		"/session",
+		foundation.requireSessionRateDecision("session-resolution", sessionRateIdentifier),
+		handlers.resolve,
+	)
+	v1.POST(
+		"/session-renewals",
+		foundation.requireSessionMutationSecurity(),
+		foundation.requireSessionRateDecision("session-renewals", sessionRateIdentifier),
+		handlers.renew,
+	)
+	v1.DELETE(
+		"/session",
+		foundation.requireSessionMutationSecurity(),
+		foundation.requireSessionRateDecision("session-logout", sessionRateIdentifier),
+		handlers.logout,
+	)
 }
 
 // newEngine composes the middleware chain and the fallback handlers, without
