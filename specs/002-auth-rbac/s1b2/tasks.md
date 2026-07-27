@@ -124,9 +124,20 @@ denial; compare every hidden login failure contract.
 ### Frontend tests and implementation
 
 - [ ] T030 [P] [US1] Add safe internal `returnTo` and memory-only session-store unit tests in
-  `frontend/src/lib/identity/session.test.ts` and `frontend/src/lib/identity/return-to.test.ts`
-- [ ] T031 [US1] Add bilingual login and session-state interaction tests in
-  `frontend/src/components/auth/login-form.test.tsx`
+  `frontend/src/lib/identity/session.test.ts` and `frontend/src/lib/identity/return-to.test.ts`,
+  run through Node's built-in `node:test` runner under a new `npm run test` script
+- [ ] T031 [US1] **Downgraded on 2026-07-31 by developer decision.** Bilingual login and
+  session-state interaction coverage is manual RTL/LTR, keyboard, failure, return, and logout
+  inspection per `quickstart.md`, recorded in `docs/launch/daily/2026-07-31.md`, instead of
+  automated tests in `frontend/src/components/auth/login-form.test.tsx`
+
+  The frontend has no component-test infrastructure: no runner, no test script, and no test file
+  existed before this slice, and S1B1 shipped its admission screens on the same manual-inspection
+  basis. Adding `vitest`, `@testing-library/react`, and `jsdom` would contradict this plan's
+  recorded no-new-dependency constitution gate and put framework setup on the critical path of a
+  Red-confidence day. T030's pure-TS logic — including the security-relevant `returnTo`
+  open-redirect boundary — is still covered automatically, because `node:test` needs no new runtime
+  dependency. Component-level test infrastructure is visible carryover, not a silent skip.
 - [ ] T032 [US1] Implement session API calls with `credentials: include`, no persistence, safe
   Problem parsing, and in-memory CSRF rehydration in `frontend/src/lib/api/identity.ts` and
   `frontend/src/lib/identity/session.ts`
@@ -156,8 +167,9 @@ PostgreSQL; browser storage and database canaries contain no plaintext credentia
 - [ ] T039 Synchronize implemented contracts and launch state in
   `specs/002-auth-rbac/s1b2/contracts/session-api.md`, `docs/launch/STATUS.md`,
   `docs/launch/SLICES.md`, and `docs/launch/daily/2026-07-31.md`
-- [ ] T040 Freeze and push the exact implementation range, verify hosted CI, and dispatch Claude
-  read-only review from a disposable detached worktree under D-033
+- [ ] T040 Freeze and push the exact implementation range, verify hosted CI, and dispatch `agy`
+  read-only review from a disposable detached worktree under D-035. Claude cannot review this range
+  because it authors part of it
 - [ ] T041 Resolve every critical/high review finding, rerun affected/full gates, record the final
   reviewed head and verdict, and close Day 9 only when all acceptance evidence exists
 
@@ -170,8 +182,9 @@ PostgreSQL; browser storage and database canaries contain no plaintext credentia
 - In Phase 3, T013–T015 fail first; T016–T018 make the domain tests pass. T019–T022 then fail before
   T023–T029 implement the HTTP boundary. T030–T031 fail before T032–T035 implement the UI.
 - Phase 4 begins only after the independent story test passes.
-- Tasks marked `[P]` touch independent files and can be reasoned about concurrently, but D-033 keeps
-  Codex as the sole builder and Claude as the later exact-range reviewer.
+- Tasks marked `[P]` touch independent files and can be reasoned about concurrently, but a single
+  builder owns the slice. Codex held that seat through T029 under D-033; Claude holds it from T030
+  under D-035, with `agy` as the later exact-range reviewer.
 
 ## Implementation Strategy
 

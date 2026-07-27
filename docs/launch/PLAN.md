@@ -3,7 +3,10 @@
 > Status: Active
 > Schedule: 2026-07-23 through 2026-08-15
 > Public go-live target: 2026-08-15, readiness-gated
-> Delivery team: Solo developer, Codex builder, Claude reviewer (see [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review))
+> Delivery team: Solo developer, Claude builder, `agy` reviewer for the active S1B2 handoff (see
+> [D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews)); the standing assignment is
+> Codex builder and Claude reviewer under
+> [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -35,31 +38,35 @@ the source-of-truth order in [the documentation index](../README.md#source-of-tr
 
 - **Developer/product owner:** approves product decisions, external commitments, accepted risks,
   scope changes, and the public go/no-go decision.
-- **Codex/builder:** plans and implements one bounded slice, runs its checks, documents evidence,
-  and corrects review findings.
-- **Claude/reviewer:** reviews the exact commit range without editing it, checking requirements,
-  security, privacy, authorization, idempotency, concurrency, tests, observability, and scope.
+- **Builder:** plans and implements one bounded slice, runs its checks, documents evidence, and
+  corrects review findings. Standing holder is Codex; **Claude holds this seat for the active S1B2
+  slice** under [D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews).
+- **Reviewer:** reviews the exact commit range without editing it, checking requirements, security,
+  privacy, authorization, idempotency, concurrency, tests, observability, and scope. Standing holder
+  is Claude; **`agy` holds this seat for the active S1B2 slice** under D-035.
 
 The reviewer must not review a moving target. Record the reviewed commit range in the daily record.
 Critical and high findings return to the builder and must be rechecked before the slice closes.
 
 The reviewer must not be the builder. Independence here is a model boundary, not a change of tone:
-Claude runs in a separate process against a disposable detached worktree at the frozen commit, with
-read-only tools and no access to the builder's reasoning. Codex reading back over its own diff is a
-self-check and is never sufficient to close a slice.
+the reviewer runs in a separate process against a disposable detached worktree at the frozen commit,
+with read-only tools and no access to the builder's reasoning. Any builder reading back over its own
+diff is a self-check and is never sufficient to close a slice — this applies to Claude reviewing a
+Claude-authored range exactly as it applies to Codex.
 
 Reviews use the fixed brief in
 [`review/REVIEW_BRIEF_TEMPLATE.md`](review/REVIEW_BRIEF_TEMPLATE.md) against a disposable detached
-worktree. Claude receives only read and shell-inspection tools; the live repository status and the
-review worktree are checked before the verdict is recorded. Two outcomes are not approvals and must
-never be recorded as one:
+worktree. The reviewer receives only read and shell-inspection tools; the live repository status and
+the review worktree are checked before the verdict is recorded. Two outcomes are not approvals and
+must never be recorded as one:
 
 - **TAINTED** — the reviewer modified something. The review is discarded, not corrected.
 - **UNAVAILABLE** — the run produced no retrievable verdict. Re-dispatch; do not infer a pass from
   silence.
 
-If Claude is unavailable, `agy` remains the approved fallback through
-`scripts/agy-review.sh <base>..<head>` under D-032's existing containment rules.
+`agy` reviews through `scripts/agy-review.sh <base>..<head>` under D-032's existing containment
+rules. It is the approved fallback whenever Claude is unavailable, and under D-035 it is the
+**assigned** reviewer for S1B2 because Claude authors that range.
 
 ### Work-in-progress rule
 
@@ -104,7 +111,7 @@ Return a brief containing:
 - today's single outcome;
 - `Must`, `Should`, and `Could` tasks in execution order;
 - timebox and stop condition for each `Must`;
-- Claude build assignment and agy review assignment;
+- the day's builder assignment and independent review assignment;
 - exact completion evidence and checks;
 - decisions or external blockers requiring the developer;
 - launch confidence and the reason for it.
@@ -115,9 +122,9 @@ new feature work forward.
 ### `Close the day`
 
 1. Run the checks required by today's acceptance evidence.
-2. Dispatch Claude's independent read-only review on the exact stable commit range from a
-   disposable detached worktree; use `scripts/agy-review.sh <base>..<head>` only when Claude is
-   unavailable.
+2. Dispatch the independent read-only review on the exact stable commit range from a disposable
+   detached worktree, using whichever model did not author the range. While D-035 is active that is
+   `scripts/agy-review.sh <base>..<head>`.
 3. Correct and retest all critical/high findings.
 4. Record completed, incomplete, blocked, and deliberately deferred work.
 5. Update [STATUS.md](STATUS.md), gate evidence, confidence, and tomorrow's first task.

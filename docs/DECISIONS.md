@@ -363,6 +363,10 @@ unedited as approved-baseline evidence.
 ## D-033 — Codex resumes building and Claude resumes review
 
 **Date:** 2026-07-25
+**Status:** Temporarily superseded by [D-035](#d-035--claude-builds-s1b2-and-agy-reviews) for the
+S1B2 handoff. The seat assignment below is paused, not retired; its frozen-range, disposable-worktree,
+and never-self-approve rules stay in force. The developer may explicitly restore this assignment when
+Codex quota returns.
 **Decision:** Restore the original launch seats when Codex quota becomes available: Codex owns
 planning, implementation, checks, evidence, and finding correction; Claude performs the independent
 read-only review of one frozen exact commit range. Claude reviews from a disposable detached
@@ -398,3 +402,35 @@ enough additional protection for the current modular-monolith architecture and l
 refresh tokens; local/session-storage credentials.
 **Source:** Developer approval during the schedule-advanced S1B2 start on 2026-07-26; see the
 [S1B2 authenticated-session design](superpowers/specs/2026-07-31-s1b2-authenticated-session-design.md).
+
+## D-035 — Claude builds S1B2 and agy reviews
+
+**Date:** 2026-07-31
+**Status:** Active. Temporarily supersedes [D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s
+seat assignment for the duration of the S1B2 handoff; D-033's frozen-range, disposable-worktree, and
+never-self-approve rules remain in force unchanged.
+**Decision:** Move the delivery seats one place for the remainder of the active S1B2 slice. Claude
+becomes the builder and planner — owning the remaining implementation, checks, evidence, and
+correction of review findings — and `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`) becomes the
+independent read-only reviewer under D-032's existing containment harness, dispatched through
+`scripts/agy-review.sh <base>..<head>` against
+[the review brief template](launch/review/REVIEW_BRIEF_TEMPLATE.md). Codex's completed S1B2 work and
+its exact commit history stay unchanged and are inherited, not rewritten: the handoff point is
+implementation head `24b0d21` plus the T013/T019–T029 backend work Codex left uncommitted in the
+working tree. Claude must not review the S1B2 range it now authors; that would be a self-check and
+cannot close the slice. The handoff is temporary. When Codex quota returns, the developer may
+explicitly restore D-033's assignment, and Claude returns to the reviewer seat.
+**Reason:** Codex exhausted its quota mid-S1B2, on 2026-07-31, with the backend complete but the
+frontend, verification, and review tasks outstanding, and 15 calendar days left before the
+readiness-gated August 15 launch at Red confidence. Leaving the builder seat empty stalls the
+critical path for an unknown duration. The property the workflow depends on is not which model
+builds, but that the reviewing model is not the authoring model — so the reviewer seat is refilled
+with a different model family rather than dropped, exactly as D-032 established when the same
+failure occurred during S1A.
+**Alternatives rejected:** Waiting for Codex quota with no credible reset date and no schedule slack;
+Claude building and also reviewing its own S1B2 range (removes the only external check on a
+Red-confidence launch); restarting S1B2 under Claude from a clean tree (discards working,
+test-backed implementation and burns critical-path hours); recording D-032 as simply reactivated
+(its `Status` field is already historical, and the launch record needs a dated entry naming the
+exact S1B2 handoff point).
+**Source:** Developer instruction on 2026-07-31 after Codex quota exhaustion during S1B2.

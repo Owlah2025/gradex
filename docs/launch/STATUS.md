@@ -1,7 +1,7 @@
 # Gradex Launch Status
 
 > Current schedule date: 2026-07-31 — advanced by user
-> Last repository reconciliation: 2026-07-31 — D-034 design head `5836b4a`, executable plan pending commit
+> Last repository reconciliation: 2026-07-31 — backend session HTTP boundary verified in working tree
 > Scheduled day: Day 9 — Authentication and RBAC, S1B2 Authenticated sessions, `IN_PROGRESS`
 > Target public go-live: 2026-08-15
 > Days remaining after today: 15 calendar days
@@ -77,10 +77,20 @@ Delivery roles returned on 2026-07-25 under
 builder/planner seat when its quota returned, Claude resumed independent read-only review, and `agy`
 remains the approved fallback.
 
+**Roles moved again mid-S1B2 on 2026-07-31 under
+[D-035](../DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews).** Codex exhausted its quota with
+the S1B2 backend complete but the frontend, verification, and review work outstanding, so Claude
+takes the builder/planner seat for the remainder of this slice and `agy` takes the independent
+read-only reviewer seat under D-032's containment harness. Codex's S1B2 work is inherited unchanged
+from implementation head `24b0d21` plus its uncommitted T013/T019–T029 backend tree. Claude may not
+review the S1B2 range it authors. The handoff is temporary: when Codex quota returns, the developer
+may explicitly restore D-033's assignment.
+
 Repository evidence at the latest reconciliation:
 
 - Current branch: `feature/002-authentication-rbac`.
-- Current synchronized HEAD/upstream is `d17a367`; reviewed S1B1 implementation head is `ad1b8f6`.
+- Current synchronized implementation HEAD/upstream is `24b0d21`; reviewed S1B1 implementation
+  head is `ad1b8f6`.
 - Final S1B1 independent review covered exact range `3af09bb..ad1b8f6`; hosted CI run
   `30210367125` passed Backend, Frontend, Migrations, Admission Integration, and Guards.
 - The frontend contains the landing-page implementation.
@@ -98,10 +108,12 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-Deliver S1B2 authenticated sessions. The explicit S1B1 security/transport carryovers and the
-PostgreSQL family/generation core are implemented with focused unit/race/vet, migration-lifecycle,
-and complete Identity integration evidence. Next, T019 begins the public Problem Details and HTTP
-cookie/CSRF contract before Arabic/English sign-in/session screens.
+Deliver S1B2 authenticated sessions. The S1B1 carryovers, PostgreSQL family/generation core, public
+Problem Details, hardened single-cookie boundary, origin/generation-bound CSRF enforcement,
+layered session rate decisions, login/resolution/renewal/logout routes, and real-session startup
+composition are implemented. Unit/race/vet, full Identity/HTTP PostgreSQL integration, exposure
+guard, and live bootstrap/policy checks pass. Next, T030 begins the memory-only frontend session
+store and safe `returnTo` tests before the bilingual sign-in/session screens.
 
 ## Milestones
 
@@ -144,10 +156,10 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | Replace placeholders and send the deferred outreach pack | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| S1B1 review carryovers precede staging/session expansion | Codex | Freeze the green carryover checkpoint, then begin S1B2 role-session configuration at T013 | July 31 | Focused configuration/composition/telemetry tests and PostgreSQL schema-floor proof pass; exact-range review remains at slice close |
+| S1B2 builder seat changed hands mid-slice (D-035) | Claude (builder), `agy` (reviewer) | Commit Codex's inherited backend tree on verified gates, then continue at T030 | July 31 | Inherited tree passes local gates before new work lands; exact-range `agy` review at slice close |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
-| S1B split moves S1C and S2 two days | Codex | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
-| S3–S8 cannot fit before the fixed August 8 runway | Developer + Codex | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
+| S1B split moves S1C and S2 two days | Current builder seat | Close S1B1–S1B3 on their bounded evidence, then S1C before S2 | August 2 | Four sub-slices close with exact-range review evidence |
+| S3–S8 cannot fit before the fixed August 8 runway | Developer + current builder seat | Reconcile the downstream calendar without silent compression or silently spending August 7 | July 31 | Dated S3–S8 and credible S9–S16 forecast |
 | Landing FAQ still promises fixed 150-day access | Developer + Codex | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -317,9 +329,13 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
 - August 15 is readiness-gated.
-- D-033: Codex is the primary builder and planner; Claude is the independent read-only reviewer.
-  Review uses a disposable detached worktree and frozen exact commit range. `agy` remains the
-  approved fallback under D-032. A `TAINTED` or `UNAVAILABLE` run is never recorded as approval.
+- D-033: Codex is the standing builder and planner; Claude is the standing independent read-only
+  reviewer. Review uses a disposable detached worktree and frozen exact commit range. A `TAINTED` or
+  `UNAVAILABLE` run is never recorded as approval.
+- D-035 (active, temporary): for the remainder of S1B2, Claude holds the builder/planner seat and
+  `agy` on `gemini-3.1-pro-high` holds the independent read-only reviewer seat, dispatched through
+  `scripts/agy-review.sh`. D-033's containment and never-self-approve rules are unchanged. The
+  developer restores D-033's seats explicitly when Codex quota returns.
 - D-034: browser authentication uses one opaque server-managed credential in a `Secure`,
   `HttpOnly`, host-only, `SameSite=Strict` cookie. Controlled renewal rotates the credential and
   CSRF token; confirmed reuse revokes the family. Older dual-token wording is superseded.
