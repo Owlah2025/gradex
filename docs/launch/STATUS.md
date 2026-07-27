@@ -10,6 +10,28 @@
 > Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
+## Legal and accounting exposure is accepted, not resolved — D-041
+
+On 2026-07-28 the developer deferred sourcing Kuwaiti counsel and an accountant to the final days and
+accepted the resulting exposure, recorded as
+[D-041](../DECISIONS.md#d-041--legal-and-accounting-outreach-deferred-to-the-final-days-the-resulting-exposure-is-accepted-rather-than-resolved).
+
+**This resolves nothing.** All 21 gates stay `OPEN` with the same owners, evidence requirements, and
+deadlines. Confidence stays **Red**: an accepted risk is not a resolution path.
+
+**Under [PLAN.md §8](PLAN.md#8-public-launch-criteria), criteria 1 and 6 will fail on August 15** —
+required gates are not `RESOLVED`, and policies and consent versions are not production-approved. §8
+says failure of any criterion is a no-go and does not authorise a reduced public launch unless the
+canonical MVP and gate register are explicitly revised and reapproved. **No such revision has been
+made.** The launch therefore proceeds against its own stated criteria, knowingly, and that is recorded
+rather than smoothed over.
+
+Technical gates are untouched: security, authorization, payment correctness, privacy, data integrity,
+and protected-media controls remain non-negotiable and are not part of this acceptance.
+
+**The Tap outreach is not blocked by D-041** — no named contact is required, it carries `LG-007`,
+`LG-008`, `LG-010`, and its webhook test vectors are a direct input to S7 on August 10.
+
 ## Why Red, as of 2026-07-28
 
 **There is no Kuwaiti counsel and no accountant engaged.** The founder confirmed it at D3 closeout.

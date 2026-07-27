@@ -689,3 +689,80 @@ evidence); deleting D-038/D-039 rather than superseding them (their evidence abo
 external lead times is still the live risk register).
 
 **Source:** Product-owner instruction on 2026-07-27, on repository evidence reconciled the same day.
+
+## D-041 — Legal and accounting outreach deferred to the final days; the resulting exposure is accepted rather than resolved
+
+**Date:** 2026-07-28
+**Status:** Active. Does **not** supersede
+[D-040](#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews);
+it records a risk acceptance beneath it.
+
+**Decision:** By product-owner instruction, sourcing Kuwaiti counsel and an accountant is deferred to
+the final days of the runway, and the August 15 public commercial launch proceeds without waiting for
+either. The developer accepts the resulting exposure explicitly.
+
+### What is being accepted
+
+Stated concretely, because a risk acceptance that does not name the risk accepts nothing:
+
+1. **Launching without a confirmed answer on Digital Commerce Law registration.** Whether a
+   Kuwait-based online course platform must register, and what lead time that registration carries,
+   is **unknown**. If it is required, it will not have been obtained. `LG-005`, `LG-006`.
+2. **Launching without counsel-reviewed bilingual Privacy, Terms, Refund, and checkout disclosures**,
+   and without a counsel-defined evidencing method for accepted policy versions. `LG-011`.
+3. **Launching without a counsel-reviewed Instructor agreement** covering content rights, revenue
+   share, payout and tax responsibility, warranties, takedown, and termination. `LG-020`.
+4. **Launching without accountant-approved tax, invoice, KWD rounding, and financial-record retention
+   treatment**, and without an approved platform-wide revenue-share percentage. `LG-001`, `LG-007`,
+   `LG-016`, `LG-017`.
+5. **Launch prices (`LG-012`, due August 11) will be set without the approved revenue share** they are
+   meant to be computed against.
+
+### What this decision does not do
+
+- **It does not resolve any launch gate.** [LAUNCH_GATES.md](LAUNCH_GATES.md) is unchanged: 21
+  entries, same owners, same evidence requirements, same deadlines, all `OPEN`. An accepted risk and a
+  satisfied requirement are different states, and collapsing them would destroy the only register the
+  go/no-go decision reads.
+- **It does not move launch confidence off Red.** Red is recorded against
+  [PLAN.md §5](launch/PLAN.md#5-launch-confidence) — a required gate lacking a credible resolution
+  path — and accepting a risk does not create a path. Confidence returns to Amber when counsel and an
+  accountant are engaged with dated actions, not when the gap is acknowledged.
+- **It does not amend [PLAN.md §8](launch/PLAN.md#8-public-launch-criteria).** Criterion 1 (all
+  required gates `RESOLVED` with evidence) and criterion 6 (policies and consent versions
+  production-approved) will **fail** on August 15 under this decision. §8 states that failure of any
+  criterion is a no-go and "does not authorize a reduced public launch unless the canonical MVP and
+  gate register are explicitly revised and reapproved." **That revision has not been made.** This
+  decision therefore records a launch proceeding against its own stated criteria, knowingly.
+- **It does not change the technical gates.** Security, authorization, payment correctness, privacy
+  enforcement, data integrity, and protected-media controls are unaffected and remain non-negotiable.
+  Nothing here weakens a control in the product.
+
+### What remains available and cheap
+
+The **Tap** outreach requires no named contact — Tap publishes a merchant-onboarding intake — and it
+carries `LG-007`, `LG-008`, and `LG-010`. It is roughly fifteen minutes of work and is **not** blocked
+by this decision. Deferring it specifically buys nothing, and item 4 of that message (webhook
+signature procedure and test vectors) is a direct input to S7 implementation on August 10 rather than
+a compliance artifact.
+
+### Alternatives that were on the table
+
+Presented to the developer on 2026-07-28 with their consequences, and not chosen:
+
+- **August 15 as a soft/internal launch** with public commerce disabled until legal clearance. The
+  code ships to the same date and the public go-live slips honestly.
+- **Deprioritise rather than abandon**, keeping counsel and accounting dated before the August 12 gate
+  deadline.
+- **Send Tap now** while deferring the other two.
+
+### Why this is recorded at this length
+
+The developer chose this with the consequences stated. That is their authority under
+[PLAN.md §2](launch/PLAN.md#responsibilities), which assigns accepted risks to the product owner. What
+the protocol does not permit is the exposure becoming invisible — a deferral absorbed into a schedule
+reads later as an oversight, and this was not an oversight. It is a decision, made on 2026-07-28, with
+the alternatives on the table.
+
+**Source:** Product-owner instruction on 2026-07-28, after the consequence for PLAN.md §8 was stated
+and the alternatives were offered.
