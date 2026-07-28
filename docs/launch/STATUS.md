@@ -7,7 +7,7 @@
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
-> Workflow: Claude plans with SpecKit → Antigravity implements → Claude reviews and accepts (D-040, standing)
+> Workflow: Codex specifies with SpecKit → Antigravity implements with SpecKit → Claude independently reviews and accepts (D-042, standing from S2 Phase 5)
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## Legal and accounting exposure is accepted, not resolved — D-041
@@ -765,7 +765,8 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Start D5 with Phase 5 — S2 revision integrity — as a clean, independently reviewable range.**
+**Codex specifies D5 Phase 5 — S2 revision integrity — then Antigravity implements it as a clean,
+independently reviewable range and Claude reviews the frozen range.**
 Phase 5 is a separate P1 risk surface and gets a fresh range, a fresh brief, and fresh attention
 rather than being folded into the already-reviewed Phase 4 range.
 

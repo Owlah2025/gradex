@@ -1,7 +1,8 @@
 # August 15 Execution Plan
 
 > Status: Active
-> Authority: [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+> Authority: [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+> workflow reassigned by [D-042](../DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews)
 > Created: 2026-07-27 (real calendar) — 19 calendar days to launch
 > Supersedes the calendar in [PLAN.md §6](PLAN.md#6-three-week-delivery-calendar) and the `TBD` rows in
 > [SLICES.md §2](SLICES.md#2-slice-order)
@@ -43,8 +44,9 @@ date. The schedule-day numbering ends at Day 11.
 ## 2. Scope matrix
 
 Category **A** = Launch Critical, **B** = Manual but Supported, **C** = Post-Launch.
-Effort is focused Antigravity implementation hours under the D-040 workflow, excluding Claude
-planning and review.
+Effort estimates are implementation hours. D1–D4 retain their historical D-040 assignment; from D5,
+Codex specifies with SpecKit, Antigravity implements with SpecKit, and Claude independently reviews
+under D-042.
 
 ### 2.1 Launch-critical slices
 
@@ -124,32 +126,32 @@ engineering time.
 
 ## 3. Nineteen-day execution plan
 
-Six working days per week; Sundays August 2 and August 9 are rest days. Claude and Antigravity work
-concurrently: Claude never plans a slice whose contracts overlap the slice Antigravity is currently
-implementing.
+Six working days per week; Sundays August 2 and August 9 are rest days. D1–D4 are historical under
+D-040. From D5, Codex owns specification, Antigravity owns implementation, and Claude reviews only
+frozen exact ranges, so the never-self-approve rule continues to apply.
 
-| Day | Date | Antigravity implements | Claude plans / reviews |
+| Day | Date | Implementation | Planning / review |
 |---|---|---|---|
 | D1 | Jul 27 Mon | **S1C Musts 3–4**: staff invitation and initial-password setup; suspension and reinstatement with three independent proofs | Reality check, D-040, freeze S1C spec/plan, issue handoff prompt |
 | D2 | Jul 28 Tue | **S1C Musts 5–6**: full authorization matrix mechanically tied to the router; bilingual staff screens | Freeze **S2** spec and plan. **Founder sends the entire August 6 outreach pack today** |
 | D3 | Jul 29 Wed | S1C remediation; begin S2 | **Tier 3 review of S1C**; accept or reject; freeze **S3** plan |
 | D4 | Jul 30 Thu | **S2**: authoring, submission/revision, Admin review lifecycle, private-draft protection, Admin-only pricing with audit | Freeze **S4** spec and plan (largest slice, plan it early) |
-| D5 | Jul 31 Fri | S2 completion and remediation | **Tier 2 review of S2**; accept |
-| D6 | Aug 1 Sat | **S3**: public catalogue, Course detail, bilingual responsive shell, RTL/LTR, locale persistence | **Tier 1 review of S3** at end of day; freeze **S5** plan |
+| D5 | Jul 31 Fri | **Antigravity:** S2 completion and remediation through `speckit.implement` | **Codex:** specify through `speckit.specify`; **Claude:** Tier 2 review of frozen S2 range; accept or reject |
+| D6 | Aug 1 Sat | **Antigravity:** **S3**: public catalogue, Course detail, bilingual responsive shell, RTL/LTR, locale persistence | **Codex:** freeze **S5** specification; **Claude:** Tier 1 review of frozen S3 range |
 | — | Aug 2 Sun | Rest | Rest |
-| D7 | Aug 3 Mon | **S4 part 1**: upload, quarantine, scanner adapter, transcode pipeline, Asset Versions | Freeze **S6** spec and plan |
-| D8 | Aug 4 Tue | **S4 part 2**: short-lived signed media access, protected downloads, **Entitlement evaluation** | Freeze **S7** spec and plan |
-| D9 | Aug 5 Wed | S4 remediation; begin **S5** protected learning | **Tier 3 review of S4** — signed access and entitlement evaluation; accept |
-| D10 | Aug 6 Thu | **S5**: HLS playback through signed access, per-Lesson completion, resume position | **Tier 3 review of S5**; freeze **S8-reduced** and **S10-reduced** plans. Outreach responses chased |
-| D11 | Aug 7 Fri | **S12**: staging and production environments, deploy pipeline with migrations, secrets, HTTPS, health checks, monitoring and alerting, **backups with a tested restore**. **First staging deploy of everything through S5** | **Tier 2 review of S12**; verify the restore actually restored |
-| D12 | Aug 8 Sat | **S6**: Orders, checkout initiation against Tap, coupons with capacity reservation, expiry snapshot | Review S6 contracts against `LG-008`/`LG-010` responses |
+| D7 | Aug 3 Mon | **Antigravity:** **S4 part 1**: upload, quarantine, scanner adapter, transcode pipeline, Asset Versions | **Codex:** freeze **S6** specification |
+| D8 | Aug 4 Tue | **Antigravity:** **S4 part 2**: short-lived signed media access, protected downloads, **Entitlement evaluation** | **Codex:** freeze **S7** specification |
+| D9 | Aug 5 Wed | **Antigravity:** S4 remediation; begin **S5** protected learning | **Claude:** Tier 3 review of frozen S4 range; accept or reject |
+| D10 | Aug 6 Thu | **Antigravity:** **S5**: HLS playback through signed access, per-Lesson completion, resume position | **Claude:** Tier 3 review of frozen S5 range; **Codex:** freeze **S8-reduced** and **S10-reduced** specifications. Outreach responses chased |
+| D11 | Aug 7 Fri | **Antigravity:** **S12**: staging and production environments, deploy pipeline with migrations, secrets, HTTPS, health checks, monitoring and alerting, **backups with a tested restore**. **First staging deploy of everything through S5** | **Claude:** Tier 2 review of frozen S12 range; verify the restore actually restored |
+| D12 | Aug 8 Sat | **Antigravity:** **S6**: Orders, checkout initiation against Tap, coupons with capacity reservation, expiry snapshot | **Claude:** review frozen S6 contracts against `LG-008`/`LG-010` responses |
 | — | Aug 9 Sun | Rest | Rest |
-| D13 | Aug 10 Mon | **S7**: callback verification, idempotency and replay, order/payment state integrity, **Entitlement creation**, refunds | **Tier 3 review of S6**; accept |
-| D14 | Aug 11 Tue | S7 remediation. **Float day** — absorbs any overrun from D1–D13 | **Tier 3 review of S7** — the deepest review of the release; accept |
-| D15 | Aug 12 Wed | **S8-reduced** admin support operations; **S10-reduced** bilingual legal and support pages; launch prices entered through the audited Admin path (`LG-012`) | **Tier 2 review of S8/S10**; accept. Launch-gate audit against every `LG-` row |
-| D16 | Aug 13 Thu | **S11**: end-to-end critical-journey tests, error states and recovery paths; **S13** hardening fixes | **Tier 3 security and quality gate** across every critical boundary: negative cases, replay, duplication, stale state, races, bypass attempts |
-| D17 | Aug 14 Fri | **S14** staging acceptance; **S15 production rehearsal**: full deploy, smoke, restore, rollback drill | Gate audit sign-off; go/no-go criteria evaluated against evidence |
-| D18 | **Aug 15 Sat** | **S16**: production cutover, smoke tests, monitoring watch | **Go/no-go decision**; accept the release or invoke rollback |
+| D13 | Aug 10 Mon | **Antigravity:** **S7**: callback verification, idempotency and replay, order/payment state integrity, **Entitlement creation**, refunds | **Claude:** Tier 3 review of frozen S6 range; accept or reject |
+| D14 | Aug 11 Tue | **Antigravity:** S7 remediation. **Float day** — absorbs any overrun from D1–D13 | **Claude:** Tier 3 review of frozen S7 range — the deepest release review; accept or reject |
+| D15 | Aug 12 Wed | **Antigravity:** **S8-reduced** admin support operations; **S10-reduced** bilingual legal and support pages; launch prices entered through the audited Admin path (`LG-012`) | **Claude:** Tier 2 review of frozen S8/S10 ranges. Launch-gate audit against every `LG-` row |
+| D16 | Aug 13 Thu | **Antigravity:** **S11** end-to-end critical-journey tests, error states and recovery paths; **S13** hardening fixes | **Claude:** Tier 3 security and quality gate across every critical boundary: negative cases, replay, duplication, stale state, races, bypass attempts |
+| D17 | Aug 14 Fri | **Antigravity:** **S14** staging acceptance; **S15** production rehearsal: full deploy, smoke, restore, rollback drill | **Claude:** gate audit sign-off; go/no-go criteria evaluated against evidence |
+| D18 | **Aug 15 Sat** | **Antigravity:** **S16** production cutover, smoke tests, monitoring watch | **Claude:** go/no-go decision; accept the release or invoke rollback |
 
 ### 3.1 Rules this calendar obeys
 

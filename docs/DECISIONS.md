@@ -766,3 +766,30 @@ the alternatives on the table.
 
 **Source:** Product-owner instruction on 2026-07-28, after the consequence for PLAN.md §8 was stated
 and the alternatives were offered.
+
+## D-042 — Codex plans, Antigravity implements, and Claude independently reviews
+
+**Date:** 2026-07-28
+**Status:** Active from S2 Phase 5 onward. Supersedes the **workflow and seat assignment only** in
+[D-040](#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
+D-040's August 15 target, scope classification, quality boundaries, and all other decisions remain
+in force.
+
+**Decision:** Codex owns feature planning and specification through SpecKit, beginning with
+`speckit.specify`. Antigravity (`agy`) owns implementation and correction of implementation findings
+through `speckit.implement`. Claude remains the independent read-only reviewer and acceptance
+authority for each frozen range.
+
+The active D4 record and its closed S2 Phase 1–4 evidence remain historical and are not reassigned.
+The first work under this decision is S2 Phase 5, revision integrity.
+
+**Review boundary:** Claude must review one exact frozen commit range from a disposable detached
+worktree, without modifying either that worktree or the live repository. Antigravity may not approve
+its own work, and Codex's planning check is not acceptance. An unavailable or tainted review is not
+an approval; critical and high findings return to Antigravity for correction and re-review.
+
+**Reason:** The product owner explicitly assigned the three seats and their Speckit stages, retaining
+Claude's independent review boundary.
+
+**Source:** Product-owner instructions on 2026-07-28: Codex is the planner using `speckit.specify`,
+Antigravity uses `speckit.implement`, and Claude reviews.
