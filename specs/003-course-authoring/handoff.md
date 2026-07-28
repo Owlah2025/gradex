@@ -16,13 +16,19 @@ repair, or approval of Claude-authored code
 
 ## Builder result
 
-T032–T038 are implemented and locally green. The exact range is frozen only after the implementation
-commit; the reviewer brief must substitute the immutable start and end SHAs and must reject a moving
-branch name.
+T032–T038 are complete at reviewed head `3b6d752`. The accepted exact range is
+`0811ca5..3b6d752`; branch names are not review evidence.
 
 The builder ran the full backend build/vet/unit-race/integration-race suite, including real
 PostgreSQL; the frontend typecheck/lint/test/clean-build suite; all six restored mutations; and the
-production composition-root route sweep. Hosted CI remains a closure gate.
+production composition-root route sweep.
+
+Claude Opus rejected `0811ca5..00fa48c` with one high finding about missing behavioral
+mutation-security evidence. Codex added the production-router matrix at `3b6d752`; Claude then
+returned `APPROVE WITH FINDINGS` with 0 critical, 0 high, 3 medium, and 8 low findings on the
+complete corrected range. Both detached review worktrees remained clean. Hosted CI run
+[30370633192](https://github.com/Owlah2025/gradex/actions/runs/30370633192) passed all five jobs on
+the exact reviewed head.
 
 ## Review protocol
 

@@ -2,8 +2,8 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D5 implemented locally, awaiting frozen review range)**; D5 planning remains frozen at `3e1809d`; application baseline remains `08b8857`
-> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS` (implemented locally, awaiting review).** T001–T031 retain their reviewed closure evidence; T032–T038 are implemented and locally green under D-043. Claude review and hosted CI remain closure gates. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
+> Last repository reconciliation: **2026-07-28 at reviewed D5 implementation head `3b6d752`**; D5 planning freeze `3e1809d`; prior application baseline `08b8857`
+> Active slice: **none. S2 D5 Phase 5 revision integrity is `CLOSED`.** T032–T038 closed on Claude Opus verdict `APPROVE WITH FINDINGS` with 0 critical/high findings, and hosted CI run `30370633192` passed all five jobs on exact reviewed head `3b6d752`. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `CLOSED`; T039–T064 remain unstarted
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
@@ -250,14 +250,14 @@ claims merely because they appear here.
 
 ## Active Outcome
 
-**S1C is `CLOSED` at reviewed head `edd6508`. S1 is complete.** All eleven acceptance items are
-satisfied, the full authorization matrix is derived from the live router rather than hand-maintained,
-and the staff surface now matches its frozen §7 contract exactly. **S2 implementation is unblocked**
-and starts from the frozen plan in
-[specs/003-course-authoring/](../../specs/003-course-authoring/plan.md).
+**S2 D5 Phase 5 revision integrity is `CLOSED` at reviewed head `3b6d752`.** T032–T038 added the
+schema-10 revision model, explicit candidate mutation authority, stable Section/Lesson identities,
+captured-pointer live reads, atomic approval/rejection evidence, the exact four PostgreSQL races,
+and six restored mutations. Claude Opus accepted exact range `0811ca5..3b6d752` with 0 critical/high
+findings, and hosted CI run `30370633192` passed all five jobs on that head.
 
-**S2 planning is complete and frozen** — spec, plan, research, data model, three API contracts, 64
-tasks, and the Antigravity handoff brief. No S2 implementation commit exists yet.
+S2 remains complete only through Phase 5; T039–T064 are unchecked. No later S2 phase or new slice
+starts implicitly.
 
 Historical, retained for the record: S1C was rejected three times before closing. The first rejection
 followed Antigravity reviewing its own range and returning `APPROVE — 0 critical` while missing three
@@ -765,15 +765,13 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Freeze Codex's completed S2 D5 T032–T038 implementation, then have Claude independently review
-that one exact range under D-043; hosted CI must pass on the reviewed head before closure.**
+**D5 is closed. Do not start T039 or another slice implicitly. Use `Replan` or `Start the day` to
+select and freeze the next bounded slice.**
 
-Codex's specification and implementation seats are complete for this boundary. The existing
-[S2 tasks](../../specs/003-course-authoring/tasks.md) reconcile T001–T031 with exact evidence and
-record T032–T038 complete for D5. The bounded
-[D5 handoff](../../specs/003-course-authoring/handoff.md) prohibits T039+, separate feature
-creation, S2 regeneration, pricing, lifecycle/emergency controls, taxonomy administration, search,
-frontend work, and unrelated refactoring.
+The [D5 record](daily/2026-07-28-d5.md) carries the exact local, mutation, independent-review, and
+hosted-CI evidence. The [S2 tasks](../../specs/003-course-authoring/tasks.md) retain T039–T064
+unchecked; pricing, lifecycle/emergency controls, taxonomy administration, search, and unrelated
+frontend work did not enter D5.
 
 The non-engineering item below is **deferred under D-041**, not forgotten:
 
@@ -785,11 +783,6 @@ the launch.
 
 **Then send the Tap message**, which needs no named contact and carries three of the seven
 cutover-blockers.
-
-The implementation stop condition is a buildable, uncommitted T032–T038 result with all named real
-PostgreSQL races, rollback/dependency/clone/identity proofs, six restored mutations, production
-wiring/security sweep, and complete local gates green. Claude reviews the Codex-authored range from
-a disposable detached worktree and does not implement.
 
 **S1B and S1C are not reopened** unless a concrete defect surfaces in them. A suspicion is not a
 defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that closed

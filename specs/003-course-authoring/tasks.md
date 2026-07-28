@@ -258,8 +258,11 @@ one frozen exact range. No T039+ file or behavior may enter the range.
 - Backend build, vet, unit race, and full integration race gates passed. Frontend typecheck, lint,
   tests, and clean production build passed. Documentation and exposure guards remain the final
   pre-commit gate.
-- T039–T064 remain unchecked. Hosted CI and Claude's independent verdict are closure gates, not
-  implementation-completion markers.
+- Claude Opus accepted exact range `0811ca5..3b6d752` with 0 critical/high findings after one
+  rejected round and one Codex-authored security-evidence correction. Hosted CI run
+  [30370633192](https://github.com/Owlah2025/gradex/actions/runs/30370633192) passed all five jobs on
+  exact reviewed head `3b6d752`.
+- T039–T064 remain unchecked.
 
 ## Phase 6 — User Story 4: Admin pricing (P2)
 
