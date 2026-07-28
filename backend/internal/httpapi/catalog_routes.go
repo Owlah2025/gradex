@@ -127,5 +127,29 @@ func mountCatalogRoutes(
 		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/preview/:lessonId", reviewH.previewLesson)
 	}
 
+	pricingH := &adminPricingHandlers{
+		repo: foundation.repository,
+	}
+
+	adminPricingGetGroup := v1.Group("/admin/courses/:id")
+	adminPricingGetGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPricing),
+	)
+	{
+		adminPricingGetGroup.GET("/price-history", pricingH.getCoursePriceHistory)
+	}
+
+	adminPricingMutationGroup := v1.Group("/admin/courses/:id")
+	adminPricingMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPricing),
+	)
+	{
+		adminPricingMutationGroup.PUT("/price", pricingH.setCoursePrice)
+		adminPricingMutationGroup.PUT("/sections/:sectionId/price", pricingH.setSectionPrice)
+	}
+
 	return nil
 }

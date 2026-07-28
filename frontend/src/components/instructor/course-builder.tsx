@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { ServerPricingPanel } from "./server-pricing-panel";
 
 interface Section {
   id: string;
@@ -88,14 +89,12 @@ export function CourseBuilder() {
 
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(courses[0]);
 
-  // Form states for creating a new course
   const [newTitleAr, setNewTitleAr] = useState("");
   const [newTitleEn, setNewTitleEn] = useState("");
   const [newDescAr, setNewDescAr] = useState("");
   const [newDescEn, setNewDescEn] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
-  // Section/Lesson addition state
   const [secTitleAr, setSecTitleAr] = useState("");
   const [secTitleEn, setSecTitleEn] = useState("");
 
@@ -168,6 +167,8 @@ export function CourseBuilder() {
         </button>
       </header>
 
+      <ServerPricingPanel />
+
       {isCreating && (
         <form
           onSubmit={handleCreateCourse}
@@ -234,10 +235,9 @@ export function CourseBuilder() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Left side: List of owned courses */}
         <div className="space-y-3">
           <h2 className="text-md font-semibold text-slate-700 dark:text-slate-300">
-            {isAr ? "الدورات الخاصة بي" : "My Courses"}
+            {isAr ? "الدورات المحلية (نموذج إعداد)" : "Local Demo Drafts"}
           </h2>
           <div className="space-y-2">
             {courses.map((c) => (
@@ -266,7 +266,6 @@ export function CourseBuilder() {
           </div>
         </div>
 
-        {/* Right side: Detailed Course & Section Structure Editor */}
         {selectedCourse ? (
           <div className="md:col-span-2 space-y-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
             <div className="flex items-center justify-between border-b pb-4">
@@ -278,9 +277,9 @@ export function CourseBuilder() {
                   {isAr ? selectedCourse.title_ar : selectedCourse.title_en}
                 </h2>
               </div>
-              <div className="text-xs px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 font-medium">
+              <span className="text-xs px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 font-medium">
                 {isAr ? "حالة الدورة: مسودة خاصة" : "Status: Private Draft"}
-              </div>
+              </span>
             </div>
 
             <div className="space-y-4">
@@ -341,7 +340,6 @@ export function CourseBuilder() {
                 </div>
               )}
 
-              {/* Add Section Form */}
               <form onSubmit={handleAddSection} className="flex gap-2 pt-2">
                 <input
                   type="text"

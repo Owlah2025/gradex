@@ -519,8 +519,16 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 	query := `
 		SELECT c.id, c.owner_account_id, c.lifecycle, c.live_revision_id,
 		       c.access_suspended_at, c.access_suspension_reason, c.retired_at,
+		       cpc.new_value_minor_units AS price_minor_units,
 		       c.created_at, c.updated_at
 		FROM courses c
+		LEFT JOIN LATERAL (
+			SELECT new_value_minor_units
+			FROM course_price_changes
+			WHERE course_id = c.id AND section_id IS NULL
+			ORDER BY changed_at DESC, id DESC
+			LIMIT 1
+		) cpc ON TRUE
 		WHERE c.owner_account_id = $1::uuid
 		ORDER BY c.updated_at DESC
 	`
@@ -537,6 +545,7 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 		if err := rows.Scan(
 			&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
 			&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
+			&c.PriceMinorUnits,
 			&c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning course: %w", err)
@@ -637,6 +646,19 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 		return nil, fmt.Errorf("getting course: %w", err)
 	}
 
+	var coursePrice *int64
+	err = r.pool.QueryRow(ctx, `
+		SELECT new_value_minor_units
+		FROM course_price_changes
+		WHERE course_id = $1::uuid AND section_id IS NULL
+		ORDER BY changed_at DESC, id DESC
+		LIMIT 1
+	`, courseID).Scan(&coursePrice)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("getting course price: %w", err)
+	}
+	c.PriceMinorUnits = coursePrice
+
 	if c.LiveRevisionID != nil && *c.LiveRevisionID != "" {
 		liveRevisionID := *c.LiveRevisionID
 		liveRev, err := r.loadRevisionGraphByID(ctx, liveRevisionID)
@@ -681,10 +703,18 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	}
 
 	secQuery := `
-		SELECT id, revision_id, course_id, section_identity_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
-		FROM course_sections
-		WHERE revision_id = $1::uuid
-		ORDER BY position ASC
+		SELECT cs.id, cs.revision_id, cs.course_id, cs.section_identity_id, cs.title_ar, cs.title_en, cs.position,
+		       cpc.new_value_minor_units AS price_minor_units, cs.created_at, cs.updated_at
+		FROM course_sections cs
+		LEFT JOIN LATERAL (
+			SELECT new_value_minor_units
+			FROM course_price_changes
+			WHERE course_id = cs.course_id AND section_id = cs.section_identity_id
+			ORDER BY changed_at DESC, id DESC
+			LIMIT 1
+		) cpc ON TRUE
+		WHERE cs.revision_id = $1::uuid
+		ORDER BY cs.position ASC
 	`
 	rows, err := q.Query(ctx, secQuery, rev.ID)
 	if err != nil {

@@ -324,6 +324,10 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/approve":           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/approve", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes":   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId", Class: ClassCapabilityProtected},
+
+	"PUT /api/v1/admin/courses/:id/price":                     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/price", Class: ClassCapabilityProtected},
+	"PUT /api/v1/admin/courses/:id/sections/:sectionId/price": {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/sections/:sectionId/price", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/courses/:id/price-history":             {Method: http.MethodGet, Path: "/api/v1/admin/courses/:id/price-history", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}

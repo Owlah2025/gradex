@@ -265,23 +265,23 @@ one frozen exact range. No T039+ file or behavior may enter the range.
   rejected round and one Codex-authored security-evidence correction. Hosted CI run
   [30370633192](https://github.com/Owlah2025/gradex/actions/runs/30370633192) passed all five jobs on
   exact reviewed head `3b6d752`.
-- T039–T064 remain unchecked.
+- At D5 closure, T039–T064 remained unchecked.
 
 ## Phase 6 — User Story 4: Admin pricing (P2)
 
-- [ ] T039 [P] [US4] Implement append-only price changes in `backend/internal/catalog/pricing.go`;
+- [x] T039 [P] [US4] Implement append-only price changes in `backend/internal/catalog/pricing.go`;
       current Course or stable-Section price is derived from the latest record, never a mutable
       duplicate; lock the Course, verify same-Course stable Section membership, derive `old` inside
       the transaction, append the price and mandatory audit evidence atomically, and expose a
       read-only current-price/history query
-- [ ] T040 [US4] Implement Course and Section price routes per
+- [x] T040 [US4] Implement Course and Section price routes per
       [contracts/catalog-admin-api.md](contracts/catalog-admin-api.md) through the production
       composition root, with Origin/CSRF before `CATALOG_PRICING`; Instructor has **no** write route
       and sees current prices read-only on owned-Course reads
-- [ ] T041 [US4] Real-PostgreSQL/API evidence: concurrent changes serialize with an unbroken
+- [x] T041 [US4] Real-PostgreSQL/API evidence: concurrent changes serialize with an unbroken
       old→new chain; cross-Course Section IDs are refused; Instructor direct writes are refused; and
       counts/content of every existing commerce or access fixture remain unchanged (FR-026–FR-029)
-- [ ] T042 [P] [US4] Add bilingual Admin pricing controls and audit history to the existing Admin
+- [x] T042 [P] [US4] Add bilingual Admin pricing controls and audit history to the existing Admin
       catalogue surface, plus read-only Course/Section price visibility in the Instructor builder
 
 ## Phase 7 — User Story 5: Lifecycle and emergency control (P2)

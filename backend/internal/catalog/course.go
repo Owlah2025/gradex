@@ -44,6 +44,7 @@ type Course struct {
 	UpdatedAt              time.Time       `json:"updated_at"`
 	EditableRevision       *CourseRevision `json:"editable_revision,omitempty"`
 	LiveRevision           *CourseRevision `json:"live_revision,omitempty"`
+	PriceMinorUnits        *int64          `json:"price_minor_units,omitempty"`
 }
 
 func (c *Course) ValidateInvariants() error {

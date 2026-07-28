@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { PricingModal } from "./pricing-modal";
 
 export interface ReviewQueueItem {
   course_id: string;
@@ -39,6 +40,10 @@ export function ReviewQueue() {
   const [reasonError, setReasonError] = useState("");
   const [actionSuccess, setActionSuccess] = useState("");
 
+  const [launcherCourseID, setLauncherCourseID] = useState("");
+  const [launcherError, setLauncherError] = useState("");
+  const [pricingCourseID, setPricingCourseID] = useState<string | null>(null);
+
   const handleApprove = (courseId: string) => {
     setItems((prev) => prev.filter((i) => i.course_id !== courseId));
     setActionSuccess(isAr ? "تم نشر الدورة بنجاح" : "Course published successfully");
@@ -67,22 +72,62 @@ export function ReviewQueue() {
     }
   };
 
+  const handleLaunchPricing = (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = launcherCourseID.trim();
+    if (!id) {
+      setLauncherError(isAr ? "معرف الدورة (UUID) إجباري" : "Course UUID is required");
+      return;
+    }
+    setLauncherError("");
+    setPricingCourseID(id);
+  };
+
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
       <div className="flex justify-between items-center border-b pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-            {isAr ? "قائمة مراجعة الدورات" : "Course Review Queue"}
+            {isAr ? "قائمة مراجعة وتسعير الدورات" : "Course Review & Pricing Admin"}
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {isAr
-              ? "مراجعة الدورات المقدمة والنشر أو طلب التعديلات"
-              : "Review submitted courses and publish or request changes"}
+              ? "إدارة مراجعة الدورات، تحديد أسعار الدورات والأقسام، وعرض سجل التغييرات التاريخي"
+              : "Review submitted courses, manage Course/Section pricing, and inspect audit history"}
           </p>
         </div>
         <span className="px-3 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 rounded-full text-sm font-medium">
           {items.length} {isAr ? "معلقة" : "Pending"}
         </span>
+      </div>
+
+      <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          {isAr ? "فتح أدوات التسعير لدورة محددة (معرف UUID)" : "Open Pricing Controls for Course UUID"}
+        </h2>
+        <form onSubmit={handleLaunchPricing} className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1">
+            <input
+              type="text"
+              value={launcherCourseID}
+              onChange={(e) => {
+                setLauncherCourseID(e.target.value);
+                setLauncherError("");
+              }}
+              placeholder={
+                isAr ? "أدخل معرف الدورة (مثال: 00000000-0000-0000-0000-000000000000)" : "Enter Course UUID (e.g. 00000000-0000-0000-0000-000000000000)"
+              }
+              className="w-full p-2.5 border rounded-lg text-xs bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100"
+            />
+            {launcherError && <p className="text-xs text-rose-600 font-medium mt-1">{launcherError}</p>}
+          </div>
+          <button
+            type="submit"
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition"
+          >
+            {isAr ? "فتح إدارة التسعير" : "Manage Pricing"}
+          </button>
+        </form>
       </div>
 
       {actionSuccess && (
@@ -130,7 +175,7 @@ export function ReviewQueue() {
                     {item.submitted_at ? new Date(item.submitted_at).toLocaleDateString() : "-"}
                   </td>
                   <td className="p-3">
-                    <div className="flex justify-center space-x-2 rtl:space-x-reverse">
+                    <div className="flex justify-center items-center gap-2">
                       <button
                         onClick={() => handleApprove(item.course_id)}
                         className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
@@ -179,7 +224,7 @@ export function ReviewQueue() {
               />
               {reasonError && <p className="text-xs text-rose-600 font-medium">{reasonError}</p>}
             </div>
-            <div className="flex justify-end space-x-2 rtl:space-x-reverse pt-2 border-t">
+            <div className="flex justify-end gap-2 pt-2 border-t">
               <button
                 onClick={() => setShowRejectModal(false)}
                 className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 rounded-lg text-sm font-medium"
@@ -195,6 +240,13 @@ export function ReviewQueue() {
             </div>
           </div>
         </div>
+      )}
+
+      {pricingCourseID && (
+        <PricingModal
+          courseID={pricingCourseID}
+          onClose={() => setPricingCourseID(null)}
+        />
       )}
     </div>
   );

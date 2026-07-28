@@ -10,6 +10,6 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/lib/identity/**/*.ts"],
+  "include": ["src/lib/identity/**/*.ts", "src/lib/formatters/**/*.ts", "src/lib/api/**/*.ts"],
   "exclude": ["node_modules"]
 }

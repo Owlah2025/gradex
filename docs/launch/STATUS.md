@@ -2,15 +2,17 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 at reviewed D5 implementation head `3b6d752`**; D5 planning freeze `3e1809d`; prior application baseline `08b8857`
-> Active slice: **S2 whole-feature completion planning.** D5 remains `CLOSED`; T039–T064 are the
-> frozen remaining program under D-044. Codex plans/orchestrates, Antigravity implements five
+> Last repository reconciliation: **2026-07-28 after local verification of pricing T039–T042**;
+> prior independently reviewed D5 head `3b6d752`; D5 planning freeze `3e1809d`
+> Active slice: **S2 whole-feature completion.** Pricing T039–T042 is complete and locally verified;
+> T043–T064 remain frozen under D-044. Codex orchestrates/verifies, Antigravity implements the
 > sequential queues on `gemini-3.6-flash-high`, and Claude reviews once only after full convergence
-> and hosted CI
+> and hosted CI.
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
-> Workflow for S2 D5: Codex specifies and implements with SpecKit → Claude independently reviews and accepts (D-043)
+> Workflow for remaining S2: Codex orchestrates/verifies → Antigravity implements → Claude reviews
+> the whole feature once after convergence (D-044)
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## Legal and accounting exposure is accepted, not resolved — D-041
@@ -259,8 +261,10 @@ captured-pointer live reads, atomic approval/rejection evidence, the exact four 
 and six restored mutations. Claude Opus accepted exact range `0811ca5..3b6d752` with 0 critical/high
 findings, and hosted CI run `30370633192` passed all five jobs on that head.
 
-S2 remains complete only through Phase 5; T039–T064 are unchecked. No later S2 phase or new slice
-starts implicitly.
+S2 is complete through Phase 6. Pricing T039–T042 passed the full local backend unit/integration race
+suites, frontend typecheck/lint/tests/clean build, and both repository guards. Under D-044 this queue
+does not receive an intermediate Claude review; whole-feature acceptance and hosted CI remain due
+after T064. T043–T064 are unchecked, and no new slice starts implicitly.
 
 Historical, retained for the record: S1C was rejected three times before closing. The first rejection
 followed Antigravity reviewing its own range and returning `APPROVE — 0 critical` while missing three
@@ -768,13 +772,13 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**S2 T039–T064 are selected under D-044.** Begin with the SpecKit planning freeze, then implement
-pricing T039–T042. Do not start S3 or ask Claude to review an intermediate queue.
+**Implement S2 lifecycle/emergency queue T043–T050 under D-044.** Start from the verified pricing
+head, keep T051+ out of the queue, and do not start S3 or ask Claude to review an intermediate queue.
 
 The [D5 record](daily/2026-07-28-d5.md) carries the exact local, mutation, independent-review, and
-hosted-CI evidence. The [S2 tasks](../../specs/003-course-authoring/tasks.md) retain T039–T064
-unchecked; pricing, lifecycle/emergency controls, taxonomy administration, search, and unrelated
-frontend work did not enter D5.
+hosted-CI evidence for its historical range. The [S2 tasks](../../specs/003-course-authoring/tasks.md)
+mark T039–T042 complete; lifecycle/emergency controls, taxonomy administration, password-change
+evidence, search, and whole-feature convergence remain unchecked.
 
 The non-engineering item below is **deferred under D-041**, not forgotten:
 

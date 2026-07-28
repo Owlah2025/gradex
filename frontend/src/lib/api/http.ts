@@ -74,7 +74,7 @@ export async function postJSON<T>(
  */
 export async function authenticatedRequest<T>(
   path: string,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   language: "ar" | "en",
   csrf?: string,
   body?: unknown,
