@@ -2,8 +2,8 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D4) at `08b8857`**; all local gates re-run green on that tree, hosted CI green on the exact head
-> Active slice: **S2 — Course authoring and review. Complete through User Story 2 of six at `08b8857`.** Foundation `71ad368`, private authoring `ae638c0`, submission and Admin review `08b8857`. S1 is complete. Day record: [2026-07-28-d4.md](daily/2026-07-28-d4.md), `CLOSED`; D3 `CLOSED` at [2026-07-28-d3.md](daily/2026-07-28-d3.md)
+> Last repository reconciliation: **2026-07-28 (D5 planning) at `3e1809d`**; D5 Speckit analysis, documentation guard, and exposure guard green; application baseline remains `08b8857`
+> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS`.** T001–T031 are reconciled complete at ranges recorded in the S2 tasks; T032–T038 are frozen as the entire Antigravity implementation queue at `3e1809d`. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
@@ -765,10 +765,15 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Codex specifies D5 Phase 5 — S2 revision integrity — then Antigravity implements it as a clean,
-independently reviewable range and Claude reviews the frozen range.**
-Phase 5 is a separate P1 risk surface and gets a fresh range, a fresh brief, and fresh attention
-rather than being folded into the already-reviewed Phase 4 range.
+**Antigravity implements S2 D5 T032–T038 through `speckit.implement` from planning freeze
+`3e1809d`; Claude then independently reviews one frozen exact implementation range.**
+
+Codex's specification seat is complete for this boundary. The existing
+[S2 tasks](../../specs/003-course-authoring/tasks.md) reconcile T001–T031 with exact evidence and
+freeze only T032–T038 for D5. The bounded
+[Antigravity handoff](../../specs/003-course-authoring/handoff.md) prohibits T039+, separate feature
+creation, S2 regeneration, pricing, lifecycle/emergency controls, taxonomy administration, search,
+frontend work, and unrelated refactoring.
 
 The non-engineering item below is **deferred under D-041**, not forgotten:
 
@@ -781,20 +786,10 @@ the launch.
 **Then send the Tap message**, which needs no named contact and carries three of the seven
 cutover-blockers.
 
-Then, and concurrently, as scheduled in [the D3 record](daily/2026-07-28-d3.md):
-
-1. **Begin S2 implementation** from the frozen plan. S1 is closed, so the gate that blocked it is
-   gone. Antigravity builds from
-   [tasks.md](../../specs/003-course-authoring/tasks.md); the brief is
-   [handoff.md](../../specs/003-course-authoring/handoff.md). **Today is T001–T011 only** — Phase 2
-   blocks every user story, so there is nothing to gain by starting a story before it lands.
-2. **Claude freezes the S3 plan** (`specs/004-public-catalogue/`) while S2 is implemented, per
-   [the execution plan](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan). No S3 contract may
-   overlap the S2 surface being built. S4 is planned on D4 and is deliberately early, being the
-   largest slice.
-3. **Fix `CARRYOVER-DOCS-GUARD-IGNORED-TARGETS`** before it costs another CI round trip. Now is the
-   right moment: no range is under review. **Assigned to Antigravity**, because Claude fixing the gate
-   that validates Claude's own documentation is a self-check on the tooling.
+The implementation stop condition is a buildable, uncommitted T032–T038 result with all named real
+PostgreSQL races, rollback/dependency/clone/identity proofs, six restored mutations, production
+wiring/security sweep, and complete local gates green. Codex freezes that result without repairing
+it; Claude reviews from a disposable detached worktree and does not implement.
 
 **S1B and S1C are not reopened** unless a concrete defect surfaces in them. A suspicion is not a
 defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that closed
