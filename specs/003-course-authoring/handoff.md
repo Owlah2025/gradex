@@ -1,69 +1,116 @@
-# Implementation Handoff — S2 Course Authoring and Review
+# D5 Implementation Handoff — S2 Revision Integrity
 
-**To**: Antigravity (builder) | **From**: Claude (planner/reviewer) | **Date**: 2026-07-28
-**Authority**: [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+**To**: Antigravity (`agy`, builder through `speckit.implement`)
 
-**Do not start until S1C closes.** S1 does not close until S1C closes, and no S2 work begins before
-it does. This brief is frozen and waiting, not active.
+**From**: Codex (SpecKit planner)
 
-## Read these, in this order
+**Independent reviewer**: Claude — review only, no implementation or repair
 
-1. [spec.md](spec.md) — 45 requirements, each traced to the BR rule it implements
-2. [plan.md](plan.md) — the design, the four resolved concurrency cases, and the authorization rule
-3. [data-model.md](data-model.md) — migration `0009`, every constraint
-4. [contracts/](contracts/) — the three API surfaces
-5. [tasks.md](tasks.md) — 64 tasks in dependency order
-6. [quickstart.md](quickstart.md) — how the work is proven
+**Authority**:
+[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews)
 
-## The standing clause
+**Application baseline**: `08b8857`
 
-> **A required dependency is validated at construction and the component refuses to build without
-> it. No security-relevant control may silently degrade, default, or become optional.**
+**Scope**: T032–T038 only; stop before T039
 
-This is not boilerplate. It exists because S1C shipped six instances of one defect class — a control
-that silently degrades instead of refusing — in a slice whose entire subject was deny-by-default
-enforcement:
+## Run protocol
 
-| Instance | What it did |
-|---|---|
-| Conditional CSRF | Protection applied only when a token happened to be present |
-| Defaulted recent-auth window | A missing configuration value silently became a permissive default |
-| Optional outbox intent | A required delivery record that could be skipped |
-| Hand-maintained authorization matrix | Could not detect drift; two real gaps were found once it was derived |
-| Context key nobody set | `sessionFromContext` read a key nothing wrote — every staff mutation returned `401` |
-| Unvalidated outbox writer | Constructed without its dependency, failing later instead of refusing to build |
+Use the existing feature selected by `.specify/feature.json`:
+`specs/003-course-authoring/`. Do not create another Phase 5 directory, rerun
+`speckit.specify`, regenerate S2, or reinterpret completed T001–T031.
 
-If a control cannot be satisfied, **refuse the request**. Do not proceed with less.
+Read these completely, in order:
 
-## Five rules this slice will be reviewed against
+1. [spec.md](spec.md), especially the D5 clarification and FR-046–FR-055
+2. [plan.md](plan.md), especially the D5 concurrency, transaction, mutation, and scope sections
+3. [data-model.md](data-model.md), including schema-10 stable identity and pointer constraints
+4. [contracts/authoring-api.md](contracts/authoring-api.md) and
+   [contracts/review-api.md](contracts/review-api.md)
+5. [tasks.md](tasks.md), then execute only T032–T038 in dependency order
+6. [quickstart.md](quickstart.md), which is the required evidence contract
 
-1. **One authorization decision point.** Role and capability decisions go through
-   `identity.Authorize` over its closed set. New capability? Add it to the set. A check performed
-   beside the gate is a finding, not a style preference.
-2. **Ownership coverage is derived, never hand-maintained.** The sweep reads `r.Routes()`. A new
-   unguarded route must fail a test rather than depend on a reviewer noticing it.
-3. **No upload, scan, or transcode path.** S2 references Asset Versions; S4 produces them
-   ([SLICES.md §3.2](../../docs/launch/SLICES.md#32-authoring-owns-media-metadata-the-media-slice-owns-media-bytes)).
-   A request body carrying file bytes is a contract violation, not an extension.
-4. **Audit and notification intent go in the same transaction as their change.** Not after it, not
-   best-effort, not optional.
-5. **Every proof must fail under a deliberate mutation.** A test that passes against broken code is
-   not evidence. The mutation checks are named tasks, not suggestions.
+Before editing, run:
 
-## How this closes
+```bash
+.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
+```
 
-- Push each checkpoint and let hosted CI verify it as it lands — S1B3 needed only one frozen review
-  range because it did this; S1B2 needed two because it did not.
-- A **green local suite is not evidence of green CI.** S1B2 proved that with a schema assertion that
-  passed locally and failed hosted.
-- A frontend build is not evidence unless `.next` was removed first. A build claim that does not say
-  "clean" reads as not having been made.
-- Offer one exact frozen commit range for review. **Do not review your own range.** The S1C
-  self-review returned `APPROVE — 0 critical` and missed nine findings including three criticals;
-  it was recorded as a process violation, not absorbed.
+Keep the result uncommitted for Codex to inspect and freeze. Do not touch the user-owned
+`.caveman.json`. If interrupted, report the exact completed task and leave the tree buildable.
 
-## What to do when blocked
+## Non-negotiable implementation boundary
 
-Say so and stop. A quota limit mid-edit left `router.go` uncompilable in S1C and the reviewer had to
-repair it, which contaminated the review boundary. **An interrupted task reported as interrupted
-costs far less than one left in an unknown state.**
+- First Published-Course edit creates or returns one complete candidate based on the captured
+  `live_revision_id`, atomically and idempotently.
+- PostgreSQL permits at most one active candidate (`DRAFT`, `CHANGES_REQUESTED`,
+  `PENDING_REVIEW`) per Course.
+- Clone revision-owned version rows and references only. Preserve stable Section/Lesson identities;
+  allocate new logical identity only for a new or explicitly deleted-and-recreated entity. Create no
+  media, upload/object, payment/Order, Enrollment, Entitlement, Progress, or other external row.
+- Every mutation names `{revisionId}` and resolves stable child identity inside that exact candidate.
+  No mutation selects the latest revision or writes the live revision.
+- The live loader captures `live_revision_id` once and assembles every descendant from that identity.
+  Wire it through the real production composition root and existing owned-Course read; do not add a
+  Student catalogue, learning, search, or playback route.
+- Approval is one PostgreSQL transaction with lock order Course → exact candidate → owner →
+  taxonomy/Asset Version rows in ascending ID order. Revalidate state, base pointer, ownership,
+  completeness, all asset kinds, and taxonomy through transaction-bound readers. Supersede old,
+  approve candidate, swap pointer, audit, and outbox intent before commit. Make no external delivery
+  call inside the transaction.
+- Rejection locks and revalidates the exact candidate, preserves a non-empty reason, writes
+  `COURSE_REVISION_REJECTED` audit/outbox evidence, and changes no live/access state.
+- `409` is only stale/terminal/replaced/competing candidate state. Business validation and owner
+  ineligibility are `422`; caller/session/ownership denials retain `401`/`403`.
+- Production foundations require the real repository and session-mutation foundation. Every D5
+  mutation applies origin/CSRF enforcement before authorization and ownership.
+
+## Proven prerequisites admitted to D5
+
+Close only D5-C01 through D5-C05:
+
+1. remove the enabled `23505 → success` submission mutation;
+2. make validators/outbox dependencies mandatory and propagate intent errors;
+3. remove implicit/latest editable-revision resolution;
+4. add stable Section/Lesson identity needed by BR-019 and BR-059;
+5. restore production origin/CSRF enforcement and construction validation on catalogue mutations.
+
+No other Phase 1–4 rewrite is authorized.
+
+## Exact PostgreSQL evidence
+
+T038 means exactly:
+
+1. concurrent first edits both succeed with one candidate ID and no `409`;
+2. concurrent approvals yield one commit and one `409`;
+3. approval commits while a mutation of that submitted candidate returns `409`, regardless of lock
+   order;
+4. approval versus rejection yields exactly one terminal action and one `409`.
+
+Also prove old-or-new graph reads, zero partial approval effects under injected failures, deep clone
+equality/external-row counts, cross-Course/child refusal, dependency revalidation and locking, stable
+identity behavior, rejection preservation, and the exact response matrix.
+
+Run and restore these six independent mutations. For each, record what it proves and does not prove:
+
+1. move the Course pointer/lifecycle update outside approval transaction and inject its failure;
+2. remove active-candidate uniqueness and use direct concurrent `DRAFT` inserts;
+3. make one live child loader choose latest rather than the captured live revision;
+4. bypass shared approval revalidation and exercise completeness/owner/taxonomy/asset subcases;
+5. let rejection alter live revision/pointer/lifecycle;
+6. regenerate stable Section/Lesson identities during cloning.
+
+## Standing quality clause
+
+> A required dependency is validated at construction and the component refuses to build without it.
+> No security-relevant control may silently degrade, default, or become optional.
+
+Reuse the existing transaction, lock, graph-loader, audit, and outbox primitives. Split only the
+authoring/review code D5 must touch; do not perform unrelated cleanup.
+
+Run all local gates in [quickstart.md](quickstart.md), including real PostgreSQL with `-race`, the
+exact production-router sweep, documentation/exposure guards, and clean frontend build. Mark a task
+complete only after its named evidence passes.
+
+Stop after T038. Do not implement Admin pricing, lifecycle/emergency controls, taxonomy
+administration, frontend changes, search, or unrelated refactoring. Claude receives only the final
+frozen exact implementation range and must remain independent.

@@ -13,8 +13,9 @@ preference.
 
 ## R1 — How is "the live approved version" represented?
 
-**Decision**: `courses.live_revision_id`, a nullable foreign key to `course_revisions`. Publishing is
-an `UPDATE` of that single column inside the approving transaction.
+**Decision**: `courses.live_revision_id`, a nullable same-Course foreign key to
+`course_revisions`. Publishing updates that pointer inside the approving transaction. A graph read
+captures it once and never re-resolves it during assembly.
 
 **Rationale**: BR-017 and BR-090 require that the live graph is untouched while a revision is pending
 and that approval is a "pointer swap". A pointer is therefore the literal requirement, not an
@@ -35,14 +36,19 @@ definition of "invisible".
 
 ## R2 — Does a revision copy the whole graph, or store a delta?
 
-**Decision**: whole-graph. A revision owns its own Sections and Lessons; approval swaps which set is
-live.
+**Decision**: whole-graph. A revision owns version rows for its Sections and Lessons; approval swaps
+which set is live. Stable logical Section/Lesson identities are preserved across copies, while the
+version rows receive new IDs.
 
 **Rationale**: BR-090 says the current approved graph "stays live until pointer swap", and BR-066
 requires the approved live file to remain available until approval. A delta would have to be
 materialized against the live graph to be reviewable, which is precisely the mutation the rule
 forbids. At launch scale (8–12 Courses, tens of Lessons) the duplication cost is irrelevant, and
-Constitution VI forbids optimizing for volume that does not exist.
+Constitution VI forbids optimizing for volume that does not exist. Preserving stable identities is
+not a scale optimization: BR-059 keys progress to the Lesson rather than its video, and BR-019 makes
+a Section a durable purchasable scope. Only a genuinely new or explicitly deleted-and-recreated
+entity gets a new logical identity. The clone copies revision-owned rows and references, never the
+referenced media or any commerce, access, or learning record.
 
 **Alternatives considered**:
 

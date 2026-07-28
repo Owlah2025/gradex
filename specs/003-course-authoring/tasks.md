@@ -2,12 +2,14 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Builder**: Antigravity, under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
-**Reviewer**: Claude, Tier 2. **A builder never closes its own slice** — the self-review in S1C was
-inadmissible and this rule is not waived by convenience.
+**Planner**: Codex through `speckit.specify`.
+**Builder**: Antigravity through `speckit.implement`.
+**Reviewer**: Claude, Tier 2, on one frozen exact range under
+[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews).
+**A builder never closes its own slice.**
 
-**Blocked until S1C closes.** These tasks are frozen and ready; none of them starts before S1 closes
-on an independent verdict.
+**D5 freeze**: T001–T031 are reconciled as completed below. T032–T038 are the entire implementation
+queue. `speckit.implement` must stop after T038.
 
 **Tests are required, not optional.** Constitution V scales rigor to risk, and this slice contains
 authorization, private-content protection, and an atomicity guarantee. Every acceptance proof must
@@ -29,34 +31,34 @@ the request is **refused** — it does not proceed with less.
 
 ## Phase 1 — Setup
 
-- [ ] T001 Create the `internal/catalog` package skeleton with its doc comment stating the module
+- [x] T001 Create the `internal/catalog` package skeleton with its doc comment stating the module
       boundary in `backend/internal/catalog/doc.go`
-- [ ] T002 Write migration `backend/internal/db/migrations/0009_course_authoring.up.sql` with all
+- [x] T002 Write migration `backend/internal/db/migrations/0009_course_authoring.up.sql` with all
       enums, tables, and constraints from [data-model.md](data-model.md)
-- [ ] T003 Write the matching `backend/internal/db/migrations/0009_course_authoring.down.sql` and
+- [x] T003 Write the matching `backend/internal/db/migrations/0009_course_authoring.down.sql` and
       verify the full `up`/`down`/`up` lifecycle against real PostgreSQL
-- [ ] T004 Raise `db.MaxSchemaVersion` to 9 in `backend/internal/db` and confirm CI derives the
+- [x] T004 Raise `db.MaxSchemaVersion` to 9 in `backend/internal/db` and confirm CI derives the
       assertion rather than carrying a literal (`CARRYOVER-S1B2-CI-DRIFT` is already fixed; verify it)
 
 ## Phase 2 — Foundational (blocks every user story)
 
-- [ ] T005 Add `CATALOG_PUBLISH`, `CATALOG_PRICING`, and `CATALOG_TAXONOMY` to `AllCapabilities` and
+- [x] T005 Add `CATALOG_PUBLISH`, `CATALOG_PRICING`, and `CATALOG_TAXONOMY` to `AllCapabilities` and
       to the `Authorize` switch in `backend/internal/identity/policy.go` — Admin only
-- [ ] T006 Grant the three capabilities to the Admin role only in
+- [x] T006 Grant the three capabilities to the Admin role only in
       `backend/internal/identity/policy_set.go`; **no Instructor grant** (this is what makes FR-013 a
       property of the capability set rather than of a handler)
-- [ ] T007 Implement the single `RequireCourseOwnership` precondition in
+- [x] T007 Implement the single `RequireCourseOwnership` precondition in
       `backend/internal/httpapi/catalog_ownership.go` — one implementation, applied as middleware
-- [ ] T008 Extend the derived authorization sweep in `backend/internal/httpapi/authorization_test.go`
+- [x] T008 Extend the derived authorization sweep in `backend/internal/httpapi/authorization_test.go`
       to assert **every** route under the owned-resource prefixes carries T007's middleware, deriving
       the route list from `r.Routes()` — a new unguarded route must fail this test (FR-042)
-- [ ] T009 Implement the transactional repository with row-level locking in
+- [x] T009 Implement the transactional repository with row-level locking in
       `backend/internal/catalog/repository.go`; every lifecycle mutation takes `SELECT … FOR UPDATE`
       on the Course row and re-asserts expected state inside the transaction
-- [ ] T010 [P] Implement audit writing for the slice in `backend/internal/catalog/audit.go` using the
+- [x] T010 [P] Implement audit writing for the slice in `backend/internal/catalog/audit.go` using the
       existing `audit_events` table and `module = CATALOG_AND_AUTHORING` — **same transaction as the
       change**, no separate writer, no optional path
-- [ ] T011 [P] Implement notification intent writing in `backend/internal/catalog/notify.go` through
+- [x] T011 [P] Implement notification intent writing in `backend/internal/catalog/notify.go` through
       the existing outbox protected-payload boundary — **mandatory, never optional** (S1C round-two
       finding)
 
@@ -69,30 +71,30 @@ can produce audit and intent. No user story starts before this holds.
 **Independent test**: fill a Course completely, then fail to reach it as a Student, a second
 Instructor, and anonymously — by exact identifier, on every read route.
 
-- [ ] T012 [P] [US1] Implement the Course entity, lifecycle type, and invariants in
+- [x] T012 [P] [US1] Implement the Course entity, lifecycle type, and invariants in
       `backend/internal/catalog/course.go`
-- [ ] T013 [P] [US1] Implement revision, Section, and Lesson structures with explicit ordering in
+- [x] T013 [P] [US1] Implement revision, Section, and Lesson structures with explicit ordering in
       `backend/internal/catalog/revision.go`
-- [ ] T014 [US1] Implement Asset Version **reference** validation in
+- [x] T014 [US1] Implement Asset Version **reference** validation in
       `backend/internal/catalog/revision.go` — refuse absent or unprocessed versions; **no upload,
       scan, or transcode path may be added anywhere in this slice** (SLICES §3.2)
-- [ ] T015 [US1] Implement lesson resource and lab-material references as two distinct kinds in
+- [x] T015 [US1] Implement lesson resource and lab-material references as two distinct kinds in
       `backend/internal/catalog/revision.go` (BR-067)
-- [ ] T016 [US1] Implement the single optional preview asset in `backend/internal/catalog/course.go`
+- [x] T016 [US1] Implement the single optional preview asset in `backend/internal/catalog/course.go`
       (BR-143)
-- [ ] T017 [US1] Implement authoring routes and handlers per
+- [x] T017 [US1] Implement authoring routes and handlers per
       [contracts/authoring-api.md](contracts/authoring-api.md) in
       `backend/internal/httpapi/authoring_handlers.go` and `catalog_routes.go`
-- [ ] T018 [US1] Make every non-Published read non-enumerating — a non-owner cannot distinguish "does
+- [x] T018 [US1] Make every non-Published read non-enumerating — a non-owner cannot distinguish "does
       not exist" from "not yours" (FR-002)
-- [ ] T019 [US1] Refuse all editing by a suspended Instructor while leaving enrolled Students' access
+- [x] T019 [US1] Refuse all editing by a suspended Instructor while leaving enrolled Students' access
       intact (BR-065)
-- [ ] T020 [US1] Integration test: private-draft protection across **every** read route enumerated
+- [x] T020 [US1] Integration test: private-draft protection across **every** read route enumerated
       from the live route table, as Student, non-owning Instructor, and anonymous — quickstart
       Scenario 1
-- [ ] T021 [US1] Mutation check for T020: remove the ownership precondition from one route and
+- [x] T021 [US1] Mutation check for T020: remove the ownership precondition from one route and
       confirm the sweep fails
-- [ ] T022 [P] [US1] Bilingual Instructor course-builder screens in
+- [x] T022 [P] [US1] Bilingual Instructor course-builder screens in
       `frontend/src/app/[locale]/instructor/courses/` with RTL/LTR
 
 **Checkpoint**: authoring works and is private. This alone is a demonstrable increment.
@@ -101,45 +103,143 @@ Instructor, and anonymously — by exact identifier, on every read route.
 
 **Goal**: only an Admin publishes, and incomplete submissions say everything that is wrong.
 
-- [ ] T023 [US2] Implement submission validation collecting **all** failures in
+- [x] T023 [US2] Implement submission validation collecting **all** failures in
       `backend/internal/catalog/validation.go` — empty Course, empty Section, missing video, and each
       unassigned taxonomy dimension, in one response (FR-009, FR-010)
-- [ ] T024 [US2] Implement submission with the partial unique index making a concurrent second
+- [x] T024 [US2] Implement submission with the partial unique index making a concurrent second
       submission a constraint violation mapped to `409` — concurrency case 2
-- [ ] T025 [US2] Make `PENDING_REVIEW` read-only to the Instructor via in-transaction state assertion
+- [x] T025 [US2] Make `PENDING_REVIEW` read-only to the Instructor via in-transaction state assertion
       (BR-016)
-- [ ] T026 [US2] Implement the Admin review queue and approve/request-changes handlers per
+- [x] T026 [US2] Implement the Admin review queue and approve/request-changes handlers per
       [contracts/review-api.md](contracts/review-api.md) in
       `backend/internal/httpapi/review_handlers.go`
-- [ ] T027 [US2] Implement approval revalidation: Asset Versions present and processed **now**, owner
+- [x] T027 [US2] Implement approval revalidation: Asset Versions present and processed **now**, owner
       not suspended, no assigned term retired — all inside the approving transaction (FR-025,
       concurrency case 3)
-- [ ] T028 [US2] Implement audited Admin content preview creating **no** enrollment and **no**
+- [x] T028 [US2] Implement audited Admin content preview creating **no** enrollment and **no**
       Entitlement (BR-081, FR-016)
-- [ ] T029 [US2] Integration test: validation reports all three defects in one response — quickstart
+- [x] T029 [US2] Integration test: validation reports all three defects in one response — quickstart
       Scenario 2, with the fail-fast mutation
-- [ ] T030 [US2] Integration test: Instructor cannot publish through any review route; mutation grants
+- [x] T030 [US2] Integration test: Instructor cannot publish through any review route; mutation grants
       `CATALOG_PUBLISH` to Instructor and the sweep must fail — quickstart Scenario 3
-- [ ] T031 [P] [US2] Bilingual Admin review-queue screens in `frontend/src/app/[locale]/admin/catalog/`
+- [x] T031 [P] [US2] Bilingual Admin review-queue screens in `frontend/src/app/[locale]/admin/catalog/`
+
+### Completion evidence for T001–T031
+
+| Tasks | Exact implementation range | Closure evidence |
+|---|---|---|
+| T001–T011 | `3d9604e..71ad368` | D3 closed after one rejection; hosted CI green at code-identical `b8b2ccf` |
+| T012–T022 | `a3a1126..ae638c0` | D4 closed after two rejections; production wiring and ownership mutations reproduced independently |
+| T023–T031 | `8487f93..08b8857` | D4 closed after one rejection; hosted CI run `30351429941` green on the exact head |
+
+The checkmarks reconcile the closed historical phases; they do not erase defects proven afterward.
+T002, T017, and T026 close the pre-D5 schema and contracts at their exact ranges; T032–T035 own the
+explicit D5 corrections below.
+D5 admits only the following corrections because T032–T038 cannot be correct while they remain:
+
+- **D5-C01**: `SubmitCourse` currently contains an enabled `23505 → success` mutation. Restore the
+  frozen `409` behavior and add a genuine parallel PostgreSQL test; the existing Course lock means
+  the prior test never exercised the unique-violation branch.
+- **D5-C02**: repository construction and mutation paths currently permit nil Asset Version
+  validation, optional outbox writing, and ignored intent-construction/write errors. Make the
+  dependencies mandatory and propagate errors on candidate submission, approval, and rejection.
+- **D5-C03**: current authoring mutations resolve an editable revision implicitly. Replace that
+  authority with the explicit candidate identity required by FR-048.
+- **D5-C04**: cloning every Section/Lesson with a new public identity would violate BR-059 and
+  destabilize BR-019's purchasable Section scope. Add stable Section/Lesson identities; clone their
+  version rows while preserving identity, and allocate a new identity only for a new or explicitly
+  deleted-and-recreated entity.
+- **D5-C05**: the production catalogue router receives but does not apply the session-mutation
+  foundation, so current authoring/review mutations omit the established origin/CSRF boundary.
+  Require that foundation and the real repository at composition, then enforce mutation security
+  before authorization/ownership on the exact D5 surface.
 
 ## Phase 5 — User Story 3: Revision integrity (P1)
 
 **Goal**: the live graph is untouchable until an atomic swap.
 
-- [ ] T032 [US3] Route every edit to a `PUBLISHED` Course into a new candidate revision; **no route
-      may edit a live revision** (FR-018, BR-017)
-- [ ] T033 [US3] Implement the atomic pointer swap — `live_revision_id` update, previous revision
-      `SUPERSEDED`, lifecycle, audit, and intent in **one** transaction (FR-020)
-- [ ] T034 [US3] Keep the approved live Resource or Lab Material serving until its replacement is
-      approved (BR-066, FR-022)
-- [ ] T035 [US3] Ensure rejection leaves the live Published version unchanged, distinctly from a
-      first-publication change request (FR-021)
-- [ ] T036 [US3] Integration test with **concurrent readers during approval**: every read returns the
-      complete old graph or the complete new one, never a mixture — quickstart Scenario 4
-- [ ] T037 [US3] Mutation check for T036: apply the revision outside a transaction and confirm the
-      concurrent-reader assertion fails
-- [ ] T038 [US3] Integration test for all four concurrency cases under `-race` against real
-      PostgreSQL with genuine parallel transactions — quickstart Scenario 5
+- [ ] T032 [US3] Implement explicit, atomic, idempotent candidate creation and mutation targeting
+      (BR-017, BR-019, BR-059, BR-066, BR-091, BR-120, BR-122; FR-018, FR-046–FR-048):
+      - add migration `0010_revision_integrity` and raise `db.MaxSchemaVersion` to 10;
+      - replace the narrower pending-review index with one active-candidate index for `DRAFT`,
+        `CHANGES_REQUESTED`, or `PENDING_REVIEW`, and verify the complete `up`/`down`/`up` lifecycle;
+      - add same-Course `live_revision_id` and `based_on_revision_id` constraints and require a
+        non-empty review reason for `REJECTED`;
+      - add and backfill stable Section/Lesson identity registries and their composite ancestry
+        constraints; remap the dormant Section price-history FK to stable Section identity without
+        implementing pricing;
+      - clone the captured live revision's version rows and references only, preserving stable
+        Section/Lesson IDs while allocating new version-row/file IDs;
+      - add `PUT /courses/:id/candidate`, make every mutation and submission route carry
+        `:revisionId`, and remove the implicit/latest-revision mutation surface;
+      - return the existing uniform denial for a cross-Course candidate/child and `409` only for an
+        exact stale, terminal, live, or replaced candidate;
+      - keep a Published Course lifecycle `PUBLISHED` when its candidate is submitted;
+      - close D5-C01 through D5-C05 minimally;
+      - add real-PostgreSQL deep-clone tests proving authored graph equality, stable identity
+        preservation, new identity on delete/recreate, video replacement retaining Lesson identity,
+        and zero new Asset Version, upload/object, commerce, Enrollment, Entitlement, or Progress
+        rows;
+      - add candidate/Section/Lesson/file membership-negative tests and the complete `401`/`403`/
+        `409`/`422` response matrix;
+      - extend the production composition-root route/dependency/security sweep for every exact D5
+        method/path.
+- [ ] T033 [US3] Implement exact-candidate approval in one PostgreSQL transaction with lock order
+      Course → candidate; transaction-aware owner, completeness, processed-asset, and taxonomy
+      revalidation; previous revision `SUPERSEDED`; candidate `APPROVED`; `live_revision_id` swap;
+      lifecycle `PUBLISHED`; mandatory audit and outbox intent; no external delivery call
+      (BR-017, BR-070–BR-071, BR-090, BR-091, BR-120, BR-122; FR-020, FR-025,
+      FR-050–FR-051). Lock owner, taxonomy, and Asset Version rows `FOR SHARE` in ascending ID order,
+      require conflicting locks on their mutation paths, and prove serialization with real
+      PostgreSQL. Bind every validator to the approving transaction. Add post-submission
+      invalidation subcases for completeness, owner eligibility, taxonomy, and every asset kind;
+      assert `422` with zero state/evidence change rather than `409`.
+- [ ] T034 [US3] Implement the production live-graph loader that captures `live_revision_id` once and
+      loads Course, Section, Lesson, taxonomy, and Asset Version references using that same identity.
+      Prove the approved live Resource, Lab Material, and video reference remain selected until
+      approval. Wire it into the existing production-mounted owned-Course read for `live_revision`
+      while loading the active candidate separately; add no Student catalogue, search, learning, or
+      playback route. Record that S3/S5 must prove their future Student routes consume this loader;
+      D5 proves the production repository seam and existing owner-route consumer, not those future
+      routes (BR-017, BR-059, BR-066, BR-090, BR-091; FR-019, FR-022–FR-023, FR-049, FR-054).
+- [ ] T035 [US3] Implement exact-candidate rejection with Course → candidate lock order, mandatory
+      preserved reason, audit and outbox intent in the same transaction, and no change to Course
+      lifecycle, `live_revision_id`, live revision state, enrollments, Entitlements, or Student
+      access. Use the canonical `COURSE_REVISION_REJECTED` audit action for a Published-Course
+      candidate (BR-072, BR-090, BR-120, BR-122; FR-021, FR-052–FR-053).
+- [ ] T036 [US3] Add real PostgreSQL integration evidence for read and rollback atomicity:
+      - concurrent readers receive a complete old graph or complete new graph, never a mixture;
+      - forced failure after each load-bearing approval stage leaves pointer, revision states, audit,
+        and outbox unchanged;
+      - concurrent approvals cannot produce two live revisions;
+      - dependency locks prevent owner/taxonomy/asset state from changing between approval
+        revalidation and commit
+      (BR-017, BR-090, BR-120, BR-122; FR-020, FR-025, FR-049–FR-051).
+- [ ] T037 [US3] Run and restore these independent mutations, recording for each what it proves and
+      does not prove (BR-017, BR-019, BR-059, BR-072, BR-090, BR-120; FR-055):
+      - move the `courses.live_revision_id`/lifecycle update to an auto-commit write after the
+        approval transaction and inject failure at that write;
+      - remove active-candidate uniqueness and prove it through a direct concurrent-insert invariant
+        test using two `DRAFT` rows that does not rely on the Course lock;
+      - make one live child loader select the latest revision instead of the captured
+        `live_revision_id`;
+      - bypass the shared approval-time revalidation call, exercising completeness, owner,
+        taxonomy, and asset subcases;
+      - let rejection alter the live revision, pointer, or Course lifecycle;
+      - regenerate stable Section/Lesson identities during cloning.
+- [ ] T038 [US3] Run the exact four D5 races under `-race` against real PostgreSQL with genuine
+      parallel transactions: (1) concurrent first edits, (2) concurrent approvals, (3) approval
+      versus Instructor mutation, and (4) approval versus rejection. In race 1 both calls succeed
+      with the same candidate and no `409`. In race 2 one approval commits and the other returns
+      `409`. In race 3 approval commits and the submitted-candidate mutation returns `409` regardless
+      of lock order. In race 4 exactly one terminal action commits and the other returns `409`.
+      Assert no duplicate active candidate, no second approved live revision, and no contradictory
+      audit/outbox evidence. Run the complete local gates and stop: do not begin T039
+      (BR-016–BR-017, BR-059, BR-070–BR-072, BR-090, BR-120, BR-122; FR-046,
+      FR-050–FR-053).
+
+**D5 checkpoint**: T032–T038 complete, production-wired, mutation-proven, and offered to Claude as
+one frozen exact range. No T039+ file or behavior may enter the range.
 
 ## Phase 6 — User Story 4: Admin pricing (P2)
 

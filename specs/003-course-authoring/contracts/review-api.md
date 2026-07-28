@@ -12,39 +12,52 @@ any route — is a property of the capability grant rather than of a handler.
 | Method | Path | Purpose | Rules |
 |---|---|---|---|
 | `GET` | `/review/queue` | List Courses and revisions in `PENDING_REVIEW` | BR-070 |
-| `GET` | `/review/courses/{id}` | Read the full candidate graph under review | Includes Draft content |
-| `POST` | `/review/courses/{id}/approve` | Publish the Course or apply the revision | See below |
-| `POST` | `/review/courses/{id}/request-changes` | Return it to the Instructor | **Reason mandatory** — BR-072 |
-| `POST` | `/review/courses/{id}/preview/{lessonId}` | Authorize Admin video preview | Audited, distinct path — BR-081 |
+| `GET` | `/review/courses/{id}/revisions/{revisionId}` | Read the exact candidate graph under review | Includes Draft content |
+| `POST` | `/review/courses/{id}/revisions/{revisionId}/approve` | Publish the Course or apply the exact revision | See below |
+| `POST` | `/review/courses/{id}/revisions/{revisionId}/request-changes` | Reject or return the exact revision | **Reason mandatory** — BR-072 |
+| `POST` | `/review/courses/{id}/revisions/{revisionId}/preview/{lessonId}` | Authorize Admin video preview | Lesson must belong to candidate; audited, distinct path — BR-081 |
 
 ## `approve`
 
-One transaction, in this order, all-or-nothing:
+One transaction, with this lock and validation order, all-or-nothing:
 
-1. `SELECT … FOR UPDATE` the Course row and re-assert `PENDING_REVIEW`. A caller that raced another
-   Admin gets `409` naming the state actually found (concurrency case 1).
-2. **Revalidate every referenced Asset Version** — present and successfully processed *now*, not at
-   submission time (FR-025). A reference that decayed fails the approval closed.
-3. Re-read the owning Instructor's account status. A suspended owner fails the approval closed
-   (concurrency case 3), matching the S1B2 live-status-read precedent.
-4. Re-check that no assigned taxonomy term was retired since submission.
-5. Swap `courses.live_revision_id` to the approved revision, mark the previous live revision
-   `SUPERSEDED`, and set `lifecycle = PUBLISHED`.
-6. Write the `COURSE_PUBLISHED` audit row.
-7. Write the Instructor notification intent.
+1. Lock the Course row `FOR UPDATE`.
+2. Lock the exact `{revisionId}` `FOR UPDATE`; verify it belongs to the Course, is still
+   `PENDING_REVIEW`, and has `based_on_revision_id` equal to the locked Course's
+   `live_revision_id`. A stale, replaced, approved, or rejected candidate returns `409`.
+3. Lock the owner Account `FOR SHARE`, then referenced taxonomy and video/Asset Version rows
+   `FOR SHARE` in ascending identifier order. Every owner, taxonomy, or asset mutation takes a
+   conflicting row lock. Re-read owner eligibility, full submission completeness, processed Asset
+   Versions, and taxonomy availability through readers bound to this same transaction. The
+   deterministic order prevents dependency-lock inversion, and the locks protect validated state
+   through commit; submission-time success is not trusted.
+4. Mark the previous live revision `SUPERSEDED`, mark the candidate `APPROVED`, swap
+   `courses.live_revision_id`, and keep/set `lifecycle = PUBLISHED`.
+5. Write the `COURSE_PUBLISHED` audit row.
+6. Write the Instructor notification intent to the durable outbox.
+7. Commit.
 
-Steps 5–7 share one transaction, so **no reader can observe a partial graph** (FR-020) and no publish
-exists without its evidence. A first publication and a revision approval are the same code path —
-BR-017 requires a revision to clear "the same Admin review flow".
+Every step shares one PostgreSQL transaction, so a failure leaves the old pointer unchanged, the old
+revision approved, the candidate unapproved, and no durable audit or outbox event claiming success.
+The transaction persists intent only; no external notification delivery occurs inside it. A first
+publication and a revision approval use the same review command, with the existing live pointer
+nullable only for first publication.
 
-`READY` media never bypasses this: processing state is an input to step 2, never a trigger (BR-091).
+`READY` media never bypasses this: processing state is an input to step 3, never a trigger (BR-091).
+Missing/incomplete content, invalid or unavailable taxonomy, unavailable processed assets, and an
+ineligible owning Instructor return the existing `422` validation envelope with a specific
+violation. Caller authorization remains `401`/`403`. Only a stale, replaced, terminal, or competing
+candidate state returns `409`.
 
 ## `request-changes`
 
 Reason is required and non-empty at the schema level, so an unexplained change request cannot be
-recorded (BR-072). A **first-publication** Course moves to `CHANGES_REQUESTED` and stays hidden. A
-**pending revision** is rejected while the currently Published version stays live and unchanged
-(FR-021) — these two outcomes are different and the handler must not collapse them.
+recorded (BR-072). The command locks the Course then exact candidate and revalidates
+`PENDING_REVIEW`. A **first-publication** Course moves to `CHANGES_REQUESTED` and stays hidden. A
+**pending revision** becomes `REJECTED` while Course lifecycle, `live_revision_id`, the currently
+Published graph, enrollments, Entitlements, and Student access remain unchanged (FR-021). Rejection
+persists `COURSE_REVISION_REJECTED` audit evidence and its notification intent in the same
+transaction. Approval racing rejection yields one terminal state; the loser returns `409`.
 
 ## `preview`
 
@@ -53,3 +66,5 @@ distinct from Student playback. It records Admin, Lesson, and timestamp, and it 
 enrollment and **no** Entitlement (BR-081, FR-016). The distinction matters: an Admin preview that
 minted an Entitlement would violate the provenance invariant in
 [SLICES.md §3.1](../../../docs/launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation).
+`{lessonId}` is the stable Lesson identity and is resolved to a version row only inside the named
+`{revisionId}`.

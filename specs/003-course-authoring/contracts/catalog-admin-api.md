@@ -52,6 +52,8 @@ recorded in [research R4](../research.md) so it is not discovered late.*
 Every change appends `old`, `new`, actor, reason, and time (FR-028). The Instructor's read-only view
 of the current price lives in the authoring surface (FR-027); the Instructor has no write route here
 at all — refusal is the absence of the capability, not a check inside a shared handler.
+`{sectionId}` is the stable Section identity introduced by D5, never a revision-owned version-row ID.
+T039 remains the first task allowed to implement this route.
 
 **A price change mutates no existing Order, Entitlement, Refund, or payout snapshot** (FR-029). S6
 owns Order pricing and snapshots; this contract sets the catalogue price and nothing else.

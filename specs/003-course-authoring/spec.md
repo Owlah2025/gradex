@@ -4,7 +4,9 @@
 
 **Created**: 2026-07-28
 
-**Status**: Draft — frozen for D3–D5 implementation under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+**Status**: Frozen through D5. T001–T031 are closed on repository evidence; T032–T038 are the entire
+D5 implementation scope under
+[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews).
 
 **Input**: S2 — Course authoring and review. Instructor creates and edits owned Course/Section/Lesson
 structure with resources/labs and preview metadata (references to Asset Versions only, never
@@ -13,14 +15,13 @@ publish, request-changes, delist/relist, retire, archive, and emergency access s
 private-draft protection; Admin-only Course/Section pricing with full audit history; pending-revision
 handling that never mutates the live published graph until approval.
 
-**Depends on**: S1C (staff lifecycle, enforcement, authorization matrix). **S2 implementation does
-not begin until S1C closes** on an independent verdict — see
-[STATUS.md](../../docs/launch/STATUS.md). This specification may be frozen while that review is open;
-freezing a spec commits no behaviour.
+**Depends on**: S1C (staff lifecycle, enforcement, authorization matrix), independently closed at
+`93eb745`. S2 implementation is complete through T031; D5 continues from application baseline
+`08b8857`.
 
-**Governing rules**: BR-011 to BR-019, BR-027, BR-061, BR-065, BR-066, BR-067, BR-070 to BR-072,
-BR-081, BR-090, BR-091, BR-143, BR-157 to BR-160. Traceability per Constitution Principle III is
-carried per requirement below.
+**Governing rules**: BR-011 to BR-019, BR-027, BR-059, BR-061, BR-065, BR-066, BR-067, BR-070 to
+BR-072, BR-081, BR-090, BR-091, BR-120, BR-122, BR-143, BR-157 to BR-160. Traceability per
+Constitution Principle III is carried per requirement below.
 
 ---
 
@@ -150,6 +151,33 @@ reads.
 6. **Given** a Lesson video replacement, **When** the replacement is processed, **Then** it cannot
    interrupt or pre-empt the approved live video, and `READY` never bypasses Admin approval.
    *(BR-091)*
+
+#### D5 clarification — approved revision-integrity boundary
+
+These statements refine FR-018–FR-025 without changing the already reviewed behavior of User
+Stories 1 and 2:
+
+1. The first authoring mutation against a Published Course creates or returns one complete editable
+   candidate cloned from the Course's current `live_revision_id`. Concurrent first mutations return
+   the same candidate; the candidate records that captured revision as its base, and the database
+   permits at most one active candidate per Course.
+2. The clone contains revision-owned Course fields, Sections, Lessons, taxonomy assignments, and
+   Asset Version references. It does not copy or create media objects, uploaded bytes, payments,
+   Orders, enrollments, Entitlements, progress, or any other externally owned resource.
+   Version rows receive new row identifiers, while an unchanged Section or Lesson preserves its
+   stable logical identity. A genuinely new or explicitly deleted-and-recreated Section or Lesson
+   receives a new logical identity.
+3. Every subsequent Instructor mutation identifies the candidate revision explicitly and is refused
+   if that identifier is stale, terminal, belongs to another Course, or is the live revision. No
+   authoring command selects an editable revision by "latest row".
+4. A Student-visible graph resolves `live_revision_id` once and uses that captured identity for the
+   entire graph assembly. It never resolves the pointer again between Course, Section, Lesson,
+   taxonomy, or Asset Version-reference reads.
+5. Submitting a revision does not replace the Course's Published lifecycle. The Course stays
+   Published through candidate review; only the candidate becomes `PENDING_REVIEW`.
+6. Approval and rejection identify and lock the exact candidate. Approval applies the candidate,
+   previous live revision, pointer, audit evidence, and notification intent atomically. Rejection
+   changes only the candidate and its review evidence.
 
 ---
 
@@ -327,6 +355,45 @@ a retired term stays on the Courses already carrying it.
 - **FR-025**: System MUST refuse approval when any referenced Asset Version is no longer present and
   successfully processed at approval time — approval revalidates rather than trusting submission-time
   state.
+- **FR-046**: System MUST create a complete editable candidate from the current `live_revision_id`
+  atomically and idempotently on the first Published-Course edit, and MUST enforce at most one active
+  candidate per Course with a database invariant rather than an application-only pre-check. The
+  candidate MUST preserve the exact live revision it was based on so approval can reject a stale
+  replacement. *(BR-017, Constitution VII)*
+- **FR-047**: Candidate cloning MUST copy only revision-owned records and references; it MUST NOT
+  duplicate or create media objects, uploaded assets, payments, Orders, enrollments, Entitlements,
+  progress, or other externally owned resources. The clone MUST preserve the stable logical identity
+  of every unchanged Section and Lesson while allocating new version-row identities. A Section or
+  Lesson created after cloning, or explicitly deleted and recreated, MUST receive a new logical
+  identity. *(BR-017, BR-019, BR-059, BR-066, BR-091)*
+- **FR-048**: Every authoring mutation after candidate creation MUST identify the candidate revision
+  explicitly, verify that every named child belongs to it, and refuse implicit "latest revision"
+  resolution or any attempt to mutate `live_revision_id`. *(BR-017, Constitution VII)*
+- **FR-049**: Every Student-visible Course graph read MUST resolve `live_revision_id` exactly once
+  and use that same revision identity for every Course, Section, Lesson, taxonomy, and Asset
+  Version-reference read in that graph. *(BR-090)*
+- **FR-050**: Revision approval MUST execute in one transaction with the lock order Course then exact
+  candidate, revalidate the candidate state, owner eligibility, completeness, processed assets, and
+  taxonomy availability, then supersede the previous live revision, approve the candidate, swap
+  `live_revision_id`, and persist audit and notification intent evidence before commit. No external
+  delivery call may run inside that transaction. *(BR-017, BR-071, BR-090, BR-120)*
+- **FR-051**: Any approval failure MUST roll back the live pointer, both revision states, approval
+  audit evidence, and approval notification intent together. *(BR-090, BR-120, Constitution VII)*
+- **FR-052**: Rejection of a Published-Course candidate MUST lock and revalidate the exact candidate,
+  preserve a mandatory reason and review evidence, and leave Course lifecycle, `live_revision_id`,
+  the Published graph, enrollments, Entitlements, and Student access unchanged. The already reviewed
+  first-publication change-request transition remains governed by BR-072. *(BR-072, BR-090)*
+- **FR-053**: Genuine stale or competing revision-state changes MUST return `409 Conflict`.
+  Incomplete graphs, missing or unprocessed Asset Versions, invalid or unavailable taxonomy, and an
+  ineligible owning Instructor at approval MUST return the existing `422` validation envelope.
+  Caller authorization, ownership concealment, and an acting suspended Instructor retain the
+  existing `401`/`403` denial semantics. None of those validation or denial cases may be converted
+  to `409`.
+- **FR-054**: Every D5 route and required dependency MUST be reachable through the production
+  composition root and router. Verification MUST extend the production-wiring sweep; a
+  self-contained test router is not evidence.
+- **FR-055**: Each required deliberate mutation MUST record what the resulting failure proves and
+  what it does not prove; a mutation report without both statements is incomplete evidence.
 
 **Pricing**
 
@@ -392,12 +459,19 @@ a retired term stays on the Courses already carrying it.
 
 - **Course**: The purchasable unit. Exactly one owning Instructor, one lifecycle state, three
   taxonomy assignments, an optional preview asset, an optional catalogue price, and at most one
-  pending revision.
+  active candidate revision.
 - **Section**: An ordered division of a Course, independently purchasable and independently priced.
 - **Lesson**: An ordered unit inside a Section, referencing exactly one Asset Version as its video,
-  plus optional resources and lab materials.
+  plus optional resources and lab materials. Its stable logical identity survives revision cloning
+  and video replacement; deletion and recreation allocates a new identity.
+- **Section/Lesson Version Row**: Revision-owned authored state for one stable Section or Lesson
+  identity. A candidate clone creates new version rows while preserving the stable identities of
+  unchanged entities.
 - **Course Revision**: A pending, reviewable, whole-graph alternative to the live approved version.
-  Becomes live only by atomic pointer swap on approval.
+  Becomes live only by atomic pointer swap on approval. An active candidate is a revision in
+  `DRAFT`, `CHANGES_REQUESTED`, or `PENDING_REVIEW`; at most one exists per Course. Only `DRAFT` and
+  `CHANGES_REQUESTED` are editable. `PENDING_REVIEW` is active but read-only; `APPROVED`,
+  `SUPERSEDED`, and `REJECTED` are terminal.
 - **Asset Version Reference**: A pointer to an exact media artefact owned by S4. S2 validates and
   references; it never produces.
 - **Taxonomy Term**: A bilingual Admin-managed vocabulary entry in the Major or Subject dimension,
@@ -434,13 +508,25 @@ a retired term stays on the Courses already carrying it.
 - **SC-009**: Authoring and review screens are fully usable in Arabic and English with correct RTL and
   LTR behaviour, on tablet, laptop, and desktop widths. *(Constitution X — complex authoring may be
   optimized for larger layouts)*
+- **SC-010**: Under genuine concurrent first edits, exactly one active candidate exists and every
+  successful caller receives its identity.
+- **SC-011**: Under concurrent approval and graph reads, every reader receives one complete old graph
+  or one complete new graph; zero reads contain a mixture.
+- **SC-012**: All four D5 races — concurrent first edits, concurrent approvals, approval versus
+  Instructor mutation, and approval versus rejection — end in one valid state with no contradictory
+  terminal revisions, duplicate active candidates, or second live revision.
+- **SC-013**: A forced failure at each load-bearing approval stage leaves zero partial pointer,
+  revision-state, audit, or notification-intent effects.
+- **SC-014**: Candidate cloning preserves 100% of unchanged Section and Lesson logical identities,
+  creates zero external resource rows, preserves Lesson identity on video replacement, and assigns a
+  different identity after an explicit delete-and-recreate.
 
 ---
 
 ## Assumptions
 
-- **S1C is closed before implementation starts.** This spec may be frozen while S1C's independent
-  review is open, but no S2 code lands until S1 closes.
+- **S1C is closed.** Its independently accepted closure at `93eb745` remains the authorization and
+  suspension baseline for D5.
 - **Asset Versions exist as a referenceable concept before S2 completes.** S2 is dependency-ordered
   after S1C and alongside S4's ownership of media bytes. Where S4 has not yet produced real Asset
   Versions, S2 is developed and tested against the reference contract, not against an invented upload
@@ -455,6 +541,10 @@ a retired term stays on the Courses already carrying it.
   creation time.
 - "Immediately" in FR-035 means at the next protected request, consistent with the S1C suspension
   enforcement precedent — not at next token expiry.
+- D5 ends at T038. Pricing, lifecycle and emergency controls, taxonomy administration, search,
+  unrelated frontend work, and unrelated refactoring remain outside the D5 range. A prerequisite may
+  enter only when T032–T038 cannot work correctly without it, with its evidence and minimal extent
+  recorded before implementation.
 
 ## Dependencies
 
