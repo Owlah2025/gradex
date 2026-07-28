@@ -2,8 +2,8 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D3) at `93eb745`**; all local gates re-run green on that tree
-> Active slice: **S2 — Course authoring and review. Foundation T001–T011 closed at `71ad368`; user stories not started.** S1 is complete. Day record: [2026-07-28-d4.md](daily/2026-07-28-d4.md), `PLANNED`; D3 `CLOSED` at [2026-07-28-d3.md](daily/2026-07-28-d3.md)
+> Last repository reconciliation: **2026-07-28 (D4) at `08b8857`**; all local gates re-run green on that tree, hosted CI green on the exact head
+> Active slice: **S2 — Course authoring and review. Complete through User Story 2 of six at `08b8857`.** Foundation `71ad368`, private authoring `ae638c0`, submission and Admin review `08b8857`. S1 is complete. Day record: [2026-07-28-d4.md](daily/2026-07-28-d4.md), `CLOSED`; D3 `CLOSED` at [2026-07-28-d3.md](daily/2026-07-28-d3.md)
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
@@ -764,6 +764,12 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
   documented risk acceptance, mitigation, and owner approval.
 
 ## Current Next Task
+
+**Start D5 with Phase 5 — S2 revision integrity — as a clean, independently reviewable range.**
+Phase 5 is a separate P1 risk surface and gets a fresh range, a fresh brief, and fresh attention
+rather than being folded into the already-reviewed Phase 4 range.
+
+The non-engineering item below is **deferred under D-041**, not forgotten:
 
 **Source Kuwaiti counsel.** Not send — source. Two of the three messages have **no recipient**, which
 is a `BLOCKED` state distinct from `DRAFT`, and it is the highest-priority item on the project ahead
