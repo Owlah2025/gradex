@@ -33,7 +33,7 @@ plan therefore spends its structure on that one problem and keeps everything els
 | Frontend | Next.js App Router, extending `frontend/src/lib/i18n` |
 | New storage | One `IMMUTABLE` SQL normalize function, one generated column, one index. **No new table.** |
 | Auth | None. These routes are deliberately anonymous |
-| Migration | `0010_catalog_search` — additive only |
+| Migration | `0011_catalog_search` — additive only; schema 10 is already S2 revision integrity |
 
 ## Constitution Check
 
@@ -235,8 +235,8 @@ backend/internal/httpapi/
 └── catalog_public_test.go   # the derived enforcement sweep
 
 backend/internal/db/migrations/
-├── 0010_catalog_search.up.sql
-└── 0010_catalog_search.down.sql
+├── 0011_catalog_search.up.sql
+└── 0011_catalog_search.down.sql
 
 frontend/src/
 ├── app/(public)/catalog/page.tsx

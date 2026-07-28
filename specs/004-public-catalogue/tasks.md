@@ -122,7 +122,7 @@ Required mutations, each of which must turn a test red:
 > identical whether folding works or is absent entirely — so "I wrote the test after and it passed" is
 > not evidence here.
 
-- [ ] T023 Add migration `0010_catalog_search`. Additive only: the `catalog_normalize_ar` function,
+- [ ] T023 Add migration `0011_catalog_search`. Additive only: the `catalog_normalize_ar` function,
       one generated column, one index. No constraint on any existing table, and **no modification of
       any existing migration file** — their checksums are enforced
 - [ ] T023a **Verify the backfill, do not assume it.** `ALTER TABLE … ADD COLUMN … GENERATED … STORED`

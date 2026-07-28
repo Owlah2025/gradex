@@ -19,7 +19,7 @@ Every field S3 renders is owned elsewhere:
 **If implementing S3 appears to require a write to any of the above, stop.** That is a finding against
 [spec.md](spec.md), not a licence to add a write path to a read-only slice.
 
-## Migration `0010_catalog_search`
+## Migration `0011_catalog_search`
 
 Additive only: one function, one column, one index. It modifies no existing table's constraints and
 **no existing migration file** — `scripts/docs-guard.sh` enforces the checksums of applied migrations,

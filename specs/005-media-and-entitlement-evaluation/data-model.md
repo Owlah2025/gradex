@@ -2,7 +2,7 @@
 
 **Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 
-## Migration `0011_media_and_entitlement`
+## Migration `0012_media_and_entitlement`
 
 Additive. Modifies no existing migration file — their checksums are enforced by
 `scripts/docs-guard.sh`, and `0001_init` onward are applied to real databases.

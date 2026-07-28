@@ -26,7 +26,7 @@ and merging them produces a range too large to review honestly.
 | Retires | `backend/internal/video` direct-to-asynq path |
 | Storage | S3-compatible, **private**; presigned time-bounded access only |
 | Queue | Existing durable queue + outbox boundary |
-| Migration | `0011_media_and_entitlement` |
+| Migration | `0012_media_and_entitlement` |
 | Scanner | **Adapter behind an interface.** `LG-014` unresolved |
 
 ## Constitution Check
@@ -166,7 +166,7 @@ backend/internal/entitlement/
 ├── scope.go          # Course covers Sections; Section covers itself; union
 └── seed_nonprod.go   # //go:build !production — absent from production builds
 
-backend/internal/db/migrations/0011_media_and_entitlement.{up,down}.sql
+backend/internal/db/migrations/0012_media_and_entitlement.{up,down}.sql
 ```
 
 ## Complexity Tracking

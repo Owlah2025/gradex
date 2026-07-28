@@ -815,3 +815,30 @@ owner explicitly reassigned implementation to Codex while retaining Claude as re
 
 **Source:** Product-owner instruction on 2026-07-28: "implement yourself instead of antigravity and
 claude will review."
+
+## D-044 — Antigravity completes S2 and Claude reviews the whole feature once
+
+**Date:** 2026-07-28
+**Status:** Active for remaining S2 T039–T064. D-043 expired when D5 closed at reviewed head
+`3b6d752`. This decision restores D-042's Antigravity builder seat for the rest of S2 and replaces
+its per-range Claude review cadence for this feature only.
+
+**Decision:** Codex owns the existing S2 SpecKit specification, plan, task reconciliation,
+orchestration, and implementation verification. Antigravity on exact model
+`gemini-3.6-flash-high` implements T039–T064 through the repository `speckit.implement` workflow in
+five sequential, bounded queues. Codex reviews and commits each queue. Claude participates only
+after the complete S2 feature converges and hosted CI is green, then independently reviews the one
+exact cumulative range `3d9604e..<final-head>` from a disposable detached worktree.
+
+There is no Claude review of an individual queue, phase, or correction slice. A critical or high
+whole-feature finding returns to Antigravity for correction, after which Claude re-reviews the whole
+cumulative S2 range. Antigravity never approves or commits its own output, and Codex verification is
+not independent acceptance.
+
+**Reason:** The Antigravity quota returned, and the product owner explicitly reassigned
+implementation to Antigravity while requiring Claude to wait until the entire feature—not a phase
+or slice—is finished.
+
+**Source:** Product-owner instructions on 2026-07-28: use Antigravity with Gemini 3.6 Flash High
+after Codex plans through SpecKit; Antigravity follows `speckit.implement`; Claude reviews only after
+the whole feature is complete.

@@ -3,7 +3,10 @@
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
 > Last repository reconciliation: **2026-07-28 at reviewed D5 implementation head `3b6d752`**; D5 planning freeze `3e1809d`; prior application baseline `08b8857`
-> Active slice: **none. S2 D5 Phase 5 revision integrity is `CLOSED`.** T032–T038 closed on Claude Opus verdict `APPROVE WITH FINDINGS` with 0 critical/high findings, and hosted CI run `30370633192` passed all five jobs on exact reviewed head `3b6d752`. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `CLOSED`; T039–T064 remain unstarted
+> Active slice: **S2 whole-feature completion planning.** D5 remains `CLOSED`; T039–T064 are the
+> frozen remaining program under D-044. Codex plans/orchestrates, Antigravity implements five
+> sequential queues on `gemini-3.6-flash-high`, and Claude reviews once only after full convergence
+> and hosted CI
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
@@ -765,8 +768,8 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**D5 is closed. Do not start T039 or another slice implicitly. Use `Replan` or `Start the day` to
-select and freeze the next bounded slice.**
+**S2 T039–T064 are selected under D-044.** Begin with the SpecKit planning freeze, then implement
+pricing T039–T042. Do not start S3 or ask Claude to review an intermediate queue.
 
 The [D5 record](daily/2026-07-28-d5.md) carries the exact local, mutation, independent-review, and
 hosted-CI evidence. The [S2 tasks](../../specs/003-course-authoring/tasks.md) retain T039–T064

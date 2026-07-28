@@ -149,6 +149,12 @@ With one entitled Student holding active access:
 
 Assert throughout that **no Entitlement row is mutated** by any of them.
 
+Until S4 replaces the compatibility access fixture with the single production Entitlement evaluator,
+this scenario exercises the production-wired Course access-state reader composed with that existing
+fixture. It proves that S2 exposes lifecycle, retirement, and emergency-suspension state live and
+does not mutate access records. It does not create a real Entitlement or implement S4's
+Order-derived retirement comparison.
+
 **Mutation**: make delisting deny access; the delist assertion must fail. If it passes, delisting and
 suspension have been conflated — the exact confusion this slice must not ship.
 
@@ -178,5 +184,7 @@ desktop widths. Validation messages, review reasons, and taxonomy labels all loc
 - All nine scenarios pass, each demonstrated to fail under its stated mutation.
 - Every gate command above is green, including a **clean** frontend build.
 - Hosted CI passes all five jobs on the exact head offered for review.
-- An **independent** review of the exact frozen range returns no critical or high finding.
+- `speckit.converge` reports clean after any appended tasks are implemented.
+- One **independent whole-S2** review of exact range `3d9604e..<final-head>` returns no critical or
+  high finding. There are no phase or slice reviews between T039 and T064.
   A builder's own reading of its own diff is a self-check and closes nothing.

@@ -545,6 +545,12 @@ a retired term stays on the Courses already carrying it.
   unrelated frontend work, and unrelated refactoring remain outside the D5 range. A prerequisite may
   enter only when T032–T038 cannot work correctly without it, with its evidence and minimal extent
   recorded before implementation.
+- After D5 closes, the remaining S2 implementation is T039–T064. S2 owns writing and exposing live
+  Course lifecycle, retirement, and emergency-suspension state. S4 remains the sole owner of the
+  complete Entitlement evaluator and Order-derived retirement comparison; S2 must not create a real
+  Entitlement or a second permanent access decision.
+- Claude reviews S2 once, only after all requirements represented by T001–T064 converge, the full
+  local gate suite passes, and hosted CI is green on the exact final head.
 
 ## Dependencies
 

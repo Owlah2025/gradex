@@ -336,6 +336,38 @@ security, and the production live-graph loader are admitted because T032–T038 
 FR-046–FR-055 and BR-019/BR-059 without them. Any other prerequisite stops for a recorded scope
 decision.
 
+## Whole-S2 completion program after D5
+
+D5 remains closed at T038. The remaining feature is implemented without reopening its accepted
+range, in five sequential queues: pricing T039–T042; lifecycle, ownership, and emergency controls
+T043–T050; taxonomy T051–T054; the inherited password-change evidence T055–T057; and whole-feature
+integration T058–T064. Each queue starts from a clean tree, is implemented by Antigravity through
+the repository `speckit.implement` skill, and is verified and committed by Codex. Claude does not
+review a queue or phase; it receives one cumulative whole-S2 range only after convergence and hosted
+CI are green.
+
+The existing S2/S4 boundary remains authoritative. S2 owns the Course lifecycle, retirement
+timestamp, emergency-suspension state, and a mandatory production-wired reader for that live state.
+S4 owns the single complete Entitlement decision and Order-derived
+`retirement_eligibility_at` comparison. S2 may exercise the existing compatibility access fixture to
+prove next-decision behavior, but it creates no real Entitlement and no second permanent evaluator.
+
+Ownership reassignment is part of T043 even though the earlier task wording omitted it: FR-003,
+FR-043, the Admin API contract, and the audit action set already require the route. Reassignment
+locks the Course, revalidates an active Instructor target, preserves the authored/revision graph and
+external records, and never silently retargets an active candidate.
+
+Schema 10 is the current S2 authority. The remaining behavior uses the existing lifecycle,
+suspension, taxonomy, stable-identity, price-history, audit, and outbox schema; no speculative S2
+migration is planned. Because D5 consumed migration 0010, the still-unbuilt downstream plans use
+`0011_catalog_search` for S3 and `0012_media_and_entitlement` for S4.
+
+The accepted D5 medium/low findings are inputs to T058–T062, not an authorization for unrelated
+cleanup. Production mutation security must include the pre-D5 Course-creation route; Problem Details
+documents must agree on their extension members; and S3/S5 must consume the canonical captured-live
+graph/access-state seams. Findings whose consuming route does not exist in S2 are documented with
+their downstream owner rather than disguised as completed behavior.
+
 ## Complexity Tracking
 
 No Constitution violations. This table is intentionally empty.

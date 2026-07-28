@@ -70,7 +70,7 @@ Each must leave the asset non-deliverable. Aggregate proof hides the one mode th
 - [ ] T012 **Retire** the legacy `internal/video` direct-to-asynq path. Retire, not disable: a dormant
       path that publishes unscanned bytes is one route registration from live. SC-008 asserts it is
       **gone**
-- [ ] T013 Migration `0011_media_and_entitlement` up and down, round-tripped against real PostgreSQL;
+- [ ] T013 Migration `0012_media_and_entitlement` up and down, round-tripped against real PostgreSQL;
       raise `db.MaxSchemaVersion` and confirm CI **derives** the assertion
 
 **Checkpoint 1** — bytes flow upload → quarantine → scan → transcode → `READY`, and nothing reaches
