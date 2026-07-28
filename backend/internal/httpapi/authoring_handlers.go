@@ -411,3 +411,33 @@ func (h *authoringHandlers) listTaxonomyTerms(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, terms)
 }
+
+func (h *authoringHandlers) submitCourse(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	courseID := c.Param("id")
+
+	course, err := h.repo.SubmitCourse(c.Request.Context(), h.assetValidator, courseID, accountID, accountID)
+	if err != nil {
+		var valErr *catalog.SubmissionValidationError
+		if errors.As(err, &valErr) {
+			var violations []gin.H
+			for _, v := range valErr.Violations {
+				item := gin.H{"code": v.Code, "target": v.Target}
+				if v.Dimension != "" {
+					item["dimension"] = v.Dimension
+				}
+				violations = append(violations, item)
+			}
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"type":       "https://gradex.app/problems/submission-incomplete",
+				"title":      "Course cannot be submitted",
+				"status":     422,
+				"violations": violations,
+			})
+			return
+		}
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, course)
+}

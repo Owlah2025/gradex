@@ -31,6 +31,12 @@ func mountCatalogRoutes(
 		logger:         logger,
 	}
 
+	reviewH := &reviewHandlers{
+		repo:           foundation.repository,
+		assetValidator: foundation.assetValidator,
+		logger:         logger,
+	}
+
 	ownershipMw, err := RequireCourseOwnership(foundation.ownership, logger)
 	if err != nil {
 		return fmt.Errorf("building course ownership middleware: %w", err)
@@ -69,6 +75,22 @@ func mountCatalogRoutes(
 		ownedGroup.DELETE("/lessons/:lessonId/files", h.deleteLessonFile)
 		ownedGroup.PUT("/preview", h.setPreviewAsset)
 		ownedGroup.DELETE("/preview", h.clearPreviewAsset)
+		ownedGroup.POST("/submit", h.submitCourse)
+	}
+
+	// Admin review queue and review actions under /admin/review
+	// Require authenticated Admin session and CATALOG_PUBLISH through identity.Authorize (contracts/review-api.md)
+	adminReviewGroup := v1.Group("/admin/review")
+	adminReviewGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+	)
+	{
+		adminReviewGroup.GET("/queue", reviewH.listQueue)
+		adminReviewGroup.GET("/courses/:id", reviewH.getCourseGraph)
+		adminReviewGroup.POST("/courses/:id/approve", reviewH.approveCourse)
+		adminReviewGroup.POST("/courses/:id/request-changes", reviewH.requestChanges)
+		adminReviewGroup.POST("/courses/:id/preview/:lessonId", reviewH.previewLesson)
 	}
 
 	return nil

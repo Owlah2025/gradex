@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 var (
@@ -39,16 +41,25 @@ type CourseRow struct {
 }
 
 type Repository struct {
-	pool *pgxpool.Pool
+	pool         *pgxpool.Pool
+	outboxWriter *outbox.Writer
 }
 
 // NewRepository constructs a new Repository.
 // Standing clause: required dependency validated at construction.
-func NewRepository(pool *pgxpool.Pool) (*Repository, error) {
+func NewRepository(pool *pgxpool.Pool, writers ...*outbox.Writer) (*Repository, error) {
 	if pool == nil {
 		return nil, ErrRepositoryNil
 	}
-	return &Repository{pool: pool}, nil
+	repo := &Repository{pool: pool}
+	if len(writers) > 0 && writers[0] != nil {
+		repo.outboxWriter = writers[0]
+	}
+	return repo, nil
+}
+
+func (r *Repository) SetOutboxWriter(writer *outbox.Writer) {
+	r.outboxWriter = writer
 }
 
 func (r *Repository) Pool() *pgxpool.Pool {

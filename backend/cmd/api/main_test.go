@@ -143,6 +143,7 @@ func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
 		"StudentAdmission": "/api/v1/student-registrations",
 		"Staff":            "/api/v1/staff",
 		"CatalogAuthoring": "/api/v1/courses",
+		"AdminReview":      "/api/v1/admin/review",
 	}
 
 	surfaceMounted := make(map[string]bool)

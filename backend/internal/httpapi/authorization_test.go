@@ -305,6 +305,13 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"DELETE /api/v1/courses/:id/lessons/:lessonId/files":   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/lessons/:lessonId/files", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
 	"DELETE /api/v1/courses/:id/preview":                   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/submit":                      {Method: http.MethodPost, Path: "/api/v1/courses/:id/submit", Class: ClassOwnershipProtected},
+
+	"GET /api/v1/admin/review/queue":                          {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/review/courses/:id":                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/approve":           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/approve", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/request-changes":   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/request-changes", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/preview/:lessonId", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}
@@ -705,7 +712,7 @@ func TestOwnedResourceRoutesDerivedSweep(t *testing.T) {
 	}
 }
 
-func TestSubmitRouteIsUnmountedAndReturns404(t *testing.T) {
+func TestSubmitRouteIsMountedAndProtected(t *testing.T) {
 	instructor := identity.Principal{
 		AccountID:       "11111111-1111-1111-1111-111111111111",
 		Role:            identity.RoleInstructor,
@@ -717,8 +724,9 @@ func TestSubmitRouteIsUnmountedAndReturns404(t *testing.T) {
 	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/courses/course-99/submit", []byte(`{}`))
 	rec := do(r, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("POST /api/v1/courses/course-99/submit returned status %d, want 404", rec.Code)
+	// Since fakeOwnershipChecker returns false for isOwner, status must be 403 Forbidden
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /api/v1/courses/course-99/submit returned status %d, want 403 (ownership enforcement)", rec.Code)
 	}
 }
 

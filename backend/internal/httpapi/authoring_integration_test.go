@@ -83,15 +83,15 @@ type dbPrincipalResolver struct {
 
 func (r dbPrincipalResolver) ResolvePrincipal(ctx context.Context, accountID string) (identity.Principal, error) {
 	var p identity.Principal
-	var roleStr, statusStr, credStr string
-	query := `SELECT id, role, status, credential_state FROM accounts WHERE id = $1::uuid`
-	err := r.pool.QueryRow(ctx, query, accountID).Scan(&p.AccountID, &roleStr, &statusStr, &credStr)
+	var roleStr, statusStr string
+	query := `SELECT id, role, status FROM accounts WHERE id = $1::uuid`
+	err := r.pool.QueryRow(ctx, query, accountID).Scan(&p.AccountID, &roleStr, &statusStr)
 	if err != nil {
 		return identity.Principal{}, identity.ErrPrincipalNotFound
 	}
 	p.Role = identity.Role(roleStr)
 	p.Status = identity.AccountStatus(statusStr)
-	p.CredentialState = identity.CredentialState(credStr)
+	p.CredentialState = identity.CredentialActive
 	return p, nil
 }
 

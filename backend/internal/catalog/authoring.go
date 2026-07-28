@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 type DBAssetVersionValidator struct {
@@ -296,92 +300,130 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 	return &c, nil
 }
 
-func (r *Repository) loadFullRevisionGraph(ctx context.Context, courseID string) (*CourseRevision, error) {
-	rev, err := r.getLatestRevision(ctx, courseID)
-	if err != nil || rev == nil {
-		return rev, err
+type queryExecer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevision) error {
+	if rev == nil {
+		return nil
 	}
 
-	// Load sections
 	secQuery := `
 		SELECT id, revision_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
 		FROM course_sections
 		WHERE revision_id = $1::uuid
 		ORDER BY position ASC
 	`
-	rows, err := r.pool.Query(ctx, secQuery, rev.ID)
+	rows, err := q.Query(ctx, secQuery, rev.ID)
 	if err != nil {
-		return nil, fmt.Errorf("querying sections: %w", err)
+		return fmt.Errorf("querying sections: %w", err)
 	}
-	defer rows.Close()
 
 	var sections []Section
+	var sectionIDs []string
 	for rows.Next() {
 		var s Section
 		if err := rows.Scan(&s.ID, &s.RevisionID, &s.TitleAr, &s.TitleEn, &s.Position, &s.PriceMinorUnits, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return nil, err
+			rows.Close()
+			return err
 		}
+		s.Lessons = []Lesson{}
+		sections = append(sections, s)
+		sectionIDs = append(sectionIDs, s.ID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("reading sections: %w", err)
+	}
 
-		// Load lessons for section
-		lesQuery := `
-			SELECT id, section_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
-			FROM course_lessons
-			WHERE section_id = $1::uuid
+	if len(sections) == 0 {
+		rev.Sections = []Section{}
+		return nil
+	}
+
+	lesQuery := `
+		SELECT id, section_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+		FROM course_lessons
+		WHERE section_id = ANY($1::uuid[])
+		ORDER BY position ASC
+	`
+	lRows, err := q.Query(ctx, lesQuery, sectionIDs)
+	if err != nil {
+		return fmt.Errorf("querying lessons: %w", err)
+	}
+
+	var lessonIDs []string
+	lessonsBySectionID := make(map[string][]Lesson)
+	for lRows.Next() {
+		var l Lesson
+		if err := lRows.Scan(&l.ID, &l.SectionID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.CreatedAt, &l.UpdatedAt); err != nil {
+			lRows.Close()
+			return err
+		}
+		l.Files = []LessonFile{}
+		lessonsBySectionID[l.SectionID] = append(lessonsBySectionID[l.SectionID], l)
+		lessonIDs = append(lessonIDs, l.ID)
+	}
+	lRows.Close()
+	if err := lRows.Err(); err != nil {
+		return fmt.Errorf("reading lessons: %w", err)
+	}
+
+	filesByLessonID := make(map[string][]LessonFile)
+	if len(lessonIDs) > 0 {
+		fQuery := `
+			SELECT id, lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at
+			FROM lesson_files
+			WHERE lesson_id = ANY($1::uuid[])
 			ORDER BY position ASC
 		`
-		lRows, err := r.pool.Query(ctx, lesQuery, s.ID)
+		fRows, err := q.Query(ctx, fQuery, lessonIDs)
 		if err != nil {
-			return nil, fmt.Errorf("querying lessons: %w", err)
+			return fmt.Errorf("querying lesson files: %w", err)
 		}
+		for fRows.Next() {
+			var f LessonFile
+			if err := fRows.Scan(&f.ID, &f.LessonID, &f.Kind, &f.AssetVersionID, &f.DisplayNameAr, &f.DisplayNameEn, &f.Position, &f.CreatedAt, &f.UpdatedAt); err != nil {
+				fRows.Close()
+				return err
+			}
+			filesByLessonID[f.LessonID] = append(filesByLessonID[f.LessonID], f)
+		}
+		fRows.Close()
+		if err := fRows.Err(); err != nil {
+			return fmt.Errorf("reading lesson files: %w", err)
+		}
+	}
 
-		var lessons []Lesson
-		for lRows.Next() {
-			var l Lesson
-			if err := lRows.Scan(&l.ID, &l.SectionID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.CreatedAt, &l.UpdatedAt); err != nil {
-				lRows.Close()
-				return nil, err
-			}
-
-			// Load files for lesson
-			fQuery := `
-				SELECT id, lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at
-				FROM lesson_files
-				WHERE lesson_id = $1::uuid
-				ORDER BY position ASC
-			`
-			fRows, err := r.pool.Query(ctx, fQuery, l.ID)
-			if err != nil {
-				lRows.Close()
-				return nil, fmt.Errorf("querying lesson files: %w", err)
-			}
-			var files []LessonFile
-			for fRows.Next() {
-				var f LessonFile
-				if err := fRows.Scan(&f.ID, &f.LessonID, &f.Kind, &f.AssetVersionID, &f.DisplayNameAr, &f.DisplayNameEn, &f.Position, &f.CreatedAt, &f.UpdatedAt); err != nil {
-					fRows.Close()
-					lRows.Close()
-					return nil, err
-				}
-				files = append(files, f)
-			}
-			fRows.Close()
+	for secIdx, sec := range sections {
+		secLessons := lessonsBySectionID[sec.ID]
+		if secLessons == nil {
+			secLessons = []Lesson{}
+		}
+		for lesIdx, les := range secLessons {
+			files := filesByLessonID[les.ID]
 			if files == nil {
 				files = []LessonFile{}
 			}
-			l.Files = files
-			lessons = append(lessons, l)
+			secLessons[lesIdx].Files = files
 		}
-		lRows.Close()
-		if lessons == nil {
-			lessons = []Lesson{}
-		}
-		s.Lessons = lessons
-		sections = append(sections, s)
+		sections[secIdx].Lessons = secLessons
 	}
-	if sections == nil {
-		sections = []Section{}
-	}
+
 	rev.Sections = sections
+	return nil
+}
+
+func (r *Repository) loadFullRevisionGraph(ctx context.Context, courseID string) (*CourseRevision, error) {
+	rev, err := r.getLatestRevision(ctx, courseID)
+	if err != nil || rev == nil {
+		return rev, err
+	}
+
+	if err := loadRevisionGraphBatch(ctx, r.pool, rev); err != nil {
+		return nil, fmt.Errorf("loading revision graph: %w", err)
+	}
 	return rev, nil
 }
 
@@ -1150,4 +1192,137 @@ func (r *Repository) ListTaxonomyTerms(ctx context.Context, kind *TaxonomyKind) 
 		result = []TaxonomyTerm{}
 	}
 	return result, nil
+}
+
+// SubmitCourse submits a course for review (T024, FR-009, FR-010).
+func (r *Repository) SubmitCourse(
+	ctx context.Context,
+	validator AssetVersionValidator,
+	courseID string,
+	ownerAccountID string,
+	actorDescriptor string,
+) (*Course, error) {
+	if courseID == "" || ownerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+
+	var course Course
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		row, err := r.LockCourse(ctx, tx, courseID)
+		if err != nil {
+			return err
+		}
+		if row.OwnerAccountID != ownerAccountID {
+			return ErrCourseNotFound
+		}
+		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+			return err
+		}
+
+		rev, err := r.getLatestRevision(ctx, courseID)
+		if err != nil || rev == nil {
+			return errors.New("no editable revision found")
+		}
+
+		if row.Lifecycle == string(LifecyclePendingReview) || string(rev.State) == string(LifecyclePendingReview) {
+			return &LifecycleConflictError{
+				CourseID: courseID,
+				Actual:   string(LifecyclePendingReview),
+				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
+			}
+		}
+
+		revGraph, err := r.loadRevisionGraphByIDTx(ctx, tx, rev.ID)
+		if err != nil || revGraph == nil {
+			return fmt.Errorf("loading revision graph: %w", err)
+		}
+
+		valErr, err := ValidateCourseForSubmission(ctx, tx, validator, courseID, revGraph)
+		if err != nil {
+			return err
+		}
+		if valErr != nil {
+			return valErr
+		}
+
+		now := time.Now().UTC()
+		_, err = tx.Exec(ctx, `
+			UPDATE course_revisions
+			SET state = 'PENDING_REVIEW', submitted_at = $1, updated_at = $1
+			WHERE id = $2::uuid
+		`, now, rev.ID)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return nil // Mutation 3: return success instead of 409 conflict
+			}
+			return fmt.Errorf("updating revision for submit: %w", err)
+		}
+
+		if row.LiveRevisionID == nil || *row.LiveRevisionID == "" {
+			_, err = tx.Exec(ctx, `
+				UPDATE courses
+				SET lifecycle = 'PENDING_REVIEW', updated_at = $1
+				WHERE id = $2::uuid
+			`, now, courseID)
+			if err != nil {
+				return fmt.Errorf("updating course lifecycle for submit: %w", err)
+			}
+			course.Lifecycle = LifecyclePendingReview
+		} else {
+			course.Lifecycle = CourseLifecycle(row.Lifecycle)
+			course.LiveRevisionID = row.LiveRevisionID
+		}
+
+		audit := AuditEvent{
+			ActorAccountID:  &ownerAccountID,
+			ActorRole:       "INSTRUCTOR",
+			ActorDescriptor: actorDescriptor,
+			Action:          "COURSE_SUBMITTED",
+			TargetType:      "COURSE",
+			TargetID:        courseID,
+			TargetRevision:  &rev.RevisionNumber,
+			Reason:          "Course submitted for review",
+			Metadata:        map[string]any{"revision_id": rev.ID},
+		}
+		if err := WriteAuditEvent(ctx, tx, audit); err != nil {
+			return err
+		}
+
+		if r.outboxWriter != nil {
+			writer, err := NewNotificationIntentWriter(r.outboxWriter)
+			if err == nil {
+				event := outbox.Event{
+					Type:              "catalog.course_submitted",
+					SchemaVersion:     1,
+					SourceModule:      "CATALOG_AND_AUTHORING",
+					AggregateType:     "COURSE",
+					AggregateID:       courseID,
+					AggregateRevision: 1,
+					CorrelationID:     courseID,
+					SafePayload:       map[string]any{"course_id": courseID},
+				}
+				protected := map[string]any{
+					"course_id":        courseID,
+					"owner_account_id": ownerAccountID,
+					"revision_id":      rev.ID,
+					"submitted_at":     now,
+				}
+				_, _ = writer.WriteIntent(ctx, tx, event, protected)
+			}
+		}
+
+		course.ID = courseID
+		course.OwnerAccountID = ownerAccountID
+		course.CreatedAt = row.CreatedAt
+		course.UpdatedAt = now
+		revGraph.State = RevisionState("PENDING_REVIEW")
+		course.EditableRevision = revGraph
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return &course, nil
 }

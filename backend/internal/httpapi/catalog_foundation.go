@@ -38,6 +38,9 @@ func NewCatalogFoundation(options CatalogFoundationOptions) (*CatalogFoundation,
 	if options.OutboxWriter == nil {
 		return nil, errors.New("outbox writer is required")
 	}
+	if options.Repository != nil && options.OutboxWriter != nil {
+		options.Repository.SetOutboxWriter(options.OutboxWriter)
+	}
 	return &CatalogFoundation{
 		repository:     options.Repository,
 		ownership:      ownership,
