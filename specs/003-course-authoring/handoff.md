@@ -1,13 +1,13 @@
 # D5 Implementation Handoff — S2 Revision Integrity
 
-**To**: Antigravity (`agy`, builder through `speckit.implement`)
+**To**: Codex (builder through `speckit.implement`)
 
 **From**: Codex (SpecKit planner)
 
 **Independent reviewer**: Claude — review only, no implementation or repair
 
 **Authority**:
-[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews)
+[D-043](../../docs/DECISIONS.md#d-043--codex-implements-s2-d5-and-claude-independently-reviews)
 
 **Application baseline**: `08b8857`
 
@@ -35,8 +35,8 @@ Before editing, run:
 .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 ```
 
-Keep the result uncommitted for Codex to inspect and freeze. Do not touch the user-owned
-`.caveman.json`. If interrupted, report the exact completed task and leave the tree buildable.
+Do not touch the user-owned `.caveman.json`. Keep implementation commits bounded to T032–T038 and
+leave the tree buildable at every checkpoint.
 
 ## Non-negotiable implementation boundary
 

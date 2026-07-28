@@ -5,9 +5,9 @@
 **Input**: Feature specification from `specs/003-course-authoring/spec.md`
 
 **Status**: T001–T031 closed; D5 is frozen to T032–T038 under
-[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews).
-Codex specifies, Antigravity implements through `speckit.implement`, and Claude independently reviews
-the frozen implementation range.
+[D-043](../../docs/DECISIONS.md#d-043--codex-implements-s2-d5-and-claude-independently-reviews).
+Codex specifies and implements through SpecKit, and Claude independently reviews the frozen
+implementation range.
 
 ## Summary
 

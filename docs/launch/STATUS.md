@@ -2,12 +2,12 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D5 planning) at `3e1809d`**; D5 Speckit analysis, documentation guard, and exposure guard green; application baseline remains `08b8857`
-> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS`.** T001–T031 are reconciled complete at ranges recorded in the S2 tasks; T032–T038 are frozen as the entire Antigravity implementation queue at `3e1809d`. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
+> Last repository reconciliation: **2026-07-28 (D5 implementation takeover) at `c5bcc65`**; D5 planning remains frozen at `3e1809d`; application baseline remains `08b8857`
+> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS`.** T001–T031 are reconciled complete at ranges recorded in the S2 tasks; T032–T038 are the entire Codex implementation queue under D-043. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
-> Workflow: Codex specifies with SpecKit → Antigravity implements with SpecKit → Claude independently reviews and accepts (D-042, standing from S2 Phase 5)
+> Workflow for S2 D5: Codex specifies and implements with SpecKit → Claude independently reviews and accepts (D-043)
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## Legal and accounting exposure is accepted, not resolved — D-041
@@ -765,13 +765,13 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Antigravity implements S2 D5 T032–T038 through `speckit.implement` from planning freeze
-`3e1809d`; Claude then independently reviews one frozen exact implementation range.**
+**Codex implements S2 D5 T032–T038 through `speckit.implement` from planning freeze
+`3e1809d`; Claude then independently reviews one frozen exact implementation range under D-043.**
 
 Codex's specification seat is complete for this boundary. The existing
 [S2 tasks](../../specs/003-course-authoring/tasks.md) reconcile T001–T031 with exact evidence and
 freeze only T032–T038 for D5. The bounded
-[Antigravity handoff](../../specs/003-course-authoring/handoff.md) prohibits T039+, separate feature
+[D5 handoff](../../specs/003-course-authoring/handoff.md) prohibits T039+, separate feature
 creation, S2 regeneration, pricing, lifecycle/emergency controls, taxonomy administration, search,
 frontend work, and unrelated refactoring.
 
@@ -788,8 +788,8 @@ cutover-blockers.
 
 The implementation stop condition is a buildable, uncommitted T032–T038 result with all named real
 PostgreSQL races, rollback/dependency/clone/identity proofs, six restored mutations, production
-wiring/security sweep, and complete local gates green. Codex freezes that result without repairing
-it; Claude reviews from a disposable detached worktree and does not implement.
+wiring/security sweep, and complete local gates green. Claude reviews the Codex-authored range from
+a disposable detached worktree and does not implement.
 
 **S1B and S1C are not reopened** unless a concrete defect surfaces in them. A suspicion is not a
 defect, and reopening a reviewed slice on suspicion discards the frozen-range evidence that closed

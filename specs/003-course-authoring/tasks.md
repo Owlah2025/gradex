@@ -3,9 +3,9 @@
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
 **Planner**: Codex through `speckit.specify`.
-**Builder**: Antigravity through `speckit.implement`.
+**Builder**: Codex through `speckit.implement`.
 **Reviewer**: Claude, Tier 2, on one frozen exact range under
-[D-042](../../docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews).
+[D-043](../../docs/DECISIONS.md#d-043--codex-implements-s2-d5-and-claude-independently-reviews).
 **A builder never closes its own slice.**
 
 **D5 freeze**: T001–T031 are reconciled as completed below. T032–T038 are the entire implementation

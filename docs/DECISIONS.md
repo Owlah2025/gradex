@@ -793,3 +793,25 @@ Claude's independent review boundary.
 
 **Source:** Product-owner instructions on 2026-07-28: Codex is the planner using `speckit.specify`,
 Antigravity uses `speckit.implement`, and Claude reviews.
+
+## D-043 — Codex implements S2 D5 and Claude independently reviews
+
+**Date:** 2026-07-28
+**Status:** Active for S2 D5. Supersedes only D-042's D5 builder seat; D-042's frozen specification,
+scope boundary, and Claude review protocol remain in force.
+
+**Decision:** Codex takes the S2 D5 implementation and correction seat through
+`speckit.implement`, beginning from the existing partial uncommitted Antigravity worktree.
+Antigravity is removed from the active D5 seat. Claude remains the independent read-only reviewer
+of one frozen exact implementation range and does not implement or repair it.
+
+Codex may plan and build, but may not accept its own range. Claude reviews from a disposable
+detached worktree. Any critical or high finding returns to Codex for correction and another
+independent Claude review. This staffing change does not reopen T001–T031, change the frozen
+T032–T038 requirements, or authorize T039+.
+
+**Reason:** Antigravity quota interruptions produced incomplete implementation passes. The product
+owner explicitly reassigned implementation to Codex while retaining Claude as reviewer.
+
+**Source:** Product-owner instruction on 2026-07-28: "implement yourself instead of antigravity and
+claude will review."
