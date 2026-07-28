@@ -3,8 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -89,7 +94,7 @@ func (f fakeVideoService) ServeManifest(context.Context, string, string, string)
 	return nil, "", nil
 }
 
-func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
+func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	freshAPISchema(t)
 	pool, _ := apiPool(t)
 
@@ -199,6 +204,84 @@ func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
 		key := req.method + " " + req.path
 		if !d5Mounted[key] {
 			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing D5 route '%s'", key)
+		}
+	}
+
+	validToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x41}, 32))
+	securityCases := []struct {
+		name       string
+		origin     string
+		csrf       string
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "missing origin",
+			csrf:       validToken,
+			wantStatus: http.StatusForbidden,
+			wantCode:   "ORIGIN_NOT_ALLOWED",
+		},
+		{
+			name:       "foreign origin",
+			origin:     "https://attacker.example",
+			csrf:       validToken,
+			wantStatus: http.StatusForbidden,
+			wantCode:   "ORIGIN_NOT_ALLOWED",
+		},
+		{
+			name:       "missing CSRF",
+			origin:     "https://gradex.example",
+			wantStatus: http.StatusForbidden,
+			wantCode:   "CSRF_FAILED",
+		},
+		{
+			name:       "invalid CSRF",
+			origin:     "https://gradex.example",
+			csrf:       "malformed",
+			wantStatus: http.StatusForbidden,
+			wantCode:   "CSRF_FAILED",
+		},
+		{
+			name:       "anonymous",
+			origin:     "https://gradex.example",
+			csrf:       validToken,
+			wantStatus: http.StatusUnauthorized,
+			wantCode:   "AUTHENTICATION_REQUIRED",
+		},
+	}
+
+	for _, route := range requiredD5Routes {
+		if route.method == http.MethodGet {
+			continue
+		}
+		for _, securityCase := range securityCases {
+			t.Run(route.method+" "+route.path+"/"+securityCase.name, func(t *testing.T) {
+				request := httptest.NewRequest(route.method, route.path, nil)
+				request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: validToken})
+				if securityCase.origin != "" {
+					request.Header.Set("Origin", securityCase.origin)
+				}
+				if securityCase.csrf != "" {
+					request.Header.Set("X-CSRF-Token", securityCase.csrf)
+				}
+
+				response := httptest.NewRecorder()
+				r.ServeHTTP(response, request)
+
+				var body struct {
+					Code string `json:"code"`
+				}
+				if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decoding Problem Details response: %v", err)
+				}
+				if response.Code != securityCase.wantStatus || body.Code != securityCase.wantCode {
+					t.Fatalf(
+						"mutation security response = %d/%s, want %d/%s: %s",
+						response.Code, body.Code, securityCase.wantStatus,
+						securityCase.wantCode, response.Body.String(),
+					)
+				}
+			})
 		}
 	}
 }
