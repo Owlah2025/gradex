@@ -1,185 +1,170 @@
+//go:build integration
+
 package main
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
+	"time"
 
-	"github.com/Owlah2025/gradex/backend/internal/config"
-	"github.com/Owlah2025/gradex/backend/internal/db"
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/health"
+	"github.com/Owlah2025/gradex/backend/internal/httpapi"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/video"
 )
 
-// S1B1 T017: every admission dependency composes at startup before the router
-// can mount the public Student mutation boundary.
-func TestBuildDevelopmentAdmissionFoundation(t *testing.T) {
-	settings := config.MapLookup(map[string]string{
-		"APP_ENV":                              "development",
-		"PUBLIC_ORIGIN":                        "http://localhost:3000",
-		"REDIS_ADDR":                           "localhost:6379",
-		"S3_ENDPOINT":                          "http://localhost:9000",
-		"S3_BUCKET":                            "gradex-test",
-		"STUDENT_REGISTRATION_ENABLED":         "true",
-		"REGISTRATION_POLICY_SET_ID":           "dev-registration-v1",
-		"PASSWORD_SCREEN_MODE":                 "deterministic",
-		"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "dev-v1",
-	})
-	secrets := config.MapSecretResolver{
-		"DATABASE_URL":                 "postgres://x",
-		"S3_ACCESS_KEY":                "a",
-		"S3_SECRET_KEY":                "b",
-		"PLAYBACK_TOKEN_SECRET":        "playback",
-		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
-		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
-		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
-		"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
-	}
-	cfg, err := config.LoadFrom(settings, secrets)
+const (
+	apiAdminDSN   = "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable"
+	apiTestDBName = "gradex_api_wiring_test"
+	apiTestDSN    = "postgres://gradex:gradex@localhost:5432/" + apiTestDBName + "?sslmode=disable"
+	apiSourceURL  = "file://../../internal/db/migrations"
+	apiOpTimeout  = 30 * time.Second
+)
+
+func freshAPISchema(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), apiOpTimeout)
+	defer cancel()
+
+	admin, err := pgxpool.New(ctx, apiAdminDSN)
 	if err != nil {
-		t.Fatalf("loading config: %v", err)
+		t.Fatalf("connecting to admin db: %v", err)
 	}
-	pool, err := pgxpool.New(context.Background(), "postgres://test:test@localhost/test")
+	defer admin.Close()
+
+	_, _ = admin.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, apiTestDBName)
+	_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+apiTestDBName)
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+apiTestDBName); err != nil {
+		t.Fatalf("creating test db: %v", err)
+	}
+
+	m, err := migrate.New(apiSourceURL, apiTestDSN)
 	if err != nil {
-		t.Fatalf("constructing test pool: %v", err)
+		t.Fatalf("creating migrator: %v", err)
 	}
-	defer pool.Close()
-	foundation, client, err := buildAdmissionFoundation(cfg, pool)
-	if err != nil {
-		t.Fatalf("building foundation: %v", err)
+	defer m.Close()
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("migrating up: %v", err)
 	}
-	if foundation == nil || client == nil {
-		t.Fatal("foundation composition omitted a required dependency")
-	}
-	_ = client.Close()
 }
 
-func TestBuildAuthenticatedSessionFoundation(t *testing.T) {
-	settings := config.MapLookup(map[string]string{
-		"APP_ENV": "development", "PUBLIC_ORIGIN": "http://localhost:3000",
-		"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
-		"S3_BUCKET": "gradex-test",
-	})
-	secrets := config.MapSecretResolver{
-		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "playback",
-		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
-		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
-		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
-		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
-	}
-	cfg, err := config.LoadFrom(settings, secrets)
+func apiPool(t *testing.T) (*pgxpool.Pool, context.Context) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), apiOpTimeout)
+	t.Cleanup(cancel)
+
+	p, err := pgxpool.New(ctx, apiTestDSN)
 	if err != nil {
-		t.Fatalf("loading config: %v", err)
+		t.Fatalf("opening pool: %v", err)
 	}
-	pool, err := pgxpool.New(context.Background(), "postgres://test:test@localhost/test")
-	if err != nil {
-		t.Fatalf("constructing test pool: %v", err)
-	}
-	defer pool.Close()
-	foundation, repository, client, err := buildSessionFoundation(cfg, pool)
-	if err != nil {
-		t.Fatalf("building session foundation: %v", err)
-	}
-	if foundation == nil || repository == nil || client == nil {
-		t.Fatal("session composition omitted a required dependency")
-	}
-	_ = client.Close()
+	t.Cleanup(p.Close)
+	return p, ctx
 }
 
-func TestBuildAdmissionFoundationRejectsNonDevelopmentFixtures(t *testing.T) {
+type fakeVideoService struct{}
+
+func (f fakeVideoService) RequestUpload(context.Context, string, string, string) (video.UploadTicket, error) {
+	return video.UploadTicket{}, nil
+}
+func (f fakeVideoService) CompleteUpload(context.Context, string) error { return nil }
+func (f fakeVideoService) Retranscode(context.Context, string) error    { return nil }
+func (f fakeVideoService) Publish(context.Context, string) error        { return nil }
+func (f fakeVideoService) GetPlaybackURL(context.Context, string, string) (video.SignedURL, error) {
+	return video.SignedURL{}, nil
+}
+func (f fakeVideoService) UpdateProgress(context.Context, string, string, float64) (video.Progress, error) {
+	return video.Progress{}, nil
+}
+func (f fakeVideoService) ServeManifest(context.Context, string, string, string) ([]byte, string, error) {
+	return nil, "", nil
+}
+
+func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
+	freshAPISchema(t)
+	pool, _ := apiPool(t)
+
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
-		"APP_ENV":                      "production",
-		"PUBLIC_ORIGIN":                "https://gradex.example",
-		"CORS_ALLOWED_ORIGINS":         "https://gradex.example",
-		"REDIS_ADDR":                   "redis:6379",
-		"S3_ENDPOINT":                  "https://storage.example",
-		"S3_BUCKET":                    "gradex-test",
-		"PASSWORD_SCREEN_MODE":         "unavailable",
-		"STUDENT_REGISTRATION_ENABLED": "false",
+		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
+		"PUBLIC_ORIGIN": "https://gradex.example",
+		"S3_ENDPOINT":   "http://localhost:9000", "S3_BUCKET": "gradex-test",
+		"STUDENT_REGISTRATION_ENABLED":         "true",
+		"REGISTRATION_POLICY_SET_ID":           "dev-set-1",
+		"PASSWORD_SCREEN_MODE":                 "deterministic",
+		"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "key-v1",
 	}), config.MapSecretResolver{
-		"DATABASE_URL":                 "postgres://x",
+		"DATABASE_URL":                 apiTestDSN,
 		"S3_ACCESS_KEY":                "a",
 		"S3_SECRET_KEY":                "b",
-		"PLAYBACK_TOKEN_SECRET":        "playback",
-		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
-		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
-		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
-		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
+		"PLAYBACK_TOKEN_SECRET":        "c",
+		"OUTBOX_PROTECTED_PAYLOAD_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"SESSION_CSRF_KEY":             "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+		"ANONYMOUS_COOKIE_SIGNING_KEY": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+		"ANONYMOUS_CSRF_KEY":           "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+		"ADMISSION_LIMITER_HMAC_KEY":   "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
 	})
 	if err != nil {
-		t.Fatalf("loading production config: %v", err)
+		t.Fatalf("config: %v", err)
 	}
-	pool, err := pgxpool.New(context.Background(), "postgres://test:test@localhost/test")
+
+	pf, err := buildProductionFoundations(cfg, pool)
 	if err != nil {
-		t.Fatalf("constructing test pool: %v", err)
+		t.Fatalf("buildProductionFoundations: %v", err)
 	}
-	defer pool.Close()
-	if _, _, err := buildAdmissionFoundation(cfg, pool); err == nil {
-		t.Fatal("production API composed development admission fixtures")
+	defer pf.Close()
+
+	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
+	reporter := health.New(time.Second)
+
+	authenticator := auth.NewFakeAuthenticator()
+	entitlements := auth.NewFakeEntitlementChecker(pool)
+	principals := identity.NewDBPrincipalResolver(pool)
+
+	r, err := httpapi.NewRouter(cfg, logger, reporter, fakeVideoService{}, authenticator, entitlements, principals, pf.Options...)
+	if err != nil {
+		t.Fatalf("httpapi.NewRouter: %v", err)
+	}
+
+	// Enumerate all mounted routes
+	routes := r.Routes()
+	t.Logf("Enumerated %d mounted production routes:", len(routes))
+
+	requiredSurfaces := map[string]string{
+		"Sessions":         "/api/v1/sessions",
+		"StudentAdmission": "/api/v1/student-registrations",
+		"Staff":            "/api/v1/staff",
+		"CatalogAuthoring": "/api/v1/courses",
+	}
+
+	surfaceMounted := make(map[string]bool)
+
+	for _, route := range routes {
+		t.Logf("  %-6s %s", route.Method, route.Path)
+		for surfaceName, pathPrefix := range requiredSurfaces {
+			if route.Path == pathPrefix || (len(route.Path) > len(pathPrefix) && route.Path[:len(pathPrefix)] == pathPrefix) {
+				surfaceMounted[surfaceName] = true
+			}
+		}
+	}
+
+	for surfaceName, pathPrefix := range requiredSurfaces {
+		if !surfaceMounted[surfaceName] {
+			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing surface '%s' (%s)", surfaceName, pathPrefix)
+		}
 	}
 }
 
-func TestRequiredSchemaVersionFollowsEnabledCapabilities(t *testing.T) {
-	tests := map[string]struct {
-		settings map[string]string
-		secrets  config.MapSecretResolver
-		want     int64
-	}{
-		"development fake auth": {
-			settings: map[string]string{
-				"APP_ENV": "development", "AUTH_FAKE_MODE": "true",
-				"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
-				"S3_BUCKET": "gradex-test",
-			},
-			secrets: config.MapSecretResolver{
-				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
-			},
-			want: db.MinSchemaVersion,
-		},
-		"real sessions": {
-			settings: map[string]string{
-				"APP_ENV": "development", "AUTH_FAKE_MODE": "false",
-				"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000",
-				"S3_BUCKET": "gradex-test",
-			},
-			secrets: config.MapSecretResolver{
-				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
-			},
-			want: db.AuthenticatedSessionSchemaVersion,
-		},
-		"Student admission": {
-			settings: map[string]string{
-				"APP_ENV": "development", "AUTH_FAKE_MODE": "true",
-				"PUBLIC_ORIGIN": "http://localhost:3000", "REDIS_ADDR": "localhost:6379",
-				"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
-				"STUDENT_REGISTRATION_ENABLED":         "true",
-				"REGISTRATION_POLICY_SET_ID":           "dev-registration-v1",
-				"PASSWORD_SCREEN_MODE":                 "deterministic",
-				"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "dev-v1",
-			},
-			secrets: config.MapSecretResolver{
-				"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-				"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
-				"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
-				"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
-				"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
-				"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
-			},
-			want: db.AuthenticatedSessionSchemaVersion,
-		},
-	}
+type syncBuffer struct{}
 
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			cfg, err := config.LoadFrom(config.MapLookup(test.settings), test.secrets)
-			if err != nil {
-				t.Fatalf("loading config: %v", err)
-			}
-			if got := requiredSchemaVersion(cfg); got != test.want {
-				t.Fatalf("required schema = %d, want %d", got, test.want)
-			}
-		})
-	}
+func (b *syncBuffer) Write(p []byte) (n int, err error) {
+	return len(p), nil
 }

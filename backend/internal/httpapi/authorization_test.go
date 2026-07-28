@@ -19,6 +19,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/video"
 )
@@ -149,11 +150,26 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing admission foundation: %v", err)
 	}
 
+	outboxWriter, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("constructing outbox writer: %v", err)
+	}
+
+	catalogFoundation, err := NewCatalogFoundation(CatalogFoundationOptions{
+		Ownership:      fakeOwnershipChecker{},
+		AssetValidator: fakeAssetValidator{},
+		OutboxWriter:   outboxWriter,
+	})
+	if err != nil {
+		t.Fatalf("constructing catalog foundation: %v", err)
+	}
+
 	r, err := NewRouter(cfg, logger, reporter, fakeService{}, sessionFoundation.authenticator,
 		fakeEntitlements{allowed: true}, principals,
 		WithStaffFoundation(staffFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
+		WithCatalogFoundation(catalogFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
@@ -272,6 +288,35 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"DELETE /api/v1/staff-invitations/:id":   {Method: http.MethodDelete, Path: "/api/v1/staff-invitations/:id", Class: ClassRecentAuthRequired},
 	"POST /api/v1/accounts/:id/suspension":   {Method: http.MethodPost, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
 	"DELETE /api/v1/accounts/:id/suspension": {Method: http.MethodDelete, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
+
+	"POST /api/v1/courses":                                 {Method: http.MethodPost, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
+	"GET /api/v1/courses":                                  {Method: http.MethodGet, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
+	"GET /api/v1/taxonomy/terms":                           {Method: http.MethodGet, Path: "/api/v1/taxonomy/terms", Class: ClassCapabilityProtected},
+	"GET /api/v1/courses/:id":                              {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/sections":                    {Method: http.MethodPost, Path: "/api/v1/courses/:id/sections", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id/sections/:sectionId":        {Method: http.MethodPatch, Path: "/api/v1/courses/:id/sections/:sectionId", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/sections/:sectionId":       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/sections/:sectionId", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/sections/:sectionId/lessons": {Method: http.MethodPost, Path: "/api/v1/courses/:id/sections/:sectionId/lessons", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id/lessons/:lessonId":          {Method: http.MethodPatch, Path: "/api/v1/courses/:id/lessons/:lessonId", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/lessons/:lessonId":         {Method: http.MethodDelete, Path: "/api/v1/courses/:id/lessons/:lessonId", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/lessons/:lessonId/video":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/lessons/:lessonId/video", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/lessons/:lessonId/files":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/lessons/:lessonId/files":   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/preview":                   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
+}
+
+type fakeOwnershipChecker struct{}
+
+func (fakeOwnershipChecker) IsCourseOwner(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+type fakeAssetValidator struct{}
+
+func (fakeAssetValidator) ValidateAssetVersion(context.Context, string) error {
+	return nil
 }
 
 func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
@@ -288,6 +333,8 @@ func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
 		}
 		execPath := rt.Path
 		execPath = strings.ReplaceAll(execPath, ":lessonID", "lesson-99")
+		execPath = strings.ReplaceAll(execPath, ":lessonId", "lesson-99")
+		execPath = strings.ReplaceAll(execPath, ":sectionId", "section-99")
 		execPath = strings.ReplaceAll(execPath, ":id", "acct-99")
 		result = append(result, struct{ method, path string }{
 			method: rt.Method,
@@ -655,6 +702,23 @@ func TestOwnedResourceRoutesDerivedSweep(t *testing.T) {
 			t.Fatalf("owned route %s %s did not enforce RequireCourseOwnership (status = %d, want 403)",
 				rt.Method, rt.Path, rec.Code)
 		}
+	}
+}
+
+func TestSubmitRouteIsUnmountedAndReturns404(t *testing.T) {
+	instructor := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleInstructor,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}
+
+	r, _ := authzRouter(t, fixedPrincipals{principal: instructor})
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/courses/course-99/submit", []byte(`{}`))
+	rec := do(r, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /api/v1/courses/course-99/submit returned status %d, want 404", rec.Code)
 	}
 }
 

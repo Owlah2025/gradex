@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/Owlah2025/gradex/backend/internal/health"
@@ -61,44 +62,15 @@ func main() {
 	redisHealth := queue.NewHealthClient(cfg.RedisAddr())
 	defer redisHealth.Close()
 
-	var routerOptions []httpapi.RouterOption
 	var sessionRepository *identity.SessionRepository
-	var sessionRedis *redis.Client
-	if cfg.Sessions().Enabled() {
-		var sessionFoundation *httpapi.SessionFoundation
-		sessionFoundation, sessionRepository, sessionRedis, err = buildSessionFoundation(cfg, pool)
-		if err != nil {
-			log.Fatalf("building authenticated-session foundation: %v", err)
-		}
-		defer sessionRedis.Close()
-		routerOptions = append(routerOptions, httpapi.WithSessionFoundation(sessionFoundation))
+	pf, err := buildProductionFoundations(cfg, pool)
+	if err != nil {
+		log.Fatalf("building production router foundations: %v", err)
 	}
+	defer pf.Close()
 
-	var admissionRedis *redis.Client
-	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool)
-		if err != nil {
-			log.Fatalf("building Student admission foundation: %v", err)
-		}
-		admissionRedis = limiterClient
-		routerOptions = append(routerOptions, httpapi.WithAdmissionFoundation(foundation))
-	}
-	if admissionRedis != nil {
-		defer admissionRedis.Close()
-	}
-
-	var staffRedis *redis.Client
-	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildStaffFoundation(cfg, pool)
-		if err != nil {
-			log.Fatalf("building Staff foundation: %v", err)
-		}
-		staffRedis = limiterClient
-		routerOptions = append(routerOptions, httpapi.WithStaffFoundation(foundation))
-	}
-	if staffRedis != nil {
-		defer staffRedis.Close()
-	}
+	routerOptions := pf.Options
+	sessionRepository = pf.SessionRepository
 
 	svc := video.NewService(pool, storageClient, queueClient, cfg)
 
@@ -462,4 +434,98 @@ func buildStaffFoundation(
 		return nil, nil, err
 	}
 	return foundation, redisClient, nil
+}
+
+func buildCatalogFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*httpapi.CatalogFoundation, error) {
+	repository, err := catalog.NewRepository(pool)
+	if err != nil {
+		return nil, err
+	}
+
+	admission := cfg.Admission()
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	assetValidator := catalog.NewDBAssetVersionValidator(pool)
+
+	return httpapi.NewCatalogFoundation(httpapi.CatalogFoundationOptions{
+		Repository:     repository,
+		AssetValidator: assetValidator,
+		OutboxWriter:   writer,
+	})
+}
+
+type ProductionFoundations struct {
+	Options           []httpapi.RouterOption
+	SessionRepository *identity.SessionRepository
+	SessionRedis      *redis.Client
+	AdmissionRedis    *redis.Client
+	StaffRedis        *redis.Client
+}
+
+func (f *ProductionFoundations) Close() {
+	if f.SessionRedis != nil {
+		_ = f.SessionRedis.Close()
+	}
+	if f.AdmissionRedis != nil {
+		_ = f.AdmissionRedis.Close()
+	}
+	if f.StaffRedis != nil {
+		_ = f.StaffRedis.Close()
+	}
+}
+
+func buildProductionFoundations(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*ProductionFoundations, error) {
+	pf := &ProductionFoundations{}
+
+	if cfg.Sessions().Enabled() {
+		sessionFoundation, sessionRepo, sessionRedis, err := buildSessionFoundation(cfg, pool)
+		if err != nil {
+			pf.Close()
+			return nil, err
+		}
+		pf.SessionRepository = sessionRepo
+		pf.SessionRedis = sessionRedis
+		pf.Options = append(pf.Options, httpapi.WithSessionFoundation(sessionFoundation))
+	}
+
+	if cfg.Admission().Enabled() {
+		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool)
+		if err != nil {
+			pf.Close()
+			return nil, err
+		}
+		pf.AdmissionRedis = limiterClient
+		pf.Options = append(pf.Options, httpapi.WithAdmissionFoundation(foundation))
+	}
+
+	if cfg.Admission().Enabled() {
+		foundation, limiterClient, err := buildStaffFoundation(cfg, pool)
+		if err != nil {
+			pf.Close()
+			return nil, err
+		}
+		pf.StaffRedis = limiterClient
+		pf.Options = append(pf.Options, httpapi.WithStaffFoundation(foundation))
+	}
+
+	catalogFoundation, err := buildCatalogFoundation(cfg, pool)
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.Options = append(pf.Options, httpapi.WithCatalogFoundation(catalogFoundation))
+
+	return pf, nil
 }
