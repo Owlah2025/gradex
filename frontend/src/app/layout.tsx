@@ -1,12 +1,30 @@
 import type { Metadata, Viewport } from "next";
+import { Alexandria, IBM_Plex_Sans_Arabic, IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { SkipLink } from "@/components/common/skip-link";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
 
-const display = { variable: "font-display" };
-const body = { variable: "font-body" };
-const mono = { variable: "font-mono" };
+const display = Alexandria({
+  subsets: ["latin", "arabic"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const body = IBM_Plex_Sans_Arabic({
+  subsets: ["latin", "arabic"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-body",
+  display: "swap",
+});
+
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteConfig.url),
