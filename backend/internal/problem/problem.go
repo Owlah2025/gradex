@@ -38,20 +38,30 @@ type Violation struct {
 	Parameter string `json:"parameter,omitempty"`
 }
 
+// SubmissionViolation is the frozen S2 course-submission error shape. It is
+// intentionally distinct from generic request-field errors: target names a
+// graph entity and dimension identifies a missing or unavailable dependency.
+type SubmissionViolation struct {
+	Code      string `json:"code"`
+	Target    string `json:"target"`
+	Dimension string `json:"dimension,omitempty"`
+}
+
 // Problem is the response body. Field order follows §2.3's example.
 //
 // Nothing here may carry a stack trace, SQL or constraint text, storage object
 // key, provider payload, internal address, or another Account's state. Callers
 // construct Detail from fixed safe strings, not from a wrapped error.
 type Problem struct {
-	Type       string      `json:"type"`
-	Title      string      `json:"title"`
-	Status     int         `json:"status"`
-	Detail     string      `json:"detail,omitempty"`
-	Instance   string      `json:"instance,omitempty"`
-	Code       string      `json:"code"`
-	RequestID  string      `json:"request_id,omitempty"`
-	Violations []Violation `json:"errors,omitempty"`
+	Type                 string                `json:"type"`
+	Title                string                `json:"title"`
+	Status               int                   `json:"status"`
+	Detail               string                `json:"detail,omitempty"`
+	Instance             string                `json:"instance,omitempty"`
+	Code                 string                `json:"code"`
+	RequestID            string                `json:"request_id,omitempty"`
+	Violations           []Violation           `json:"errors,omitempty"`
+	SubmissionViolations []SubmissionViolation `json:"violations,omitempty"`
 }
 
 // New builds a problem whose `type` URI and uppercase `code` are generated
@@ -111,6 +121,13 @@ func ValidationFailed() Problem {
 	return New(http.StatusUnprocessableEntity, "validation-failed",
 		"Request validation failed",
 		"One or more fields are invalid.")
+}
+
+func SubmissionIncomplete(violations ...SubmissionViolation) Problem {
+	p := New(http.StatusUnprocessableEntity, "submission-incomplete",
+		"Course cannot be submitted", "")
+	p.SubmissionViolations = append([]SubmissionViolation(nil), violations...)
+	return p
 }
 
 // TokenInvalid deliberately collapses every unusable action-secret state.

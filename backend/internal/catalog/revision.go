@@ -94,6 +94,7 @@ type TaxonomyTerm struct {
 type CourseRevision struct {
 	ID                    string        `json:"id"`
 	CourseID              string        `json:"course_id"`
+	BasedOnRevisionID     *string       `json:"based_on_revision_id,omitempty"`
 	State                 RevisionState `json:"state"`
 	RevisionNumber        int           `json:"revision_number"`
 	TitleAr               string        `json:"title_ar"`
@@ -127,20 +128,25 @@ func (r *CourseRevision) ValidateInvariants() error {
 }
 
 type Section struct {
-	ID              string    `json:"id"`
-	RevisionID      string    `json:"revision_id"`
-	TitleAr         string    `json:"title_ar"`
-	TitleEn         string    `json:"title_en"`
-	Position        int       `json:"position"`
-	PriceMinorUnits *int64    `json:"price_minor_units,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Lessons         []Lesson  `json:"lessons"`
+	ID                string    `json:"-"`
+	RevisionID        string    `json:"revision_id"`
+	CourseID          string    `json:"course_id"`
+	SectionIdentityID string    `json:"id"`
+	TitleAr           string    `json:"title_ar"`
+	TitleEn           string    `json:"title_en"`
+	Position          int       `json:"position"`
+	PriceMinorUnits   *int64    `json:"price_minor_units,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	Lessons           []Lesson  `json:"lessons"`
 }
 
 type Lesson struct {
-	ID                  string       `json:"id"`
-	SectionID           string       `json:"section_id"`
+	ID                  string       `json:"-"`
+	SectionID           string       `json:"-"`
+	CourseID            string       `json:"course_id"`
+	SectionIdentityID   string       `json:"section_id"`
+	LessonIdentityID    string       `json:"id"`
 	TitleAr             string       `json:"title_ar"`
 	TitleEn             string       `json:"title_en"`
 	Position            int          `json:"position"`
@@ -152,7 +158,7 @@ type Lesson struct {
 
 type LessonFile struct {
 	ID             string         `json:"id"`
-	LessonID       string         `json:"lesson_id"`
+	LessonID       string         `json:"-"`
 	Kind           LessonFileKind `json:"kind"`
 	AssetVersionID string         `json:"asset_version_id"`
 	DisplayNameAr  string         `json:"display_name_ar"`

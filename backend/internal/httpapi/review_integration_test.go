@@ -14,14 +14,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
-func seedReviewDatabase(t *testing.T, p *pgxpool.Pool, ctx context.Context) (adminID, instructorID string, videoAssetID string, majorTermID string, subjectTermID string) {
+func seedReviewDatabase(t *testing.T, pool interface{}, ctx context.Context) (adminID, instructorID, videoAssetID, majorTermID, subjectTermID string) {
 	t.Helper()
-	adminID = "11111111-1111-1111-1111-111111111111"
-	instructorID = "22222222-2222-2222-2222-222222222222"
+	p := pool.(*pgxpool.Pool)
+
+	adminID = "00000000-0000-0000-0000-000000000001"
+	instructorID = "11111111-1111-1111-1111-111111111111"
 	videoAssetID = "33333333-3333-3333-3333-333333333333"
 	majorTermID = "44444444-4444-4444-4444-444444444444"
 	subjectTermID = "55555555-5555-5555-5555-555555555555"
@@ -30,63 +31,55 @@ func seedReviewDatabase(t *testing.T, p *pgxpool.Pool, ctx context.Context) (adm
 		INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES
 		($1, 'admin@example.com', 'admin@example.com', 'ADMIN', 'ACTIVE', 'Admin User'),
 		($2, 'instructor@example.com', 'instructor@example.com', 'INSTRUCTOR', 'ACTIVE', 'Instructor User')
-		ON CONFLICT (id) DO NOTHING
 	`, adminID, instructorID)
 	if err != nil {
 		t.Fatalf("seeding accounts: %v", err)
 	}
 
-	stubCourseID := "66666666-6666-6666-6666-666666666666"
-	stubSecID := "77777777-7777-7777-7777-777777777777"
-	stubLesID := "88888888-8888-8888-8888-888888888888"
+	secID := "77777777-7777-7777-7777-777777777777"
+	lesID := "88888888-8888-8888-8888-888888888888"
+	dummyCourseID := "66666666-6666-6666-6666-666666666666"
 
-	_, err = p.Exec(ctx, `INSERT INTO courses (id, owner_account_id) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, stubCourseID, instructorID)
+	_, err = p.Exec(ctx, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1, $2, 'DRAFT')`, dummyCourseID, instructorID)
 	if err != nil {
-		t.Fatalf("seeding stub course: %v", err)
+		t.Fatalf("seeding dummy course: %v", err)
 	}
-	_, err = p.Exec(ctx, `INSERT INTO sections (id, course_id, title, "order") VALUES ($1, $2, 'stub', 1) ON CONFLICT (id) DO NOTHING`, stubSecID, stubCourseID)
+	_, err = p.Exec(ctx, `INSERT INTO sections (id, course_id, title, "order") VALUES ($1, $2, 'Sec', 1)`, secID, dummyCourseID)
 	if err != nil {
-		t.Fatalf("seeding stub section: %v", err)
+		t.Fatalf("seeding dummy section: %v", err)
 	}
-	_, err = p.Exec(ctx, `INSERT INTO lessons (id, section_id, title, "order") VALUES ($1, $2, 'stub', 1) ON CONFLICT (id) DO NOTHING`, stubLesID, stubSecID)
+	_, err = p.Exec(ctx, `INSERT INTO lessons (id, section_id, title, "order") VALUES ($1, $2, 'Les', 1)`, lesID, secID)
 	if err != nil {
-		t.Fatalf("seeding stub lesson: %v", err)
+		t.Fatalf("seeding dummy lesson: %v", err)
 	}
-
-	_, err = p.Exec(ctx, `
-		INSERT INTO videos (id, lesson_id, status) VALUES
-		($1, $2, 'READY')
-		ON CONFLICT (id) DO NOTHING
-	`, videoAssetID, stubLesID)
+	_, err = p.Exec(ctx, `INSERT INTO videos (id, lesson_id, status) VALUES ($1, $2, 'READY')`, videoAssetID, lesID)
 	if err != nil {
-		t.Fatalf("seeding video asset: %v", err)
+		t.Fatalf("seeding video: %v", err)
 	}
 
 	_, err = p.Exec(ctx, `
 		INSERT INTO taxonomy_terms (id, kind, label_ar, label_en, academic_code) VALUES
-		($1, 'MAJOR', 'هندسة الحاسوب', 'Computer Engineering', NULL),
-		($2, 'SUBJECT', 'برمجة بالحاسوب', 'Computer Programming', 'CS101')
-		ON CONFLICT (id) DO NOTHING
+		($1, 'MAJOR', 'تخصص', 'Major', NULL),
+		($2, 'SUBJECT', 'مادة', 'Subject', 'SUBJ-01')
 	`, majorTermID, subjectTermID)
 	if err != nil {
-		t.Fatalf("seeding taxonomy terms: %v", err)
+		t.Fatalf("seeding taxonomy: %v", err)
 	}
 
 	return adminID, instructorID, videoAssetID, majorTermID, subjectTermID
 }
 
 func doAuthReq(ts *httptest.Server, method, path string, body []byte) (*http.Response, map[string]any) {
-	var req *http.Request
-	if len(body) > 0 {
-		req, _ = http.NewRequest(method, ts.URL+path, bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-	} else {
-		req, _ = http.NewRequest(method, ts.URL+path, nil)
-	}
+	req, _ := http.NewRequest(method, ts.URL+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://gradex.example")
-	validToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x41}, 32))
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: validToken})
-	req.Header.Set("X-CSRF-Token", validToken)
+	validCSRF := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
+	validSession := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x41}, 32))
+	req.Header.Set("X-CSRF-Token", validCSRF)
+	req.AddCookie(&http.Cookie{
+		Name:  "__Host-gradex_session",
+		Value: validSession,
+	})
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -112,27 +105,29 @@ func TestSubmissionValidationReportsAllDefectsInOneResponse(t *testing.T) {
 		t.Fatalf("creating course: status %d", resp.StatusCode)
 	}
 	courseID := body["id"].(string)
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
 
 	// Set Major taxonomy term only (leave Subject and StudyYear missing)
-	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID, []byte(`{"major_term_id":"`+majorTermID+`"}`))
+	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`"}`))
 
 	// Add section 1 with a lesson that has a video
-	resp, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل 1","title_en":"Section 1"}`))
+	resp, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل 1","title_en":"Section 1"}`))
 	sec1ID := secBody["id"].(string)
-	resp, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections/"+sec1ID+"/lessons", []byte(`{"title_ar":"درس 1","title_en":"Lesson 1"}`))
+	resp, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+sec1ID+"/lessons", []byte(`{"title_ar":"درس 1","title_en":"Lesson 1"}`))
 	les1ID := lesBody["id"].(string)
-	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+les1ID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+les1ID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
 
 	// Add section 2 with NO lessons (empty section)
-	_, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل 2 فارغ","title_en":"Section 2 Empty"}`))
+	_, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل 2 فارغ","title_en":"Section 2 Empty"}`))
 
 	// Add section 3 with lesson lacking video
-	resp, sec3Body := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل 3","title_en":"Section 3"}`))
+	resp, sec3Body := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل 3","title_en":"Section 3"}`))
 	sec3ID := sec3Body["id"].(string)
-	_, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections/"+sec3ID+"/lessons", []byte(`{"title_ar":"درس بدون فيديو","title_en":"Lesson without video"}`))
+	_, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+sec3ID+"/lessons", []byte(`{"title_ar":"درس بدون فيديو","title_en":"Lesson without video"}`))
 
 	// Submit course -> expect 422 Unprocessable Entity with ALL failures in one response (FR-009, FR-010)
-	resp, submitRes := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	resp, submitRes := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422 for incomplete submission, got %d: %v", resp.StatusCode, submitRes)
 	}
@@ -154,8 +149,8 @@ func TestSubmissionValidationReportsAllDefectsInOneResponse(t *testing.T) {
 		if code, ok := vm["code"].(string); ok {
 			codes[code] = true
 		}
-		if dim, ok := vm["dimension"].(string); ok {
-			dimensions[dim] = true
+		if dimension, ok := vm["dimension"].(string); ok {
+			dimensions[dimension] = true
 		}
 	}
 
@@ -189,21 +184,23 @@ func TestConcurrentSubmissionReturns409(t *testing.T) {
 		t.Fatalf("create course status %d: %v", resp.StatusCode, body)
 	}
 	courseID := body["id"].(string)
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
 
 	studyYear := "YEAR_1"
-	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID, []byte(`{
+	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{
 		"major_term_id":"`+majorTermID+`",
 		"subject_term_id":"`+subjectTermID+`",
 		"study_year":"`+studyYear+`"
 	}`))
 
-	_, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل 1","title_en":"Section 1"}`))
+	_, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل 1","title_en":"Section 1"}`))
 	secID := secBody["id"].(string)
 
-	_, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس 1","title_en":"Lesson 1"}`))
+	_, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس 1","title_en":"Lesson 1"}`))
 	lesID := lesBody["id"].(string)
 
-	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
 
 	// Concurrent double submission: two parallel requests
 	var wg sync.WaitGroup
@@ -214,13 +211,13 @@ func TestConcurrentSubmissionReturns409(t *testing.T) {
 		idx := i
 		go func() {
 			defer wg.Done()
-			r, _ := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+			r, _ := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 			results[idx] = r.StatusCode
 		}()
 	}
 	wg.Wait()
 
-	// Exactly one succeeds (200) and the second gets 409 conflict (partial unique index)
+	// Exactly one succeeds (200) and the second gets 409 conflict
 	successCount := 0
 	conflictCount := 0
 	for _, status := range results {
@@ -246,14 +243,17 @@ func TestEditingPendingReviewCourseIsRefused(t *testing.T) {
 	// Create and submit complete course
 	resp, body := doAuthReq(ts, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة للمراجعة","title_en":"Review Course"}`))
 	courseID := body["id"].(string)
-	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
-	resp, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
-	secID := secBody["id"].(string)
-	resp, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
-	lesID := lesBody["id"].(string)
-	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
 
-	resp, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
+	resp, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
+	secID := secBody["id"].(string)
+	resp, lesBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
+	lesID := lesBody["id"].(string)
+	_, _ = doAuthReq(ts, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+
+	resp, _ = doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("submit failed: status %d", resp.StatusCode)
 	}
@@ -265,11 +265,11 @@ func TestEditingPendingReviewCourseIsRefused(t *testing.T) {
 		path   string
 		body   []byte
 	}{
-		{"update_course", "PATCH", "/api/v1/courses/" + courseID, []byte(`{"title_en":"New Title"}`)},
-		{"add_section", "POST", "/api/v1/courses/" + courseID + "/sections", []byte(`{"title_ar":"فصل جديد","title_en":"New Section"}`)},
-		{"add_lesson", "POST", "/api/v1/courses/" + courseID + "/sections/" + secID + "/lessons", []byte(`{"title_ar":"درس جديد","title_en":"New Lesson"}`)},
-		{"set_video", "PUT", "/api/v1/courses/" + courseID + "/lessons/" + lesID + "/video", []byte(`{"video_asset_version_id":"` + videoAssetID + `"}`)},
-		{"submit_again", "POST", "/api/v1/courses/" + courseID + "/submit", nil},
+		{"update_course", "PATCH", "/api/v1/courses/" + courseID + "/revisions/" + revID, []byte(`{"title_en":"New Title"}`)},
+		{"add_section", "POST", "/api/v1/courses/" + courseID + "/revisions/" + revID + "/sections", []byte(`{"title_ar":"فصل جديد","title_en":"New Section"}`)},
+		{"add_lesson", "POST", "/api/v1/courses/" + courseID + "/revisions/" + revID + "/sections/" + secID + "/lessons", []byte(`{"title_ar":"درس جديد","title_en":"New Lesson"}`)},
+		{"set_video", "PUT", "/api/v1/courses/" + courseID + "/revisions/" + revID + "/lessons/" + lesID + "/video", []byte(`{"video_asset_version_id":"` + videoAssetID + `"}`)},
+		{"submit_again", "POST", "/api/v1/courses/" + courseID + "/revisions/" + revID + "/submit", nil},
 	}
 
 	for _, m := range mutations {
@@ -293,13 +293,16 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	// 1. Create and submit course as Instructor
 	resp, body := doAuthReq(instructorTS, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة مراجعة أدمن","title_en":"Admin Review Course"}`))
 	courseID := body["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_2"}`))
-	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
+
+	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_2"}`))
+	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	secID := secBody["id"].(string)
-	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
+	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
 	lesID := lesBody["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
-	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 
 	// 2. Admin lists queue
 	resp, _ = doAuthReq(adminTS, "GET", "/api/v1/admin/review/queue", nil)
@@ -308,7 +311,7 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	}
 
 	// 3. Admin previews lesson video (T028, BR-081)
-	resp, prevRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/preview/"+lesID, nil)
+	resp, prevRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/preview/"+lesID, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("admin preview returned status %d: %v", resp.StatusCode, prevRes)
 	}
@@ -316,20 +319,20 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 		t.Errorf("preview returned video %v, want %s", prevRes["video_asset_version_id"], videoAssetID)
 	}
 
-	// Assert ADMIN_VIDEO_PREVIEWED audit row exists in DB
+	// Assert ADMIN_CONTENT_PREVIEWED audit row exists in DB
 	var auditCount int
-	err := p.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'ADMIN_VIDEO_PREVIEWED' AND target_id = $1`, lesID).Scan(&auditCount)
+	err := p.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'ADMIN_CONTENT_PREVIEWED' AND target_id = $1`, lesID).Scan(&auditCount)
 	if err != nil || auditCount == 0 {
-		t.Fatalf("expected ADMIN_VIDEO_PREVIEWED audit event in database, got count %d, err %v", auditCount, err)
+		t.Fatalf("expected ADMIN_CONTENT_PREVIEWED audit event in database, got count %d, err %v", auditCount, err)
 	}
 
 	// 4. Request-changes requires reason (BR-072)
-	resp, _ = doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/request-changes", []byte(`{"reason":"  "}`))
+	resp, _ = doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/request-changes", []byte(`{"reason":"  "}`))
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("request-changes with empty reason returned status %d, want 422", resp.StatusCode)
 	}
 
-	resp, _ = doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/request-changes", []byte(`{"reason":"Need more detailed description in Arabic"}`))
+	resp, _ = doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/request-changes", []byte(`{"reason":"Need more detailed description in Arabic"}`))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("request-changes returned status %d", resp.StatusCode)
 	}
@@ -342,10 +345,10 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	}
 
 	// Resubmit course
-	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 
 	// 5. Admin approves course (T027)
-	resp, approveRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/approve", nil)
+	resp, approveRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/approve", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("admin approve returned status %d: %v", resp.StatusCode, approveRes)
 	}
@@ -381,19 +384,22 @@ func TestInstructorCannotPublishThroughReviewRoutes(t *testing.T) {
 		t.Fatalf("create course status %d: %v", resp.StatusCode, body)
 	}
 	courseID := body["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
-	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
+
+	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
+	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create section status %d: %v", resp.StatusCode, secBody)
 	}
 	secID := secBody["id"].(string)
-	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
+	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create lesson status %d: %v", resp.StatusCode, lesBody)
 	}
 	lesID := lesBody["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
-	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 
 	// Owning Instructor attempts direct API calls to all review routes -> MUST be refused 403 Forbidden (T030, FR-013)
 	reviewRoutes := []struct {
@@ -402,10 +408,10 @@ func TestInstructorCannotPublishThroughReviewRoutes(t *testing.T) {
 		body   []byte
 	}{
 		{"GET", "/api/v1/admin/review/queue", nil},
-		{"GET", "/api/v1/admin/review/courses/" + courseID, nil},
-		{"POST", "/api/v1/admin/review/courses/" + courseID + "/approve", nil},
-		{"POST", "/api/v1/admin/review/courses/" + courseID + "/request-changes", []byte(`{"reason":"unauthorized"}`)},
-		{"POST", "/api/v1/admin/review/courses/" + courseID + "/preview/" + lesID, nil},
+		{"GET", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID, nil},
+		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/approve", nil},
+		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/request-changes", []byte(`{"reason":"unauthorized"}`)},
+		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/preview/" + lesID, nil},
 	}
 
 	for _, rt := range reviewRoutes {
@@ -432,13 +438,16 @@ func TestApprovalRevalidatesOwnerSuspension(t *testing.T) {
 		t.Fatalf("creating course: status %d", resp.StatusCode)
 	}
 	courseID := body["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
-	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
+	revMap := body["editable_revision"].(map[string]any)
+	revID := revMap["id"].(string)
+
+	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
+	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	secID := secBody["id"].(string)
-	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
+	resp, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
 	lesID := lesBody["id"].(string)
-	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
-	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/submit", nil)
+	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 
 	// Suspend owner account in DB before Admin approves course (Case 3 revalidation)
 	_, err := p.Exec(ctx, `UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, instructorID)
@@ -447,7 +456,7 @@ func TestApprovalRevalidatesOwnerSuspension(t *testing.T) {
 	}
 
 	// Admin approves course -> MUST fail due to owner account status revalidation inside approving transaction
-	resp, approveRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/approve", nil)
+	resp, approveRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/approve", nil)
 	if resp.StatusCode == http.StatusOK {
 		t.Fatalf("Admin approve succeeded despite owner account being SUSPENDED, want failure: %v", approveRes)
 	}

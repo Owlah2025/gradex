@@ -17,77 +17,122 @@ type SubmissionValidationError struct {
 	Violations []SubmissionViolation `json:"violations"`
 }
 
+type submissionValidationRequest struct {
+	tx        pgx.Tx
+	validator AssetVersionValidator
+	courseID  string
+	revision  *CourseRevision
+}
+
 func (e *SubmissionValidationError) Error() string {
 	return fmt.Sprintf("course submission incomplete: %d violations", len(e.Violations))
 }
 
-// ValidateCourseForSubmission validates a course revision graph for submission completeness (FR-009, FR-010).
-// CRITICAL: It collects ALL violations into a single list rather than returning on the first failure.
-func ValidateCourseForSubmission(
+// validateCourseForSubmission collects every graph and dependency violation in one pass.
+func validateCourseForSubmission(
 	ctx context.Context,
-	tx pgx.Tx,
-	validator AssetVersionValidator,
-	courseID string,
-	rev *CourseRevision,
+	req submissionValidationRequest,
 ) (*SubmissionValidationError, error) {
+	if req.tx == nil {
+		return nil, fmt.Errorf("submission validation transaction is required")
+	}
+	if req.validator == nil {
+		return nil, fmt.Errorf("asset version validator is required")
+	}
+
 	var violations []SubmissionViolation
 
-	if rev == nil {
+	if req.revision == nil {
 		violations = append(violations, SubmissionViolation{
 			Code:   "COURSE_EMPTY",
-			Target: "course:" + courseID,
+			Target: "course:" + req.courseID,
 		})
 		return &SubmissionValidationError{Violations: violations}, nil
 	}
 
 	// 1. Taxonomy dimension validation (FR-010)
-	if rev.MajorTermID == nil || *rev.MajorTermID == "" {
+	if req.revision.MajorTermID == nil || *req.revision.MajorTermID == "" {
 		violations = append(violations, SubmissionViolation{
 			Code:      "TAXONOMY_DIMENSION_MISSING",
-			Target:    "course:" + courseID,
-			Dimension: "MAJOR",
+			Target:    "course:" + req.courseID,
+			Dimension: string(TaxonomyMajor),
+		})
+	} else if unavailable, err := taxonomyUnavailable(ctx, req.tx, *req.revision.MajorTermID, TaxonomyMajor); err != nil {
+		return nil, err
+	} else if unavailable {
+		violations = append(violations, SubmissionViolation{
+			Code:      "TAXONOMY_TERM_UNAVAILABLE",
+			Target:    "course:" + req.courseID,
+			Dimension: string(TaxonomyMajor),
 		})
 	}
-	if rev.SubjectTermID == nil || *rev.SubjectTermID == "" {
+	if req.revision.SubjectTermID == nil || *req.revision.SubjectTermID == "" {
 		violations = append(violations, SubmissionViolation{
 			Code:      "TAXONOMY_DIMENSION_MISSING",
-			Target:    "course:" + courseID,
-			Dimension: "SUBJECT",
+			Target:    "course:" + req.courseID,
+			Dimension: string(TaxonomySubject),
+		})
+	} else if unavailable, err := taxonomyUnavailable(ctx, req.tx, *req.revision.SubjectTermID, TaxonomySubject); err != nil {
+		return nil, err
+	} else if unavailable {
+		violations = append(violations, SubmissionViolation{
+			Code:      "TAXONOMY_TERM_UNAVAILABLE",
+			Target:    "course:" + req.courseID,
+			Dimension: string(TaxonomySubject),
 		})
 	}
-	if rev.StudyYear == nil {
+	if req.revision.StudyYear == nil {
 		violations = append(violations, SubmissionViolation{
 			Code:      "TAXONOMY_DIMENSION_MISSING",
-			Target:    "course:" + courseID,
+			Target:    "course:" + req.courseID,
 			Dimension: "STUDY_YEAR",
 		})
 	}
 
+	if req.revision.PreviewAssetVersionID != nil && *req.revision.PreviewAssetVersionID != "" {
+		if err := req.validator.ValidateAssetVersion(ctx, *req.revision.PreviewAssetVersionID); err != nil {
+			violations = append(violations, SubmissionViolation{
+				Code:      "ASSET_VERSION_UNAVAILABLE",
+				Target:    "asset:" + *req.revision.PreviewAssetVersionID,
+				Dimension: "PREVIEW",
+			})
+		}
+	}
+
 	// 2. Sections and Lessons completeness validation (FR-009)
-	if len(rev.Sections) == 0 {
+	if len(req.revision.Sections) == 0 {
 		violations = append(violations, SubmissionViolation{
 			Code:   "COURSE_EMPTY",
-			Target: "course:" + courseID,
+			Target: "course:" + req.courseID,
 		})
 	} else {
-		for _, sec := range rev.Sections {
+		for _, sec := range req.revision.Sections {
 			if len(sec.Lessons) == 0 {
 				violations = append(violations, SubmissionViolation{
 					Code:   "SECTION_EMPTY",
-					Target: "section:" + sec.ID,
+					Target: "section:" + sec.SectionIdentityID,
 				})
 			} else {
 				for _, les := range sec.Lessons {
 					if les.VideoAssetVersionID == nil || *les.VideoAssetVersionID == "" {
 						violations = append(violations, SubmissionViolation{
 							Code:   "LESSON_VIDEO_MISSING",
-							Target: "lesson:" + les.ID,
+							Target: "lesson:" + les.LessonIdentityID,
 						})
-					} else if validator != nil {
-						if err := validator.ValidateAssetVersion(ctx, *les.VideoAssetVersionID); err != nil {
+					} else {
+						if err := req.validator.ValidateAssetVersion(ctx, *les.VideoAssetVersionID); err != nil {
 							violations = append(violations, SubmissionViolation{
 								Code:   "LESSON_VIDEO_MISSING",
-								Target: "lesson:" + les.ID,
+								Target: "lesson:" + les.LessonIdentityID,
+							})
+						}
+					}
+					for _, file := range les.Files {
+						if err := req.validator.ValidateAssetVersion(ctx, file.AssetVersionID); err != nil {
+							violations = append(violations, SubmissionViolation{
+								Code:      "ASSET_VERSION_UNAVAILABLE",
+								Target:    "file:" + file.ID,
+								Dimension: string(file.Kind),
 							})
 						}
 					}
@@ -101,4 +146,26 @@ func ValidateCourseForSubmission(
 	}
 
 	return nil, nil
+}
+
+func taxonomyUnavailable(
+	ctx context.Context,
+	tx pgx.Tx,
+	termID string,
+	expectedKind TaxonomyKind,
+) (bool, error) {
+	var kind TaxonomyKind
+	var retired bool
+	err := tx.QueryRow(ctx, `
+		SELECT kind, retired_at IS NOT NULL
+		FROM taxonomy_terms
+		WHERE id = $1::uuid
+	`, termID).Scan(&kind, &retired)
+	if err == pgx.ErrNoRows {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("validating taxonomy term %s: %w", termID, err)
+	}
+	return retired || kind != expectedKind, nil
 }

@@ -36,6 +36,15 @@ const (
 	authzOpTimeout  = 30 * time.Second
 )
 
+func testWriterForAuthoring(t *testing.T) *outbox.Writer {
+	t.Helper()
+	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("outbox.NewWriter: %v", err)
+	}
+	return writer
+}
+
 func freshSchema(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), authzOpTimeout)
@@ -159,18 +168,17 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 		t.Fatalf("NewSessionFoundation: %v", err)
 	}
 
-	catalogRepo, err := catalog.NewRepository(pool)
-	if err != nil {
-		t.Fatalf("catalog.NewRepository: %v", err)
-	}
 	outboxWriter, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatalf("outbox.NewWriter: %v", err)
 	}
+	catalogRepo, err := catalog.NewRepository(pool, outboxWriter)
+	if err != nil {
+		t.Fatalf("catalog.NewRepository: %v", err)
+	}
 	catalogFoundation, err := NewCatalogFoundation(CatalogFoundationOptions{
 		Repository:     catalogRepo,
 		AssetValidator: catalog.NewDBAssetVersionValidator(pool),
-		OutboxWriter:   outboxWriter,
 	})
 	if err != nil {
 		t.Fatalf("NewCatalogFoundation: %v", err)
@@ -213,7 +221,7 @@ func TestPrivateDraftProtectionAcrossReadRoutes(t *testing.T) {
 		t.Fatalf("seeding accounts: %v", err)
 	}
 
-	repo, err := catalog.NewRepository(p)
+	repo, err := catalog.NewRepository(p, testWriterForAuthoring(t))
 	if err != nil {
 		t.Fatalf("catalog.NewRepository: %v", err)
 	}
@@ -296,7 +304,16 @@ func TestSuspendedInstructorRefusedEditing(t *testing.T) {
 		t.Fatalf("seeding course: %v", err)
 	}
 
-	repo, err := catalog.NewRepository(p)
+	revID := "66666666-6666-6666-6666-666666666666"
+	_, err = p.Exec(ctx, `
+		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1, $2, 'DRAFT', 1, 'Title AR', 'Title EN', 'Desc AR', 'Desc EN')
+	`, revID, courseID)
+	if err != nil {
+		t.Fatalf("seeding revision: %v", err)
+	}
+
+	repo, err := catalog.NewRepository(p, testWriterForAuthoring(t))
 	if err != nil {
 		t.Fatalf("catalog.NewRepository: %v", err)
 	}
@@ -304,6 +321,7 @@ func TestSuspendedInstructorRefusedEditing(t *testing.T) {
 	// Attempt edit by suspended instructor
 	_, err = repo.AddSection(ctx, catalog.AddSectionRequest{
 		CourseID:       courseID,
+		RevisionID:     revID,
 		OwnerAccountID: suspendedID,
 		TitleAr:        "قسم جديد",
 		TitleEn:        "New Section",

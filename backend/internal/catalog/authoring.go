@@ -14,24 +14,59 @@ import (
 )
 
 type DBAssetVersionValidator struct {
-	pool *pgxpool.Pool
+	queryer interface {
+		QueryRow(context.Context, string, ...any) pgx.Row
+	}
 }
 
 func NewDBAssetVersionValidator(pool *pgxpool.Pool) *DBAssetVersionValidator {
-	return &DBAssetVersionValidator{pool: pool}
+	return &DBAssetVersionValidator{queryer: pool}
+}
+
+func newTxAssetVersionValidator(tx pgx.Tx) *DBAssetVersionValidator {
+	return &DBAssetVersionValidator{queryer: tx}
+}
+
+type candidateMutationHold struct {
+	reached chan<- struct{}
+	release <-chan struct{}
+}
+
+type candidateMutationHoldKey struct{}
+
+func withCandidateMutationHold(ctx context.Context, hold candidateMutationHold) context.Context {
+	return context.WithValue(ctx, candidateMutationHoldKey{}, hold)
+}
+
+func holdCandidateMutationAfterCourseLock(ctx context.Context) error {
+	hold, ok := ctx.Value(candidateMutationHoldKey{}).(candidateMutationHold)
+	if !ok {
+		return nil
+	}
+	if hold.reached != nil {
+		hold.reached <- struct{}{}
+	}
+	if hold.release == nil {
+		return nil
+	}
+	select {
+	case <-hold.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (v *DBAssetVersionValidator) ValidateAssetVersion(ctx context.Context, assetVersionID string) error {
 	if assetVersionID == "" {
-		return errors.New("asset version ID is required")
+		return ErrAssetVersionInvalid
 	}
-	if v == nil || v.pool == nil {
-		// In integration tests / fixtures where video pool is initialized, check DB.
-		return nil
+	if v == nil || v.queryer == nil {
+		return errors.New("asset version validator database queryer is required")
 	}
 
 	var status string
-	err := v.pool.QueryRow(ctx, `SELECT status FROM videos WHERE id = $1::uuid`, assetVersionID).Scan(&status)
+	err := v.queryer.QueryRow(ctx, `SELECT status FROM videos WHERE id = $1::uuid`, assetVersionID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrAssetVersionInvalid
 	}
@@ -55,6 +90,7 @@ type CreateCourseRequest struct {
 
 type UpdateRevisionRequest struct {
 	CourseID              string
+	RevisionID            string
 	OwnerAccountID        string
 	TitleAr               string
 	TitleEn               string
@@ -68,6 +104,7 @@ type UpdateRevisionRequest struct {
 
 type AddSectionRequest struct {
 	CourseID       string
+	RevisionID     string
 	OwnerAccountID string
 	TitleAr        string
 	TitleEn        string
@@ -76,17 +113,26 @@ type AddSectionRequest struct {
 
 type UpdateSectionRequest struct {
 	CourseID       string
-	OwnerAccountID string
+	RevisionID     string
 	SectionID      string
+	OwnerAccountID string
 	TitleAr        string
 	TitleEn        string
 	Position       *int
 }
 
+type DeleteSectionRequest struct {
+	CourseID       string
+	RevisionID     string
+	SectionID      string
+	OwnerAccountID string
+}
+
 type AddLessonRequest struct {
 	CourseID       string
-	OwnerAccountID string
+	RevisionID     string
 	SectionID      string
+	OwnerAccountID string
 	TitleAr        string
 	TitleEn        string
 	Position       *int
@@ -94,27 +140,95 @@ type AddLessonRequest struct {
 
 type UpdateLessonRequest struct {
 	CourseID       string
-	OwnerAccountID string
+	RevisionID     string
 	LessonID       string
+	OwnerAccountID string
 	TitleAr        string
 	TitleEn        string
 	Position       *int
 }
 
+type DeleteLessonRequest struct {
+	CourseID       string
+	RevisionID     string
+	LessonID       string
+	OwnerAccountID string
+}
+
+type SetVideoRequest struct {
+	CourseID            string
+	RevisionID          string
+	LessonID            string
+	VideoAssetVersionID string
+	OwnerAccountID      string
+}
+
 type LessonFileRequest struct {
 	CourseID       string
-	OwnerAccountID string
+	RevisionID     string
 	LessonID       string
 	Kind           LessonFileKind
 	AssetVersionID string
 	DisplayNameAr  string
 	DisplayNameEn  string
 	Position       *int
+	OwnerAccountID string
+}
+
+type DeleteLessonFileRequest struct {
+	CourseID       string
+	RevisionID     string
+	LessonID       string
+	FileID         string
+	OwnerAccountID string
+}
+
+type PreviewAssetRequest struct {
+	CourseID              string
+	RevisionID            string
+	PreviewAssetVersionID string
+	OwnerAccountID        string
+}
+
+type ClearPreviewAssetRequest struct {
+	CourseID       string
+	RevisionID     string
+	OwnerAccountID string
+}
+
+type SubmitCourseRequest struct {
+	CourseID        string
+	RevisionID      string
+	OwnerAccountID  string
+	ActorDescriptor string
+}
+
+type instructorAuditRequest struct {
+	accountID       string
+	actorDescriptor string
+	action          string
+	targetType      string
+	targetID        string
+	reason          string
+	metadata        map[string]any
+}
+
+func writeInstructorAudit(ctx context.Context, tx pgx.Tx, req instructorAuditRequest) error {
+	return WriteAuditEvent(ctx, tx, AuditEvent{
+		ActorAccountID:  &req.accountID,
+		ActorRole:       "INSTRUCTOR",
+		ActorDescriptor: req.actorDescriptor,
+		Action:          req.action,
+		TargetType:      req.targetType,
+		TargetID:        req.targetID,
+		Reason:          req.reason,
+		Metadata:        req.metadata,
+	})
 }
 
 func (r *Repository) checkOwnerActive(ctx context.Context, tx pgx.Tx, ownerAccountID string) error {
-	var status string
-	err := tx.QueryRow(ctx, `SELECT status FROM accounts WHERE id = $1::uuid`, ownerAccountID).Scan(&status)
+	var role, status string
+	err := tx.QueryRow(ctx, `SELECT role, status FROM accounts WHERE id = $1::uuid`, ownerAccountID).Scan(&role, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return errors.New("owner account not found")
 	}
@@ -124,7 +238,58 @@ func (r *Repository) checkOwnerActive(ctx context.Context, tx pgx.Tx, ownerAccou
 	if status == "SUSPENDED" {
 		return ErrAccountSuspended
 	}
+	if role != "INSTRUCTOR" || status != "ACTIVE" {
+		return ErrOwnerIneligible
+	}
 	return nil
+}
+
+func (r *Repository) LockCandidate(
+	ctx context.Context,
+	tx pgx.Tx,
+	courseID string,
+	revisionID string,
+) (*CourseRevision, error) {
+	if tx == nil {
+		return nil, errors.New("transaction is required")
+	}
+	if courseID == "" || revisionID == "" {
+		return nil, ErrCourseNotFound
+	}
+
+	var rev CourseRevision
+	query := `
+		SELECT id, course_id, based_on_revision_id, state, revision_number,
+		       title_ar, title_en, description_ar, description_en,
+		       major_term_id, subject_term_id, study_year, preview_asset_version_id,
+		       submitted_at, reviewed_at, reviewed_by_account_id, review_reason, created_at, updated_at
+		FROM course_revisions
+		WHERE id = $1::uuid AND course_id = $2::uuid
+		FOR UPDATE
+	`
+	err := tx.QueryRow(ctx, query, revisionID, courseID).Scan(
+		&rev.ID, &rev.CourseID, &rev.BasedOnRevisionID, &rev.State, &rev.RevisionNumber,
+		&rev.TitleAr, &rev.TitleEn, &rev.DescriptionAr, &rev.DescriptionEn,
+		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID,
+		&rev.SubmittedAt, &rev.ReviewedAt, &rev.ReviewedByAccountID, &rev.ReviewReason,
+		&rev.CreatedAt, &rev.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCourseNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("locking revision %s: %w", revisionID, err)
+	}
+
+	if rev.State != RevisionDraft && rev.State != RevisionChangesRequested {
+		return nil, &LifecycleConflictError{
+			CourseID: courseID,
+			Actual:   string(rev.State),
+			Expected: []string{string(RevisionDraft), string(RevisionChangesRequested)},
+		}
+	}
+
+	return &rev, nil
 }
 
 func (r *Repository) CreateCourse(ctx context.Context, req CreateCourseRequest, actorDescriptor string) (*Course, error) {
@@ -198,6 +363,154 @@ func (r *Repository) CreateCourse(ctx context.Context, req CreateCourseRequest, 
 	return &course, nil
 }
 
+func (r *Repository) CreateCandidate(
+	ctx context.Context,
+	courseID string,
+	ownerAccountID string,
+	actorDescriptor string,
+) (*CourseRevision, error) {
+	if courseID == "" || ownerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+
+	var candidate *CourseRevision
+
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		courseRow, err := r.LockCourse(ctx, tx, courseID)
+		if err != nil {
+			return err
+		}
+		if courseRow.OwnerAccountID != ownerAccountID {
+			return ErrCourseNotFound
+		}
+		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+			return err
+		}
+
+		// Check if active candidate already exists
+		var activeRevID string
+		err = tx.QueryRow(ctx, `
+			SELECT id FROM course_revisions
+			WHERE course_id = $1::uuid AND state IN ('DRAFT', 'CHANGES_REQUESTED', 'PENDING_REVIEW')
+			LIMIT 1
+			FOR UPDATE
+		`, courseID).Scan(&activeRevID)
+
+		if err == nil {
+			rev, err := r.loadRevisionGraphByIDTx(ctx, tx, activeRevID)
+			if err != nil {
+				return err
+			}
+			candidate = rev
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("checking active candidate: %w", err)
+		}
+
+		// If course is not published and has no active candidate (edge case), return error
+		if courseRow.LiveRevisionID == nil || *courseRow.LiveRevisionID == "" {
+			return fmt.Errorf("course has no live revision to clone")
+		}
+
+		liveRevID := *courseRow.LiveRevisionID
+		liveRev, err := r.loadRevisionGraphByIDTx(ctx, tx, liveRevID)
+		if err != nil || liveRev == nil {
+			return fmt.Errorf("loading live revision %s: %w", liveRevID, err)
+		}
+
+		var maxRevNum int
+		err = tx.QueryRow(ctx, `SELECT COALESCE(MAX(revision_number), 0) FROM course_revisions WHERE course_id = $1::uuid`, courseID).Scan(&maxRevNum)
+		if err != nil {
+			return fmt.Errorf("querying max revision number: %w", err)
+		}
+		nextRevNum := maxRevNum + 1
+
+		var newRevID string
+		now := time.Now().UTC()
+		queryRev := `
+			INSERT INTO course_revisions (
+				course_id, based_on_revision_id, state, revision_number,
+				title_ar, title_en, description_ar, description_en,
+				major_term_id, subject_term_id, study_year, preview_asset_version_id,
+				created_at, updated_at
+			) VALUES (
+				$1::uuid, $2::uuid, 'DRAFT', $3,
+				$4, $5, $6, $7,
+				$8, $9, $10, $11,
+				$12, $12
+			)
+			RETURNING id
+		`
+		err = tx.QueryRow(ctx, queryRev,
+			courseID, liveRevID, nextRevNum,
+			liveRev.TitleAr, liveRev.TitleEn, liveRev.DescriptionAr, liveRev.DescriptionEn,
+			liveRev.MajorTermID, liveRev.SubjectTermID, liveRev.StudyYear, liveRev.PreviewAssetVersionID,
+			now,
+		).Scan(&newRevID)
+		if err != nil {
+			return fmt.Errorf("inserting candidate revision: %w", err)
+		}
+
+		for _, sec := range liveRev.Sections {
+			var newSecID string
+			err = tx.QueryRow(ctx, `
+				INSERT INTO course_sections (
+					revision_id, course_id, section_identity_id,
+					title_ar, title_en, position, price_minor_units, created_at, updated_at
+				) VALUES (
+					$1::uuid, $2::uuid, $3::uuid,
+					$4, $5, $6, $7, $8, $8
+				) RETURNING id
+			`, newRevID, courseID, sec.SectionIdentityID, sec.TitleAr, sec.TitleEn, sec.Position, sec.PriceMinorUnits, now).Scan(&newSecID)
+			if err != nil {
+				return fmt.Errorf("cloning section %s: %w", sec.ID, err)
+			}
+
+			for _, les := range sec.Lessons {
+				var newLesID string
+				err = tx.QueryRow(ctx, `
+					INSERT INTO course_lessons (
+						section_id, course_id, section_identity_id, lesson_identity_id,
+						title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+					) VALUES (
+						$1::uuid, $2::uuid, $3::uuid, $4::uuid,
+						$5, $6, $7, $8, $9, $9
+					) RETURNING id
+				`, newSecID, courseID, sec.SectionIdentityID, les.LessonIdentityID, les.TitleAr, les.TitleEn, les.Position, les.VideoAssetVersionID, now).Scan(&newLesID)
+				if err != nil {
+					return fmt.Errorf("cloning lesson %s: %w", les.ID, err)
+				}
+
+				for _, f := range les.Files {
+					_, err = tx.Exec(ctx, `
+						INSERT INTO lesson_files (
+							lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at
+						) VALUES (
+							$1::uuid, $2, $3::uuid, $4, $5, $6, $7, $7
+						)
+					`, newLesID, f.Kind, f.AssetVersionID, f.DisplayNameAr, f.DisplayNameEn, f.Position, now)
+					if err != nil {
+						return fmt.Errorf("cloning lesson file %s: %w", f.ID, err)
+					}
+				}
+			}
+		}
+
+		rev, err := r.loadRevisionGraphByIDTx(ctx, tx, newRevID)
+		if err != nil {
+			return err
+		}
+		candidate = rev
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return candidate, nil
+}
+
 func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string) ([]Course, error) {
 	if ownerAccountID == "" {
 		return nil, errors.New("owner account ID is required")
@@ -229,12 +542,29 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 			return nil, fmt.Errorf("scanning course: %w", err)
 		}
 
-		// Load latest revision summary
-		rev, err := r.getLatestRevision(ctx, c.ID)
+		var activeRevID string
+		err = r.pool.QueryRow(ctx, `
+			SELECT id FROM course_revisions
+			WHERE course_id = $1::uuid AND state IN ('DRAFT', 'CHANGES_REQUESTED', 'PENDING_REVIEW')
+			LIMIT 1
+		`, c.ID).Scan(&activeRevID)
 		if err == nil {
+			rev, err := r.loadRevisionGraphByID(ctx, activeRevID)
+			if err != nil {
+				return nil, fmt.Errorf("loading editable revision %s: %w", activeRevID, err)
+			}
+			if rev == nil {
+				return nil, fmt.Errorf("editable revision %s is missing", activeRevID)
+			}
 			c.EditableRevision = rev
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("querying active revision for course %s: %w", c.ID, err)
 		}
+
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading owned courses: %w", err)
 	}
 	if result == nil {
 		result = []Course{}
@@ -242,29 +572,44 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 	return result, nil
 }
 
-func (r *Repository) getLatestRevision(ctx context.Context, courseID string) (*CourseRevision, error) {
+func (r *Repository) GetLiveCourseGraph(ctx context.Context, courseID string) (*Course, error) {
+	if courseID == "" {
+		return nil, ErrCourseNotFound
+	}
+
 	query := `
-		SELECT id, course_id, state, revision_number, title_ar, title_en, description_ar, description_en,
-		       major_term_id, subject_term_id, study_year, preview_asset_version_id,
-		       submitted_at, reviewed_at, reviewed_by_account_id, review_reason, created_at, updated_at
-		FROM course_revisions
-		WHERE course_id = $1::uuid
-		ORDER BY revision_number DESC
-		LIMIT 1
+		SELECT id, owner_account_id, lifecycle, live_revision_id,
+		       access_suspended_at, access_suspension_reason, retired_at,
+		       created_at, updated_at
+		FROM courses
+		WHERE id = $1::uuid
 	`
-	var rev CourseRevision
+	var c Course
 	err := r.pool.QueryRow(ctx, query, courseID).Scan(
-		&rev.ID, &rev.CourseID, &rev.State, &rev.RevisionNumber, &rev.TitleAr, &rev.TitleEn, &rev.DescriptionAr, &rev.DescriptionEn,
-		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID,
-		&rev.SubmittedAt, &rev.ReviewedAt, &rev.ReviewedByAccountID, &rev.ReviewReason, &rev.CreatedAt, &rev.UpdatedAt,
+		&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
+		&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
+		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, ErrCourseNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getting course: %w", err)
 	}
-	return &rev, nil
+
+	if c.LiveRevisionID != nil && *c.LiveRevisionID != "" {
+		liveRevID := *c.LiveRevisionID
+		liveRev, err := r.loadRevisionGraphByID(ctx, liveRevID)
+		if err != nil {
+			return nil, fmt.Errorf("loading live revision %s: %w", liveRevID, err)
+		}
+		if liveRev == nil {
+			return nil, fmt.Errorf("live revision %s is missing", liveRevID)
+		}
+		c.LiveRevision = liveRev
+	}
+
+	return &c, nil
 }
 
 func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountID string) (*Course, error) {
@@ -292,11 +637,37 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 		return nil, fmt.Errorf("getting course: %w", err)
 	}
 
-	rev, err := r.loadFullRevisionGraph(ctx, courseID)
-	if err != nil {
-		return nil, fmt.Errorf("loading revision graph: %w", err)
+	if c.LiveRevisionID != nil && *c.LiveRevisionID != "" {
+		liveRevisionID := *c.LiveRevisionID
+		liveRev, err := r.loadRevisionGraphByID(ctx, liveRevisionID)
+		if err != nil {
+			return nil, fmt.Errorf("loading live revision %s: %w", liveRevisionID, err)
+		}
+		if liveRev == nil {
+			return nil, fmt.Errorf("live revision %s is missing", liveRevisionID)
+		}
+		c.LiveRevision = liveRev
 	}
-	c.EditableRevision = rev
+
+	var activeRevID string
+	err = r.pool.QueryRow(ctx, `
+		SELECT id FROM course_revisions
+		WHERE course_id = $1::uuid AND state IN ('DRAFT', 'CHANGES_REQUESTED', 'PENDING_REVIEW')
+		LIMIT 1
+	`, courseID).Scan(&activeRevID)
+	if err == nil {
+		candidate, err := r.loadRevisionGraphByID(ctx, activeRevID)
+		if err != nil {
+			return nil, fmt.Errorf("loading editable revision %s: %w", activeRevID, err)
+		}
+		if candidate == nil {
+			return nil, fmt.Errorf("editable revision %s is missing", activeRevID)
+		}
+		c.EditableRevision = candidate
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("querying active revision for course %s: %w", courseID, err)
+	}
+
 	return &c, nil
 }
 
@@ -310,7 +681,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	}
 
 	secQuery := `
-		SELECT id, revision_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
+		SELECT id, revision_id, course_id, section_identity_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
 		FROM course_sections
 		WHERE revision_id = $1::uuid
 		ORDER BY position ASC
@@ -324,7 +695,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	var sectionIDs []string
 	for rows.Next() {
 		var s Section
-		if err := rows.Scan(&s.ID, &s.RevisionID, &s.TitleAr, &s.TitleEn, &s.Position, &s.PriceMinorUnits, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.RevisionID, &s.CourseID, &s.SectionIdentityID, &s.TitleAr, &s.TitleEn, &s.Position, &s.PriceMinorUnits, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			rows.Close()
 			return err
 		}
@@ -343,7 +714,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	}
 
 	lesQuery := `
-		SELECT id, section_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+		SELECT id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
 		FROM course_lessons
 		WHERE section_id = ANY($1::uuid[])
 		ORDER BY position ASC
@@ -357,7 +728,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	lessonsBySectionID := make(map[string][]Lesson)
 	for lRows.Next() {
 		var l Lesson
-		if err := lRows.Scan(&l.ID, &l.SectionID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err := lRows.Scan(&l.ID, &l.SectionID, &l.CourseID, &l.SectionIdentityID, &l.LessonIdentityID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			lRows.Close()
 			return err
 		}
@@ -415,35 +786,26 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	return nil
 }
 
-func (r *Repository) loadFullRevisionGraph(ctx context.Context, courseID string) (*CourseRevision, error) {
-	rev, err := r.getLatestRevision(ctx, courseID)
-	if err != nil || rev == nil {
-		return rev, err
-	}
-
-	if err := loadRevisionGraphBatch(ctx, r.pool, rev); err != nil {
-		return nil, fmt.Errorf("loading revision graph: %w", err)
-	}
-	return rev, nil
-}
-
 func (r *Repository) UpdateCourseRevision(
 	ctx context.Context,
 	validator AssetVersionValidator,
 	req UpdateRevisionRequest,
 	actorDescriptor string,
 ) (*CourseRevision, error) {
-	if req.CourseID == "" || req.OwnerAccountID == "" {
+	if req.CourseID == "" || req.RevisionID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
 	}
+	if validator == nil {
+		return nil, errors.New("asset version validator is required")
+	}
 
-	if req.PreviewAssetVersionID != nil && *req.PreviewAssetVersionID != "" && validator != nil {
+	if req.PreviewAssetVersionID != nil && *req.PreviewAssetVersionID != "" {
 		if err := validator.ValidateAssetVersion(ctx, *req.PreviewAssetVersionID); err != nil {
 			return nil, err
 		}
 	}
 
-	var updatedRev CourseRevision
+	var updatedRev *CourseRevision
 	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
 		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
@@ -452,75 +814,97 @@ func (r *Repository) UpdateCourseRevision(
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
-
-		rev, err := r.getLatestRevision(ctx, req.CourseID)
-		if err != nil || rev == nil {
-			return fmt.Errorf("finding editable revision: %w", err)
+		if err := holdCandidateMutationAfterCourseLock(ctx); err != nil {
+			return err
 		}
 
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		titleAr := rev.TitleAr
+		if req.TitleAr != "" {
+			titleAr = req.TitleAr
+		}
+		titleEn := rev.TitleEn
+		if req.TitleEn != "" {
+			titleEn = req.TitleEn
+		}
+		descAr := rev.DescriptionAr
+		if req.DescriptionAr != "" {
+			descAr = req.DescriptionAr
+		}
+		descEn := rev.DescriptionEn
+		if req.DescriptionEn != "" {
+			descEn = req.DescriptionEn
+		}
+
+		majorTermID := rev.MajorTermID
+		if req.MajorTermID != nil {
+			majorTermID = req.MajorTermID
+		}
+		subjectTermID := rev.SubjectTermID
+		if req.SubjectTermID != nil {
+			subjectTermID = req.SubjectTermID
+		}
+		studyYear := rev.StudyYear
+		if req.StudyYear != nil {
+			studyYear = req.StudyYear
+		}
+		previewAssetVersionID := rev.PreviewAssetVersionID
+		if req.PreviewAssetVersionID != nil {
+			previewAssetVersionID = req.PreviewAssetVersionID
+		}
+
+		now := time.Now().UTC()
 		query := `
 			UPDATE course_revisions
-			SET title_ar = COALESCE(NULLIF($1, ''), title_ar),
-			    title_en = COALESCE(NULLIF($2, ''), title_en),
-			    description_ar = COALESCE($3, description_ar),
-			    description_en = COALESCE($4, description_en),
-			    major_term_id = COALESCE($5::uuid, major_term_id),
-			    subject_term_id = COALESCE($6::uuid, subject_term_id),
-			    study_year = COALESCE($7::study_year, study_year),
-			    preview_asset_version_id = COALESCE($8::uuid, preview_asset_version_id),
-			    updated_at = now()
-			WHERE id = $9::uuid
-			RETURNING id, course_id, state, revision_number, title_ar, title_en, description_ar, description_en,
-			          major_term_id, subject_term_id, study_year, preview_asset_version_id, created_at, updated_at
+			SET title_ar = $1, title_en = $2, description_ar = $3, description_en = $4,
+			    major_term_id = $5::uuid, subject_term_id = $6::uuid, study_year = $7,
+			    preview_asset_version_id = $8::uuid, updated_at = $9
+			WHERE id = $10::uuid AND course_id = $11::uuid
 		`
-		err = tx.QueryRow(ctx, query,
-			req.TitleAr, req.TitleEn, req.DescriptionAr, req.DescriptionEn,
-			req.MajorTermID, req.SubjectTermID, req.StudyYear, req.PreviewAssetVersionID, rev.ID,
-		).Scan(
-			&updatedRev.ID, &updatedRev.CourseID, &updatedRev.State, &updatedRev.RevisionNumber,
-			&updatedRev.TitleAr, &updatedRev.TitleEn, &updatedRev.DescriptionAr, &updatedRev.DescriptionEn,
-			&updatedRev.MajorTermID, &updatedRev.SubjectTermID, &updatedRev.StudyYear, &updatedRev.PreviewAssetVersionID,
-			&updatedRev.CreatedAt, &updatedRev.UpdatedAt,
+		_, err = tx.Exec(ctx, query,
+			titleAr, titleEn, descAr, descEn,
+			majorTermID, subjectTermID, studyYear, previewAssetVersionID,
+			now, rev.ID, req.CourseID,
 		)
 		if err != nil {
-			return fmt.Errorf("updating revision: %w", err)
+			return fmt.Errorf("updating course revision: %w", err)
+		}
+		if err := writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "COURSE_REVISION_UPDATED", targetType: "COURSE_REVISION", targetID: rev.ID,
+			reason: "Course metadata updated", metadata: map[string]any{"course_id": req.CourseID},
+		}); err != nil {
+			return err
 		}
 
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "COURSE_REVISION_UPDATED",
-			TargetType:      "COURSE_REVISION",
-			TargetID:        updatedRev.ID,
-			Reason:          "Course metadata updated",
-			Metadata:        map[string]any{"course_id": req.CourseID},
+		res, err := r.loadRevisionGraphByIDTx(ctx, tx, rev.ID)
+		if err != nil {
+			return err
 		}
-		return WriteAuditEvent(ctx, tx, audit)
+		updatedRev = res
+		return nil
 	})
 
 	if err != nil {
 		return nil, err
 	}
-	return &updatedRev, nil
+	return updatedRev, nil
 }
 
-func (r *Repository) AddSection(ctx context.Context, req AddSectionRequest, actorDescriptor string) (*Section, error) {
-	if req.CourseID == "" || req.OwnerAccountID == "" {
+func (r *Repository) AddSection(
+	ctx context.Context,
+	req AddSectionRequest,
+	actorDescriptor string,
+) (*Section, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
-	}
-	if len(req.TitleAr) == 0 || len(req.TitleEn) == 0 {
-		return nil, errors.New("title_ar and title_en are required")
 	}
 
 	var sec Section
@@ -532,63 +916,65 @@ func (r *Repository) AddSection(ctx context.Context, req AddSectionRequest, acto
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		rev, err := r.getLatestRevision(ctx, req.CourseID)
-		if err != nil || rev == nil {
-			return errors.New("no editable revision found")
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
 		}
 
-		pos := 1
-		if req.Position != nil && *req.Position >= 0 {
+		var pos int
+		if req.Position != nil {
 			pos = *req.Position
 		} else {
-			_ = tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), 0) + 1 FROM course_sections WHERE revision_id = $1::uuid`, rev.ID).Scan(&pos)
+			err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), -1) + 1 FROM course_sections WHERE revision_id = $1::uuid`, rev.ID).Scan(&pos)
+			if err != nil {
+				return fmt.Errorf("querying max section position: %w", err)
+			}
 		}
 
+		// Create new stable section identity
+		var secIdentityID string
+		err = tx.QueryRow(ctx, `INSERT INTO course_section_identities (course_id) VALUES ($1::uuid) RETURNING id`, req.CourseID).Scan(&secIdentityID)
+		if err != nil {
+			return fmt.Errorf("creating section identity: %w", err)
+		}
+
+		now := time.Now().UTC()
 		query := `
-			INSERT INTO course_sections (revision_id, title_ar, title_en, position)
-			VALUES ($1::uuid, $2, $3, $4)
-			RETURNING id, revision_id, title_ar, title_en, position, created_at, updated_at
+			INSERT INTO course_sections (revision_id, course_id, section_identity_id, title_ar, title_en, position, created_at, updated_at)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $7)
+			RETURNING id, revision_id, course_id, section_identity_id, title_ar, title_en, position, created_at, updated_at
 		`
-		err = tx.QueryRow(ctx, query, rev.ID, req.TitleAr, req.TitleEn, pos).Scan(
-			&sec.ID, &sec.RevisionID, &sec.TitleAr, &sec.TitleEn, &sec.Position, &sec.CreatedAt, &sec.UpdatedAt,
+		err = tx.QueryRow(ctx, query, rev.ID, req.CourseID, secIdentityID, req.TitleAr, req.TitleEn, pos, now).Scan(
+			&sec.ID, &sec.RevisionID, &sec.CourseID, &sec.SectionIdentityID, &sec.TitleAr, &sec.TitleEn, &sec.Position, &sec.CreatedAt, &sec.UpdatedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting section: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "SECTION_CREATED",
-			TargetType:      "SECTION",
-			TargetID:        sec.ID,
-			Reason:          "Section created",
-			Metadata:        map[string]any{"course_id": req.CourseID, "position": pos},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		sec.Lessons = []Lesson{}
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "SECTION_CREATED", targetType: "SECTION", targetID: sec.SectionIdentityID,
+			reason:   "Section created",
+			metadata: map[string]any{"course_id": req.CourseID, "position": pos},
+		})
 	})
 
 	if err != nil {
 		return nil, err
 	}
-	sec.Lessons = []Lesson{}
 	return &sec, nil
 }
 
-func (r *Repository) UpdateSection(ctx context.Context, req UpdateSectionRequest, actorDescriptor string) (*Section, error) {
-	if req.CourseID == "" || req.SectionID == "" || req.OwnerAccountID == "" {
+func (r *Repository) UpdateSection(
+	ctx context.Context,
+	req UpdateSectionRequest,
+	actorDescriptor string,
+) (*Section, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.SectionID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
 	}
 
@@ -601,28 +987,27 @@ func (r *Repository) UpdateSection(ctx context.Context, req UpdateSectionRequest
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
 		query := `
 			UPDATE course_sections
 			SET title_ar = COALESCE(NULLIF($1, ''), title_ar),
 			    title_en = COALESCE(NULLIF($2, ''), title_en),
 			    position = COALESCE($3, position),
-			    updated_at = now()
-			WHERE id = $4::uuid
-			RETURNING id, revision_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
+			    updated_at = $4
+			WHERE revision_id = $5::uuid AND section_identity_id = $6::uuid
+			RETURNING id, revision_id, course_id, section_identity_id, title_ar, title_en, position, price_minor_units, created_at, updated_at
 		`
-		err = tx.QueryRow(ctx, query, req.TitleAr, req.TitleEn, req.Position, req.SectionID).Scan(
-			&sec.ID, &sec.RevisionID, &sec.TitleAr, &sec.TitleEn, &sec.Position, &sec.PriceMinorUnits, &sec.CreatedAt, &sec.UpdatedAt,
+		err = tx.QueryRow(ctx, query, req.TitleAr, req.TitleEn, req.Position, now, rev.ID, req.SectionID).Scan(
+			&sec.ID, &sec.RevisionID, &sec.CourseID, &sec.SectionIdentityID, &sec.TitleAr, &sec.TitleEn, &sec.Position, &sec.PriceMinorUnits, &sec.CreatedAt, &sec.UpdatedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCourseNotFound
@@ -630,18 +1015,11 @@ func (r *Repository) UpdateSection(ctx context.Context, req UpdateSectionRequest
 		if err != nil {
 			return fmt.Errorf("updating section: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "SECTION_UPDATED",
-			TargetType:      "SECTION",
-			TargetID:        sec.ID,
-			Reason:          "Section updated",
-			Metadata:        map[string]any{"course_id": req.CourseID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "SECTION_UPDATED", targetType: "SECTION", targetID: sec.SectionIdentityID,
+			reason: "Section updated", metadata: map[string]any{"course_id": req.CourseID},
+		})
 	})
 
 	if err != nil {
@@ -650,58 +1028,57 @@ func (r *Repository) UpdateSection(ctx context.Context, req UpdateSectionRequest
 	return &sec, nil
 }
 
-func (r *Repository) DeleteSection(ctx context.Context, courseID, sectionID, ownerAccountID, actorDescriptor string) error {
-	if courseID == "" || sectionID == "" || ownerAccountID == "" {
+func (r *Repository) DeleteSection(
+	ctx context.Context,
+	req DeleteSectionRequest,
+	actorDescriptor string,
+) error {
+	if req.CourseID == "" || req.RevisionID == "" || req.SectionID == "" || req.OwnerAccountID == "" {
 		return ErrCourseNotFound
 	}
 
 	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		tag, err := tx.Exec(ctx, `DELETE FROM course_sections WHERE id = $1::uuid`, sectionID)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		res, err := tx.Exec(ctx, `
+			DELETE FROM course_sections
+			WHERE revision_id = $1::uuid AND section_identity_id = $2::uuid
+		`, rev.ID, req.SectionID)
 		if err != nil {
 			return fmt.Errorf("deleting section: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if res.RowsAffected() == 0 {
 			return ErrCourseNotFound
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "SECTION_DELETED",
-			TargetType:      "SECTION",
-			TargetID:        sectionID,
-			Reason:          "Section deleted",
-			Metadata:        map[string]any{"course_id": courseID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "SECTION_DELETED", targetType: "SECTION", targetID: req.SectionID,
+			reason: "Section deleted", metadata: map[string]any{"course_id": req.CourseID},
+		})
 	})
 }
 
-func (r *Repository) AddLesson(ctx context.Context, req AddLessonRequest, actorDescriptor string) (*Lesson, error) {
-	if req.CourseID == "" || req.SectionID == "" || req.OwnerAccountID == "" {
+func (r *Repository) AddLesson(
+	ctx context.Context,
+	req AddLessonRequest,
+	actorDescriptor string,
+) (*Lesson, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.SectionID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
-	}
-	if len(req.TitleAr) == 0 || len(req.TitleEn) == 0 {
-		return nil, errors.New("title_ar and title_en are required")
 	}
 
 	var les Lesson
@@ -713,58 +1090,83 @@ func (r *Repository) AddLesson(ctx context.Context, req AddLessonRequest, actorD
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		pos := 1
-		if req.Position != nil && *req.Position >= 0 {
-			pos = *req.Position
-		} else {
-			_ = tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), 0) + 1 FROM course_lessons WHERE section_id = $1::uuid`, req.SectionID).Scan(&pos)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
 		}
 
+		var secID string
+		var secIdentityID string
+		err = tx.QueryRow(ctx, `
+			SELECT id, section_identity_id FROM course_sections
+			WHERE revision_id = $1::uuid AND section_identity_id = $2::uuid
+		`, rev.ID, req.SectionID).Scan(&secID, &secIdentityID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCourseNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("querying section: %w", err)
+		}
+
+		var pos int
+		if req.Position != nil {
+			pos = *req.Position
+		} else {
+			err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), -1) + 1 FROM course_lessons WHERE section_id = $1::uuid`, secID).Scan(&pos)
+			if err != nil {
+				return fmt.Errorf("querying max lesson position: %w", err)
+			}
+		}
+
+		// Create new stable lesson identity
+		var lesIdentityID string
+		err = tx.QueryRow(ctx, `
+			INSERT INTO course_lesson_identities (course_id, section_identity_id)
+			VALUES ($1::uuid, $2::uuid)
+			RETURNING id
+		`, req.CourseID, secIdentityID).Scan(&lesIdentityID)
+		if err != nil {
+			return fmt.Errorf("creating lesson identity: %w", err)
+		}
+
+		now := time.Now().UTC()
 		query := `
-			INSERT INTO course_lessons (section_id, title_ar, title_en, position)
-			VALUES ($1::uuid, $2, $3, $4)
-			RETURNING id, section_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+			INSERT INTO course_lessons (section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, created_at, updated_at)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $8)
+			RETURNING id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
 		`
-		err = tx.QueryRow(ctx, query, req.SectionID, req.TitleAr, req.TitleEn, pos).Scan(
-			&les.ID, &les.SectionID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+		err = tx.QueryRow(ctx, query, secID, req.CourseID, secIdentityID, lesIdentityID, req.TitleAr, req.TitleEn, pos, now).Scan(
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting lesson: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_CREATED",
-			TargetType:      "LESSON",
-			TargetID:        les.ID,
-			Reason:          "Lesson created",
-			Metadata:        map[string]any{"course_id": req.CourseID, "section_id": req.SectionID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		les.Files = []LessonFile{}
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_CREATED", targetType: "LESSON", targetID: les.LessonIdentityID,
+			reason: "Lesson created", metadata: map[string]any{
+				"course_id": req.CourseID, "section_id": req.SectionID,
+			},
+		})
 	})
 
 	if err != nil {
 		return nil, err
 	}
-	les.Files = []LessonFile{}
 	return &les, nil
 }
 
-func (r *Repository) UpdateLesson(ctx context.Context, req UpdateLessonRequest, actorDescriptor string) (*Lesson, error) {
-	if req.CourseID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
+func (r *Repository) UpdateLesson(
+	ctx context.Context,
+	req UpdateLessonRequest,
+	actorDescriptor string,
+) (*Lesson, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
 	}
 
@@ -777,28 +1179,29 @@ func (r *Repository) UpdateLesson(ctx context.Context, req UpdateLessonRequest, 
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
 		query := `
-			UPDATE course_lessons
-			SET title_ar = COALESCE(NULLIF($1, ''), title_ar),
-			    title_en = COALESCE(NULLIF($2, ''), title_en),
-			    position = COALESCE($3, position),
-			    updated_at = now()
-			WHERE id = $4::uuid
-			RETURNING id, section_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+			UPDATE course_lessons cl
+			SET title_ar = COALESCE(NULLIF($1, ''), cl.title_ar),
+			    title_en = COALESCE(NULLIF($2, ''), cl.title_en),
+			    position = COALESCE($3, cl.position),
+			    updated_at = $4
+			FROM course_sections cs
+			WHERE cl.section_id = cs.id AND cs.revision_id = $5::uuid
+			  AND cl.lesson_identity_id = $6::uuid
+			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.created_at, cl.updated_at
 		`
-		err = tx.QueryRow(ctx, query, req.TitleAr, req.TitleEn, req.Position, req.LessonID).Scan(
-			&les.ID, &les.SectionID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+		err = tx.QueryRow(ctx, query, req.TitleAr, req.TitleEn, req.Position, now, rev.ID, req.LessonID).Scan(
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCourseNotFound
@@ -806,18 +1209,11 @@ func (r *Repository) UpdateLesson(ctx context.Context, req UpdateLessonRequest, 
 		if err != nil {
 			return fmt.Errorf("updating lesson: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_UPDATED",
-			TargetType:      "LESSON",
-			TargetID:        les.ID,
-			Reason:          "Lesson updated",
-			Metadata:        map[string]any{"course_id": req.CourseID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_UPDATED", targetType: "LESSON", targetID: les.LessonIdentityID,
+			reason: "Lesson updated", metadata: map[string]any{"course_id": req.CourseID},
+		})
 	})
 
 	if err != nil {
@@ -826,129 +1222,138 @@ func (r *Repository) UpdateLesson(ctx context.Context, req UpdateLessonRequest, 
 	return &les, nil
 }
 
-func (r *Repository) DeleteLesson(ctx context.Context, courseID, lessonID, ownerAccountID, actorDescriptor string) error {
-	if courseID == "" || lessonID == "" || ownerAccountID == "" {
+func (r *Repository) DeleteLesson(
+	ctx context.Context,
+	req DeleteLessonRequest,
+	actorDescriptor string,
+) error {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
 		return ErrCourseNotFound
 	}
 
 	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		tag, err := tx.Exec(ctx, `DELETE FROM course_lessons WHERE id = $1::uuid`, lessonID)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		res, err := tx.Exec(ctx, `
+			DELETE FROM course_lessons cl
+			USING course_sections cs
+			WHERE cl.section_id = cs.id AND cs.revision_id = $1::uuid
+			  AND cl.lesson_identity_id = $2::uuid
+		`, rev.ID, req.LessonID)
 		if err != nil {
 			return fmt.Errorf("deleting lesson: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if res.RowsAffected() == 0 {
 			return ErrCourseNotFound
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_DELETED",
-			TargetType:      "LESSON",
-			TargetID:        lessonID,
-			Reason:          "Lesson deleted",
-			Metadata:        map[string]any{"course_id": courseID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_DELETED", targetType: "LESSON", targetID: req.LessonID,
+			reason: "Lesson deleted", metadata: map[string]any{"course_id": req.CourseID},
+		})
 	})
 }
 
 func (r *Repository) SetLessonVideo(
 	ctx context.Context,
 	validator AssetVersionValidator,
-	courseID, lessonID, videoAssetVersionID, ownerAccountID, actorDescriptor string,
-) error {
-	if courseID == "" || lessonID == "" || videoAssetVersionID == "" || ownerAccountID == "" {
-		return ErrCourseNotFound
+	req SetVideoRequest,
+	actorDescriptor string,
+) (*Lesson, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+	if validator == nil {
+		return nil, errors.New("asset version validator is required")
 	}
 
-	if validator != nil {
-		if err := validator.ValidateAssetVersion(ctx, videoAssetVersionID); err != nil {
-			return err
-		}
+	if err := validator.ValidateAssetVersion(ctx, req.VideoAssetVersionID); err != nil {
+		return nil, err
 	}
 
-	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+	var les Lesson
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		tag, err := tx.Exec(ctx, `
-			UPDATE course_lessons
-			SET video_asset_version_id = $1::uuid, updated_at = now()
-			WHERE id = $2::uuid
-		`, videoAssetVersionID, lessonID)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
 		if err != nil {
-			return fmt.Errorf("updating lesson video: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrCourseNotFound
+			return err
 		}
 
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_VIDEO_ATTACHED",
-			TargetType:      "LESSON",
-			TargetID:        lessonID,
-			Reason:          "Lesson video asset version attached",
-			Metadata:        map[string]any{"course_id": courseID, "video_asset_version_id": videoAssetVersionID},
+		now := time.Now().UTC()
+		query := `
+			UPDATE course_lessons cl
+			SET video_asset_version_id = $1::uuid, updated_at = $2
+			FROM course_sections cs
+			WHERE cl.section_id = cs.id AND cs.revision_id = $3::uuid
+			  AND cl.lesson_identity_id = $4::uuid
+			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.created_at, cl.updated_at
+		`
+		err = tx.QueryRow(ctx, query, req.VideoAssetVersionID, now, rev.ID, req.LessonID).Scan(
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCourseNotFound
 		}
-		return WriteAuditEvent(ctx, tx, audit)
+		if err != nil {
+			return fmt.Errorf("setting lesson video: %w", err)
+		}
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_VIDEO_ATTACHED", targetType: "LESSON", targetID: les.LessonIdentityID,
+			reason: "Lesson video asset version attached", metadata: map[string]any{
+				"course_id": req.CourseID, "video_asset_version_id": req.VideoAssetVersionID,
+			},
+		})
 	})
+
+	if err != nil {
+		return nil, err
+	}
+	return &les, nil
 }
 
-func (r *Repository) AddOrUpdateLessonFile(
+func (r *Repository) AddLessonFile(
 	ctx context.Context,
 	validator AssetVersionValidator,
 	req LessonFileRequest,
 	actorDescriptor string,
 ) (*LessonFile, error) {
-	if req.CourseID == "" || req.LessonID == "" || req.OwnerAccountID == "" || req.AssetVersionID == "" {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
 		return nil, ErrCourseNotFound
 	}
 	if !req.Kind.Valid() {
 		return nil, fmt.Errorf("invalid lesson file kind: %s", req.Kind)
 	}
+	if validator == nil {
+		return nil, errors.New("asset version validator is required")
+	}
 
-	if validator != nil {
-		if err := validator.ValidateAssetVersion(ctx, req.AssetVersionID); err != nil {
-			return nil, err
-		}
+	if err := validator.ValidateAssetVersion(ctx, req.AssetVersionID); err != nil {
+		return nil, err
 	}
 
 	var lf LessonFile
@@ -960,47 +1365,57 @@ func (r *Repository) AddOrUpdateLessonFile(
 		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: req.CourseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
 		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		pos := 1
-		if req.Position != nil && *req.Position >= 0 {
-			pos = *req.Position
-		} else {
-			_ = tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), 0) + 1 FROM lesson_files WHERE lesson_id = $1::uuid AND kind = $2::lesson_file_kind`, req.LessonID, string(req.Kind)).Scan(&pos)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
 		}
 
+		var versionLessonID string
+		err = tx.QueryRow(ctx, `
+			SELECT cl.id FROM course_lessons cl
+			JOIN course_sections cs ON cs.id = cl.section_id
+			WHERE cs.revision_id = $1::uuid AND cl.lesson_identity_id = $2::uuid
+		`, rev.ID, req.LessonID).Scan(&versionLessonID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCourseNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("querying lesson: %w", err)
+		}
+
+		var pos int
+		if req.Position != nil {
+			pos = *req.Position
+		} else {
+			err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(position), -1) + 1 FROM lesson_files WHERE lesson_id = $1::uuid AND kind = $2`, versionLessonID, req.Kind).Scan(&pos)
+			if err != nil {
+				return fmt.Errorf("querying max lesson file position: %w", err)
+			}
+		}
+
+		now := time.Now().UTC()
 		query := `
-			INSERT INTO lesson_files (lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position)
-			VALUES ($1::uuid, $2::lesson_file_kind, $3::uuid, $4, $5, $6)
+			INSERT INTO lesson_files (lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $7)
 			RETURNING id, lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position, created_at, updated_at
 		`
-		err = tx.QueryRow(ctx, query, req.LessonID, string(req.Kind), req.AssetVersionID, req.DisplayNameAr, req.DisplayNameEn, pos).Scan(
+		err = tx.QueryRow(ctx, query, versionLessonID, req.Kind, req.AssetVersionID, req.DisplayNameAr, req.DisplayNameEn, pos, now).Scan(
 			&lf.ID, &lf.LessonID, &lf.Kind, &lf.AssetVersionID, &lf.DisplayNameAr, &lf.DisplayNameEn, &lf.Position, &lf.CreatedAt, &lf.UpdatedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting lesson file: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &req.OwnerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_FILE_ATTACHED",
-			TargetType:      "LESSON_FILE",
-			TargetID:        lf.ID,
-			Reason:          "Lesson file attached",
-			Metadata:        map[string]any{"course_id": req.CourseID, "kind": string(req.Kind)},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_FILE_ATTACHED", targetType: "LESSON_FILE", targetID: lf.ID,
+			reason: "Lesson file attached", metadata: map[string]any{
+				"course_id": req.CourseID, "kind": string(req.Kind),
+			},
+		})
 	})
 
 	if err != nil {
@@ -1009,201 +1424,197 @@ func (r *Repository) AddOrUpdateLessonFile(
 	return &lf, nil
 }
 
-func (r *Repository) DeleteLessonFile(ctx context.Context, courseID, lessonID, fileID, ownerAccountID, actorDescriptor string) error {
-	if courseID == "" || lessonID == "" || fileID == "" || ownerAccountID == "" {
+func (r *Repository) DeleteLessonFile(
+	ctx context.Context,
+	req DeleteLessonFileRequest,
+	actorDescriptor string,
+) error {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.FileID == "" || req.OwnerAccountID == "" {
 		return ErrCourseNotFound
 	}
 
 	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		tag, err := tx.Exec(ctx, `DELETE FROM lesson_files WHERE id = $1::uuid AND lesson_id = $2::uuid`, fileID, lessonID)
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		res, err := tx.Exec(ctx, `
+			DELETE FROM lesson_files lf
+			USING course_lessons cl, course_sections cs
+			WHERE lf.lesson_id = cl.id AND cl.section_id = cs.id
+			  AND cs.revision_id = $1::uuid
+			  AND cl.lesson_identity_id = $2::uuid
+			  AND lf.id = $3::uuid
+		`, rev.ID, req.LessonID, req.FileID)
 		if err != nil {
 			return fmt.Errorf("deleting lesson file: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if res.RowsAffected() == 0 {
 			return ErrCourseNotFound
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "LESSON_FILE_DELETED",
-			TargetType:      "LESSON_FILE",
-			TargetID:        fileID,
-			Reason:          "Lesson file deleted",
-			Metadata:        map[string]any{"course_id": courseID},
-		}
-		return WriteAuditEvent(ctx, tx, audit)
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "LESSON_FILE_DELETED", targetType: "LESSON_FILE", targetID: req.FileID,
+			reason: "Lesson file deleted", metadata: map[string]any{"course_id": req.CourseID},
+		})
 	})
 }
 
 func (r *Repository) SetPreviewAsset(
 	ctx context.Context,
 	validator AssetVersionValidator,
-	courseID, previewAssetVersionID, ownerAccountID, actorDescriptor string,
-) error {
-	if courseID == "" || previewAssetVersionID == "" || ownerAccountID == "" {
-		return ErrCourseNotFound
+	req PreviewAssetRequest,
+	actorDescriptor string,
+) (*CourseRevision, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.OwnerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+	if validator == nil {
+		return nil, errors.New("asset version validator is required")
 	}
 
-	if validator != nil {
-		if err := validator.ValidateAssetVersion(ctx, previewAssetVersionID); err != nil {
-			return err
-		}
+	if err := validator.ValidateAssetVersion(ctx, req.PreviewAssetVersionID); err != nil {
+		return nil, err
 	}
 
-	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+	var rev *CourseRevision
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		rev, err := r.getLatestRevision(ctx, courseID)
-		if err != nil || rev == nil {
-			return errors.New("no editable revision found")
+		candidate, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
 		}
 
-		_, err = tx.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid, updated_at = now() WHERE id = $2::uuid`, previewAssetVersionID, rev.ID)
+		now := time.Now().UTC()
+		_, err = tx.Exec(ctx, `
+			UPDATE course_revisions
+			SET preview_asset_version_id = $1::uuid, updated_at = $2
+			WHERE id = $3::uuid
+		`, req.PreviewAssetVersionID, now, candidate.ID)
 		if err != nil {
 			return fmt.Errorf("setting preview asset: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "PREVIEW_ASSET_SET",
-			TargetType:      "COURSE_REVISION",
-			TargetID:        rev.ID,
-			Reason:          "Preview asset version nominated",
-			Metadata:        map[string]any{"course_id": courseID, "preview_asset_version_id": previewAssetVersionID},
+		if err := writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "PREVIEW_ASSET_SET", targetType: "COURSE_REVISION", targetID: candidate.ID,
+			reason: "Preview asset version nominated", metadata: map[string]any{
+				"course_id": req.CourseID, "preview_asset_version_id": req.PreviewAssetVersionID,
+			},
+		}); err != nil {
+			return err
 		}
-		return WriteAuditEvent(ctx, tx, audit)
-	})
-}
 
-func (r *Repository) ClearPreviewAsset(ctx context.Context, courseID, ownerAccountID, actorDescriptor string) error {
-	if courseID == "" || ownerAccountID == "" {
-		return ErrCourseNotFound
-	}
-
-	return r.ExecTx(ctx, func(tx pgx.Tx) error {
-		courseRow, err := r.LockCourse(ctx, tx, courseID)
+		res, err := r.loadRevisionGraphByIDTx(ctx, tx, candidate.ID)
 		if err != nil {
 			return err
 		}
-		if courseRow.OwnerAccountID != ownerAccountID {
+		rev = res
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return rev, nil
+}
+
+func (r *Repository) ClearPreviewAsset(
+	ctx context.Context,
+	req ClearPreviewAssetRequest,
+	actorDescriptor string,
+) (*CourseRevision, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.OwnerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+
+	var rev *CourseRevision
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
+		if err != nil {
+			return err
+		}
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
 			return ErrCourseNotFound
 		}
-		if courseRow.Lifecycle == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   courseRow.Lifecycle,
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
-		}
-		if err := r.checkOwnerActive(ctx, tx, ownerAccountID); err != nil {
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
 			return err
 		}
 
-		rev, err := r.getLatestRevision(ctx, courseID)
-		if err != nil || rev == nil {
-			return errors.New("no editable revision found")
+		candidate, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
 		}
 
-		_, err = tx.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = NULL, updated_at = now() WHERE id = $1::uuid`, rev.ID)
+		now := time.Now().UTC()
+		_, err = tx.Exec(ctx, `
+			UPDATE course_revisions
+			SET preview_asset_version_id = NULL, updated_at = $1
+			WHERE id = $2::uuid
+		`, now, candidate.ID)
 		if err != nil {
 			return fmt.Errorf("clearing preview asset: %w", err)
 		}
-
-		audit := AuditEvent{
-			ActorAccountID:  &ownerAccountID,
-			ActorRole:       "INSTRUCTOR",
-			ActorDescriptor: actorDescriptor,
-			Action:          "PREVIEW_ASSET_CLEARED",
-			TargetType:      "COURSE_REVISION",
-			TargetID:        rev.ID,
-			Reason:          "Preview asset cleared",
-			Metadata:        map[string]any{"course_id": courseID},
+		if err := writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: "PREVIEW_ASSET_CLEARED", targetType: "COURSE_REVISION", targetID: candidate.ID,
+			reason: "Preview asset cleared", metadata: map[string]any{"course_id": req.CourseID},
+		}); err != nil {
+			return err
 		}
-		return WriteAuditEvent(ctx, tx, audit)
+
+		res, err := r.loadRevisionGraphByIDTx(ctx, tx, candidate.ID)
+		if err != nil {
+			return err
+		}
+		rev = res
+		return nil
 	})
-}
 
-func (r *Repository) ListTaxonomyTerms(ctx context.Context, kind *TaxonomyKind) ([]TaxonomyTerm, error) {
-	query := `
-		SELECT id, kind, label_ar, label_en, academic_code, retired_at, created_at, updated_at
-		FROM taxonomy_terms
-		WHERE retired_at IS NULL
-	`
-	var args []any
-	if kind != nil && kind.Valid() {
-		query += ` AND kind = $1::taxonomy_kind`
-		args = append(args, string(*kind))
-	}
-	query += ` ORDER BY label_en ASC`
-
-	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("querying taxonomy terms: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-
-	var result []TaxonomyTerm
-	for rows.Next() {
-		var t TaxonomyTerm
-		if err := rows.Scan(&t.ID, &t.Kind, &t.LabelAr, &t.LabelEn, &t.AcademicCode, &t.RetiredAt, &t.CreatedAt, &t.UpdatedAt); err != nil {
-			return nil, err
-		}
-		result = append(result, t)
-	}
-	if result == nil {
-		result = []TaxonomyTerm{}
-	}
-	return result, nil
+	return rev, nil
 }
 
-// SubmitCourse submits a course for review (T024, FR-009, FR-010).
 func (r *Repository) SubmitCourse(
 	ctx context.Context,
 	validator AssetVersionValidator,
-	courseID string,
-	ownerAccountID string,
-	actorDescriptor string,
+	req SubmitCourseRequest,
 ) (*Course, error) {
-	if courseID == "" || ownerAccountID == "" {
+	courseID := req.CourseID
+	revisionID := req.RevisionID
+	ownerAccountID := req.OwnerAccountID
+	actorDescriptor := req.ActorDescriptor
+	if courseID == "" || revisionID == "" || ownerAccountID == "" {
 		return nil, ErrCourseNotFound
+	}
+	if validator == nil {
+		return nil, errors.New("asset version validator is required")
+	}
+	if r.outboxWriter == nil {
+		return nil, errors.New("outbox writer is required")
 	}
 
 	var course Course
@@ -1219,25 +1630,20 @@ func (r *Repository) SubmitCourse(
 			return err
 		}
 
-		rev, err := r.getLatestRevision(ctx, courseID)
-		if err != nil || rev == nil {
-			return errors.New("no editable revision found")
-		}
-
-		if row.Lifecycle == string(LifecyclePendingReview) || string(rev.State) == string(LifecyclePendingReview) {
-			return &LifecycleConflictError{
-				CourseID: courseID,
-				Actual:   string(LifecyclePendingReview),
-				Expected: []string{string(LifecycleDraft), string(LifecycleChangesRequested)},
-			}
+		rev, err := r.LockCandidate(ctx, tx, courseID, revisionID)
+		if err != nil {
+			return err
 		}
 
 		revGraph, err := r.loadRevisionGraphByIDTx(ctx, tx, rev.ID)
 		if err != nil || revGraph == nil {
-			return fmt.Errorf("loading revision graph: %w", err)
+			return fmt.Errorf("loading candidate revision graph: %w", err)
 		}
 
-		valErr, err := ValidateCourseForSubmission(ctx, tx, validator, courseID, revGraph)
+		valErr, err := validateCourseForSubmission(ctx, submissionValidationRequest{
+			tx: tx, validator: newTxAssetVersionValidator(tx),
+			courseID: courseID, revision: revGraph,
+		})
 		if err != nil {
 			return err
 		}
@@ -1254,7 +1660,11 @@ func (r *Repository) SubmitCourse(
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				return nil // Mutation 3: return success instead of 409 conflict
+				return &LifecycleConflictError{
+					CourseID: courseID,
+					Actual:   "PENDING_REVIEW",
+					Expected: []string{"DRAFT", "CHANGES_REQUESTED"},
+				}
 			}
 			return fmt.Errorf("updating revision for submit: %w", err)
 		}
@@ -1289,35 +1699,36 @@ func (r *Repository) SubmitCourse(
 			return err
 		}
 
-		if r.outboxWriter != nil {
-			writer, err := NewNotificationIntentWriter(r.outboxWriter)
-			if err == nil {
-				event := outbox.Event{
-					Type:              "catalog.course_submitted",
-					SchemaVersion:     1,
-					SourceModule:      "CATALOG_AND_AUTHORING",
-					AggregateType:     "COURSE",
-					AggregateID:       courseID,
-					AggregateRevision: 1,
-					CorrelationID:     courseID,
-					SafePayload:       map[string]any{"course_id": courseID},
-				}
-				protected := map[string]any{
-					"course_id":        courseID,
-					"owner_account_id": ownerAccountID,
-					"revision_id":      rev.ID,
-					"submitted_at":     now,
-				}
-				_, _ = writer.WriteIntent(ctx, tx, event, protected)
-			}
+		writer, err := NewNotificationIntentWriter(r.outboxWriter)
+		if err != nil {
+			return fmt.Errorf("constructing notification intent writer: %w", err)
+		}
+		event := outbox.Event{
+			Type:              "catalog.course_submitted",
+			SchemaVersion:     1,
+			SourceModule:      "CATALOG_AND_AUTHORING",
+			AggregateType:     "COURSE",
+			AggregateID:       courseID,
+			AggregateRevision: 1,
+			CorrelationID:     courseID,
+			SafePayload:       map[string]any{"course_id": courseID},
+		}
+		protected := map[string]any{
+			"course_id":        courseID,
+			"owner_account_id": ownerAccountID,
+			"revision_id":      rev.ID,
+			"submitted_at":     now,
+		}
+		if _, err := writer.WriteIntent(ctx, tx, event, protected); err != nil {
+			return fmt.Errorf("writing submission intent: %w", err)
 		}
 
 		course.ID = courseID
 		course.OwnerAccountID = ownerAccountID
 		course.CreatedAt = row.CreatedAt
 		course.UpdatedAt = now
-		revGraph.State = RevisionState("PENDING_REVIEW")
 		course.EditableRevision = revGraph
+		course.EditableRevision.State = RevisionPendingReview
 		return nil
 	})
 
@@ -1325,4 +1736,39 @@ func (r *Repository) SubmitCourse(
 		return nil, err
 	}
 	return &course, nil
+}
+
+func (r *Repository) ListTaxonomyTerms(ctx context.Context, kind *TaxonomyKind) ([]TaxonomyTerm, error) {
+	query := `
+		SELECT id, kind, label_ar, label_en, academic_code, retired_at, created_at, updated_at
+		FROM taxonomy_terms
+		WHERE retired_at IS NULL
+	`
+	var args []any
+	if kind != nil && kind.Valid() {
+		query += ` AND kind = $1::taxonomy_kind`
+		args = append(args, string(*kind))
+	}
+	query += ` ORDER BY kind ASC, label_en ASC`
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying taxonomy terms: %w", err)
+	}
+	defer rows.Close()
+
+	var terms []TaxonomyTerm
+	for rows.Next() {
+		var t TaxonomyTerm
+		if err := rows.Scan(
+			&t.ID, &t.Kind, &t.LabelAr, &t.LabelEn, &t.AcademicCode,
+			&t.RetiredAt, &t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning taxonomy term: %w", err)
+		}
+		terms = append(terms, t)
+	}
+	if terms == nil {
+		terms = []TaxonomyTerm{}
+	}
+	return terms, nil
 }

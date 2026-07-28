@@ -28,6 +28,7 @@ func (l CourseLifecycle) Valid() bool {
 
 var (
 	ErrAccountSuspended = errors.New("instructor account is suspended")
+	ErrOwnerIneligible  = errors.New("course owner is not an active instructor")
 	ErrInvalidLifecycle = errors.New("invalid course lifecycle transition")
 )
 

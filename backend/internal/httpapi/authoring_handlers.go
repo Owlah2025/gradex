@@ -69,13 +69,26 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 		writeProblem(c, problem.NotAuthorized())
 		return
 	}
-	if errors.Is(err, catalog.ErrAccountSuspended) {
+	if errors.Is(err, catalog.ErrAccountSuspended) || errors.Is(err, catalog.ErrOwnerIneligible) {
 		writeProblem(c, problem.NotAuthorized())
 		return
 	}
 	var conflict *catalog.LifecycleConflictError
 	if errors.As(err, &conflict) {
 		writeProblem(c, problem.StateConflict())
+		return
+	}
+	var valErr *catalog.SubmissionValidationError
+	if errors.As(err, &valErr) {
+		var violations []problem.SubmissionViolation
+		for _, v := range valErr.Violations {
+			violations = append(violations, problem.SubmissionViolation{
+				Code:      v.Code,
+				Target:    v.Target,
+				Dimension: v.Dimension,
+			})
+		}
+		writeProblem(c, problem.SubmissionIncomplete(violations...))
 		return
 	}
 	if errors.Is(err, catalog.ErrAssetVersionInvalid) || errors.Is(err, catalog.ErrAssetVersionNotReady) {
@@ -108,6 +121,18 @@ func (h *authoringHandlers) createCourse(c *gin.Context) {
 	c.JSON(http.StatusCreated, course)
 }
 
+func (h *authoringHandlers) createCandidate(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	courseID := c.Param("id")
+
+	candidate, err := h.repo.CreateCandidate(c.Request.Context(), courseID, accountID, accountID)
+	if err != nil {
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, candidate)
+}
+
 func (h *authoringHandlers) listOwnedCourses(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courses, err := h.repo.ListOwnedCourses(c.Request.Context(), accountID)
@@ -130,9 +155,10 @@ func (h *authoringHandlers) getOwnedCourse(c *gin.Context) {
 	c.JSON(http.StatusOK, course)
 }
 
-func (h *authoringHandlers) updateCourse(c *gin.Context) {
+func (h *authoringHandlers) updateCourseRevision(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 
 	var body updateCourseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -142,6 +168,7 @@ func (h *authoringHandlers) updateCourse(c *gin.Context) {
 
 	rev, err := h.repo.UpdateCourseRevision(c.Request.Context(), h.assetValidator, catalog.UpdateRevisionRequest{
 		CourseID:              courseID,
+		RevisionID:            revisionID,
 		OwnerAccountID:        accountID,
 		TitleAr:               body.TitleAr,
 		TitleEn:               body.TitleEn,
@@ -163,6 +190,7 @@ func (h *authoringHandlers) updateCourse(c *gin.Context) {
 func (h *authoringHandlers) addSection(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 
 	var body sectionBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -172,6 +200,7 @@ func (h *authoringHandlers) addSection(c *gin.Context) {
 
 	sec, err := h.repo.AddSection(c.Request.Context(), catalog.AddSectionRequest{
 		CourseID:       courseID,
+		RevisionID:     revisionID,
 		OwnerAccountID: accountID,
 		TitleAr:        body.TitleAr,
 		TitleEn:        body.TitleEn,
@@ -188,6 +217,7 @@ func (h *authoringHandlers) addSection(c *gin.Context) {
 func (h *authoringHandlers) updateSection(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	sectionID := c.Param("sectionId")
 
 	var body sectionBody
@@ -198,8 +228,9 @@ func (h *authoringHandlers) updateSection(c *gin.Context) {
 
 	sec, err := h.repo.UpdateSection(c.Request.Context(), catalog.UpdateSectionRequest{
 		CourseID:       courseID,
-		OwnerAccountID: accountID,
+		RevisionID:     revisionID,
 		SectionID:      sectionID,
+		OwnerAccountID: accountID,
 		TitleAr:        body.TitleAr,
 		TitleEn:        body.TitleEn,
 		Position:       body.Position,
@@ -215,9 +246,16 @@ func (h *authoringHandlers) updateSection(c *gin.Context) {
 func (h *authoringHandlers) deleteSection(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	sectionID := c.Param("sectionId")
 
-	err := h.repo.DeleteSection(c.Request.Context(), courseID, sectionID, accountID, accountID)
+	err := h.repo.DeleteSection(c.Request.Context(), catalog.DeleteSectionRequest{
+		CourseID:       courseID,
+		RevisionID:     revisionID,
+		SectionID:      sectionID,
+		OwnerAccountID: accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
@@ -228,6 +266,7 @@ func (h *authoringHandlers) deleteSection(c *gin.Context) {
 func (h *authoringHandlers) addLesson(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	sectionID := c.Param("sectionId")
 
 	var body lessonBody
@@ -238,8 +277,9 @@ func (h *authoringHandlers) addLesson(c *gin.Context) {
 
 	les, err := h.repo.AddLesson(c.Request.Context(), catalog.AddLessonRequest{
 		CourseID:       courseID,
-		OwnerAccountID: accountID,
+		RevisionID:     revisionID,
 		SectionID:      sectionID,
+		OwnerAccountID: accountID,
 		TitleAr:        body.TitleAr,
 		TitleEn:        body.TitleEn,
 		Position:       body.Position,
@@ -255,6 +295,7 @@ func (h *authoringHandlers) addLesson(c *gin.Context) {
 func (h *authoringHandlers) updateLesson(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
 
 	var body lessonBody
@@ -265,8 +306,9 @@ func (h *authoringHandlers) updateLesson(c *gin.Context) {
 
 	les, err := h.repo.UpdateLesson(c.Request.Context(), catalog.UpdateLessonRequest{
 		CourseID:       courseID,
-		OwnerAccountID: accountID,
+		RevisionID:     revisionID,
 		LessonID:       lessonID,
+		OwnerAccountID: accountID,
 		TitleAr:        body.TitleAr,
 		TitleEn:        body.TitleEn,
 		Position:       body.Position,
@@ -282,9 +324,16 @@ func (h *authoringHandlers) updateLesson(c *gin.Context) {
 func (h *authoringHandlers) deleteLesson(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
 
-	err := h.repo.DeleteLesson(c.Request.Context(), courseID, lessonID, accountID, accountID)
+	err := h.repo.DeleteLesson(c.Request.Context(), catalog.DeleteLessonRequest{
+		CourseID:       courseID,
+		RevisionID:     revisionID,
+		LessonID:       lessonID,
+		OwnerAccountID: accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
@@ -295,6 +344,7 @@ func (h *authoringHandlers) deleteLesson(c *gin.Context) {
 func (h *authoringHandlers) setLessonVideo(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
 
 	var body setVideoBody
@@ -303,17 +353,25 @@ func (h *authoringHandlers) setLessonVideo(c *gin.Context) {
 		return
 	}
 
-	err := h.repo.SetLessonVideo(c.Request.Context(), h.assetValidator, courseID, lessonID, body.VideoAssetVersionID, accountID, accountID)
+	les, err := h.repo.SetLessonVideo(c.Request.Context(), h.assetValidator, catalog.SetVideoRequest{
+		CourseID:            courseID,
+		RevisionID:          revisionID,
+		LessonID:            lessonID,
+		VideoAssetVersionID: body.VideoAssetVersionID,
+		OwnerAccountID:      accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, les)
 }
 
 func (h *authoringHandlers) addLessonFile(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
 
 	var body lessonFileBody
@@ -322,29 +380,30 @@ func (h *authoringHandlers) addLessonFile(c *gin.Context) {
 		return
 	}
 
-	lf, err := h.repo.AddOrUpdateLessonFile(c.Request.Context(), h.assetValidator, catalog.LessonFileRequest{
+	lf, err := h.repo.AddLessonFile(c.Request.Context(), h.assetValidator, catalog.LessonFileRequest{
 		CourseID:       courseID,
-		OwnerAccountID: accountID,
+		RevisionID:     revisionID,
 		LessonID:       lessonID,
 		Kind:           body.Kind,
 		AssetVersionID: body.AssetVersionID,
 		DisplayNameAr:  body.DisplayNameAr,
 		DisplayNameEn:  body.DisplayNameEn,
 		Position:       body.Position,
+		OwnerAccountID: accountID,
 	}, accountID)
 
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, lf)
+	c.JSON(http.StatusCreated, lf)
 }
 
 func (h *authoringHandlers) deleteLessonFile(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
-
 	fileID := c.Query("file_id")
 	if fileID == "" {
 		var body lessonFileBody
@@ -356,7 +415,14 @@ func (h *authoringHandlers) deleteLessonFile(c *gin.Context) {
 		return
 	}
 
-	err := h.repo.DeleteLessonFile(c.Request.Context(), courseID, lessonID, fileID, accountID, accountID)
+	err := h.repo.DeleteLessonFile(c.Request.Context(), catalog.DeleteLessonFileRequest{
+		CourseID:       courseID,
+		RevisionID:     revisionID,
+		LessonID:       lessonID,
+		FileID:         fileID,
+		OwnerAccountID: accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
@@ -367,6 +433,7 @@ func (h *authoringHandlers) deleteLessonFile(c *gin.Context) {
 func (h *authoringHandlers) setPreviewAsset(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 
 	var body previewAssetBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -374,70 +441,66 @@ func (h *authoringHandlers) setPreviewAsset(c *gin.Context) {
 		return
 	}
 
-	err := h.repo.SetPreviewAsset(c.Request.Context(), h.assetValidator, courseID, body.PreviewAssetVersionID, accountID, accountID)
+	rev, err := h.repo.SetPreviewAsset(c.Request.Context(), h.assetValidator, catalog.PreviewAssetRequest{
+		CourseID:              courseID,
+		RevisionID:            revisionID,
+		PreviewAssetVersionID: body.PreviewAssetVersionID,
+		OwnerAccountID:        accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, rev)
 }
 
 func (h *authoringHandlers) clearPreviewAsset(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 
-	err := h.repo.ClearPreviewAsset(c.Request.Context(), courseID, accountID, accountID)
+	rev, err := h.repo.ClearPreviewAsset(c.Request.Context(), catalog.ClearPreviewAssetRequest{
+		CourseID:       courseID,
+		RevisionID:     revisionID,
+		OwnerAccountID: accountID,
+	}, accountID)
+
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, rev)
+}
+
+func (h *authoringHandlers) submitCourse(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
+
+	course, err := h.repo.SubmitCourse(c.Request.Context(), h.assetValidator, catalog.SubmitCourseRequest{
+		CourseID: courseID, RevisionID: revisionID,
+		OwnerAccountID: accountID, ActorDescriptor: accountID,
+	})
+	if err != nil {
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, course)
 }
 
 func (h *authoringHandlers) listTaxonomyTerms(c *gin.Context) {
 	var kind *catalog.TaxonomyKind
-	k := c.Query("kind")
-	if k != "" {
-		tk := catalog.TaxonomyKind(k)
-		if tk.Valid() {
-			kind = &tk
+	if rawKind := c.Query("kind"); rawKind != "" {
+		value := catalog.TaxonomyKind(rawKind)
+		if value.Valid() {
+			kind = &value
 		}
 	}
-
 	terms, err := h.repo.ListTaxonomyTerms(c.Request.Context(), kind)
 	if err != nil {
 		h.handleCatalogError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, terms)
-}
-
-func (h *authoringHandlers) submitCourse(c *gin.Context) {
-	accountID := c.GetString(ctxUserIDKey)
-	courseID := c.Param("id")
-
-	course, err := h.repo.SubmitCourse(c.Request.Context(), h.assetValidator, courseID, accountID, accountID)
-	if err != nil {
-		var valErr *catalog.SubmissionValidationError
-		if errors.As(err, &valErr) {
-			var violations []gin.H
-			for _, v := range valErr.Violations {
-				item := gin.H{"code": v.Code, "target": v.Target}
-				if v.Dimension != "" {
-					item["dimension"] = v.Dimension
-				}
-				violations = append(violations, item)
-			}
-			c.JSON(http.StatusUnprocessableEntity, gin.H{
-				"type":       "https://gradex.app/problems/submission-incomplete",
-				"title":      "Course cannot be submitted",
-				"status":     422,
-				"violations": violations,
-			})
-			return
-		}
-		h.handleCatalogError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, course)
 }

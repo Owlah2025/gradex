@@ -223,13 +223,7 @@ func buildSessionFoundation(
 }
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	if cfg.Admission().Enabled() || cfg.Sessions().Enabled() {
-		return db.AuthenticatedSessionSchemaVersion
-	}
-	if !cfg.AuthFakeMode() {
-		return db.AuthenticatedSessionSchemaVersion
-	}
-	return db.MinSchemaVersion
+	return db.RevisionIntegritySchemaVersion
 }
 
 func buildAdmissionFoundation(
@@ -440,11 +434,6 @@ func buildCatalogFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
 ) (*httpapi.CatalogFoundation, error) {
-	repository, err := catalog.NewRepository(pool)
-	if err != nil {
-		return nil, err
-	}
-
 	admission := cfg.Admission()
 	writer, err := outbox.NewWriter(
 		admission.ProtectedPayloadKeyVersion(),
@@ -454,12 +443,16 @@ func buildCatalogFoundation(
 		return nil, err
 	}
 
+	repository, err := catalog.NewRepository(pool, writer)
+	if err != nil {
+		return nil, err
+	}
+
 	assetValidator := catalog.NewDBAssetVersionValidator(pool)
 
 	return httpapi.NewCatalogFoundation(httpapi.CatalogFoundationOptions{
 		Repository:     repository,
 		AssetValidator: assetValidator,
-		OutboxWriter:   writer,
 	})
 }
 

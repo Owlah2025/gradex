@@ -2,8 +2,8 @@
 
 > Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 (D5 implementation takeover) at `c5bcc65`**; D5 planning remains frozen at `3e1809d`; application baseline remains `08b8857`
-> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS`.** T001–T031 are reconciled complete at ranges recorded in the S2 tasks; T032–T038 are the entire Codex implementation queue under D-043. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
+> Last repository reconciliation: **2026-07-28 (D5 implemented locally, awaiting frozen review range)**; D5 planning remains frozen at `3e1809d`; application baseline remains `08b8857`
+> Active slice: **S2 — Course authoring and review, D5 Phase 5 revision integrity `IN_PROGRESS` (implemented locally, awaiting review).** T001–T031 retain their reviewed closure evidence; T032–T038 are implemented and locally green under D-043. Claude review and hosted CI remain closure gates. Day record: [2026-07-28-d5.md](daily/2026-07-28-d5.md), `IN_PROGRESS`; D4 is `CLOSED` at [2026-07-28-d4.md](daily/2026-07-28-d4.md)
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
@@ -765,12 +765,12 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Codex implements S2 D5 T032–T038 through `speckit.implement` from planning freeze
-`3e1809d`; Claude then independently reviews one frozen exact implementation range under D-043.**
+**Freeze Codex's completed S2 D5 T032–T038 implementation, then have Claude independently review
+that one exact range under D-043; hosted CI must pass on the reviewed head before closure.**
 
-Codex's specification seat is complete for this boundary. The existing
+Codex's specification and implementation seats are complete for this boundary. The existing
 [S2 tasks](../../specs/003-course-authoring/tasks.md) reconcile T001–T031 with exact evidence and
-freeze only T032–T038 for D5. The bounded
+record T032–T038 complete for D5. The bounded
 [D5 handoff](../../specs/003-course-authoring/handoff.md) prohibits T039+, separate feature
 creation, S2 regeneration, pricing, lifecycle/emergency controls, taxonomy administration, search,
 frontend work, and unrelated refactoring.

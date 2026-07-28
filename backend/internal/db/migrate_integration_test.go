@@ -107,6 +107,8 @@ var (
 	catalogTables = []string{
 		"taxonomy_terms",
 		"course_revisions",
+		"course_section_identities",
+		"course_lesson_identities",
 		"course_sections",
 		"course_lessons",
 		"lesson_files",

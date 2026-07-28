@@ -67,6 +67,15 @@ func pool(t *testing.T) (*pgxpool.Pool, context.Context) {
 	return p, ctx
 }
 
+func testOutboxWriter(t *testing.T) *outbox.Writer {
+	t.Helper()
+	w, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("outbox.NewWriter: %v", err)
+	}
+	return w
+}
+
 func seedInstructorAndCourse(t *testing.T, pool *pgxpool.Pool, ctx context.Context) (accountID string, courseID string) {
 	t.Helper()
 	accountID = "11111111-1111-1111-1111-111111111111"
@@ -88,6 +97,14 @@ func seedInstructorAndCourse(t *testing.T, pool *pgxpool.Pool, ctx context.Conte
 		t.Fatalf("seeding course: %v", err)
 	}
 
+	_, err = pool.Exec(ctx, `
+		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1, 'DRAFT', 1, 'العنوان', 'Title', 'الوصف', 'Description')
+	`, courseID)
+	if err != nil {
+		t.Fatalf("seeding revision: %v", err)
+	}
+
 	return accountID, courseID
 }
 
@@ -97,7 +114,7 @@ func TestRepositoryLockCourseAndConflict(t *testing.T) {
 
 	accountID, courseID := seedInstructorAndCourse(t, p, ctx)
 
-	repo, err := NewRepository(p)
+	repo, err := NewRepository(p, testOutboxWriter(t))
 	if err != nil {
 		t.Fatalf("NewRepository: %v", err)
 	}
@@ -113,9 +130,9 @@ func TestRepositoryLockCourseAndConflict(t *testing.T) {
 		t.Fatalf("IsCourseOwner returned (%v, %v), want (false, nil)", notOwner, err)
 	}
 
-	// Test LockCourse with matching state
+	// Test LockCourse
 	err = repo.ExecTx(ctx, func(tx pgx.Tx) error {
-		row, err := repo.LockCourse(ctx, tx, courseID, "DRAFT")
+		row, err := repo.LockCourse(ctx, tx, courseID)
 		if err != nil {
 			return err
 		}
@@ -128,17 +145,16 @@ func TestRepositoryLockCourseAndConflict(t *testing.T) {
 		t.Fatalf("ExecTx LockCourse DRAFT failed: %v", err)
 	}
 
-	// Test LockCourse with conflicting state (expecting PUBLISHED when actual is DRAFT)
 	err = repo.ExecTx(ctx, func(tx pgx.Tx) error {
-		_, err := repo.LockCourse(ctx, tx, courseID, "PUBLISHED")
+		_, err := repo.LockCourse(ctx, tx, courseID, string(LifecyclePublished))
 		return err
 	})
 	if err == nil {
-		t.Fatal("LockCourse expected error on conflicting state, got nil")
+		t.Fatal("LockCourse expected an error for a conflicting lifecycle")
 	}
 	var conflictErr *LifecycleConflictError
 	if !errors.As(err, &conflictErr) {
-		t.Fatalf("got error %v, want LifecycleConflictError", err)
+		t.Fatalf("LockCourse conflict error = %v, want LifecycleConflictError", err)
 	}
 }
 
@@ -148,7 +164,7 @@ func TestAuditWritingIntegration(t *testing.T) {
 
 	accountID, courseID := seedInstructorAndCourse(t, p, ctx)
 
-	repo, err := NewRepository(p)
+	repo, err := NewRepository(p, testOutboxWriter(t))
 	if err != nil {
 		t.Fatalf("NewRepository: %v", err)
 	}
@@ -188,18 +204,18 @@ func TestNotificationIntentWritingIntegration(t *testing.T) {
 
 	accountID, courseID := seedInstructorAndCourse(t, p, ctx)
 
-	repo, err := NewRepository(p)
+	outboxWriter := testOutboxWriter(t)
+	repo, err := NewRepository(p, outboxWriter)
 	if err != nil {
 		t.Fatalf("NewRepository: %v", err)
 	}
 
-	key := bytes.Repeat([]byte{0x42}, 32)
-	outboxWriter, err := outbox.NewWriter("key-v1", key)
+	outboxWriter2, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatalf("outbox.NewWriter: %v", err)
 	}
 
-	notifier, err := NewNotificationIntentWriter(outboxWriter)
+	notifier, err := NewNotificationIntentWriter(outboxWriter2)
 	if err != nil {
 		t.Fatalf("NewNotificationIntentWriter: %v", err)
 	}

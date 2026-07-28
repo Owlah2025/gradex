@@ -146,7 +146,34 @@ func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
 		"AdminReview":      "/api/v1/admin/review",
 	}
 
+	requiredD5Routes := []struct {
+		method string
+		path   string
+	}{
+		{method: "GET", path: "/api/v1/courses/:id"},
+		{method: "PUT", path: "/api/v1/courses/:id/candidate"},
+		{method: "PATCH", path: "/api/v1/courses/:id/revisions/:revisionId"},
+		{method: "POST", path: "/api/v1/courses/:id/revisions/:revisionId/sections"},
+		{method: "PATCH", path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId"},
+		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId"},
+		{method: "POST", path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId/lessons"},
+		{method: "PATCH", path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId"},
+		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId"},
+		{method: "PUT", path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video"},
+		{method: "PUT", path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files"},
+		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files"},
+		{method: "PUT", path: "/api/v1/courses/:id/revisions/:revisionId/preview"},
+		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/preview"},
+		{method: "POST", path: "/api/v1/courses/:id/revisions/:revisionId/submit"},
+		{method: "GET", path: "/api/v1/admin/review/queue"},
+		{method: "GET", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId"},
+		{method: "POST", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/approve"},
+		{method: "POST", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes"},
+		{method: "POST", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId"},
+	}
+
 	surfaceMounted := make(map[string]bool)
+	d5Mounted := make(map[string]bool)
 
 	for _, route := range routes {
 		t.Logf("  %-6s %s", route.Method, route.Path)
@@ -155,11 +182,23 @@ func TestProductionRouterWiringHasNoMissingSurfaces(t *testing.T) {
 				surfaceMounted[surfaceName] = true
 			}
 		}
+		for _, req := range requiredD5Routes {
+			if route.Method == req.method && route.Path == req.path {
+				d5Mounted[req.method+" "+req.path] = true
+			}
+		}
 	}
 
 	for surfaceName, pathPrefix := range requiredSurfaces {
 		if !surfaceMounted[surfaceName] {
 			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing surface '%s' (%s)", surfaceName, pathPrefix)
+		}
+	}
+
+	for _, req := range requiredD5Routes {
+		key := req.method + " " + req.path
+		if !d5Mounted[key] {
+			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing D5 route '%s'", key)
 		}
 	}
 }

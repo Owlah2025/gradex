@@ -158,7 +158,7 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
 
 **Goal**: the live graph is untouchable until an atomic swap.
 
-- [ ] T032 [US3] Implement explicit, atomic, idempotent candidate creation and mutation targeting
+- [x] T032 [US3] Implement explicit, atomic, idempotent candidate creation and mutation targeting
       (BR-017, BR-019, BR-059, BR-066, BR-091, BR-120, BR-122; FR-018, FR-046–FR-048):
       - add migration `0010_revision_integrity` and raise `db.MaxSchemaVersion` to 10;
       - replace the narrower pending-review index with one active-candidate index for `DRAFT`,
@@ -184,7 +184,7 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
         `409`/`422` response matrix;
       - extend the production composition-root route/dependency/security sweep for every exact D5
         method/path.
-- [ ] T033 [US3] Implement exact-candidate approval in one PostgreSQL transaction with lock order
+- [x] T033 [US3] Implement exact-candidate approval in one PostgreSQL transaction with lock order
       Course → candidate; transaction-aware owner, completeness, processed-asset, and taxonomy
       revalidation; previous revision `SUPERSEDED`; candidate `APPROVED`; `live_revision_id` swap;
       lifecycle `PUBLISHED`; mandatory audit and outbox intent; no external delivery call
@@ -194,7 +194,7 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
       PostgreSQL. Bind every validator to the approving transaction. Add post-submission
       invalidation subcases for completeness, owner eligibility, taxonomy, and every asset kind;
       assert `422` with zero state/evidence change rather than `409`.
-- [ ] T034 [US3] Implement the production live-graph loader that captures `live_revision_id` once and
+- [x] T034 [US3] Implement the production live-graph loader that captures `live_revision_id` once and
       loads Course, Section, Lesson, taxonomy, and Asset Version references using that same identity.
       Prove the approved live Resource, Lab Material, and video reference remain selected until
       approval. Wire it into the existing production-mounted owned-Course read for `live_revision`
@@ -202,12 +202,12 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
       playback route. Record that S3/S5 must prove their future Student routes consume this loader;
       D5 proves the production repository seam and existing owner-route consumer, not those future
       routes (BR-017, BR-059, BR-066, BR-090, BR-091; FR-019, FR-022–FR-023, FR-049, FR-054).
-- [ ] T035 [US3] Implement exact-candidate rejection with Course → candidate lock order, mandatory
+- [x] T035 [US3] Implement exact-candidate rejection with Course → candidate lock order, mandatory
       preserved reason, audit and outbox intent in the same transaction, and no change to Course
       lifecycle, `live_revision_id`, live revision state, enrollments, Entitlements, or Student
       access. Use the canonical `COURSE_REVISION_REJECTED` audit action for a Published-Course
       candidate (BR-072, BR-090, BR-120, BR-122; FR-021, FR-052–FR-053).
-- [ ] T036 [US3] Add real PostgreSQL integration evidence for read and rollback atomicity:
+- [x] T036 [US3] Add real PostgreSQL integration evidence for read and rollback atomicity:
       - concurrent readers receive a complete old graph or complete new graph, never a mixture;
       - forced failure after each load-bearing approval stage leaves pointer, revision states, audit,
         and outbox unchanged;
@@ -215,7 +215,7 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
       - dependency locks prevent owner/taxonomy/asset state from changing between approval
         revalidation and commit
       (BR-017, BR-090, BR-120, BR-122; FR-020, FR-025, FR-049–FR-051).
-- [ ] T037 [US3] Run and restore these independent mutations, recording for each what it proves and
+- [x] T037 [US3] Run and restore these independent mutations, recording for each what it proves and
       does not prove (BR-017, BR-019, BR-059, BR-072, BR-090, BR-120; FR-055):
       - move the `courses.live_revision_id`/lifecycle update to an auto-commit write after the
         approval transaction and inject failure at that write;
@@ -227,7 +227,7 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
         taxonomy, and asset subcases;
       - let rejection alter the live revision, pointer, or Course lifecycle;
       - regenerate stable Section/Lesson identities during cloning.
-- [ ] T038 [US3] Run the exact four D5 races under `-race` against real PostgreSQL with genuine
+- [x] T038 [US3] Run the exact four D5 races under `-race` against real PostgreSQL with genuine
       parallel transactions: (1) concurrent first edits, (2) concurrent approvals, (3) approval
       versus Instructor mutation, and (4) approval versus rejection. In race 1 both calls succeed
       with the same candidate and no `409`. In race 2 one approval commits and the other returns
@@ -240,6 +240,26 @@ D5 admits only the following corrections because T032–T038 cannot be correct w
 
 **D5 checkpoint**: T032–T038 complete, production-wired, mutation-proven, and offered to Claude as
 one frozen exact range. No T039+ file or behavior may enter the range.
+
+### Completion evidence for T032–T038
+
+- Migration `0010_revision_integrity` passed the real-PostgreSQL up/down/up migration suite.
+- `TestD5CandidateCloneIsDeepAtomicAndIdentityStable`,
+  `TestD5ActiveCandidateUniqueIndexRejectsDirectConcurrentInserts`,
+  `TestD5MutationsRefuseLiveRowsAndCrossCandidateChildren`,
+  `TestD5ApprovalRollbackIsAtomicAfterEveryLoadBearingStage`,
+  `TestD5ApprovalRevalidatesEveryDependencyClass`,
+  `TestD5LiveReadersObserveCompleteOldOrNewGraph`,
+  `TestD5ApprovalDependencyLocksSerializeConflictingWrites`,
+  `TestD5PublishedCandidateRejectionPreservesLiveStateAndAccess`, and
+  `TestD5ExactFourRaces` passed against real PostgreSQL under the integration race suite.
+- All six independent mutations failed their named proof and were restored; see
+  [d5-mutation-report.md](d5-mutation-report.md).
+- Backend build, vet, unit race, and full integration race gates passed. Frontend typecheck, lint,
+  tests, and clean production build passed. Documentation and exposure guards remain the final
+  pre-commit gate.
+- T039–T064 remain unchecked. Hosted CI and Claude's independent verdict are closure gates, not
+  implementation-completion markers.
 
 ## Phase 6 — User Story 4: Admin pricing (P2)
 

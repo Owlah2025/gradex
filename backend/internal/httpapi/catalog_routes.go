@@ -18,8 +18,11 @@ func mountCatalogRoutes(
 	principals identity.PrincipalResolver,
 	logger *logging.Logger,
 ) error {
-	if foundation == nil || foundation.ownership == nil {
-		return fmt.Errorf("catalog ownership checker is required")
+	if foundation == nil || foundation.repository == nil || foundation.ownership == nil || foundation.assetValidator == nil {
+		return fmt.Errorf("complete catalog foundation is required")
+	}
+	if sessionFoundation == nil {
+		return fmt.Errorf("session foundation is required for catalog routes")
 	}
 	if logger == nil {
 		return fmt.Errorf("logger is required")
@@ -42,55 +45,86 @@ func mountCatalogRoutes(
 		return fmt.Errorf("building course ownership middleware: %w", err)
 	}
 
-	// Unowned authoring routes (Course creation, listing owned courses, taxonomy listing)
-	unownedGroup := v1.Group("")
-	unownedGroup.Use(
+	// Unowned GET routes (Course listing, taxonomy terms listing)
+	unownedGetGroup := v1.Group("")
+	unownedGetGroup.Use(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapContentManagement),
 	)
 	{
-		unownedGroup.POST("/courses", h.createCourse)
-		unownedGroup.GET("/courses", h.listOwnedCourses)
-		unownedGroup.GET("/taxonomy/terms", h.listTaxonomyTerms)
+		unownedGetGroup.GET("/courses", h.listOwnedCourses)
+		unownedGetGroup.GET("/taxonomy/terms", h.listTaxonomyTerms)
 	}
 
-	// Owned course routes under /courses/:id - EVERY route carries RequireCourseOwnership
-	ownedGroup := v1.Group("/courses/:id")
-	ownedGroup.Use(
+	// Unowned mutation routes (Course creation)
+	unownedMutationGroup := v1.Group("")
+	unownedMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapContentManagement),
+	)
+	{
+		unownedMutationGroup.POST("/courses", h.createCourse)
+	}
+
+	// Owned GET routes under /courses/:id
+	ownedGetGroup := v1.Group("/courses/:id")
+	ownedGetGroup.Use(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapContentManagement),
 		ownershipMw,
 	)
 	{
-		ownedGroup.GET("", h.getOwnedCourse)
-		ownedGroup.PATCH("", h.updateCourse)
-		ownedGroup.POST("/sections", h.addSection)
-		ownedGroup.PATCH("/sections/:sectionId", h.updateSection)
-		ownedGroup.DELETE("/sections/:sectionId", h.deleteSection)
-		ownedGroup.POST("/sections/:sectionId/lessons", h.addLesson)
-		ownedGroup.PATCH("/lessons/:lessonId", h.updateLesson)
-		ownedGroup.DELETE("/lessons/:lessonId", h.deleteLesson)
-		ownedGroup.PUT("/lessons/:lessonId/video", h.setLessonVideo)
-		ownedGroup.PUT("/lessons/:lessonId/files", h.addLessonFile)
-		ownedGroup.DELETE("/lessons/:lessonId/files", h.deleteLessonFile)
-		ownedGroup.PUT("/preview", h.setPreviewAsset)
-		ownedGroup.DELETE("/preview", h.clearPreviewAsset)
-		ownedGroup.POST("/submit", h.submitCourse)
+		ownedGetGroup.GET("", h.getOwnedCourse)
 	}
 
-	// Admin review queue and review actions under /admin/review
-	// Require authenticated Admin session and CATALOG_PUBLISH through identity.Authorize (contracts/review-api.md)
-	adminReviewGroup := v1.Group("/admin/review")
-	adminReviewGroup.Use(
+	// Owned candidate mutation routes under /courses/:id
+	ownedMutationGroup := v1.Group("/courses/:id")
+	ownedMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapContentManagement),
+		ownershipMw,
+	)
+	{
+		ownedMutationGroup.PUT("/candidate", h.createCandidate)
+		ownedMutationGroup.PATCH("/revisions/:revisionId", h.updateCourseRevision)
+		ownedMutationGroup.POST("/revisions/:revisionId/sections", h.addSection)
+		ownedMutationGroup.PATCH("/revisions/:revisionId/sections/:sectionId", h.updateSection)
+		ownedMutationGroup.DELETE("/revisions/:revisionId/sections/:sectionId", h.deleteSection)
+		ownedMutationGroup.POST("/revisions/:revisionId/sections/:sectionId/lessons", h.addLesson)
+		ownedMutationGroup.PATCH("/revisions/:revisionId/lessons/:lessonId", h.updateLesson)
+		ownedMutationGroup.DELETE("/revisions/:revisionId/lessons/:lessonId", h.deleteLesson)
+		ownedMutationGroup.PUT("/revisions/:revisionId/lessons/:lessonId/video", h.setLessonVideo)
+		ownedMutationGroup.PUT("/revisions/:revisionId/lessons/:lessonId/files", h.addLessonFile)
+		ownedMutationGroup.DELETE("/revisions/:revisionId/lessons/:lessonId/files", h.deleteLessonFile)
+		ownedMutationGroup.PUT("/revisions/:revisionId/preview", h.setPreviewAsset)
+		ownedMutationGroup.DELETE("/revisions/:revisionId/preview", h.clearPreviewAsset)
+		ownedMutationGroup.POST("/revisions/:revisionId/submit", h.submitCourse)
+	}
+
+	// Admin review GET routes under /admin/review
+	adminReviewGetGroup := v1.Group("/admin/review")
+	adminReviewGetGroup.Use(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapCatalogPublish),
 	)
 	{
-		adminReviewGroup.GET("/queue", reviewH.listQueue)
-		adminReviewGroup.GET("/courses/:id", reviewH.getCourseGraph)
-		adminReviewGroup.POST("/courses/:id/approve", reviewH.approveCourse)
-		adminReviewGroup.POST("/courses/:id/request-changes", reviewH.requestChanges)
-		adminReviewGroup.POST("/courses/:id/preview/:lessonId", reviewH.previewLesson)
+		adminReviewGetGroup.GET("/queue", reviewH.listQueue)
+		adminReviewGetGroup.GET("/courses/:id/revisions/:revisionId", reviewH.getCourseRevisionGraph)
+	}
+
+	// Admin review mutation routes under /admin/review
+	adminReviewMutationGroup := v1.Group("/admin/review")
+	adminReviewMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+	)
+	{
+		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/approve", reviewH.approveCourse)
+		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/request-changes", reviewH.requestChanges)
+		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/preview/:lessonId", reviewH.previewLesson)
 	}
 
 	return nil

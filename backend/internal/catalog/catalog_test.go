@@ -4,12 +4,21 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 func TestConstructorsRefuseNilDependencies(t *testing.T) {
-	if _, err := NewRepository(nil); err == nil {
-		t.Error("NewRepository(nil) accepted nil pool")
+	key := make([]byte, 32)
+	writer, _ := outbox.NewWriter("key-v1", key)
+
+	if _, err := NewRepository(nil, writer); err == nil {
+		t.Error("NewRepository(nil, writer) accepted nil pool")
+	}
+
+	if _, err := NewRepository(&pgxpool.Pool{}, nil); err == nil {
+		t.Error("NewRepository(pool, nil) accepted nil writer")
 	}
 
 	if _, err := NewNotificationIntentWriter(nil); err == nil {

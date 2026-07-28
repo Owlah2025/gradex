@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -154,11 +156,20 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	if err != nil {
 		t.Fatalf("constructing outbox writer: %v", err)
 	}
+	pool, err := pgxpool.New(context.Background(), "postgres://gradex:gradex@127.0.0.1:1/gradex?sslmode=disable")
+	if err != nil {
+		t.Fatalf("constructing lazy catalog pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	catalogRepository, err := catalog.NewRepository(pool, outboxWriter)
+	if err != nil {
+		t.Fatalf("constructing catalog repository: %v", err)
+	}
 
 	catalogFoundation, err := NewCatalogFoundation(CatalogFoundationOptions{
+		Repository:     catalogRepository,
 		Ownership:      fakeOwnershipChecker{},
 		AssetValidator: fakeAssetValidator{},
-		OutboxWriter:   outboxWriter,
 	})
 	if err != nil {
 		t.Fatalf("constructing catalog foundation: %v", err)
@@ -289,29 +300,30 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/accounts/:id/suspension":   {Method: http.MethodPost, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
 	"DELETE /api/v1/accounts/:id/suspension": {Method: http.MethodDelete, Path: "/api/v1/accounts/:id/suspension", Class: ClassRecentAuthRequired},
 
-	"POST /api/v1/courses":                                 {Method: http.MethodPost, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
-	"GET /api/v1/courses":                                  {Method: http.MethodGet, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
-	"GET /api/v1/taxonomy/terms":                           {Method: http.MethodGet, Path: "/api/v1/taxonomy/terms", Class: ClassCapabilityProtected},
-	"GET /api/v1/courses/:id":                              {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
-	"PATCH /api/v1/courses/:id":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
-	"POST /api/v1/courses/:id/sections":                    {Method: http.MethodPost, Path: "/api/v1/courses/:id/sections", Class: ClassOwnershipProtected},
-	"PATCH /api/v1/courses/:id/sections/:sectionId":        {Method: http.MethodPatch, Path: "/api/v1/courses/:id/sections/:sectionId", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/sections/:sectionId":       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/sections/:sectionId", Class: ClassOwnershipProtected},
-	"POST /api/v1/courses/:id/sections/:sectionId/lessons": {Method: http.MethodPost, Path: "/api/v1/courses/:id/sections/:sectionId/lessons", Class: ClassOwnershipProtected},
-	"PATCH /api/v1/courses/:id/lessons/:lessonId":          {Method: http.MethodPatch, Path: "/api/v1/courses/:id/lessons/:lessonId", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/lessons/:lessonId":         {Method: http.MethodDelete, Path: "/api/v1/courses/:id/lessons/:lessonId", Class: ClassOwnershipProtected},
-	"PUT /api/v1/courses/:id/lessons/:lessonId/video":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/lessons/:lessonId/video", Class: ClassOwnershipProtected},
-	"PUT /api/v1/courses/:id/lessons/:lessonId/files":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/lessons/:lessonId/files", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/lessons/:lessonId/files":   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/lessons/:lessonId/files", Class: ClassOwnershipProtected},
-	"PUT /api/v1/courses/:id/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
-	"DELETE /api/v1/courses/:id/preview":                   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/preview", Class: ClassOwnershipProtected},
-	"POST /api/v1/courses/:id/submit":                      {Method: http.MethodPost, Path: "/api/v1/courses/:id/submit", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses":                                                       {Method: http.MethodPost, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
+	"GET /api/v1/courses":                                                        {Method: http.MethodGet, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
+	"GET /api/v1/taxonomy/terms":                                                 {Method: http.MethodGet, Path: "/api/v1/taxonomy/terms", Class: ClassCapabilityProtected},
+	"GET /api/v1/courses/:id":                                                    {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/candidate":                                          {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id/revisions/:revisionId":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/sections":                    {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/sections", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId":        {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId":       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId/lessons": {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId/lessons", Class: ClassOwnershipProtected},
+	"PATCH /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":          {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":         {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/preview":                   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/submit":                      {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/submit", Class: ClassOwnershipProtected},
 
-	"GET /api/v1/admin/review/queue":                          {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
-	"GET /api/v1/admin/review/courses/:id":                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id", Class: ClassCapabilityProtected},
-	"POST /api/v1/admin/review/courses/:id/approve":           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/approve", Class: ClassCapabilityProtected},
-	"POST /api/v1/admin/review/courses/:id/request-changes":   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/request-changes", Class: ClassCapabilityProtected},
-	"POST /api/v1/admin/review/courses/:id/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/preview/:lessonId", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/review/queue":                                                {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/review/courses/:id/revisions/:revisionId":                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/approve":           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/approve", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes":   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}
@@ -721,12 +733,12 @@ func TestSubmitRouteIsMountedAndProtected(t *testing.T) {
 	}
 
 	r, _ := authzRouter(t, fixedPrincipals{principal: instructor})
-	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/courses/course-99/submit", []byte(`{}`))
+	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/courses/course-99/revisions/rev-99/submit", []byte(`{}`))
 	rec := do(r, req)
 
 	// Since fakeOwnershipChecker returns false for isOwner, status must be 403 Forbidden
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("POST /api/v1/courses/course-99/submit returned status %d, want 403 (ownership enforcement)", rec.Code)
+		t.Fatalf("POST /api/v1/courses/course-99/revisions/rev-99/submit returned status %d, want 403 (ownership enforcement)", rec.Code)
 	}
 }
 

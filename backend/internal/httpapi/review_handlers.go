@@ -27,8 +27,17 @@ func (h *reviewHandlers) handleReviewError(c *gin.Context, err error) {
 		writeProblem(c, problem.NotFound())
 		return
 	}
-	if errors.Is(err, catalog.ErrAccountSuspended) {
-		writeProblem(c, problem.StateConflict())
+	var valErr *catalog.SubmissionValidationError
+	if errors.As(err, &valErr) {
+		var violations []problem.SubmissionViolation
+		for _, v := range valErr.Violations {
+			violations = append(violations, problem.SubmissionViolation{
+				Code:      v.Code,
+				Target:    v.Target,
+				Dimension: v.Dimension,
+			})
+		}
+		writeProblem(c, problem.SubmissionIncomplete(violations...))
 		return
 	}
 	if errors.Is(err, catalog.ErrReasonRequired) {
@@ -40,8 +49,8 @@ func (h *reviewHandlers) handleReviewError(c *gin.Context, err error) {
 		}))
 		return
 	}
-	if errors.Is(err, catalog.ErrTaxonomyTermRetired) || errors.Is(err, catalog.ErrAssetVersionInvalid) || errors.Is(err, catalog.ErrAssetVersionNotReady) {
-		writeProblem(c, problem.StateConflict())
+	if errors.Is(err, catalog.ErrAssetVersionInvalid) || errors.Is(err, catalog.ErrAssetVersionNotReady) || errors.Is(err, catalog.ErrAccountSuspended) {
+		writeProblem(c, problem.ValidationFailed())
 		return
 	}
 	var conflict *catalog.LifecycleConflictError
@@ -61,9 +70,10 @@ func (h *reviewHandlers) listQueue(c *gin.Context) {
 	c.JSON(http.StatusOK, queue)
 }
 
-func (h *reviewHandlers) getCourseGraph(c *gin.Context) {
+func (h *reviewHandlers) getCourseRevisionGraph(c *gin.Context) {
 	courseID := c.Param("id")
-	course, err := h.repo.GetReviewCourseGraph(c.Request.Context(), courseID)
+	revisionID := c.Param("revisionId")
+	course, err := h.repo.GetCourseRevisionGraph(c.Request.Context(), courseID, revisionID)
 	if err != nil {
 		h.handleReviewError(c, err)
 		return
@@ -74,9 +84,13 @@ func (h *reviewHandlers) getCourseGraph(c *gin.Context) {
 func (h *reviewHandlers) approveCourse(c *gin.Context) {
 	adminAccountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	actorDescriptor := adminAccountID
 
-	course, err := h.repo.ApproveCourse(c.Request.Context(), h.assetValidator, courseID, adminAccountID, actorDescriptor)
+	course, err := h.repo.ApproveCourse(c.Request.Context(), h.assetValidator, catalog.ApproveCourseRequest{
+		CourseID: courseID, RevisionID: revisionID,
+		AdminAccountID: adminAccountID, ActorDescriptor: actorDescriptor,
+	})
 	if err != nil {
 		h.handleReviewError(c, err)
 		return
@@ -87,6 +101,7 @@ func (h *reviewHandlers) approveCourse(c *gin.Context) {
 func (h *reviewHandlers) requestChanges(c *gin.Context) {
 	adminAccountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	actorDescriptor := adminAccountID
 
 	var body requestChangesBody
@@ -104,7 +119,10 @@ func (h *reviewHandlers) requestChanges(c *gin.Context) {
 		return
 	}
 
-	course, err := h.repo.RequestChanges(c.Request.Context(), courseID, adminAccountID, body.Reason, actorDescriptor)
+	course, err := h.repo.RequestChanges(c.Request.Context(), catalog.RequestChangesRequest{
+		CourseID: courseID, RevisionID: revisionID, AdminAccountID: adminAccountID,
+		Reason: body.Reason, ActorDescriptor: actorDescriptor,
+	})
 	if err != nil {
 		h.handleReviewError(c, err)
 		return
@@ -115,16 +133,21 @@ func (h *reviewHandlers) requestChanges(c *gin.Context) {
 func (h *reviewHandlers) previewLesson(c *gin.Context) {
 	adminAccountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
 	lessonID := c.Param("lessonId")
 	actorDescriptor := adminAccountID
 
-	videoAssetVersionID, err := h.repo.PreviewAdminLesson(c.Request.Context(), courseID, lessonID, adminAccountID, actorDescriptor)
+	videoAssetVersionID, err := h.repo.PreviewAdminLesson(c.Request.Context(), catalog.AdminPreviewRequest{
+		CourseID: courseID, RevisionID: revisionID, LessonID: lessonID,
+		AdminAccountID: adminAccountID, ActorDescriptor: actorDescriptor,
+	})
 	if err != nil {
 		h.handleReviewError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"course_id":              courseID,
+		"revision_id":            revisionID,
 		"lesson_id":              lessonID,
 		"video_asset_version_id": videoAssetVersionID,
 		"playback_url":           "/api/v1/videos/" + videoAssetVersionID + "/manifest/index.m3u8",

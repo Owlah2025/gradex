@@ -28,7 +28,8 @@ const (
 	PasswordRecoverySchemaVersion     = 7
 	StaffLifecycleSchemaVersion       = 8
 	CourseAuthoringSchemaVersion      = 9
-	MaxSchemaVersion                  = CourseAuthoringSchemaVersion
+	RevisionIntegritySchemaVersion    = 10
+	MaxSchemaVersion                  = RevisionIntegritySchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

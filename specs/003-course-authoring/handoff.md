@@ -1,10 +1,11 @@
-# D5 Implementation Handoff — S2 Revision Integrity
+# D5 Independent Review Handoff — S2 Revision Integrity
 
-**To**: Codex (builder through `speckit.implement`)
+**To**: Claude (independent read-only reviewer)
 
-**From**: Codex (SpecKit planner)
+**From**: Codex (SpecKit planner and builder)
 
-**Independent reviewer**: Claude — review only, no implementation or repair
+**Review rule**: one frozen exact range from a disposable detached worktree; no implementation,
+repair, or approval of Claude-authored code
 
 **Authority**:
 [D-043](../../docs/DECISIONS.md#d-043--codex-implements-s2-d5-and-claude-independently-reviews)
@@ -13,7 +14,17 @@
 
 **Scope**: T032–T038 only; stop before T039
 
-## Run protocol
+## Builder result
+
+T032–T038 are implemented and locally green. The exact range is frozen only after the implementation
+commit; the reviewer brief must substitute the immutable start and end SHAs and must reject a moving
+branch name.
+
+The builder ran the full backend build/vet/unit-race/integration-race suite, including real
+PostgreSQL; the frontend typecheck/lint/test/clean-build suite; all six restored mutations; and the
+production composition-root route sweep. Hosted CI remains a closure gate.
+
+## Review protocol
 
 Use the existing feature selected by `.specify/feature.json`:
 `specs/003-course-authoring/`. Do not create another Phase 5 directory, rerun
@@ -29,14 +40,15 @@ Read these completely, in order:
 5. [tasks.md](tasks.md), then execute only T032–T038 in dependency order
 6. [quickstart.md](quickstart.md), which is the required evidence contract
 
-Before editing, run:
+Before reviewing, run:
 
 ```bash
 .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
 ```
 
-Do not touch the user-owned `.caveman.json`. Keep implementation commits bounded to T032–T038 and
-leave the tree buildable at every checkpoint.
+Do not touch the user-owned `.caveman.json`. The detached review worktree must be clean before and
+after review. Report findings only; do not edit, implement, repair, commit, or approve Claude-authored
+code.
 
 ## Non-negotiable implementation boundary
 

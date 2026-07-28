@@ -46,20 +46,17 @@ type Repository struct {
 }
 
 // NewRepository constructs a new Repository.
-// Standing clause: required dependency validated at construction.
-func NewRepository(pool *pgxpool.Pool, writers ...*outbox.Writer) (*Repository, error) {
+// Standing clause: both pool and outbox writer are required at construction.
+// A component refuses to build without a security-relevant dependency;
+// no mutation-after-construction path may restore it.
+func NewRepository(pool *pgxpool.Pool, writer *outbox.Writer) (*Repository, error) {
 	if pool == nil {
 		return nil, ErrRepositoryNil
 	}
-	repo := &Repository{pool: pool}
-	if len(writers) > 0 && writers[0] != nil {
-		repo.outboxWriter = writers[0]
+	if writer == nil {
+		return nil, errors.New("outbox writer is required")
 	}
-	return repo, nil
-}
-
-func (r *Repository) SetOutboxWriter(writer *outbox.Writer) {
-	r.outboxWriter = writer
+	return &Repository{pool: pool, outboxWriter: writer}, nil
 }
 
 func (r *Repository) Pool() *pgxpool.Pool {
