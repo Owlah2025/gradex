@@ -2,14 +2,19 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Seats: ASSIGNED 2026-07-30 under
-[D-053](../../docs/DECISIONS.md#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it).**
+**Implementation seats: PAUSED. The active seat is the planning correction under
+[D-054](../../docs/DECISIONS.md#d-054--claude-corrects-the-s3-catalogue-search-ownership-defect-and-agy-reviews-the-correction).**
 
 | Seat | Holder | Authority |
 |---|---|---|
-| Implementation builder | **Codex** | May create and modify the production files the approved tasks require. **May not** approve its own work |
+| Planning-correction builder | **Claude** (D-054) | May edit these S3 planning artefacts only. **No** production implementation authority — no source, migration, schema constant, or test |
 | Independent reviewer | **`agy`** (`gemini-3.1-pro-high`) | Reviews frozen exact ranges through `scripts/agy-review.sh`. **May not** edit, stage, commit, push, or implement |
-| Planner / coordinator | **Claude** | Prepares bounded batch handoffs, inspects evidence, validates ranges. **May not** give the independent implementation verdict — it authored this plan |
+| Implementation builder | **unassigned** | D-053's authorization is paused; see the note below. A replacement seat decision must name a builder against the newly approved base |
+
+Under [D-053](../../docs/DECISIONS.md#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it)
+Codex held the implementation-builder seat and Claude was planner and coordinator only. That assignment
+is paused rather than rewritten, and Claude still **may not** give the independent verdict on S3 —
+implementation or planning — because Claude authored these artefacts.
 
 **Implementation base: `343aacb`** — the approved planning head, reviewed to `APPROVE` with zero
 findings. **Implementation has not started; zero tasks are complete.**

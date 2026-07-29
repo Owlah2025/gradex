@@ -1422,3 +1422,100 @@ before the schema-version correction landed; assigning S4 authority in the same 
 
 **Source:** Product-owner instruction on 2026-07-30, carrying the explicit Codex availability
 reverification.
+
+---
+
+## D-054 — Claude corrects the S3 catalogue-search ownership defect and agy reviews the correction
+
+**Date:** 2026-07-30
+**Status:** Active. Scoped to the **S3 search-design planning correction only**. Expires at the
+reviewed head.
+
+### What went wrong, and what went right
+
+Codex opened Batch 1 under
+[D-053](#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it) and **stopped
+before editing a single file**, reporting that the approved design could not be built. It was correct.
+T026 required a generated `search_text` column that was simultaneously same-row and populated for
+Published Courses only, and the artefacts left the owning table as an `ALTER TABLE <course table>`
+placeholder. Against the committed S2 schema that placeholder has no valid filling:
+
+- `courses` owns publication — `lifecycle`, `live_revision_id`, `access_suspended_at`, `retired_at` —
+  and holds **no** authored text; `0009_course_authoring` dropped its stub `title`.
+- `course_revisions` holds the authored text — `title_ar`, `title_en`, `description_ar`,
+  `description_en` — and owns **no** Course-level publication state.
+- PostgreSQL generated columns cannot reference another table, so neither table satisfies both halves.
+
+**The builder stopping is the outcome this protocol is built to produce.** A builder that had picked a
+table to satisfy the letter of the task would have shipped either delisted and archived revision text
+sitting in a searchable column, or a column generated from fields that do not exist. Batch 1 produced
+**no implementation range** — no production file, migration, test, task closure, or commit — and that is
+recorded as a success, not a stall.
+
+### Seats
+
+**Base: `77656aec0c512ae590092e62bcd42b74c33a3362`** — the head at which Batch 1 was dispatched and
+stopped.
+
+- **Claude — builder of this planning correction only.** Claude may edit the S3 planning artefacts under
+  [`specs/004-public-catalogue/`](../specs/004-public-catalogue/tasks.md) and this decision record.
+  Claude has **no production implementation authority**: no backend or frontend source, no migration, no
+  schema-version constant, no test.
+- **`agy` — independent read-only reviewer.** `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`)
+  reviews the frozen exact range through `scripts/agy-review.sh <base>..<head>` under
+  [D-032](#d-032--claude-builds-agy-reviews)'s containment harness. `agy` **may not** edit, stage,
+  commit, push, or implement. A `TAINTED` or `UNAVAILABLE` run is never recorded as an approval.
+
+Claude authored the correction, so Claude **may not** provide its verdict. Never self-approve.
+
+### The correction
+
+> **`course_revisions` owns the generated catalogue-search text. `courses` owns whether a revision may
+> be exposed publicly.**
+
+Search text is generated for **every** revision from that row's own authored columns. Publication is an
+exposure rule applied at query time, enforced by two conditions and nothing else: the live-revision join
+`courses.live_revision_id = course_revisions.id`, and the canonical `PublishedOnly` predicate.
+
+**A populated `search_text` is not a claim that a row is publicly visible.** Draft, `SUPERSEDED`, and
+`REJECTED` revisions, and revisions of `DELISTED`, `ARCHIVED`, retired, or suspended Courses, all
+legitimately hold indexed text; none may ever appear in a public result.
+
+**Reason the correction loses nothing.** The withdrawn population boundary was documented in the
+approved plan as *"deliberately redundant with `PublishedOnly`, which remains the control."* It was a
+second layer over a control that was already load-bearing — and a layer that cannot be built is not a
+layer. Two new tasks replace it with redundancy that can be executed: **T032a** asserts the
+live-revision exposure boundary, and **T032b** runs the two mutations that must fail — removing the
+live-revision join, and removing `PublishedOnly`. Task count moves from 46 to 48; **T026 and T027 were
+rewritten in place and keep their identifiers.**
+
+**Alternatives rejected:** a generated column on `courses` (no same-row text to generate from); a
+generated column referencing `course_revisions` (PostgreSQL forbids it); a trigger copying revision text
+onto `courses` (the denormalization subsystem R-005 already rejected, now also touching S2's authoring
+transaction while S2 is closed); an application-maintained search column (the second source of truth
+R-002 rejected); a new materialized search-document table (S3 growing into the search subsystem its
+scope boundary forbids); keeping "Published only" and choosing a table anyway (shipping an unmeetable
+requirement as though it were met).
+
+### Boundaries
+
+Migration numbering is **unchanged**: `0011_catalog_search` for S3, schema version **11** after it, then
+`0012_media_and_entitlement` for S4 and `0013_enrollments` / `0014_protected_learning` for S5. This
+decision grants **no** S4, S5, or S6 authority, and no authority to implement S3.
+
+### D-053 is not edited retroactively
+
+D-053 recorded a true state of affairs — Codex availability was genuinely reverified, and the planning
+head it named had genuinely been reviewed to `APPROVE`. What has changed is that its frozen planning
+premise is now known to be defective. Therefore:
+
+- **D-053's implementation authorization is paused and spent.** `343aacb` is no longer a valid
+  implementation base and implementation **must not** resume under it.
+- D-053's text stands as written. Superseding a decision by editing it destroys the record of what was
+  believed when it was made.
+- After this correction is approved, a **new** implementation-seat decision must reassign Codex and
+  `agy` against the new exact base. That decision is deliberately **not** created in this pass — it
+  would be authorizing implementation against a range no reviewer has seen.
+
+**Source:** Codex's Batch 1 blocker report and the product owner's instruction to correct the design, on
+2026-07-30.
