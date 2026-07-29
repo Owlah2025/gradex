@@ -280,7 +280,7 @@ Every PRD MVP bullet mapped to its one owning slice. This is the completeness ch
 | Adaptive HLS playback, resume position, per-Lesson completion | S5 (pipeline and delivery: S4) |
 | Entitlement-protected Lesson resources and downloadable lab materials | S4 |
 | Optional separate public Course preview asset | S4 |
-| External Discord/Telegram Course community link | S5 (authoring of the link: S2) |
+| ~~External Discord/Telegram Course community link~~ | **Deferred to S18 on 2026-07-29 by [D-046](../DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch)** — no slice ever authored it |
 | Student content reporting and Admin resolution | S5 (Admin resolution: S8) |
 
 ### Instructor and Admin operations

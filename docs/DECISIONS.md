@@ -1009,3 +1009,42 @@ account-creation semantics that must not touch course access).
 
 **Source:** Product-owner scope decision on 2026-07-28, approved with all twelve listed questions
 resolved.
+
+---
+
+## D-046 — The external Course community link is deferred to post-launch
+
+**Date:** 2026-07-29
+**Status:** Approved
+**Decision:** The **external Discord/Telegram Course community link leaves the MVP scope** and is
+deferred to **S18, post-launch**. No slice authors it, stores it, serves it, or renders it before
+launch.
+
+**Affected artefacts:** [PRD §MVP](PRD.md) drops the "External Discord/Telegram Course community
+link" bullet; [SLICES.md §6](launch/SLICES.md) drops the row assigning display to S5 and authoring to
+S2; [AUGUST_15_EXECUTION_PLAN.md §2.3](launch/AUGUST_15_EXECUTION_PLAN.md#23-deferred-to-post-launch--recorded-not-removed)
+gains a deferral row; [DOMAIN_MODEL.md](DOMAIN_MODEL.md) retains the field on the Course revision as a
+post-launch attribute. [S5's specification](../specs/007-protected-learning/spec.md#c2--the-community-link-is-not-authored-anywhere)
+retains User Story 5 and FR-036 – FR-038 marked `DEFERRED — S18` rather than deleting them.
+
+**Reason:** The gap was found while specifying S5 and was verified against the repository, not
+inferred: `specs/003-course-authoring/` contains no `community`, `discord`, or `telegram` match, and
+no migration through `0010` defines such a field. The PRD assigns the capability to MVP and SLICES.md
+assigns *authoring* of it to S2 — but S2 never specified it, and S2 is mid-implementation with
+T043–T064 frozen under [D-044](#d-044--antigravity-completes-s2-and-claude-reviews-the-whole-feature-once).
+
+Closing the gap correctly would mean adding a field to a frozen queue inside an in-flight slice. The
+link is a convenience that points at a third-party service Gradex neither hosts nor moderates; it is
+not on the access-to-playback critical path, and no Student is blocked from learning without it.
+Against 17 days of runway and a RED launch confidence, that is not worth reopening S2 for.
+
+**What this decision does not do:** it does not remove the community *strategy*. The external Discord
+community remains the approved answer to post-purchase follow-up ([D-005]); it is reached by a link
+shared out of band until S18 puts it in the product.
+
+**Alternatives rejected:** Adding the field to S2's frozen queue (a scope change to an in-flight
+slice, for a non-critical convenience); giving S5 a Course-level community-link field (splits Course
+authoring across two slices and gives the learning slice a write path into Course content, which the
+S2/S5 boundary exists to prevent).
+
+**Source:** Product-owner scope decision on 2026-07-29, raised as conflict C2 in the S5 specification.

@@ -91,6 +91,7 @@ Every item below has a reason and a destination. None is deleted from the PRD.
 | Reported-content moderation queue | Content volume at launch is a hand-curated catalogue; reports route to the support address and are actioned manually | S18, manual until then |
 | Catalogue vocabulary administration UI | Launch taxonomy is seeded through an audited migration and changes rarely | S18 |
 | Arabic-normalized ranked search and filtering | Launch catalogue is small enough for listing plus simple text match | S18 |
+| **External Discord/Telegram Course community link** | Deferred by [D-046](../DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch): no slice ever authored it, and closing the gap would reopen S2's frozen queue for a convenience that is not on the access-to-playback path | S18. The Discord community itself is unaffected; only the in-product link moves |
 | Revenue reporting and payout screens | Manual path in §2.2 covers the operation | S19 |
 | Automated Instructor settlement | `FF-004`, already fast-follow | Fast-follow register |
 | Certificates, reviews and ratings, wishlist, gamification, recommendations | Already outside MVP | Future register |

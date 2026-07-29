@@ -91,7 +91,9 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Adaptive HLS video playback, resume position, and per-Lesson completion tracking.
 - Entitlement-protected Lesson resources and downloadable lab materials.
 - Optional separate public Course preview asset.
-- External Discord/Telegram Course community link.
+- ~~External Discord/Telegram Course community link.~~ **Deferred to post-launch (S18) on 2026-07-29
+  by [D-046](DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).** The
+  external Discord community itself is unaffected; only the in-product link moves out of MVP.
 - Student content reporting and Admin resolution.
 
 ### Instructor and Admin operations
