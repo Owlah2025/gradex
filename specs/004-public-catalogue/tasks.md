@@ -2,14 +2,25 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Seats: UNASSIGNED as of 2026-07-30.** S3 implementation **may not begin** until a new dated decision
-assigns a builder seat and a separate independent read-only reviewer seat. A builder never closes its
-own slice, and no seat renews implicitly.
+**Seats: ASSIGNED 2026-07-30 under
+[D-053](../../docs/DECISIONS.md#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it).**
 
-**Codex may be assigned only after its availability is explicitly reverified.** Codex exhausted its
-quota, and neither silence nor the absence of a quota error counts as reverification — see
-[D-033](../../docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review), which stays
-paused for exactly that reason.
+| Seat | Holder | Authority |
+|---|---|---|
+| Implementation builder | **Codex** | May create and modify the production files the approved tasks require. **May not** approve its own work |
+| Independent reviewer | **`agy`** (`gemini-3.1-pro-high`) | Reviews frozen exact ranges through `scripts/agy-review.sh`. **May not** edit, stage, commit, push, or implement |
+| Planner / coordinator | **Claude** | Prepares bounded batch handoffs, inspects evidence, validates ranges. **May not** give the independent implementation verdict — it authored this plan |
+
+**Implementation base: `343aacb`** — the approved planning head, reviewed to `APPROVE` with zero
+findings. **Implementation has not started; zero tasks are complete.**
+
+**Codex availability was explicitly reverified by the product owner on 2026-07-30**, satisfying
+[D-033](../../docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)'s precondition
+positively rather than by inference from silence or from the absence of a quota error.
+
+**Work is handed over in bounded batches, not as all 46 tasks at once.** Each batch names its exact
+task IDs and evidence, and freezes a range for independent review before the next begins. D-053 expires
+when S3 closes on a recorded reviewer verdict.
 
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
@@ -17,7 +28,6 @@ That assignment is **not in force** and confers nothing. The Tier 1 review depth
 unchanged.
 
 **S2 has closed** on an independent verdict at `785d71c`, so the Phase 1 dependency is satisfied.
-S3 remains blocked on seat assignment, not on S2.
 
 **[OD-001](spec.md#resolved-decisions) resolved `ADJUST` on 2026-07-28**: Arabic query normalization
 is **in** S3; relevance ranking and multi-dimension filtering stay deferred to S18. FR-023b forbids
