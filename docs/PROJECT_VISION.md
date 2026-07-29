@@ -74,13 +74,13 @@ Gradex provides:
 - An external Course community and Course-scoped external-link office hours.
 - Admin-reviewed Course quality and Admin-controlled pricing.
 - A responsive Arabic/English website across Student device classes.
-- Clear purchase, refund, entitlement, and Instructor payout records.
+- Clear course-access, entitlement, and audit records for every granted Course.
 
 ## Key Benefits
 
 ### For Students
 
-- Fair, visible pricing with the option to purchase a complete Course or one Section.
+- Fair, visible pricing for a complete Course, paid externally and confirmed by an Admin before access is granted.
 - Practical materials tied directly to Course Lessons.
 - Follow-up through community and Instructor office hours.
 - Continuous learning across phones, tablets/iPads, laptops, and desktops.
@@ -89,13 +89,13 @@ Gradex provides:
 
 - Course-building, video/resource/lab delivery, and Student analytics.
 - Reach beyond an existing classroom or personal audience.
-- Admin-managed commercial operations and monthly payout statements.
+- Admin-managed commercial operations, with compensation handled out of band at launch.
 - A review process that protects live content from accidental edits.
 
 ### For Gradex
 
 - A focused Kuwait-first launch rather than an unfocused general marketplace.
-- Revenue through Course and Section purchases.
+- Revenue through complete-Course access, collected externally at launch.
 - A foundation that can later support bundles, BNPL, captions, and broader GCC expansion.
 
 ---
@@ -145,10 +145,14 @@ platform system design.
 
 ## MVP Revenue
 
-- Single Course purchase.
-- Single Section purchase (the UI may label Section as “Chapter”).
-- Coupons support launch promotions and controlled zero-value grants without changing catalog
-  prices.
+Under [D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+the MVP takes no payment inside the platform.
+
+- Access to a single complete Course, paid as External Payment and granted by Admin Approval of a
+  Course Access Invitation.
+- Course prices are displayed so a Student knows what to pay; Gradex charges nothing.
+- Section purchase, coupons, and zero-value grant codes are deferred with in-platform checkout.
+  Free and promotional access uses the same audited invitation path as any other access.
 
 Gradex retains a platform share and pays Instructors one configurable platform-wide percentage of
 net collected revenue. The percentage has no assumed value and must be chosen before production.
@@ -171,8 +175,8 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 
 ### Student
 
-- Register/verify, browse, buy one Course/Section, and view order/refund history.
-- Watch entitled video and retain progress across sessions and later repurchase after expiry.
+- Register/verify, browse, accept a Course Access Invitation, and view access status and history.
+- Watch entitled video and retain progress across sessions and after access expires.
 - Download protected resources/labs and evaluate an optional separate public preview.
 - Join external community and entitled Course office hours.
 - Receive transactional notifications and report entitled content.
@@ -190,7 +194,8 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 - Provision staff accounts and manage/suspend users.
 - Control Course/Section prices, publishing, catalog delisting, retirement, emergency access
   suspension, and moderation.
-- Process coupons, payments/refunds, revenue records, and monthly Instructor payouts.
+- Confirm External Payment out of band, then create, approve, reject, or cancel Course Access
+  Invitations, and adjust Entitlement expiry through the audited path.
 - Resolve reported content and cancel office hours for moderation.
 
 ## Fast-Follow
@@ -211,7 +216,7 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 - Sandboxed code execution.
 - Certificates.
 - Reviews, ratings, recommendation engines, or invented testimonials.
-- Instructor control over prices, coupons, refunds, or withdrawals.
+- Instructor control over prices, access granting, or withdrawals.
 - Notification preferences, marketing, SMS/WhatsApp, or push.
 
 ---
@@ -221,9 +226,9 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 ## First Six Months
 
 - 8–12 live Courses.
-- 100–500 paid Students.
+- 100–500 Students with granted access.
 - Test the 30–60 KWD full-Course pricing hypothesis with real Kuwait Students.
-- Establish repeatable Instructor onboarding, Course review, and monthly payout operations.
+- Establish repeatable Instructor onboarding, Course review, and course-access granting operations.
 
 ## First Year
 
@@ -258,7 +263,7 @@ net collected revenue. The percentage has no assumed value and must be chosen be
 | Course completion signal | 30%+ | 40%+ | 50%+ |
 | Student satisfaction survey | 4.0+/5 | 4.2+/5 | 4.5+/5 |
 | Office-hours participation | Establish baseline | Improve from baseline | Segment by market |
-| Refund rate | Establish baseline | Stable/declining | Segment by market |
+| Access-grant turnaround | Establish baseline | Improve from baseline | Segment by market |
 | Support response time | <48h | <24h | <12h |
 
 The MVP does not include public ratings/reviews, so “average Course rating” is not an MVP metric.

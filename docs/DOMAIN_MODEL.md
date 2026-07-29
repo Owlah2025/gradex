@@ -1,7 +1,7 @@
 # Gradex Domain Model
 
 > Status: Approved conceptual baseline for system design
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 This document defines product-level entities, ownership, relationships, invariants, and lifecycle
 states. It is not a database schema or API design. System design may choose storage/mechanisms but
@@ -9,12 +9,26 @@ must preserve these meanings and the rules in [BUSINESS_RULES.md](BUSINESS_RULES
 
 ## 1. Canonical Language
 
+> **MVP scope note (2026-07-28, [D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).**
+> Gradex launches with no in-platform payments. `Order`, `Payment Attempt`, `Refund`, `Coupon`,
+> `Coupon Redemption`, `Financial Ledger Entry`, and `Payout Statement` are **deferred out of MVP**
+> and their definitions are retained below, clearly marked, as the design of record for whenever
+> those features are taken up. Access is granted by the `Course Access Invitation` workflow.
+
 - The content hierarchy is `Course → Section → Lesson`.
 - `Section` is the domain term. “Chapter” may be a localized Student-facing label for the same
-  object; it is never a separate entity, table, purchase type, or API target.
+  object; it is never a separate entity, table, acquirable scope, or API target.
+- `Course Access Invitation` is the Admin-created **workflow** record through which a Student
+  requests access to one specific Course. It is never the authoritative access record.
+- `External Payment` is payment performed and verified **outside** Gradex. Gradex stores no payment
+  transaction, amount, currency, or status.
+- `Admin Approval` is the final Admin action on an accepted Invitation, and it is the authoritative
+  trigger that activates access.
 - `Enrollment` is the durable Student-to-Course learning relationship used for roster/progress.
-- `Entitlement` is the time-bounded authorization to access a Course or one Section.
-- A paid or zero-value Coupon Order may create or reuse an Enrollment and creates one Entitlement.
+- `Entitlement` is the time-bounded **authorization** to access a Course, and it is the authoritative
+  access record every protected operation checks. Enrollment and Entitlement are distinct and are not
+  merged.
+- Admin Approval creates or reuses an Enrollment and creates exactly one Entitlement, idempotently.
 - Expiry/revocation ends access but does not delete Enrollment or progress history.
 
 ## 2. Identity and Access
@@ -37,14 +51,17 @@ Ownership and rules:
 - An email already attached to an Account cannot be invited into a different role; MVP Accounts
   have exactly one role assigned at creation and immutable during MVP, with no role conversion,
   multi-role membership, or identity merge.
-- Only Student Accounts can place Orders, receive ordinary Entitlements, create Enrollments, and
-  record Progress. Instructors author assigned content without Student consumption capability.
-  Admin content access uses the distinct audited preview path and creates no Entitlement or Progress.
+- Only Student Accounts can receive Course Access Invitations, receive Entitlements, create
+  Enrollments, and record Progress. Instructors author assigned content without Student consumption
+  capability. Admin content access uses the distinct audited preview path and creates no Entitlement
+  or Progress.
 - A person needing separate role capabilities uses a separate Account with a different normalized
   email during MVP.
 - One bootstrap Admin is created through secure deployment.
-- Suspension is an Account restriction; it does not delete purchases, Course ownership, or audit
-  history.
+- Suspension is an Account restriction. It immediately blocks every protected action, including for
+  an Account holding an active Entitlement, but it does not mutate that Entitlement and does not
+  delete course access, Course ownership, or audit history. Reactivation restores otherwise-valid
+  access. "Disabling" an account is this same `ACTIVE ↔ SUSPENDED` transition, not a separate state.
 
 Lifecycle:
 
@@ -66,6 +83,32 @@ subject to independent Course/Entitlement states.
 Single-purpose, expiring, single-use credential associated with an Account/email. Only the secure
 token representation is stored. Resend/attempt behavior is rate-limited and audited as appropriate.
 
+### Course Access Invitation
+
+The Admin-created workflow record granting one Student the ability to request access to one Course.
+It is **not** an access record and **not** an account invitation, and it must not be implemented in
+terms of the staff Invitation above: it creates no Account and assigns no role.
+
+It binds one normalized Student email, one Course, the creating Admin, its current state, and
+separate creation, acceptance, decision, and cancellation timestamps. It may carry an Admin-only
+free-text note and an opaque External Payment reference; it never carries an amount, currency, or
+payment status.
+
+```text
+PENDING_STUDENT_ACCEPTANCE ──accept──→ PENDING_ADMIN_APPROVAL ──approve──→ APPROVED
+            │                                    │
+            │                                    └──reject──→ REJECTED
+            └──cancel──→ CANCELLED               (Admin may cancel before a decision)
+```
+
+`APPROVED`, `REJECTED`, and `CANCELLED` are terminal. There is **no expiry state**: the acceptance
+link is a separate expiring action secret that is reissued, while the Invitation itself does not
+expire. Only an Account whose normalized email matches may accept. At most one non-terminal
+Invitation exists per `(normalized email, Course)`. An Admin may reject an already-accepted
+Invitation, and a new Invitation may afterwards be created for the same pair.
+
+Acceptance grants nothing. Only Admin Approval creates access, and it does so idempotently.
+
 ### Session
 
 An authenticated browser Session is one stable, independently revocable family associated with an
@@ -82,8 +125,13 @@ response.
 
 Top-level catalog/learning product. Exactly one Instructor owns a Course; an Admin may reassign
 ownership. A Course has authored details, one current Admin-controlled price, an Admin-configured
-`default_access_ends_at` for future purchases, its catalog classification, Sections, an optional
-public preview, community link, publication state, and history.
+`default_access_ends_at` applied at future approvals, its catalog classification, Sections, an optional
+public preview, publication state, and history.
+
+The **external community link is a post-launch attribute of the Course revision**, deferred to S18 on
+2026-07-29 by [D-046](DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).
+It is retained here as the design of record: no MVP slice authors, persists, serves, or renders it,
+and no MVP migration defines a column for it.
 
 Lifecycle:
 
@@ -96,17 +144,17 @@ PUBLISHED ──────────────────────→ 
 ```
 
 - `CHANGES_REQUESTED` requires an Admin reason and permits Instructor revision/resubmission.
-- `DELISTED` is reversible and removes catalog discovery/new checkout without denying qualifying
-  existing Student access.
-- `ARCHIVED` is terminal for catalog/new purchases. A Course with enrollment history is archived,
+- `DELISTED` is reversible and removes catalog discovery **and blocks new access grants**, without
+  denying qualifying existing Student access: an active Entitlement is untouched (BR-090).
+- `ARCHIVED` is terminal for catalog discovery and new access grants. A Course with enrollment history is archived,
   not hard-deleted; Students retain access while their existing Entitlement remains active.
 - Retirement is a separate explicit future-acquisition/inclusion block. Emergency Course access
   suspension is an orthogonal elevated state that immediately blocks existing Student access for a
   constrained legal, security, malware, or severe-moderation reason without mutating Entitlements.
   Suspension and restoration preserve immutable reason/actor/Audit/notification evidence.
-- Changing `default_access_ends_at` affects future Orders only. A Course may remain Published and
-  available to existing entitled Students without a future default, but checkout is disabled until
-  an Admin configures one.
+- Changing `default_access_ends_at` affects future approvals only. A Course may remain Published and
+  available to existing entitled Students without a future default, but a Course Access Invitation
+  for it **cannot be approved** until an Admin configures one.
 
 ### Taxonomy Term and Course Classification
 
@@ -141,8 +189,9 @@ Catalog pricing is not part of an Instructor revision.
 ### Section
 
 Ordered grouping within exactly one Course. A Section contains Lessons and may have an Admin-set
-catalog price, making it an MVP purchasable scope. It has no independent access-period override;
-Section checkout snapshots the containing Course's configured expiry.
+catalog price. **Section is not an acquirable access scope in MVP** — access is granted for a
+complete Course only — so Section prices are retained in the model and the Admin surface but are not
+displayed in the student-facing catalogue. A Section has no independent access-period override.
 
 ### Lesson
 
@@ -186,15 +235,20 @@ to a durable Enrollment and remains after Entitlement expiry. Writes require run
 the server validates/bounds positions and calculates completion from the trusted duration of the
 exact played Asset Version. Completion never regresses.
 
-## 4. Catalog Price and Commerce
+## 4. Catalog Price and Course Access
 
 ### Catalog Price / Price Change
 
 Current integer-fils price for a Course or Section, controlled only by Admin. Each change records
-old/new value, reason, Admin, and timestamp. Orders snapshot their own commercial values and never
-change when the catalog price changes.
+old/new value, reason, Admin, and timestamp.
 
-### Order
+In MVP the Course price is **displayed** so a Student knows what to pay through External Payment; it
+is not charged by Gradex and nothing in Gradex snapshots it. Section prices are retained but not
+displayed, because Section is not an acquirable scope.
+
+### Order — *deferred out of MVP*
+
+*No Order entity exists in MVP. Retained as the design of record for a future checkout.*
 
 Commercial intent for exactly one Student and one purchasable item (Course or Section). Its item
 snapshot preserves identity, catalog subtotal, coupon details, discount, total, currency,
@@ -219,7 +273,9 @@ not replace Refund records. `CANCELLED` and `EXPIRED` are separate outcomes, not
 `RECONCILIATION_REQUIRED` is a visible exception when money may have moved but automatic completion
 is unsafe; resolution preserves all evidence.
 
-### Payment Attempt
+### Payment Attempt — *deferred out of MVP*
+
+*No Payment Attempt entity exists in MVP.*
 
 One attempt to pay an Order, with a stable idempotency reference and gateway reference.
 
@@ -238,7 +294,11 @@ access, and it grants once. `SUCCEEDED` means verified capture, not authorizatio
 `UNKNOWN` blocks another Attempt. Provider occurrence time—not arrival time—controls deadline
 eligibility, and immutable event/transition history remains even when Attempt state changes.
 
-### Refund
+### Refund — *deferred out of MVP*
+
+*Gradex processes no refunds. Money returned to a Student is an External Payment matter handled
+outside the platform; ending that Student's access uses the audited Entitlement adjustment or
+revocation, never an unrecorded deletion.*
 
 One Admin-requested gateway refund amount/reason against a captured Order.
 
@@ -255,42 +315,53 @@ REQUESTED → PENDING ─→ SUCCEEDED
 
 ### Enrollment
 
-Durable Student-to-Course relationship used for roster, progress, and learning history. A Section
-purchase still enrolls the Student in the containing Course but does not grant other Sections. An
-Instructor roster is a least-privilege projection of Course-scoped display identity/enrollment/
-progress, not access to the Student's direct account/contact/payment PII.
+Durable Student-to-Course relationship used for roster, progress, and learning history, created or
+reused by Admin Approval. An Instructor roster is a least-privilege projection of Course-scoped
+display identity, enrollment, and progress — never the Student's direct account/contact PII, the
+Admin note, the External Payment reference, or the approval evidence.
 
 ### Entitlement
 
-Authorization scope tied to a Student, Course or Section and its required source Order. It preserves
-`acquired_at`, `retirement_eligibility_at` copied from Order acceptance,
-`original_access_ends_at`, current authoritative `access_ends_at`, and revocation details. Access is
-allowed only while `current_timestamp < access_ends_at`.
+**The authoritative access record.** Authorization tied to one Student and one Course, carrying a
+typed `grant_source` that records how access was granted. It preserves `acquired_at`,
+`retirement_eligibility_at` set from the Admin Approval instant, `original_access_ends_at`
+snapshotted from the Course's configured expiry at approval, the current authoritative
+`access_ends_at`, and revocation details. Access is allowed only while
+`current_timestamp < access_ends_at`.
 
 ```text
 ACTIVE → EXPIRED
    └──→ REVOKED
 ```
 
+**Grant sources.** MVP implements exactly one: `MANUAL_INVITATION`, produced by Admin Approval of an
+accepted Course Access Invitation, which the Entitlement references. `PAID_ORDER`, `PROMOTIONAL`, and
+`DIRECT_ADMIN_GRANT` are reserved names that are **not implemented**; no route, command, screen,
+fixture, or configuration flag in a production build may create an Entitlement by any other path.
+This discriminator is the extension point for a future payment gateway — no speculative
+payment-provider, checkout-session, or webhook-event entity is introduced.
+
+**Scope.** MVP grants whole-Course scope only, authorizing every Section and Lesson in that Course.
+The scope concept remains expressive enough for a narrower future scope, but Section-, Lesson-,
+bundle-, and partial-course access are not acquirable at launch. At most one `ACTIVE` Entitlement
+exists per `(Student, Course)`.
+
 Account suspension and explicit emergency Course access suspension can block access without mutating
 Entitlement state. Delisting, retirement, and archival alone do not deny qualifying existing access.
-A Course Entitlement authorizes every Section in its Course. A Section Entitlement authorizes only
-that Section; it creates no upgrade credit against a later Course purchase.
-
-After an allowed Section-to-Course purchase, both Entitlements remain independent and access is
-their union. Refunding/revoking the Course Entitlement leaves the earlier Section Entitlement
-untouched.
 
 An elevated Admin may extend or shorten `access_ends_at`. Each change creates an immutable
-Entitlement Adjustment recording old/new instants, reason, actor, timestamp, and an optional
-support/refund reference; `original_access_ends_at` never changes.
+Entitlement Adjustment recording old/new instants, reason, actor, timestamp, and an optional support
+reference; `original_access_ends_at` never changes.
 
 Retirement blocks future acquisition. Retired Course/Section/Lesson content remains accessible only
-when `retirement_eligibility_at < retired_at`, the Order remained within its payment deadline, and
-any paid capture occurred within that deadline. Webhook arrival/database insertion time is never the
-eligibility timestamp.
+when `retirement_eligibility_at < retired_at`. Invitation creation time, acceptance time, and
+database insertion time are never the eligibility timestamp.
 
-## 5. Coupons
+## 5. Coupons — *deferred out of MVP*
+
+*No Coupon entity exists in MVP; a coupon discounts a checkout and there is no checkout. Free or
+promotional access is granted through the same audited Course Access Invitation path as any other
+access. Retained as the design of record.*
 
 ### Coupon / Coupon Target
 
@@ -367,10 +438,16 @@ immutably.
 
 Immutable record of a privileged action: actor, role, action, target, before/after or relevant
 metadata, reason, timestamp, and correlation/reference identifiers. Audit Events cover account/role,
-pricing, publishing/preview, refunds, payouts, coupons, reports, office-hours moderation, taxonomy
-vocabulary changes, and Admin resets of an Account display name.
+account suspension and reinstatement, pricing, publishing/preview, Course Access Invitation
+creation/acceptance/approval/rejection/cancellation, Entitlement grant and expiry adjustment,
+reports, office-hours moderation, taxonomy vocabulary changes, and Admin resets of an Account display
+name.
 
-## 8. Instructor Earnings and Payouts
+## 8. Instructor Earnings and Payouts — *deferred out of MVP*
+
+*With no in-platform revenue record there is no earning to calculate, so no ledger, Statement, or
+transfer entity exists in MVP. Instructors are paid entirely out of band at launch. The Instructor
+agreement's revenue-share terms remain required under `LG-020`. Retained as the design of record.*
 
 ### Financial Ledger Entry
 
@@ -410,31 +487,42 @@ Taxonomy Term 1 ── classifies ── * Course
 
 Student Account 1 ── has ── * Enrollment (Course)
 Enrollment 1 ── has ── * Progress (Lesson)
-Student Account 1 ── has ── * Entitlement (Course or Section)
+Student Account 1 ── has ── * Entitlement (Course)
 
-Student 1 ── places ── * Order 1 ── targets ── 1 Course or Section
-Order 1 ── has ── * Payment Attempt, * Refund, 0..1 committed Coupon Redemption
+Admin 1 ── creates ── * Course Access Invitation ── targets ── 1 Student email + 1 Course
+Course Access Invitation 1 ── when APPROVED produces ── 1 Entitlement + 0..1 new Enrollment
+Entitlement 1 ── records ── 1 grant_source (MVP: MANUAL_INVITATION only)
 
-Instructor 1 ── receives ── * Payout Statement 1 ── contains ── * Earning/Adjustment
 Course 1 ── has ── * Office-Hours Session
 Student 1 ── submits ── * Content Report ── resolved by ── Admin
 ```
 
+Deferred out of MVP with in-platform payments: `Order`, `Payment Attempt`, `Refund`,
+`Coupon Redemption`, `Payout Statement`, and `Earning/Adjustment`.
+
 ## 10. Cross-Cutting Invariants
 
 - Role, ownership, status, and entitlement authorization is always server-side.
-- Monetary values are integer fils; KWD display uses three decimal places.
-- Gateway success/refund confirmation is authoritative; browser redirect is not.
-- Idempotency prevents duplicate charge-state application, grant, refund, coupon commit, or notice.
-- Catalog price changes never rewrite historical Order/refund/payout values.
+- Monetary values are integer fils; KWD display uses three decimal places. In MVP these are display
+  values only — Gradex charges nothing and records no payment.
+- **Admin Approval is the authoritative grant trigger.** Registration, email verification, External
+  Payment, and invitation acceptance each grant nothing on their own.
+- **The Entitlement is the authoritative access record.** No protected operation reads Course Access
+  Invitation state, and none may ever read payment-provider state.
+- Idempotency prevents a duplicate grant or a duplicate notice; repeating an approval returns the
+  existing Entitlement.
 - Account suspension, catalog delisting, retirement, emergency Course access suspension,
   Entitlement expiry/revocation, archival, and deletion are separate concepts.
-- Financial ledger entries, Statements, payout evidence, and privileged-action Audit records are
-  append-only and never rewritten or hard-deleted. Other records with access or moderation history
-  require an explicit approved retention workflow rather than silent deletion.
+- Privileged-action Audit records — including every Course Access Invitation transition and every
+  Entitlement grant and adjustment — are append-only and never rewritten or hard-deleted. Other
+  records with access or moderation history require an explicit approved retention workflow rather
+  than silent deletion. The same rule applies to financial ledger entries, Statements, and payout
+  evidence whenever those deferred entities are built.
 - Catalog discovery, filtering, and search expose only `PUBLISHED` Courses and never index Lesson
   titles or protected Resource/Lab content.
 - Exact storage, table, API, token, and queue designs belong to the system-design phase.
-- The commerce design must accommodate required receipt/invoice fields and immutable
-  dispute/chargeback events without assuming the unresolved tax or Entitlement policies in
-  [LAUNCH_GATES.md](LAUNCH_GATES.md) LG-016/LG-017.
+- MVP records no receipt, invoice, tax, or dispute data, because it handles no money. `LG-016`
+  remains open: where payment is captured does not decide whether records are required, and
+  off-platform collection may move that obligation rather than remove it. A future commerce design
+  must still accommodate receipt/invoice fields and immutable dispute/chargeback events without
+  assuming the unresolved policies in [LAUNCH_GATES.md](LAUNCH_GATES.md) LG-016/LG-017.

@@ -1,8 +1,8 @@
 # Product Requirements Document (PRD)
 
-> Version: 1.0
+> Version: 1.1
 > Status: Approved baseline for system design
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 This document owns Gradex product scope and acceptance criteria. Product decisions are recorded
 in [DECISIONS.md](DECISIONS.md), invariants in [BUSINESS_RULES.md](BUSINESS_RULES.md), canonical
@@ -30,20 +30,24 @@ Admin-governed way to publish courses and earn revenue from their expertise.
 
 ## Business Goals
 
-- Launch with 8–12 approved Courses and reach 100–500 paid Students in the first six months.
-- Build sustainable revenue through full-Course and single-Section purchases.
+- Launch with 8–12 approved Courses and reach 100–500 Students with granted access in the first six
+  months. Payment is collected outside the platform and confirmed by an Admin before access is
+  granted ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
+- Build sustainable revenue through full-Course access, collected as External Payment at launch and
+  through in-platform checkout once a gateway is integrated.
 - Expand toward 100+ Courses and 50,000–200,000 registered users within three years.
-- Validate Student outcomes, Instructor supply, and Kuwait-first operations before adding
-  bundles, BNPL, native applications, or automated marketplace settlement.
+- Validate Student outcomes, Instructor supply, and Kuwait-first operations before adding in-platform
+  checkout, Section purchases, bundles, BNPL, native applications, or automated marketplace
+  settlement.
 
 ## User Goals
 
 - **Students:** understand university coursework, practise with real materials, receive
-  follow-up after purchase, and learn on phones, tablets, laptops, or desktops at a fair price.
-- **Instructors:** publish high-quality Courses, reach Students, track learning outcomes, and
-  receive transparent monthly payout statements without operating payment infrastructure.
-- **Admins:** control access, pricing, publishing, moderation, refunds, coupons, and payout
-  operations with complete auditability.
+  follow-up after gaining access, and learn on phones, tablets, laptops, or desktops at a fair price.
+- **Instructors:** publish high-quality Courses, reach Students, track learning outcomes, and see who
+  is enrolled in their own Courses, without operating payment infrastructure.
+- **Admins:** control account provisioning, course access granting, pricing, publishing, and
+  moderation with complete auditability.
 
 ---
 
@@ -57,12 +61,12 @@ skills. Public self-registration is limited to this role.
 ## Instructor
 
 Subject-matter experts invited by an Admin to create and maintain their own Course content.
-Instructors do not control catalog prices, refunds, or payouts.
+Instructors do not control catalog prices or who is granted access to their Courses.
 
 ## Administrator
 
 Gradex operators responsible for staff provisioning, pricing, publishing, user management,
-payment/refund oversight, content moderation, coupons, and Instructor payouts.
+confirming External Payment and granting Course access, and content moderation.
 
 ---
 
@@ -71,11 +75,18 @@ payment/refund oversight, content moderation, coupons, and Instructor payouts.
 This register is the authoritative release boundary. A downstream document cannot move an item
 between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
+> **MVP has no in-platform payments** ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
+> Payment is External Payment, confirmed by an Admin outside Gradex. Course access is granted by an
+> Admin-approved Course Access Invitation. Checkout, cart, coupons, refunds, invoices, payouts, BNPL,
+> payment webhooks, gateway integration, reconciliation, and chapter/bundle/partial-course purchases
+> are **deferred, not rejected**, and appear under Fast-Follow below.
+
 ## MVP
 
 ### Identity and access
 
-- Student-only public registration with mandatory email verification.
+- Student-only public registration with mandatory email verification. **Registration grants no
+  course access.**
 - Email/password login, one opaque rotating server-managed cookie session, password reset, and
   logout. Older access/refresh-token wording is superseded by D-034.
 - Admin invitation and initial-password setup for Instructors and additional Admins.
@@ -105,18 +116,21 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Admin-only Course/Section pricing with audit history.
 - Admin Course review, publish, delist/relist, retire, archive, emergency access suspension, and
   reported-content moderation.
-- Admin user provisioning, suspension, coupons, refunds, revenue reporting, and payout records.
+- Admin user provisioning and suspension; Admin creation, approval, rejection, and cancellation of
+  Course Access Invitations.
 
-### Commerce and communication
+### Course access and communication
 
-- One full Course or one Section per order.
-- Tap-hosted card/KNET checkout; webhook/API confirmation controls successful payment.
-- Admin coupons: percentage/fixed, optional Course/Section scope, global cap, one consuming
-  redemption per Student, and zero-value grants.
-- Full and partial refunds, subject to gateway capability and the counsel-approved policy.
-- Course-configured semester expiry disclosed at checkout and snapshotted onto the Order and
-  Entitlement, with audited Admin extension/shortening of individual Entitlements.
-- Manual monthly Instructor payout process with system-recorded accounting and emailed statement.
+- Admin-created Course Access Invitation bound to one Student email and one complete Course.
+- Student acceptance from the invited email identity only; acceptance grants no access.
+- Admin Approval as the sole grant trigger, creating or reusing an Enrollment and creating exactly
+  one Entitlement, idempotently and audited.
+- Admin rejection with a required reason, and Admin cancellation before a decision.
+- Course-configured semester expiry snapshotted onto the Entitlement at approval, with audited Admin
+  extension/shortening of individual Entitlements.
+- Displayed Course prices so a Student knows what to pay through External Payment; Admin-only pricing
+  with audit history. Section prices are retained but not displayed, because Section is not an
+  acquirable scope.
 - Course-scoped one-off live office hours using an entitlement-protected external meeting link.
 - Fixed transactional in-app/email notifications.
 
@@ -126,9 +140,24 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
   laptops, and desktops.
 - Arabic and English UI for every role; Arabic default, persistent preference, full RTL/LTR.
 - Platform-owned UI/player controls target WCAG 2.2 AA within the boundary in §6.
-- Bilingual Privacy Notice, Terms, Refund Policy, and checkout disclosures before production.
+- Bilingual Privacy Notice, Terms, Refund Policy, and course-access terms disclosed before a Student
+  accepts an invitation, all approved before production. The Refund Policy remains required even
+  though Gradex processes no refunds.
 
 ## Fast-Follow
+
+Deferred by [D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation),
+each retaining its approved design and its extension point in the access model:
+
+- In-platform checkout and Orders, Tap-hosted card/KNET payment, payment webhooks and callback
+  verification, and automated reconciliation. A successful payment must converge on the same
+  Entitlement the manual flow produces.
+- Shopping cart, Admin coupons and zero-value grants, and Section, chapter, bundle, or
+  partial-course acquisition.
+- Automated refunds and their entitlement effect; invoice and receipt generation.
+- Instructor payout processing, revenue reporting, and emailed statements.
+
+Previously recorded fast-follow items, unchanged:
 
 - Bundle browsing, pricing, checkout, and cross-Course entitlement.
 - Deema BNPL after written digital-goods approval and a separate entitlement/payment-state review.
@@ -164,7 +193,7 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
   Sending an invitation does not create an Account; acceptance creates it with the assigned role.
   An address already attached to an Account cannot be invited or converted to another role.
 - Every Account has exactly one role assigned at creation and immutable during MVP. Students alone
-  may purchase, receive Entitlements, and record Progress. Instructors author assigned content
+  may receive Course Access Invitations, Entitlements, and Progress. Instructors author assigned content
   without Student learning capability; Admins use the separate audited preview path. A person
   needing another capability uses a separate Account with another normalized email.
 - The bootstrap Admin has no credential in the repository and must change the initial password.
@@ -185,9 +214,9 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
   Search matches Arabic and English at once regardless of interface language, ignores diacritics and
   alef/taa-marbuta/digit variants, ranks by relevance only, and never returns delisted Courses or
   protected Lesson content.
-- Evaluate a Course using its authored details and optional public preview.
-- Purchase one Course or one Section and view order/payment/refund history.
-- Apply one coupon at checkout and see the original price, discount, and final KWD total.
+- Evaluate a Course using its authored details, displayed price, and optional public preview.
+- Receive a Course Access Invitation at the invited email, accept it from that identity only, see
+  that acceptance awaits Admin Approval, and view current access status and invitation history.
 - Watch entitled Lessons, resume playback, track completion, and retain progress after expiry.
 - Download entitled resources and labs through short-lived signed access.
 - View/join entitled upcoming office hours and receive transactional notifications.
@@ -210,17 +239,19 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
 ## Admin Features
 
-- Invite Instructors/additional Admins and suspend/reactivate users.
+- Invite Instructors/additional Admins and suspend/reactivate users. Suspension is the mechanism for
+  disabling a Student account and immediately blocks access even where an Entitlement is active.
+- Confirm External Payment out of band, then create a Course Access Invitation for one Student email
+  and one Course; approve, reject with a reason, or cancel it. Approval is the only action that
+  grants access, and every transition is audited.
 - Create, rename, retire, and delete Major/Subject taxonomy terms with bilingual labels and audit
   history, and override any Course's classification.
 - Set/change Course and Section prices with reason and audit history.
 - Review Course content, publish/request changes, delist/relist, retire, archive, and invoke or
   resolve emergency access suspension when authorized.
 - Preview Course media through a separate audited authorization path.
-- Manage coupons and view historical redemption data.
-- Process full/partial refund requests and monitor gateway status.
+- Extend or shorten an individual Entitlement's expiry through the audited elevated adjustment.
 - Review content reports, dismiss/request changes/delist/retire/access-suspend, and record resolution.
-- Reconcile monthly Instructor payouts, record adjustments/transfer reference, and email statement.
 - Cancel any office-hours session for moderation; Admins do not create platform-wide sessions.
 
 ## Course and Content Management
@@ -240,53 +271,57 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Uploads are type/size validated and quarantined; public/downloadable assets require a successful
   malware scan before availability.
 
-## Payments, Orders, Coupons, and Refunds
+## Course Access Invitation and Entitlement
 
-- Monetary values are integer fils and displayed as KWD with three decimal places.
-- Percentage discounts round to the nearest fil and are clamped to `[0, subtotal]`.
-- The server creates an Order and stable Payment Attempt reference before Tap redirect.
-- Tap webhook/API verification—not browser redirect—controls capture and entitlement grant.
-- Payment/refund callbacks and transactional state changes are signature-verified and idempotent.
-- Orders explicitly distinguish Pending Payment, Paid, Free Granted, Cancelled, Expired,
-  Reconciliation Required, Partially Refunded, and Refunded, with separate creation, acceptance,
-  payment-deadline, completion, expiry, and cancellation timestamps.
-- One active `CREATED`/`PENDING`/`UNKNOWN` Payment Attempt exists per Order. Success means verified
-  capture; timeout remains reconcilable; provider occurrence—not arrival—controls deadline.
-- A zero-value coupon order creates a real Order and entitlement without a gateway call.
-- Every ordinary Entitlement originates from one paid or zero-value Coupon Order. Admins may adjust
-  an existing Entitlement's expiry but cannot create access through a separate manual-grant path.
-- A Course Entitlement blocks repurchase of that Course or any contained Section. A Section
-  Entitlement blocks that Section only; another Section or the full Course remains purchasable at
-  current catalog price, with no MVP upgrade credit/proration/refund/expiry combination. Both
-  Entitlements remain independent after a Section-to-Course purchase.
-- A Course must have a future Admin-configured access-expiry instant before checkout. Sections have
-  no independent expiry override. The Order preserves the disclosed instant; runtime access uses
-  the Entitlement's current effective expiry, which an elevated Admin may extend or shorten through
-  an audited adjustment.
-- Paid Coupon Order acceptance reserves exact Coupon capacity until its payment deadline. Timely
-  capture consumes the reservation; cancellation/expiry releases it unused. Zero-value Orders
-  consume immediately. Full Refund releases Student eligibility but never restores historical
-  global quota; partial Refund does not release it.
-- Only Admins initiate refunds. One or more refund amounts may not exceed the remaining captured
-  balance and require a reason.
-- Partial Refund keeps access active; cumulative full Refund revokes only that Order's Entitlement
-  after confirmed gateway success. Unsupported/failed requests have no access effect.
-- Checkout records the accepted bilingual refund-policy version.
+- All payment activity is **External Payment**, performed and verified outside Gradex. Gradex stores
+  no payment transaction, amount, currency, gateway reference, or payment status, and receives no
+  payment callback. *(BR-020)*
+- Displayed monetary values are integer fils rendered as KWD with three decimal places. They tell a
+  Student what to pay externally; Gradex charges nothing.
+- An Admin confirms External Payment out of band, then creates a Course Access Invitation bound to
+  one normalized Student email, one complete Course, the creating Admin, its state, and separate
+  creation, acceptance, decision, and cancellation timestamps. *(BR-165)*
+- Creating an Invitation grants nothing, and it is never evidence that payment occurred inside
+  Gradex. An optional Admin note and opaque external reference may be recorded on the audit record;
+  no amount, currency, or payment status is stored anywhere. *(BR-020, BR-170)*
+- A Student who already has an Account still requires an Invitation. A Student without one may
+  register normally, but the Account alone grants no course access. *(BR-029)*
+- Only an authenticated Account whose normalized email matches may accept; any other identity is
+  refused server-side regardless of how the link was obtained. *(BR-166)*
+- Acceptance moves the Invitation to pending Admin approval and **grants no access**. *(BR-029)*
+- **Admin Approval is the sole grant trigger.** It atomically creates or reuses the Enrollment and
+  creates exactly one active Entitlement scoped to the whole Course, is idempotent under repetition
+  and concurrency, and requires the Admin course-access capability plus a valid recent
+  authentication — absent either, the request is refused rather than degraded. *(BR-167)*
+- The Invitation lifecycle is pending student acceptance, pending admin approval, approved, rejected,
+  and cancelled. Rejection requires a reason; an accepted Invitation may still be rejected, and a new
+  Invitation may afterwards be created for the same email and Course. Every transition is audited.
+  *(BR-168)*
+- An Invitation does not expire. The acceptance link is a separate expiring, single-use, purpose-bound
+  secret that is reissued when it lapses. *(BR-169)*
+- A Course must have a future Admin-configured access-expiry instant before an Invitation for it can
+  be approved. Approval snapshots that instant; runtime access uses the Entitlement's current
+  effective expiry, which an elevated Admin may extend or shorten through an audited adjustment.
+  *(BR-025, BR-026)*
+- Every Entitlement carries a typed grant source and none may exist without one. MVP implements
+  `MANUAL_INVITATION` only; no production build may create an Entitlement by any other route,
+  command, screen, fixture, or configuration flag. *(BR-028)*
+- At most one active Entitlement exists per Student and Course, enforced by database constraint.
+  *(BR-024)*
+- Instructor and Course Access invitations are separate workflows and neither is implemented in terms
+  of the other. *(BR-171)*
+- A future online payment flow must converge on this same Entitlement rather than introducing a
+  second access model. Playback, downloads, progress, and rosters must never read payment-provider
+  state or Invitation state.
 
-## Payouts
+## Payouts — deferred out of MVP
 
-- One platform-wide Instructor revenue-share percentage is configurable but has no default.
-- Share uses net collected revenue after coupons, confirmed refunds, and gateway/payment fees.
-- Each paid Order snapshots the effective share version and owning Instructor. Course reassignment
-  affects later Orders only; Refund/chargeback adjustments remain with the original earning.
-- Earnings, fees, Refunds, chargebacks, payout adjustments, carry-forwards, and corrections are
-  immutable source-linked ledger entries; corrections use compensating entries.
-- One monthly Statement per Instructor/currency/period freezes its items and totals on approval.
-- Approval snapshots the payout destination; transfer initiation creates an immutable attempt using
-  it, and `PAID` requires verified full-payment evidence. Partial Statement payments and negative
-  transfers are not supported; negative balances carry.
-- Late refunds/chargebacks adjust a later Statement without rewriting an approved/paid one.
-- Instructor receives the statement by email; no in-app payout dashboard/withdrawal exists.
+Instructor payout processing, revenue reporting, earnings ledgers, and emailed statements are
+deferred with in-platform payments. With no in-platform revenue record there is no earning to
+calculate, and Instructors are paid entirely out of band at launch. The Instructor agreement's
+revenue-share terms remain required under `LG-020`, and the approved payout design is retained in
+[BUSINESS_RULES.md](BUSINESS_RULES.md) BR-073/074 and
+[DOMAIN_MODEL.md §8](DOMAIN_MODEL.md#8-instructor-earnings-and-payouts--deferred-out-of-mvp).
 
 ## Live Office Hours
 
@@ -312,11 +347,12 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 
 ## Notifications
 
-- Required in-app + email events: purchase receipt, refund/reconciliation status, password/security,
+- Required in-app + email events: Course Access Invitation issued, access granted, invitation
+  rejected, invitation cancelled after the Student was notified, password/security, Account
   invitation, Course approval/change request, office-hours cancellation/material reschedule, Admin
   Entitlement expiry adjustment, and emergency Course access suspension/restoration.
-- New office-hours sessions and new Instructor Course/revision submissions are in-app and may also
-  use email when operationally appropriate.
+- Invitation accepted targets Admin operations. New office-hours sessions and new Instructor
+  Course/revision submissions are in-app and may also use email when operationally appropriate.
 - Video-processing completion is an Instructor event.
 - Notification Events relationally snapshot exact Account/channel recipients at source-event time.
   Delivery attempts are idempotent; email failure never changes the source transaction or durable
@@ -342,18 +378,21 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Deny by default; role, ownership, status, and entitlement authorization is server-side.
 - Secrets never enter the repository; credentials/tokens/personal data are excluded from logs.
 - Sensitive data is encrypted in transit and at rest according to classification.
-- Gradex never collects, transmits, or stores full card/PAN data; payment entry is Tap-hosted.
-- Webhooks are signature-verified, replay-safe, and idempotent.
-- Auth, verification, reset, checkout, reporting, signed-URL, and download endpoints are
+- Gradex never collects, transmits, or stores full card/PAN data. In MVP no payment is entered
+  anywhere in Gradex; the rule remains binding on any future hosted checkout.
+- Course access is granted only by an authorised, capability-gated, recent-authentication-bound,
+  idempotent, audited Admin Approval. It replaces gateway verification as the sole control between a
+  registered account and paid content and carries the same review depth.
+- Auth, verification, reset, invitation acceptance, reporting, signed-URL, and download endpoints are
   rate-limited based on abuse risk.
-- Privileged identity, pricing, publishing, preview, refund, payout, and moderation actions are
-  auditable.
+- Privileged identity, pricing, publishing, preview, course-access invitation, entitlement-grant, and
+  moderation actions are auditable.
 
 ## Reliability
 
-- Core catalog, purchase, and playback paths target 99.5% monthly availability for MVP.
-- Payment and entitlement writes are transactional and safely recoverable after duplicate,
-  delayed, or out-of-order callbacks.
+- Core catalog, course-access, and playback paths target 99.5% monthly availability for MVP.
+- Entitlement writes are transactional and idempotent: a repeated or concurrent Admin Approval
+  produces exactly one Entitlement.
 - Backup/restore procedures must be automated and restore-tested before production; system design
   selects RPO/RTO consistent with the business target and operating budget.
 - External notification failure is isolated from the business transaction.
@@ -373,7 +412,8 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
 - Platform-owned UI/player controls target WCAG 2.2 Level AA: keyboard operation, visible focus,
   accessible authentication, semantic structure, labels, announced errors, contrast, and target
   sizes.
-- Hosted checkout accessibility is evaluated and documented but not claimed as Gradex-controlled.
+- MVP has no hosted checkout to assess. Whenever one is added, its accessibility is evaluated and
+  documented but not claimed as Gradex-controlled.
 - Captions/transcripts are outside MVP. Gradex therefore does not claim complete learning-product
   WCAG conformance until that fast-follow gap is closed.
 
@@ -427,9 +467,12 @@ This is a product-readiness summary, not legal advice. Production requires resol
   counsel must confirm operative dates and applicability.
   [Official announcement](https://e.gov.kw/sites/KGOArabic/Pages/ApplicationPages/NewsDetail.aspx?nid=64409149)
 - Counsel must approve refund eligibility for streamed/downloaded education, privacy scope,
-  retention, consumer disclosures, and any education-sector licensing requirement.
-- Tap production onboarding, digital-course merchant approval, payment methods, webhook contract,
-  and partial-refund support must be verified in production configuration.
+  retention, consumer disclosures, and any education-sector licensing requirement. **Moving payment
+  outside Gradex does not answer any of these.** Whether a Kuwait-based course platform must register
+  under the Digital Commerce Law, and how off-platform collection is treated for tax, invoicing, and
+  record retention, remain counsel and accounting questions (`LG-005`, `LG-006`, `LG-011`, `LG-016`).
+- Tap production onboarding and merchant approval are deferred with in-platform payments and are no
+  longer MVP launch dependencies.
 
 ---
 
@@ -440,22 +483,43 @@ This is a product-readiness summary, not legal advice. Production requires resol
 - Students can use downloadable labs without a managed execution environment; setup friction must
   be tested with pilot Students.
 - Instructor supply and Course production can proceed in parallel with platform delivery.
-- One global revenue-share formula is sufficient for MVP; its numeric percentage remains a
-  pre-launch commercial decision.
-- Tap can activate an appropriate digital-course merchant account; this is an external launch
-  gate, not a system-design assumption to hard-code.
+- Instructor compensation is handled entirely out of band at launch; the revenue-share percentage
+  remains a pre-launch commercial decision and a required term of the Instructor agreement.
+- The admin team can confirm External Payment reliably and at launch volume through its own
+  operational process, and can carry the manual invitation workload. This is an operating assumption,
+  not an engineering control, and it does not scale past a modest launch.
 
 ---
 
 # 9. Risks
 
-## Payment Provider and Reconciliation
+## Manual Access Granting Is a Single Human Control
 
-**Impact:** provider approval, outages, unsupported refund methods, or callback drift can block
-revenue/access correctness.
+**Impact:** with no gateway, an Admin's approval is the only thing between a registered account and
+paid content. A mistaken, coerced, or compromised approval grants access that no automated check
+would have caught, and the process does not scale past a modest launch volume.
 
-**Mitigation:** hosted Tap integration behind an internal boundary, signature verification,
-idempotent states, reconciliation, and production onboarding verification before launch.
+**Mitigation:** a distinct Admin capability rather than a broad one, required recent authentication,
+immutable audit on every transition, idempotent grants, an identity-bound acceptance step that an
+Admin cannot perform on the Student's behalf, and Tier-3 review of the grant path.
+
+## External Payment Reconciliation Is Off-Platform
+
+**Impact:** Gradex holds no payment record, so payment-to-access reconciliation, disputes, and
+refunds depend entirely on the founder's out-of-band process and on `LG-016`'s unresolved accounting
+treatment. Errors surface as a Student who paid and has no access, or access with no payment.
+
+**Mitigation:** an optional Admin note and opaque external reference on the audit record, `LG-016`
+kept open rather than assumed closed, and a documented manual operating procedure before launch.
+
+## Payment Provider Dependency — deferred, not resolved
+
+**Impact:** whenever in-platform checkout is taken up, provider approval, outages, unsupported refund
+methods, or callback drift can block revenue/access correctness.
+
+**Mitigation:** the deferred design keeps hosted integration behind an internal boundary with
+signature verification, idempotent states, and reconciliation. The Entitlement grant-source seam
+means adding it does not redesign access.
 
 ## External Community Ownership
 
@@ -519,11 +583,11 @@ Each criterion names its governing business rules and primary verification metho
   may hold the same display name without conflict, and an Admin reset is audited. *(BR-064/101/105;
   integration + E2E)*
 
-## Catalog, Checkout, and Entitlement
+## Catalog, Course Access, and Entitlement
 
-- Given a Student opens a published Course, then full-Course and individually priced Section
-  purchase options use the same Section entities shown in its outline; no Chapter entity exists.
-  *(BR-010/021; E2E)*
+- Given a Student opens a published Course, then the full-Course price and the Section outline are
+  shown using the same Section entities in that outline; no Chapter entity exists and no Section is
+  offered as an acquirable scope. *(BR-010/021; E2E)*
 - Given the catalog, when the Student filters by Major, Subject, and Study Year, then only published
   Courses carrying those exact values are returned, and a delisted or archived Course never
   appears in any filter combination. *(BR-157/161; integration + E2E)*
@@ -537,32 +601,47 @@ Each criterion names its governing business rules and primary verification metho
 - Given a Course missing any classification dimension, then submission for review is blocked and
   names the missing dimension; a retired term stays on already-assigned Courses and a referenced
   term cannot be deleted. *(BR-159/160; integration + E2E)*
-- Given a valid paid checkout, when Tap confirms capture through a verified callback/API result,
-  then the Order becomes Paid and one scoped Entitlement with the disclosed Course-configured
-  expiry is granted exactly once. *(BR-020/021/025/031/033; integration + E2E)*
-- Given a redirect without confirmed capture or a failed/ambiguous/late Attempt, then no Entitlement
-  is granted automatically and preserved evidence drives safe reconciliation. *(BR-020/022/034)*
-- Given a valid coupon, when preview/order creation occurs, then integer-fils discount/total are
-  snapshotted and paid capacity is reserved until the Order deadline; zero total consumes and grants
-  once without Tap. *(BR-124–129; unit + integration)*
-- Given the Student has a consuming redemption, a second use is denied; after cumulative full
-  refund it is eligible again while history remains. *(BR-128/129/131; integration)*
-- Given an active entitlement already covers the chosen scope, checkout blocks repurchase. A
-  Section-entitled Student may buy another Section or the full Course without automatic credit,
-  expiry combination, or modification of the original Section Entitlement; after expiry the
-  standard purchase path is available. *(BR-024/025; E2E)*
-
-## Refunds and Payouts
-
-- Given an Admin requests a supported partial refund within the remaining balance, when the gateway
-  confirms success, then the refunded balance/revenue/payout adjustment update and entitlement
-  remains active. *(BR-040–047; integration + E2E)*
-- Given cumulative confirmed refunds equal captured amount, then entitlement is revoked; a failed
-  or pending refund does not revoke it. *(BR-041/046/047; integration)*
-- Given a monthly payout run, then immutable source-linked ledger entries calculate one Statement
-  per Instructor/currency/period; approval freezes items/totals, and only verified full-transfer
-  evidence marks it Paid. Later adjustments carry forward without rewriting it. *(BR-073/074;
+- Given a Student registers and verifies their email, when they request any protected Course
+  content, then access is denied, because registration creates no Entitlement. *(BR-029; E2E)*
+- Given an Admin confirms External Payment out of band, when they create a Course Access Invitation
+  for one email and one Course, then the Invitation records email, Course, creating Admin, state, and
+  timestamps and is audited, and no Entitlement exists. A second non-terminal Invitation for the same
+  pair is refused. *(BR-020/165; integration + E2E)*
+- Given the invited Student signs in with the invited email and accepts, then the Invitation moves to
+  pending admin approval and **no access is granted**. Given any other Account attempts to accept,
+  acceptance is refused server-side regardless of how the link was obtained. *(BR-029/166; security
   integration + E2E)*
+- Given an accepted Invitation, when an authorised Admin with valid recent authentication approves
+  it, then one transaction creates or reuses the Enrollment, creates exactly one active Entitlement
+  scoped to that Course with the snapshotted expiry and approval-derived retirement eligibility,
+  writes audit evidence, and notifies the Student. *(BR-025/027/167; integration + E2E)*
+- Given the same approval is submitted twice, sequentially or concurrently, then exactly one
+  Entitlement exists. *(BR-024/167; integration under race)*
+- Given approval is attempted without the course-access capability or without valid recent
+  authentication, then it is refused — not degraded, not defaulted. *(BR-167; security integration)*
+- Given a Course with no future configured access-expiry instant, then an Invitation for it cannot be
+  approved. *(BR-025; integration)*
+- Given an Admin rejects an accepted Invitation, then a reason is required, the Student is notified,
+  no Entitlement is created, and a new Invitation may afterwards be created for the same email and
+  Course. *(BR-168; integration + E2E)*
+- Given an active Entitlement, then playback, protected downloads, Progress writes, and the
+  Instructor roster all authorise against it, and none reads Course Access Invitation state.
+  *(BR-023/029; integration)*
+- Given the Account is suspended, then every protected action is denied immediately even though the
+  Entitlement remains active, and the Entitlement is not mutated. *(BR-007; E2E)*
+- Given a production build, then no route, command, screen, fixture, or configuration flag performs
+  checkout, accepts a payment callback, issues a refund, applies a coupon, or creates an Entitlement
+  by any path other than recorded Admin Approval. *(BR-020/028; build-level assertion)*
+
+## Instructor Roster
+
+- Given an Instructor opens the roster for an owned Course, then only Students with a qualifying
+  Enrollment for that Course appear, showing display name and Course-scoped enrollment/progress only,
+  and no Admin note, External Payment reference, approval evidence, direct contact PII, or Student
+  from another Instructor's Course is exposed. *(BR-064/101/170; integration + E2E)*
+- Given a Course the Instructor does not own, then the roster request is refused server-side.
+  *(BR-060/064; security integration)*
+
 
 ## Course Building and Moderation
 
@@ -574,12 +653,12 @@ Each criterion names its governing business rules and primary verification metho
   review. Approval publishes and notifies. *(BR-071/072/090/122; E2E)*
 - Given a Published Course revision, the live approved version remains unchanged until Admin
   approval applies the revision atomically. *(BR-017/090; integration)*
-- Given an Admin delists a Course, it leaves catalog/checkout but qualifying existing access
+- Given an Admin delists a Course, it leaves catalog discovery and new access grants but qualifying existing access
   continues. Given an elevated Admin invokes emergency access suspension with a constrained reason,
   existing Student access stops without mutating Entitlements/Progress and Audit/notifications are
   recorded; restoration re-enables otherwise-valid access. *(BR-090; integration + E2E)*
-- Given an Admin changes a Course/Section price, the change is audited and affects future Orders
-  only; existing transaction snapshots remain unchanged. *(BR-019; integration)*
+- Given an Admin changes a Course/Section price, the change is audited and affects future access
+  grants only; the expiry snapshot on an existing Entitlement remains unchanged. *(BR-019; integration)*
 
 ## Learning, Preview, Reporting, and Office Hours
 
@@ -591,8 +670,8 @@ Each criterion names its governing business rules and primary verification metho
   *(BR-104/143/144; integration)*
 - Given an entitled Student reports content, it enters the Admin queue without auto-hiding; Admin
   resolution and any content/account action are audited. *(BR-145/146; E2E)*
-- Given an Instructor creates Course office hours, only active Course/Section-entitled Students see
-  the join link; an unauthorized/public request never receives it. *(BR-134–136; security E2E)*
+- Given an Instructor creates Course office hours, only Students holding an active Course Entitlement
+  see the join link; an unauthorized/public request never receives it. *(BR-134–136; security E2E)*
 - Given a session is materially rescheduled/cancelled, deduplicated notifications are recorded and
   email failure does not undo the schedule change. *(BR-120/122/140; integration)*
 

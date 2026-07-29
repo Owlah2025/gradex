@@ -1,7 +1,7 @@
 # Gradex Glossary
 
 > Status: Canonical terminology
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 The conceptual relationships and lifecycles behind these terms are defined in
 [DOMAIN_MODEL.md](DOMAIN_MODEL.md).
@@ -12,9 +12,9 @@ The conceptual relationships and lifecycles behind these terms are defined in
 |---|---|
 | Account | One person's identity, normalized email, role, status, language, display name, and authentication profile. |
 | Display Name | Self-chosen, non-unique label shown for an Account; the only identity field an Instructor roster exposes. |
-| Student | The only publicly self-registering role; browses, purchases, learns, reports content, and joins entitled office hours. |
-| Instructor | Admin-invited role that owns and manages Course content but cannot control prices, refunds, coupons, or payouts. |
-| Admin | Privileged Gradex operator responsible for provisioning, pricing, publishing, moderation, commerce, and payouts. |
+| Student | The only publicly self-registering role; browses, accepts Course Access Invitations, learns, reports content, and joins entitled office hours. |
+| Instructor | Admin-invited role that owns and manages Course content and sees its Student roster, but cannot control prices or who is granted access. |
+| Admin | Privileged Gradex operator responsible for provisioning, pricing, publishing, moderation, and granting Course access after confirming External Payment. |
 | Bootstrap Admin | The first Admin, created once through secure deployment rather than public UI or a repository credential. |
 | Verification | Proof that a Student controls the registered email before the Account becomes Active. |
 | Invitation | Expiring Admin-issued activation path for an Instructor or additional Admin. |
@@ -31,8 +31,8 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Major | Course classification dimension naming the field of study, drawn from the Admin vocabulary. |
 | Subject | Course classification dimension naming the university subject, with an optional academic code such as `CS 101`. |
 | Study Year | Course classification dimension using the fixed enumeration `PREP`, `YEAR_1`–`YEAR_4`. |
-| Section | Ordered purchasable grouping inside one Course. The canonical domain term. |
-| Chapter | Optional localized/Student-facing label for Section; never a separate entity or purchase scope. |
+| Section | Ordered grouping inside one Course. The canonical domain term. Not an acquirable access scope in MVP. |
+| Chapter | Optional localized/Student-facing label for Section; never a separate entity or access scope. |
 | Lesson | Ordered learning unit inside one Section, with video and optional protected attachments. |
 | Course Revision | Instructor-proposed change to a Published Course that is reviewed separately from the live version. |
 | Lesson Resource | Protected reference material such as slides, notes, readings, or images. |
@@ -42,17 +42,29 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Office Hours | One-off Course-scoped session using an external meeting link protected by authentication/Entitlement. |
 | Content Report | Entitled Student report about a Course/Lesson/video/resource/lab, resolved by an Admin. |
 
-## Commerce and Access
+## Course Access
 
 | Term | Definition |
 |---|---|
-| Catalog Price | Current Admin-controlled integer-fils amount for a Course or Section; affects future Orders only. |
+| Catalog Price | Current Admin-controlled integer-fils amount for a Course or Section. In MVP the Course price is displayed so a Student knows what to pay externally; Gradex charges nothing. Section prices are retained but not displayed. |
 | KWD | Kuwaiti dinar, displayed with three decimal places. |
-| Fils | Integer monetary unit; 1 KWD = 1,000 fils. All Gradex money calculations use fils. |
+| Fils | Integer monetary unit; 1 KWD = 1,000 fils. All Gradex money display uses fils. |
+| External Payment | Payment performed and verified entirely outside Gradex by the admin team. Gradex stores no payment transaction, amount, currency, or status. |
+| Course Access Invitation | Admin-created workflow record binding one Student email to one Course, allowing that Student to request access. It is never the authoritative access record. |
+| Admin Approval | The final Admin action on an accepted Course Access Invitation, and the sole authoritative trigger that activates access. |
+| Enrollment | Durable Student-to-Course learning relationship used for roster/progress/history. |
+| Entitlement | **The authoritative access record.** Time-bounded authorization for one complete Course, carrying a typed grant source. |
+| Grant Source | Typed discriminator recording how an Entitlement was granted. MVP implements `MANUAL_INVITATION` only; `PAID_ORDER`, `PROMOTIONAL`, and `DIRECT_ADMIN_GRANT` are reserved and not implemented. |
+
+### Deferred with in-platform payments
+
+Retained as the design of record; none of these entities exists in MVP
+([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
+
+| Term | Definition |
+|---|---|
 | Order | One Student's commercial record for exactly one Course or Section, including immutable price/discount/policy snapshots. |
 | Payment Attempt | One gateway attempt attached to an Order with its own idempotency and gateway references. |
-| Enrollment | Durable Student-to-Course learning relationship used for roster/progress/history. |
-| Entitlement | Time-bounded authorization for one Course or Section, created by a paid Order or zero-value grant. |
 | Refund | One Admin-requested full/partial amount returned against a captured Order after gateway confirmation. |
 | Remaining Refundable Balance | Captured Order amount minus all confirmed refunds; refund requests cannot exceed it. |
 | Coupon | Admin-managed percentage/fixed discount, optionally Course/Section-scoped, applied before gateway checkout. |
@@ -60,11 +72,14 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Zero-Value Grant | Successful coupon Order with total 0 KWD that creates normal access without calling a gateway. |
 | Net Collected Revenue | Captured amount after coupons, confirmed refunds, and gateway/payment fees; basis for Instructor share. |
 
-## Instructor Accounting
+## Instructor Accounting — deferred out of MVP
+
+Instructors are paid entirely out of band at launch. Revenue-share terms remain a required part of
+the Instructor agreement under `LG-020`.
 
 | Term | Definition |
 |---|---|
-| Revenue-Share Percentage | One platform-wide commercial configuration used for all MVP Instructor calculations; value is undecided until launch. |
+| Revenue-Share Percentage | One platform-wide commercial configuration; value is undecided and is a required Instructor-agreement term. |
 | Earning | Instructor accounting line derived from net collected revenue for an eligible Order. |
 | Adjustment | Later correction, such as a refund/chargeback after a prior payout, applied to a future statement. |
 | Payout Statement | Monthly itemization of Orders, fees, refunds/adjustments, share, and amount owed to one Instructor. |
@@ -77,13 +92,13 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Draft | Course is editable by its Instructor and not public. |
 | Pending Review | Course/revision is read-only to the Instructor while an Admin reviews it. |
 | Changes Requested | Admin returned a Course/revision with a required reason for Instructor revision. |
-| Published | Approved Course version is visible in the catalog and eligible for entitled access/purchase. |
-| Delisted | Course removed from catalog discovery/new checkout without denying qualifying existing access. |
+| Published | Approved Course version is visible in the catalog and eligible for entitled access. |
+| Delisted | Course removed from catalog discovery and new access grants without denying qualifying existing access. |
 | Emergency Course Access Suspension | Elevated legal/security/malware/severe-moderation block on existing Student access without rewriting Entitlements. |
-| Archived | Terminal catalog/new-purchase state for historical Course records; not a hard delete. |
+| Archived | Terminal state for catalog discovery and new access grants on historical Course records; not a hard delete. |
 | Active Entitlement | Current authorization within its access term and not revoked. |
 | Expired Entitlement | Authorization whose current effective `access_ends_at` instant has passed. |
-| Revoked Entitlement | Authorization ended before natural expiry, such as after cumulative full refund. |
+| Revoked Entitlement | Authorization ended before natural expiry through an audited Admin action. |
 | Audit Event | Immutable record of privileged actor, action, target, reason/context, and timestamp. |
 | Launch Gate | Unresolved commercial/legal/provider/readiness item that blocks production (or a named fast-follow feature), not ordinary system design. |
 
