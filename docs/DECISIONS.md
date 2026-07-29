@@ -1177,3 +1177,51 @@ reconciliation.
 
 **Source:** Developer instruction on 2026-07-29 to complete and independently review the remaining
 downstream reconciliation before S5 implementation begins.
+
+---
+
+## D-050 — Claude reconciles the launch plan and agy reviews the correction
+
+**Date:** 2026-07-29
+**Status:** Active. Scoped to the launch-plan reconciliation range only — base
+`b32e28957efc16bb09d46765b1e949aa3587088f` through this decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the builder seat for the correction of stale launch state in
+[`docs/launch/PLAN.md`](launch/PLAN.md), and `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`)
+holds the independent read-only reviewer seat under [D-032](#d-032--claude-builds-agy-reviews)'s
+containment harness, dispatched through `scripts/agy-review.sh <base>..<head>`. Claude must not
+review the range it authored.
+
+**[D-049](#d-049--claude-reconciles-the-d-045d-046-downstream-documents-and-agy-reviews-the-range) is
+spent.** It was scoped to the downstream reconciliation range `bae064d..b32e289`, which `agy`
+reviewed to `APPROVE` with zero findings. That range is closed and is not reopened here. D-049 is not
+edited to cover a different range, because retroactively widening a spent seat decision is the
+failure mode the launch protocol forbids.
+
+**This decision grants no S5 implementation authority.** It covers one document's launch-state
+correction. S5 implementation requires its own dated builder and reviewer assignment, and no such
+assignment exists at the time of writing.
+
+This decision **expires at the frozen reviewed head of this range** — the exact commit that carries
+the recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** `PLAN.md` is named in its own §1 as an operating source of truth, and implementation
+agents read it. It still presented S1C as the active slice under the spent
+[D-037](#d-037--claude-builds-s1c-and-agy-reviews) and September as the public target under
+[D-039](#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september), both contradicted
+by [D-040](#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+and its launch criteria still required a checkout step and payment gates that
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+deferred. Leaving that in place while assigning implementation seats would hand a builder a
+source-of-truth document that disagrees with every register around it.
+
+**Alternatives rejected:** Rewriting §6's three-week calendar rather than banner-marking it
+historical (it is accurate as the record of what was planned and what happened through S1C and S2,
+and deleting history to remove a contradiction loses the evidence behind D-038 and D-039); assigning
+S5 implementation seats first and correcting the plan afterwards; Claude reviewing its own
+correction.
+
+**Source:** Developer instruction on 2026-07-29 to resolve the final launch-plan contradiction before
+assigning S5 implementation seats.
