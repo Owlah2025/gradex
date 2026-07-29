@@ -46,7 +46,9 @@ not an extension.
 active candidate or clones that exact live graph as one complete `DRAFT` candidate. Concurrent calls
 return the same candidate because the transaction locks the Course and the database permits only one
 active candidate. The candidate records the captured pointer as `based_on_revision_id`; the response
-is `200` in both create and already-exists cases so retry behavior is identical.
+is `200` in both create and already-exists cases so retry behavior is identical. Creating a new
+candidate writes `COURSE_CANDIDATE_CREATED` in the same transaction; returning the already-active
+candidate does not fabricate a second creation audit event.
 
 Every authoring mutation after that contains `{revisionId}`. The server verifies that it is the
 Course's editable candidate (`DRAFT` or `CHANGES_REQUESTED`) and that every named Section, Lesson, or
@@ -72,7 +74,7 @@ SC-008):
 
 ```json
 {
-  "type": "https://gradex.app/problems/submission-incomplete",
+  "type": "https://api.gradex.com/problems/submission-incomplete",
   "title": "Course cannot be submitted",
   "status": 422,
   "violations": [
@@ -83,11 +85,18 @@ SC-008):
 }
 ```
 
+Generic request-field validation uses the RFC 9457 extension member `errors`; the submission-specific
+completeness response above uses `violations` because each item names a Course graph target and an
+optional missing dimension. The two arrays are distinct response contracts and are never aliases.
+
 On first publication, success moves the Course and candidate to `PENDING_REVIEW`. For a Course with
 an existing `live_revision_id`, only the candidate moves to `PENDING_REVIEW`; the Course remains
 `PUBLISHED` and Student reads stay pinned to the committed live revision. In both cases the candidate
 becomes read-only to its Instructor and the same transaction writes the audit row plus mandatory
 Admin-operations notification intent (FR-017).
+
+S3 catalogue discovery and S5 media/entitlement routes must consume the canonical production
+live-graph loader captured from `live_revision_id`; neither may reselect a latest revision.
 
 A stale or terminal `{revisionId}` and a genuine concurrent second transition return `409` — never
 success and never a duplicate queue entry. Submission validation remains `422` and is not converted

@@ -220,7 +220,7 @@ immediately without any Entitlement being mutated.
 **Acceptance Scenarios**:
 
 1. **Given** a `PUBLISHED` Course with an entitled Student, **When** an Admin delists it, **Then** it
-   leaves catalogue discovery and blocks new checkout, and **the Student's existing access
+   leaves catalogue discovery and blocks new access grants, and **the Student's existing access
    continues**. *(BR-090)*
 2. **Given** a `DELISTED` Course, **When** an Admin relists it, **Then** it returns to `PUBLISHED`.
    *(BR-090)*
@@ -409,11 +409,13 @@ a retired term stays on the Courses already carrying it.
 - **FR-030**: System MUST implement the lifecycle `DRAFT → PENDING_REVIEW → PUBLISHED`, with
   `PENDING_REVIEW → CHANGES_REQUESTED → PENDING_REVIEW`, `PUBLISHED ↔ DELISTED`, and
   `PUBLISHED/DELISTED → ARCHIVED`, refusing every transition outside it. *(BR-090)*
-- **FR-031**: System MUST make `DELISTED` remove catalogue discovery and new checkout **without**
+- **FR-031**: System MUST make `DELISTED` remove catalogue discovery and block **new access grants** **without**
   denying qualifying existing access. *(BR-090)*
 - **FR-032**: System MUST treat retirement as a future-acquisition block, preserving access where the
-  Order's `retirement_eligibility_at` precedes `retired_at`, and MUST NOT let retried or delayed
-  payment delivery bypass it. *(BR-027)*
+  Entitlement's `retirement_eligibility_at` precedes `retired_at`, and MUST NOT let a retried or
+  delayed grant bypass it. Under D-045 that instant is set from the **Admin Approval** moment, not
+  derived from an Order; S2 owns only the `retired_at` transition and exposes it, while S4 owns the
+  comparison. *(BR-027 as amended by D-045)*
 - **FR-033**: System MUST refuse permanent deletion of a Course with at least one enrollment, offering
   archiving instead, and MUST permit outright deletion only at zero enrollments. *(BR-018)*
 - **FR-034**: System MUST provide emergency Course access suspension as an elevated, separately

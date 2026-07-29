@@ -10,6 +10,13 @@
 **Reviewer**: Claude, Tier 2, once only after the whole S2 feature converges and hosted CI passes.
 **A builder never closes its own slice.**
 
+> **D-045 scope note (2026-07-28).** The MVP ships no in-platform payments; course access is granted
+> by an Admin-approved Course Access Invitation. **No S2 task is cancelled or rewritten by this.**
+> Course authoring, review, revision integrity, lifecycle, taxonomy, and Admin pricing are all
+> unaffected — pricing is retained because the displayed Course price tells a Student what to pay
+> externally. T044's enrollment-based deletion safeguard still holds, and T045's
+> `retirement_eligibility_at` input changes source only. The active T043–T064 queue continues.
+
 **Whole-S2 completion freeze**: T001–T038 and their evidence remain completed. The only unchecked
 implementation program is T039–T064. Antigravity processes it sequentially as T039–T042,
 T043–T050, T051–T054, T055–T057, and T058–T064. There is no interim Claude review.
@@ -286,53 +293,74 @@ one frozen exact range. No T039+ file or behavior may enter the range.
 
 ## Phase 7 — User Story 5: Lifecycle and emergency control (P2)
 
-- [ ] T043 [US5] Implement delist, relist, retire, archive, and Admin-only owner reassignment in
+- [X] T043 [US5] Implement delist, relist, retire, archive, and Admin-only owner reassignment in
       `backend/internal/catalog/course.go`, refusing transitions outside BR-090's graph and
       revalidating an active Instructor owner under the Course lock. Reassignment preserves every
       revision, price, enrollment/access fixture, and audit history; a pending candidate remains
       explicit and cannot silently change author (FR-003, FR-030, FR-043)
-- [ ] T044 [US5] Implement the deletion safeguard: refused at ≥1 enrollment with archiving offered,
+- [X] T044 [US5] Implement the deletion safeguard: refused at ≥1 enrollment with archiving offered,
       checked through the existing access compatibility records inside the deleting transaction —
       **not** an `ON DELETE CASCADE`; zero-access deletion must also respect revision-owned and
       stable-identity FK order (BR-018)
-- [ ] T045 [US5] Persist retirement as a locked, audited `retired_at` transition and expose that
+- [X] T045 [US5] Persist retirement as a locked, audited `retired_at` transition and expose that
       timestamp through the production Course access-state reader. S4 remains the sole owner of
-      comparing an Entitlement's Order-derived `retirement_eligibility_at`; update its frozen input
-      so retried or delayed delivery cannot bypass BR-027
-- [ ] T046 [US5] Implement emergency access suspension and restoration in
+      comparing an Entitlement's `retirement_eligibility_at`, which under
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+      is set from the Admin Approval instant rather than derived from an Order; update its frozen
+      input so a delayed approval cannot bypass BR-027
+- [X] T046 [US5] Implement emergency access suspension and restoration in
       `backend/internal/catalog/suspension.go` — orthogonal to lifecycle, reason mandatory, audit and
       intent in the same transaction, **no Entitlement mutated**; constrain suspension causes to
       legal, security, malware, or severe moderation, and require a reason for restoration
       (FR-034–FR-036)
-- [ ] T047 [US5] Add a mandatory production-wired Course access-state reader that resolves
+- [X] T047 [US5] Add a mandatory production-wired Course access-state reader that resolves
       lifecycle, `retired_at`, and `access_suspended_at` live for a Lesson/Course without creating
       or mutating Entitlements. Record the S4/S5 obligation to consume this state inside their single
       entitlement decision; do not add a second permanent evaluator ([research R4](research.md))
-- [ ] T048 [US5] Real-PostgreSQL/API evidence through the production compatibility access seam: an
-      existing Student access fixture is unchanged and remains usable through delist, relist,
-      retire, and archive, but its next access decision is denied during emergency suspension and
-      restored afterward; no access/commerce row changes — quickstart Scenario 6
-- [ ] T049 [US5] Mutation check for T048: make delisting deny access and confirm the delist assertion
-      fails — if it passes, delisting and suspension have been conflated
-- [ ] T050 [P] [US5] Add bilingual Admin lifecycle, owner-reassignment, and
+- ~~T048~~ **[REMOVED 2026-07-29 — duplicate cross-slice obligation. Not executable in S2.]**
+      Originally asked for real-PostgreSQL/API evidence that an existing Student access fixture
+      survives delist/relist/retire/archive but is denied during emergency suspension. **That proof
+      requires an access-decision point S2 does not own and is forbidden to build**: T047 states
+      "do not add a second permanent evaluator", and
+      [research R4](research.md) already assigned enforcement to S4/S5, recording the obligation as
+      one that "belongs in the S4 plan". The "production compatibility access seam" this task named
+      is defined in no artifact; the only access seam that exists is `AUTH_FAKE_MODE`, which
+      configuration validation refuses in production and which therefore cannot yield production
+      evidence.
+      **Authoritative implementation and proof: S4 `T016`** — the single
+      `Evaluate(student, lesson, now) → Decision`, which answers emergency suspension among its
+      ordered checks. The ID is retained as a tombstone so no task is renumbered.
+- ~~T049~~ **[REMOVED 2026-07-29 — duplicate cross-slice obligation. Not executable in S2.]**
+      Originally the mutation check for T048. **Authoritative equivalent: S4 mutation check #7**,
+      "Skip the emergency-suspension check → T016", already recorded in
+      [the S4 task list](../005-media-and-entitlement-evaluation/tasks.md). No coverage is lost by
+      this removal, because S4 never stopped owning it.
+
+> **Ownership recorded, so this does not get rediscovered.** **S2 owns publishing the live Course
+> suspension state** — the `access_suspended_at` transition, its audit and notification evidence, and
+> the production-wired access-state reader delivered by T047. **S4 owns enforcing that state at the
+> access-decision boundary**, inside its single evaluator. These are two different responsibilities in
+> two different slices, and S2 must not acquire the second one. **No temporary or compatibility
+> entitlement evaluator may be added to S2 to close these two IDs.**
+- [X] T050 [P] [US5] Add bilingual Admin lifecycle, owner-reassignment, and
       emergency-suspension/restoration controls to the existing catalogue surface with mandatory
       reason/cause capture and explicit conflict/error display
 
 ## Phase 8 — User Story 6: Taxonomy administration (P3)
 
-- [ ] T051 [P] [US6] Implement term creation, rename, retirement, and deletion in
+- [X] T051 [P] [US6] Implement term creation, rename, retirement, and deletion in
       `backend/internal/catalog/taxonomy.go` with locked reference-count refusal, kind/academic-code
       validation, immutable stable IDs, atomic audit evidence, and no assignment rewrite on rename
       (BR-158–BR-160)
-- [ ] T052 [US6] Production-wire Instructor selection on an explicit owned candidate revision and
+- [X] T052 [US6] Production-wire Instructor selection on an explicit owned candidate revision and
       Admin override on any exact candidate/live Course per the frozen contracts; refuse retired or
       wrong-kind terms, preserve existing assignments to newly retired terms, and grant Instructors
       no taxonomy-mutation capability
-- [ ] T053 [US6] Real-PostgreSQL/API evidence: retired terms are unassignable but preserved and
+- [X] T053 [US6] Real-PostgreSQL/API evidence: retired terms are unassignable but preserved and
       displayable on Courses carrying them; rename changes display without rewriting assignments;
       referenced deletion returns the frozen conflict/refusal semantics; unreferenced deletion
       succeeds; every mutation is authorized and audited — quickstart Scenario 7
-- [ ] T054 [P] [US6] Add bilingual taxonomy administration and Admin override controls to the
+- [X] T054 [P] [US6] Add bilingual taxonomy administration and Admin override controls to the
       existing catalogue surface, reusing the Instructor builder's localized selection vocabulary
 
 ## Phase 9 — Carryover with a named slot
@@ -341,40 +369,51 @@ one frozen exact range. No T039+ file or behavior may enter the range.
 lost its place in three cut orders, which is a scheduling failure rather than a priority judgement.
 It is scheduled here **before** polish, not after it, and it is not cuttable to make room for polish.
 
-- [ ] T055 Integration test in `backend/internal/identity/password_change_integration_test.go`
+- [X] T055 Integration test in `backend/internal/identity/password_change_integration_test.go`
       producing **observed evidence** that a voluntary password change revokes another session
       family — the recovery path is already proven, the voluntary-change path is a different code
       path and is not
-- [ ] T056 Mutation check for T055: remove family revocation from the voluntary-change path and
+- [X] T056 Mutation check for T055: remove family revocation from the voluntary-change path and
       confirm the test fails. Without this, the test is a restatement of policy rather than evidence
-- [ ] T057 Close `CARRYOVER-S1B3-VOLUNTARY-CHANGE-EVIDENCE` in
+- [X] T057 Close `CARRYOVER-S1B3-VOLUNTARY-CHANGE-EVIDENCE` in
       [STATUS.md](../../docs/launch/STATUS.md) with a link to the passing test
 
 ## Phase 10 — Polish and cross-cutting
 
-- [ ] T058 Enumerate every privileged route from the live production route table and assert its
+- [X] T058 Enumerate every privileged route from the live production route table and assert its
       capability, Origin/CSRF mutation boundary, required dependency wiring, and audit row —
       enumeration, not sampling. Include the pre-D5 Course-creation mutation and every pricing,
       lifecycle, ownership, suspension, taxonomy, submission, review, and preview route
       (FR-041–FR-044, quickstart Scenario 8)
-- [ ] T059 Mutation check for T058: remove one audit write and confirm enumeration fails
-- [ ] T060 [P] Verify bilingual Arabic/English and RTL/LTR across every new screen at tablet, laptop,
+- [X] T059 Mutation check for T058: remove one audit write and confirm enumeration fails
+- [X] T060 [P] Verify bilingual Arabic/English and RTL/LTR across every new screen at tablet, laptop,
       and desktop widths (SC-009, quickstart Scenario 9)
-- [ ] T061 [P] Address the S1C low finding pattern and the accepted D5 carryovers in code touched by
+- [X] T061 [P] Address the S1C low finding pattern and the accepted D5 carryovers in code touched by
       S2 completion: every new assertion states why it fails; use canonical Problem type URIs and
       `errors.Is`; remove unnecessary test assertions/hooks where a safer seam exists; and ensure
       route helpers substitute every parameter. Do not refactor unrelated code
-- [ ] T062 Update `docs/BUSINESS_RULES.md` cross-references, the API contract documents, and any
+- [X] T062 Update `docs/BUSINESS_RULES.md` cross-references, the API contract documents, and any
       affected decision record. Reconcile the Problem Details `errors`/`violations` terminology,
       record the canonical live-graph consumer obligation for S3/S5, and renumber the still-unbuilt
       downstream migrations to `0011_catalog_search` and `0012_media_and_entitlement`
-      (Constitution XI — a behaviour change without its document update is incomplete, not done)
-- [ ] T063 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
+      (Constitution XI — a behaviour change without its document update is incomplete, not done).
+      **The D-045 scope reconciliation already updated the canonical documents on 2026-07-28**, so
+      this task covers only what S2 implementation itself changes — do not re-reconcile the payment
+      scope here
+- [X] T063 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
       frontend build with `.next` removed first
 - [ ] T064 Run `speckit.converge`; complete any appended work through another
       `speckit.implement` pass until convergence is clean, then push the exact head and verify hosted
       CI passes all five jobs. Only then freeze `3d9604e..<final-head>` for the single whole-S2
       Claude review — S1B2 proved a green local suite is not evidence of green CI
+
+## Phase 11: Convergence
+
+- [X] T065 Exercise every S2 privileged mutation derived from the live production route table and
+      assert its committed `audit_events` row (actor, target, action, required reason, timestamp,
+      and `CATALOG_AND_AUTHORING` module) per FR-043 and SC-006 (partial).
+- [X] T066 Add repeatable tablet, laptop, and desktop viewport evidence for every new taxonomy
+      screen in Arabic RTL and English LTR per SC-009 (partial).
 
 ---
 

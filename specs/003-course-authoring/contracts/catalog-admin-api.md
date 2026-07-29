@@ -12,7 +12,7 @@ Capabilities, all Admin-only and all new members of the closed set (FR-041):
 
 | Method | Path | Purpose | Rules |
 |---|---|---|---|
-| `POST` | `/courses/{id}/delist` | Leave catalogue and block new checkout | **Existing access continues** — BR-090 |
+| `POST` | `/courses/{id}/delist` | Leave catalogue and block new access grants | **Existing access continues** — BR-090 |
 | `POST` | `/courses/{id}/relist` | Return to `PUBLISHED` | BR-090 |
 | `POST` | `/courses/{id}/retire` | Block future acquisition | Qualifying existing access preserved — BR-027 |
 | `POST` | `/courses/{id}/archive` | Remove from catalogue and new purchase | BR-018, BR-090 |
@@ -68,7 +68,7 @@ Money is integer minor units.
 | `PATCH` | `/taxonomy/terms/{id}` | Rename — changes every display, rewrites no assignment (BR-159) |
 | `POST` | `/taxonomy/terms/{id}/retire` | Retired terms are unassignable but stay on Courses carrying them (BR-160) |
 | `DELETE` | `/taxonomy/terms/{id}` | **Refused when referenced by ≥1 Course**; retirement offered instead (BR-160) |
-| `PUT` | `/courses/{id}/taxonomy` | Admin override of any Course's assignment (BR-158) |
+| `PUT` | `/courses/{id}/taxonomy` | Admin override of one exact candidate or live Course revision (BR-158); JSON body requires `revision_id`, `major_term_id`, and `subject_term_id` |
 
 Every mutation is audited like other privileged catalogue actions (BR-158, FR-037).
 
