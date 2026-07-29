@@ -1289,3 +1289,56 @@ reviewed; inferring Codex availability from the absence of a quota error.
 
 **Source:** Developer instruction on 2026-07-30 to perform a bounded S3 planning remediation and
 independent review.
+
+---
+
+## D-052 — Claude corrects the S3 schema-version statements and agy reviews the correction
+
+**Date:** 2026-07-30
+**Status:** Active. Scoped to the S3 schema-version correction range only — base
+`25c37af96c4127baa927e320dd7b1dc46c2c4dad` through this decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the builder seat for the schema-version correction in
+[`specs/004-public-catalogue/data-model.md`](../specs/004-public-catalogue/data-model.md), and `agy`
+(Google Antigravity CLI, `gemini-3.1-pro-high`) holds the independent read-only reviewer seat under
+[D-032](#d-032--claude-builds-agy-reviews)'s containment harness, dispatched through
+`scripts/agy-review.sh <base>..<head>`. Claude must not review the range it authored.
+
+**This decision grants no implementation authority.** It covers three stale statements in one design
+document. **S3 implementation seats remain unassigned**, and S3 implementation may not begin until a
+separate dated decision assigns a builder and a distinct independent reviewer. Codex may hold that
+seat only after its availability is explicitly reverified. This decision grants no authority for S4,
+S5, or S6.
+
+**[D-051](#d-051--claude-remediates-the-s3-planning-gaps-and-agy-reviews-the-correction) is spent.** It
+was scoped to the S3 planning-remediation range `e98e0db..25c37af`, which `agy` reviewed to
+`APPROVE WITH FINDINGS` — zero critical, zero high, zero medium, and one LOW: `data-model.md`
+§Schema version still stated that `0011_catalog_search` raises `db.MaxSchemaVersion` to 10, while
+`T035` had been corrected to 11. That range is closed. D-051 is not edited retroactively.
+
+This decision **expires at the frozen reviewed head of this range** — the exact commit carrying the
+recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** The reviewer's LOW was acted on rather than accepted, because it differs in kind from
+D-050's accepted wording LOW. That one sat inside a spent governance decision with no downstream
+consumer. This one was a **wrong number in a design document a builder implements from** — both `T023`
+and `T035` point at `data-model.md` — and it is the same off-by-one the D-051 pass was commissioned to
+fix, surviving in the source document while the task referencing it was corrected. Verifying the
+finding surfaced two further errors in the same three lines that the reviewer did not name: the
+up/down/up check also expected version 10 after each `up`, and the schema-version statement cited
+`T030`, the write/query-symmetry red-first test, rather than `T035`.
+
+`backend/internal/db/schema.go` already holds `MaxSchemaVersion = 10`, so a builder following the
+design document would have set the constant to a value it already had and shipped an application that
+refuses to serve against the migration it just applied.
+
+**Alternatives rejected:** Recording the LOW as accepted non-blocking evidence and handing S3 to a
+builder with the contradiction in place (a wrong instruction is not the same as an infelicitous
+phrasing, and the design document is what a builder reads for schema shape); folding the correction
+into the later implementation-seat decision (it would ship an unreviewed correction inside a seat
+assignment); widening D-051 to cover a range it did not author.
+
+**Source:** Developer instruction on 2026-07-30 to correct the remaining S3 schema-version defect and
+re-review the narrow correction.
