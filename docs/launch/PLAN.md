@@ -1,22 +1,22 @@
 # Gradex MVP Launch Workflow
 
 > Status: Active
-> Schedule: 2026-07-23 through the September public target, date not yet set
-> Public go-live target: **September, exact date unset**, readiness-gated. August 15 was **retired as
-> non-credible** on 2026-08-02 under
-> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september);
-> full PRD scope is preserved and the exact date is selected only after the August 6 outreach results
-> and a critical-path rebaseline of S2–S16
-> Delivery team: Solo developer, Claude builder, `agy` reviewer for the active S1C slice (see
-> [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews)); the standing assignment is
-> Codex builder and Claude reviewer under
-> [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review), which stays paused
-> until Codex availability is explicitly reverified
-> Downstream forecast: August 8 and the August 15 full-PRD target are retired as non-credible
-> ([D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy),
-> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september));
-> the dated calendar below from August 8 onward is **historical**, not a forecast, until the rebaseline
-> — see [DOWNSTREAM_RECONCILIATION.md](DOWNSTREAM_RECONCILIATION.md)
+> Last reconciled: **2026-07-29**
+> Public go-live target: **2026-08-15 — hard product-owner decision**, restored under
+> [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+> which supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)'s
+> September target on the date. D-038 and D-039 are retained below as history, not as forecast
+> Active slice: **S5 — Protected Learning. Planning approved; implementation not started.** S1C and
+> S2 are closed
+> Calendar authority: **[AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan)**,
+> not §6 of this document. §6 is retained as the historical record of the original three-week plan
+> Delivery team: Solo developer. **Seats are assigned per slice and none is currently assigned for S5
+> implementation** — see [§2](#responsibilities). The standing assignment is Codex builder and Claude
+> reviewer under [D-033](../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review),
+> which stays paused until Codex availability is explicitly reverified
+> Scope: **[D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)**
+> — MVP ships no in-platform payments; **[D-046](../DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch)**
+> — the Course community link is deferred to S18
 
 This is the schedule of record for delivering the MVP in [PRD.md](../PRD.md). It supersedes any
 standalone launch draft when its scope or dates disagree with the current canonical product
@@ -25,6 +25,52 @@ documents.
 The full current PRD remains the target. A missed task becomes visible carryover; it does not
 silently disappear from scope. Security, legal, payment, privacy, backup, and data-integrity gates
 are never waived to preserve the target date.
+
+## 0. Current launch state
+
+Four things are distinguished throughout this document and must not be read as one: **current
+status**, **completed history**, the **active implementation order**, and **deferred roadmap**.
+
+### Completed
+
+- **S1A–S1C** — identity, sessions, RBAC, staff lifecycle, suspension enforcement, and the
+  authorization matrix. All five sub-slices closed on independent verdicts. S1C closed at `edd6508`.
+- **S2 — Course authoring and review.** **Closed** at `785d71c` with hosted CI convergence recorded.
+  It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range is
+  reopened by current work.
+
+### Active implementation order
+
+| Slice | State | Blocked on |
+|---|---|---|
+| **S3 — Public catalogue and shell** | Specified, not implemented | S2 (closed) |
+| **S4 — Media pipeline, delivery, and Entitlement evaluation** | Specified, not implemented | S1C, S2 (both closed) |
+| **S5 — Protected Learning** — **the next implementation slice** | **Planning independently approved; implementation not started.** [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md), 78 tasks `T001`–`T078`, **0 complete** | S3, S4 |
+| **S6 — Course Access Grant** | **Planned, not implemented.** [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) | **S2, S4, and S5** |
+
+**S5 introduces the minimum physical `enrollments` table** required by `progress.enrollment_id`, and
+**creates no normal Enrollment row**. It implements no invitation, acceptance, approval, rejection,
+grant, or revocation behaviour. **S6 owns every normal Enrollment lifecycle write**, created only
+inside the Admin Approval transaction, and consumes S5's table without recreating it. See
+[SLICES.md §3.4](SLICES.md#34-s5-introduces-the-enrollments-table-s6-owns-every-enrollment-write).
+
+Current delivery state, including the approved S5 planning range, is in
+[STATUS.md](STATUS.md). Dated slice sequencing is in
+[AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan).
+
+### Deferred — recorded, not deleted
+
+Under [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation),
+**online checkout, payment-gateway integration, KNET/card/Apple Pay processing, payment webhooks,
+coupons, automated refunds, invoices, BNPL, and platform-managed Instructor payouts are outside this
+MVP.** Access is granted by Admin Approval of a Course Access Invitation; payment is confirmed off
+platform. The old S7 is struck from the runway. These designs are retained as the design of record
+for whenever payments are taken up — they are inactive, not repealed.
+
+Under [D-046](../DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch),
+the **external Discord/Telegram Course community link is deferred to S18**. No slice authors,
+persists, serves, or renders it before launch. The Discord community itself is unaffected; its link
+is shared out of band until then.
 
 ## 1. Sources of Truth
 
@@ -49,11 +95,18 @@ the source-of-truth order in [the documentation index](../README.md#source-of-tr
 - **Developer/product owner:** approves product decisions, external commitments, accepted risks,
   scope changes, and the public go/no-go decision.
 - **Builder:** plans and implements one bounded slice, runs its checks, documents evidence, and
-  corrects review findings. Standing holder is Codex; **Claude holds this seat for the active S1C
-  slice** under [D-037](../DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews).
+  corrects review findings. Standing holder is Codex.
 - **Reviewer:** reviews the exact commit range without editing it, checking requirements, security,
   privacy, authorization, idempotency, concurrency, tests, observability, and scope. Standing holder
-  is Claude; **`agy` holds this seat for the active S1C slice** under D-037.
+  is Claude.
+
+**No seat is currently assigned for S5 implementation.** The most recent assignments —
+[D-047](../DECISIONS.md#d-047--claude-plans-s5-and-s6-and-agy-reviews-the-frozen-planning-range),
+[D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range),
+and [D-049](../DECISIONS.md#d-049--claude-reconciles-the-d-045d-046-downstream-documents-and-agy-reviews-the-range)
+— covered S5/S6 **planning** and documentation reconciliation only, are spent at their reviewed
+heads, and grant no implementation authority. S5 implementation requires its own dated assignment
+before any code is written.
 
 Seat decisions are scoped to one slice and expire at its frozen reviewed head. They never renew
 implicitly: the next slice requires its own dated assignment, and D-033's restoration requires Codex
@@ -79,9 +132,8 @@ must never be recorded as one:
   silence.
 
 `agy` reviews through `scripts/agy-review.sh <base>..<head>` under D-032's existing containment
-rules. It is the approved fallback whenever Claude is unavailable, and under D-037 it is the
-**assigned** reviewer for S1C because Claude authors that range — including the S1 integration review,
-whose scope contains Claude-authored commits.
+rules. It is the approved fallback whenever Claude is unavailable, and it is the **assigned** reviewer
+for any range Claude authors — a builder reading back over its own diff cannot close a slice.
 
 ### Work-in-progress rule
 
@@ -138,8 +190,8 @@ new feature work forward.
 
 1. Run the checks required by today's acceptance evidence.
 2. Dispatch the independent read-only review on the exact stable commit range from a disposable
-   detached worktree, using whichever model did not author the range. While D-037 is active that is
-   `scripts/agy-review.sh <base>..<head>`.
+   detached worktree, using whichever model did not author the range. Whenever Claude is the builder,
+   that is `scripts/agy-review.sh <base>..<head>`.
 3. Correct and retest all critical/high findings.
 4. Record completed, incomplete, blocked, and deliberately deferred work.
 5. Update [STATUS.md](STATUS.md), gate evidence, confidence, and tomorrow's first task.
@@ -205,6 +257,22 @@ planned or actual result to make the schedule look successful.
 Confidence describes the public launch forecast, not effort or morale.
 
 ## 6. Three-Week Delivery Calendar
+
+> **HISTORICAL — superseded as the calendar of record on 2026-07-27 by
+> [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).**
+> The dated calendar in force is
+> [AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan); slice
+> ordering of record is [SLICES.md §2](SLICES.md#2-slice-order). This section is retained as the
+> record of what was originally planned and what actually happened through S1C and S2 — Week 1 is
+> completed history and is accurate.
+>
+> **Two things below are obsolete and must not be worked from.** The `Date TBD — Orders, checkout,
+> and coupons`, `Date TBD — Payments, entitlements, and refunds`, and
+> `Sunday, August 9 — Revenue, payouts, compliance, and recovery` days describe the payment-era MVP
+> that [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+> removed; the single Course Access Invitation and Entitlement grant slice replaces them. And the
+> `Date TBD` markers reflect D-038's undated block, which D-040 closed. Use §0 for the active
+> implementation order.
 
 ### Week 1 — Baseline, System Design, and Foundation
 
@@ -571,16 +639,18 @@ required gate is `RESOLVED`; otherwise record a formal no-go forecast.
 **Exit evidence:** production health, monitoring, backups, commerce, access, learning, and support
 are verified; release and rollback versions are recorded.
 
-#### Public go/no-go — date unset, moved out of August
+#### Public go/no-go
 
-> **August 15 was retired as non-credible on 2026-08-02** under
-> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september).
-> Full PRD scope is preserved and the target moves into September. **No exact date is set here**, and
-> none may be recorded until the August 6 outreach results exist and S2–S16 have been rebaselined
-> against them. The August 8–14 outcomes above keep their content and lose their dates in the same
-> rebaseline; they are retained as the ordered runway, not as a forecast.
+> **HISTORICAL.** August 15 was retired as non-credible under
+> [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september),
+> and that retirement was itself **superseded on 2026-07-27** by
+> [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+> which restored **2026-08-15** as the hard product-owner date. The September target recorded here is
+> no longer in force. The dated runway is
+> [AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan); the
+> go/no-go date is **August 15**.
 
-Launch only when every criterion in §8 passes. If any fails, keep public commerce disabled,
+Launch only when every criterion in §8 passes. If any fails, keep public access granting disabled,
 preserve the tested environment, record the blocker/owner/evidence required, and schedule the next
 go/no-go within 48 hours.
 
@@ -590,10 +660,10 @@ go/no-go within 48 hours.
 |---|---|
 | July 23 | All then-existing LG-001–LG-020 entries have a real owner, next action, evidence target, and deadline |
 | July 29 | Every architecture-affecting open gate has a documented configurable/provider boundary |
-| August 5 | LG-007–LG-010 payment/commercial evidence resolved |
-| August 9 | LG-001–LG-006, LG-011–LG-013, LG-016–LG-017, and LG-020 resolved |
+| ~~August 5~~ | ~~LG-007–LG-010 payment/commercial evidence resolved~~ — **`LG-007`, `LG-008`, and `LG-010` are `DEFERRED` with in-platform payments under D-045.** `LG-009` likewise. Deferral is not resolution |
+| August 9 | LG-003–LG-006, LG-011–LG-013, LG-016, and LG-020 resolved. **`LG-001`, `LG-002`, and `LG-017` are `DEFERRED` under D-045; `LG-016` is not** — off-platform collection may move the record-keeping obligation rather than remove it |
 | August 12 | LG-014, LG-015, LG-018, LG-019, and LG-021 resolved |
-| August 13 | Every required gate is `RESOLVED` with linked or summarized evidence |
+| August 13 | Every **required** gate is `RESOLVED` with linked or summarized evidence. The seven deferred payment gates are outside the required set and may **not** be marked `RESOLVED` to satisfy this |
 
 An unmet deadline makes launch confidence Red unless the gate is already resolved by equivalent
 evidence recorded in [LAUNCH_GATES.md](../LAUNCH_GATES.md).
@@ -604,17 +674,22 @@ The developer may approve public go-live only when:
 
 1. All required launch gates are `RESOLVED` with evidence.
 2. The production critical journey passes:
-   registration → discovery → Course/Section purchase → verified payment/free grant → entitlement
-   → protected learning → progress.
-3. Instructor authoring/Admin review, refunds, support repair, office hours, notifications,
-   reporting, and payout records meet their MVP acceptance criteria.
+   registration → discovery → Course Access Invitation → identity-bound acceptance → Admin Approval
+   → Enrollment and Entitlement → protected learning → progress. **There is no checkout or payment
+   step in the MVP journey** (D-045).
+3. Instructor authoring/Admin review, the Course-scoped Instructor roster, invitation administration,
+   audited Entitlement expiry adjustment, support repair, office hours, notifications, and reporting
+   meet their MVP acceptance criteria. Refunds and payout records are deferred with in-platform
+   payments and are not evaluated here.
 4. No unresolved critical defect remains. Every high-severity security, authorization, privacy,
-   payment, data-loss, or public/private media defect has documented risk acceptance, mitigation,
-   and owner approval.
+   access-grant, data-loss, or public/private media defect has documented risk acceptance,
+   mitigation, and owner approval.
 5. Production backup, restore, monitoring, alerting, support, incident response, and rollback have
    been demonstrated.
-6. Prices, content, policies, consent versions, payment credentials, sender identity, domain, and
-   TLS are production-approved.
+6. Prices, content, policies, consent versions, sender identity, domain, and TLS are
+   production-approved. No payment credential exists to approve.
+7. No production build contains a checkout, payment-callback, refund, or coupon path, and no
+   Entitlement can be created except through recorded Admin Approval.
 
 Failure of any criterion is a no-go. It does not authorize a reduced public launch unless the
 canonical MVP and gate register are explicitly revised and reapproved.
@@ -633,6 +708,9 @@ The launch-control workflow is working when:
 - a no-go preserves a safe deployment and creates a dated next review.
 
 The release acceptance suite must cover identity, staff invitation, Course review/publishing,
-catalog/search, protected media/Resources/Labs, Course/Section orders, coupons/free grants, Tap
-callbacks, refunds, entitlement expiry, playback/progress, reports, office hours, notifications,
-revenue/payouts, audit, localization, accessibility, backup/restore, monitoring, and rollback.
+catalog/search, protected media/Resources/Labs, Course Access Invitation creation, identity-bound
+acceptance, Admin Approval, rejection and cancellation, entitlement expiry and audited adjustment,
+the Instructor roster, playback/progress, reports, office hours, notifications, audit, localization,
+accessibility, backup/restore, monitoring, and rollback. **Orders, coupons, Tap callbacks, refunds,
+and revenue/payouts are not in the MVP suite** — they are deferred with in-platform payments under
+D-045.
