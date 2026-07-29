@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-08-02
+> Last Updated: 2026-07-28 (real calendar)
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -17,6 +17,10 @@ Central record of significant product/technical decisions for Gradex — what wa
 ## D-002 — Tap Payments for MVP checkout; Deema BNPL is fast-follow
 
 **Date:** 2026-07-20
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+No payment gateway is integrated for launch. The provider analysis and the BNPL rejection remain the
+approved starting point whenever online payment is taken up.
 **Decision:** MVP checkout uses Tap Payments hosted card/KNET payments. Deema BNPL remains Fast-Follow and is not a launch dependency. MyFatoorah is considered only if Tap cannot activate Gradex's digital-course merchant account; it is not integrated speculatively in MVP.
 **Reason:** One hosted gateway keeps MVP payment and reconciliation behavior bounded. BNPL adds entitlement and payment-state branches and still requires written digital-goods approval, so it must not delay the core checkout path.
 **Alternatives rejected:** PayTabs — its Kuwait "installment" offering is a reseller layer over the same Deema product Tap offers directly, with no upside and added integration overhead.
@@ -99,8 +103,11 @@ decision for history.
 ## D-012 — Coupons in MVP: admin-only discount codes applied pre-gateway
 
 **Date:** 2026-07-22
-**Status:** Capacity/commit timing amended on 2026-07-26 by D-028. The approved scope, ownership,
-discount behavior, targets, and refund-release rule remain in force.
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+coupons require a checkout Gradex no longer has. Capacity/commit timing was amended on 2026-07-26 by
+D-028. The approved scope, ownership, discount behavior, targets, and refund-release rule remain the
+design of record for the deferred feature.
 **Decision:** Add an admin-managed coupon system to MVP. Admins (only) mint percentage or fixed-amount codes (integer fils), optionally scoped to Course(s)/Section(s) or platform-wide. A code is validated and applied server-side before the Tap payment session; a zero-value order grants entitlement without a gateway call. One coupon applies per order. Each Student may consume a code once at a time: failed/abandoned attempts do not consume it, and a fully refunded purchase releases that Student's redemption eligibility while retaining the historical redemption/refund records. Global caps remain configurable; per-user limits greater than one are not supported. Coupons never modify catalog prices. *(Section terminology and redemption/refund behavior amended 2026-07-23.)*
 **Reason:** Launch promos and seeding free access are standard go-to-market levers, and the insertion point is clean—the server computes the Order amount before hosted checkout. Admin-only matches the BR-019 pricing boundary and prevents an Instructor discount side door. Full design in [coupons-system-design.md](superpowers/specs/2026-07-22-coupons-system-design.md).
 **Alternatives rejected at the time:** Instructor-created coupons; disallowing free codes; capacity
@@ -127,6 +134,12 @@ review showed that exact pre-payment capacity is required.
 ## D-015 — Section is canonical; Admin owns all catalog pricing
 
 **Date:** 2026-07-23
+**Status:** Amended on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+**on purchasable scope only.** MVP grants `COURSE` scope exclusively; Section is not an acquirable
+scope at launch and Section prices are retained in schema and the Admin surface but not displayed in
+the student-facing catalogue. The `Course → Section → Lesson` hierarchy, the Chapter labelling rule,
+and Admin-exclusive pricing authority are unchanged and remain in force.
 **Decision:** The only content hierarchy is `Course → Section → Lesson`. “Chapter” may be a localized/student-facing label for Section but is not a separate entity. Students may buy one Course or one Section per Order. A Course Entitlement covers all its Sections; a Section Entitlement covers only that Section. A Student with a Section may later buy another Section or the Course, but MVP gives no automatic upgrade credit/proration. Admins exclusively set/change Course and Section prices; Instructors have read-only price visibility. Price changes affect future orders only and are audited.
 **Reason:** The repository already implements Sections, while treating Chapter as separate would create a second overlapping domain entity. Admin pricing prevents Instructor content edits from changing commercial terms.
 **Alternatives rejected:** Separate Chapter and Section entities; Instructor-controlled pricing; retroactively changing transaction values.
@@ -143,6 +156,11 @@ review showed that exact pre-payment capacity is required.
 ## D-017 — Full and partial refunds with counsel-approved eligibility
 
 **Date:** 2026-07-23
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+Gradex processes no refunds; any refund is an External Payment matter handled outside the platform.
+The counsel-approved eligibility requirement is **not** deferred — it remains part of `LG-011`'s
+published Refund Policy.
 **Decision:** Admins can request one or more full/partial refunds up to the remaining captured balance. Partial success keeps entitlement active; cumulative successful refunds equal to the captured amount revoke it. State changes only after confirmed gateway success. Amount, reason, Admin, gateway reference, status, and history are audited. Refund-policy eligibility is configurable and must be approved by Kuwaiti counsel; the product will not assume that streaming automatically removes refund rights.
 **Reason:** Tap supports amount-controlled refund requests but may reject partial refunds for some payment methods. Separating eligibility from processing lets system design proceed while legal interpretation remains a launch gate.
 **Alternatives rejected:** Full-refund-only MVP; immediate access revocation on request; unverified “content accessed means no refund” language.
@@ -151,6 +169,12 @@ review showed that exact pre-payment capacity is required.
 ## D-018 — Manual monthly payouts with system-recorded accounting
 
 **Date:** 2026-07-23
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+With no in-platform revenue record, no earning can be calculated, so the ledger, Statement, and
+transfer lifecycle do not ship. The **contractual** obligation is not deferred: `LG-020`'s Instructor
+agreement still requires revenue-share terms, and payment to Instructors is an entirely out-of-band
+founder operation at launch.
 **Decision:** MVP uses one platform-wide Instructor revenue-share percentage, configured before launch with no assumed default. Share is calculated from net collected revenue after coupons, confirmed refunds, and payment fees. Every earning, fee, Refund, chargeback, payout adjustment, carry-forward, and approved correction is an immutable source-linked ledger entry; corrections append compensating entries. One monthly Statement exists per Instructor/currency/period. `DRAFT → READY_FOR_REVIEW → APPROVED → PAYMENT_PENDING → PAID`, with review blocking and retryable payment-failure paths. Approval freezes included entries, totals, and approved payout destination; transfer initiation creates an immutable attempt using that destination; `PAID` requires verified full-payment evidence. Partial Statement payments and negative bank transfers are prohibited, negative balances carry forward, and late Refunds/chargebacks adjust a later period. Admins transfer manually and email the Statement. No Instructor payout dashboard or automated settlement ships in MVP. *(Detailed lifecycle amended 2026-07-26 by Sections 4/6; recipient snapshot remains D-030.)*
 **Reason:** The accounting model must be designable before the commercial percentage is chosen, while automated settlement and per-course negotiation would add unnecessary launch scope.
 **Alternatives rejected:** Hard-coded placeholder percentage; per-Course revenue-share rules; Instructor withdrawals; automated marketplace settlement.
@@ -217,6 +241,14 @@ archival decisions remain in force.
 ## D-026 — Course-configured semester expiry with audited Entitlement adjustments
 
 **Date:** 2026-07-26
+**Status:** Amended on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+**on the disclosure and snapshot trigger only.** There is no checkout, so the precondition becomes:
+a Course MUST have a future `default_access_ends_at` before a Course Access Invitation for it can be
+**approved**, and Admin Approval snapshots that exact instant onto the Entitlement as
+`original_access_ends_at`. Everything else — the separate effective `access_ends_at`, the audited
+elevated-Admin adjustment, the Kuwait-local boundary conversion, and the rule that changing the
+Course default never mutates an existing Entitlement — is unchanged and in force.
 **Decision:** D-009's fixed 150-day duration is replaced by an Admin-managed Course
 `default_access_ends_at` instant for future purchases. A Section has no independent access-period
 override. Checkout discloses the exact expiry and the Order snapshots it; the granted Entitlement
@@ -237,6 +269,12 @@ unaudited expiry edits.
 ## D-027 — Every MVP Entitlement originates from an Order
 
 **Date:** 2026-07-26
+**Status:** **Superseded in full on 2026-07-28** by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+Orders do not exist in MVP, so Entitlement provenance is a typed `grant_source` discriminator whose
+only implemented value is `MANUAL_INVITATION`, created by Admin Approval. The **principle** D-027 was
+protecting survives and is restated by D-045: an Entitlement never appears without a recorded,
+audited grant source. This entry is retained for history and is not the current rule.
 **Decision:** Every ordinary Course/Section Entitlement originates from exactly one Order. Paid
 Orders grant only after verified payment success; a valid 100%/fixed-to-zero Coupon uses the
 existing `FREE_GRANTED` Order path without contacting Tap. Admins may extend or shorten an existing
@@ -252,6 +290,9 @@ using a zero catalog price as an implicit grant.
 ## D-028 — Reserve Coupon capacity when Gradex accepts an Order
 
 **Date:** 2026-07-26
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation),
+with D-012. It remains the design of record for coupon capacity whenever checkout is built.
 **Decision:** A paid Coupon Order atomically reserves Coupon capacity when Gradex accepts its
 immutable commercial terms. The reservation shares the Order payment deadline, counts against
 global capacity, and blocks the Student's concurrent reuse. Verified timely capture consumes it in
@@ -273,8 +314,13 @@ discarding late/conflicting payments.
 ## D-029 — Catalog delisting is separate from emergency Course access suspension
 
 **Date:** 2026-07-26
-**Decision:** Ordinary catalog delisting removes a Course from public discovery and new checkout but
-does not deny existing entitled Students. Retirement blocks future acquisition/inclusion while
+**Status:** Amended on 2026-07-29 **on wording only**, with BR-090: delisting blocks "new access
+grants" rather than "new checkout", because MVP has no checkout. The substance — delisting never
+denies qualifying existing access, and is separate from retirement and from emergency suspension —
+is unchanged and in force.
+**Decision:** Ordinary catalog delisting removes a Course from public discovery and blocks new access
+grants — "new checkout" in the original wording, amended 2026-07-29 with BR-090 because MVP has no
+checkout — but does not deny existing entitled Students. Retirement blocks future acquisition/inclusion while
 preserving qualifying existing access. Immediate denial of existing Student access requires a
 separate elevated Course access-suspension command with a constrained legal, security, malware, or
 severe-moderation reason, immutable Audit evidence, and notification/outbox intent. Entitlements are
@@ -290,6 +336,10 @@ Entitlements; an unrestricted generic Course access toggle; automatic content hi
 ## D-030 — Earnings snapshot Instructor ownership and share configuration at Order completion
 
 **Date:** 2026-07-26
+**Status:** Deferred out of MVP on 2026-07-28 by
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation),
+with D-018. No paid Order exists to snapshot. The rule that historical commercial responsibility must
+survive Course reassignment is preserved for the deferred feature.
 **Decision:** Each paid Order's earning ledger entry snapshots the owning Instructor and the
 effective versioned revenue-share configuration when the Order completes. Course reassignment never
 rewrites earlier entries. Orders completed after reassignment credit the new Instructor; a later
@@ -842,3 +892,120 @@ or slice—is finished.
 **Source:** Product-owner instructions on 2026-07-28: use Antigravity with Gemini 3.6 Flash High
 after Codex plans through SpecKit; Antigravity follows `speckit.implement`; Claude reviews only after
 the whole feature is complete.
+
+## D-045 — MVP launches without in-platform payments; course access is granted by admin-approved Course Access Invitation
+
+**Date:** 2026-07-28
+**Status:** Active. Supersedes [D-027](#d-027--every-mvp-entitlement-originates-from-an-order)
+entirely. Amends [D-015](#d-015--section-is-canonical-admin-owns-all-catalog-pricing) and
+[D-026](#d-026--course-configured-semester-expiry-with-audited-entitlement-adjustments) on scope and
+grant trigger only. Defers [D-002](#d-002--tap-payments-for-mvp-checkout-deema-bnpl-is-fast-follow),
+[D-012](#d-012--coupons-in-mvp-admin-only-discount-codes-applied-pre-gateway),
+[D-017](#d-017--full-and-partial-refunds-with-counsel-approved-eligibility),
+[D-018](#d-018--manual-monthly-payouts-with-system-recorded-accounting),
+[D-028](#d-028--reserve-coupon-capacity-when-gradex-accepts-an-order), and
+[D-030](#d-030--earnings-snapshot-instructor-ownership-and-share-configuration-at-order-completion)
+out of MVP. Does not change
+[D-040](#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)'s
+date or quality boundaries, or the workflow seats in
+[D-042](#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews)/[D-044](#d-044--antigravity-completes-s2-and-claude-reviews-the-whole-feature-once).
+
+**Decision:** Gradex launches as a fully functional educational video platform with **no payment
+processing inside the platform**. All payment activity is External Payment — performed and verified
+outside Gradex by the admin team through its own operational process. Gradex does not collect
+payments, verify them automatically, store checkout sessions, process refunds, receive payment
+webhooks, generate invoices, calculate payouts, handle BNPL, provide a cart, or apply coupons.
+
+Course access is granted through this workflow and no other:
+
+```text
+External Payment confirmed off-platform
+  → Admin creates a Course Access Invitation for one student email and one Course
+  → Student signs in or registers with the invited email
+  → Student accepts                       (state: PENDING_ADMIN_APPROVAL — grants nothing)
+  → Admin Approval                        (the authoritative grant trigger)
+  → idempotent transaction creates or reuses the Enrollment and creates one ACTIVE Entitlement
+  → Student is notified that access is active
+```
+
+**Registration grants no course access. Acceptance grants no course access.** Only Admin Approval
+does. The Course Access Invitation is a workflow record and is never the authoritative access record;
+protected reads, playback authorization, progress writes, and Instructor rosters all authorise
+against the Entitlement.
+
+### Resolved questions
+
+Twelve questions were raised as unresolved in the reconciliation and resolved by product-owner
+approval on 2026-07-28. Recorded individually because each one changes an artefact:
+
+1. **Catalog prices remain displayed.** The price tells the Student what to pay externally. Admin
+   pricing (`course_price_changes`, S2 T039–T042) is retained as shipped, and `LG-012` stays required.
+2. **Section prices are retained in schema and the Admin surface but are not displayed in the
+   student-facing catalogue for MVP.** Displaying a price for a scope that cannot be acquired is
+   misleading. This item carried no recommendation in the reconciliation and was derived from the
+   locked "one complete course only" rule plus item 1; it is the one call recorded here as derived
+   rather than recommended.
+3. **Entitlement is the authoritative access record; Enrollment remains the durable Student-to-Course
+   learning relationship** for roster and progress. The two are not merged.
+4. **A granted Entitlement still carries an expiry.** A Course MUST have a future
+   `default_access_ends_at` before an Invitation for it can be **approved** — the direct replacement
+   for D-026's pre-checkout precondition. The approval snapshots it as `original_access_ends_at`.
+5. **`retirement_eligibility_at` is set from the Admin Approval instant**, the moment access begins.
+6. **A Course Access Invitation does not expire.** No approved business rule required it and no
+   duration is invented. The acceptance *link* is an expiring `identity_action_secrets` row with a
+   resend path; link expiry and invitation expiry are different things.
+7. **An Admin may reject an already-accepted Invitation, and a new Invitation may be created for a
+   previously rejected or cancelled `(email, Course)` pair.** Both are audited.
+8. **External Payment evidence is an optional free-text admin note plus an opaque external
+   reference, recorded on the audit record only.** No amount, currency, or payment-status field
+   exists anywhere in Gradex. This is deliberately not an accounting system.
+9. **The Course-scoped Instructor roster returns to MVP**, overturning its post-launch deferral in
+   [the execution plan §2.3](launch/AUGUST_15_EXECUTION_PLAN.md#23-deferred-to-post-launch--recorded-not-removed).
+   Instructor visibility into enrolled Students is part of the locked MVP scope.
+10. **`LG-005`, `LG-006`, `LG-011`, and `LG-016` stay `OPEN` and unchanged.** Where payment is
+    captured is not an engineering answer to a counsel question, and off-platform collection may
+    increase rather than remove the `LG-016` record-keeping burden.
+11. **Instructor payout processing is deferred**, so no earnings are calculated in MVP. The
+    contractual obligation is not deferred: `LG-020`'s Instructor agreement still requires
+    revenue-share terms, and `LG-001` moves with the deferred payout feature.
+12. **Account disabling reuses the shipped `ACTIVE ↔ SUSPENDED` enforcement** rather than adding a
+    state. S1C already satisfies the requirement.
+
+### Access-model boundaries preserved for future payment
+
+The Entitlement carries a typed `grant_source` discriminator. MVP implements `MANUAL_INVITATION`
+only. `PAID_ORDER`, `PROMOTIONAL`, and `DIRECT_ADMIN_GRANT` are reserved names, **not implemented**,
+and no speculative payment-provider table, checkout-session table, or webhook-event table is added.
+The Entitlement scope column remains expressive enough for Section scope even though MVP issues
+`COURSE` scope only.
+
+[SLICES.md §3.1](launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation)'s
+separation of Entitlement **evaluation** from Entitlement **creation** is unchanged and is what makes
+this change bounded: only the producer changes, from verified payment to Admin Approval. A future
+online payment flow converges on the same authoritative result without redesigning access.
+
+**Reason:** Payment-gateway activation is gated on `LG-007`/`LG-008`/`LG-010`, none of which has a
+resolution path under [D-041](#d-041--legal-and-accounting-outreach-deferred-to-the-final-days-the-resulting-exposure-is-accepted-rather-than-resolved),
+while the product's actual value — structured video learning with follow-up — needs none of it. The
+change is also unusually cheap: repository evidence at migration `0010` shows no `orders`,
+`payment_attempts`, `entitlements`, `enrollments`, `coupons`, `refunds`, ledger, or statement table
+exists, so no shipped code is discarded. It removes roughly 26 hours of Tier-3 work (S6 and S7) and
+replaces it with roughly 8–10 hours.
+
+**What this decision does not do:** it does not reduce review depth. Admin Approval replaces a
+cryptographically verified gateway callback as the sole control between a registered account and paid
+content, so the grant path is Tier 3, capability-gated, recent-authentication-bound, idempotent, and
+audited. It also does not reduce legal exposure proportionally — see resolved question 10.
+
+**Alternatives rejected:** Delaying launch until Tap activation completes (the gate has no owner and
+no date under D-041); treating the Admin invitation as evidence that payment occurred inside Gradex
+(it is not, and modelling it as a payment transaction would rebuild the accounting system this
+decision removes); granting access on student acceptance without Admin Approval (removes the only
+control point and makes an emailed link sufficient for paid content); building a thin
+payment-provider abstraction now to "keep the seam warm" (speculative complexity the reconciliation
+explicitly forbids — the `grant_source` discriminator is the seam); merging Course Access Invitations
+into the existing `staff_invitations` table (different lifecycle, different uniqueness rule, and
+account-creation semantics that must not touch course access).
+
+**Source:** Product-owner scope decision on 2026-07-28, approved with all twelve listed questions
+resolved.
