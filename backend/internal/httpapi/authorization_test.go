@@ -336,6 +336,11 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/courses/:id/owner":                    {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/owner", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/courses/:id/access-suspension":        {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
 	"DELETE /api/v1/admin/courses/:id/access-suspension":      {Method: http.MethodDelete, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
+	"PUT /api/v1/admin/courses/:id/taxonomy":                  {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/taxonomy", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/taxonomy/terms":                       {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms", Class: ClassCapabilityProtected},
+	"PATCH /api/v1/admin/taxonomy/terms/:id":                  {Method: http.MethodPatch, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/taxonomy/terms/:id/retire":            {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms/:id/retire", Class: ClassCapabilityProtected},
+	"DELETE /api/v1/admin/taxonomy/terms/:id":                 {Method: http.MethodDelete, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}
@@ -362,11 +367,7 @@ func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
 		if entry.Class == ClassAnonymous || entry.Class == ClassAuthenticatedSessionLifecycle {
 			continue
 		}
-		execPath := rt.Path
-		execPath = strings.ReplaceAll(execPath, ":lessonID", "lesson-99")
-		execPath = strings.ReplaceAll(execPath, ":lessonId", "lesson-99")
-		execPath = strings.ReplaceAll(execPath, ":sectionId", "section-99")
-		execPath = strings.ReplaceAll(execPath, ":id", "acct-99")
+		execPath := materializeRouteParameters(rt.Path, "route-99")
 		result = append(result, struct{ method, path string }{
 			method: rt.Method,
 			path:   execPath,
@@ -392,6 +393,66 @@ func TestAuthorizationMatrixMatchesMountedRouter(t *testing.T) {
 		if !mountedMap[key] {
 			t.Fatalf("matrix row %s references a route no longer mounted", key)
 		}
+	}
+}
+
+// TestCatalogAdminMutationRoutesDenyInstructor derives the full Admin catalog
+// mutation set from the mounted router. A 403 here proves the capability gate
+// runs before request binding and repository work; no handler-specific body is
+// needed to reach that boundary.
+func TestCatalogAdminMutationRoutesDenyInstructor(t *testing.T) {
+	instructor := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleInstructor,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}
+	r, _ := authzRouter(t, fixedPrincipals{principal: instructor})
+
+	var routes []gin.RouteInfo
+	for _, route := range r.Routes() {
+		if route.Method == http.MethodGet || !strings.HasPrefix(route.Path, "/api/v1/admin/") {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	if len(routes) == 0 {
+		t.Fatal("no Admin catalog mutation routes were derived from the router")
+	}
+
+	for _, route := range routes {
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			req := newAuthenticatedRequest(route.Method, materializeAuthorizationRoute(route.Path), nil)
+			rec := do(r, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("Instructor status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func materializeAuthorizationRoute(path string) string {
+	return materializeRouteParameters(path, "route-99")
+}
+
+// materializeRouteParameters replaces every Gin path parameter, including a
+// future parameter whose name this test does not know yet. A protected-route
+// sweep must never accidentally test a literal ":newParameter" path.
+func materializeRouteParameters(path, replacement string) string {
+	for {
+		start := strings.IndexByte(path, ':')
+		if start < 0 {
+			return path
+		}
+		end := start + 1
+		for end < len(path) {
+			ch := path[end]
+			if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') && ch != '_' {
+				break
+			}
+			end++
+		}
+		path = path[:start] + replacement + path[end:]
 	}
 }
 

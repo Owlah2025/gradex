@@ -132,6 +132,7 @@ func mountCatalogRoutes(
 		repo: foundation.repository,
 	}
 	lifecycleH := &adminLifecycleHandlers{repo: foundation.repository}
+	taxonomyH := &adminTaxonomyHandlers{repo: foundation.repository}
 
 	adminPricingGetGroup := v1.Group("/admin/courses/:id")
 	adminPricingGetGroup.Use(
@@ -168,6 +169,29 @@ func mountCatalogRoutes(
 		adminLifecycleMutationGroup.POST("/owner", lifecycleH.reassignOwner)
 		adminLifecycleMutationGroup.POST("/access-suspension", lifecycleH.suspend)
 		adminLifecycleMutationGroup.DELETE("/access-suspension", lifecycleH.restoreAccess)
+	}
+
+	adminTaxonomyMutationGroup := v1.Group("/admin/courses/:id")
+	adminTaxonomyMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogTaxonomy),
+	)
+	{
+		adminTaxonomyMutationGroup.PUT("/taxonomy", taxonomyH.assignTaxonomy)
+	}
+
+	adminTaxonomyTermMutationGroup := v1.Group("/admin/taxonomy/terms")
+	adminTaxonomyTermMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogTaxonomy),
+	)
+	{
+		adminTaxonomyTermMutationGroup.POST("", taxonomyH.createTerm)
+		adminTaxonomyTermMutationGroup.PATCH("/:id", taxonomyH.renameTerm)
+		adminTaxonomyTermMutationGroup.POST("/:id/retire", taxonomyH.retireTerm)
+		adminTaxonomyTermMutationGroup.DELETE("/:id", taxonomyH.deleteTerm)
 	}
 
 	return nil

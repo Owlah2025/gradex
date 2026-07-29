@@ -338,7 +338,7 @@ func TestCompletePasswordChangeRollsBackWhenAuditCannotCommit(t *testing.T) {
 	}
 }
 
-func TestPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
+func TestMandatoryPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
 		kind            PasswordChangeKind
@@ -349,12 +349,6 @@ func TestPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
 			name:        "mandatory",
 			kind:        BootstrapMandatoryChange,
 			newPassword: config.NewSecret("a-mandatory-launch-passphrase-8"),
-		},
-		{
-			name:            "voluntary",
-			kind:            VoluntaryChange,
-			currentPassword: config.NewSecret("correct-horse-battery-staple-7"),
-			newPassword:     config.NewSecret("a-voluntary-launch-passphrase-8"),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -424,6 +418,84 @@ func TestPasswordChangeRevokesEveryOtherSessionFamily(t *testing.T) {
 				t.Errorf("other family = %s/%s, want REVOKED/PASSWORD_CHANGE", otherState, otherReason)
 			}
 		})
+	}
+}
+
+// T055 proves the voluntary-change path itself, not the superficially similar
+// mandatory or recovery paths. Its state and audit assertions fail if family
+// revocation is removed from the password-change transaction.
+func TestVoluntaryPasswordChangeRevokesAnotherSessionFamilyWithAuditEvidence(t *testing.T) {
+	freshSchema(t)
+	conn, ctx := connect(t)
+	accountID, currentSessionID := bootstrapWithSession(t, conn, ctx)
+	now := time.Now().UTC()
+
+	var otherSessionID string
+	if err := conn.QueryRow(ctx, `
+		INSERT INTO sessions
+		   (account_id, admitted_epoch, authenticated_at, last_activity_at, idle_expires_at, absolute_expires_at)
+		VALUES ($1::uuid, 1, $2, $2, $3, $4)
+		RETURNING id::text
+	`, accountID, now, now.Add(time.Hour), now.Add(12*time.Hour)).Scan(&otherSessionID); err != nil {
+		t.Fatalf("creating other session family: %v", err)
+	}
+	otherCredential, err := NewSessionCredential()
+	if err != nil {
+		t.Fatalf("minting other session credential: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO session_credentials (session_id, generation, credential_digest, csrf_digest)
+		VALUES ($1::uuid, 1, $2, $3)
+	`, otherSessionID, otherCredential.CredentialDigest, otherCredential.CSRFDigest); err != nil {
+		t.Fatalf("storing other session credential: %v", err)
+	}
+
+	result, err := CompletePasswordChange(ctx, conn, PasswordChangeRequest{
+		AccountID:           accountID,
+		SessionID:           currentSessionID,
+		PresentedGeneration: 1,
+		Kind:                VoluntaryChange,
+		CurrentPassword:     config.NewSecret("correct-horse-battery-staple-7"),
+		NewPassword:         config.NewSecret("a-voluntary-launch-passphrase-8"),
+		Compromised:         clearCompromisedSource(),
+	}, adminPasswordChangePolicy, now)
+	if err != nil {
+		t.Fatalf("completing voluntary password change: %v", err)
+	}
+	if result.SessionID != currentSessionID || result.Generation != 2 {
+		t.Fatalf("replacement session = %s/%d, want %s/2", result.SessionID, result.Generation, currentSessionID)
+	}
+
+	var currentState, otherState string
+	var otherReason *string
+	var otherRevokedAt *time.Time
+	if err := conn.QueryRow(ctx, `SELECT state::text FROM sessions WHERE id = $1::uuid`, currentSessionID).Scan(&currentState); err != nil {
+		t.Fatalf("reading current family: %v", err)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT state::text, revocation_reason::text, revoked_at
+		FROM sessions WHERE id = $1::uuid
+	`, otherSessionID).Scan(&otherState, &otherReason, &otherRevokedAt); err != nil {
+		t.Fatalf("reading revoked family: %v", err)
+	}
+	if currentState != "ACTIVE" {
+		t.Fatalf("current family state = %s, want ACTIVE", currentState)
+	}
+	if otherState != "REVOKED" || otherReason == nil || *otherReason != "PASSWORD_CHANGE" || otherRevokedAt == nil {
+		t.Fatalf("other family = %s/%v/%v, want REVOKED/PASSWORD_CHANGE/revocation time", otherState, otherReason, otherRevokedAt)
+	}
+
+	var auditKind string
+	var otherFamiliesRevoked bool
+	if err := conn.QueryRow(ctx, `
+		SELECT metadata->>'change_kind', (metadata->>'other_sessions_revoked')::boolean
+		FROM audit_events
+		WHERE action = 'PASSWORD_CHANGED' AND target_id = $1
+	`, accountID).Scan(&auditKind, &otherFamiliesRevoked); err != nil {
+		t.Fatalf("reading voluntary password-change audit evidence: %v", err)
+	}
+	if auditKind != "VOLUNTARY" || !otherFamiliesRevoked {
+		t.Fatalf("password-change audit = %s/%v, want VOLUNTARY/true", auditKind, otherFamiliesRevoked)
 	}
 }
 

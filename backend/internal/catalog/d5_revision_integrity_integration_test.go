@@ -361,6 +361,15 @@ func TestD5CandidateCloneIsDeepAtomicAndIdentityStable(t *testing.T) {
 	if second.ID != candidate.ID {
 		t.Fatalf("idempotent candidate call returned %s, want %s", second.ID, candidate.ID)
 	}
+	var candidateAuditCount int
+	if err := f.p.QueryRow(f.ctx, `
+		SELECT count(*)
+		FROM audit_events
+		WHERE action = 'COURSE_CANDIDATE_CREATED'
+		  AND target_id = $1::text
+	`, candidate.ID).Scan(&candidateAuditCount); err != nil || candidateAuditCount != 1 {
+		t.Fatalf("candidate creation audit count = %d (err=%v), want 1", candidateAuditCount, err)
+	}
 
 	if err := f.p.QueryRow(f.ctx, countSQL).Scan(
 		&externalAfter[0], &externalAfter[1], &externalAfter[2], &externalAfter[3],
@@ -368,8 +377,9 @@ func TestD5CandidateCloneIsDeepAtomicAndIdentityStable(t *testing.T) {
 	); err != nil {
 		t.Fatalf("recounting external rows: %v", err)
 	}
+	externalBefore[5]++ // The newly-created candidate is itself an audited privileged mutation.
 	if externalAfter != externalBefore {
-		t.Fatalf("candidate clone changed externally owned/evidence rows: before=%v after=%v",
+		t.Fatalf("candidate clone changed externally owned rows or emitted unexpected evidence: before=%v after=%v",
 			externalBefore, externalAfter)
 	}
 

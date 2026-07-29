@@ -501,6 +501,17 @@ func (r *Repository) CreateCandidate(
 		if err != nil {
 			return err
 		}
+		if err := writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: ownerAccountID, actorDescriptor: actorDescriptor,
+			action: "COURSE_CANDIDATE_CREATED", targetType: "COURSE_REVISION", targetID: rev.ID,
+			reason: "Candidate revision created from the live revision",
+			metadata: map[string]any{
+				"course_id":         courseID,
+				"based_on_revision": liveRev.ID,
+			},
+		}); err != nil {
+			return err
+		}
 		candidate = rev
 		return nil
 	})
@@ -888,6 +899,11 @@ func (r *Repository) UpdateCourseRevision(
 		previewAssetVersionID := rev.PreviewAssetVersionID
 		if req.PreviewAssetVersionID != nil {
 			previewAssetVersionID = req.PreviewAssetVersionID
+		}
+		if req.MajorTermID != nil || req.SubjectTermID != nil {
+			if err := validateTaxonomyAssignments(ctx, tx, req.MajorTermID, req.SubjectTermID); err != nil {
+				return err
+			}
 		}
 
 		now := time.Now().UTC()

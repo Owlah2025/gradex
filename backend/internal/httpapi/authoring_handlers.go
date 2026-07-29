@@ -95,6 +95,10 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 		writeProblem(c, problem.ValidationFailed())
 		return
 	}
+	if errors.Is(err, catalog.ErrInvalidTaxonomyTerm) || errors.Is(err, catalog.ErrTaxonomyTermUnavailable) || errors.Is(err, catalog.ErrTaxonomyTermKindMismatch) {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
 	writeProblem(c, problem.Internal(""))
 }
 

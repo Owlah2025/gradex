@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -55,5 +56,15 @@ func TestTaxonomyMutationValidationRejectsMissingIdentifiers(t *testing.T) {
 	}
 	if err := validateTaxonomyMutation("term-id", ""); err == nil || err.Error() != "admin account ID is required" {
 		t.Fatalf("missing admin error = %v", err)
+	}
+}
+
+func TestAdminTaxonomyAssignmentRejectsEmptyTermIdentifier(t *testing.T) {
+	repo := &Repository{}
+	_, err := repo.AssignTaxonomyToRevision(context.Background(), AssignTaxonomyRequest{
+		CourseID: "course-id", RevisionID: "revision-id", AdminAccountID: "admin-id", SubjectTermID: "subject-id",
+	})
+	if !errors.Is(err, ErrInvalidTaxonomyTerm) {
+		t.Fatalf("empty term ID error = %v, want %v", err, ErrInvalidTaxonomyTerm)
 	}
 }

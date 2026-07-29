@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,10 +12,13 @@ import (
 )
 
 var (
-	ErrTaxonomyTermNotFound   = errors.New("taxonomy term not found")
-	ErrInvalidTaxonomyTerm    = errors.New("invalid taxonomy term")
-	ErrTaxonomyTermReferenced = errors.New("taxonomy term is referenced by a course")
-	ErrTaxonomyTermRetired    = errors.New("taxonomy term is already retired")
+	ErrTaxonomyTermNotFound     = errors.New("taxonomy term not found")
+	ErrInvalidTaxonomyTerm      = errors.New("invalid taxonomy term")
+	ErrTaxonomyTermReferenced   = errors.New("taxonomy term is referenced by a course")
+	ErrTaxonomyTermRetired      = errors.New("taxonomy term is already retired")
+	ErrTaxonomyTermUnavailable  = errors.New("taxonomy term is unavailable for assignment")
+	ErrTaxonomyTermKindMismatch = errors.New("taxonomy term kind does not match assignment")
+	ErrTaxonomyRevisionInvalid  = errors.New("revision is not an allowed taxonomy override target")
 )
 
 type CreateTaxonomyTermRequest struct {
@@ -44,6 +48,15 @@ type DeleteTaxonomyTermRequest struct {
 	TermID          string
 	AdminAccountID  string
 	ActorDescriptor string
+}
+
+type AssignTaxonomyRequest struct {
+	CourseID        string
+	RevisionID      string
+	AdminAccountID  string
+	ActorDescriptor string
+	MajorTermID     string
+	SubjectTermID   string
 }
 
 type taxonomyAuditRequest struct {
@@ -208,6 +221,141 @@ func (r *Repository) DeleteTaxonomyTerm(ctx context.Context, req DeleteTaxonomyT
 			},
 		})
 	})
+}
+
+// AssignTaxonomyToRevision applies an Admin override to one explicitly named live or candidate revision.
+func (r *Repository) AssignTaxonomyToRevision(ctx context.Context, req AssignTaxonomyRequest) (*CourseRevision, error) {
+	if req.CourseID == "" || req.RevisionID == "" {
+		return nil, ErrCourseNotFound
+	}
+	if err := validateTaxonomyAdmin(req.AdminAccountID); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.MajorTermID) == "" || strings.TrimSpace(req.SubjectTermID) == "" {
+		return nil, ErrInvalidTaxonomyTerm
+	}
+
+	var revision *CourseRevision
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		course, err := r.LockCourse(ctx, tx, req.CourseID)
+		if err != nil {
+			return err
+		}
+		target, err := lockExactTaxonomyRevision(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+		if !taxonomyOverrideAllowed(course, target) {
+			return ErrTaxonomyRevisionInvalid
+		}
+		if err := validateTaxonomyAssignments(ctx, tx, &req.MajorTermID, &req.SubjectTermID); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if _, err := tx.Exec(ctx, `
+			UPDATE course_revisions
+			SET major_term_id = $1::uuid, subject_term_id = $2::uuid, updated_at = $3
+			WHERE id = $4::uuid AND course_id = $5::uuid
+		`, req.MajorTermID, req.SubjectTermID, now, req.RevisionID, req.CourseID); err != nil {
+			return fmt.Errorf("overriding course taxonomy: %w", err)
+		}
+		if err := writeAdminTaxonomyAssignmentAudit(ctx, tx, req, target); err != nil {
+			return err
+		}
+		revision, err = r.loadRevisionGraphByIDTx(ctx, tx, req.RevisionID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return revision, nil
+}
+
+func validateTaxonomyAssignments(ctx context.Context, tx pgx.Tx, majorTermID, subjectTermID *string) error {
+	type assignment struct {
+		termID string
+		kind   TaxonomyKind
+	}
+	assignments := make([]assignment, 0, 2)
+	if majorTermID != nil {
+		assignments = append(assignments, assignment{termID: *majorTermID, kind: TaxonomyMajor})
+	}
+	if subjectTermID != nil {
+		assignments = append(assignments, assignment{termID: *subjectTermID, kind: TaxonomySubject})
+	}
+	sort.Slice(assignments, func(i, j int) bool { return assignments[i].termID < assignments[j].termID })
+	for _, assignment := range assignments {
+		if strings.TrimSpace(assignment.termID) == "" {
+			return ErrInvalidTaxonomyTerm
+		}
+		if err := lockAssignableTaxonomyTerm(ctx, tx, assignment.termID, assignment.kind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func lockAssignableTaxonomyTerm(ctx context.Context, tx pgx.Tx, termID string, expectedKind TaxonomyKind) error {
+	var kind TaxonomyKind
+	var retired bool
+	err := tx.QueryRow(ctx, `
+		SELECT kind, retired_at IS NOT NULL
+		FROM taxonomy_terms
+		WHERE id = $1::uuid
+		FOR SHARE
+	`, termID).Scan(&kind, &retired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrTaxonomyTermUnavailable
+	}
+	if err != nil {
+		return fmt.Errorf("locking taxonomy term assignment: %w", err)
+	}
+	if retired {
+		return ErrTaxonomyTermUnavailable
+	}
+	if kind != expectedKind {
+		return ErrTaxonomyTermKindMismatch
+	}
+	return nil
+}
+
+type taxonomyRevisionTarget struct {
+	ID    string
+	State RevisionState
+}
+
+func lockExactTaxonomyRevision(ctx context.Context, tx pgx.Tx, courseID, revisionID string) (*taxonomyRevisionTarget, error) {
+	var target taxonomyRevisionTarget
+	err := tx.QueryRow(ctx, `
+		SELECT id, state
+		FROM course_revisions
+		WHERE id = $1::uuid AND course_id = $2::uuid
+		FOR UPDATE
+	`, revisionID, courseID).Scan(&target.ID, &target.State)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCourseNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("locking taxonomy override revision: %w", err)
+	}
+	return &target, nil
+}
+
+func taxonomyOverrideAllowed(course *CourseRow, target *taxonomyRevisionTarget) bool {
+	if course.LiveRevisionID != nil && *course.LiveRevisionID == target.ID {
+		return true
+	}
+	return target.State == RevisionDraft || target.State == RevisionChangesRequested || target.State == RevisionPendingReview
+}
+
+func writeAdminTaxonomyAssignmentAudit(ctx context.Context, tx pgx.Tx, req AssignTaxonomyRequest, target *taxonomyRevisionTarget) error {
+	return writeAdminCourseAudit(ctx, tx, req.AdminAccountID, req.ActorDescriptor,
+		"COURSE_REVISION_UPDATED", req.CourseID, "Course taxonomy overridden by Admin", map[string]any{
+			"revision_id":       target.ID,
+			"major_term_id":     req.MajorTermID,
+			"subject_term_id":   req.SubjectTermID,
+			"taxonomy_override": true,
+		})
 }
 
 func validateTaxonomyTermInput(kind TaxonomyKind, labelAr, labelEn string, academicCode *string) (*string, error) {

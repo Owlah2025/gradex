@@ -10,9 +10,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
@@ -251,6 +253,68 @@ func doPricingRequest(
 		t.Fatalf("client.Do: %v", err)
 	}
 	return resp
+}
+
+// TestCatalogMutationRouteTableRequiresSessionMutationSecurity derives the S2
+// mutation surface from the production-composed Gin router.  It deliberately
+// sends no valid body: Origin/CSRF must reject before request binding or any
+// domain mutation, so malformed fixture data cannot hide a missing boundary.
+func TestCatalogMutationRouteTableRequiresSessionMutationSecurity(t *testing.T) {
+	ts, _, _, _, courseID, sectionID, adminToken, _ := setupAdminPricingAPIServer(t)
+	engine, ok := ts.Config.Handler.(*gin.Engine)
+	if !ok {
+		t.Fatal("test server does not expose the production Gin router")
+	}
+
+	routes := catalogMutationRoutes(engine)
+	if len(routes) == 0 {
+		t.Fatal("no catalog mutation routes were derived from the live router")
+	}
+
+	for _, route := range routes {
+		path := materializeCatalogMutationRoute(route.Path, courseID, sectionID)
+		t.Run(route.Method+" "+route.Path+" rejects missing origin", func(t *testing.T) {
+			response := doPricingRequest(t, ts.Client(), route.Method, ts.URL+path, adminToken, "", adminToken, nil)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusForbidden {
+				t.Fatalf("missing Origin status = %d, want 403", response.StatusCode)
+			}
+		})
+
+		t.Run(route.Method+" "+route.Path+" rejects invalid csrf", func(t *testing.T) {
+			response := doPricingRequest(t, ts.Client(), route.Method, ts.URL+path, adminToken, "https://gradex.example", "not-the-session-token", nil)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusForbidden {
+				t.Fatalf("invalid CSRF status = %d, want 403", response.StatusCode)
+			}
+		})
+	}
+}
+
+func catalogMutationRoutes(engine *gin.Engine) []gin.RouteInfo {
+	var routes []gin.RouteInfo
+	for _, route := range engine.Routes() {
+		if route.Method == http.MethodGet || !isCatalogMutationPath(route.Path) {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	return routes
+}
+
+func isCatalogMutationPath(path string) bool {
+	return strings.HasPrefix(path, "/api/v1/courses") ||
+		strings.HasPrefix(path, "/api/v1/admin/courses") ||
+		strings.HasPrefix(path, "/api/v1/admin/review") ||
+		strings.HasPrefix(path, "/api/v1/admin/taxonomy/terms")
+}
+
+func materializeCatalogMutationRoute(path, courseID, sectionID string) string {
+	path = strings.ReplaceAll(path, ":revisionId", "30000000-0000-0000-0000-000000000001")
+	path = strings.ReplaceAll(path, ":sectionId", sectionID)
+	path = strings.ReplaceAll(path, ":lessonId", "30000000-0000-0000-0000-000000000002")
+	path = strings.ReplaceAll(path, ":id", courseID)
+	return path
 }
 
 func TestAdminPricingHTTPAPI_RealPostgreSQL(t *testing.T) {
