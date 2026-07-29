@@ -156,6 +156,14 @@ Six slices (S3–S8) have three available dates (August 4–6), and nine feature
 dates before the August 10 integration runway. **August 8 is no longer a credible runway start, and a
 full-PRD August 15 launch is not forecastable.** That result needs no velocity assumption — it is
 arithmetic on dates — and the observed velocity makes it worse: S1 was scoped as one day and took five.
+> **HISTORICAL — the date conclusion below was reversed.** D-038 and D-039's analysis stands as the
+> record of why August 8 and a full-PRD August 15 were judged non-credible on 2026-08-02, but
+> [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+> restored **2026-08-15** as the hard product-owner date on 2026-07-27, and
+> [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+> later removed roughly 26 hours of Tier-3 payment work from the runway. The September target is not
+> in force.
+
 **The developer adopted Remedy A the same day
 ([D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)):
 August 8 and the August 15 full-PRD target are retired as non-credible, full PRD scope is preserved, and
@@ -384,7 +392,7 @@ August 2. S1C inherits four carryovers and three unexamined judgement calls, all
 | M5 — Integrated production candidate | August 12 | **Not forecastable** | Depends on S1A–S10; the feature slices feeding it have no credible dates (D-038) |
 | M6 — Staging acceptance | August 13 | **Not forecastable** | UAT and all-gate audit, downstream of M5 |
 | M7 — Production soft launch | August 14 | **Not forecastable** | Smoke tests and rollback rehearsal, downstream of M6 |
-| M8 — Public go/no-go | **September, date unset** | **Retired and awaiting rebaseline** | Every criterion in PLAN.md §8. August 15 retired under [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september); scope preserved, exact date set only after the August 6 outreach and an S2–S16 rebaseline |
+| M8 — Public go/no-go | **August 15** | Not started | Every criterion in PLAN.md §8. D-039's September target was superseded on 2026-07-27 by [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews), which restored August 15 as the hard date |
 
 ## Carryover
 
@@ -455,7 +463,7 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | **No accountant is engaged — blocks LG-016 (still cutover-blocking)** | Developer/founder | **Source and engage.** `LG-016` did not move under D-045: collecting payment outside Gradex changes where records live, not whether they are required. `LG-001`/`LG-007`/`LG-017` are now deferred | **Immediately** | An engaged adviser, then written treatment of externally collected payment records |
 | ~~Tap message~~ — **no longer launch-blocking** | Developer/founder | `LG-007`, `LG-008`, `LG-010` are `DEFERRED` under D-045. Sending remains useful lead-time work for the post-launch payment programme, but it no longer gates August 15 | Optional | A `SENT` row if sent |
 | Required launch gates are all open | Role owners in LAUNCH_GATES.md | 15 of 15 `OPEN`, zero `RESOLVED`, 6 `DEFERRED` with in-platform payments under D-045. **No gate was weakened, merged, or resolved on engineering progress** — the seven payment gates left the required set because the feature did, and the four legal/accounting gates did not move | August 6 | Named contacts plus acknowledged requests/delivery dates |
-| **Critical-path rebaseline of S2–S16 is owed; no public date exists** | Developer + builder seat | Remedy A is adopted (D-039). Rebaseline S2–S16 against the August 6 outreach results, then set the September date. Do not publish a date before both | **After August 6 outreach returns** | Dated S2–S16 with acknowledged external delivery dates, and a recorded public target |
+| **The August 15 date is hard and the runway is tight** | Developer + builder seat | D-040 restored August 15 and D-045 returned roughly 26 hours of Tier-3 work by removing S7. The dated runway is [AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan). D-039's rebaseline-then-set-a-September-date remedy is superseded and is not the current plan | Continuous | Slices closing on their dated days with independent verdicts, and the August 6 outreach answered |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1 does not close until S1C closes | Claude, builder under D-037 | Deliver S1C's eleven acceptance items, then the S1 integration review by `agy` | August 2 | S1C closes on a frozen exact range with no critical or high finding |
 | Slices blocked on external parties not yet contacted | Developer/founder | S4 needs a malware scanner, S9 needs a verified sender, S10 needs counsel. **S6/S7's Tap dependency is gone under D-045** | August 6 | Acknowledged requests with delivery dates; no engineering rate substitutes for these |
@@ -786,25 +794,23 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
   point.
 - Daily capacity is 8–10 focused hours.
 - The full current PRD is the release target.
-- The public target is readiness-gated and, under D-039, is **September with no exact date**. August 15
-  is retired. A forecast range is not a target and is not to be published as one.
+- The public target is **2026-08-15**, a hard product-owner decision under
+  [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
+  which supersedes D-039 on the date. The September target D-039 set is **no longer in force**.
 - D-033: Codex is the standing builder and planner; Claude is the standing independent read-only
   reviewer. Review uses a disposable detached worktree and frozen exact commit range. A `TAINTED` or
   `UNAVAILABLE` run is never recorded as approval.
-- D-037 (active, scoped to S1C): Claude holds the builder/planner seat and `agy` on
-  `gemini-3.1-pro-high` holds the independent read-only reviewer seat, dispatched through
-  `scripts/agy-review.sh`. It **expires at S1C's frozen reviewed head**; S2 needs its own dated
-  assignment. The S1 integration review also goes to `agy`, because its scope contains Claude-authored
-  commits. D-033's containment and never-self-approve rules are unchanged, and D-033 stays paused until
-  Codex availability is **explicitly reverified** — silence is not a return of quota. D-035 (S1B2) and
-  D-036 (S1B3) are expired and historical.
-- D-038 (active): August 8 is recorded as no longer a credible runway start and a full-PRD August 15
-  launch as not forecastable. S3–S8 stay `TBD`.
-- D-039 (active): **Remedy A adopted.** August 8 and the August 15 full-PRD target are retired as
-  non-credible, full PRD scope is preserved, and the public target moves into September with **no exact
-  date set** until the August 6 outreach results and an S2–S16 rebaseline exist. Remedy B stays
-  available afterwards as an optimization; Remedy C — compressing the envelope or spending August 7 —
-  is **rejected**. A September range must not be committed to publicly as a target.
+- **Seat decisions D-035, D-036, D-037, D-047, D-048, and D-049 are all spent** and historical. Each
+  was scoped to one slice or range and expired at its frozen reviewed head. **No seat is assigned for
+  S5 implementation**; it requires its own dated assignment before any code is written. D-033's
+  containment and never-self-approve rules are unchanged, and D-033 stays paused until Codex
+  availability is **explicitly reverified** — silence is not a return of quota.
+- D-038 and D-039 (**historical, superseded on the date**): they retired August 8 and the August 15
+  full-PRD target as non-credible and moved the public target into September.
+  [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+  restored **2026-08-15** as the hard date on 2026-07-27. Their analysis is retained as the evidence
+  behind that reversal; their September target is not in force. Remedy C — compressing the envelope
+  or spending a protected recovery day — remains **rejected**.
 - **A frontend production build is not local build evidence unless `.next` was removed first.** In
   force from August 2 regardless of whether `CARRYOVER-LOCAL-BUILD-CACHE` is fixed. A build claim that
   does not say "clean" is to be read as not having been made.
