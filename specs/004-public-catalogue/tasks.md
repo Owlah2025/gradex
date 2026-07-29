@@ -2,10 +2,22 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Builder**: Antigravity, under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
-**Reviewer**: Claude, Tier 1. **A builder never closes its own slice.**
+**Seats: UNASSIGNED as of 2026-07-30.** S3 implementation **may not begin** until a new dated decision
+assigns a builder seat and a separate independent read-only reviewer seat. A builder never closes its
+own slice, and no seat renews implicitly.
 
-**Blocked until S2 closes** on an independent verdict. Frozen and ready, not active.
+**Codex may be assigned only after its availability is explicitly reverified.** Codex exhausted its
+quota, and neither silence nor the absence of a quota error counts as reverification — see
+[D-033](../../docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review), which stays
+paused for exactly that reason.
+
+*Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
+under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
+That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
+unchanged.
+
+**S2 has closed** on an independent verdict at `785d71c`, so the Phase 1 dependency is satisfied.
+S3 remains blocked on seat assignment, not on S2.
 
 **[OD-001](spec.md#resolved-decisions) resolved `ADJUST` on 2026-07-28**: Arabic query normalization
 is **in** S3; relevance ranking and multi-dimension filtering stay deferred to S18. FR-023b forbids
@@ -33,17 +45,19 @@ proofs were trusted only after the reviewer reproduced their mutations independe
 **This phase is the security surface. Nothing else in the slice matters if it is wrong.**
 
 - [ ] T001 Create `backend/internal/catalogpublic/doc.go` stating the module boundary: public reads
-      only, no writes, no authority, reads S2's tables
+      only, no writes, no authority, reads S2's tables. State explicitly that this module implements
+      **no** entitlement evaluation (S4), no protected delivery (S4), no progress (S5), and no
+      invitation or Enrollment behaviour (S6) *(FR-020 boundary; SLICES.md §2)*
 - [ ] T002 Implement `PublishedOnly` in `backend/internal/catalogpublic/visibility.go` as the single
       exported predicate encoding **all four** exclusions together — lifecycle state, emergency access
       suspension, pending-revision selection, and the live-revision pointer. One condition, because it
-      answers one question
+      answers one question *(FR-002, FR-004, FR-005; BR-090, BR-017, BR-161)*
 - [ ] T003 Implement the repository in `backend/internal/catalogpublic/repository.go` with list,
       detail, and search. **Every** query obtains its rows through T002. The constructor **refuses to
-      build** without the predicate — no nil, no default, no fallback
+      build** without the predicate — no nil, no default, no fallback *(FR-002; BR-161)*
 - [ ] T004 Implement the single not-found response constructor for the public surface. Hidden and
       absent Courses return byte-identical `404` Problem Details — same status, same body, same
-      headers, no cause-varying `detail` field
+      headers, no cause-varying `detail` field *(FR-003; BR-090)*
 
 **Checkpoint 1** — the predicate exists, is unavoidable, and both not-found paths are identical.
 No route is mounted yet.
@@ -51,24 +65,36 @@ No route is mounted yet.
 ## Phase 2 — Public routes and derived enforcement
 
 - [ ] T005 Register public routes under `/api/v1/catalog` in `backend/internal/httpapi/router.go`,
-      per [contracts/catalogue-api.md](contracts/catalogue-api.md)
+      per [contracts/catalogue-api.md](contracts/catalogue-api.md). Every route is unauthenticated and
+      read-only *(FR-001)*
 - [ ] T006 Implement thin handlers: **no status comparison in a handler**, no second not-found
-      constructor, no query built outside the repository
+      constructor, no query built outside the repository *(FR-002, FR-003)*
 - [ ] T007 **The load-bearing test.** In `backend/internal/httpapi/catalog_public_test.go`, enumerate
       every route registered under the public prefix from `r.Routes()` and assert each is served
       through `PublishedOnly`. A new public route that queries the catalog tables directly **must fail
-      this test.** Derive the route list; never hand-maintain it
+      this test.** Derive the route list; never hand-maintain it *(FR-002, SC-001)*
+- [ ] T007a **Route and exposure guard — what S3 must NOT add.** In the same derived-enumeration
+      style as T007, assert over the **whole** application route table that this slice introduces:
+      **no** non-`GET`/`HEAD` route under the public prefix; **no** route under the public prefix
+      requiring or reading a session, credential, or capability; and **no** route whose path or handler
+      names an order, checkout, cart, coupon, payment, payment-callback, webhook, refund, invoice, or
+      entitlement concept. Derive the assertion from `r.Routes()`; a hand-maintained list is not
+      evidence. **This test must fail if any such route is added later**, which is what makes the
+      absence a property of the code rather than of this document *(FR-010a, FR-001;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+      BR-020, BR-029; [contracts/catalogue-api.md](contracts/catalogue-api.md))*
 - [ ] T008 Prove the enumeration case: request every non-Published state by **exact identifier** and
       assert the response is identical to a never-existing identifier in **status, headers, response
       schema, and body**. This is the exact, provable guarantee — assert on the full response, not the
       status code. Timing is **not** claimed here; it is measured separately in T038
+      *(FR-003, FR-004, SC-002)*
 - [ ] T009 Implement the detail lookup with the predicate **inside the query boundary**. Do **not**
       fetch-then-check in application code: that returns measurably faster for an absent row than for
       a hidden one, and closing that branch is **necessary but not sufficient** — see
       [plan.md](plan.md#the-timing-claim-stated-honestly). This task is where the mistake gets made by
-      default
+      default *(FR-003, FR-005; BR-017)*
 
-**Checkpoint 2 — MANDATORY REVIEW GATE.** Do not proceed to Phase 3 until T007 and T008 pass *and*
+**Checkpoint 2 — MANDATORY REVIEW GATE.** Do not proceed to Phase 3 until T007, T007a, and T008 pass *and*
 their mutations have been run. This is the only checkpoint in S3 that blocks on evidence rather than
 on completion, because everything after it is presentation and cannot compensate for a leak here.
 
@@ -78,39 +104,86 @@ Required mutations, each of which must turn a test red:
 3. Make the hidden-Course path return `403` instead of `404` → T008 fails.
 4. Add a cause-varying `detail` field to the hidden-Course response → T008 fails on the body
    assertion. Included because a differing body is the leak that survives a matching status code.
+5. Register a `POST /api/v1/catalog/checkout` route → **T007a fails and names it.** Included because
+   FR-010a's guarantee is only as good as its regression test.
 
 ## Phase 3 — Catalogue list and Course detail (backend)
 
 - [ ] T010 [P] Implement the paginated list projection: title, Instructor display name, three taxonomy
-      dimensions, price, preview availability
-- [ ] T011 [P] Implement the detail projection: description, Section outline, full-Course price, each
-      individually priced Section's price, preview reference
+      dimensions in the active interface language, the **full-Course price only** in integer minor
+      units, and preview availability *(FR-008, FR-010, FR-013; BR-157, BR-105, BR-158, BR-019)*
+- [ ] T011 [P] Implement the detail projection: authored description, Section outline, the
+      **full-Course price**, and the preview reference. **Serve no Section price.** Section is **not an
+      independently acquirable scope** in the MVP, so a per-Section price is not part of this
+      projection and must not appear in the payload — not as a field, not as null, not as zero. The
+      Course price is **informational external-payment guidance only**: it tells the Student what to pay
+      out of band, and neither the payload nor any field name may imply Gradex takes payment. The
+      Section outline keeps its titles, ordering, and Lesson counts — **only the price is removed**
+      *(FR-009, FR-010, FR-010a;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+      BR-010, BR-021, BR-019, BR-020)*
+- [ ] T011a Assert the **absence** of any Section price in the detail payload, against the full
+      serialized response rather than the rendered page, for a Course whose Sections carry authored
+      prices in S2's tables. S2 still stores Section prices and the Admin surface still shows them
+      (D-045 resolved question 2); this test is what keeps them from reaching a public payload
+      *(FR-009, FR-010a; BR-021)*
 - [ ] T012 Assert **no PII beyond display name** appears in any public response, against the full
       response body rather than the rendered page. Email, phone, and legal identity must be absent
-      from the serialized payload, not merely unrendered
+      from the serialized payload, not merely unrendered *(FR-011, SC-007; BR-105, BR-064)*
 - [ ] T013 Assert Lesson titles, Resources, and Lab Materials are absent from every public response
+      *(FR-006; BR-143, BR-161)*
+- [ ] T013a Assert a **retired** taxonomy term still displays on a Course that already carries it, in
+      both the list and the detail projection. Retirement blocks new assignment, not the display of an
+      existing one, and dropping it silently changes what a Course appears to be about
+      *(FR-014; BR-160)*
 - [ ] T014 Assert a Published Course whose owning Instructor is **suspended** remains publicly visible
       — suspension blocks authoring, not Student access (BR-065). This is an easy over-correction and
-      the test exists to catch it
+      the test exists to catch it *(FR-007; BR-065)*
 
 **Checkpoint 3** — the public API returns correct content and leaks nothing. Frontend has not started.
 
 ## Phase 4 — Bilingual responsive shell (frontend)
 
 - [ ] T015 Extend `frontend/src/lib/i18n` — **extend, do not replace.** A second locale mechanism is a
-      second source of truth for what language the user chose
+      second source of truth for what language the user chose *(FR-020)*
 - [ ] T016 Implement the public shell layout with document direction bound to locale: RTL for Arabic,
-      LTR for English, applied to navigation, forms, lists, and iconography
+      LTR for English, applied to navigation, forms, lists, and iconography *(FR-017, FR-020; BR-149)*
 - [ ] T017 Default to Arabic for a visitor with no stored preference; persist a chosen language across
       navigation and across sessions, for anonymous and authenticated visitors alike
-- [ ] T018 [P] Implement the catalogue list screen
-- [ ] T019 [P] Implement the Course detail screen, including the Section outline and both price forms
+      *(FR-015, FR-016, SC-003; BR-149)*
+- [ ] T018 [P] Implement the catalogue list screen, rendering the list projection including the three
+      taxonomy dimensions in the active interface language *(FR-008, FR-013; BR-157, BR-158)*
+- [ ] T019 [P] Implement the Course detail screen, including the Section outline and the
+      **full-Course price only**. **Render no Section price and no per-Section price column, row, or
+      badge** — Section is not an independently acquirable scope in the MVP. Present the Course price as
+      **informational external-payment guidance**; the page may link to guidance on how to obtain
+      access, and may not imply Gradex takes payment *(FR-009, FR-010, FR-010a;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+      BR-010, BR-021, BR-019, BR-020)*
+- [ ] T019a **Render no commerce control.** Neither the catalogue list nor the Course detail screen may
+      render a checkout button, an add-to-cart control, a cart indicator, a coupon or promo-code field,
+      a buy-now control, a price-total or discount computation, or any control that submits toward a
+      purchase. There is no client route, form action, or fetch target for checkout, cart, coupon,
+      payment, or payment callback. An informational link explaining how to obtain access is permitted
+      and is the **only** access-related affordance on these screens *(FR-010a, FR-010;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+      BR-020, BR-029)*
 - [ ] T020 Render the optional public preview with no empty player frame when absent; ensure no
-      protected media is reachable from the page
+      protected media is reachable from the page *(FR-012, FR-006; BR-143)*
 - [ ] T021 Present Instructor-authored content in its authored language under either interface
-      language, with no machine translation (BR-150)
+      language, with no machine translation (BR-150) *(FR-019; BR-150)*
 - [ ] T022 Responsive audit at phone, tablet, and desktop widths in **both** directions: no clipping,
-      mirroring, or overlap
+      mirroring, or overlap *(FR-018, FR-017, SC-004)*
+- [ ] T022a **Rendered-browser commerce-absence evidence.** In the Playwright suite, assert against the
+      **rendered DOM and accessibility tree** — not the source and not the API payload — that no
+      checkout, cart, coupon, buy-now, or purchase-submission control is present on the catalogue list
+      or the Course detail screen, and that no Section price is rendered. Run the full matrix:
+      **Arabic RTL and English LTR × every S3 viewport (phone, tablet, desktop)**, which is six
+      renderings per screen. Assert by accessible role and name plus a text sweep for the localized
+      commerce vocabulary in **both** languages, so an Arabic-only checkout affordance cannot pass an
+      English-only assertion. Record the artefacts alongside the T022 responsive evidence
+      *(FR-010a, FR-009, FR-017, FR-018; SC-004;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation))*
 
 **Checkpoint 4** — a visitor can browse and evaluate a Course in Arabic and English.
 
@@ -122,54 +195,64 @@ Required mutations, each of which must turn a test red:
 > identical whether folding works or is absent entirely — so "I wrote the test after and it passed" is
 > not evidence here.
 
-- [ ] T023 Add migration `0011_catalog_search`. Additive only: the `catalog_normalize_ar` function,
-      one generated column, one index. No constraint on any existing table, and **no modification of
-      any existing migration file** — their checksums are enforced
+- [ ] T023 Add migration `0011_catalog_search`, the **next** number after committed
+      `0010_revision_integrity`. Additive only: the `catalog_normalize_ar` function, one generated
+      column, one index. No constraint on any existing table, and **no modification of
+      any existing migration file** — their checksums are enforced by `scripts/docs-guard.sh`
+      *(FR-002, FR-021 storage support; data-model.md §Migration `0011_catalog_search`)*
 - [ ] T023a **Verify the backfill, do not assume it.** `ALTER TABLE … ADD COLUMN … GENERATED … STORED`
       computes the value for existing rows as part of the statement. Assert after `up` that every
       pre-existing Published Course has non-empty `search_text` and that a known Arabic title is
       present in folded form. A migration that leaves the existing catalogue unsearchable passes every
-      schema assertion while being obvious to a visitor
+      schema assertion while being obvious to a visitor *(FR-021, FR-023)*
 - [ ] T024 Implement `catalog_normalize_ar` as an `IMMUTABLE STRICT` SQL function — **the single
       definition of normalization in the system.** Exactly the transformations in
       [data-model.md](data-model.md#1-the-normalize-function--the-single-definition): alef/hamza
       folding, alef maqsura, taa marbuta, Arabic-Indic digits, tashkeel and tatweel removal, Unicode
-      case folding, and whitespace collapse
+      case folding, and whitespace collapse *(FR-023; BR-162 matching only — ranking is not in S3)*
 - [ ] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
       same SQL function inside the query. If a Go helper appears, write/query asymmetry has become
       representable again and the guarantee is gone. The review checks for its absence
 - [ ] T026 Generate the stored column from **title and description only** (same-row constraint,
       [R-005](research.md#r-005--the-cross-table-constraint)), with `coalesce` so a null description
       cannot null the column and silently drop the Course from search. Populate for **Published**
-      Courses only — deliberately redundant with T002
+      Courses only — deliberately redundant with T002 *(FR-021, FR-002; BR-161)*
 - [ ] T027 Normalize the joined fields — Instructor display name, taxonomy labels and code — **at
       query time through the same function**, and route the whole search through the **same**
       `PublishedOnly` predicate rather than a separate status condition (FR-022)
+      *(FR-021, FR-022, FR-023; BR-161)*
 
 ### Red-first test set — each observed failing before its implementation
 
 - [ ] T028 [RED] **Normalized Arabic queries.** `احياء` matches a Course titled `أحياء`; a query
       written with tashkeel matches a title without it; a tatweel-padded query matches; Arabic-Indic
-      digits match Western ones. Each assertion must fail before T024 exists
+      digits match Western ones. Each assertion must fail before T024 exists *(FR-023; BR-162)*
 - [ ] T029 [RED] **Mixed Arabic/Latin content.** A Course whose title mixes both scripts is matched by
       an Arabic fragment and by a Latin fragment; a Latin query is case-insensitive; normalization of
-      the Arabic portion does not corrupt the Latin portion
+      the Arabic portion does not corrupt the Latin portion *(FR-023, FR-021; BR-162)*
 - [ ] T030 [RED] **Write/query symmetry.** Assert matching in **both** directions — stored-folded
       against raw query, and raw stored against folded query. This is a regression guard: T025 makes
       the asymmetry unrepresentable, and this test is what notices if someone reintroduces a Go
-      normalizer
+      normalizer *(FR-023)*
 - [ ] T031 [RED] **Empty normalized query.** A query of only diacritics, only tatweel, or only
       whitespace normalizes to empty and MUST behave exactly as an absent query — the unfiltered
       published list, not an error and not an empty result (FR-023a, SC-009)
 - [ ] T032 [RED] **Unpublished non-disclosure through search.** A Lesson title, a Resource filename,
       a Draft Course's title, and a Delisted Course's title each return nothing — including when
       queried in normalized Arabic form. Normalization must not become a path around `PublishedOnly`
+      *(FR-006, FR-002, FR-022, SC-005; BR-143, BR-161)*
 - [ ] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
       return a well-formed result and never an error disclosing internals (FR-024)
 - [ ] T034 Confirm no stemming, fuzzy matching, ranking, or external search dependency was introduced
-      (FR-023b). Result ordering is stable and documented, not scored
-- [ ] T035 Raise `db.MaxSchemaVersion` to 10 and confirm CI **derives** the assertion from that
-      constant rather than carrying a literal
+      (FR-023b). Result ordering is stable and documented, not scored. Confirm in the same task that
+      **no personalization, recommendation, or paid-placement input** reaches result selection or
+      ordering — no visitor identity, no session, no behavioural signal, and no sponsored or boosted
+      flag *(FR-023b, FR-025; BR-161)*
+- [ ] T035 Add `CatalogSearchSchemaVersion = 11` and raise `db.MaxSchemaVersion` to it, matching the
+      per-migration named-constant pattern in `backend/internal/db/schema.go`. **The current value is
+      already 10** (`RevisionIntegritySchemaVersion`), so `0011_catalog_search` makes the new maximum
+      **11**. Confirm CI **derives** its assertion from the constant via `migrate max-version` rather
+      than carrying a literal *(FR-002 storage support; data-model.md §Schema version)*
 
 **Checkpoint 5** — search finds published Courses in both languages, reveals nothing else, and every
 red-first test was observed failing first.
@@ -177,15 +260,25 @@ red-first test was observed failing first.
 ## Phase 6 — Performance and polish
 
 - [ ] T036 Verify SC-006: p95 LCP under 2.5s on representative Kuwait 4G for the list and detail pages
+      *(SC-006; PRD §Non-Functional)*
 - [ ] T037 Confirm indexes support the list and detail paths, and that the unindexed joined-field
       search stays inside budget at launch catalogue size ([R-005](research.md#r-005--the-cross-table-constraint))
+      *(SC-006 supporting evidence)*
 - [ ] T038 **Timing-distribution check (SC-008).** Sample hidden-identifier and absent-identifier
       lookups, compare the distributions against a **documented tolerance**, and record the result as
       a statistical observation. **No nanosecond-equality assertion**, and no wording that calls a
       statistical property proven. Outside tolerance is a finding with an owner; inside tolerance is
-      not a guarantee
+      not a guarantee *(SC-008, FR-003)*
 - [ ] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
-      build with `.next` removed first
+      build with `.next` removed first, on hosted CI at the exact reviewed head
+- [ ] T039a **Production-build commerce-absence evidence.** Against the **clean production build**
+      from T039 — not the dev server — sweep the emitted client bundle and server output and assert the
+      absence of any checkout, cart, coupon, buy-now, purchase-submission, payment, payment-callback,
+      or webhook route, form action, fetch target, or handler, in either language's rendered output.
+      A control absent from the dev render but shipped by a conditional build is the failure this task
+      exists to catch. Record the artefact paths in the daily record *(FR-010a;
+      [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
+      BR-020)*
 
 ---
 
@@ -193,7 +286,7 @@ red-first test was observed failing first.
 
 | Phase | Blocked by | Why |
 |---|---|---|
-| 1 | S2 closing | Reads S2's tables; the graph must exist and be stable |
+| 1 | S2 closing — **satisfied**, S2 closed at `785d71c` | Reads S2's tables; the graph must exist and be stable |
 | 2 | Phase 1 | Routes cannot be safe before the predicate exists |
 | 3 | **Checkpoint 2** | Hard gate on evidence, not completion |
 | 4 | Phase 3 | Screens render the API's projections |
@@ -205,25 +298,88 @@ not overlap Phase 2: it depends on the checkpoint.
 
 ## Parallel opportunities
 
-`[P]`-marked tasks touch disjoint files: T010/T011, and T018/T019.
+`[P]`-marked tasks touch disjoint files: T010/T011, and T018/T019. T007a runs with T007; T011a with
+T011; T013a with T013; T019a with T019; T022a with T022; T039a after T039's clean build.
 
 ## Review checkpoints
 
 | Checkpoint | Blocks | Evidence required |
 |---|---|---:|
 | 1 | Phase 2 | Predicate exists; constructor refuses to build without it |
-| **2** | **Phase 3 — hard gate** | T007 and T008 pass **and** all three mutations turn a test red |
-| 3 | Phase 4 | No PII, no Lesson content, no protected media in any public response |
-| 4 | — | Responsive audit passes in both directions at three widths |
+| **2** | **Phase 3 — hard gate** | T007, T007a, and T008 pass **and** all five mutations turn a test red |
+| 3 | Phase 4 | No PII, no Lesson content, no protected media, and **no Section price** in any public response |
+| 4 | — | Responsive audit passes in both directions at three widths; T022a's six-rendering commerce-absence matrix passes |
 | 5 | — | All leak cases and degenerate inputs proven; **every red-first test observed failing before implementation** |
-| Final | Slice closure | Full gate suite; independent Tier 1 review by Claude on a frozen exact range |
+| Final | Slice closure | Full gate suite including T039a; **Tier 1 independent review by whichever seat holder did not author the range**, on a frozen exact range |
+
+## Requirement and success-criterion coverage
+
+Constitution **Principle III** requires traceability per requirement, and it is not tier-dependent.
+Every active FR below names at least one implementing or evidencing task, and every SC names an
+explicit verification task. Recorded on 2026-07-30.
+
+| Requirement | Tasks |
+|---|---|
+| FR-001 public unauthenticated routes | T005, T007a |
+| FR-002 published-only from one predicate | T002, T003, T006, T007, T026, T032, T035 |
+| FR-003 hidden is indistinguishable from absent | T004, T006, T008, T009, T038 |
+| FR-004 emergency suspension excluded | T002, T008 |
+| FR-005 live revision only | T002, T009 |
+| FR-006 no Lesson, Resource, or Lab exposure | T013, T020, T032 |
+| FR-007 suspended Instructor stays visible | T014 |
+| FR-008 paginated list projection | T010, T018 |
+| FR-009 detail projection, **no Section price** | T011, T011a, T019 |
+| FR-010 price exactly as authored | T010, T011, T019, T019a |
+| FR-010a **no commerce control** | T007a, T011a, T019, T019a, T022a, T039a |
+| FR-011 display name only, no PII | T012 |
+| FR-012 public preview without authentication | T020 |
+| FR-013 three taxonomy dimensions, active language | T010, T018 |
+| FR-014 retired taxonomy term still displayed | T013a |
+| FR-015 Arabic by default | T017 |
+| FR-016 language persists across navigation and sessions | T017 |
+| FR-017 RTL/LTR direction | T016, T022, T022a |
+| FR-018 phone, tablet, desktop | T022, T022a |
+| FR-019 authored language, no machine translation | T021 |
+| FR-020 the shell is the single foundation | T001, T015, T016 |
+| FR-021 match title, description, name, taxonomy | T023a, T026, T027, T029 |
+| FR-022 search reuses the FR-002 predicate | T027, T032 |
+| FR-023 one normalization function | T023a, T024, T025, T027, T028, T029, T030 |
+| FR-023a empty normalized query behaves as absent | T031 |
+| FR-023b no stemming, fuzzy, ranking, external service | T034 |
+| FR-024 degenerate input never errors | T033 |
+| FR-025 no personalization, recommendation, paid placement | T034 |
+
+**28 of 28 active FRs cited.** No FR is deferred out of S3. Three requirements had **no** task before
+this pass — FR-010a, FR-014, and the personalization half of FR-025 — and each now has one; the rest
+were substantively covered but uncited.
+
+| Success criterion | Verification task |
+|---|---|
+| SC-001 zero non-Published in any response | T007 |
+| SC-002 identical response for hidden and absent | T008 |
+| SC-003 Arabic + RTL first visit, preference survives | T017 |
+| SC-004 renders at three widths in both directions | T022, T022a |
+| SC-005 search reveals no unpublished content | T032 |
+| SC-006 p95 LCP under 2.5s | T036, T037 |
+| SC-007 no PII beyond display name | T012 |
+| SC-008 timing distribution within documented tolerance | T038 |
+| SC-009 empty normalized query returns unfiltered list | T031 |
+
+**9 of 9 SCs have an explicit verification task.**
+
+**Deferred, and therefore uncited by design:** relevance ranking, multi-dimension filtering, and sort
+options stay in S18 under OD-001, and FR-023b makes their absence a requirement rather than a gap.
+BR-162's *"ranked by relevance"* clause is **not** claimed by S3 — see the traceability note in
+[spec.md](spec.md#functional-requirements).
 
 ## Task count
 
-**40 tasks** (T001–T039 plus T023a). Phase 5 grew from 8 to 13 with OD-001's resolution and the
-red-first requirement; nothing was removed to accommodate it, and the slice estimate moves from 8h to
-**10–11h**. That increase is reported rather than absorbed — see
-[§Scope honesty](#scope-honesty).
+**46 tasks** (T001–T039 plus T007a, T011a, T013a, T019a, T022a, T023a, T039a). Six tasks were added on
+2026-07-30 to close requirement-coverage gaps: T007a and T039a plus T019a and T022a for FR-010a,
+T011a for FR-009's Section-price prohibition, and T013a for FR-014. No task was removed and no
+requirement was weakened. Phase 5 previously grew from 8 to 13 with OD-001's resolution and the
+red-first requirement; the slice estimate moves from 8h to **11–13h** with this pass's additions.
+That increase is reported rather than absorbed — see [§Scope honesty](#scope-honesty).
 
 ## Scope honesty
 
@@ -236,6 +392,12 @@ OD-001 admitted real work into a slice that was already sized. Recorded plainly:
 - **Estimate impact**: +2–3h on an 8h slice. If implementation shows normalization cannot fit
   cleanly, **that is evidence to surface**, not licence to grow into a search subsystem — the
   fallback is to narrow the fold set, not to add machinery.
+
+The 2026-07-30 coverage pass added a further **+1–2h**, almost entirely evidence rather than behaviour:
+the six-rendering RTL/LTR × viewport commerce-absence matrix in T022a and the production-build sweep in
+T039a. Recorded here rather than absorbed. Proving a control's **absence** costs more than rendering
+one, and that cost is the point — D-045 removed the feature, and only a derived, failing-on-regression
+assertion keeps it removed.
 
 ## MVP scope
 
