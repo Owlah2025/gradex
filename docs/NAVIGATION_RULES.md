@@ -1,7 +1,7 @@
 # Navigation Rules
 
 > Status: Aligned with approved MVP
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 Navigation behavior for the responsive Gradex website. Screen definitions live in
 [SCREENS.md](SCREENS.md); route relationships in [NAVIGATION_MAP.md](NAVIGATION_MAP.md).
@@ -10,13 +10,15 @@ Navigation behavior for the responsive Gradex website. Screen definitions live i
 
 - **Public/Student:** public top navigation. Authenticated small screens use bottom tabs
   `Home · Browse · Notifications · Profile`; tablet/desktop layouts promote these destinations to
-  wider top/side navigation. Checkout and Lesson Player may use focused/immersive chrome.
+  wider top/side navigation. The Course Access Invitation screen and Lesson Player may use
+  focused/immersive chrome.
 - **Instructor:** responsive shell with `Dashboard · Courses · Analytics · Office Hours ·
   Notifications · Profile`. Persistent sidebar on wide screens; drawer/collapsed rail on smaller
   screens. No payout/earnings destination.
-- **Admin:** responsive operations shell with `Ops · Course Review · Users · Pricing · Coupons ·
-  Revenue · Refunds · Payouts · Reports`. Persistent sidebar on wide screens and drawer/collapsed
-  rail on smaller screens.
+- **Admin:** responsive operations shell with `Ops · Course Review · Users · Pricing ·
+  Course Access · Entitlements · Taxonomy · Reports`. Persistent sidebar on wide screens and
+  drawer/collapsed rail on smaller screens. There is no coupon, revenue, refund, or payout
+  destination.
 
 Student functionality is complete across phones, tablets/iPads, laptops, and desktops. Instructor
 and Admin shells remain responsive, while complex operational screens are optimized for
@@ -34,14 +36,14 @@ tablet/laptop/desktop (BR-147/148).
 | Course Details | ✓ | ~ | ~ desktop | ✓ |
 | Login / Register / Verify / Accept Invitation | logo | ✗ | ✗ | ✓ |
 | Forgot / Reset Password | logo | ✗ | ✗ | ✓ |
-| Checkout | minimal | ✗ | ✗ | cancel |
-| Payment Confirming / Receipt | minimal | ✗ | ✗ | controlled (§6) |
+| Course Access Invitation | minimal | ✗ | ✗ | cancel |
+| Access Status | ✓ | ✓ | ✗ | Dashboard |
 | Student Dashboard | ✓ | ✓ | ✗ | ✗ root |
 | Course Home | ✓ | ✓ | ~ desktop | Dashboard |
 | Lesson Player | overlay/minimal | ✗ | ~ desktop | Course/history (§6) |
 | Resources & Labs | ✓ | ~ | ~ desktop | Course/Player |
 | Office Hours | ✓ | ✓ | ~ | Course/Dashboard |
-| Orders & Refunds | ✓ | ✓ | ~ | Profile/Dashboard |
+| Access History | ✓ | ✓ | ~ | Profile/Dashboard |
 | Notification Center | ✓ | ✓ | ✗ | prior/root |
 | Profile / Language / Account | ✓ | ✓ | ✗ | prior/root |
 | Legal | ✓ | ✗ | ✗ | prior/home |
@@ -62,11 +64,11 @@ tablet/laptop/desktop (BR-147/148).
 
 | Screen | Sidebar | Breadcrumb | Back/Close |
 |---|:---:|:---:|:---:|
-| Ops / User / Pricing / Coupon / Revenue roots | ✓ | ✗ | ✗ root |
+| Ops / User / Pricing / Course Access / Entitlement roots | ✓ | ✗ | ✗ root |
 | Invitation/User detail | ✓ | Users / Account | drawer or ✓ |
 | Moderation Queue / Content Review | ✓ | Queue / Course | ~ / ✓ |
-| Refund detail | ✓ | Refunds / Order | ✓ |
-| Payout Run / Statement | ✓ | Payouts / Period / Instructor | ✓ |
+| Invitation detail | ✓ | Course Access / Invitation | ✓ |
+| Entitlement detail | ✓ | Entitlements / Student / Course | ✓ |
 | Reported Content / Resolution | ✓ | Reports / Item | ✓ |
 | Office-Hours moderation | ✓ | Ops / Office Hours | ✓ |
 

@@ -1,7 +1,7 @@
 # User Journeys
 
 > Status: Aligned with approved MVP
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 These task journeys apply the canonical scope in [PRD.md](PRD.md), rules in
 [BUSINESS_RULES.md](BUSINESS_RULES.md), and terminology in [GLOSSARY.md](GLOSSARY.md).
@@ -11,40 +11,48 @@ optimized.
 
 ---
 
-# 1. Student — Discover, Buy, and Learn
+# 1. Student — Discover, Gain Access, and Learn
 
 ```text
-Discover → Evaluate → Register/Verify or Sign In → Apply Coupon → Hosted Checkout
+Discover → Evaluate → Pay externally (outside Gradex) → Register/Verify or Sign In
                                                                   ↓
-Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
+                                          Receive Course Access Invitation
                                                                   ↓
-                                                         Expiry → Buy Again
+                                        Accept  →  Await Admin Approval
+                                                                  ↓
+Report ← Practise/Office Hours ← Watch/Resume ← Course Home ← Access granted
+                                                                  ↓
+                                                 Expiry → Request access again
 ```
+
+**Nothing in this journey charges money inside Gradex.** Payment is External Payment, confirmed by
+an Admin out of band ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
 
 ## SJ-01 — Discover a Course
 
 - **Goal:** Find a Course matching a university subject/level.
 - **Actions:** Browse the published catalog, filter by Major/Subject/Study Year, search in Arabic or
   English, open a Course detail page.
-- **Decisions:** Is this the right Course? Buy the complete Course or one Section?
+- **Decisions:** Is this the right Course? Access is granted for the complete Course only.
 - **Rules:** `Course → Section → Lesson`; “Chapter” may only label Section (BR-010/021). Only
   `PUBLISHED` Courses are discoverable; search matches both languages with Arabic normalization and
   ranks by relevance only (BR-161/162).
 - **Edge cases:** Thin launch catalog; no Course for the selected filter combination; query typed
-  with diacritics or a different hamza form; archived/delisted Course absent from purchase
-  results.
+  with diacritics or a different hamza form; archived/delisted Course absent from results.
 - **Failure behavior:** Catalog errors provide retry/empty states without exposing protected data.
 
 ## SJ-02 — Evaluate the Course
 
-- **Goal:** Understand content, practical value, Instructor, price, and access term.
+- **Goal:** Understand content, practical value, Instructor, price, access term, and how to obtain
+  access.
 - **Actions:** Review outline, authored details, resources/lab inclusion, office-hours support,
-  Course/Section prices, exact disclosed access-expiry date, and optional public preview.
-- **Rules:** Admin controls prices (BR-019); protected Labs/Resources are not previews
-  (BR-143/144); active ownership changes CTA to “Go to Course” (BR-024).
-- **Edge cases:** No preview asset; some Sections not owned; recently changed price affects future
-  Orders only.
-- **Failure behavior:** Preview/price/scope mismatch blocks checkout rather than charging stale data.
+  Course price, access term, optional public preview, and how-to-get-access guidance.
+- **Rules:** Admin controls prices (BR-019); the displayed price tells the Student what to pay
+  externally and Gradex charges nothing (BR-020); Section prices are not displayed because Section
+  is not an acquirable scope (BR-021); protected Labs/Resources are not previews (BR-143/144);
+  active access changes the CTA to “Go to Course” (BR-024).
+- **Edge cases:** No preview asset; recently changed price; Student already holds active access.
+- **Failure behavior:** The page never implies Gradex will take payment.
 
 ## SJ-03 — Register and Verify
 
@@ -59,43 +67,50 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 
 ## SJ-04 — Sign In
 
-- **Goal:** Authenticate and continue the intended purchase/learning route.
+- **Goal:** Authenticate and continue the intended access or learning route.
 - **Actions:** Enter credentials; renew/rotate the opaque session credential as needed.
 - **Rules:** Generic credential failure (BR-003), revoked refresh rejection (BR-005), immediate
   suspension enforcement (BR-007).
-- **Edge cases:** Session expires during checkout; Account becomes suspended while active.
+- **Edge cases:** Session expires mid-acceptance; Account becomes suspended while active.
 - **Failure behavior:** Re-authentication preserves safe return path; suspension never reaches
   protected content.
 
-## SJ-05 — Apply a Coupon
+## SJ-05 — Accept a Course Access Invitation
 
-- **Goal:** See a valid discount before entering hosted checkout.
-- **Actions:** Enter code; view subtotal, integer-fils discount, total, and rejection reason.
-- **Rules:** One Coupon per Order; paid acceptance reserves exact global/Student capacity through
-  the payment deadline; timely capture consumes it and cancellation/expiry releases it
-  (BR-124–129).
-- **Edge cases:** Zero-value grant, expired/inactive/wrong-scope/already-used code, cap race.
-- **Failure behavior:** Invalid coupon leaves catalog price unchanged; zero total never opens Tap.
+- **Goal:** Accept an Admin-issued invitation for one Course and understand that access is not yet
+  active.
+- **Actions:** Open the invitation link, sign in or register with the invited email, review the
+  Course and access term, accept.
+- **Rules:** Only an Account whose normalized email matches may accept, and any other identity is
+  refused server-side (BR-166). Acceptance moves the invitation to pending Admin approval and
+  **grants no access** (BR-029). An Account alone never grants access.
+- **Edge cases:** Signed in as a different Account; no Account yet; acceptance link expired and needs
+  reissuing (BR-169); invitation already cancelled.
+- **Failure behavior:** A refused acceptance never partially grants access and never reveals whether
+  another Account exists.
 
-## SJ-06 — Pay and Receive Access
+## SJ-06 — Await Admin Approval and Receive Access
 
-- **Goal:** Complete card/KNET payment and know whether access is ready.
-- **Actions:** Confirm one Course/Section Order; use Tap-hosted checkout; return to confirming/receipt.
-- **Rules:** Verified webhook/API success—not redirect—grants one Entitlement (BR-020/021/031/033).
-- **Edge cases:** Delayed callback, ambiguous timeout, duplicate callback, already-active Entitlement.
-- **Failure behavior:** Declined/cancelled/timed-out attempt grants no access; ambiguous outcomes
-  reconcile before retry (BR-022/034).
-- **Notification:** Receipt is recorded after grant; delivery failure does not affect access
-  (BR-120–123).
+- **Goal:** Know whether access has been granted, and reach the Course once it has.
+- **Actions:** View access status; receive the access-granted notification; open the Course.
+- **Rules:** **Admin Approval is the sole grant trigger** (BR-167). It creates or reuses the
+  Enrollment and creates exactly one Entitlement, idempotently, with the Course's configured expiry
+  snapshotted (BR-024/025). A rejection carries a reason (BR-168).
+- **Edge cases:** Approval repeated or concurrent — exactly one Entitlement results; Course lacking a
+  future access-expiry instant cannot be approved; Account suspended before approval.
+- **Failure behavior:** Until approval lands there is no access, and the status screen says so
+  plainly rather than implying a pending purchase.
+- **Notification:** The access-granted notice is recorded after the Entitlement exists; delivery
+  failure does not affect access (BR-120–123).
 
 ## SJ-07 — Orient in Course Home
 
-- **Goal:** Understand purchased scope, locked Sections, progress, access expiry, materials, and
-  upcoming office hours.
-- **Actions:** Start/resume a Lesson; view Course outline and explicit locked state.
-- **Rules:** Course purchase covers all Sections; Section purchase covers only that Section;
+- **Goal:** Understand entitled scope, progress, access expiry, materials, and upcoming office
+  hours.
+- **Actions:** Start/resume a Lesson; view the Course outline.
+- **Rules:** A Course Entitlement covers every Section and Lesson in that Course (BR-024);
   Enrollment/progress can remain after Entitlement expiry.
-- **Edge cases:** Mixed owned/locked Sections; expired access with retained progress.
+- **Edge cases:** Expired access with retained progress; emergency Course access suspension.
 - **Failure behavior:** Locked content never receives signed playback/download URLs.
 
 ## SJ-08 — Watch and Resume a Lesson
@@ -112,9 +127,14 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 ## SJ-09 — Use Resources, Labs, Community, and Office Hours
 
 - **Goal:** Practise and receive follow-up.
-- **Actions:** Download entitled Resource/Lab; open external community; view/join Course office hours.
+- **Actions:** Download entitled Resource/Lab; view/join Course office hours.
 - **Rules:** Each download is entitlement-checked (BR-023/063); Labs may carry buyer identification
-  (BR-103); office-hours link requires active Course/Section Entitlement (BR-135/136).
+  (BR-103); office-hours link requires an active Course Entitlement (BR-135/136).
+- **Community — deferred to S18 on 2026-07-29 by
+  [D-046](DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).** No MVP
+  screen shows a Course community link and no MVP journey step opens one. The external Discord
+  community still exists; its link is shared out of band until S18. The journey title is retained
+  unchanged so approved references to this anchor keep resolving.
 - **Edge cases:** Expired signed URL, cancelled/rescheduled session, external link failure.
 - **Failure behavior:** Reissue authorized download; cancelled session is not joinable; notification
   failure does not alter schedule.
@@ -128,23 +148,30 @@ Report/Refund ← Practise/Office Hours ← Watch/Resume ← Course Home/Receipt
 - **Failure behavior:** Duplicate/spam attempt is throttled; successful submission receives a safe
   acknowledgement without revealing Admin operations.
 
-## SJ-11 — Request and Track a Refund
+## SJ-11 — Raise a Refund or Billing Question
 
-- **Goal:** Request a policy-eligible full/partial refund and see its status.
-- **Actions:** Contact/support flow supplies Order and reason; Admin makes the gateway request;
-  Student sees pending/succeeded/failed status.
-- **Rules:** Accepted bilingual policy version governs eligibility (BR-044/153); gateway success is
-  authoritative; partial keeps access, cumulative full revokes (BR-041/046/047).
-- **Edge cases:** Multiple partial refunds, unsupported method, amount above remaining balance.
-- **Failure behavior:** Pending/failed request does not revoke access; confirmed full refund does.
+- **Goal:** Resolve a payment question when Gradex holds no payment record.
+- **Actions:** Contact the support route; the founder handles the refund entirely outside Gradex.
+- **Rules:** The bilingual Refund Policy still governs eligibility and is still required
+  (BR-153/`LG-011`) even though Gradex processes no refunds (BR-040–047 deferred). If access must
+  end as a result, an Admin uses the audited Entitlement adjustment or revocation (BR-026) — never
+  an unrecorded deletion.
+- **Edge cases:** Student paid but was never invited; Student invited but never paid; access granted
+  in error.
+- **Failure behavior:** No Gradex screen implies a refund is in progress, because Gradex has no
+  payment state to report.
+- **MVP boundary:** Reconciliation between External Payment records and granted access is a manual
+  founder process. `LG-016` remains open on how those records must be kept.
 
 ## SJ-12 — Return After Expiry
 
-- **Goal:** Continue learning after the purchased semester-access period.
-- **Actions:** Sign in, see retained progress and expired access, purchase again through normal flow.
-- **Rules:** Expiry ends access but preserves Enrollment/progress; active duplicate purchase is
-  blocked, expired scope may be repurchased (BR-024/025).
-- **MVP boundary:** No expiry reminder or dedicated renewal flow.
+- **Goal:** Continue learning after the access period ends.
+- **Actions:** Sign in, see retained progress and expired access, pay externally again and receive a
+  new Course Access Invitation.
+- **Rules:** Expiry ends access but preserves Enrollment/progress; at most one active Entitlement
+  exists per Student and Course (BR-024/025).
+- **MVP boundary:** No expiry reminder and no self-service renewal; regaining access repeats the
+  invitation and approval workflow.
 
 ---
 
@@ -221,25 +248,25 @@ Emailed Statement ← Analytics/Office Hours ← Published ← Review/Revise
 - **Failure behavior:** Suspended Instructor cannot edit/schedule, while approved Student content
   remains governed by BR-065.
 
-## IJ-08 — Receive Monthly Payout Statement
+## IJ-08 — Receive Compensation — outside Gradex
 
-- **Goal:** Understand the monthly amount transferred.
-- **Actions:** Receive emailed statement listing eligible Orders and adjustments; raise an ops query
-  outside the platform if needed.
-- **Rules:** One configured global share of net collected revenue; manual bank transfer; no in-app
-  earnings/withdrawal (BR-073/074).
-- **Edge cases:** Late refund/chargeback appears on next statement.
+- **Goal:** Understand the amount transferred.
+- **Actions:** Compensation is arranged and paid entirely out of band by the founder. Gradex produces
+  no statement, ledger, or earnings view.
+- **Rules:** Payout processing is deferred with in-platform payments (BR-073/074 deferred). Revenue
+  share remains a required term of the Instructor agreement under `LG-020`.
+- **MVP boundary:** No in-app earnings, statement, or withdrawal exists, and none is calculated.
 
 ---
 
-# 3. Admin — Provision, Price, Moderate, Refund, and Reconcile
+# 3. Admin — Provision, Price, Publish, and Grant Access
 
 ```text
-Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
+Bootstrap/Sign In → Invite Staff → Price Courses → Review/Publish
         ├→ Suspend/Reactivate
-        ├→ Coupons/Revenue/Refunds
-        ├→ Content Reports/Unpublish
-        └→ Monthly Statements/Payouts
+        ├→ Confirm External Payment → Invite to Course → Approve → Access granted
+        ├→ Adjust Entitlement expiry
+        └→ Content Reports/Delist
 ```
 
 ## AJ-01 — Bootstrap and Sign In
@@ -259,12 +286,14 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 - **Failure behavior:** Conflicting-address/expired/reused invitations fail safely; active sessions
   cannot bypass suspend.
 
-## AJ-03 — Set Course and Section Prices
+## AJ-03 — Set Course Prices
 
-- **Goal:** Control catalog commercial terms.
+- **Goal:** Publish the amount a Student must pay externally.
 - **Actions:** Set/change price with required reason; review audit history.
-- **Rules:** Admin-only, integer fils, future Orders only (BR-019).
-- **Failure behavior:** Historical Orders/refunds/payouts remain unchanged.
+- **Rules:** Admin-only, integer fils (BR-019). The price is displayed to Students as guidance for
+  External Payment; Gradex charges nothing (BR-020). Section prices are maintained but not displayed
+  because Section is not an acquirable scope (BR-021).
+- **Failure behavior:** A price change never alters an existing Entitlement or its expiry.
 
 ## AJ-04 — Maintain the Catalog Taxonomy
 
@@ -287,23 +316,32 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 - **Failure behavior:** Approval/revision application is atomic; queue/dashboard state is source of
   truth if notification fails.
 
-## AJ-06 — Manage Coupons and Revenue
+## AJ-06 — Grant Course Access
 
-- **Goal:** Run promotions and reconcile money/access.
-- **Actions:** Create/edit/deactivate Coupon; view redemption history; inspect Orders/Attempts.
-- **Rules:** Admin-only, frozen value fields after reservation/use, one Coupon/Order, one
-  `RESERVED`/`CONSUMED` use per Student, exact global capacity, and full-Refund Student release
-  without quota restoration (BR-124–133).
-- **Failure behavior:** Reconciliation flags gateway/Order disagreement; history is not deleted.
+- **Goal:** Turn a confirmed External Payment into active course access, safely and auditably.
+- **Actions:** Confirm the payment out of band; create a Course Access Invitation for one Student
+  email and one Course, optionally recording a note and an opaque external reference; watch the queue
+  for acceptance; approve, reject with a reason, or cancel.
+- **Rules:** Creation grants nothing and is never evidence that payment occurred inside Gradex
+  (BR-020/165). **Approval is the sole grant trigger** and requires the course-access capability plus
+  valid recent authentication, or it is refused (BR-167). Approval is idempotent and creates exactly
+  one Entitlement (BR-024). A Course without a future access-expiry instant cannot be approved
+  (BR-025). Every transition is audited (BR-168).
+- **Edge cases:** Student never accepts; wrong email entered; duplicate invitation refused; Student
+  already holds active access; Account suspended between acceptance and approval.
+- **Failure behavior:** A failed approval grants nothing and leaves the invitation in its prior state.
 
-## AJ-07 — Process Full or Partial Refunds
+## AJ-07 — Adjust or End Course Access
 
-- **Goal:** Apply the approved policy safely.
-- **Actions:** Check policy/version, remaining balance, and method support; submit amount/reason;
-  wait for gateway result.
-- **Rules:** Admin-only; idempotent/audited; no access change before confirmation; partial/full
-  semantics (BR-040–047).
-- **Failure behavior:** Failure leaves access/revenue unchanged; late success applies exactly once.
+- **Goal:** Correct an access term or end access after an out-of-band refund.
+- **Actions:** Extend or shorten an Entitlement's effective expiry with a required reason, or revoke
+  it.
+- **Rules:** Elevated Admin only; the adjustment atomically records old/new instants, reason, actor,
+  and timestamp with immutable audit evidence and a Student notification (BR-026).
+  `original_access_ends_at` never changes, and moving expiry into the past never deletes Enrollment,
+  Progress, or invitation history.
+- **Failure behavior:** No unrecorded deletion path exists — ending access is always an audited
+  transition.
 
 ## AJ-08 — Resolve Content Reports
 
@@ -313,15 +351,12 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 - **Rules:** No auto-hide; reason/action/actor/timestamp audited (BR-145/146).
 - **Failure behavior:** Unpublish is reversible and does not erase Entitlements/history.
 
-## AJ-09 — Run Monthly Instructor Payouts
+## AJ-09 — Instructor Payouts — deferred out of MVP
 
-- **Goal:** Transfer the correct amount and produce transparent records.
-- **Actions:** Generate/review statement; apply adjustments; approve; transfer by bank; record
-  reference; email statement.
-- **Rules:** One configured global percentage; net collected basis; late changes go to future
-  statement; no automated settlement (BR-073/074).
-- **Failure behavior:** Idempotent run/reference checks prevent duplicate payment; corrections are
-  adjustments, not silent edits to Paid statements.
+Payout processing, statements, and the earnings ledger are deferred with in-platform payments
+(BR-073/074 deferred). Gradex holds no revenue record to calculate a share from, so compensation is
+arranged and paid entirely out of band. Revenue-share terms remain a required part of the Instructor
+agreement under `LG-020`.
 
 ## AJ-10 — Moderate Office Hours
 
@@ -334,11 +369,14 @@ Bootstrap/Sign In → Invite Staff → Price Courses/Sections → Review/Publish
 
 # Cross-Cutting Boundaries
 
-- No Instructor price editing or in-app payout dashboard.
+- No Instructor price editing, access granting, or in-app payout dashboard.
 - No protected sample Lab; public preview is separate.
 - No separate Chapter entity.
 - No built-in live video, recurrence, RSVP, attendance, recording, or calendar integration.
 - No notification preference, marketing, SMS/WhatsApp, or push journey.
 - No public review/rating/recommendation journey.
+- **No checkout, cart, coupon, order, receipt, or refund journey.** Payment is External Payment and
+  access is granted by Admin-approved Course Access Invitation
+  ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
 - Remaining legal/provider/commercial work is in [LAUNCH_GATES.md](LAUNCH_GATES.md), not hidden in
   journey assumptions.

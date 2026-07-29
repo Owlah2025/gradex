@@ -1,7 +1,7 @@
 # Navigation Map
 
 > Status: Aligned with approved MVP
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 Per-role route hierarchy for the responsive Gradex website. Behavioral rules live in
 [NAVIGATION_RULES.md](NAVIGATION_RULES.md); detailed screen contracts in [SCREENS.md](SCREENS.md).
@@ -47,7 +47,7 @@ Role shell
 ├── Legal
 └── Error/Status
     ├── Access Denied / Suspended
-    ├── Entitlement Expired → Course Details / Checkout
+    ├── Entitlement Expired → Course Details
     ├── Not Found
     └── Offline / Retry
 ```
@@ -60,39 +60,47 @@ Catalog / Search
 └── Course Details
     ├── Public Preview
     ├── [actively entitled] Go to Course → Course Home
-    └── Checkout
-        ├── Choose Course or Section
-        ├── Apply Coupon                           [state]
-        ├── Tap Hosted Checkout                    [external]
-        ├── Confirming / Failed                    [state]
-        └── Receipt
-            ├── Start / Resume → Lesson Player
-            ├── Course Home
-            └── Orders & Refunds
+    └── How to Get Access                          [informational]
+
+Course Access Invitation                          [entry: emailed link]
+├── Sign In / Register with the invited email
+├── Accept                                        → Awaiting Admin Approval  [state]
+├── Wrong identity signed in                      [state, refused]
+└── Link expired → Request a new link             [state]
+
+Access Status
+├── Awaiting your acceptance                      [state]
+├── Awaiting Admin approval                       [state]
+├── Access active                                 → Course Home
+├── Rejected (with reason)                        [state]
+└── Cancelled / Expired                           [state]
 
 Student Dashboard
 ├── Continue Learning → Lesson Player
 ├── My Courses → Course Home
+├── Pending Invitation → Course Access Invitation
 ├── Browse → Catalog
 ├── Upcoming Office Hours
-└── Orders & Refunds
+└── Access History
 
 Course Home
 ├── Section / Lesson outline
-│   ├── Lesson Player
-│   │   ├── Previous / Next Lesson
-│   │   ├── Resources & Labs
-│   │   └── Report Content                         [modal]
-│   └── Locked Section / Lesson                    [state]
+│   └── Lesson Player
+│       ├── Previous / Next Lesson
+│       ├── Resources & Labs
+│       └── Report Content                         [modal]
 ├── Resources & Labs
 ├── Upcoming Office Hours
 │   └── Join External Meeting                      [external, authorized]
 ├── Community                                      [external]
 └── Report Course                                  [modal]
 
-Orders & Refunds
-└── Order / Payment / Refund detail
+Access History
+└── Per-Course invitation state + Entitlement term
 ```
+
+There is no checkout, cart, coupon, order, receipt, or refund route. A Course Entitlement covers
+every Section in its Course, so there is no locked-Section state inside an entitled Course.
 
 ## Instructor
 
@@ -117,8 +125,8 @@ Instructor Dashboard
 └── Notifications
 ```
 
-There is no Instructor earnings, payout-statement, withdrawal, pricing-edit, coupon, or refund route.
-The monthly payout statement is sent by email outside the authenticated UI.
+There is no Instructor earnings, payout-statement, withdrawal, pricing-edit, or access-granting
+route. Instructor compensation is arranged entirely outside the platform in MVP.
 
 ## Admin
 
@@ -141,34 +149,37 @@ Admin Ops
 │   └── Term Detail → Edit / Retire / Delete (unreferenced only)
 ├── Pricing
 │   └── Course / Section Price + Audit History
-├── Coupons
-│   ├── Create / Edit / Deactivate
-│   └── Redemption History
-├── Revenue
-│   └── Order / Payment Attempt Detail
-├── Refunds
-│   └── Order Lookup → Full / Partial Refund → Gateway Status
-├── Payouts
-│   └── Monthly Run → Instructor Statement → Approve → Record Paid Reference
+├── Course Access Invitations
+│   ├── Create (Student email + one Course)
+│   ├── Awaiting Acceptance                        [queue]
+│   ├── Awaiting Approval                          [queue]
+│   └── Invitation Detail → Approve / Reject with reason / Cancel / Resend link
+├── Entitlements
+│   └── Entitlement Detail → Extend / Shorten expiry / Revoke  [audited]
 ├── Reported Content
 │   └── Report Detail → Dismiss / Request Changes / Unpublish / Suspend
 └── Office-Hours Moderation
     └── Session Detail → Cancel with reason
 ```
 
-Admins do not create platform-wide office-hours sessions in MVP.
+Admins do not create platform-wide office-hours sessions in MVP. There is no coupon, revenue,
+refund, or payout route: those features are deferred with in-platform payments
+([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
+**Approve is the only route in the entire product that creates course access.**
 
 ## Cross-Role Handoffs
 
 ```text
 Admin Invitation                  → Instructor/Admin activation
-Instructor Submit                → Admin Course Review queue
-Admin Publish / Request Changes  → Instructor status + notification
-Student Payment Success          → Admin Revenue + Instructor earning line
-Student Content Report           → Admin Reported Content queue
-Admin Refund Success             → Student refund state + entitlement/payout adjustment
-Instructor Office-Hours change   → Entitled Student list + notifications
-Admin Monthly Payout             → Instructor emailed statement
+Instructor Submit                 → Admin Course Review queue
+Admin Publish / Request Changes   → Instructor status + notification
+Admin Creates Course Invitation   → Student invitation notice
+Student Accepts Invitation        → Admin Awaiting-Approval queue
+Admin Approval                    → Entitlement + Enrollment + Student access-granted notice
+Admin Rejection                   → Student notice with reason
+Student Content Report            → Admin Reported Content queue
+Admin Entitlement Adjustment      → Student expiry-change notice
+Instructor Office-Hours change    → Entitled Student list + notifications
 ```
 
 All handoffs are state/event transitions. Email delivery is never the source of truth.

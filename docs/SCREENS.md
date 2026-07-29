@@ -1,7 +1,7 @@
 # Screens
 
 > Status: Canonical MVP screen contract
-> Last Updated: 2026-07-23
+> Last Updated: 2026-07-28
 
 This document defines the purpose, content, actions, states, and permissions of Gradex screens.
 Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavior in
@@ -16,8 +16,9 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 - Every mutation validates role/ownership/status server-side and exposes pending/success/failure.
 - Arabic/English and RTL/LTR apply to every screen, including tables, dialogs, errors, and email
   deep-link destinations.
-- No MVP screen exists for Instructor pricing, Instructor earnings/payouts, notification
-  preferences, platform-wide office hours, reviews/ratings, recommendations, bundles, or BNPL.
+- No MVP screen exists for checkout, cart, orders, receipts, refunds, coupons, Instructor pricing,
+  Instructor earnings/payouts, notification preferences, platform-wide office hours, reviews/ratings,
+  recommendations, bundles, or BNPL.
 
 ---
 
@@ -94,7 +95,7 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 - **Content:** Unread/read list, event type, timestamp, safe deep link.
 - **Actions:** Open event, mark read/all read.
-- **Events:** Purchases, refunds, security, invitations, Course/revision submission and
+- **Events:** Course access granted, invitation issued/rejected, security, staff invitations, Course/revision submission and
   review/change request, video-processing (Instructor), and office-hours changes per BR-122.
 - **States:** Loading, empty, delivery-channel failure metadata hidden from ordinary user.
 - **Constraints:** No preferences, marketing, SMS/WhatsApp, or push controls.
@@ -116,7 +117,7 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 **Purpose:** Show versioned bilingual Terms, Privacy Notice, and Refund Policy.
 
-- **Entry:** Footer, Registration, Checkout, Profile.
+- **Entry:** Footer, Registration, Course Access Invitation, Profile.
 - **Content:** Effective version/date and approved text.
 - **Actions:** Switch legal document/language; return to source.
 - **Constraints:** No unapproved claim that streaming automatically removes refund rights.
@@ -125,7 +126,7 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 **Purpose:** Shared 401/403/404/expired/offline/5xx and empty states.
 
-- **Actions:** Retry, Login, role root, Catalog, Course Details/repurchase when allowed.
+- **Actions:** Retry, Login, role root, Catalog, Course Details.
 - **Constraints:** Do not reveal entity/account existence; do not advertise out-of-scope actions.
 
 ---
@@ -149,56 +150,61 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 ## ST02 — Course Details
 
-**Purpose:** Evaluate a Published Course and choose Course or Section access.
+**Purpose:** Evaluate a Published Course and learn how to obtain access.
 
 - **Content:** Title, Instructor, authored description/language, outline, Resources/Labs summary,
-  office-hours support, community, Course price, individually priced Sections, access term.
-- **Actions:** Play optional Public Preview, choose Course/Section, Checkout, Go to Course if active,
-  Login/Register when required.
+  office-hours support, community, Course price, access term, and how-to-get-access guidance.
+- **Actions:** Play optional Public Preview, open how-to-get-access guidance, Go to Course if access
+  is active, Login/Register when required.
 - **Public Preview state:** Separate validated asset; absent preview removes the control.
 - **Locked content:** Lesson titles may be visible, but protected media/files are not public.
-- **Constraints:** No Sample Lab download, ratings/reviews, recommendations, bundle, or BNPL CTA.
+- **Constraints:** No checkout, cart, coupon field, Section purchase control, Sample Lab download,
+  ratings/reviews, recommendations, bundle, or BNPL CTA. The price is informational — Gradex charges
+  nothing. Section prices are not displayed.
 
-## ST03 — Checkout
+## ST03 — Course Access Invitation
 
-**Purpose:** Confirm one Course/Section Order, apply one coupon, accept policy, and open Tap.
+**Purpose:** Let the invited Student review and accept an invitation to one Course.
 
-- **Content:** Item/scope, catalog subtotal, coupon/discount, total KWD, exact access-expiry instant,
-  accepted Refund Policy version, payment-method handoff.
-- **Actions:** Apply/remove coupon, continue to Tap, cancel.
-- **States:** Coupon valid/invalid/inactive/expired/wrong-scope/cap/already-used; zero-value grant;
-  creating Order; gateway unavailable.
-- **Rules:** Integer fils; server recalculates; active duplicate Entitlement blocked.
+- **Content:** Course identity, inviting message, the invited email address, access term that would
+  apply, accepted policy versions, and an explicit statement that acceptance does not grant access.
+- **Actions:** Accept, decline to act, sign in or register with the invited email.
+- **States:** Awaiting acceptance; accepted and awaiting Admin approval; approved and active;
+  rejected with reason; cancelled; wrong identity signed in; acceptance link expired with resend.
+- **Constraints:** Only an Account whose normalized email matches may accept; any other signed-in
+  identity sees a refusal, not the accept control. No payment field appears anywhere on this screen.
 
-## ST04 — Payment Confirmation and Receipt
+## ST04 — Access Status
 
-**Purpose:** Represent gateway-confirmed status without trusting the redirect.
+**Purpose:** Show the Student where a request stands without implying access exists.
 
-- **States:** Confirming/pending, paid, free-granted, failed/cancelled/timed-out, reconciliation
-  needed.
-- **Receipt content:** Order/item snapshot, subtotal/discount/paid amount, payment reference, date,
-  access expiry, Refund Policy version.
-- **Actions:** Start/Go to Course, Orders & Refunds, retry a definitive failure safely.
-- **Constraints:** No access/receipt success until verified backend confirmation.
+- **States:** Awaiting your acceptance, awaiting Admin approval, access active, rejected with reason,
+  cancelled, expired.
+- **Content:** Course, current state, relevant timestamps, access-until instant when active.
+- **Actions:** Go to Course when active; return to catalogue otherwise.
+- **Constraints:** No access is offered until an Entitlement exists. Admin notes and any External
+  Payment reference are never shown to the Student.
 
 ## ST05 — Student Dashboard
 
 **Purpose:** Resume learning and see owned/expired Courses, upcoming office hours, and recent status.
 
-- **Content:** Continue Learning, My Courses/Sections, progress, expiry, upcoming sessions, recent
-  notifications/order status.
-- **Actions:** Resume Lesson, open Course Home, Browse, Orders & Refunds.
-- **States:** First purchase/empty, active, near expiry (without scheduled reminder), expired.
+- **Content:** Continue Learning, My Courses, progress, expiry, upcoming sessions, recent
+  notifications, and any invitation awaiting acceptance or approval.
+- **Actions:** Resume Lesson, open Course Home, Browse, Access History, act on a pending invitation.
+- **States:** No access yet/empty, awaiting approval, active, near expiry (without scheduled
+  reminder), expired.
 
 ## ST06 — Course Home
 
 **Purpose:** Navigate the Course within the Student's exact Entitlement scope.
 
 - **Content:** Course progress, access-until, ordered Sections/Lessons, locked markers, Resources/Labs,
-  upcoming office hours, community link.
+  upcoming office hours. **No community link** — deferred to S18 on 2026-07-29 by
+  [D-046](DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).
 - **Actions:** Start/resume Lesson, open allowed material, join authorized office hours, report Course.
-- **States:** Course Entitlement, Section-only Entitlement, expired, Delisted but accessible,
-  emergency access suspended.
+- **States:** Active Course Entitlement, expired, Delisted but accessible, emergency access
+  suspended.
 - **Constraints:** Locked Lessons never expose signed URLs.
 
 ## ST07 — Lesson Player
@@ -220,7 +226,8 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 - **Content:** Separate Resource and Lab lists with type/size/description.
 - **Actions:** Download via newly authorized short-lived link; report a file; return to Lesson/Course.
 - **States:** Empty per category, generating link, expired/retry, denied, unavailable after moderation.
-- **Constraints:** No public link; Lab buyer-identification may be applied server-side.
+- **Constraints:** No public link; per-Entitlement Lab buyer-identification may be applied
+  server-side and must not encode Student PII.
 
 ## ST09 — Office Hours
 
@@ -231,15 +238,16 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 - **States:** Upcoming, rescheduled, cancelled, completed, empty, entitlement expired.
 - **Constraints:** Link is never present in public/unauthorized payloads.
 
-## ST10 — Orders and Refunds
+## ST10 — Access History
 
-**Purpose:** View Order, Payment Attempt, Receipt, and Refund history/status.
+**Purpose:** View the Student's Course Access Invitations and current entitlements.
 
-- **Content:** Item snapshot, paid/discount amounts, payment status/reference, Entitlement term,
-  accepted policy version, Refund list and remaining refundable balance where appropriate.
-- **Actions:** View receipt/policy; follow support refund-request instructions; return to Course.
-- **States:** Paid/free-granted/failed; refund pending/partially refunded/refunded/failed.
-- **Constraints:** Student does not directly call refund mutation; Admin applies approved process.
+- **Content:** Per Course — invitation state, acceptance and decision timestamps, Entitlement term
+  and access-until instant, accepted policy versions.
+- **Actions:** Open an active Course; contact support about a rejected or missing grant.
+- **States:** Empty, awaiting acceptance, awaiting approval, active, rejected, cancelled, expired.
+- **Constraints:** No payment, order, receipt, or refund data exists to show. Admin notes, External
+  Payment references, and approval evidence are never exposed to the Student.
 
 ### Report Content Modal/Drawer
 
@@ -336,8 +344,8 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 
 **Purpose:** Surface actionable operational state.
 
-- **Content:** Pending Course reviews, open reports, pending/failed refunds, payout run status,
-  failed content processing/scans, invitation status.
+- **Content:** Pending Course reviews, open reports, Course Access Invitations awaiting approval,
+  failed content processing/scans, staff invitation status.
 - **Actions:** Open the relevant queue/detail.
 - **Constraints:** Metrics are operational, not recommendations/marketing analytics.
 
@@ -359,7 +367,8 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 - **Content:** Course outline, current prices, price history.
 - **Actions:** Set/change integer-fils price with required reason.
 - **States:** Unsaved validation, saving, success, conflict, audit view.
-- **Constraint:** Change affects future Orders only.
+- **Constraint:** Price is displayed to Students as what to pay externally; Gradex charges nothing.
+  Section prices are maintained here but not displayed in the public catalogue.
 
 ## AD04 — Course Review Queue
 
@@ -380,45 +389,47 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
   conflict/failure.
 - **Constraints:** No partial publish; Admin preview never creates Student Entitlement.
 
-## AD06 — Coupons
+## AD06 — Course Access Invitations
 
-**Purpose:** Create/manage discounts and inspect history.
+**Purpose:** Create Course Access Invitations after confirming External Payment, and work the
+approval queue.
 
-- **Fields:** Code, percentage/fixed value, validity, Course/Section targets, global cap, active.
-- **Actions:** Create/edit/deactivate; delete only with no redemption; view redemption/refund history.
-- **States:** Draft validation, active/inactive/expired, cap reached, frozen redeemed value fields.
-- **Constraints:** No configurable per-user limit; one consuming redemption per Student.
+- **Content:** Queue filtered by state; per invitation the Student email, Course, creating Admin,
+  current state, and timestamps; optional Admin note and opaque external reference.
+- **Fields (create):** Student email, one Course, optional Admin note, optional external reference.
+- **Actions:** Create, approve, reject with a required reason, cancel before a decision, resend the
+  acceptance link.
+- **States:** Awaiting student acceptance, awaiting admin approval, approved, rejected, cancelled;
+  duplicate non-terminal invitation refused; Course missing a future access-expiry instant blocks
+  approval.
+- **Constraints:** **Approval is the only action that grants access.** It requires the course-access
+  capability and valid recent authentication, and is refused — not degraded — without them. No
+  amount, currency, or payment-status field exists on this screen. Every transition is audited.
 
-## AD07 — Revenue and Order Detail
+## AD07 — Entitlement Detail
 
-**Purpose:** Reconcile Orders, Payment Attempts, Entitlements, Refunds, and Instructor accounting.
+**Purpose:** Inspect a granted Entitlement. **Read-only.**
 
-- **Content:** Amount snapshots, gateway references/status, coupon, Entitlement, refund/earning lines,
-  reconciliation warning.
-- **Actions:** Search/filter/export as permitted, open Refund/Payout context.
-- **States:** Pending/paid/free-granted/failed/unknown/partially refunded/refunded.
+- **Owning slice:** S6 builds the read surface. **Every mutation on this screen belongs to S8 Admin
+  Operations** — expiry extension, expiry shortening, and revocation are S8's alone, and S6 ships
+  none of them. One owner per mutation.
+- **Content:** Student, Course, grant source, originating invitation, `original_access_ends_at`,
+  current effective `access_ends_at`, adjustment history, revocation state.
+- **Actions (S6):** View; open the originating invitation.
+- **Actions (S8):** Extend or shorten expiry with a required reason; revoke with a required reason —
+  the audited elevated adjustment under BR-026.
+- **States:** Active, expired, revoked.
+- **Constraints:** No screen may create an Entitlement — creation is AD06 approval only.
+  `original_access_ends_at` is never editable by any actor in any slice.
 
-## AD08 — Refunds
+## AD08, AD09 — Refunds and Payouts — deferred out of MVP
 
-**Purpose:** Request and track policy-eligible full/partial refunds.
-
-- **Content:** Order/captured/refunded/remaining balance, method capability, accepted policy version,
-  existing Refunds, payout impact.
-- **Fields:** Integer-fils amount, required reason.
-- **Actions:** Submit idempotently, refresh/reconcile status.
-- **States:** Requested/pending/succeeded/failed/cancelled; partial/full cumulative outcome.
-- **Constraints:** No Entitlement/revenue effect before confirmed gateway success.
-
-## AD09 — Payouts
-
-**Purpose:** Prepare monthly statements and record manual bank transfers.
-
-- **Content:** Configured global share (or blocking unconfigured state), eligible Orders, fees,
-  refunds/chargebacks, prior adjustments, payable total, statement history.
-- **Actions:** Generate/review, approve, mark Paid with required reference, email statement, void an
-  unpaid statement with reason.
-- **States:** Draft/Approved/Paid/Void; failed email does not undo Paid state.
-- **Constraints:** No automated transfer or Instructor UI.
+These screens described in-platform refund processing and monthly payout statements. Both are
+deferred with in-platform payments under
+[D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+The identifiers are reserved rather than reused so existing references keep their meaning. Coupons
+previously occupied AD06 and are deferred with them; AD06 and AD07 above are new screens, not
+renamed ones.
 
 ## AD10 — Reported Content
 
@@ -460,9 +471,12 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 | ID | Screen | Audience |
 |---|---|---|
 | S01–S10 | Shared/auth/legal/system screens | Public or role-aware |
-| ST01–ST10 | Catalog through Orders/Refunds | Student/public where stated |
+| ST01–ST10 | Catalog, Course details, access invitation and status, learning, office hours, access history | Student/public where stated |
 | IN01–IN08 | Course operations, analytics, office hours | Instructor |
-| AD01–AD12 | Users, pricing, moderation, commerce, payouts, catalog taxonomy | Admin |
+| AD01–AD07, AD10–AD12 | Users, pricing, course review, course-access invitations, entitlements, moderation, catalog taxonomy | Admin |
 
-Modal/drawer states: Public Preview · Report Content · coupon result · confirmation dialogs ·
-unsaved/upload warning. External destinations: Tap hosted checkout · Discord/Telegram · meeting link.
+Modal/drawer states: Public Preview · Report Content · invitation accept/reject confirmation ·
+confirmation dialogs · unsaved/upload warning. External destination: meeting link. **There is no
+external checkout destination in MVP, and no screen links to a Discord/Telegram Course community** —
+that link is deferred to S18 by
+[D-046](DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).

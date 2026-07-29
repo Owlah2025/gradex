@@ -1,5 +1,14 @@
 # Downstream Calendar Reconciliation — S3 through S8
 
+> **HISTORICAL — superseded twice.** The calendar analysis here was corrected by
+> [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews)
+> (it counted schedule days as real days), and its slice inventory was superseded by
+> [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+> on 2026-07-28, which removed S7 and rescoped S6 to the Course Access Invitation and Entitlement
+> grant. The S6/S7/S10 rows below describe payment work that is no longer in the MVP. Retained
+> unedited as the evidence behind D-038 and D-039.
+
+
 > Produced: 2026-08-02, before S1C planning, at developer instruction
 > Bounded scope: the calendar and dependency forecast for S3–S8, with the S2, S9, and S10 dates they
 > collide with
