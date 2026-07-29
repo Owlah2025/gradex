@@ -1129,3 +1129,51 @@ its builder's assessment that its own fix worked).
 
 **Source:** Developer instruction on 2026-07-29 to resolve the review findings, re-freeze, and
 re-dispatch.
+
+---
+
+## D-049 — Claude reconciles the D-045/D-046 downstream documents and agy reviews the range
+
+**Date:** 2026-07-29
+**Status:** Active. Scoped to the downstream reconciliation range only — base
+`bae064d285f82703ee7cd61696e09c20d237a349` through this decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the builder seat for the remaining
+[D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+and [D-046](#d-046--the-external-course-community-link-is-deferred-to-post-launch) downstream
+reconciliation — the constitution, PRD, domain model, glossary, vision, screens, journeys,
+navigation, launch gates, the prior specifications under `specs/001`, `specs/002`, `specs/004`, and
+`specs/005`, and the status file — and `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`) holds
+the independent read-only reviewer seat under [D-032](#d-032--claude-builds-agy-reviews)'s
+containment harness, dispatched through `scripts/agy-review.sh <base>..<head>`. Claude must not
+review the range it authored.
+
+**[D-048](#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range) is spent.**
+It was scoped to the S5/S6 planning range `785d71c..bae064d`, which `agy` reviewed to `APPROVE` with
+zero findings. That range is closed and is not reopened by this one. D-048 is not edited to cover a
+different range, because retroactively widening a spent seat decision is the failure mode the launch
+protocol forbids.
+
+**This decision grants no S5 implementation authority.** It covers documentation reconciliation only.
+S5 implementation requires its own dated builder and reviewer assignment, and no such assignment
+exists at the time of writing.
+
+This decision **expires at the frozen reviewed head of this reconciliation range** — the exact commit
+that carries the recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** The approved S5/S6 planning range is self-contained, but S5 implementation will read the
+domain model, screens, journeys, and the S4 specification it depends on. Those still described the
+payment-era MVP, and `specs/005-media-and-entitlement-evaluation/data-model.md` still required
+`source_order_item_id NOT NULL` on the Entitlement — a constraint that would have made S6's grant
+transaction unimplementable. Reconciling that is a change to authoritative documents, so it is
+reviewed rather than assumed correct.
+
+**Alternatives rejected:** Starting S5 implementation against unreconciled downstream documents (the
+S4 Order-provenance constraint would have surfaced as a schema conflict mid-slice); folding this
+range into the approved planning range (it would reopen an approved head); Claude reviewing its own
+reconciliation.
+
+**Source:** Developer instruction on 2026-07-29 to complete and independently review the remaining
+downstream reconciliation before S5 implementation begins.
