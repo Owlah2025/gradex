@@ -51,6 +51,44 @@ export type OwnedCourseSummary = {
 
 export type OwnedCourseDetail = OwnedCourseSummary;
 
+export type CourseLifecycle = "PUBLISHED" | "DELISTED" | "ARCHIVED";
+export type SuspensionCause = "LEGAL" | "SECURITY" | "MALWARE" | "SEVERE_MODERATION";
+
+type LifecycleRequest = {
+  courseID: string;
+  locale: "ar" | "en";
+  csrf: string;
+};
+
+async function lifecycleRequest(
+  input: LifecycleRequest,
+  path: string,
+  method: "POST" | "DELETE",
+  body?: Record<string, string>,
+): Promise<void> {
+  if (!input.csrf) {
+    throw new Error(input.locale === "ar" ? "رمز CSRF مفقود" : "CSRF token is required");
+  }
+  const res = await authenticatedRequest<unknown>(
+    `/admin/courses/${encodeURIComponent(input.courseID)}${path}`,
+    method,
+    input.locale,
+    input.csrf,
+    body,
+  );
+  if (res === null && method !== "DELETE") {
+    throw new Error(input.locale === "ar" ? "لم يرجع الخادم نتيجة" : "Server returned an empty result");
+  }
+}
+
+export function delistCourse(input: LifecycleRequest) { return lifecycleRequest(input, "/delist", "POST"); }
+export function relistCourse(input: LifecycleRequest) { return lifecycleRequest(input, "/relist", "POST"); }
+export function retireCourse(input: LifecycleRequest) { return lifecycleRequest(input, "/retire", "POST"); }
+export function archiveCourse(input: LifecycleRequest) { return lifecycleRequest(input, "/archive", "POST"); }
+export function reassignCourseOwner(input: LifecycleRequest & { ownerAccountID: string }) { return lifecycleRequest(input, "/owner", "POST", { owner_account_id: input.ownerAccountID }); }
+export function suspendCourseAccess(input: LifecycleRequest & { cause: SuspensionCause; reason: string }) { return lifecycleRequest(input, "/access-suspension", "POST", { cause: input.cause, reason: input.reason }); }
+export function restoreCourseAccess(input: LifecycleRequest & { reason: string }) { return lifecycleRequest(input, "/access-suspension", "DELETE", { reason: input.reason }); }
+
 export async function getCoursePriceHistory(
   courseID: string,
   locale: "ar" | "en",

@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 )
@@ -130,6 +131,7 @@ func mountCatalogRoutes(
 	pricingH := &adminPricingHandlers{
 		repo: foundation.repository,
 	}
+	lifecycleH := &adminLifecycleHandlers{repo: foundation.repository}
 
 	adminPricingGetGroup := v1.Group("/admin/courses/:id")
 	adminPricingGetGroup.Use(
@@ -149,6 +151,23 @@ func mountCatalogRoutes(
 	{
 		adminPricingMutationGroup.PUT("/price", pricingH.setCoursePrice)
 		adminPricingMutationGroup.PUT("/sections/:sectionId/price", pricingH.setSectionPrice)
+	}
+
+	adminLifecycleMutationGroup := v1.Group("/admin/courses/:id")
+	adminLifecycleMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+	)
+	{
+		adminLifecycleMutationGroup.POST("/delist", lifecycleH.transition(catalog.LifecycleDelisted))
+		adminLifecycleMutationGroup.POST("/relist", lifecycleH.transition(catalog.LifecyclePublished))
+		adminLifecycleMutationGroup.POST("/retire", lifecycleH.retire)
+		adminLifecycleMutationGroup.POST("/archive", lifecycleH.transition(catalog.LifecycleArchived))
+		adminLifecycleMutationGroup.DELETE("", lifecycleH.delete)
+		adminLifecycleMutationGroup.POST("/owner", lifecycleH.reassignOwner)
+		adminLifecycleMutationGroup.POST("/access-suspension", lifecycleH.suspend)
+		adminLifecycleMutationGroup.DELETE("/access-suspension", lifecycleH.restoreAccess)
 	}
 
 	return nil

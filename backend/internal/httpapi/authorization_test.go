@@ -328,6 +328,14 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PUT /api/v1/admin/courses/:id/price":                     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/price", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/sections/:sectionId/price": {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/sections/:sectionId/price", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/courses/:id/price-history":             {Method: http.MethodGet, Path: "/api/v1/admin/courses/:id/price-history", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/delist":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/delist", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/relist":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/relist", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/retire":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/retire", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/archive":                  {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/archive", Class: ClassCapabilityProtected},
+	"DELETE /api/v1/admin/courses/:id":                        {Method: http.MethodDelete, Path: "/api/v1/admin/courses/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/owner":                    {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/owner", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/courses/:id/access-suspension":        {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
+	"DELETE /api/v1/admin/courses/:id/access-suspension":      {Method: http.MethodDelete, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}

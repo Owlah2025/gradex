@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { PricingModal } from "./pricing-modal";
+import { LifecycleControls } from "./lifecycle-controls";
 
 export interface ReviewQueueItem {
   course_id: string;
@@ -248,6 +249,8 @@ export function ReviewQueue() {
           onClose={() => setPricingCourseID(null)}
         />
       )}
+
+      {pricingCourseID && <LifecycleControls courseID={pricingCourseID} />}
     </div>
   );
 }

@@ -6,7 +6,35 @@ import {
   setSectionPrice,
   getOwnedCourses,
   getOwnedCourseDetail,
+  delistCourse,
+  restoreCourseAccess,
 } from "./catalog";
+
+test("lifecycle wrappers send the secured route and body", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return new Response(JSON.stringify({}), { status: 200 });
+  };
+
+  try {
+    await delistCourse({ courseID: "course-123", locale: "en", csrf: "csrf-123" });
+    await restoreCourseAccess({ courseID: "course-123", locale: "en", csrf: "csrf-123", reason: "Incident resolved" });
+
+    assert.deepEqual(requests.map(({ url, init }) => ({
+      url,
+      method: init?.method,
+      csrf: new Headers(init?.headers).get("X-CSRF-Token"),
+      body: init?.body,
+    })), [
+      { url: "/api/v1/admin/courses/course-123/delist", method: "POST", csrf: "csrf-123", body: undefined },
+      { url: "/api/v1/admin/courses/course-123/access-suspension", method: "DELETE", csrf: "csrf-123", body: JSON.stringify({ reason: "Incident resolved" }) },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("catalog API wrappers fail closed when server returns 204/null empty body", async () => {
   const originalFetch = globalThis.fetch;
