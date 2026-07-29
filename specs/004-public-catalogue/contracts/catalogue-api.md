@@ -76,6 +76,9 @@ one projection — a separate search endpoint would be a second place to forget 
   this surface claims **partial** BR-162 compliance — complete on matching, absent on ranking.
 - Restricted to Published Courses through the **same** `PublishedOnly` predicate the unfiltered list
   uses — never a separate status condition in the search query *(FR-022)*.
+- Matches only the Course's **live revision**, resolved through its live-revision pointer. A Course is
+  never surfaced through a pending or superseded revision, even though every revision holds stored
+  searchable text — storage is not a visibility control on this surface *(FR-005; BR-017)*.
 - Empty, whitespace-only, over-long, and metacharacter-bearing queries return a well-formed result,
   never an error disclosing internals *(FR-024)*.
 - No ranking, personalization, or paid placement *(FR-025)*. Ordering is stable and documented — not

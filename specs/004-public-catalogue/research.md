@@ -48,7 +48,11 @@ filtering deferred, on the grounds that §2.2's single line bundled a genuinely 
 
 That draft specified one generated column covering Course title, description, Instructor display name,
 and taxonomy labels. **It is not implementable.** A PostgreSQL generated column may reference only
-columns of its own row, and three of those four fields live in other tables.
+columns of its own row — here, the `course_revisions` row — and the display name lives in `accounts`
+while the taxonomy labels live in `taxonomy_terms`.
+
+*Which* row that is went unanswered until [R-006](#r-006--which-table-owns-the-generated-search-column),
+which is the defect R-005 left behind.
 
 **Options considered**
 
@@ -67,6 +71,47 @@ comfortably inside the 2.5s p95 LCP budget into the **low hundreds** of Courses.
 **500 Courses** it should be revisited — and the right answer then is PostgreSQL full-text search with
 an Arabic configuration, adopted **together with ranking** in S18, rather than a trigger fabric bolted
 on earlier. Recorded here so the threshold is a documented trigger rather than a surprise.
+
+## R-006 — Which table owns the generated search column
+
+**Found on 2026-07-30 by the implementation builder on the first pass over the approved plan, before
+any file was edited. It invalidated the second draft of [data-model.md](data-model.md) and the original
+wording of T026.** The builder stopping instead of guessing is the reason this is a research entry and
+not a production defect.
+
+R-005 established that the generated column may only read same-row fields. It never said **whose** row,
+and the artefacts carried the placeholder `ALTER TABLE <course table>`. Against the committed S2 schema
+there is no table for which the old requirement — *same-row generated text, populated for Published
+Courses only* — can be satisfied:
+
+| Table | Has authored `title`/`description`? | Owns Course publication state? |
+|---|---|---|
+| `courses` | **No** — `0009_course_authoring` dropped the stub `title`; description was never there | Yes — `lifecycle`, `live_revision_id`, `access_suspended_at`, `retired_at` |
+| `course_revisions` | Yes — `title_ar`, `title_en`, `description_ar`, `description_en` | **No** — its `state` describes the revision's review position, not Course visibility |
+
+**Options considered**
+
+| Option | Verdict |
+|---|---|
+| Generated column on `courses` | **Impossible.** There is no same-row text to generate from |
+| Generated column on `courses` reading `course_revisions` | **Impossible.** PostgreSQL forbids cross-table generation. This is the same wall R-005 hit, one table over |
+| Trigger copying revision title/description onto `courses` | **Rejected.** Reintroduces the denormalization subsystem R-005 rejected, and puts an S3 trigger on S2's authoring transaction — while S2 is closed and must not be reopened |
+| Application-maintained `search_text` on `courses` | **Rejected.** The second source of truth R-002 already rejected, now also coupling catalogue search to the authoring write path |
+| New materialized search-document table | **Rejected.** This is "S3 grows into a search subsystem", which the slice boundary forbids outright. Also introduces staleness on a correctness-adjacent surface |
+| Keep "Published only" and pick a table anyway | **Rejected.** Whichever table is chosen, the requirement is unmet — and shipping an unmeetable requirement as if it were met is worse than the exposure it was meant to prevent |
+| **Split by concern**: `course_revisions` owns generated text; `courses` owns exposure | **Adopted** |
+
+**Why the adopted option loses nothing.** The population boundary was documented as *"deliberately
+redundant with `PublishedOnly`, which remains the control."* It was defence-in-depth over a control that
+was already load-bearing, not a control itself. Dropping a redundant layer that cannot be built, while
+keeping the layer that can and adding the live-revision join the one-to-many relationship demands, is a
+strictly better position than the one the plan claimed.
+
+**Its cost, stated honestly.** Non-live and unavailable revisions now hold indexed search text. Nothing
+reads it except a query that has already passed the live-revision join and `PublishedOnly`, so the cost
+is disk and a weaker story if *both* of those controls are removed at once. That is why the mutation
+proofs are named tasks (T032a, T032b) rather than a line of prose: the redundancy that used to be
+claimed by storage is now claimed by tests, and tests can be run.
 
 ## R-003 — Reusing the S1B locale mechanism
 

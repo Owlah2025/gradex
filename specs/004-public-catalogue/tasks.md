@@ -14,11 +14,26 @@
 **Implementation base: `343aacb`** — the approved planning head, reviewed to `APPROVE` with zero
 findings. **Implementation has not started; zero tasks are complete.**
 
+> **D-053's implementation authorization is PAUSED as of 2026-07-30, and `343aacb` is no longer a valid
+> implementation base.** Codex began Batch 1, found that the approved search design could not be built
+> against the committed S2 schema, and **stopped before editing any file** — no production file,
+> migration, test, task closure, or commit was produced. That was the correct outcome: the defect was in
+> the plan, not in the implementation of it. The generated `search_text` column was specified as
+> same-row *and* conditioned on Course publication, but `courses` holds no authored text and
+> `course_revisions` holds no Course publication state, so no PostgreSQL generated column can satisfy
+> both. See [R-006](research.md#r-006--which-table-owns-the-generated-search-column).
+>
+> T023, T023a, T026, T027, T032, and T034 are corrected below, and T032a and T032b are added.
+> **Implementation must not resume under `343aacb`.** A replacement implementation-seat decision must
+> reassign the builder and reviewer against the new approved base once this correction is reviewed.
+> D-053 is not edited retroactively — it recorded a true state of affairs on a premise that has since
+> been corrected.
+
 **Codex availability was explicitly reverified by the product owner on 2026-07-30**, satisfying
 [D-033](../../docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)'s precondition
 positively rather than by inference from silence or from the absence of a quota error.
 
-**Work is handed over in bounded batches, not as all 46 tasks at once.** Each batch names its exact
+**Work is handed over in bounded batches, not as all 48 tasks at once.** Each batch names its exact
 task IDs and evidence, and freezes a range for independent review before the next begins. D-053 expires
 when S3 closes on a recorded reviewer verdict.
 
@@ -207,14 +222,23 @@ Required mutations, each of which must turn a test red:
 
 - [ ] T023 Add migration `0011_catalog_search`, the **next** number after committed
       `0010_revision_integrity`. Additive only: the `catalog_normalize_ar` function, one generated
-      column, one index. No constraint on any existing table, and **no modification of
-      any existing migration file** — their checksums are enforced by `scripts/docs-guard.sh`
+      column **on `course_revisions`**, one index over it. `ALTER TABLE course_revisions` — the table
+      that actually holds the authored text; **not** `courses`, which holds no title or description at
+      all. No constraint on any existing table, and **no modification of any existing migration
+      file** — their checksums are enforced by `scripts/docs-guard.sh`
       *(FR-002, FR-021 storage support; data-model.md §Migration `0011_catalog_search`)*
-- [ ] T023a **Verify the backfill, do not assume it.** `ALTER TABLE … ADD COLUMN … GENERATED … STORED`
-      computes the value for existing rows as part of the statement. Assert after `up` that every
-      pre-existing Published Course has non-empty `search_text` and that a known Arabic title is
-      present in folded form. A migration that leaves the existing catalogue unsearchable passes every
-      schema assertion while being obvious to a visitor *(FR-021, FR-023)*
+- [ ] T023a **Verify the backfill and the upgrade path, do not assume them.**
+      `ALTER TABLE … ADD COLUMN … GENERATED … STORED` computes the value for existing rows as part of
+      the statement. Assert after `up`, on a database seeded **before** the migration ran:
+      **(a)** every pre-existing `course_revisions` row has a non-empty `search_text` — every row, not
+      only those belonging to Published Courses; **(b)** a known Arabic title is present in folded form,
+      so the assertion proves normalization rather than mere non-emptiness; **(c)** the live revision of
+      a pre-existing Published Course is reachable by a search for its authored text; **(d)** a Draft
+      revision and a `SUPERSEDED` revision **do** carry generated text and are **still** absent from
+      every public result. Run both paths: clean install (`0001`→`0011` on an empty database) and
+      upgrade (schema 10 with real rows, then `0011`), and confirm they agree. A migration that leaves
+      the existing catalogue unsearchable passes every schema assertion while being obvious to a
+      visitor *(FR-021, FR-023, FR-002; data-model.md §3)*
 - [ ] T024 Implement `catalog_normalize_ar` as an `IMMUTABLE STRICT` SQL function — **the single
       definition of normalization in the system.** Exactly the transformations in
       [data-model.md](data-model.md#1-the-normalize-function--the-single-definition): alef/hamza
@@ -223,14 +247,46 @@ Required mutations, each of which must turn a test red:
 - [ ] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
       same SQL function inside the query. If a Go helper appears, write/query asymmetry has become
       representable again and the guarantee is gone. The review checks for its absence
-- [ ] T026 Generate the stored column from **title and description only** (same-row constraint,
-      [R-005](research.md#r-005--the-cross-table-constraint)), with `coalesce` so a null description
-      cannot null the column and silently drop the Course from search. Populate for **Published**
-      Courses only — deliberately redundant with T002 *(FR-021, FR-002; BR-161)*
-- [ ] T027 Normalize the joined fields — Instructor display name, taxonomy labels and code — **at
-      query time through the same function**, and route the whole search through the **same**
-      `PublishedOnly` predicate rather than a separate status condition (FR-022)
-      *(FR-021, FR-022, FR-023; BR-161)*
+- [ ] T026 **Generate `search_text` on `course_revisions`, from that row's own authored columns, for
+      every revision.** Exactly:
+      - The column is added to **`course_revisions`** — the table that owns the authored text. Adding it
+        to `courses` is impossible, not merely discouraged: `0009_course_authoring` dropped that table's
+        stub `title` and it never had a description.
+      - The expression reads **only same-row columns of `course_revisions`**: `title_ar`, `title_en`,
+        `description_ar`, `description_en`. Use those committed names; do not introduce `title` or
+        `description` aliases and do not add authored fields to `courses`.
+      - **No cross-table dependency of any kind.** The expression must not reference `courses`,
+        `accounts`, or `taxonomy_terms`. PostgreSQL forbids it, and the workarounds — a trigger, an
+        application-written column, a materialized search table — are all rejected by
+        [R-006](research.md#r-006--which-table-owns-the-generated-search-column).
+      - Keep `coalesce` on all four columns. They are `NOT NULL` today, so it changes nothing now; it
+        prevents `catalog_normalize_ar`'s `STRICT` behaviour from nulling the whole document, and
+        silently dropping the revision from search, if a later migration relaxes one of them.
+      - **Generate it for every revision row — no publication condition.** There is deliberately **no**
+        `WHERE`, no partial index, and no expression testing lifecycle. A populated `search_text` is
+        **not** a claim that the row is publicly visible; it is storage. Exposure is decided by T027's
+        live-revision join and by `PublishedOnly`, and by nothing else.
+      - Add the approved index over `course_revisions (search_text)` — a substring-match structure, not
+        a ranking one (FR-023b).
+
+      *This task previously required population for Published Courses only. That requirement was
+      withdrawn on 2026-07-30 as unbuildable — see
+      [R-006](research.md#r-006--which-table-owns-the-generated-search-column). It was documented as
+      redundant with `PublishedOnly`; T032a and T032b now carry that redundancy as runnable proofs.*
+      *(FR-021, FR-002; BR-161; data-model.md §2)*
+- [ ] T027 **Build the public search query: live revision, published Course, generated column.** The
+      search must:
+      - join `courses` to `course_revisions` on **`courses.live_revision_id = course_revisions.id`**, so
+        only the live revision is ever a public candidate. Joining on `course_id` alone is the specific
+        defect this clause forbids — it would surface a Course through **any** revision it has ever had,
+        including a `SUPERSEDED` title deliberately withdrawn;
+      - apply the **same** `PublishedOnly` predicate from T002 that the list and detail routes use —
+        never a separate status condition in the search query (FR-022);
+      - match the normalized query against the **live revision's** `search_text`;
+      - **never** search a Course's historical revisions as public candidates;
+      - normalize the joined fields — Instructor display name, taxonomy labels and code — **at query
+        time through the same function**, on the same live-revision row set.
+      *(FR-021, FR-022, FR-023, FR-005; BR-161, BR-017; plan.md §Exposure boundary)*
 
 ### Red-first test set — each observed failing before its implementation
 
@@ -249,23 +305,65 @@ Required mutations, each of which must turn a test red:
       published list, not an error and not an empty result (FR-023a, SC-009)
 - [ ] T032 [RED] **Unpublished non-disclosure through search.** A Lesson title, a Resource filename,
       a Draft Course's title, and a Delisted Course's title each return nothing — including when
-      queried in normalized Arabic form. Normalization must not become a path around `PublishedOnly`
+      queried in normalized Arabic form. Normalization must not become a path around `PublishedOnly`.
+      **Assert the harder version of this now that storage no longer filters:** for each of a `DRAFT`,
+      `PENDING_REVIEW`, `CHANGES_REQUESTED`, `DELISTED`, and `ARCHIVED` Course, plus a retired Course
+      and a Published Course under an active `access_suspended_at` suspension, first confirm the
+      revision row **does** hold matching `search_text`, then confirm the public search returns nothing
+      for it. A test that only checks the absence of the result would also pass if the text were never
+      generated, and would therefore stop proving anything the day generation changed
       *(FR-006, FR-002, FR-022, SC-005; BR-143, BR-161)*
+- [ ] T032a [RED] **The live-revision exposure boundary.** This is the task that carries the guarantee
+      the withdrawn population boundary used to claim, and each assertion must fail before T027 exists:
+      1. A Published Course **is** found by text authored on its **live** revision.
+      2. A non-live revision of that same Course carrying **identical** matching text returns nothing —
+         the same query string, so the only difference is which revision is live.
+      3. A `SUPERSEDED` historical revision is not returned while another revision is live, even though
+         its `search_text` is populated and indexed.
+      4. Repointing `courses.live_revision_id` to a different revision changes which authored text is
+         searchable **immediately and in both directions** — the new text matches, the old text stops
+         matching — with **no** text copied into `courses` and no S2 write path involved. Assert that
+         `courses` gained no title, description, or search column.
+      5. Search and detail agree: the text that matches is the text the detail projection renders,
+         because both resolve through `live_revision_id`.
+      *(FR-005, FR-002, FR-021, FR-022; BR-017, BR-161; plan.md §Exposure boundary)*
+- [ ] T032b **Mutation proofs for the two exposure controls.** Both must be named, run, and their
+      failure output recorded — this is the redundancy that replaced the population boundary, and an
+      unrun mutation is prose:
+      - Remove **only** the `courses.live_revision_id = course_revisions.id` join condition (leaving the
+        `course_id` join) and confirm a named test in T032a fails by returning a Course through a
+        historical revision.
+      - Remove **only** the `PublishedOnly` predicate from the search query and confirm a named test in
+        T032 fails by returning a non-Published Course.
+      Neither mutation may be survivable. If either passes, the control is not where this plan says it
+      is *(FR-002, FR-005, FR-022, SC-005; standing clause on mutation evidence)*
 - [ ] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
       return a well-formed result and never an error disclosing internals (FR-024)
 - [ ] T034 Confirm no stemming, fuzzy matching, ranking, or external search dependency was introduced
       (FR-023b). Result ordering is stable and documented, not scored. Confirm in the same task that
       **no personalization, recommendation, or paid-placement input** reaches result selection or
       ordering — no visitor identity, no session, no behavioural signal, and no sponsored or boosted
-      flag *(FR-023b, FR-025; BR-161)*
+      flag. Confirm three further absences, each of which is a rejected alternative from
+      [R-006](research.md#r-006--which-table-owns-the-generated-search-column) rather than a style
+      preference:
+      - **The generated expression reads same-row `course_revisions` columns only.** Read the column's
+        definition back out of `information_schema`/`pg_attrdef` and assert it names no other table.
+        Assert `courses` has no title, description, or search column.
+      - **No Go catalogue-normalization function exists** anywhere in the backend (reinforces T025,
+        T030).
+      - **No S2 authoring or publication write path was modified.** No trigger on `courses` or
+        `course_revisions`, and no change to S2's authoring or publication transactions. `git diff`
+        against the implementation base touches no S2 write path
+      *(FR-023b, FR-025, FR-021; BR-161; R-006)*
 - [ ] T035 Add `CatalogSearchSchemaVersion = 11` and raise `db.MaxSchemaVersion` to it, matching the
       per-migration named-constant pattern in `backend/internal/db/schema.go`. **The current value is
       already 10** (`RevisionIntegritySchemaVersion`), so `0011_catalog_search` makes the new maximum
       **11**. Confirm CI **derives** its assertion from the constant via `migrate max-version` rather
       than carrying a literal *(FR-002 storage support; data-model.md §Schema version)*
 
-**Checkpoint 5** — search finds published Courses in both languages, reveals nothing else, and every
-red-first test was observed failing first.
+**Checkpoint 5** — search finds published Courses in both languages **through their live revisions**,
+reveals nothing else, T032b's two mutations were run and both failed as required, and every red-first
+test was observed failing first.
 
 ## Phase 6 — Performance and polish
 
@@ -309,7 +407,9 @@ not overlap Phase 2: it depends on the checkpoint.
 ## Parallel opportunities
 
 `[P]`-marked tasks touch disjoint files: T010/T011, and T018/T019. T007a runs with T007; T011a with
-T011; T013a with T013; T019a with T019; T022a with T022; T039a after T039's clean build.
+T011; T013a with T013; T019a with T019; T022a with T022; T039a after T039's clean build. T032a runs
+with T032 — they share a fixture; **T032b runs last in Phase 5**, because a mutation proof needs the
+tests it mutates to be passing first.
 
 ## Review checkpoints
 
@@ -331,10 +431,10 @@ explicit verification task. Recorded on 2026-07-30.
 | Requirement | Tasks |
 |---|---|
 | FR-001 public unauthenticated routes | T005, T007a |
-| FR-002 published-only from one predicate | T002, T003, T006, T007, T026, T032, T035 |
+| FR-002 published-only from one predicate | T002, T003, T006, T007, T027, T032, T032b, T035 |
 | FR-003 hidden is indistinguishable from absent | T004, T006, T008, T009, T038 |
-| FR-004 emergency suspension excluded | T002, T008 |
-| FR-005 live revision only | T002, T009 |
+| FR-004 emergency suspension excluded | T002, T008, T032 |
+| FR-005 live revision only | T002, T009, T027, T032a, T032b |
 | FR-006 no Lesson, Resource, or Lab exposure | T013, T020, T032 |
 | FR-007 suspended Instructor stays visible | T014 |
 | FR-008 paginated list projection | T010, T018 |
@@ -351,8 +451,8 @@ explicit verification task. Recorded on 2026-07-30.
 | FR-018 phone, tablet, desktop | T022, T022a |
 | FR-019 authored language, no machine translation | T021 |
 | FR-020 the shell is the single foundation | T001, T015, T016 |
-| FR-021 match title, description, name, taxonomy | T023a, T026, T027, T029 |
-| FR-022 search reuses the FR-002 predicate | T027, T032 |
+| FR-021 match title, description, name, taxonomy | T023a, T026, T027, T029, T032a, T034 |
+| FR-022 search reuses the FR-002 predicate | T027, T032, T032a, T032b |
 | FR-023 one normalization function | T023a, T024, T025, T027, T028, T029, T030 |
 | FR-023a empty normalized query behaves as absent | T031 |
 | FR-023b no stemming, fuzzy, ranking, external service | T034 |
@@ -369,7 +469,7 @@ were substantively covered but uncited.
 | SC-002 identical response for hidden and absent | T008 |
 | SC-003 Arabic + RTL first visit, preference survives | T017 |
 | SC-004 renders at three widths in both directions | T022, T022a |
-| SC-005 search reveals no unpublished content | T032 |
+| SC-005 search reveals no unpublished content | T032, T032a, T032b |
 | SC-006 p95 LCP under 2.5s | T036, T037 |
 | SC-007 no PII beyond display name | T012 |
 | SC-008 timing distribution within documented tolerance | T038 |
@@ -384,12 +484,21 @@ BR-162's *"ranked by relevance"* clause is **not** claimed by S3 — see the tra
 
 ## Task count
 
-**46 tasks** (T001–T039 plus T007a, T011a, T013a, T019a, T022a, T023a, T039a). Six tasks were added on
-2026-07-30 to close requirement-coverage gaps: T007a and T039a plus T019a and T022a for FR-010a,
-T011a for FR-009's Section-price prohibition, and T013a for FR-014. No task was removed and no
-requirement was weakened. Phase 5 previously grew from 8 to 13 with OD-001's resolution and the
-red-first requirement; the slice estimate moves from 8h to **11–13h** with this pass's additions.
-That increase is reported rather than absorbed — see [§Scope honesty](#scope-honesty).
+**48 tasks** (T001–T039 plus T007a, T011a, T013a, T019a, T022a, T023a, T032a, T032b, T039a). Six tasks
+were added earlier on 2026-07-30 to close requirement-coverage gaps: T007a and T039a plus T019a and
+T022a for FR-010a, T011a for FR-009's Section-price prohibition, and T013a for FR-014.
+
+**Two tasks were added later the same day by the search-ownership correction: T032a and T032b.** They
+are not scope growth. The withdrawn population boundary claimed a layer of defence in storage that
+cannot be built against the committed S2 schema; T032a asserts the live-revision exposure boundary that
+actually enforces it, and T032b runs the two mutations that prove both controls are load-bearing. A
+redundancy that can be executed replaces one that could only be asserted. No task was removed and no
+requirement was weakened; T026 and T027 were rewritten in place and keep their identifiers.
+
+Phase 5 previously grew from 8 to 13 with OD-001's resolution and the red-first requirement; the slice
+estimate moves from 8h to **11–13h** with the coverage additions, and the correction's two tasks add
+roughly **1h** for a range of **12–14h**. That increase is reported rather than absorbed — see
+[§Scope honesty](#scope-honesty).
 
 ## Scope honesty
 

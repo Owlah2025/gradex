@@ -69,12 +69,19 @@ indistinguishability promises something it cannot deliver and invites a test tha
 S2 protects private drafts behind ownership. S3 opens a set of routes that deliberately serve
 anonymous callers, and it reads the same tables. Every leak class this project has already paid for
 lives here: enumeration by identifier, a filter applied to the list route but not the detail route, a
-404 that says "not found" for one case and "forbidden" for another, and a search index built from
-rows the reader may not see.
+404 that says "not found" for one case and "forbidden" for another, a search **result** built from rows
+the reader may not see, and a Course surfaced through a revision that is not the live one.
+
+The last two are worth separating, because they fail differently. Searchable text is stored for every
+Course Revision — it must be, since a generated column cannot consult the Course's publication state
+(see [research.md §R-006](research.md#r-006--which-table-owns-the-generated-search-column)) — so the
+control is never *what is indexed*, it is always *what is returned*. FR-002 and FR-022 keep
+non-Published Courses out; FR-005 keeps non-live revisions out. Both are query-side, and both must fail
+under mutation to count as controls at all.
 
 `DELISTED`, `ARCHIVED`, `PENDING_REVIEW`, `CHANGES_REQUESTED`, `DRAFT`, and a Course under emergency
 access suspension are **all** non-public here (BR-090). A pending revision of a Published Course is
-non-public while its approved live version remains public (BR-017).
+non-public while its approved live version remains public (BR-017), and so is a `SUPERSEDED` one.
 
 ---
 
@@ -143,6 +150,14 @@ makes the catalogue feel like a product rather than a list, but it does not bloc
 4. **Given** an empty query, a whitespace query, a very long query, or a query containing SQL or
    regex metacharacters, **when** it is searched, **then** the response is a well-formed empty or
    filtered result and never an error disclosing internals.
+5. **Given** a Published Course whose **live** revision matches a query, **when** it is searched,
+   **then** the Course is returned once, projected from that live revision. *(BR-017, BR-161)*
+6. **Given** text that appears **only** on a non-live revision of a Published Course — a pending
+   revision, or a `SUPERSEDED` one whose title was withdrawn — **when** that text is searched, **then**
+   nothing is returned, even though the revision row holds indexed searchable text. *(BR-017, BR-161)*
+7. **Given** a Published Course whose live revision pointer is moved to a different revision, **when**
+   the old and new authored titles are each searched, **then** the new title matches and the old one
+   stops matching, with no Course-level text having been written. *(BR-017)*
 
 ### Edge Cases
 
@@ -175,7 +190,9 @@ makes the catalogue feel like a product rather than a list, but it does not bloc
 - **FR-004**: System MUST exclude a Course under emergency access suspension from all public routes
   while that suspension is active. *(BR-090)*
 - **FR-005**: System MUST serve only the currently approved live revision of a Published Course and
-  MUST NOT expose a pending revision. *(BR-017)*
+  MUST NOT expose a pending or superseded revision — on **every** public route, including search, which
+  MUST resolve its candidate rows through the Course's live-revision pointer rather than through the
+  Course's revisions generally. *(BR-017)*
 - **FR-006**: System MUST NOT expose Lesson titles, protected Resources, Lab Materials, or any
   non-Published content through any public route, including search. *(BR-143, BR-161)*
 - **FR-007**: System MUST keep a Published Course publicly visible when its owning Instructor is
@@ -220,10 +237,14 @@ makes the catalogue feel like a product rather than a list, but it does not bloc
 
 **Search**
 
-- **FR-021**: System MUST match a query against Course title, authored description, Instructor
-  display name, and taxonomy labels and code. *(BR-161)*
+- **FR-021**: System MUST match a query against the **live revision's** title and authored description,
+  in both authored languages, plus the Instructor display name and the taxonomy labels and code.
+  *(BR-161, BR-017)*
 - **FR-022**: System MUST restrict search results to Published Courses using the **same** FR-002
-  predicate the list and detail routes use, not a separate status condition in the query. *(BR-161)*
+  predicate the list and detail routes use, not a separate status condition in the query. Search text
+  MAY be stored for content that is not publicly visible — storage is not a visibility control — so this
+  predicate and FR-005's live-revision resolution are the **only** things standing between a stored
+  value and a public result, and each MUST fail a deliberate mutation. *(BR-161)*
 - **FR-023**: System MUST match case-insensitively and MUST match Arabic and English content
   simultaneously regardless of interface language, applying **one** normalization function identically
   to stored searchable text and to the incoming query. The normalization implemented in S3 is exactly:
@@ -315,9 +336,16 @@ bundling a genuinely optional feature with a non-optional one:
   **Pulled into S3.**
 
 **Scope admitted to S3**: one shared normalization function applied identically to stored searchable
-text and to the incoming query; the folds enumerated in FR-023; migration and backfill for existing
-published records; red-first tests. See FR-023, FR-023a, FR-023b, and
+text and to the incoming query; the folds enumerated in FR-023; migration and backfill of the existing
+Course Revision rows that hold that text; red-first tests. See FR-023, FR-023a, FR-023b, and
 [data-model.md](data-model.md).
+
+**Corrected 2026-07-30.** This paragraph previously read "backfill for existing published records",
+which implied that publication governs whether stored search text exists. It does not, and it cannot:
+the text lives on `course_revisions` and publication state lives on `courses`, and a PostgreSQL
+generated column cannot read across the two. Search text is stored for **every** Course Revision;
+FR-002, FR-005, and FR-022 are what keep non-Published and non-live content out of every public
+result. See [research.md §R-006](research.md#r-006--which-table-owns-the-generated-search-column).
 
 **Explicitly excluded**: stemming, fuzzy or edit-distance matching, weighted or relevance ranking,
 external search infrastructure, and multi-dimension filtering. S3 must not expand into a search

@@ -11,7 +11,11 @@ No new dependency:
 
 - PostgreSQL at schema **10**, Redis, MinIO
 - Fixture Courses with **Arabic**, **English**, and **mixed-script** titles, plus one pre-existing
-  Published Course created *before* migration `0010` so the backfill is exercised rather than assumed
+  Published Course created *before* migration `0011` so the backfill is exercised rather than assumed
+- A Published Course carrying **more than one** revision: its live revision, one pending revision, and
+  one `SUPERSEDED` revision, with **distinct** authored titles and one title deliberately duplicated
+  across a live and a non-live revision. Without this fixture the live-revision boundary cannot be
+  tested at all, and a search joining on `course_id` alone would pass every other scenario here
 - `GOCACHE=/tmp/gradex-go-cache` — the workspace sandbox refuses the default
 - A fixture catalogue containing **every** lifecycle state: Published, Draft, Pending Review, Changes
   Requested, Delisted, Archived, a Published Course with an active emergency suspension, a Published
@@ -118,14 +122,32 @@ why it runs against the payload rather than the page, where an unrendered field 
 5. Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each return a well-formed result and
    never an error disclosing internals.
 6. **Non-disclosure survives normalization**: a Draft or Delisted Course's title, queried in normalized
-   Arabic form, returns nothing. Normalization must not become a path around `PublishedOnly`.
+   Arabic form, returns nothing. Normalization must not become a path around `PublishedOnly`. Confirm
+   first that the revision row **does** carry matching `search_text`, so the assertion proves the query
+   is filtering rather than that the text was never stored.
+7. **Only the live revision is searchable** (FR-005): text authored on a Published Course's live
+   revision matches; the same text present **only** on a pending or `SUPERSEDED` revision of that Course
+   matches nothing. Then repoint `courses.live_revision_id` to another revision and re-run both queries —
+   the new title matches and the old one stops, with `courses` holding no title, description, or search
+   column of its own.
 
 **Every test in this scenario is written red-first** and observed failing before its implementation
 exists. Arabic normalization is the one place in this slice where a test passes for the wrong reason:
 an English-only assertion looks identical whether folding works or is absent entirely.
 
-**Mutation**: apply normalization on write but not on query. Case 2 must fail — this is the asymmetry
-the single SQL function exists to make unrepresentable, and it passes every naive English-only test.
+**Mutations — three, all required:**
+
+1. Apply normalization on write but not on query. Case 2 must fail — this is the asymmetry the single
+   SQL function exists to make unrepresentable, and it passes every naive English-only test.
+2. Drop the `courses.live_revision_id = course_revisions.id` condition, keeping the `course_id` join.
+   Case 7 must fail by returning a Course through a historical revision (T032b).
+3. Drop `PublishedOnly` from the search query. Case 6 must fail by returning a non-Published Course
+   (T032b).
+
+Mutations 2 and 3 are the whole of the defence that used to be claimed by storing search text for
+Published Courses only. That claim was withdrawn on 2026-07-30 as unbuildable
+([R-006](research.md#r-006--which-table-owns-the-generated-search-column)); these two runnable
+mutations replace it.
 
 ## Scenario 6 — The suspended-Instructor case (FR-007, BR-065)
 
