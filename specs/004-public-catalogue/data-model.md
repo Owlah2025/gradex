@@ -106,10 +106,14 @@ that stops being true.
 
 Drops the index, the column, and the function, in that order. It must leave no orphaned function or
 type. Verify `up` → `down` → `up` against real PostgreSQL rather than by inspection, and confirm the
-schema version reports 10 at each `up`.
+schema version reports **11** after each `up` and **10** after the `down`.
 
 ## Schema version
 
-`db.MaxSchemaVersion` rises to **10** (T030). CI derives its assertion from that constant through the
-`migrate max-version` subcommand rather than a literal — a hardcoded version is the exact drift that
-failed hosted CI during S1B2.
+Committed migrations currently end at schema version **10** (`RevisionIntegritySchemaVersion`, from
+`0010_revision_integrity`). Applying `0011_catalog_search` raises the schema version to **11**: add
+`CatalogSearchSchemaVersion = 11` and make `db.MaxSchemaVersion` **11**, following the per-migration
+named-constant pattern in `backend/internal/db/schema.go`. Implemented by **T035**.
+
+CI derives its assertion from that constant through the `migrate max-version` subcommand rather than a
+literal — a hardcoded version is the exact drift that failed hosted CI during S1B2.
