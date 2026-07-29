@@ -1,5 +1,16 @@
 # Phase 1 Data Model: Coupons System
 
+> **STATUS: DEFERRED — post-MVP. Not implementation scope.**
+>
+> Coupons were deferred out of MVP on 2026-07-28 by
+> [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation):
+> a coupon discounts a checkout, and MVP has no checkout. Free and promotional access is granted
+> through the same audited Course Access Invitation path as any other access — there is no second
+> grant mechanism.
+>
+> This document is **retained unchanged as the design of record** for whenever in-platform payments
+> are taken up. Nothing in it is current implementation scope.
+
 > Status: Design input; capacity mechanics reconciled 2026-07-26 by D-028.
 
 All money is BIGINT **fils**. Timestamps are `timestamptz` instants stored in UTC.

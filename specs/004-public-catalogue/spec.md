@@ -15,8 +15,12 @@ produces; it authors none of it. S3 planning may be frozen while S2 is implement
 commits no behaviour — but **S3 implementation does not begin until S2 closes on an independent
 verdict.**
 
-**Governing rules**: BR-010, BR-019, BR-021, BR-090, BR-105, BR-143, BR-149, BR-150, BR-157,
-BR-158, BR-161, BR-162. Traceability is carried per requirement below, per Constitution Principle III.
+**Governing rules**: BR-010, BR-019, BR-020, BR-021, BR-029, BR-090, BR-105, BR-143, BR-149, BR-150,
+BR-157, BR-158, BR-161, BR-162.
+
+**Amended 2026-07-28** by [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation):
+the Course price is displayed as External Payment guidance, Section prices are not displayed, and no
+checkout control exists. Traceability is carried per requirement below, per Constitution Principle III.
 
 **Scope authority**: [AUGUST_15_EXECUTION_PLAN.md §2.2](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#22-reduced-slices--launch-critical-core-retained-remainder-reclassified)
 reduces S3. What it moved out is recorded in [§Deferred](#deferred-by-scope-decision-not-dropped) with
@@ -33,7 +37,7 @@ Stated first, because S3 sits between two slices that own most of what it displa
 | S3 owns | S3 must not acquire |
 |---|---|
 | Reading and rendering the **published** Course graph | Any authoring, lifecycle, or review transition — S2 |
-| Displaying Course and Section prices as authored | Setting prices, orders, checkout, coupons — S2 sets, S6 buys |
+| Displaying the Course price as authored | Setting prices — S2. Course Access Invitations and the grant transaction — S6 |
 | The public preview asset's playback surface | Protected media, signed URLs, entitlement evaluation — S4 |
 | The bilingual responsive shell, RTL/LTR, locale persistence | Per-screen content for later slices; each slice ships its own screens on this shell |
 | Taxonomy **display** on a Course | Taxonomy administration — S2 (Admin), S8 (UI) |
@@ -81,8 +85,8 @@ non-public while its approved live version remains public (BR-017).
 An anonymous visitor opens Gradex, sees the published catalogue in Arabic by default, and can read
 enough about a Course to decide whether to buy it.
 
-**Why P1**: it is the entry point of the entire commercial journey. Nothing downstream — orders,
-payment, entitlement, learning — is reachable if a visitor cannot find a Course.
+**Why P1**: it is the entry point of the entire journey. Nothing downstream — course access,
+entitlement, learning — is reachable if a visitor cannot find a Course.
 
 **Acceptance**
 1. **Given** a catalogue containing Published, Draft, Pending Review, Changes Requested, Delisted,
@@ -92,8 +96,9 @@ payment, entitlement, learning — is reachable if a visitor cannot find a Cours
    that exact identifier, **then** the response is identical in status, headers, schema, and body to
    the response for an identifier that has never existed.
 3. **Given** a Published Course, **when** the visitor opens its detail page, **then** the title,
-   description, Instructor display name, all three taxonomy dimensions, the Section outline, and both
-   the full-Course and per-Section prices are shown.
+   description, Instructor display name, all three taxonomy dimensions, the Section outline, and the
+   full-Course price are shown. **Per-Section prices are not shown** — Section is not an acquirable
+   scope under D-045.
 4. **Given** a Published Course with a preview asset, **when** the visitor opens the detail page,
    **then** the preview is playable and **no** protected Lesson video, Resource, or Lab Material is
    reachable from that page.
@@ -181,10 +186,14 @@ makes the catalogue feel like a product rather than a list, but it does not bloc
 - **FR-008**: System MUST present a paginated public list of Published Courses with title, Instructor
   display name, all three taxonomy dimensions, price, and preview availability. *(BR-157, BR-105)*
 - **FR-009**: System MUST present a Course detail view containing the authored description, the
-  Section outline, the full-Course price, and each individually priced Section's price. *(BR-010,
-  BR-021)*
-- **FR-010**: System MUST present prices exactly as authored, in integer minor units rendered as KWD,
-  and MUST NOT compute, discount, or infer any price. *(BR-019)*
+  Section outline, and the full-Course price. It MUST NOT display Section prices, because Section is
+  not an acquirable scope in MVP. *(BR-010, BR-021)*
+- **FR-010**: System MUST present the Course price exactly as authored, in integer minor units
+  rendered as KWD, and MUST NOT compute, discount, or infer any price. The price is informational —
+  it tells the Student what to pay through External Payment, and no page may imply Gradex will take
+  payment. *(BR-019, BR-020)*
+- **FR-010a**: System MUST NOT render any checkout, cart, coupon, or purchase control. A Course
+  detail page MAY link to informational guidance on how to obtain access. *(BR-020, BR-029)*
 - **FR-011**: System MUST identify an Instructor publicly by display name only, and MUST NOT expose
   email, phone, legal identity, or any other Instructor or Student PII. *(BR-105, BR-064)*
 - **FR-012**: System MUST make the optional public preview asset playable without authentication and

@@ -58,7 +58,7 @@ Internally each cause is typed and audited. Externally there is one refusal.
 ## What this contract does not contain
 
 **No route that creates an Entitlement.** Not an admin grant, not a support repair, not a seeded
-fixture endpoint. Entitlement creation is S7 (BR-028,
+fixture endpoint. Entitlement creation is S6 (BR-028,
 [SLICES §3.1](../../../docs/launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation)).
 If implementation appears to need one, that is a finding against [../spec.md](../spec.md).
 

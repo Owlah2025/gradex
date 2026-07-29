@@ -19,7 +19,7 @@ suspension enforcement.
 A visitor creates a Student account, verifies ownership of the email address, and then signs in.
 Public catalog browsing does not require an account.
 
-**Why this priority**: Purchase and protected learning require an authenticated Student identity.
+**Why this priority**: Course access and protected learning require an authenticated Student identity.
 
 **Independent test**: Register a new address and valid display name, prove that login is blocked
 before verification, consume the verification link, and then sign in with the display name stored
@@ -124,7 +124,7 @@ Instructor, bypassing the frontend.
 ### User Story 5 — Suspension takes effect immediately (Priority: P1)
 
 An Admin suspends an Account and every existing or new session immediately loses protected access,
-regardless of previous purchases or ownership.
+regardless of any existing course access.
 
 **Independent test**: Suspend an Account while it has a valid opaque cookie session, then prove its
 next protected request, renewal, fresh login, playback, and download are denied.
@@ -135,7 +135,7 @@ next protected request, renewal, fresh login, playback, and download are denied.
    **then** every subsequent protected action is denied immediately; no access-token TTL grace
    period is allowed. *(BR-007)*
 2. **Given** a suspended Student with an active Entitlement, **when** playback or protected download
-   is requested, **then** access is denied without deleting the underlying purchase/history. *(BR-007)*
+   is requested, **then** access is denied without mutating the Entitlement or deleting history. *(BR-007)*
 3. **Given** a suspended Instructor, **when** they attempt Course changes/submission, **then** access
    is denied while already-enrolled Students retain access to the Instructor's Published Courses.
    *(BR-007, BR-065)*
@@ -187,7 +187,7 @@ next protected request, renewal, fresh login, playback, and download are denied.
   rejected without role change or identity merge. *(BR-009, BR-080)*
 - **FR-006**: The bootstrap Admin MUST be created exactly once through a secure out-of-band deployment
   operation, MUST have no repository credential, and MUST change the initial password. *(BR-009)*
-- **FR-006A**: Only Student Accounts MAY place Orders, receive ordinary Entitlements, create
+- **FR-006A**: Only Student Accounts MAY receive Course Access Invitations, receive Entitlements, create
   Enrollments, or record Progress. Instructor Accounts have no Student consumption capability;
   Admin protected-content access MUST use the separate audited preview path. *(BR-081/082)*
 - **FR-007**: Successful login MUST create an independently revocable server-authoritative session
@@ -259,7 +259,7 @@ next protected request, renewal, fresh login, playback, and download are denied.
   session-family reuse response as one opaque server-managed cookie with controlled credential/CSRF
   rotation and family revocation. Tunable TTLs, the email vendor, and immediate-suspension mechanism
   remain owned by their implementation/system-design boundaries.
-- Public catalog browsing remains available without authentication; purchase and protected learning
+- Public catalog browsing remains available without authentication; course access and protected learning
   require an Active Student Account.
 
 ## Clarifications

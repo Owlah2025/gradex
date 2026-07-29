@@ -14,9 +14,11 @@ seed path, and a test asserting the exclusion.
 | Test-only package with an `_test.go` seed | Works until someone needs the fixture from another package's tests and promotes it. The build tag survives that pressure |
 | Nothing — trust the plan | The seed mints access to paid content. Every downstream control assumes Entitlements are provenance-bound |
 
-The `source_order_item_id NOT NULL` constraint in [data-model.md](data-model.md) is a fourth defence
-and the strongest: it makes an Entitlement without an Order **unrepresentable**, so neither the seed
-nor a future support script can cheat.
+The `grant_source NOT NULL` constraint in [data-model.md](data-model.md) is a fourth defence and the
+strongest: it makes an Entitlement with no recorded origin **unrepresentable**, so neither the seed
+nor a future support script can cheat. *(Amended 2026-07-29: D-045 replaced the original
+`source_order_item_id NOT NULL` Order-provenance constraint with the typed grant source. The defence
+is unchanged in strength; only what it points at changed.)*
 
 ## R-002 — Fail-closed when the scanner may not exist at launch
 

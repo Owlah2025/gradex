@@ -39,37 +39,48 @@ rather than in a handler.
 A unique constraint on `(asset_version_id, storage_object_version)` makes duplicate scan callbacks
 harmless and makes a stale result for a replaced object structurally unable to satisfy delivery.
 
-### Entitlement — the grant record S7 will later create
+### Entitlement — the grant record S6 will later create
+
+> **Amended 2026-07-29** by [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+> Entitlement creation moved from the removed S7 to **S6**, and Order provenance was replaced by the
+> typed `grant_source` discriminator (BR-028, BR-113). The table below is the corrected shape. S4
+> still creates **no** Entitlement.
 
 | Field | Rule |
 |---|---|
 | id | |
 | student_id | |
-| scope_kind | `COURSE` or `SECTION` (BR-021) |
-| scope_id | The Course or Section |
-| source_order_item_id | **Required, non-null.** Every Entitlement references exactly one Order Item (BR-028) |
-| original_access_ends_at | From the source Order, immutable (BR-026) |
+| scope_kind | `COURSE` in MVP. The column stays wide enough for `SECTION`, which is **not an acquirable scope** under D-045 (BR-021) |
+| scope_id | The Course |
+| grant_source | **Required, non-null.** The typed discriminator recording how access was granted. MVP implements `MANUAL_INVITATION` only (BR-028) |
+| source_invitation_id | Required when `grant_source = 'MANUAL_INVITATION'` (BR-113). S6 adds the foreign key and check constraints — see [S6 data-model §4](../006-course-access-grant/data-model.md) |
+| original_access_ends_at | Snapshotted from the Course at Admin Approval, immutable (BR-026) |
 | access_ends_at | Effective, separately mutable by audited adjustment only (BR-026) |
 | revoked_at | Null while active |
-| retirement_eligibility_at | Copied from the Order's `accepted_at` (BR-027) |
+| retirement_eligibility_at | Set from the Admin Approval instant (BR-027) |
 
-**`source_order_item_id` is `NOT NULL` from this migration**, even though S7 has not yet built the
-producer. That constraint is the provenance invariant written into the schema: it makes an Entitlement
-without an Order **unrepresentable**, so the seed mechanism cannot cheat and neither can a future
-support script.
+**`grant_source` is `NOT NULL` from this migration.** That constraint is the provenance invariant
+written into the schema: it makes an Entitlement with no recorded origin **unrepresentable**, so the
+S4 test seed cannot cheat and neither can a future support script. **There is no
+`source_order_item_id` and no Order, payment, or checkout reference anywhere in this migration** —
+D-045 removed in-platform payments, and D-045's `grant_source` seam is what a future paid source
+would extend.
 
 ### Entitlement Adjustment — audit for expiry changes
 
-Records old expiry, new expiry, reason, actor, timestamp, and any support or refund reference,
-atomically with the change and with immutable audit evidence (BR-026). Moving expiry into the past
-ends access immediately and **deletes nothing** — Enrollment, Progress, Order, and adjustment history
-all survive.
+Records old expiry, new expiry, reason, actor, timestamp, and any support or external-payment
+reference, atomically with the change and with immutable audit evidence (BR-026). Moving expiry into
+the past ends access immediately and **deletes nothing** — Enrollment, Progress, the Course Access
+Invitation record, and adjustment history all survive.
 
 ## What this migration deliberately does not contain
 
-- **No Entitlement creation routine, function, or default.** Creation is S7.
-- **No "grant" table, admin-grant record, or manual-grant audit type.** BR-028 forbids creation
-  through a manual command, so no schema anticipates one.
+- **No Entitlement creation routine, function, or default.** Creation is S6.
+- **No `orders`, `order_items`, `payment_attempts`, `coupons`, or `refunds` table**, and no column
+  referencing one. Those are deferred with in-platform payments under D-045.
+- **No "grant" table, admin-grant record, or manual-grant audit type.** BR-028 permits creation only
+  through Admin Approval of an accepted Course Access Invitation, which S6 builds; no schema here
+  anticipates a manual-grant command.
 - **No public-read grant on any storage object.** Objects are private; access is presigned only.
 
 ## Schema version

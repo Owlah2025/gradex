@@ -41,7 +41,7 @@ for different reasons — an error returns, a timeout does not, and absence neve
 
 1. Build with production constraints; assert the seed symbol is unreachable.
 2. Enumerate the live route table; assert no route writes an Entitlement.
-3. Attempt to insert an Entitlement with a null `source_order_item_id`; the **database** must refuse.
+3. Attempt to insert an Entitlement with a null `grant_source`; the **database** must refuse. *(D-045 replaced Order provenance with the typed grant source — BR-028, BR-113.)*
 
 **Mutation 4** must turn step 1 red. Step 3 is the defence that survives a code change.
 
@@ -53,7 +53,7 @@ Enumerate **every Lesson in the Course**, not a sample:
 - Section grant → that Section's Lessons reachable, **all others denied**.
 - Both grants → union; revoke the Course grant, the Section grant still works.
 - Expired on **effective** expiry → denied. Shorten expiry into the past → denied immediately, and
-  Enrollment, Progress, Order, and adjustment history all survive.
+  Enrollment, Progress, the Course Access Invitation record, and adjustment history all survive.
 - Emergency suspension → denied, **and no Entitlement row is mutated**.
 - Retired with grandfathering → allowed; without → denied.
 

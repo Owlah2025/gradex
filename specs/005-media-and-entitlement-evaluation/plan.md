@@ -45,7 +45,7 @@ and merging them produces a range too large to review honestly.
 
 ## The ordering decision, and how the code enforces it
 
-S4 evaluates Entitlements; S7 creates them. That is easy to write and easy to erode — the erosion
+S4 evaluates Entitlements; **S6** creates them (D-045 removed S7). That is easy to write and easy to erode — the erosion
 looks like a test helper that grows a production import, or an Admin "fix access" button added in S8
 because support needs one.
 
@@ -161,7 +161,7 @@ backend/internal/media/
 └── delivery.go       # presigned issuance; short-lived, session-scoped
 
 backend/internal/entitlement/
-├── doc.go            # boundary: EVALUATION ONLY. Creation is S7
+├── doc.go            # boundary: EVALUATION ONLY. Creation is S6
 ├── evaluate.go       # the single Evaluate function
 ├── scope.go          # Course covers Sections; Section covers itself; union
 └── seed_nonprod.go   # //go:build !production — absent from production builds

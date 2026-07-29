@@ -14,10 +14,14 @@ Asset Versions, short-lived signed media access, protected Resource and Lab Mate
 independent verdict.
 
 **Effort**: 18h — the largest slice in the release. **Review Tier 3** — the deepest tier, shared only
-with S1C, S5, S6, and S7.
+with S1C, S5, and S6.
 
-**Governing rules**: BR-021, BR-023, BR-024, BR-025, BR-026, BR-027, BR-028, BR-050, BR-063, BR-090,
-BR-100, BR-103, BR-104, BR-143, BR-144. Traceability is carried per requirement.
+**Governing rules**: BR-021, BR-023, BR-024, BR-025, BR-026, BR-027, BR-028, BR-029, BR-050, BR-063,
+BR-090, BR-100, BR-103, BR-104, BR-113, BR-143, BR-144. Traceability is carried per requirement.
+
+**Amended 2026-07-28** by [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation):
+Entitlement creation moves from S7 to S6 and Section scope is not acquirable in MVP. FR-018 and
+SC-002 are unchanged.
 
 ---
 
@@ -28,23 +32,28 @@ decisions that look wrong until you see what they prevent.
 
 ### 1. S4 evaluates Entitlements. It must never create one.
 
-Entitlement *creation* from verified payment is **S7**. S4 owns the grant record, scope evaluation,
-expiry, and revocation — the consumer side.
+Entitlement *creation* is **S6**, the Course Access Invitation and Entitlement grant slice. S4 owns
+the grant record, scope evaluation, expiry, and revocation — the consumer side.
 [SLICES.md §3.1](../../docs/launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation)
 calls this *"the single most load-bearing ordering decision in the register"*, because getting it
-wrong pushes access-control verification into payment implementation, where it gets far less
+wrong pushes access-control verification into the grant implementation, where it gets far less
 scrutiny under far more schedule pressure.
 
-The production invariant is unchanged by the split:
+The production invariant, restated for the current access model:
 
-> Every real Entitlement originates from a completed paid or zero-value Coupon Order Item, except
-> reconciliation that restores one from an already valid completed Order Item. *(BR-028)*
+> Every Entitlement carries a typed `grant_source` and is created only through that source's audited
+> path. MVP implements one source: Admin Approval of an accepted Course Access Invitation. *(BR-028)*
 
-**S4 therefore ships no manual-grant command, no Admin grant screen, and no runtime flag that could
-mint an Entitlement.** Its test path is a seed mechanism that is **build- or environment-excluded from
+**S4 therefore ships no grant command, no Admin grant screen, and no runtime flag that could mint an
+Entitlement.** Its test path is a seed mechanism that is **build- or environment-excluded from
 production images**, not merely disabled by configuration — the same standard the `AUTH_FAKE_MODE`
 seam is held to. A configuration flag that *could* be flipped in production is not excluded from
 production.
+
+> **Amended 2026-07-28 by [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).**
+> Only the *producer* changed — from verified payment to Admin Approval. **FR-018 and SC-002 are
+> unchanged**, and the seed-exclusion requirement is not relaxed by the arrival of a legitimate grant
+> path: the Admin approval path is a production capability in S6, not this slice's test seed.
 
 ### 2. Nothing unscanned is ever reachable.
 
@@ -71,9 +80,9 @@ August 13.
 | S4 owns | S4 must not acquire |
 |---|---|
 | Media **bytes**: upload, validation, quarantine, scan, transcode, Asset Versions | Course/Section/Lesson structure and metadata — S2 ([§3.2](../../docs/launch/SLICES.md#32-authoring-owns-media-metadata-the-media-slice-owns-media-bytes)) |
-| Entitlement **evaluation**: grant record, scope, expiry, revocation | Entitlement **creation** from payment — **S7** |
+| Entitlement **evaluation**: grant record, scope, expiry, revocation | Entitlement **creation** from Admin Approval — **S6** |
 | Short-lived signed access to protected media | The player, progress, completion, resume — S5 |
-| Protected Resource and Lab Material downloads | Orders, checkout, coupons, refunds — S6/S7 |
+| Protected Resource and Lab Material downloads | Course Access Invitations and the grant transaction — S6 |
 | Cutover of the legacy `internal/video` path | A second media authority alongside it |
 
 **The legacy video path is migration input, not a second authority.** `backend/internal/video`
@@ -102,20 +111,21 @@ never scans anything.
 **Acceptance**
 1. A Student with an active Course Entitlement receives short-lived, session-scoped signed access to
    the exact approved Asset Version *(BR-050, BR-100)*.
-2. A Student with a **Section** Entitlement reaches Lessons in that Section and **no others**
-   *(BR-024)*.
-3. A Student with a **Course** Entitlement reaches every contained Section *(BR-024)*.
+2. A Student with a **Course** Entitlement reaches every contained Section and Lesson *(BR-024)*.
+3. A Student with **no** Entitlement reaches nothing, and the denial is identical to a non-existent
+   asset *(BR-023, BR-029)*.
 4. Access after `access_ends_at` is denied *(BR-025)*.
 5. Access to a Course under **emergency access suspension** is denied immediately, without mutating
-   any Entitlement *(BR-090)*.
-6. A revoked Entitlement denies access; the Enrollment and Progress rows survive *(BR-047)*.
+   any Entitlement *(BR-090)*. A suspended Account is denied even with an `ACTIVE` Entitlement
+   *(BR-007)*.
+6. A revoked Entitlement denies access; the Enrollment and Progress rows survive *(BR-026)*.
 7. Every denial is identical regardless of whether the file exists *(BR-023, BR-050)*.
 
 ### User Story 3 — An entitled Student downloads Resources and Lab Materials (Priority: P1)
 
 **Acceptance**
 1. Download is entitlement-checked **per download**, not once per session *(BR-023, BR-063)*.
-2. A Lab Material carries an opaque per-purchase buyer tag; a Lesson Resource does **not**
+2. A Lab Material carries an opaque per-Entitlement buyer tag; a Lesson Resource does **not**
    *(BR-103)*.
 3. The buyer tag exposes no Student PII and is not reversible by its holder *(BR-103)*.
 4. An unscanned or scan-failed attachment is not downloadable *(BR-104)*.
@@ -133,15 +143,15 @@ never scans anything.
 - Entitlement expiring **mid-playback**: issued signed access remains valid for its short lifetime;
   no new access is issued. Access is not retroactively revoked mid-segment, and the window is bounded
   by the signature lifetime rather than by the session.
-- A Student holding **both** a Section and a Course Entitlement: access is their union, both survive
-  independently, and revoking the Course grant leaves the Section grant intact *(BR-024)*.
+- At most one `ACTIVE` Entitlement exists per `(Student, Course)`; a second concurrent grant attempt
+  must be impossible by database constraint rather than by handler check *(BR-024)*.
 - A **retired** Asset Version still reachable through a grandfathered Entitlement whose
   `retirement_eligibility_at` precedes `retired_at` *(BR-027)*.
 - Scanner returns success for an object that was **replaced** after scanning — the scan binds to an
   exact object version, not to a logical asset.
 - Transcode succeeds but produces zero renditions — treated as failure, not as an empty success.
 - An Admin shortens `access_ends_at` into the past: access ends immediately; Enrollment, Progress,
-  Order, and adjustment history are preserved *(BR-026)*.
+  the Course Access Invitation record, and adjustment history are preserved *(BR-026)*.
 
 ---
 
@@ -176,36 +186,39 @@ never scans anything.
 
 **Entitlement evaluation — and only evaluation**
 
-- **FR-011**: System MUST provide an Entitlement grant record carrying scope (Course or Section),
-  `original_access_ends_at`, effective `access_ends_at`, revocation state, and its source Order
-  reference. *(BR-021, BR-026, BR-028)*
-- **FR-012**: System MUST evaluate a Course Entitlement as covering every contained Section, and a
-  Section Entitlement as covering only its Section. *(BR-024)*
-- **FR-013**: System MUST evaluate overlapping Entitlements as a **union**, keep them independent, and
-  MUST NOT let revocation of one affect another. *(BR-024)*
+- **FR-011**: System MUST provide an Entitlement grant record carrying scope, a typed `grant_source`,
+  `original_access_ends_at`, effective `access_ends_at`, revocation state, and a reference to the
+  approved Course Access Invitation that produced it. *(BR-021, BR-026, BR-028, BR-113)*
+- **FR-012**: System MUST evaluate a Course Entitlement as covering every contained Section and
+  Lesson. Section scope remains expressible in the model but is **not acquirable in MVP**. *(BR-021,
+  BR-024)*
+- **FR-013**: System MUST enforce at most one `ACTIVE` Entitlement per `(Student, Course)` by
+  database constraint. *(BR-024)*
 - **FR-014**: System MUST deny access when `current_timestamp >= access_ends_at`, treating the
   Entitlement as authoritative at runtime. *(BR-025)*
 - **FR-015**: System MUST deny access to a Course under active emergency access suspension **without
   mutating any Entitlement**. *(BR-090)*
 - **FR-016**: System MUST allow access to a retired Course, Section, Lesson, or version only when
-  `retirement_eligibility_at` precedes `retired_at`. *(BR-027)*
-- **FR-017**: System MUST NOT provide any path — command, endpoint, screen, or configuration flag —
-  that creates an Entitlement. *(BR-028, SLICES §3.1)*
+  `retirement_eligibility_at`, set from the Admin Approval instant, precedes `retired_at`. *(BR-027)*
+- **FR-017**: **S4** MUST NOT provide any path — command, endpoint, screen, or configuration flag —
+  that creates an Entitlement. Creation belongs to S6's Admin Approval transaction alone. *(BR-028,
+  SLICES §3.1)*
 - **FR-018**: The S4 Entitlement seed mechanism used for testing MUST be **build- or
   environment-excluded from production images**, not merely disabled by configuration. *(SLICES §3.1)*
 
 **Protected delivery**
 
 - **FR-019**: System MUST check Entitlement **before every** signed playback issuance and **every**
-  protected download. *(BR-023)*
+  protected download, and MUST NOT read Course Access Invitation state in any authorization
+  decision. *(BR-023, BR-029)*
 - **FR-020**: System MUST issue playback access as short-lived, session-scoped signed URLs, re-issued
   per playback session and not cached long-term. *(BR-100)*
 - **FR-021**: System MUST authorize playback only for the exact approved or historically qualifying
   Asset Version. *(BR-050)*
 - **FR-022**: System MUST deny unauthorized callers identically regardless of whether the underlying
   file exists. *(BR-023, BR-050)*
-- **FR-023**: System MUST apply an opaque per-purchase buyer tag to **Lab Materials only**, never to
-  Lesson Resources, and the tag MUST NOT expose Student PII. *(BR-103)*
+- **FR-023**: System MUST apply an opaque per-Entitlement buyer tag to **Lab Materials only**, never
+  to Lesson Resources, and the tag MUST NOT expose Student PII. *(BR-103)*
 - **FR-024**: System MUST keep media objects private; **no object is publicly readable**, and every
   access is signed and time-bounded. *(PRD §6)*
 - **FR-025**: A redirect MUST NOT grant access. Authorization is server-side on every issuance.
@@ -222,9 +235,9 @@ never scans anything.
 |---|---|---|
 | Asset Version | **S4** | Created and made immutable here |
 | Scan Result | **S4** | Bound to an exact object version |
-| Entitlement | **S4 evaluates**, S7 creates | Grant record, scope, expiry, revocation |
+| Entitlement | **S4 evaluates**, S6 creates | Grant record, scope, expiry, revocation |
 | Course / Section / Lesson | S2 | Read only |
-| Order | S6/S7 | Referenced by Entitlement; **not created here** |
+| Course Access Invitation | S6 | Referenced by Entitlement; **not created or read here** |
 
 ---
 
@@ -232,10 +245,12 @@ never scans anything.
 
 - **SC-001**: Across every failure mode of the scanner — failure, error, timeout, absence,
   misconfiguration — **zero** assets become reachable. Proven per mode, not in aggregate.
-- **SC-002**: No route, command, flag, or fixture in a **production build** can create an Entitlement.
-  Proven by a test asserting the seed mechanism is absent from a production build, not merely off.
-- **SC-003**: A Section Entitlement reaches exactly its Section's Lessons and no others, enumerated
-  across the full Course graph rather than sampled.
+- **SC-002**: No route, command, flag, or fixture **in S4** can create an Entitlement, and the test
+  seed is absent from a production build — proven by asserting its absence, not merely that it is
+  off. **Unchanged by D-045.**
+- **SC-003**: A Course Entitlement reaches exactly its own Course's Lessons and no others, and a
+  Student with no Entitlement reaches none — both enumerated across the full Course graph rather than
+  sampled.
 - **SC-004**: Expired, revoked, suspended-Account, and emergency-suspended access are each denied, and
   each denial is byte-identical to the denial for a non-existent asset.
 - **SC-005**: Duplicate and out-of-order upload/transcode callbacks produce exactly one Asset Version.
@@ -252,7 +267,7 @@ never scans anything.
 - S2 has closed, so Asset Version **references** exist and are validated by authoring.
 - `LG-014` may be unresolved at launch. FR-026 is the planned response, not a contingency.
 - Object storage is S3-compatible with presigned URL support (MinIO locally, provider at launch).
-- S7 will attach real Entitlement creation to this already-proven consumer. **S4 does not stub S7** —
+- S6 will attach real Entitlement creation to this already-proven consumer. **S4 does not stub S6** —
   it defines the record and evaluates it; nothing here anticipates the producer's transaction.
 
 ## Dependencies
@@ -262,4 +277,4 @@ never scans anything.
 | S2 | Course graph, Asset Version references, emergency suspension state | **Blocking** |
 | S1C | Capability gate, session, ownership precondition | Closed |
 | `LG-014` | Production scanner | **Unresolved** — FR-003 and FR-026 make that survivable |
-| S7 | Entitlement creation | **Deliberately absent.** S4 must remain complete without it |
+| S6 | Entitlement creation | **Deliberately absent.** S4 must remain complete without it |

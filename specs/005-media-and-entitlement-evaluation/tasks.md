@@ -82,9 +82,12 @@ delivery before `READY`.
 
 ## Phase 4 — Entitlement evaluation, and the absence of creation
 
-- [ ] T014 `backend/internal/entitlement/doc.go` — boundary: **EVALUATION ONLY. Creation is S7.**
+- [ ] T014 `backend/internal/entitlement/doc.go` — boundary: **EVALUATION ONLY. Creation is S6.** *(D-045 removed S7)*
 - [ ] T015 Implement the grant record: scope, `original_access_ends_at`, effective `access_ends_at`,
-      revocation state, source Order reference (BR-021, BR-026, BR-028)
+      revocation state, and its **typed `grant_source`** with the originating approved course-access
+      invitation where the source is `MANUAL_INVITATION` (BR-021, BR-026, BR-028, BR-113). **No Order,
+      payment, or checkout reference** — D-045 removed in-platform payments and replaced Order
+      provenance with the grant-source discriminator; S6 creates the record, S4 evaluates it
 - [ ] T016 Implement the **single** `Evaluate(student, lesson, now) → Decision` in `evaluate.go`,
       answering scope, expiry, emergency suspension, and retirement eligibility in that order.
       **No handler compares an expiry.** Two slices in a row were rejected for a control that existed
