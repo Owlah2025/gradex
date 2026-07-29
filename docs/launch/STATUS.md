@@ -1,19 +1,77 @@
 # Gradex Launch Status
 
-> Current date: **2026-07-28 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-07-29 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-28 after local verification of pricing T039–T042**;
-> prior independently reviewed D5 head `3b6d752`; D5 planning freeze `3e1809d`
-> Active slice: **S2 whole-feature completion.** Pricing T039–T042 is complete and locally verified;
-> T043–T064 remain frozen under D-044. Codex orchestrates/verifies, Antigravity implements the
-> sequential queues on `gemini-3.6-flash-high`, and Claude reviews once only after full convergence
-> and hosted CI.
+> Last repository reconciliation: **2026-07-29, D-045/D-046 downstream reconciliation**; prior
+> reconciliation 2026-07-28 after local verification of pricing T039–T042
+> Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
+> Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
+> below and [MVP_SCOPE_RECONCILIATION.md](MVP_SCOPE_RECONCILIATION.md)
+> Scope: **D-046 (2026-07-29)** — the external Course community link is deferred to **S18**. No slice
+> authors, persists, serves, or renders it before launch
+> **S2 is CLOSED.** Course authoring and review closed at `785d71c` with hosted CI convergence
+> recorded. It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range
+> is reopened by any current work
+> Active slice: **S5 — Protected Learning. Planning only; implementation has not started.** See
+> the S5 section below
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
-> Workflow for remaining S2: Codex orchestrates/verifies → Antigravity implements → Claude reviews
-> the whole feature once after convergence (D-044)
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
+
+## S5 — Protected Learning is the next implementation slice
+
+**Planning is independently approved. No implementation has started.**
+
+| | |
+|---|---|
+| Authoritative directory | [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md) |
+| Planning review range | `785d71ce0b44ba4f591f2274285a6bc2f890b6c6..bae064d285f82703ee7cd61696e09c20d237a349` |
+| Approved planning head | `bae064d285f82703ee7cd61696e09c20d237a349` |
+| Independent verdict | **`APPROVE`** by `agy` under [D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range) — 0 critical, 0 high, 0 medium, 0 low, no open questions |
+| Tasks | 78 (`T001`–`T078`), **0 complete** |
+| Traceability | 36/36 active functional requirements cited; 12/12 success criteria covered |
+| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority; S5 implementation requires its own dated assignment |
+
+S5 introduces the minimum physical `enrollments` table required by `progress.enrollment_id` and
+**creates no normal Enrollment row**. It implements no invitation, acceptance, approval, rejection,
+grant, or revocation behaviour. See [SLICES.md §3.4](SLICES.md#34-s5-introduces-the-enrollments-table-s6-owns-every-enrollment-write).
+
+**S6 — Course Access Grant is planned and unimplemented**, under
+[`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md). It is blocked on
+**S2 (closed), S4, and S5**: it consumes the `enrollments` table S5 introduces, asserts the inherited
+shape before writing, and does not recreate it. S6 owns the Course Access Invitation lifecycle and
+every production Enrollment write.
+
+## MVP scope changed on 2026-07-28 — D-045: no in-platform payments
+
+The MVP launches as a fully functional educational video platform with **no payment processing inside
+Gradex**. Payment is External Payment, confirmed by an Admin out of band; course access is granted by
+an Admin-approved **Course Access Invitation** that creates the authoritative Entitlement. Recorded as
+[D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+with the full reconciliation in
+[MVP_SCOPE_RECONCILIATION.md](MVP_SCOPE_RECONCILIATION.md).
+
+**Nothing shipped was discarded.** Repository evidence at migration `0010` shows no `orders`,
+`payment_attempts`, `entitlements`, `enrollments`, `coupons`, `refunds`, ledger, or statement table
+ever existed. The change is documentation and specification only; no application code was written.
+
+What moved:
+
+- **S7 is removed from the runway.** S6 becomes the Course Access Invitation and Entitlement grant
+  slice at 9h Tier 3, down from 26h of Tier-3 work across the old S6 and S7. D15 becomes a second
+  float day.
+- **Seven launch gates move to `DEFERRED`** — `LG-001`, `LG-002`, `LG-007`, `LG-008`, `LG-009`,
+  `LG-010`, `LG-017`. Required gates go from 21 to **15**.
+- **`LG-005`, `LG-006`, `LG-011`, and `LG-016` stay `OPEN` and unchanged.** Moving payment
+  off-platform does not answer a counsel question, and off-platform collection may move the
+  record-keeping obligation rather than remove it. **No gate was resolved.**
+- **The Instructor Student roster returns to category A**, overturning its post-launch deferral.
+- **The S2 queue (T043–T064) is unaffected** and continues.
+
+**Review depth did not fall with scope.** Admin Approval replaces a verified gateway callback as the
+sole control between a registered account and paid content, so the grant slice stays Tier 3,
+capability-gated, recent-auth-bound, idempotent, and audited.
 
 ## Legal and accounting exposure is accepted, not resolved — D-041
 
@@ -321,8 +379,8 @@ August 2. S1C inherits four carryovers and three unexamined judgement calls, all
 | M0 — Launch control and approved baseline | July 23 | Completed | Baseline `1f63a59`; Claude verdict `APPROVE BASELINE`; zero critical/high findings |
 | M1 — Platform architecture baseline | July 28 | **Completed** | [M1_ARCHITECTURE_BASELINE.md](M1_ARCHITECTURE_BASELINE.md) combines July 25 `c9c2238`, July 26 `2e4f3e1`, and July 27 `6862db5`; cross-design reconciliation found no conflicting authority; the focused §4.5/§7.1 implementation-readiness review passed all thirteen required properties with no amendment. Developer sign-off `APPROVED` at `4d4bbe8`, with four obligations carried into [SLICES.md](SLICES.md). Delivery foundation (S0) closed at `f39257b` |
 | M2 — Authentication/RBAC vertical slice | July 29–August 2 | **Completed** | S1A `70b4809`; S1B1 `ad1b8f6`; S1B2 `7d8710e`; S1B3 `9d3db91`; **S1C `edd6508`**. All five slices closed on independent verdicts with hosted CI green on each exact reviewed head. **S1 is complete** |
-| M3 — Product/revenue journey | **TBD — developer remedy required** | Not started | Authoring through verified entitlement. S3–S8 undated on a recorded verdict, not pending analysis: [D-038](../DECISIONS.md#d-038--august-8-is-no-longer-a-credible-runway-start-s3s8-remain-undated-pending-a-developer-remedy) |
-| M4 — Complete MVP operations | **TBD — developer remedy required** | Not started | Admin/Instructor, office hours, notifications, payouts — all downstream of the undated S3–S8 block |
+| M3 — Product/access journey | **TBD — developer remedy required** | Not started | Authoring through granted entitlement. Rescoped by D-045: no payment journey. S3–S8 dates per the execution plan |
+| M4 — Complete MVP operations | **TBD — developer remedy required** | Not started | Admin/Instructor operations, Instructor roster, notifications. Office hours and payouts are deferred |
 | M5 — Integrated production candidate | August 12 | **Not forecastable** | Depends on S1A–S10; the feature slices feeding it have no credible dates (D-038) |
 | M6 — Staging acceptance | August 13 | **Not forecastable** | UAT and all-gate audit, downstream of M5 |
 | M7 — Production soft launch | August 14 | **Not forecastable** | Smoke tests and rollback rehearsal, downstream of M6 |
@@ -360,9 +418,12 @@ how a policy question gets closed by an implementation that assumed it.
 - `CARRYOVER-LOCAL-BUILD-CACHE`: `npm run build` reuses `.next`, so prerender-time failures stay
   invisible locally. This let a `Suspense` defect reach hosted CI. Until fixed, a frontend build
   offered as pre-push evidence must clear `.next` first.
-- `CARRYOVER-S1B3-VOLUNTARY-CHANGE-EVIDENCE`: the undelivered S1B3 `Should` — observed evidence that
-  voluntary password change revokes another family, rather than restated policy. The recovery path is
-  proven; the voluntary-change path is a different code path and is not.
+- `CARRYOVER-S1B3-VOLUNTARY-CHANGE-EVIDENCE`: **CLOSED in S2 T055–T057.**
+  [`TestVoluntaryPasswordChangeRevokesAnotherSessionFamilyWithAuditEvidence`](../../backend/internal/identity/password_change_integration_test.go)
+  proves against real PostgreSQL that a voluntary password change rotates the caller's family,
+  revokes another family with `PASSWORD_CHANGE`, and writes `PASSWORD_CHANGED` evidence marked
+  `VOLUNTARY`. T056 temporarily removed `revokeOtherSessions`; the proof failed with the other family
+  still `ACTIVE` and no revocation reason/time, then the production call was restored.
 - `CARRYOVER-S1B3-DENIAL-VOCABULARY`: the undelivered S1B3 `Could` — reconcile the S1B-wide
   policy-denial vocabulary against API design §6.1.
 - **Three judgement calls the S1B3 review did not address by name**: that `CHANGE_REQUIRED` stays
@@ -391,13 +452,13 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 | Item | Owner | Next action | Deadline | Required evidence |
 |---|---|---|---|---|
 | **No Kuwaiti counsel is engaged — blocks LG-005, LG-006, LG-011 (cutover-blocking) plus LG-002, LG-004, LG-020** | Developer/founder | **Source and engage.** Ask the Digital Commerce Law registration/lead-time question first, to several candidates at once — it is the one answer that can move the date rather than the content | **Immediately** | An engaged firm, then acknowledged receipt of the Message 1 brief |
-| **No accountant is engaged — blocks LG-007 (cutover-blocking) plus LG-001, LG-016, LG-017** | Developer/founder | **Source and engage.** LG-012 launch prices are due August 11 and are computed against the revenue share only they approve | **Immediately** | An engaged adviser, then an approved revenue-share percentage with an effective date |
-| Tap message is sendable today and is not blocked | Developer/founder | Send to Tap's merchant-onboarding intake; it needs no named contact and carries LG-007, LG-008, LG-010 | **2026-07-29** | A `SENT` row with a real timestamp |
-| Required launch gates are all open | Role owners in LAUNCH_GATES.md | 21 of 21 `OPEN`, zero `RESOLVED`. Unchanged on 2026-07-28: no gate weakened, merged, or completed on engineering progress | August 6 | Named contacts plus acknowledged requests/delivery dates |
+| **No accountant is engaged — blocks LG-016 (still cutover-blocking)** | Developer/founder | **Source and engage.** `LG-016` did not move under D-045: collecting payment outside Gradex changes where records live, not whether they are required. `LG-001`/`LG-007`/`LG-017` are now deferred | **Immediately** | An engaged adviser, then written treatment of externally collected payment records |
+| ~~Tap message~~ — **no longer launch-blocking** | Developer/founder | `LG-007`, `LG-008`, `LG-010` are `DEFERRED` under D-045. Sending remains useful lead-time work for the post-launch payment programme, but it no longer gates August 15 | Optional | A `SENT` row if sent |
+| Required launch gates are all open | Role owners in LAUNCH_GATES.md | 15 of 15 `OPEN`, zero `RESOLVED`, 6 `DEFERRED` with in-platform payments under D-045. **No gate was weakened, merged, or resolved on engineering progress** — the seven payment gates left the required set because the feature did, and the four legal/accounting gates did not move | August 6 | Named contacts plus acknowledged requests/delivery dates |
 | **Critical-path rebaseline of S2–S16 is owed; no public date exists** | Developer + builder seat | Remedy A is adopted (D-039). Rebaseline S2–S16 against the August 6 outreach results, then set the September date. Do not publish a date before both | **After August 6 outreach returns** | Dated S2–S16 with acknowledged external delivery dates, and a recorded public target |
 | Compromised-password production source is unapproved (`LG-021`) | Engineering + security | Shortlist a privacy-preserving provider or licensed offline dataset | August 6/12 | Source/license/privacy/failure-policy evidence and staging validation |
 | S1 does not close until S1C closes | Claude, builder under D-037 | Deliver S1C's eleven acceptance items, then the S1 integration review by `agy` | August 2 | S1C closes on a frozen exact range with no critical or high finding |
-| Three slices are blocked on external parties not yet contacted | Developer/founder | S4 needs a malware scanner, S6/S7 need live Tap, S9 needs a verified sender, S10 needs counsel and accounting | August 6 | Acknowledged requests with delivery dates; no engineering rate substitutes for these |
+| Slices blocked on external parties not yet contacted | Developer/founder | S4 needs a malware scanner, S9 needs a verified sender, S10 needs counsel. **S6/S7's Tap dependency is gone under D-045** | August 6 | Acknowledged requests with delivery dates; no engineering rate substitutes for these |
 | Landing FAQ still promises fixed 150-day access | Developer + Codex | Replace the stale copy when implementing D-026 | Before public release | UI copy and tests reflect the snapshotted Course expiry |
 | External lead times can outlast the remaining launch window | Developer/founder | Contact counsel, accounting, Tap, email, hosting, scanner, and content owners | August 6 | Acknowledged requests with delivery dates compatible with the August 9/12 gates |
 
@@ -405,9 +466,13 @@ and `.caveman.json` are user-owned, intentionally untouched, and outside the act
 
 | Status | Count |
 |---|---:|
-| Open | 21 |
+| Open | 15 |
 | Resolved | 0 |
-| Deferred | 0 |
+| Deferred | 6 |
+
+Recounted on 2026-07-28 after D-045. Seven payment gates moved to `DEFERRED`; `LG-002` is one of
+them, and the previously separate fast-follow count is unchanged. **No gate was resolved**, and a
+deferred gate is not evidence about the question it asks.
 
 Fast-follow gates are outside this count. Recalculate from
 [LAUNCH_GATES.md](../LAUNCH_GATES.md) whenever it changes.
@@ -770,10 +835,22 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 - Production approval requires no unresolved critical defect. A high-severity defect requires
   documented risk acceptance, mitigation, and owner approval.
 
+- S2 T066 has repeatable rendered Playwright Chromium evidence for Arabic RTL and English LTR across
+  tablet, laptop, and desktop taxonomy screens. The aligned Playwright 1.62.0 runner executed all
+  12 checks successfully in `mcr.microsoft.com/playwright:v1.62.0-resolute`; the retained HTML report
+  is the configured CI artifact, while traces remain failure-only by policy.
+
 ## Current Next Task
 
 **Implement S2 lifecycle/emergency queue T043–T050 under D-044.** Start from the verified pricing
 head, keep T051+ out of the queue, and do not start S3 or ask Claude to review an intermediate queue.
+**D-045 does not interrupt this queue** — no S2 task was cancelled or rewritten.
+
+**Then: specify S6′ through SpecKit.** The Course Access Invitation and Entitlement grant slice has
+no specification yet, and no implementation may begin before one is frozen and the slice's seats are
+assigned. Its acceptance criteria are already written in
+[PRD §11](../PRD.md#11-acceptance-criteria) and its rules in
+[BUSINESS_RULES §21](../BUSINESS_RULES.md#21-course-access-invitation-rules).
 
 The [D5 record](daily/2026-07-28-d5.md) carries the exact local, mutation, independent-review, and
 hosted-CI evidence for its historical range. The [S2 tasks](../../specs/003-course-authoring/tasks.md)
