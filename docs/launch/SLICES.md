@@ -31,12 +31,12 @@ rather than absorbed as improvisation during implementation.
 | S2 | Course authoring and review | **Jul 29–31** | Catalog and Authoring, Audit | S1C |
 | S3 | Public catalog and shell (ranked search deferred) | **Aug 1** | Catalog and Authoring | S2 |
 | S4 | Media pipeline, delivery, and Entitlement evaluation | **Aug 3–5** | Media and Assets, Entitlements | S1C, S2 |
-| S5 | Protected learning | **Aug 5–6** | Learning, Moderation | S3, S4 |
-| S6 | Orders, checkout, and coupons | **Aug 8** | Commerce | S2, S4 |
-| S7 | Payments, entitlement grants, and refunds | **Aug 10–11** | Commerce, Entitlements, Audit | S6 |
-| S8 | Admin support operations (reduced; analytics/moderation deferred) | **Aug 12** | Reporting and Payouts, Moderation, Audit | S5, S7 |
-| S9 | Transactional notifications only; **office hours deferred post-launch** | folded into S4/S7 | Office Hours, Notifications | S4, S5 |
-| S10 | Bilingual legal/support pages (reduced; revenue/payouts manual) | **Aug 12** | Reporting and Payouts | S7, S8 |
+| S5 | **Protected learning** — also introduces the minimum `enrollments` table (§3.4) | **Aug 5–6** | Learning, Moderation | S3, S4 |
+| S6 | **Course Access Invitation and Entitlement grant** | **Aug 8** | Course Access, Entitlements, Audit | S2, S4, **S5** |
+| ~~S7~~ | ~~Payments, entitlement grants, and refunds~~ — **removed from the MVP runway** | — | — | — |
+| S8 | Admin support operations (reduced; moderation deferred) + **Instructor roster** | **Aug 12** | Reporting, Moderation, Audit | S5, S6 |
+| S9 | Transactional notifications only; **office hours deferred post-launch** | folded into S4/S6 | Office Hours, Notifications | S4, S5 |
+| S10 | Bilingual legal/support pages (reduced; no revenue/payout screens) | **Aug 12** | Support | S6, S8 |
 | S11 | End-to-end integration | **Aug 13** | all | S1A–S10 |
 | S12 | Production infrastructure and observability | **Aug 7** | operational | S11 |
 | S13 | Security and quality gate | **Aug 13** | all | S12 |
@@ -45,6 +45,14 @@ rather than absorbed as improvisation during implementation.
 | S16 | Public go/no-go | **Aug 15** | — | S15 |
 
 Every `Depends on` entry points backwards. No forward dependency remains.
+
+**S6 and S7 were replaced by a single smaller slice on 2026-07-28 under
+[D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).**
+MVP ships no in-platform payments, so orders, checkout, coupons, payment callbacks, and refunds leave
+the runway entirely. The new S6 is the **producer** that §3.1 always anticipated — only its trigger
+changed, from verified payment to Admin Approval. Roughly 26 hours of Tier-3 work becomes roughly
+8–10 hours, and the S7 row is struck rather than renumbered so no existing reference silently
+retargets.
 
 **S3–S8 are dated again as of 2026-07-27 under
 [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
@@ -78,28 +86,34 @@ already defines, not by moving a calendar day.
 ### 3.1 Entitlement evaluation precedes Entitlement creation
 
 Media delivery (S4) and protected learning (S5) both gate on Entitlements — but Entitlements are
-created from verified payment in S7. Read naively, S4 and S5 depend on S7.
+created by the access-grant slice, S6. Read naively, S4 and S5 depend on S6.
 
 The architecture already separates these concerns: the Entitlements module owns "grant records,
-validity, scope evaluation, expiry, and revocation," while creation is *triggered* by Commerce.
-So the module splits across two slices:
+validity, scope evaluation, expiry, and revocation," while creation is *triggered* elsewhere. So the
+module splits across two slices:
 
-- **S4 delivers** the grant record, scope evaluation (a Course grant covers every contained Section;
-  a Section grant covers only its Section), expiry, and revocation.
-- **S7 adds** the transactional creation of grants from verified payment and free grants.
+- **S4 delivers** the grant record, scope evaluation (a Course grant covers every contained Section),
+  expiry, and revocation.
+- **S6 adds** the transactional creation of grants from Admin Approval of an accepted Course Access
+  Invitation.
 
-S4 and S5 are then fully testable before S7, and S7 wires the real producer to an already-proven
+S4 and S5 are then fully testable before S6, and S6 wires the real producer to an already-proven
 consumer. This is the single most load-bearing ordering decision in the register: getting it wrong
-pushes access-control verification into payment implementation.
+pushes access-control verification into the grant implementation.
+
+**This split is exactly why [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+was cheap.** Only the producer changed — from verified payment to Admin Approval. The consumer side,
+which is where the security lives, is untouched. When online payment is taken up later it becomes a
+second producer against the same record rather than a second access model.
 
 **The S4 test path is not a production capability.** S4 exercises Entitlement evaluation through
 isolated integration fixtures or a non-production-only seed mechanism that cannot be enabled in
-production. It does not introduce a manual-grant command, an Admin grant screen, or any runtime flag
-that could mint an Entitlement outside the provenance rule below. The production invariant is
-unchanged by this split:
+production. It does not introduce an Admin grant screen or any runtime flag that could mint an
+Entitlement outside the provenance rule below. The production invariant, restated for the current
+access model:
 
-> Every real Entitlement originates from a completed paid or zero-value Coupon Order Item, except
-> reconciliation that restores one from an already valid completed Order Item.
+> Every real Entitlement carries a typed grant source and is created only through that source's
+> audited path. MVP implements one source: Admin Approval of an accepted Course Access Invitation.
 
 Design §11.2 already forbids any flag from weakening Entitlement provenance. The seed mechanism is
 therefore build- or environment-excluded from production images rather than merely disabled by
@@ -118,6 +132,24 @@ revision references an exact `media_asset_version`; S2 owns that reference, S4 o
 outbox. Domain §7.3 already classifies this as a migration input rather than a production source of
 truth. It is cut over inside S4 and is not a dependency of any earlier slice. Confirmed by the
 developer at M1 sign-off as correctly assigned and not an M1 blocker.
+
+### 3.4 S5 introduces the `enrollments` table; S6 owns every Enrollment write
+
+Progress is keyed by `(enrollment_id, lesson_id)` under BR-114 and BR-116, and S5 writes Progress on
+August 5–6 — before S6 runs on August 8. S4's specification never claimed the `enrollments` table, so
+it was unowned. Assigning it to S6 would have made S5 depend forward on S6, which rule 2 forbids.
+
+Resolved on 2026-07-29 by the same consumer-before-producer split as §3.1:
+
+- **S5 introduces** the minimum physical `enrollments` table required by `progress.enrollment_id`,
+  and **creates no normal Enrollment row**. S5 implements no invitation, acceptance, approval,
+  rejection, grant, or revocation behaviour — those are S6's alone.
+- **S6 consumes** that table, asserts the inherited shape before writing to it, and **does not
+  recreate it**. S6 owns the Enrollment lifecycle and every production Enrollment write, created
+  only inside the Admin Approval transaction (BR-167).
+
+Defining a table and writing to it are different capabilities, and S5 takes only the first. This is
+why S6's `Depends on` in §2 reads `S2, S4, S5`.
 
 ## 4. S0 — Delivery foundation (July 28)
 
@@ -289,22 +321,23 @@ Every PRD MVP bullet mapped to its one owning slice. This is the completeness ch
 |---|---|
 | Instructor Course/Section/Lesson builder, submission, revision workflow | S2 |
 | Video/resource/lab upload | S4 |
-| Instructor Course analytics and Course-scoped Student roster; read-only price visibility | S8 |
+| Instructor Course analytics and Course-scoped Student roster; read-only price visibility | S8 (roster is launch-critical under D-045) |
 | Admin-only Course/Section pricing with audit history | S2 |
 | Admin review, publish, delist/relist, retire, archive, emergency access suspension | S2 |
 | Reported-content moderation | S8 |
-| Admin user provisioning, suspension, coupons, refunds, revenue reporting, payout records | S8 (coupons: S6; refunds: S7; revenue/payouts: S10) |
+| Admin user provisioning and suspension; Course Access Invitation administration | S8 provisioning; S6 invitations |
 
-### Commerce and communication
+### Course access and communication
 
 | Capability | Slice |
 |---|---|
-| One full Course or one Section per order | S6 |
-| Tap-hosted card/KNET checkout; webhook/API confirmation controls successful payment | S6 initiation, S7 confirmation |
-| Admin coupons: percentage/fixed, scope, global cap, one consuming redemption, zero-value grants | S6 |
-| Full and partial refunds | S7 |
-| Course-configured semester expiry disclosed at checkout, snapshotted onto Order and Entitlement | S6 snapshot, S7 grant, S8 audited Admin adjustment |
-| Manual monthly Instructor payout with recorded accounting and emailed statement | S10 |
+| Admin-created Course Access Invitation bound to one email and one Course | S6 |
+| Student acceptance from the invited identity only; acceptance grants nothing | S6 |
+| Admin Approval creating Enrollment + one Entitlement, idempotently and audited | S6 |
+| Admin rejection with reason, and cancellation before decision | S6 |
+| Course-configured semester expiry snapshotted onto the Entitlement at approval | S6 grant, S8 audited Admin adjustment |
+| Displayed Course prices with Admin-only pricing and audit history | S2 pricing, S3 display |
+| Course-scoped Student roster for the owning Instructor | S8 |
 | Course-scoped one-off live office hours with entitlement-protected external meeting link | S9 |
 | Fixed transactional in-app/email notifications | S9 |
 
@@ -315,7 +348,7 @@ Every PRD MVP bullet mapped to its one owning slice. This is the completeness ch
 | Responsive website across phone, tablet, laptop, desktop | S3 shell; each later slice for its own screens |
 | Arabic/English for every role, Arabic default, persistent preference, full RTL/LTR | S3 shell; each later slice for its own screens |
 | WCAG 2.2 AA for platform-owned UI and player controls | S13 audit; each slice for its own screens |
-| Bilingual Privacy Notice, Terms, Refund Policy, checkout disclosures | S10 |
+| Bilingual Privacy Notice, Terms, Refund Policy, course-access disclosures | S10 |
 
 No MVP bullet is unassigned, and no bullet is owned by two slices — where a capability spans slices,
 the split is stated explicitly above and follows a module boundary.
@@ -328,9 +361,9 @@ inventing policy.
 | Slice | Blocking gate | Behavior while the gate is open |
 |---|---|---|
 | S4 | `LG-014` malware scanner | Scanner adapter stays provider-neutral; missing configuration leaves Asset Versions quarantined and unpublishable |
-| S7 | `LG-010` Tap authenticity scheme | Adapter built against documented vectors; production Tap processing stays disabled until the contract is tested and approved |
+| S6 | none | The grant path depends on no external provider. `LG-012` launch prices affect catalogue display only, not the ability to grant access |
 | S9 | `LG-018` transactional email | Outbox and templates built; delivery adapter remains configurable |
-| S10 | Revenue-share configuration, legal copy | Missing revenue-share configuration fails closed; legal pages cannot ship placeholder text |
+| S10 | Legal copy (`LG-011`) | Legal pages cannot ship placeholder text. The Refund Policy is required even though Gradex processes no refunds |
 
 An open gate does not stop the slice from being built. It stops the slice from being declared
 production-ready.
