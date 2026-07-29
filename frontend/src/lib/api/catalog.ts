@@ -37,9 +37,24 @@ export type SectionWire = {
 };
 
 export type CourseRevisionWire = {
-  title_ar: string;
-  title_en: string;
-  sections: SectionWire[];
+	id?: string;
+	state?: string;
+	title_ar: string;
+	title_en: string;
+	major_term_id?: string;
+	subject_term_id?: string;
+	sections: SectionWire[];
+};
+
+export type TaxonomyKind = "MAJOR" | "SUBJECT";
+
+export type TaxonomyTerm = {
+	id: string;
+	kind: TaxonomyKind;
+	label_ar: string;
+	label_en: string;
+	academic_code?: string;
+	retired_at?: string;
 };
 
 export type OwnedCourseSummary = {
@@ -196,5 +211,124 @@ export async function getOwnedCourseDetail(
         : "No course details returned from server",
     );
   }
-  return res;
+	return res;
+}
+
+export async function getTaxonomyTerms(locale: "ar" | "en"): Promise<TaxonomyTerm[]> {
+	const res = await authenticatedRequest<TaxonomyTerm[]>("/taxonomy/terms", "GET", locale);
+	if (res === null) {
+		throw new Error(locale === "ar" ? "لم يتم استلام مصطلحات التصنيف" : "No taxonomy terms returned");
+	}
+	return res;
+}
+
+type TaxonomyMutationInput = {
+	locale: "ar" | "en";
+	csrf: string;
+};
+
+function requireTaxonomyCSRF(input: TaxonomyMutationInput): void {
+	if (!input.csrf) {
+		throw new Error(input.locale === "ar" ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is required");
+	}
+}
+
+export async function assignInstructorTaxonomy(input: TaxonomyMutationInput & {
+	courseID: string;
+	revisionID: string;
+	majorTermID: string;
+	subjectTermID: string;
+}): Promise<void> {
+	requireTaxonomyCSRF(input);
+	const res = await authenticatedRequest<unknown>(
+		`/courses/${encodeURIComponent(input.courseID)}/revisions/${encodeURIComponent(input.revisionID)}`,
+		"PATCH",
+		input.locale,
+		input.csrf,
+		{ major_term_id: input.majorTermID, subject_term_id: input.subjectTermID },
+	);
+	if (res === null) {
+		throw new Error(input.locale === "ar" ? "لم يرجع الخادم التعديل" : "Server returned an empty taxonomy update");
+	}
+}
+
+export async function assignAdminTaxonomy(input: TaxonomyMutationInput & {
+	courseID: string;
+	revisionID: string;
+	majorTermID: string;
+	subjectTermID: string;
+}): Promise<void> {
+	requireTaxonomyCSRF(input);
+	const res = await authenticatedRequest<unknown>(
+		`/admin/courses/${encodeURIComponent(input.courseID)}/taxonomy`,
+		"PUT",
+		input.locale,
+		input.csrf,
+		{ revision_id: input.revisionID, major_term_id: input.majorTermID, subject_term_id: input.subjectTermID },
+	);
+	if (res === null) {
+		throw new Error(input.locale === "ar" ? "لم يرجع الخادم التعديل" : "Server returned an empty taxonomy update");
+	}
+}
+
+export async function createTaxonomyTerm(input: TaxonomyMutationInput & {
+	kind: TaxonomyKind;
+	labelAr: string;
+	labelEn: string;
+	academicCode?: string;
+}): Promise<TaxonomyTerm> {
+	requireTaxonomyCSRF(input);
+	const res = await authenticatedRequest<TaxonomyTerm>("/admin/taxonomy/terms", "POST", input.locale, input.csrf, {
+		kind: input.kind,
+		label_ar: input.labelAr,
+		label_en: input.labelEn,
+		academic_code: input.academicCode || undefined,
+	});
+	if (res === null) {
+		throw new Error(input.locale === "ar" ? "لم يرجع الخادم المصطلح" : "Server returned an empty taxonomy term");
+	}
+	return res;
+}
+
+export async function renameTaxonomyTerm(input: TaxonomyMutationInput & {
+	termID: string;
+	labelAr: string;
+	labelEn: string;
+}): Promise<TaxonomyTerm> {
+	requireTaxonomyCSRF(input);
+	const res = await authenticatedRequest<TaxonomyTerm>(
+		`/admin/taxonomy/terms/${encodeURIComponent(input.termID)}`,
+		"PATCH",
+		input.locale,
+		input.csrf,
+		{ label_ar: input.labelAr, label_en: input.labelEn },
+	);
+	if (res === null) {
+		throw new Error(input.locale === "ar" ? "لم يرجع الخادم المصطلح" : "Server returned an empty taxonomy term");
+	}
+	return res;
+}
+
+export async function retireTaxonomyTerm(input: TaxonomyMutationInput & { termID: string }): Promise<TaxonomyTerm> {
+	requireTaxonomyCSRF(input);
+	const res = await authenticatedRequest<TaxonomyTerm>(
+		`/admin/taxonomy/terms/${encodeURIComponent(input.termID)}/retire`,
+		"POST",
+		input.locale,
+		input.csrf,
+	);
+	if (res === null) {
+		throw new Error(input.locale === "ar" ? "لم يرجع الخادم المصطلح" : "Server returned an empty taxonomy term");
+	}
+	return res;
+}
+
+export async function deleteTaxonomyTerm(input: TaxonomyMutationInput & { termID: string }): Promise<void> {
+	requireTaxonomyCSRF(input);
+	await authenticatedRequest<unknown>(
+		`/admin/taxonomy/terms/${encodeURIComponent(input.termID)}`,
+		"DELETE",
+		input.locale,
+		input.csrf,
+	);
 }

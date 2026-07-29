@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ServerPricingPanel } from "./server-pricing-panel";
+import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
 
 interface Section {
   id: string;
@@ -168,6 +169,8 @@ export function CourseBuilder() {
       </header>
 
       <ServerPricingPanel />
+
+      <TaxonomyAssignmentPanel />
 
       {isCreating && (
         <form
@@ -340,7 +343,7 @@ export function CourseBuilder() {
                 </div>
               )}
 
-              <form onSubmit={handleAddSection} className="flex gap-2 pt-2">
+              <form onSubmit={handleAddSection} className="flex flex-col gap-2 pt-2 lg:flex-row">
                 <input
                   type="text"
                   placeholder={isAr ? "عنوان القسم بالعربية" : "Section Title (Arabic)"}

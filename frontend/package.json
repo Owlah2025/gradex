@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && node --test \"../.frontend-test-build/**/*.test.js\""
+    "test": "rm -rf ../.frontend-test-build && tsc -p tsconfig.test.json && node --test \"../.frontend-test-build/**/*.test.js\"",
+    "test:s2-ui": "node scripts/verify-s2-taxonomy-ui.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.1",
@@ -27,6 +29,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

@@ -8,6 +8,12 @@ import {
   getOwnedCourseDetail,
   delistCourse,
   restoreCourseAccess,
+  assignAdminTaxonomy,
+  assignInstructorTaxonomy,
+  createTaxonomyTerm,
+  deleteTaxonomyTerm,
+  renameTaxonomyTerm,
+  retireTaxonomyTerm,
 } from "./catalog";
 
 test("lifecycle wrappers send the secured route and body", async () => {
@@ -223,6 +229,59 @@ test("getOwnedCourses and getOwnedCourseDetail preserve real Go nested revision 
     assert.equal(detail.editable_revision?.sections?.[0].id, "sec-id-001");
     assert.equal(detail.editable_revision?.sections?.[0].position, 1);
     assert.equal(detail.editable_revision?.sections?.[0].price_minor_units, 10000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("taxonomy wrappers use explicit revision routes and Admin term endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/terms") && init?.method === "POST") {
+      return new Response(JSON.stringify({ id: "term-1" }), { status: 201 });
+    }
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    return new Response(JSON.stringify({ id: "term-1" }), { status: 200 });
+  };
+
+  try {
+    const common = { locale: "en" as const, csrf: "csrf-123" };
+    await assignInstructorTaxonomy({ ...common, courseID: "course-1", revisionID: "revision-1", majorTermID: "major-1", subjectTermID: "subject-1" });
+    await assignAdminTaxonomy({ ...common, courseID: "course-1", revisionID: "revision-2", majorTermID: "major-1", subjectTermID: "subject-1" });
+    await createTaxonomyTerm({ ...common, kind: "SUBJECT", labelAr: "فيزياء", labelEn: "Physics", academicCode: "PHY101" });
+    await renameTaxonomyTerm({ ...common, termID: "term-1", labelAr: "فيزياء محدثة", labelEn: "Updated Physics" });
+    await retireTaxonomyTerm({ ...common, termID: "term-1" });
+    await deleteTaxonomyTerm({ ...common, termID: "term-2" });
+
+    assert.deepEqual(requests.map(({ url, init }) => ({ url, method: init?.method, body: init?.body })), [
+      { url: "/api/v1/courses/course-1/revisions/revision-1", method: "PATCH", body: JSON.stringify({ major_term_id: "major-1", subject_term_id: "subject-1" }) },
+      { url: "/api/v1/admin/courses/course-1/taxonomy", method: "PUT", body: JSON.stringify({ revision_id: "revision-2", major_term_id: "major-1", subject_term_id: "subject-1" }) },
+      { url: "/api/v1/admin/taxonomy/terms", method: "POST", body: JSON.stringify({ kind: "SUBJECT", label_ar: "فيزياء", label_en: "Physics", academic_code: "PHY101" }) },
+      { url: "/api/v1/admin/taxonomy/terms/term-1", method: "PATCH", body: JSON.stringify({ label_ar: "فيزياء محدثة", label_en: "Updated Physics" }) },
+      { url: "/api/v1/admin/taxonomy/terms/term-1/retire", method: "POST", body: undefined },
+      { url: "/api/v1/admin/taxonomy/terms/term-2", method: "DELETE", body: undefined },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("taxonomy mutations fail closed before fetch without a session CSRF token", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalled = false;
+  globalThis.fetch = async () => {
+    fetchCalled = true;
+    return new Response("{}", { status: 200 });
+  };
+
+  try {
+    await assert.rejects(
+      () => createTaxonomyTerm({ locale: "en", csrf: "", kind: "MAJOR", labelAr: "علوم", labelEn: "Science" }),
+      /Session CSRF token is required/,
+    );
+    assert.equal(fetchCalled, false, "taxonomy mutation must not call fetch without CSRF");
   } finally {
     globalThis.fetch = originalFetch;
   }

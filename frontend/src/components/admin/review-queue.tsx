@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { PricingModal } from "./pricing-modal";
 import { LifecycleControls } from "./lifecycle-controls";
+import { TaxonomyControls } from "./taxonomy-controls";
 
 export interface ReviewQueueItem {
   course_id: string;
@@ -18,7 +19,7 @@ export interface ReviewQueueItem {
 }
 
 export function ReviewQueue() {
-  const { locale } = useLocale();
+  const { locale, dir } = useLocale();
   const isAr = locale === "ar";
 
   const [items, setItems] = useState<ReviewQueueItem[]>([
@@ -85,7 +86,7 @@ export function ReviewQueue() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
+    <div dir={dir} className="max-w-6xl mx-auto p-6 space-y-6">
       <div className="flex justify-between items-center border-b pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
@@ -251,6 +252,8 @@ export function ReviewQueue() {
       )}
 
       {pricingCourseID && <LifecycleControls courseID={pricingCourseID} />}
+
+      {pricingCourseID && <TaxonomyControls courseID={pricingCourseID} />}
     </div>
   );
 }
