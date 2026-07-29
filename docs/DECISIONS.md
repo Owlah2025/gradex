@@ -1048,3 +1048,40 @@ authoring across two slices and gives the learning slice a write path into Cours
 S2/S5 boundary exists to prevent).
 
 **Source:** Product-owner scope decision on 2026-07-29, raised as conflict C2 in the S5 specification.
+
+---
+
+## D-047 — Claude plans S5 and S6 and agy reviews the frozen planning range
+
+**Date:** 2026-07-29
+**Status:** Active. Scoped to the S5/S6 **planning** range only — commits `785d71c..` through this
+decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the builder and planner seat for the
+[S5 Protected Learning](../specs/007-protected-learning/spec.md) and
+[S6 Course Access Grant](../specs/006-course-access-grant/spec.md) planning artefacts, and `agy`
+(Google Antigravity CLI, `gemini-3.1-pro-high`) holds the independent read-only reviewer seat under
+[D-032](#d-032--claude-builds-agy-reviews)'s containment harness, dispatched through
+`scripts/agy-review.sh <base>..<head>`. Claude must not review the planning range it authored.
+
+**This decision covers planning only.** It confers no implementation authority for S5 or S6, and it
+does not name a builder or reviewer for either slice's implementation. Both require their own dated
+assignment.
+
+This decision **expires at the frozen reviewed head of this planning range** — the exact commit that
+carries the recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** [D-036](#d-036--claude-builds-s1b3-and-agy-reviews) was scoped to S1B3 and
+[D-037](#d-037--claude-builds-s1c-and-agy-reviews) to S1C. Both are spent, and neither reaches S5 or
+S6 planning. Claude authored every artefact in this range, so reviewing it would be a self-check,
+which cannot close it.
+
+**Alternatives rejected:** Treating D-036 or D-037 as implicitly covering this range (both scope
+themselves to one slice, and silently widening a seat decision is the failure mode the launch
+protocol forbids); Claude reviewing its own planning output; deferring the review until
+implementation starts, which would put unreviewed planning defects into built code.
+
+**Source:** Developer instruction on 2026-07-29 to freeze the S5/S6 planning work and dispatch an
+independent review.
