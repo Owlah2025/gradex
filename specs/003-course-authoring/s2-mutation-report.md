@@ -17,3 +17,11 @@ and the exact original code was restored before the green convergence gates.
 cd backend
 go test -tags=integration ./internal/httpapi -run 'TestProduction(Privileged|Instructor)MutationRoutesCommitAuditEvidence' -count=1
 ```
+
+## T064 hosted convergence
+
+GitHub Actions run [30465620015](https://github.com/Owlah2025/gradex/actions/runs/30465620015),
+attempt 2, completed successfully for commit
+`1cedfc51f97b79d662146e22cc6127ef71729da2` on
+`feature/002-authentication-rbac`. Backend, Frontend, Migrations, Admission Integration, and Guards
+all succeeded. This is the final hosted-CI evidence for S2 range `3d9604e..1cedfc5`.

@@ -402,7 +402,7 @@ It is scheduled here **before** polish, not after it, and it is not cuttable to 
       scope here
 - [X] T063 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
       frontend build with `.next` removed first
-- [ ] T064 Run `speckit.converge`; complete any appended work through another
+- [X] T064 Run `speckit.converge`; complete any appended work through another
       `speckit.implement` pass until convergence is clean, then push the exact head and verify hosted
       CI passes all five jobs. Only then freeze `3d9604e..<final-head>` for the single whole-S2
       Claude review — S1B2 proved a green local suite is not evidence of green CI
