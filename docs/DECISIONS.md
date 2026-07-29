@@ -1342,3 +1342,83 @@ assignment); widening D-051 to cover a range it did not author.
 
 **Source:** Developer instruction on 2026-07-30 to correct the remaining S3 schema-version defect and
 re-review the narrow correction.
+
+---
+
+## D-053 — Codex availability is reverified; Codex implements S3 and agy reviews it
+
+**Date:** 2026-07-30
+**Status:** Active. Scoped to **S3 only** — Public Catalogue and Bilingual Shell,
+[`specs/004-public-catalogue/`](../specs/004-public-catalogue/tasks.md). Expires when S3 is formally
+closed on a recorded independent reviewer verdict.
+
+### Codex availability is reverified — positively, on the record
+
+**The product owner explicitly confirmed Codex availability on 2026-07-30.** This is the positive
+reverification [D-033](#d-033--codex-resumes-building-and-claude-resumes-review) requires, and it is
+recorded here as an affirmative statement by the developer rather than as an inference. It was **not**
+derived from silence, from a previous session, or from the absence of a quota error — the standing rule
+that "no report of quota is not a return of quota" is satisfied by an explicit confirmation and by
+nothing weaker. Availability was last recorded as exhausted under
+[D-032](#d-032--claude-builds-agy-reviews); that condition is now cleared for S3.
+
+### Seats
+
+**Implementation base: `343aacb15c860b5d3dae91314769de541d3be92b`** — the approved S3 planning head,
+which `agy` reviewed to `APPROVE` with zero findings at every severity.
+
+- **Codex — S3 implementation builder.** Codex **may** create and modify the production files required
+  by the approved S3 tasks: backend Go packages, the `0011_catalog_search` migration, schema-version
+  constants, frontend sources, and their tests. Codex works only from task IDs authorised in a bounded
+  batch handoff, and **may not independently approve its own work.** A slice does not close on its
+  builder's assessment.
+- **`agy` — independent read-only S3 implementation reviewer.** `agy`
+  (Google Antigravity CLI, `gemini-3.1-pro-high`) reviews frozen exact commit ranges through
+  `scripts/agy-review.sh <base>..<head>` under [D-032](#d-032--claude-builds-agy-reviews)'s containment
+  harness. `agy` **may not** edit, stage, commit, push, or implement anything. A `TAINTED` or
+  `UNAVAILABLE` run is never recorded as an approval.
+- **Claude — planner and implementation coordinator only.** Claude prepares bounded batch handoffs,
+  inspects evidence, validates frozen ranges, and reports. Claude **may not provide the independent
+  implementation verdict for S3**, because Claude authored S3's planning artefacts and a review of work
+  derived from one's own plan is not independent in the sense this protocol means.
+
+### Boundaries
+
+This assignment grants **no S4, S5, or S6 implementation authority.** Each requires its own dated
+assignment. S3 must not implement authenticated routes, write routes, content authoring, media upload
+or transcoding, protected media delivery, entitlement evaluation, Enrollment creation, progress,
+invitations, approval workflows, checkout, cart, coupons, payment callbacks, refunds, invoices, BNPL,
+or payouts. **No Section price may be exposed in the public API or UI** — Section is not an acquirable
+scope under [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+
+**Work is handed over in bounded batches, not as all 46 tasks at once.** Each batch names its exact
+task IDs, its required evidence, and its prohibitions, and each freezes a range for independent review
+before the next batch begins.
+
+### Spent decisions
+
+**[D-052](#d-052--claude-corrects-the-s3-schema-version-statements-and-agy-reviews-the-correction) is
+spent at `343aacb`**, which `agy` reviewed to `APPROVE` with zero findings. The chain of spent S3
+planning seats is D-051 then D-052; neither is edited retroactively.
+
+**The accepted LOW from
+[D-050](#d-050--claude-reconciles-the-launch-plan-and-agy-reviews-the-correction)'s review remains
+non-blocking and is not reopened.** It concerns D-050's own single-document phrasing after a same-day
+pre-review scope extension, has no downstream consumer, and was accepted as review evidence rather
+than corrected.
+
+**Reason:** S3's planning chain closed clean — 46 tasks, 28/28 active functional requirements cited,
+9/9 success criteria covered, zero tasks complete, and a final independent verdict of `APPROVE` with no
+findings. The one condition that still blocked implementation was an unstaffed builder seat, and the
+repository standard for filling it with Codex was an explicit availability confirmation, which now
+exists. Claude cannot hold both the builder and reviewer seats, and cannot review implementation of its
+own plan, so the reviewer seat goes to `agy` exactly as it did for every planning range in this
+sequence.
+
+**Alternatives rejected:** Handing Codex all 46 tasks in one batch (an unbounded handoff produces an
+unreviewable range and defeats Checkpoint 2, which exists to gate on evidence before presentation work
+begins); Claude reviewing S3 implementation (not independent of the plan it authored); starting S3
+before the schema-version correction landed; assigning S4 authority in the same decision.
+
+**Source:** Product-owner instruction on 2026-07-30, carrying the explicit Codex availability
+reverification.
