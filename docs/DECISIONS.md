@@ -1184,9 +1184,18 @@ downstream reconciliation before S5 implementation begins.
 
 **Date:** 2026-07-29
 **Status:** Active. Scoped to the launch-plan reconciliation range only — base
-`b32e28957efc16bb09d46765b1e949aa3587088f` through this decision's own commit. Continues to pause
-[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
-frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+`b32e28957efc16bb09d46765b1e949aa3587088f` through the frozen head this range is reviewed at.
+Continues to pause [D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat
+assignment; D-033's frozen-range, disposable-worktree, and never-self-approve rules remain in force
+unchanged.
+
+**Scope extended the same day, before review, to include [`docs/launch/STATUS.md`](launch/STATUS.md).**
+Validating the `PLAN.md` correction in a clean worktree surfaced a direct contradiction inside
+`STATUS.md`: its header records August 15 as hard under D-040 while six passages still presented
+D-039's September target and D-037's S1C seats as in force. Correcting `PLAN.md` alone would have
+moved that contradiction rather than resolved it. This is a forward extension of an **active,
+unreviewed** decision, recorded here rather than left implicit — it is not a retroactive widening of
+a spent seat, which the launch protocol forbids and which D-047, D-048, and D-049 were each refused.
 
 **Decision:** Claude holds the builder seat for the correction of stale launch state in
 [`docs/launch/PLAN.md`](launch/PLAN.md), and `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`)
