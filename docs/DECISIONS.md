@@ -1085,3 +1085,47 @@ implementation starts, which would put unreviewed planning defects into built co
 
 **Source:** Developer instruction on 2026-07-29 to freeze the S5/S6 planning work and dispatch an
 independent review.
+
+---
+
+## D-048 — Claude plans S5 and S6 and agy re-reviews the expanded planning range
+
+**Date:** 2026-07-29
+**Status:** Active. Scoped to the expanded S5/S6 **planning** range only — base
+`785d71ce0b44ba4f591f2274285a6bc2f890b6c6` through this decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the builder and planner seat for the
+[S5 Protected Learning](../specs/007-protected-learning/spec.md) and
+[S6 Course Access Grant](../specs/006-course-access-grant/spec.md) planning artefacts together with
+the canonical business-rule and launch-register corrections this range adds, and `agy` (Google
+Antigravity CLI, `gemini-3.1-pro-high`) holds the independent read-only reviewer seat under
+[D-032](#d-032--claude-builds-agy-reviews)'s containment harness, dispatched through
+`scripts/agy-review.sh <base>..<head>`. Claude must not review the range it authored.
+
+**[D-047](#d-047--claude-plans-s5-and-s6-and-agy-reviews-the-frozen-planning-range) is spent.** It
+was scoped to head `0f0fe06`, which `agy` reviewed and returned `REJECT` on one HIGH finding: the
+S5/S6 specifications cited BR-165 – BR-171 while `docs/BUSINESS_RULES.md` ended at BR-164. D-047 is
+not edited to cover the corrected range, because retroactively widening a spent seat decision is the
+failure mode the launch protocol forbids. This decision covers the expanded range instead.
+
+**This decision covers planning only.** It confers no implementation authority for S5 or S6, and it
+does not name a builder or reviewer for either slice's implementation. Both require their own dated
+assignment.
+
+This decision **expires at the frozen reviewed head of this planning range** — the exact commit that
+carries the recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** A rejected range cannot close on the builder's own correction of it. The corrections that
+answer the finding — the D-045 business rules and the S5/S6 launch-register boundary — are
+themselves authored by Claude and are therefore inside the range needing independent review, not
+outside it.
+
+**Alternatives rejected:** Amending D-047's stated range (retroactive widening of a spent seat);
+re-running the review under D-047 unchanged (the assignment names a head that is no longer the head);
+treating the single HIGH finding as builder-correctable without re-review (a slice does not close on
+its builder's assessment that its own fix worked).
+
+**Source:** Developer instruction on 2026-07-29 to resolve the review findings, re-freeze, and
+re-dispatch.
