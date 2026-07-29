@@ -1234,3 +1234,58 @@ correction.
 
 **Source:** Developer instruction on 2026-07-29 to resolve the final launch-plan contradiction before
 assigning S5 implementation seats.
+
+---
+
+## D-051 — Claude remediates the S3 planning gaps and agy reviews the correction
+
+**Date:** 2026-07-30
+**Status:** Active. Scoped to the S3 planning-correction range only — base
+`e98e0db2e858c9aaf5af150f28de4bc7c4156e52` through this decision's own commit. Continues to pause
+[D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s seat assignment; D-033's
+frozen-range, disposable-worktree, and never-self-approve rules remain in force unchanged.
+
+**Decision:** Claude holds the **planning-remediation builder** seat for
+[`specs/004-public-catalogue/`](../specs/004-public-catalogue/tasks.md) — S3, Public Catalogue and
+Bilingual Shell — and `agy` (Google Antigravity CLI, `gemini-3.1-pro-high`) holds the independent
+read-only reviewer seat under [D-032](#d-032--claude-builds-agy-reviews)'s containment harness,
+dispatched through `scripts/agy-review.sh <base>..<head>`. Claude must not review the range it
+authored.
+
+**This decision grants no implementation authority of any kind.** It covers corrections to S3's task
+list and nothing else. **S3 implementation seats remain unassigned**, and S3 implementation may not
+begin until a separate dated decision assigns a builder and a distinct independent reviewer. This
+decision also grants no authority for S4, S5, or S6.
+
+**[D-050](#d-050--claude-reconciles-the-launch-plan-and-agy-reviews-the-correction) is spent.** It was
+scoped to the launch-plan reconciliation range `b32e289..e98e0db`, which `agy` reviewed to
+`APPROVE WITH FINDINGS` — zero critical, zero high, zero medium, one LOW concerning D-050's own
+single-document phrasing after its same-day scope extension. That LOW is **accepted as non-blocking
+review evidence** and no correction cycle was opened for it. D-050 is not edited retroactively.
+
+This decision **expires at the frozen reviewed head of this range** — the exact commit carrying the
+recorded reviewer verdict. Seats never renew implicitly.
+
+**Reason:** S3 is the next slice in the implementation order, and its task list carried four defects
+that a builder would have implemented as written. `T011` and `T019` instructed rendering per-Section
+prices, which [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+removed and the reconciled `FR-009` forbids — the downstream reconciliation corrected the requirement
+but not the tasks implementing it. `FR-010a` had no task whatsoever, so the prohibition on checkout,
+cart, coupon, and purchase controls existed only as prose. Explicit requirement traceability covered
+4 of 28 requirements and 3 of 9 success criteria, against Constitution **Principle III**, which is
+constitutional rather than tier-dependent and therefore binds a Tier 1 slice exactly as it binds a
+Tier 3 one. And `T035` told the builder to raise `db.MaxSchemaVersion` to 10 when
+`backend/internal/db/schema.go` already holds 10.
+
+Mapping requirements to tasks surfaced two further genuine gaps that the citation audit existed to
+find: `FR-014`'s retired-taxonomy-term display had no task, and `FR-025`'s prohibition on
+personalization and paid placement was uncovered. Both now have coverage.
+
+**Alternatives rejected:** Accepting S3's traceability at its prior level on the grounds that it is a
+Tier 1 slice (Principle III sets no tier condition, and the audit itself found two real coverage gaps,
+so the citation exercise was not ceremony); handing S3 to a builder with `T011` uncorrected;
+assigning implementation seats in the same pass as the planning correction that has not yet been
+reviewed; inferring Codex availability from the absence of a quota error.
+
+**Source:** Developer instruction on 2026-07-30 to perform a bounded S3 planning remediation and
+independent review.
