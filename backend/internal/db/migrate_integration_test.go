@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -218,6 +219,210 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 	if err := CheckSchema(ctx, pool); err != nil {
 		t.Errorf("schema check failed after up/down/up: %v", err)
+	}
+}
+
+func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
+	const input = "  أإآٱ ىة ٠١٢٣٤٥٦٧٨٩ مَدْرَسـٌ  MIXED\tText  "
+	const wantNormalized = "اااا يه 0123456789 مدرس mixed text"
+
+	t.Run("clean install", func(t *testing.T) {
+		freshDatabase(t)
+		m := openMigrator(t)
+		if err := m.Up(); err != nil {
+			t.Fatalf("clean install: %v", err)
+		}
+		pool := openPool(t)
+		assertCatalogNormalization(t, pool, input, wantNormalized)
+		assertSearchTextColumn(t, pool)
+	})
+
+	t.Run("upgrade with existing revisions", func(t *testing.T) {
+		freshDatabase(t)
+		m := openMigrator(t)
+		if err := m.Migrate(uint(RevisionIntegritySchemaVersion)); err != nil {
+			t.Fatalf("migrating to schema 10: %v", err)
+		}
+		pool := openPool(t)
+		seeded := seedPreCatalogSearchRevisions(t, pool)
+
+		if err := m.Migrate(uint(CatalogSearchSchemaVersion)); err != nil {
+			t.Fatalf("upgrading to schema 11: %v", err)
+		}
+		assertCatalogNormalization(t, pool, input, wantNormalized)
+		assertSearchTextColumn(t, pool)
+
+		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+		defer cancel()
+		var emptyDocuments int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM course_revisions
+			WHERE search_text IS NULL OR length(trim(search_text)) = 0
+		`).Scan(&emptyDocuments); err != nil {
+			t.Fatalf("counting backfilled documents: %v", err)
+		}
+		if emptyDocuments != 0 {
+			t.Errorf("pre-existing revisions with empty search_text = %d, want 0", emptyDocuments)
+		}
+
+		var publishedText string
+		if err := pool.QueryRow(ctx, `SELECT search_text FROM course_revisions WHERE id = $1::uuid`, seeded.publishedRevisionID).Scan(&publishedText); err != nil {
+			t.Fatalf("reading normalized Arabic title: %v", err)
+		}
+		if !strings.Contains(publishedText, "احياء 101") {
+			t.Errorf("published search_text = %q, want folded Arabic title containing %q", publishedText, "احياء 101")
+		}
+
+		for _, tc := range []struct {
+			name        string
+			query       string
+			wantResults int
+		}{
+			{name: "published live revision", query: "أحياء ١٠١", wantResults: 1},
+			{name: "draft revision", query: "مسودة", wantResults: 0},
+			{name: "superseded revision", query: "قديم", wantResults: 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				query := fmt.Sprintf(`
+					SELECT count(*)
+					FROM courses c
+					JOIN course_revisions cr ON cr.course_id = c.id
+					WHERE %s
+					  AND cr.search_text LIKE '%%' || catalog_normalize_ar($1) || '%%'
+				`, catalogpublic.PublishedOnly("c", "cr"))
+				var results int
+				if err := pool.QueryRow(ctx, query, tc.query).Scan(&results); err != nil {
+					t.Fatalf("querying backfilled document: %v", err)
+				}
+				if results != tc.wantResults {
+					t.Errorf("results = %d, want %d", results, tc.wantResults)
+				}
+			})
+		}
+
+		if err := m.Steps(-1); err != nil {
+			t.Fatalf("reverting schema 11: %v", err)
+		}
+		state, err := ReadSchemaState(ctx, pool)
+		if err != nil {
+			t.Fatalf("reading schema state after reverting schema 11: %v", err)
+		}
+		if state.Version != RevisionIntegritySchemaVersion {
+			t.Fatalf("version after reverting schema 11 = %d, want %d", state.Version, RevisionIntegritySchemaVersion)
+		}
+		assertCatalogSearchRemoved(t, pool)
+
+		if err := m.Steps(1); err != nil {
+			t.Fatalf("reapplying schema 11: %v", err)
+		}
+		assertCatalogNormalization(t, pool, input, wantNormalized)
+		assertSearchTextColumn(t, pool)
+	})
+}
+
+type preCatalogSearchRevisions struct {
+	publishedRevisionID string
+}
+
+func seedPreCatalogSearchRevisions(t *testing.T, pool *pgxpool.Pool) preCatalogSearchRevisions {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	const ownerID = "11111111-1111-1111-1111-111111111111"
+	const publishedCourseID = "22222222-2222-2222-2222-222222222222"
+	const publishedRevisionID = "33333333-3333-3333-3333-333333333333"
+	const supersededRevisionID = "44444444-4444-4444-4444-444444444444"
+	const draftCourseID = "55555555-5555-5555-5555-555555555555"
+	const draftRevisionID = "66666666-6666-6666-6666-666666666666"
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ($1::uuid, 'catalog-owner@example.test', 'catalog-owner@example.test', 'INSTRUCTOR', 'ACTIVE', 'Catalogue Owner')
+	`, ownerID); err != nil {
+		t.Fatalf("seeding owner: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle) VALUES
+		($1::uuid, $3::uuid, 'DRAFT'),
+		($2::uuid, $3::uuid, 'DRAFT')
+	`, publishedCourseID, draftCourseID, ownerID); err != nil {
+		t.Fatalf("seeding courses: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO course_revisions
+			(id, course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES
+			($1::uuid, $2::uuid, 'APPROVED', 1, 'أحيَاء ١٠١', 'Biology', 'وصف', 'Live revision'),
+			($3::uuid, $2::uuid, 'SUPERSEDED', 2, 'قديم', 'Withdrawn', 'وصف قديم', 'Superseded revision'),
+			($4::uuid, $5::uuid, 'DRAFT', 1, 'مسودة', 'Draft', 'وصف مسودة', 'Draft revision')
+	`, publishedRevisionID, publishedCourseID, supersededRevisionID, draftRevisionID, draftCourseID); err != nil {
+		t.Fatalf("seeding pre-migration revisions: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE courses
+		SET lifecycle = 'PUBLISHED', live_revision_id = $1::uuid
+		WHERE id = $2::uuid
+	`, publishedRevisionID, publishedCourseID); err != nil {
+		t.Fatalf("publishing seeded course: %v", err)
+	}
+	return preCatalogSearchRevisions{publishedRevisionID: publishedRevisionID}
+}
+
+func assertCatalogNormalization(t *testing.T, pool *pgxpool.Pool, input, want string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var got string
+	if err := pool.QueryRow(ctx, `SELECT catalog_normalize_ar($1)`, input).Scan(&got); err != nil {
+		t.Fatalf("normalizing catalogue text: %v", err)
+	}
+	if got != want {
+		t.Errorf("catalog_normalize_ar(%q) = %q, want %q", input, got, want)
+	}
+}
+
+func assertSearchTextColumn(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var generated string
+	if err := pool.QueryRow(ctx, `
+		SELECT is_generated
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'course_revisions' AND column_name = 'search_text'
+	`).Scan(&generated); err != nil {
+		t.Fatalf("reading search_text column metadata: %v", err)
+	}
+	if generated != "ALWAYS" {
+		t.Errorf("search_text is_generated = %q, want ALWAYS", generated)
+	}
+}
+
+func assertCatalogSearchRemoved(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = 'course_revisions' AND column_name = 'search_text'
+		)
+	`).Scan(&exists); err != nil {
+		t.Fatalf("checking removed search_text column: %v", err)
+	}
+	if exists {
+		t.Error("search_text column survived schema 11 down migration")
+	}
+
+	if err := pool.QueryRow(ctx, `SELECT to_regprocedure('catalog_normalize_ar(text)') IS NULL`).Scan(&exists); err != nil {
+		t.Fatalf("checking removed catalog normalizer: %v", err)
+	}
+	if !exists {
+		t.Error("catalog_normalize_ar function survived schema 11 down migration")
 	}
 }
 
