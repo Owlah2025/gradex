@@ -143,6 +143,31 @@ loading, no-results, safe-failure, stable-slug navigation, and phone/tablet/desk
 race, real-PostgreSQL, frontend, build, vet, migration/max-version, exposure, documentation, clean-code,
 test, and diff gates passed.
 
+**Phase 6 local convergence evidence — 2026-07-30.** The production-server Chromium performance
+spec uses a repeatable local `Network.emulateNetworkConditions` profile named **Kuwait 4G local
+emulation**: 170ms latency, 4 Mib/s downlink, 1 Mib/s uplink, and `cellular4g`. Five samples per
+screen produced p95 LCP **1352.0ms** for `/en/catalog` and **1348.0ms** for the slug detail, below the
+2.5s target. The real-PostgreSQL launch-scale test seeds 12 Courses, proves `courses_pkey` can support
+the list and canonical-UUID detail plans, and records 201µs `EXPLAIN ANALYZE` execution for the
+deliberately unindexed Instructor/taxonomy joined-field search—well inside the 2.5s budget. The
+real-PostgreSQL timing distribution samples 100 hidden and 100 absent lookups after warmup: hidden p95
+264.984µs, absent p95 266.899µs, absolute delta 1.915µs against a documented 25ms tolerance. This is a
+statistical observation, not a timing-indistinguishability claim.
+
+The complete local Go suite, race packages, real-PostgreSQL catalogue/migration/S2-authoring suites,
+build, both vet modes, schema max-version (11), frontend typecheck/lint/unit suite, 33-test Chromium
+suite, clean production build, anonymous-route/exposure guard, migration checksum guard, documentation
+guard, and diff guard passed. The clean-build T039a sweep covered exactly these emitted public
+catalogue artifacts: `server/app/[locale]/catalog/page.js`, its client-reference manifest,
+`server/app/[locale]/catalog/[idOrSlug]/page.js`, its manifest, and their two static route chunks. It
+found no commerce, Section-price, private-email, or client-normalizer string. Repository scans found
+no public commerce, S4–S6, Section-price, or application-normalization implementation; the only
+S4–S6 terms are the pre-existing boundary documentation. The earlier named mutations for lifecycle,
+anonymous 404, whole-router commerce, behavioural unauthenticated routes, live revision, hidden
+search, and application normalization remain documented with fail/restore/pass evidence and no
+mutation residue. **T039 remains unchecked:** its exact wording requires hosted CI on the final frozen
+head, and no push or hosted-CI authorization exists.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -485,19 +510,19 @@ test was observed failing first.
 
 ## Phase 6 — Performance and polish
 
-- [ ] T036 Verify SC-006: p95 LCP under 2.5s on representative Kuwait 4G for the list and detail pages
+- [X] T036 Verify SC-006: p95 LCP under 2.5s on representative Kuwait 4G for the list and detail pages
       *(SC-006; PRD §Non-Functional)*
-- [ ] T037 Confirm indexes support the list and detail paths, and that the unindexed joined-field
+- [X] T037 Confirm indexes support the list and detail paths, and that the unindexed joined-field
       search stays inside budget at launch catalogue size ([R-005](research.md#r-005--the-cross-table-constraint))
       *(SC-006 supporting evidence)*
-- [ ] T038 **Timing-distribution check (SC-008).** Sample hidden-identifier and absent-identifier
+- [X] T038 **Timing-distribution check (SC-008).** Sample hidden-identifier and absent-identifier
       lookups, compare the distributions against a **documented tolerance**, and record the result as
       a statistical observation. **No nanosecond-equality assertion**, and no wording that calls a
       statistical property proven. Outside tolerance is a finding with an owner; inside tolerance is
       not a guarantee *(SC-008, FR-003)*
 - [ ] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
       build with `.next` removed first, on hosted CI at the exact reviewed head
-- [ ] T039a **Production-build commerce-absence evidence.** Against the **clean production build**
+- [X] T039a **Production-build commerce-absence evidence.** Against the **clean production build**
       from T039 — not the dev server — sweep the emitted client bundle and server output and assert the
       absence of any checkout, cart, coupon, buy-now, purchase-submission, payment, payment-callback,
       or webhook route, form action, fetch target, or handler, in either language's rendered output.
