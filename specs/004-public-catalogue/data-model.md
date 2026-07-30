@@ -57,9 +57,10 @@ or publication transaction.
 
 ## Migration `0011_catalog_search`
 
-Additive only: one function, one column, one index. It modifies no existing table's constraints and
-**no existing migration file** — `scripts/docs-guard.sh` enforces the checksums of applied migrations,
-and `0001_init` onward are applied to real databases.
+Additive only: one function, one column, one index. It modifies no existing table's constraints. The
+local, unhosted `0011` definition was corrected before feature-wide review; no checksum-covered applied
+migration was changed. `scripts/applied-migrations.sha256` currently protects the migrations declared
+applied by repository policy (`0001`–`0004`), and its checksums remain unchanged.
 
 ### 1. The normalize function — the single definition
 
@@ -157,7 +158,11 @@ that is instant. Recorded because it is a lock worth knowing about, not because 
 
 ### 4. The index
 
-One index over `course_revisions (search_text)` supporting the substring match FR-023b permits.
+One `GIN` index using `pg_trgm`'s `gin_trgm_ops` over `course_revisions.search_text` supports the
+normalized leading-wildcard substring match FR-023b permits. A plain btree cannot serve that predicate
+and rejects ordinary long generated documents. `0011` enables `pg_trgm` with the repository's
+`CREATE EXTENSION IF NOT EXISTS` convention; extensions are database capabilities, so rollback removes
+the S3-owned index/column/function but retains the extension just as `0001` retains `pgcrypto`.
 **Not** a ranking structure — ranking is deferred to S18.
 
 The index covers every revision row, for the same reason the column does: a partial index conditioned
@@ -172,9 +177,10 @@ that stops being true.
 
 ### 5. Down migration
 
-Drops the index and the column from `course_revisions`, then the function, in that order. It must leave
-no orphaned function or type. Verify `up` → `down` → `up` against real PostgreSQL rather than by
-inspection, and confirm the schema version reports **11** after each `up` and **10** after the `down`.
+Drops the S3-owned index and the column from `course_revisions`, then the function, in that order. It
+retains `pg_trgm` under the same database-capability ownership convention as `pgcrypto` in `0001`.
+Verify `up` → `down` → `up` against real PostgreSQL rather than by inspection, and confirm the schema
+version reports **11** after each `up` and **10** after the `down`.
 
 The `down` **does not** null, blank, or delete search text for any Course that has become unavailable.
 There is no state in which search text is removed as a hiding mechanism; removal happens only when the

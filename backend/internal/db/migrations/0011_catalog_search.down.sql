@@ -1,4 +1,4 @@
-DROP INDEX IF EXISTS course_revisions_search_text_idx;
+DROP INDEX IF EXISTS course_revisions_search_text_trgm_idx;
 
 ALTER TABLE course_revisions
     DROP COLUMN IF EXISTS search_text;

@@ -321,6 +321,97 @@ func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
 	})
 }
 
+func TestCatalogSearchIndexSupportsLongDocumentsAndSubstringQuery(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating to schema 11: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ('77777777-7777-7777-7777-777777777777', 'long-search@example.test', 'long-search@example.test', 'INSTRUCTOR', 'ACTIVE', 'Long Search')
+	`); err != nil {
+		t.Fatalf("seeding long-document owner: %v", err)
+	}
+	var courseID, revisionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO courses (owner_account_id, lifecycle)
+		VALUES ('77777777-7777-7777-7777-777777777777', 'DRAFT')
+		RETURNING id::text
+	`).Scan(&courseID); err != nil {
+		t.Fatalf("creating long-document course: %v", err)
+	}
+
+	longArabic := strings.Repeat("وصف عربي مطول ", 600)
+	longEnglish := strings.Repeat("long English description ", 600) + " indexed-needle "
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1::uuid, 'DRAFT', 1, 'عنوان', 'Long document', $2, $3)
+		RETURNING id::text
+	`, courseID, longArabic, longEnglish).Scan(&revisionID); err != nil {
+		t.Fatalf("inserting multi-thousand-character revision: %v", err)
+	}
+
+	updatedArabic := strings.Repeat("تحديث عربي مطول ", 700)
+	updatedEnglish := strings.Repeat("updated English description ", 700) + " replacement-needle "
+	if _, err := pool.Exec(ctx, `
+		UPDATE course_revisions
+		SET description_ar = $1, description_en = $2
+		WHERE id = $3::uuid
+	`, updatedArabic, updatedEnglish, revisionID); err != nil {
+		t.Fatalf("updating multi-thousand-character revision: %v", err)
+	}
+
+	var matchedID string
+	if err := pool.QueryRow(ctx, `
+		SELECT id::text
+		FROM course_revisions
+		WHERE search_text LIKE '%' || catalog_normalize_ar($1) || '%'
+	`, "replacement-needle").Scan(&matchedID); err != nil {
+		t.Fatalf("querying normalized substring: %v", err)
+	}
+	if matchedID != revisionID {
+		t.Errorf("normalized substring row = %q, want %q", matchedID, revisionID)
+	}
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquiring connection for explain: %v", err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SET enable_seqscan = off`); err != nil {
+		t.Fatalf("preferring approved search index: %v", err)
+	}
+	rows, err := conn.Query(ctx, `
+		EXPLAIN (COSTS OFF)
+		SELECT id
+		FROM course_revisions
+		WHERE search_text LIKE '%' || catalog_normalize_ar($1) || '%'
+	`, "replacement-needle")
+	if err != nil {
+		t.Fatalf("explaining normalized substring query: %v", err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scanning explain line: %v", err)
+		}
+		plan = append(plan, line)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading explain plan: %v", err)
+	}
+	if !strings.Contains(strings.Join(plan, "\n"), "course_revisions_search_text_trgm_idx") {
+		t.Errorf("normalized substring plan does not use the approved trigram index:\n%s", strings.Join(plan, "\n"))
+	}
+}
+
 type preCatalogSearchRevisions struct {
 	publishedRevisionID string
 }

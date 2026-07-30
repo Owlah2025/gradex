@@ -1,6 +1,10 @@
 -- S3 catalogue search storage: one normalized document per authored revision.
 -- Visibility remains a query-time concern owned by courses and PublishedOnly.
 
+-- Extensions are database capabilities, not S3-owned schema objects. Follow
+-- 0001_init's IF NOT EXISTS convention and retain pg_trgm on rollback.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE FUNCTION catalog_normalize_ar(input text) RETURNS text
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
     RETURN trim(regexp_replace(
@@ -22,4 +26,5 @@ ALTER TABLE course_revisions
         )
     ) STORED;
 
-CREATE INDEX course_revisions_search_text_idx ON course_revisions (search_text);
+CREATE INDEX course_revisions_search_text_trgm_idx
+    ON course_revisions USING GIN (search_text gin_trgm_ops);
