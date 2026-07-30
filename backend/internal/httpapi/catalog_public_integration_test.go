@@ -20,6 +20,7 @@ func TestPublicCatalogRoutesExposeOnlyVisibleCourses(t *testing.T) {
 	pool, ctx := pool(t)
 	seedPublicCatalogOwner(t, pool, ctx)
 	published := seedPublicCatalogCourse(t, pool, ctx, publicCourseVisibility{lifecycle: "PUBLISHED"})
+	seedPricedPublicSection(t, pool, ctx, published)
 	seedRetiredPublicTaxonomy(t, pool, ctx, published)
 	hidden := map[string]string{
 		"draft":             seedPublicCatalogCourse(t, pool, ctx, publicCourseVisibility{lifecycle: "DRAFT"}),
@@ -99,6 +100,17 @@ func seedRetiredPublicTaxonomy(t *testing.T, pool *pgxpool.Pool, ctx context.Con
 	}
 	if _, err := pool.Exec(ctx, `UPDATE taxonomy_terms SET retired_at = now() WHERE id IN ($1::uuid, $2::uuid)`, majorID, subjectID); err != nil {
 		t.Fatalf("retiring assigned taxonomy: %v", err)
+	}
+}
+
+func seedPricedPublicSection(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID string) {
+	t.Helper()
+	var identityID string
+	if err := pool.QueryRow(ctx, `INSERT INTO course_section_identities (course_id) VALUES ($1::uuid) RETURNING id::text`, courseID).Scan(&identityID); err != nil {
+		t.Fatalf("creating section identity: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO course_sections (revision_id, course_id, section_identity_id, title_ar, title_en, position, price_minor_units) VALUES ((SELECT live_revision_id FROM courses WHERE id = $1::uuid), $1::uuid, $2::uuid, 'قسم مدفوع', 'Priced section', 0, 10000)`, courseID, identityID); err != nil {
+		t.Fatalf("creating priced public section: %v", err)
 	}
 }
 
