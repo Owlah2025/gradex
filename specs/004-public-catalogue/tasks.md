@@ -100,6 +100,18 @@ no Section price, PII, Lesson title, Resource, Lab, owner, or review metadata; r
 still displays and a suspended Instructor's Published Course remains visible. T003 remains unchecked;
 no public search, frontend, S4–S6, or commerce behavior was added.
 
+**Phase 4 implementation evidence — 2026-07-30.** The public shell extends the existing locale provider:
+catalogue routes bind document direction to their language-addressed URL, while legacy routes retain the
+saved visitor preference. The browser suite proves Arabic RTL and English LTR list/detail renderings at
+phone (390px), tablet (768px), and desktop (1440px): twelve screen combinations plus loading, empty,
+safe-failure, anonymous-not-found, and stable-slug navigation. It asserts semantic landmarks, headings,
+accessible names, focusable navigation, rendered accessibility snapshots, no viewport overflow, retired
+taxonomy display, and the absence from both DOM and accessibility tree of Section prices, private email,
+and Arabic/English commerce controls or vocabulary. `npm run typecheck`, `npm run lint`, `npm test`
+(28 tests), the full Chromium suite (29 tests), and a clean production build passed; its build-artifact
+sweep found no checkout, cart, coupon, buy-now, payment, purchase, or Section-price artifact. T003
+remains unchecked because public search semantics remain for T027, T032, T032a, and T032b.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -232,23 +244,23 @@ Required mutations, each of which must turn a test red:
 
 ## Phase 4 — Bilingual responsive shell (frontend)
 
-- [ ] T015 Extend `frontend/src/lib/i18n` — **extend, do not replace.** A second locale mechanism is a
+- [X] T015 Extend `frontend/src/lib/i18n` — **extend, do not replace.** A second locale mechanism is a
       second source of truth for what language the user chose *(FR-020)*
-- [ ] T016 Implement the public shell layout with document direction bound to locale: RTL for Arabic,
+- [X] T016 Implement the public shell layout with document direction bound to locale: RTL for Arabic,
       LTR for English, applied to navigation, forms, lists, and iconography *(FR-017, FR-020; BR-149)*
-- [ ] T017 Default to Arabic for a visitor with no stored preference; persist a chosen language across
+- [X] T017 Default to Arabic for a visitor with no stored preference; persist a chosen language across
       navigation and across sessions, for anonymous and authenticated visitors alike
       *(FR-015, FR-016, SC-003; BR-149)*
-- [ ] T018 [P] Implement the catalogue list screen, rendering the list projection including the three
+- [X] T018 [P] Implement the catalogue list screen, rendering the list projection including the three
       taxonomy dimensions in the active interface language *(FR-008, FR-013; BR-157, BR-158)*
-- [ ] T019 [P] Implement the Course detail screen, including the Section outline and the
+- [X] T019 [P] Implement the Course detail screen, including the Section outline and the
       **full-Course price only**. **Render no Section price and no per-Section price column, row, or
       badge** — Section is not an independently acquirable scope in the MVP. Present the Course price as
       **informational external-payment guidance**; the page may link to guidance on how to obtain
       access, and may not imply Gradex takes payment *(FR-009, FR-010, FR-010a;
       [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
       BR-010, BR-021, BR-019, BR-020)*
-- [ ] T019a **Render no commerce control.** Neither the catalogue list nor the Course detail screen may
+- [X] T019a **Render no commerce control.** Neither the catalogue list nor the Course detail screen may
       render a checkout button, an add-to-cart control, a cart indicator, a coupon or promo-code field,
       a buy-now control, a price-total or discount computation, or any control that submits toward a
       purchase. There is no client route, form action, or fetch target for checkout, cart, coupon,
@@ -256,13 +268,13 @@ Required mutations, each of which must turn a test red:
       and is the **only** access-related affordance on these screens *(FR-010a, FR-010;
       [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
       BR-020, BR-029)*
-- [ ] T020 Render the optional public preview with no empty player frame when absent; ensure no
+- [X] T020 Render the optional public preview with no empty player frame when absent; ensure no
       protected media is reachable from the page *(FR-012, FR-006; BR-143)*
-- [ ] T021 Present Instructor-authored content in its authored language under either interface
+- [X] T021 Present Instructor-authored content in its authored language under either interface
       language, with no machine translation (BR-150) *(FR-019; BR-150)*
-- [ ] T022 Responsive audit at phone, tablet, and desktop widths in **both** directions: no clipping,
+- [X] T022 Responsive audit at phone, tablet, and desktop widths in **both** directions: no clipping,
       mirroring, or overlap *(FR-018, FR-017, SC-004)*
-- [ ] T022a **Rendered-browser commerce-absence evidence.** In the Playwright suite, assert against the
+- [X] T022a **Rendered-browser commerce-absence evidence.** In the Playwright suite, assert against the
       **rendered DOM and accessibility tree** — not the source and not the API payload — that no
       checkout, cart, coupon, buy-now, or purchase-submission control is present on the catalogue list
       or the Course detail screen, and that no Section price is rendered. Run the full matrix:
