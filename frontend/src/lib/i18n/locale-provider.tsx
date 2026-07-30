@@ -27,6 +27,18 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 
   // Restore the user's saved choice after mount (avoids hydration mismatch).
   React.useEffect(() => {
+    const routeSegments = window.location.pathname.split("/");
+    const routeLocale = routeSegments[1];
+    // Public catalogue URLs are language-addressable. Other legacy routes keep
+    // respecting the visitor's saved language instead of treating incidental
+    // path segments (for example /en/admin) as a locale selection.
+    if (
+      routeSegments[2] === "catalog" &&
+      (routeLocale === "en" || routeLocale === "ar")
+    ) {
+      setLocaleState(routeLocale);
+      return;
+    }
     const saved = window.localStorage.getItem(STORAGE_KEY) as Locale | null;
     if (saved === "en" || saved === "ar") setLocaleState(saved);
   }, []);
