@@ -27,6 +27,17 @@ func TestRepositoryRefusesMissingRequiredDependencies(t *testing.T) {
 	}
 }
 
+func TestDetailIdentifierPredicateKeepsCanonicalUUIDsIndexable(t *testing.T) {
+	if got := publicCourseIdentifierPredicate("11111111-1111-1111-1111-111111111111"); got != "AND c.id = $2::uuid" {
+		t.Fatalf("canonical UUID predicate = %q", got)
+	}
+	for _, identifier := range []string{"course-11111111111111111111111111111111", "not-a-canonical-slug", "11111111111111111111111111111111"} {
+		if got := publicCourseIdentifierPredicate(identifier); got != "AND c.slug = $2" {
+			t.Fatalf("identifier %q predicate = %q, want slug lookup", identifier, got)
+		}
+	}
+}
+
 func TestPublicNotFoundIsByteIdenticalForHiddenAndAbsentCourses(t *testing.T) {
 	hidden := httptest.NewRecorder()
 	absent := httptest.NewRecorder()

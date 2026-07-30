@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -134,7 +135,7 @@ func publicSearchMatch(queryParameter string) string {
 // and every visibility exclusion share one SQL boundary, so callers cannot
 // fetch a Course and make a separate visibility decision in application code.
 func (r *Repository) Detail(ctx context.Context, identifier string, arabic bool) (*DetailCourse, error) {
-	rows, err := r.pool.Query(ctx, r.projectionQuery(r.visibility("c", "cr"), `AND (c.id::text = $2 OR c.slug = $2)`, ``), arabic, identifier)
+	rows, err := r.pool.Query(ctx, r.projectionQuery(r.visibility("c", "cr"), publicCourseIdentifierPredicate(identifier), ``), arabic, identifier)
 	if err != nil {
 		return nil, fmt.Errorf("looking up public course: %w", err)
 	}
@@ -155,6 +156,14 @@ func (r *Repository) Detail(ctx context.Context, identifier string, arabic bool)
 		return nil, fmt.Errorf("loading public course description: %w", err)
 	}
 	return &DetailCourse{Course: items[0], Description: description, Sections: sections}, nil
+}
+
+func publicCourseIdentifierPredicate(identifier string) string {
+	parsed, err := uuid.Parse(identifier)
+	if err == nil && parsed.String() == identifier {
+		return `AND c.id = $2::uuid`
+	}
+	return `AND c.slug = $2`
 }
 
 func (r *Repository) projectionQuery(visibility, identifier, suffix string) string {
