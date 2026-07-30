@@ -12,7 +12,10 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
-const publicCatalogCacheControl = "public, max-age=60"
+const (
+	publicCatalogCacheControl  = "public, max-age=60"
+	maxPublicCatalogQueryBytes = 10 * 1024
+)
 
 type publicCatalogHandlers struct {
 	repository *catalogpublic.Repository
@@ -40,12 +43,28 @@ func publicCatalogCache() gin.HandlerFunc {
 
 func (h *publicCatalogHandlers) list(c *gin.Context) {
 	page, pageSize := publicCatalogPagination(c)
-	result, err := h.repository.List(c.Request.Context(), publicCatalogArabic(c), page, pageSize)
+	query, searching := publicCatalogSearchQuery(c)
+	var result catalogpublic.ListResult
+	var err error
+	if searching {
+		result, err = h.repository.Search(c.Request.Context(), publicCatalogArabic(c), page, pageSize, query)
+	} else {
+		result, err = h.repository.List(c.Request.Context(), publicCatalogArabic(c), page, pageSize)
+	}
 	if err != nil {
 		writeProblem(c, problem.Internal(""))
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func publicCatalogSearchQuery(c *gin.Context) (string, bool) {
+	query := c.Query("q")
+	if len(query) > maxPublicCatalogQueryBytes {
+		return "", true
+	}
+	_, supplied := c.GetQuery("q")
+	return query, supplied
 }
 
 func (h *publicCatalogHandlers) detail(c *gin.Context) {
