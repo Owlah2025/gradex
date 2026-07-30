@@ -23,5 +23,10 @@ async function publicRequest<T>(path: string, locale: "ar" | "en"): Promise<T> {
   return body as T;
 }
 
-export function getPublicCourses(locale: "ar" | "en") { return publicRequest<PublicCourseList>("/courses", locale); }
+export function getPublicCourses(locale: "ar" | "en", query = "") {
+  const parameters = new URLSearchParams();
+  if (query !== "") parameters.set("q", query);
+  const suffix = parameters.size === 0 ? "" : `?${parameters}`;
+  return publicRequest<PublicCourseList>(`/courses${suffix}`, locale);
+}
 export function getPublicCourse(idOrSlug: string, locale: "ar" | "en") { return publicRequest<PublicCourseDetail>(`/courses/${encodeURIComponent(idOrSlug)}`, locale); }

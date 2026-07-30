@@ -114,7 +114,7 @@ async function expectNoCommerceOrSectionPrice(page: Page) {
   expect(renderedText).not.toContain("سعر القسم");
   await expect(page.getByRole("button", { name: /checkout|cart|coupon|buy now|payment|purchase|الدفع|السلة|قسيمة|اشتر|شراء/i })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /checkout|cart|coupon|buy now|payment|purchase|الدفع|السلة|قسيمة|اشتر|شراء/i })).toHaveCount(0);
-  await expect(page.locator("form")).toHaveCount(0);
+  await expect(page.locator("form[action*='checkout'], form[action*='cart'], form[action*='coupon'], form[action*='payment'], form[action*='purchase']")).toHaveCount(0);
 }
 
 async function expectVisibleKeyboardFocus(page: Page) {
@@ -134,6 +134,7 @@ for (const locale of ["ar", "en"] as const) {
       await expect(page.getByRole("heading", { name: localized[locale].catalogue, level: 1 })).toBeVisible();
       await expect(page.getByRole("link", { name: localized[locale].title })).toBeVisible();
       await expect(page.getByRole("button", { name: localized[locale].language })).toBeVisible();
+      await expect(page.getByRole("search")).toBeVisible();
       await expect(page.getByText(locale === "ar" ? /تخصص متقاعد/ : /Retired major/)).toBeVisible();
       await expectNoCommerceOrSectionPrice(page);
       await expectVisibleKeyboardFocus(page);
@@ -181,6 +182,59 @@ test("catalogue language choice persists on its language-addressed route", async
   await expect(page.evaluate(() => localStorage.getItem("gradex.locale"))).resolves.toBe("en");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+});
+
+test("catalogue search forwards raw bilingual input and renders safe result states", async ({ page }) => {
+  const receivedQueries: string[] = [];
+  await page.route("**/api/v1/catalog/courses*", (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+    receivedQueries.push(query);
+    const items = query === "لا-نتائج" ? [] : [localizedCourse("ar")];
+    return route.fulfill({ json: { items, page: 1, page_size: 20, total: items.length } });
+  });
+  await page.goto("/ar/catalog");
+  const search = page.getByRole("searchbox", { name: "ابحث في الكتالوج" });
+  await search.fill("أحياء Biology ١٠١");
+  await page.getByRole("button", { name: "بحث" }).click();
+  await expect(page).toHaveURL(/q=/);
+  await expect(page.getByRole("link", { name: "عنوان الدورة" })).toBeVisible();
+  expect(receivedQueries).toContain("أحياء Biology ١٠١");
+
+  await search.fill("لا-نتائج");
+  await page.getByRole("button", { name: "بحث" }).click();
+  await expect(page.getByText("لا توجد دورات مطابقة.", { exact: true })).toBeVisible();
+  expect(receivedQueries).toContain("لا-نتائج");
+});
+
+test("catalogue search preserves English routing and forwards raw Latin input", async ({ page }) => {
+  const receivedQueries: string[] = [];
+  await page.route("**/api/v1/catalog/courses*", (route) => {
+    const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+    receivedQueries.push(query);
+    return route.fulfill({ json: { items: [localizedCourse("en")], page: 1, page_size: 20, total: 1 } });
+  });
+  await page.goto("/en/catalog");
+  await page.getByRole("searchbox", { name: "Search the catalogue" }).fill("Biology 101");
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(page).toHaveURL(/\/en\/catalog\?q=/);
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+  await expect(page.getByRole("link", { name: "Course title" })).toBeVisible();
+  expect(receivedQueries).toContain("Biology 101");
+});
+
+test("catalogue search announces its loading state", async ({ page }) => {
+  await page.route("**/api/v1/catalog/courses*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.fulfill({ json: { items: [], page: 1, page_size: 20, total: 0 } });
+  });
+  await page.goto("/en/catalog?q=slow-search");
+  await expect(page.getByText("Searching courses…", { exact: true })).toBeVisible();
+});
+
+test("catalogue search renders a safe generic failure", async ({ page }) => {
+  await page.route("**/api/v1/catalog/courses*", (route) => route.fulfill({ status: 500, json: { status: 500 } }));
+  await page.goto("/en/catalog?q=broken-search");
+  await expect(page.getByText("The catalogue could not be loaded. Try again.", { exact: true })).toBeVisible();
 });
 
 test("catalogue maps a public not-found problem to the anonymous state", async ({ page }) => {

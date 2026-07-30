@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import {
   getPublicCourse,
@@ -27,6 +27,11 @@ const copy = {
     navigation: "التنقل الرئيسي",
     skip: "انتقل إلى المحتوى",
     switchLanguage: "التبديل إلى الإنجليزية",
+    searchLabel: "ابحث في الكتالوج",
+    searchPlaceholder: "ابحث باسم الدورة أو وصفها",
+    searchSubmit: "بحث",
+    searching: "جارٍ البحث في الدورات…",
+    noResults: "لا توجد دورات مطابقة.",
   },
   en: {
     catalogue: "Catalogue",
@@ -42,6 +47,11 @@ const copy = {
     navigation: "Primary navigation",
     skip: "Skip to content",
     switchLanguage: "Switch to Arabic",
+    searchLabel: "Search the catalogue",
+    searchPlaceholder: "Search course titles or descriptions",
+    searchSubmit: "Search",
+    searching: "Searching courses…",
+    noResults: "No matching courses were found.",
   },
 };
 
@@ -131,25 +141,68 @@ function Failure({ children }: { children: ReactNode }) {
   );
 }
 
+function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
+  const { locale } = useLocale();
+  const t = copy[locale];
+  const pathname = usePathname();
+  const router = useRouter();
+  const [query, setQuery] = useState(initialQuery);
+
+  useEffect(() => setQuery(initialQuery), [initialQuery]);
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parameters = new URLSearchParams();
+    if (query !== "") parameters.set("q", query);
+    const suffix = parameters.size === 0 ? "" : `?${parameters}`;
+    router.push(`${pathname}${suffix}`);
+  }
+
+  return (
+    <form className="mt-8 flex max-w-xl gap-3" role="search" onSubmit={submitSearch}>
+      <label className="sr-only" htmlFor="catalogue-search">
+        {t.searchLabel}
+      </label>
+      <input
+        id="catalogue-search"
+        type="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={t.searchPlaceholder}
+        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+      />
+      <button
+        type="submit"
+        className="rounded-md bg-teal-800 px-4 py-2 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+      >
+        {t.searchSubmit}
+      </button>
+    </form>
+  );
+}
+
 export function CatalogueList() {
   const { locale } = useLocale();
   const t = copy[locale];
+  const searchParameters = useSearchParams();
+  const query = searchParameters.get("q") ?? "";
   const [state, setState] = useState<{ items?: PublicCourse[]; error?: string }>({});
 
   useEffect(() => {
     setState({});
-    getPublicCourses(locale)
+    getPublicCourses(locale, query)
       .then((result) => setState({ items: result.items }))
       .catch(() => setState({ error: t.failed }));
-  }, [locale, t.failed]);
+  }, [locale, query, t.failed]);
 
   return (
     <Shell>
       <main id="catalogue-main" className="mx-auto max-w-6xl px-5 py-10">
         <h1 className="font-display text-4xl font-bold">{t.catalogue}</h1>
+        <CatalogueSearch initialQuery={query} />
         {!state.items && !state.error && (
           <p className="mt-8" aria-live="polite">
-            {t.loading}
+            {query === "" ? t.loading : t.searching}
           </p>
         )}
         {state.error && (
@@ -157,7 +210,7 @@ export function CatalogueList() {
             <Failure>{state.error}</Failure>
           </div>
         )}
-        {state.items?.length === 0 && <p className="mt-8 text-slate-600">{t.empty}</p>}
+        {state.items?.length === 0 && <p className="mt-8 text-slate-600">{query === "" ? t.empty : t.noResults}</p>}
         <section aria-label={t.catalogue} className="mt-8 grid gap-5 md:grid-cols-2">
           {state.items?.map((course) => (
             <article key={course.id} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
