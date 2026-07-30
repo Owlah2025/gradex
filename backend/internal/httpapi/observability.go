@@ -56,6 +56,20 @@ func writeProblem(c *gin.Context, p problem.Problem) {
 	c.Abort()
 }
 
+// writeAnonymousProblem writes an enumeration-safe error without a per-request
+// identifier. The request logger still reads the trusted identifier from the
+// request context after this handler returns, preserving server-side
+// correlation while preventing a hidden and nonexistent resource response
+// from differing by a freshly generated header, instance, or body field.
+func writeAnonymousProblem(c *gin.Context, p problem.Problem) {
+	p.RequestID = ""
+	p.Instance = ""
+	c.Writer.Header().Del(requestid.HeaderName)
+	c.Set(ctxSafeErrorCodeKey, p.Code)
+	_ = problem.Write(c.Writer, p)
+	c.Abort()
+}
+
 // requestIDMiddleware creates the trusted correlation identifier for this
 // attempt.
 //

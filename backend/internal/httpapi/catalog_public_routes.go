@@ -51,16 +51,8 @@ func (h *publicCatalogHandlers) detail(c *gin.Context) {
 		return
 	}
 	if !visible {
-		writePublicCatalogNotFound(c)
+		writeAnonymousProblem(c, catalogpublic.NotFound())
 		return
 	}
 	c.Status(http.StatusOK)
-}
-
-func writePublicCatalogNotFound(c *gin.Context) {
-	p := catalogpublic.NotFound()
-	c.Writer.Header().Del("X-Request-ID")
-	c.Set(ctxSafeErrorCodeKey, p.Code)
-	_ = problem.Write(c.Writer, p)
-	c.Abort()
 }

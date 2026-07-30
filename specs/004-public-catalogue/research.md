@@ -113,6 +113,30 @@ is disk and a weaker story if *both* of those controls are removed at once. That
 proofs are named tasks (T032a, T032b) rather than a line of prose: the redundancy that used to be
 claimed by storage is now claimed by tests, and tests can be run.
 
+## R-007 — Substring index shape
+
+**Decision**: `0011_catalog_search` uses `pg_trgm` and a `GIN (search_text gin_trgm_ops)` index.
+
+A plain btree over the unbounded generated document is unsafe for normal long descriptions and cannot
+serve the normalized `LIKE '%' || query || '%'` predicate. The real-PostgreSQL correction test inserts
+and updates multi-thousand-character Arabic and English descriptions, verifies the normalized substring
+row, and forces the planner to demonstrate the approved index can participate. `pg_trgm` is enabled
+with `CREATE EXTENSION IF NOT EXISTS`, following `0001`'s `pgcrypto` convention. The extension is a
+database capability rather than an S3-owned object, so rollback removes the index/column/function but
+does not drop it.
+
+## R-008 — Anonymous public-problem correlation
+
+**Decision**: public catalogue concealment errors use `writeAnonymousProblem`, alongside the normal
+problem writer.
+
+The normal writer correctly returns a fresh request identifier, but that makes two otherwise identical
+hidden/nonexistent responses differ in their header, `instance`, and `request_id`. The anonymous writer
+removes those client-visible fields centrally while preserving the trusted identifier on the request
+context. The structured request logger therefore retains server-side correlation; the deliberate
+tradeoff is that a visitor cannot quote an identifier for an enumeration-safe `404` support request.
+Handlers call the shared writer and cannot grow their own anonymous-not-found construction.
+
 ## R-003 — Reusing the S1B locale mechanism
 
 **Decision**: extend `frontend/src/lib/i18n`.

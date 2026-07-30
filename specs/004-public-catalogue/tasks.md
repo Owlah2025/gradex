@@ -72,6 +72,23 @@ bodies; and temporary `POST /api/v1/catalog/checkout` made T007a name the non-re
 route. After every restoration, the affected proof passed; no mutation code remains. T003 remains
 unchecked because its public search consumer is still deferred to T027, T032, T032a, and T032b.
 
+**Batch 1–2 correction-gate evidence — 2026-07-30.** The local, unhosted `0011` definition was
+corrected before feature-wide review: it now enables `pg_trgm` using the repository's extension
+convention and creates `course_revisions_search_text_trgm_idx` with `GIN`/`gin_trgm_ops`; schema version
+remains `11`, generated text remains on `course_revisions`, and no checksum-covered applied migration
+changed. Real PostgreSQL proved multi-thousand-character Arabic/English revision insert and update,
+normalized leading-wildcard matching, and `EXPLAIN` participation by that exact index, alongside clean,
+upgrade, down, and up/down/up regression checks and existing S2 authoring writes. T007a now examines
+every production `r.Routes()` entry for commerce terms while preserving public-prefix-only method and
+anonymous checks. Its temporary `POST /api/v1/checkout/orders` mutation failed and named the route,
+then passed after restoration. The behavioural public-route sweep materializes every derived catalogue
+path and sends a valid session cookie through authentication/session/credential, principal/capability,
+and entitlement tripwires; its temporary auth-wrapped `GET /api/v1/catalog/promoted` route failed and
+named all invoked tripwires, then passed after restoration. `writeAnonymousProblem` is the shared
+enumeration-safe writer: it omits client-visible request identifiers while the request context retains
+server-log correlation; its response-shape and byte-identity tests pass. No correction changes task
+status: T003 remains unchecked and all Phase 3+ work remains deferred.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is

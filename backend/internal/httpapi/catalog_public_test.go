@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -26,6 +28,32 @@ func TestPublicCatalogFoundationRefusesMissingRepository(t *testing.T) {
 	}
 	if err := WithPublicCatalogFoundation(nil)(&routerOptions{}); err == nil {
 		t.Fatal("WithPublicCatalogFoundation accepted a missing foundation")
+	}
+}
+
+func TestAnonymousProblemWriterOmitsRequestSpecificIdentifiers(t *testing.T) {
+	r := gin.New()
+	r.Use(requestIDMiddleware())
+	r.GET("/anonymous", func(c *gin.Context) {
+		writeAnonymousProblem(c, catalogpublic.NotFound().WithRequestID("must-not-reach-the-client"))
+	})
+
+	first := httptest.NewRecorder()
+	second := httptest.NewRecorder()
+	r.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/anonymous", nil))
+	r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/anonymous", nil))
+	if !bytes.Equal(first.Body.Bytes(), second.Body.Bytes()) {
+		t.Fatalf("anonymous problem bodies differ: %q != %q", first.Body.String(), second.Body.String())
+	}
+	if first.Header().Get("X-Request-ID") != "" || second.Header().Get("X-Request-ID") != "" {
+		t.Fatal("anonymous problem exposes a request identifier header")
+	}
+	var body problem.Problem
+	if err := json.Unmarshal(first.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decoding anonymous problem: %v", err)
+	}
+	if body.Status != http.StatusNotFound || body.Code != "NOT_FOUND" || body.RequestID != "" || body.Instance != "" {
+		t.Errorf("anonymous problem shape = %#v", body)
 	}
 }
 
