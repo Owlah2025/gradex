@@ -13,12 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -198,6 +200,46 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 	ts := httptest.NewServer(r)
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+func buildPublicCatalogRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
+	t.Helper()
+	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
+		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
+		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
+	}), config.MapSecretResolver{
+		"DATABASE_URL": authzTestDSN, "S3_ACCESS_KEY": "a",
+		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+	})
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+
+	repository, err := catalogpublic.NewRepository(pool, catalogpublic.PublishedOnly)
+	if err != nil {
+		t.Fatalf("constructing public catalogue repository: %v", err)
+	}
+	foundation, err := NewPublicCatalogFoundation(PublicCatalogFoundationOptions{Repository: repository})
+	if err != nil {
+		t.Fatalf("constructing public catalogue foundation: %v", err)
+	}
+
+	reporter := health.New(time.Second)
+	reporter.MarkStarted()
+	r, err := NewRouter(
+		cfg,
+		logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info")),
+		reporter,
+		fakeService{},
+		fakeAuth{},
+		fakeEntitlements{allowed: true},
+		fixedPrincipals{},
+		WithPublicCatalogFoundation(foundation),
+	)
+	if err != nil {
+		t.Fatalf("constructing public catalogue router: %v", err)
+	}
+	return r
 }
 
 func TestPrivateDraftProtectionAcrossReadRoutes(t *testing.T) {
