@@ -104,14 +104,21 @@ Courses only* — can be satisfied:
 **Why the adopted option loses nothing.** The population boundary was documented as *"deliberately
 redundant with `PublishedOnly`, which remains the control."* It was defence-in-depth over a control that
 was already load-bearing, not a control itself. Dropping a redundant layer that cannot be built, while
-keeping the layer that can and adding the live-revision join the one-to-many relationship demands, is a
-strictly better position than the one the plan claimed.
+keeping the layer that can and letting `PublishedOnly`'s live-revision clause answer the one-to-many
+relationship the search join exposes, is a strictly better position than the one the plan claimed.
+
+The search therefore joins `course_revisions` to `courses` on the committed ownership foreign key and
+leaves the live-revision narrowing entirely to `PublishedOnly`. Repeating
+`courses.live_revision_id = course_revisions.id` as a second join condition was considered and
+**rejected**: it splits one rule across two enforcement points, and a rule enforced twice is a rule
+whose mutation proof cannot fail — weakening either copy leaves the other holding, so the test stays
+green and reports a control that is not where the plan says it is.
 
 **Its cost, stated honestly.** Non-live and unavailable revisions now hold indexed search text. Nothing
-reads it except a query that has already passed the live-revision join and `PublishedOnly`, so the cost
-is disk and a weaker story if *both* of those controls are removed at once. That is why the mutation
-proofs are named tasks (T032a, T032b) rather than a line of prose: the redundancy that used to be
-claimed by storage is now claimed by tests, and tests can be run.
+reads it except a query that has already passed `PublishedOnly`, so the cost is disk and a weaker story
+if that predicate is removed. That is why the mutation proofs are named tasks (T032a, T032b) rather
+than a line of prose: the redundancy that used to be claimed by storage is now claimed by tests, and
+tests can be run.
 
 ## R-007 — Substring index shape
 

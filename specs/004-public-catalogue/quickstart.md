@@ -139,10 +139,16 @@ an English-only assertion looks identical whether folding works or is absent ent
 
 1. Apply normalization on write but not on query. Case 2 must fail — this is the asymmetry the single
    SQL function exists to make unrepresentable, and it passes every naive English-only test.
-2. Drop the `courses.live_revision_id = course_revisions.id` condition, keeping the `course_id` join.
-   Case 7 must fail by returning a Course through a historical revision (T032b).
-3. Drop `PublishedOnly` from the search query. Case 6 must fail by returning a non-Published Course
-   (T032b).
+2. Weaken **only** the `live_revision_id = id` clause **inside `PublishedOnly`**, leaving its other
+   three exclusions and the search query's ownership join untouched. Case 7 must fail by returning a
+   Course through a historical revision. Then restore `PublishedOnly` verbatim, confirm case 7 passes,
+   and confirm no residue remains (T032b).
+3. Drop `PublishedOnly` from the search query. Case 6 must fail by returning a non-Published Course.
+   Restore and confirm case 6 passes with no residue (T032b).
+
+Both mutations act on `PublishedOnly`, because that is where both controls live. **Neither may require
+weakening two places at once** — the search query joins on ownership (`course_revisions.course_id =
+courses.id`) and holds no live-revision condition of its own, so there is only one clause to weaken.
 
 Mutations 2 and 3 are the whole of the defence that used to be claimed by storing search text for
 Published Courses only. That claim was withdrawn on 2026-07-30 as unbuildable

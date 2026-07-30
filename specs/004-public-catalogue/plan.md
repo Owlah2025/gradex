@@ -209,13 +209,21 @@ redundant with `PublishedOnly`, which remains the control."* It was a second lay
 that was always doing the work. Search text is generated for **every** revision, and exposure is
 decided entirely at query time:
 
-1. `courses.live_revision_id = course_revisions.id` — only the live revision is a public candidate.
-2. `PublishedOnly` — the same predicate the list and detail routes use, unchanged.
+1. The search joins `course_revisions` to `courses` through the committed **ownership** foreign key,
+   `course_revisions.course_id = courses.id`. This establishes candidacy only; it decides nothing.
+2. `PublishedOnly` — the same predicate the list and detail routes use, unchanged — narrows that
+   ownership join to the live revision. Its fourth exclusion,
+   `courses.live_revision_id = course_revisions.id`, is the **single** enforcement point for the
+   live-revision boundary and is **not** repeated in a search-specific join condition.
 3. The normalized query matches that revision's `search_text`.
 
-Condition 1 is load-bearing rather than incidental. `courses` to `course_revisions` is one-to-many, so a
-search joining on `course_id` alone would surface a Course through the text of **any** revision it ever
-had, including a `SUPERSEDED` title that was withdrawn on purpose.
+Step 2 is load-bearing rather than incidental. `courses` to `course_revisions` is one-to-many, so the
+ownership join alone would surface a Course through the text of **any** revision it ever had, including
+a `SUPERSEDED` title that was withdrawn on purpose. `PublishedOnly` is what closes that, and it is the
+only thing that closes it — which is why T032b's mutation weakens the clause **inside `PublishedOnly`**
+rather than a duplicate of it. A second copy in a join would make the control unlocatable and its
+mutation survivable: removing either copy would leave the other enforcing, the test would stay green,
+and the proof would report a control that is not where this plan says it is.
 
 **A populated `search_text` is not a visibility claim.** A Draft, `SUPERSEDED`, or `REJECTED` revision,
 and a revision of a `DELISTED`, `ARCHIVED`, retired, or suspended Course, all legitimately hold indexed
@@ -239,7 +247,8 @@ It cannot, and for two different reasons depending on the field:
 
 A third drift question exists only because the column moved to `course_revisions`: **can the searchable
 text drift from the text a visitor is shown?** It cannot, and for the same reason — the detail projection
-and the search predicate both resolve through `courses.live_revision_id`, so they read the same row.
+and the search predicate both resolve through the **same** `PublishedOnly` live-revision clause, so they
+read the same row.
 Repointing `live_revision_id` changes which text is searchable and which text renders in the same
 instant, without copying anything into `courses`. T032a proves that.
 
@@ -310,5 +319,5 @@ would read like a reasonable default while doing it.
 | A derived enforcement test over `r.Routes()` | Code review and convention | Convention failed in S1C and the derived matrix caught it. Same defect class, same answer |
 | Normalization implemented once in SQL | A Go normalize function plus a SQL expression | Two implementations of one rule diverge silently — English keeps passing while Arabic stops matching. One `IMMUTABLE` SQL function makes asymmetry unrepresentable |
 | Stored generation for same-row fields, query-time for joined fields | One column covering all four fields | Not implementable: a generated column cannot reference other tables. The alternative was a trigger fabric across three tables — a denormalization subsystem S3 must not become |
-| `course_revisions` owns generated search text; `courses` owns exposure | A generated column on `courses`, populated for Published Courses only | Unbuildable on either table: `courses` has no authored text and PostgreSQL forbids cross-table generation. The withdrawn rule was documented as redundant with `PublishedOnly`; the live-revision join plus that predicate is what actually enforces visibility ([R-006](research.md#r-006--which-table-owns-the-generated-search-column)) |
+| `course_revisions` owns generated search text; `courses` owns exposure | A generated column on `courses`, populated for Published Courses only | Unbuildable on either table: `courses` has no authored text and PostgreSQL forbids cross-table generation. The withdrawn rule was documented as redundant with `PublishedOnly`; that predicate — live-revision clause included — is what actually enforces visibility ([R-006](research.md#r-006--which-table-owns-the-generated-search-column)) |
 | One `PublishedOnly` predicate | A status filter per query | Four separate exclusions applied per-site is exactly how a route ends up with three of them |

@@ -43,7 +43,8 @@ when S3 closes on a recorded reviewer verdict.
 visibility foundation only. **The public search query is not authorized in Batch 1**, so T027 and the
 exposure proofs T032, T032a, and T032b belong to a later frozen range. Note that T003's wording spans
 list, detail, **and search**: in Batch 1 its search entry point carries no query semantics — no
-live-revision join, no normalization matching — and **T003 therefore stays unchecked until T027 lands.**
+ownership join under `PublishedOnly`, no normalization matching — and **T003 therefore stays unchecked
+until T027 lands.**
 
 **Batch 1 implementation evidence — 2026-07-30.** `GOCACHE=/tmp/gradex-go-cache go test
 ./...` passed from `backend`; `GOCACHE=/tmp/gradex-go-cache go test -tags=integration
@@ -339,8 +340,8 @@ Required mutations, each of which must turn a test red:
         silently dropping the revision from search, if a later migration relaxes one of them.
       - **Generate it for every revision row — no publication condition.** There is deliberately **no**
         `WHERE`, no partial index, and no expression testing lifecycle. A populated `search_text` is
-        **not** a claim that the row is publicly visible; it is storage. Exposure is decided by T027's
-        live-revision join and by `PublishedOnly`, and by nothing else.
+        **not** a claim that the row is publicly visible; it is storage. Exposure is decided by
+        `PublishedOnly` — including its live-revision clause — and by nothing else.
       - Add the approved index over `course_revisions (search_text)` — a substring-match structure, not
         a ranking one (FR-023b).
 
@@ -351,14 +352,18 @@ Required mutations, each of which must turn a test red:
       *(FR-021, FR-002; BR-161; data-model.md §2)*
 - [ ] T027 **Build the public search query: live revision, published Course, generated column.** The
       search must:
-      - join `courses` to `course_revisions` on **`courses.live_revision_id = course_revisions.id`**, so
-        only the live revision is ever a public candidate. Joining on `course_id` alone is the specific
-        defect this clause forbids — it would surface a Course through **any** revision it has ever had,
-        including a `SUPERSEDED` title deliberately withdrawn;
-      - apply the **same** `PublishedOnly` predicate from T002 that the list and detail routes use —
-        never a separate status condition in the search query (FR-022);
-      - match the normalized query against the **live revision's** `search_text`;
-      - **never** search a Course's historical revisions as public candidates;
+      - join `course_revisions` to `courses` through the committed **ownership** foreign key —
+        `course_revisions.course_id = courses.id` — and stop there. The join establishes which Course a
+        revision belongs to; it decides **nothing** about visibility;
+      - apply the **same** `PublishedOnly` predicate from T002 that the list and detail routes use as
+        the **sole** authority narrowing that ownership join to the live revision. `PublishedOnly`
+        already carries `courses.live_revision_id = course_revisions.id`; the search query **must not
+        repeat it** in a search-specific join condition. One clause, one enforcement point — a second
+        copy is what makes a mutation survivable and a control unlocatable (FR-022);
+      - match the normalized query against `course_revisions.search_text` on that predicate-narrowed
+        row set;
+      - **never** search a Course's historical revisions as public candidates. That exclusion is
+        `PublishedOnly`'s live-revision clause doing its work, not a separate search rule;
       - normalize the joined fields — Instructor display name, taxonomy labels and code — **at query
         time through the same function**, on the same live-revision row set.
       *(FR-021, FR-022, FR-023, FR-005; BR-161, BR-017; plan.md §Exposure boundary)*
@@ -400,16 +405,24 @@ Required mutations, each of which must turn a test red:
          matching — with **no** text copied into `courses` and no S2 write path involved. Assert that
          `courses` gained no title, description, or search column.
       5. Search and detail agree: the text that matches is the text the detail projection renders,
-         because both resolve through `live_revision_id`.
+         because both resolve through `PublishedOnly`'s live-revision clause.
       *(FR-005, FR-002, FR-021, FR-022; BR-017, BR-161; plan.md §Exposure boundary)*
 - [ ] T032b **Mutation proofs for the two exposure controls.** Both must be named, run, and their
       failure output recorded — this is the redundancy that replaced the population boundary, and an
-      unrun mutation is prose:
-      - Remove **only** the `courses.live_revision_id = course_revisions.id` join condition (leaving the
-        `course_id` join) and confirm a named test in T032a fails by returning a Course through a
-        historical revision.
-      - Remove **only** the `PublishedOnly` predicate from the search query and confirm a named test in
-        T032 fails by returning a non-Published Course.
+      unrun mutation is prose. Both mutate `PublishedOnly` itself, because that is where both controls
+      live; neither requires touching a search-specific join, and **no mutation may require weakening
+      two places at once.** A control that takes two edits to break is a control this plan cannot
+      locate:
+      - **Live-revision mutation.** (1) Temporarily remove or weaken **only** the
+        `live_revision_id = id` clause inside `PublishedOnly`, leaving its other three exclusions
+        intact. (2) Run the T032a historical-revision test. (3) Confirm it fails by proving matching
+        text on a **non-live** revision has become publicly searchable — a Course returned through a
+        revision that is not its live one. (4) Restore `PublishedOnly` verbatim. (5) Re-run the same
+        test and confirm it passes. (6) Confirm no mutation residue remains — `git diff` against the
+        pre-mutation tree is empty and no commented-out or flag-guarded variant survives.
+      - **Published-only mutation.** Remove **only** the `PublishedOnly` predicate from the search
+        query and confirm a named test in T032 fails by returning a non-Published Course. Restore, and
+        confirm the same test passes with no residue.
       Neither mutation may be survivable. If either passes, the control is not where this plan says it
       is *(FR-002, FR-005, FR-022, SC-005; standing clause on mutation evidence)*
 - [ ] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
@@ -569,6 +582,23 @@ cannot be built against the committed S2 schema; T032a asserts the live-revision
 actually enforces it, and T032b runs the two mutations that prove both controls are load-bearing. A
 redundancy that can be executed replaces one that could only be asserted. No task was removed and no
 requirement was weakened; T026 and T027 were rewritten in place and keep their identifiers.
+
+**Phase 5 planning correction — 2026-07-30. No task added, removed, or renumbered; the count stays at
+48 and no checkbox changed.** The plan previously required T027 to carry
+`courses.live_revision_id = course_revisions.id` as its own join condition *and* to apply
+`PublishedOnly`, which already contains that clause. T032b's first mutation then asked for the join
+condition alone to be removed — a mutation that **could not turn a test red**, because `PublishedOnly`
+would still have enforced the boundary. The proof was unsatisfiable as written, and it would have been
+discovered only after the test was built.
+
+Corrected in place across [tasks.md](tasks.md), [plan.md](plan.md), [data-model.md](data-model.md),
+[research.md](research.md), and [quickstart.md](quickstart.md): the search joins `course_revisions` to
+`courses` on the committed ownership foreign key, `PublishedOnly` remains the **single** authority
+selecting the live revision, and T032b's live-revision mutation weakens that clause **inside
+`PublishedOnly`** — one enforcement point, one edit, one red test, then restore and re-prove. No
+mutation in this slice may require weakening two places at once. The contract
+([contracts/catalogue-api.md](contracts/catalogue-api.md)) describes externally observable behaviour
+only and needed no change.
 
 Phase 5 previously grew from 8 to 13 with OD-001's resolution and the red-first requirement; the slice
 estimate moves from 8h to **11–13h** with the coverage additions, and the correction's two tasks add

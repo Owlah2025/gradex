@@ -201,28 +201,37 @@ That is what proved unsatisfiable, and replacing it costs nothing, because the c
 
 A revision is publicly searchable **only** when all three hold:
 
-1. It is the owning Course's current live revision — `courses.live_revision_id = course_revisions.id`.
+1. It belongs to the Course under consideration, established by the committed ownership foreign key —
+   `course_revisions.course_id = courses.id`. This is a candidacy join and carries **no** visibility
+   authority.
 2. The owning Course passes `PublishedOnly` (T002), the single predicate encoding all four exclusions:
-   `lifecycle = 'PUBLISHED'`, no active `access_suspended_at`, not retired, and the live-revision
-   pointer itself.
+   `lifecycle = 'PUBLISHED'`, no active `access_suspended_at`, not retired, and
+   `courses.live_revision_id = course_revisions.id`. That fourth clause is what narrows the ownership
+   join to the live revision, and it exists **only** here.
 3. The normalized query matches that revision's `search_text`.
 
-Condition 1 is what makes historical text unreachable, and it is not a convenience: `courses` and
-`course_revisions` are one-to-many, so a search that joins on `course_id` alone would return a Course
-through the text of **any** revision it has ever had, including a `SUPERSEDED` one whose title was
-withdrawn. That is the exposure this rule closes.
+Condition 2 is what makes historical text unreachable, and it is not a convenience: `courses` and
+`course_revisions` are one-to-many, so the ownership join alone would return a Course through the text
+of **any** revision it has ever had, including a `SUPERSEDED` one whose title was withdrawn. That is
+the exposure `PublishedOnly` closes.
+
+**The live-revision clause must not be duplicated in a search-specific join condition.** One rule, one
+enforcement point. A second copy would mean neither copy is individually load-bearing, so weakening
+either one leaves the guarantee intact and the mutation proof green — reporting a control that is not
+where this document says it is.
 
 **Stated as an invariant:**
 
 > A generated `search_text` value on a row is **not** evidence that the row is publicly visible. It is
-> a storage and query accelerator. Exposure is decided by the live-revision join and by
-> `PublishedOnly`, and by nothing else.
+> a storage and query accelerator. Exposure is decided by `PublishedOnly` — live-revision clause
+> included — and by nothing else.
 
 So it is **acceptable** for a Draft, `SUPERSEDED`, or `REJECTED` revision, or a revision of a
 `DELISTED`, `ARCHIVED`, retired, or suspended Course, to hold indexed search text. It is **not
-acceptable** for any of them to appear in a public result. Removing either the live-revision join or
-the `PublishedOnly` predicate must break a named test — T032a and T032b exist for exactly that, because
-an invariant with no failing mutation behind it is a sentence, not a control.
+acceptable** for any of them to appear in a public result. Weakening the live-revision clause inside
+`PublishedOnly`, or removing `PublishedOnly` from the search query, must each break a named test —
+T032a and T032b exist for exactly that, because an invariant with no failing mutation behind it is a
+sentence, not a control.
 
 ## Schema version
 
