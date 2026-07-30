@@ -135,7 +135,8 @@ hidden/nonexistent responses differ in their header, `instance`, and `request_id
 removes those client-visible fields centrally while preserving the trusted identifier on the request
 context. The structured request logger therefore retains server-side correlation; the deliberate
 tradeoff is that a visitor cannot quote an identifier for an enumeration-safe `404` support request.
-Handlers call the shared writer and cannot grow their own anonymous-not-found construction.
+Public catalogue handlers call the shared writer; this correction leaves no handler-specific
+anonymous-not-found construction.
 
 ## R-003 — Reusing the S1B locale mechanism
 
