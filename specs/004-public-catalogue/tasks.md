@@ -58,6 +58,20 @@ unchecked:** Batch 1 adds only the construction/policy foundation; public `q` pa
 matching, live-revision search joins, and search-result semantics remain for T027, T032, T032a, and
 T032b.
 
+**Batch 2 implementation evidence — 2026-07-30.** `GOCACHE=/tmp/gradex-go-cache go test ./...`,
+`go test -race ./internal/catalogpublic ./internal/httpapi ./cmd/api`, `go build ./...`, `go vet
+./...`, `go vet -tags=integration ./...`, `go run ./cmd/migrate max-version` (`11`),
+`scripts/docs-guard.sh`, `scripts/expose-guard.sh`, and `git diff --check` passed. Real PostgreSQL
+evidence passed for the public visibility route test, both normally and under `-race`, and for the
+Batch 1 migration acceptance suite, both normally and under `-race`. Checkpoint 2 mutations failed
+their named proofs and were restored: removing `retired_at` from `PublishedOnly` made the retired
+Course return `200`; a temporary GET route executing `SELECT 1 FROM courses` bypassed
+`publicCatalogHandlers` and T007 named `/api/v1/catalog/catalog-table-leak`; a hidden-only `403`
+branch made T008 compare `404` with `403`; a hidden-only detail string made T008 report differing
+bodies; and temporary `POST /api/v1/catalog/checkout` made T007a name the non-read-only checkout
+route. After every restoration, the affected proof passed; no mutation code remains. T003 remains
+unchecked because its public search consumer is still deferred to T027, T032, T032a, and T032b.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -110,16 +124,16 @@ No route is mounted yet.
 
 ## Phase 2 — Public routes and derived enforcement
 
-- [ ] T005 Register public routes under `/api/v1/catalog` in `backend/internal/httpapi/router.go`,
+- [X] T005 Register public routes under `/api/v1/catalog` in `backend/internal/httpapi/router.go`,
       per [contracts/catalogue-api.md](contracts/catalogue-api.md). Every route is unauthenticated and
       read-only *(FR-001)*
-- [ ] T006 Implement thin handlers: **no status comparison in a handler**, no second not-found
+- [X] T006 Implement thin handlers: **no status comparison in a handler**, no second not-found
       constructor, no query built outside the repository *(FR-002, FR-003)*
-- [ ] T007 **The load-bearing test.** In `backend/internal/httpapi/catalog_public_test.go`, enumerate
+- [X] T007 **The load-bearing test.** In `backend/internal/httpapi/catalog_public_test.go`, enumerate
       every route registered under the public prefix from `r.Routes()` and assert each is served
       through `PublishedOnly`. A new public route that queries the catalog tables directly **must fail
       this test.** Derive the route list; never hand-maintain it *(FR-002, SC-001)*
-- [ ] T007a **Route and exposure guard — what S3 must NOT add.** In the same derived-enumeration
+- [X] T007a **Route and exposure guard — what S3 must NOT add.** In the same derived-enumeration
       style as T007, assert over the **whole** application route table that this slice introduces:
       **no** non-`GET`/`HEAD` route under the public prefix; **no** route under the public prefix
       requiring or reading a session, credential, or capability; and **no** route whose path or handler
@@ -129,12 +143,12 @@ No route is mounted yet.
       absence a property of the code rather than of this document *(FR-010a, FR-001;
       [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
       BR-020, BR-029; [contracts/catalogue-api.md](contracts/catalogue-api.md))*
-- [ ] T008 Prove the enumeration case: request every non-Published state by **exact identifier** and
+- [X] T008 Prove the enumeration case: request every non-Published state by **exact identifier** and
       assert the response is identical to a never-existing identifier in **status, headers, response
       schema, and body**. This is the exact, provable guarantee — assert on the full response, not the
       status code. Timing is **not** claimed here; it is measured separately in T038
       *(FR-003, FR-004, SC-002)*
-- [ ] T009 Implement the detail lookup with the predicate **inside the query boundary**. Do **not**
+- [X] T009 Implement the detail lookup with the predicate **inside the query boundary**. Do **not**
       fetch-then-check in application code: that returns measurably faster for an absent row than for
       a hidden one, and closing that branch is **necessary but not sufficient** — see
       [plan.md](plan.md#the-timing-claim-stated-honestly). This task is where the mistake gets made by
