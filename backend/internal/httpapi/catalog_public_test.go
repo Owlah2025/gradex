@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,7 +30,7 @@ func TestPublicCatalogFoundationRefusesMissingRepository(t *testing.T) {
 }
 
 func TestPublicCatalogRoutesUseTheSharedVisibilityBoundary(t *testing.T) {
-	r := publicCatalogRouter(t, fakeAuth{}, fixedPrincipals{})
+	r := publicCatalogRouter(t, fakeAuth{}, fakeEntitlements{allowed: true}, fixedPrincipals{})
 	count := 0
 	for _, route := range r.Routes() {
 		if !strings.HasPrefix(route.Path, "/api/v1/catalog") {
@@ -45,8 +47,15 @@ func TestPublicCatalogRoutesUseTheSharedVisibilityBoundary(t *testing.T) {
 }
 
 func TestPublicCatalogRouteExposureGuard(t *testing.T) {
-	r := publicCatalogRouter(t, fakeAuth{}, fixedPrincipals{})
+	r := publicCatalogRouter(t, fakeAuth{}, fakeEntitlements{allowed: true}, fixedPrincipals{})
 	for _, route := range r.Routes() {
+		for _, prohibited := range []string{
+			"order", "checkout", "cart", "coupon", "payment", "callback", "webhook", "refund", "invoice", "entitlement",
+		} {
+			if strings.Contains(strings.ToLower(route.Path+" "+route.Handler), prohibited) {
+				t.Errorf("application route %s %s names prohibited commerce concept %q", route.Method, route.Path, prohibited)
+			}
+		}
 		if !strings.HasPrefix(route.Path, "/api/v1/catalog") {
 			continue
 		}
@@ -54,48 +63,99 @@ func TestPublicCatalogRouteExposureGuard(t *testing.T) {
 			t.Errorf("public route %s %s is not read-only", route.Method, route.Path)
 		}
 		for _, prohibited := range []string{
-			"session", "credential", "capability", "order", "checkout", "cart", "coupon", "payment",
-			"callback", "webhook", "refund", "invoice", "entitlement", "enrollment", "invitation",
-			"progress", "upload", "process",
+			"session", "credential", "capability", "enrollment", "invitation", "progress", "upload", "process",
 		} {
 			if strings.Contains(strings.ToLower(route.Path+" "+route.Handler), prohibited) {
-				t.Errorf("public route %s %s names prohibited concept %q", route.Method, route.Path, prohibited)
+				t.Errorf("public route %s %s names prohibited public-route concept %q", route.Method, route.Path, prohibited)
 			}
 		}
 	}
 }
 
-func TestPublicCatalogRoutesDoNotReadAuthenticationOrCapabilities(t *testing.T) {
-	authCalled := false
-	principalCalled := false
-	r := publicCatalogRouter(t,
-		publicCatalogAuthTripwire{called: &authCalled},
-		publicCatalogPrincipalTripwire{called: &principalCalled},
-	)
-	do(r, httptest.NewRequest(http.MethodGet, "/api/v1/catalog/courses", nil))
-	if authCalled {
-		t.Error("public catalogue route read authentication")
+func TestPublicCatalogRoutesDoNotReadAuthenticationBoundaries(t *testing.T) {
+	tripwires := &publicCatalogRouteTripwires{}
+	authenticator, err := auth.NewSessionAuthenticator(publicCatalogSessionTripwire{tripwires: tripwires})
+	if err != nil {
+		t.Fatalf("constructing session authenticator tripwire: %v", err)
 	}
-	if principalCalled {
-		t.Error("public catalogue route read a capability principal")
+	r := publicCatalogRouter(t, authenticator, publicCatalogEntitlementTripwire{tripwires: tripwires}, publicCatalogPrincipalTripwire{tripwires: tripwires})
+
+	for _, route := range r.Routes() {
+		if !strings.HasPrefix(route.Path, "/api/v1/catalog") {
+			continue
+		}
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			req := httptest.NewRequest(route.Method, publicCatalogRequestPath(route.Path), nil)
+			req.AddCookie(&http.Cookie{
+				Name:  auth.SessionCookieName,
+				Value: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x61}, 32)),
+			})
+			do(r, req)
+			tripwires.assertUntouched(t)
+		})
 	}
 }
 
-type publicCatalogAuthTripwire struct{ called *bool }
-
-func (t publicCatalogAuthTripwire) UserFromRequest(*gin.Context) (string, error) {
-	*t.called = true
-	return "", nil
+func publicCatalogRequestPath(routePath string) string {
+	for start := strings.IndexByte(routePath, ':'); start >= 0; start = strings.IndexByte(routePath, ':') {
+		end := strings.IndexByte(routePath[start:], '/')
+		if end < 0 {
+			return routePath[:start] + "00000000-0000-0000-0000-000000000000"
+		}
+		routePath = routePath[:start] + "00000000-0000-0000-0000-000000000000" + routePath[start+end:]
+	}
+	return strings.ReplaceAll(routePath, "*filepath", "asset")
 }
 
-type publicCatalogPrincipalTripwire struct{ called *bool }
+type publicCatalogRouteTripwires struct {
+	authentication bool
+	session        bool
+	credential     bool
+	principal      bool
+	capability     bool
+	entitlement    bool
+}
+
+// Resolve runs only after SessionAuthenticator accepted the valid test cookie,
+// so one callback witnesses authentication, session resolution, and credential parsing.
+type publicCatalogSessionTripwire struct{ tripwires *publicCatalogRouteTripwires }
+
+func (t publicCatalogSessionTripwire) Resolve(context.Context, string, identity.CredentialUseKind, string) (identity.SessionView, error) {
+	t.tripwires.authentication = true
+	t.tripwires.session = true
+	t.tripwires.credential = true
+	return identity.SessionView{}, nil
+}
+
+type publicCatalogPrincipalTripwire struct{ tripwires *publicCatalogRouteTripwires }
 
 func (t publicCatalogPrincipalTripwire) ResolvePrincipal(context.Context, string) (identity.Principal, error) {
-	*t.called = true
+	t.tripwires.principal = true
+	t.tripwires.capability = true
 	return identity.Principal{}, nil
 }
 
-func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, principals identity.PrincipalResolver) *gin.Engine {
+type publicCatalogEntitlementTripwire struct{ tripwires *publicCatalogRouteTripwires }
+
+func (t publicCatalogEntitlementTripwire) HasAccess(context.Context, string, string) (bool, error) {
+	t.tripwires.entitlement = true
+	return true, nil
+}
+
+func (t publicCatalogEntitlementTripwire) IsInstructorForLesson(context.Context, string, string) (bool, error) {
+	t.tripwires.entitlement = true
+	return true, nil
+}
+
+func (t *publicCatalogRouteTripwires) assertUntouched(tb testing.TB) {
+	tb.Helper()
+	if t.authentication || t.session || t.credential || t.principal || t.capability || t.entitlement {
+		tb.Fatalf("public catalogue route invoked authentication=%t session=%t credential=%t principal=%t capability=%t entitlement=%t",
+			t.authentication, t.session, t.credential, t.principal, t.capability, t.entitlement)
+	}
+}
+
+func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, entitlements auth.EntitlementChecker, principals identity.PrincipalResolver) *gin.Engine {
 	t.Helper()
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -130,7 +190,7 @@ func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, princip
 		reporter,
 		fakeService{},
 		authenticator,
-		fakeEntitlements{allowed: true},
+		entitlements,
 		principals,
 		WithPublicCatalogFoundation(foundation),
 	)
