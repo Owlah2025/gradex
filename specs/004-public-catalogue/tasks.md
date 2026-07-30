@@ -524,8 +524,19 @@ test was observed failing first.
       a statistical observation. **No nanosecond-equality assertion**, and no wording that calls a
       statistical property proven. Outside tolerance is a finding with an owner; inside tolerance is
       not a guarantee *(SC-008, FR-003)*
-- [ ] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
-      build with `.next` removed first, on hosted CI at the exact reviewed head
+- [X] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
+      build with `.next` removed first, on hosted CI at the exact reviewed head. **Hosted evidence:**
+      GitHub Actions [CI run 30590627163](https://github.com/Owlah2025/gradex/actions/runs/30590627163)
+      tested `c05b8f3fb11ff238a4b94484eba6423197b64445` on
+      `feature/002-authentication-rbac` and completed successfully. Guards passed the Documentation
+      and Secret exposure guards; Frontend passed lint, typecheck, tests, and production build;
+      Migrations passed migration and schema-integration evidence; Backend passed build, vet, and
+      tests; and Admission Integration passed its database, identity, outbox, HTTP API, public
+      catalogue, and rate-limit integration packages. Its hosted command includes
+      `./internal/catalogpublic`, so the integration-tagged package run includes
+      `TestDetailSecondaryReadsRecheckPublishedOnly`. This hosted record does **not** claim the
+      local-only Playwright browser, RTL/LTR responsive, accessibility, production-LCP, or mutation
+      evidence.
 - [X] T039a **Production-build commerce-absence evidence.** Against the **locally produced clean
       production build** — not the dev server — sweep the emitted client bundle and server output and assert the
       absence of any checkout, cart, coupon, buy-now, purchase-submission, payment, payment-callback,
