@@ -45,6 +45,19 @@ exposure proofs T032, T032a, and T032b belong to a later frozen range. Note that
 list, detail, **and search**: in Batch 1 its search entry point carries no query semantics — no
 live-revision join, no normalization matching — and **T003 therefore stays unchecked until T027 lands.**
 
+**Batch 1 implementation evidence — 2026-07-30.** `GOCACHE=/tmp/gradex-go-cache go test
+./...` passed from `backend`; `GOCACHE=/tmp/gradex-go-cache go test -tags=integration
+./internal/db -run 'Test(MigrateUpDownUp|CatalogSearchMigrationSupportsCleanInstallAndUpgrade)$'
+-count=1` passed against the local PostgreSQL test database; and `GOCACHE=/tmp/gradex-go-cache
+go run ./cmd/migrate max-version` returned `11`. The integration proof covers clean `0001`→`0011`
+installation, a schema-10 upgrade with pre-existing Published, Draft, and SUPERSEDED revisions,
+generated-column backfill, Arabic normalization, and the `PublishedOnly` candidate condition. The
+`catalogpublic` unit proof covers all four predicate exclusions, constructor refusal without its
+required policy, and byte-identical public not-found responses. **T003 remains intentionally
+unchecked:** Batch 1 adds only the construction/policy foundation; public `q` parsing, normalized
+matching, live-revision search joins, and search-result semantics remain for T027, T032, T032a, and
+T032b.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -77,18 +90,18 @@ proofs were trusted only after the reviewer reproduced their mutations independe
 
 **This phase is the security surface. Nothing else in the slice matters if it is wrong.**
 
-- [ ] T001 Create `backend/internal/catalogpublic/doc.go` stating the module boundary: public reads
+- [X] T001 Create `backend/internal/catalogpublic/doc.go` stating the module boundary: public reads
       only, no writes, no authority, reads S2's tables. State explicitly that this module implements
       **no** entitlement evaluation (S4), no protected delivery (S4), no progress (S5), and no
       invitation or Enrollment behaviour (S6) *(FR-020 boundary; SLICES.md §2)*
-- [ ] T002 Implement `PublishedOnly` in `backend/internal/catalogpublic/visibility.go` as the single
+- [X] T002 Implement `PublishedOnly` in `backend/internal/catalogpublic/visibility.go` as the single
       exported predicate encoding **all four** exclusions together — lifecycle state, emergency access
       suspension, pending-revision selection, and the live-revision pointer. One condition, because it
       answers one question *(FR-002, FR-004, FR-005; BR-090, BR-017, BR-161)*
 - [ ] T003 Implement the repository in `backend/internal/catalogpublic/repository.go` with list,
       detail, and search. **Every** query obtains its rows through T002. The constructor **refuses to
       build** without the predicate — no nil, no default, no fallback *(FR-002; BR-161)*
-- [ ] T004 Implement the single not-found response constructor for the public surface. Hidden and
+- [X] T004 Implement the single not-found response constructor for the public surface. Hidden and
       absent Courses return byte-identical `404` Problem Details — same status, same body, same
       headers, no cause-varying `detail` field *(FR-003; BR-090)*
 
@@ -228,14 +241,14 @@ Required mutations, each of which must turn a test red:
 > identical whether folding works or is absent entirely — so "I wrote the test after and it passed" is
 > not evidence here.
 
-- [ ] T023 Add migration `0011_catalog_search`, the **next** number after committed
+- [X] T023 Add migration `0011_catalog_search`, the **next** number after committed
       `0010_revision_integrity`. Additive only: the `catalog_normalize_ar` function, one generated
       column **on `course_revisions`**, one index over it. `ALTER TABLE course_revisions` — the table
       that actually holds the authored text; **not** `courses`, which holds no title or description at
       all. No constraint on any existing table, and **no modification of any existing migration
       file** — their checksums are enforced by `scripts/docs-guard.sh`
       *(FR-002, FR-021 storage support; data-model.md §Migration `0011_catalog_search`)*
-- [ ] T023a **Verify the backfill and the upgrade path, do not assume them.**
+- [X] T023a **Verify the backfill and the upgrade path, do not assume them.**
       `ALTER TABLE … ADD COLUMN … GENERATED … STORED` computes the value for existing rows as part of
       the statement. Assert after `up`, on a database seeded **before** the migration ran:
       **(a)** every pre-existing `course_revisions` row has a non-empty `search_text` — every row, not
@@ -247,7 +260,7 @@ Required mutations, each of which must turn a test red:
       upgrade (schema 10 with real rows, then `0011`), and confirm they agree. A migration that leaves
       the existing catalogue unsearchable passes every schema assertion while being obvious to a
       visitor *(FR-021, FR-023, FR-002; data-model.md §3)*
-- [ ] T024 Implement `catalog_normalize_ar` as an `IMMUTABLE STRICT` SQL function — **the single
+- [X] T024 Implement `catalog_normalize_ar` as an `IMMUTABLE STRICT` SQL function — **the single
       definition of normalization in the system.** Exactly the transformations in
       [data-model.md](data-model.md#1-the-normalize-function--the-single-definition): alef/hamza
       folding, alef maqsura, taa marbuta, Arabic-Indic digits, tashkeel and tatweel removal, Unicode
@@ -255,7 +268,7 @@ Required mutations, each of which must turn a test red:
 - [ ] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
       same SQL function inside the query. If a Go helper appears, write/query asymmetry has become
       representable again and the guarantee is gone. The review checks for its absence
-- [ ] T026 **Generate `search_text` on `course_revisions`, from that row's own authored columns, for
+- [X] T026 **Generate `search_text` on `course_revisions`, from that row's own authored columns, for
       every revision.** Exactly:
       - The column is added to **`course_revisions`** — the table that owns the authored text. Adding it
         to `courses` is impossible, not merely discouraged: `0009_course_authoring` dropped that table's
@@ -363,7 +376,7 @@ Required mutations, each of which must turn a test red:
         `course_revisions`, and no change to S2's authoring or publication transactions. `git diff`
         against the implementation base touches no S2 write path
       *(FR-023b, FR-025, FR-021; BR-161; R-006)*
-- [ ] T035 Add `CatalogSearchSchemaVersion = 11` and raise `db.MaxSchemaVersion` to it, matching the
+- [X] T035 Add `CatalogSearchSchemaVersion = 11` and raise `db.MaxSchemaVersion` to it, matching the
       per-migration named-constant pattern in `backend/internal/db/schema.go`. **The current value is
       already 10** (`RevisionIntegritySchemaVersion`), so `0011_catalog_search` makes the new maximum
       **11**. Confirm CI **derives** its assertion from the constant via `migrate max-version` rather
