@@ -82,7 +82,7 @@ one projection — a separate search endpoint would be a second place to forget 
 - Empty, whitespace-only, over-long, and metacharacter-bearing queries return a well-formed result,
   never an error disclosing internals *(FR-024)*.
 - No ranking, personalization, or paid placement *(FR-025)*. Ordering is stable and documented — not
-  relevance.
+  relevance: results are ordered by Course UUID ascending.
 
 ## Localization
 
