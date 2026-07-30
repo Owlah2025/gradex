@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -88,6 +89,111 @@ func TestPublicCatalogRoutesExposeOnlyVisibleCourses(t *testing.T) {
 	assertSamePublicCatalogNotFound(t, missing, malformed)
 }
 
+func TestPublicCatalogBilingualProjectionAndCacheVariants(t *testing.T) {
+	freshSchema(t)
+	pool, ctx := pool(t)
+	seedPublicCatalogOwner(t, pool, ctx)
+	courseID := seedPublicCatalogCourse(t, pool, ctx, publicCourseVisibility{lifecycle: "PUBLISHED"})
+	setSearchRevision(t, pool, ctx, courseID, "عنوان الأحياء العربي", "English Biology Title", "وصف عربي مفصل", "Detailed English description")
+	seedLocalizedPublicTaxonomy(t, pool, ctx, courseID)
+	seedLocalizedPublicSections(t, pool, ctx, courseID)
+	setPublicCourseStudyYear(t, pool, ctx, courseID, "YEAR_1")
+
+	studyYears := map[string]string{courseID: "YEAR_1"}
+	for _, value := range []string{"PREP", "YEAR_2", "YEAR_3", "YEAR_4"} {
+		id := seedPublicCatalogCourse(t, pool, ctx, publicCourseVisibility{lifecycle: "PUBLISHED"})
+		setPublicCourseStudyYear(t, pool, ctx, id, value)
+		studyYears[id] = value
+	}
+	router := buildPublicCatalogRouter(t, pool)
+
+	tests := []struct {
+		name            string
+		acceptLanguage  string
+		title           string
+		description     string
+		major           string
+		subject         string
+		sectionTitles   []string
+		studyYearLabels map[string]string
+	}{
+		{
+			name:           "Arabic",
+			acceptLanguage: "ar-KW",
+			title:          "عنوان الأحياء العربي",
+			description:    "وصف عربي مفصل",
+			major:          "العلوم",
+			subject:        "الأحياء",
+			sectionTitles:  []string{"القسم الأول", "القسم الثاني"},
+			studyYearLabels: map[string]string{
+				"PREP": "تمهيدي", "YEAR_1": "السنة الأولى", "YEAR_2": "السنة الثانية", "YEAR_3": "السنة الثالثة", "YEAR_4": "السنة الرابعة",
+			},
+		},
+		{
+			name:           "English",
+			acceptLanguage: "en-US",
+			title:          "English Biology Title",
+			description:    "Detailed English description",
+			major:          "Science",
+			subject:        "Biology",
+			sectionTitles:  []string{"First section", "Second section"},
+			studyYearLabels: map[string]string{
+				"PREP": "Preparatory", "YEAR_1": "Year 1", "YEAR_2": "Year 2", "YEAR_3": "Year 3", "YEAR_4": "Year 4",
+			},
+		},
+	}
+
+	responses := make(map[string]*httptest.ResponseRecorder, len(tests))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			list := publicCatalogRequestWithLanguage(router, http.MethodGet, "/api/v1/catalog/courses", test.acceptLanguage)
+			responses[test.name] = list
+			assertPublicCatalogCacheVariant(t, list)
+			var result catalogpublic.ListResult
+			if err := json.Unmarshal(list.Body.Bytes(), &result); err != nil {
+				t.Fatalf("decoding list response: %v", err)
+			}
+			byID := make(map[string]catalogpublic.Course, len(result.Items))
+			for _, item := range result.Items {
+				byID[item.ID] = item
+			}
+			item, ok := byID[courseID]
+			if !ok {
+				t.Fatalf("list omitted seeded course %s: %s", courseID, list.Body.String())
+			}
+			if item.Title != test.title || item.Major == nil || item.Major.Label != test.major || item.Subject == nil || item.Subject.Label != test.subject || item.Subject.Code == nil || *item.Subject.Code != "BIO-101" {
+				t.Fatalf("localized list projection = %#v", item)
+			}
+			for id, year := range studyYears {
+				if got, ok := byID[id]; !ok || got.StudyYear == nil || got.StudyYear.Label != test.studyYearLabels[year] {
+					t.Fatalf("study year %s for course %s = %#v, want %q", year, id, got.StudyYear, test.studyYearLabels[year])
+				}
+			}
+
+			detail := publicCatalogRequestWithLanguage(router, http.MethodGet, "/api/v1/catalog/courses/"+courseID, test.acceptLanguage)
+			assertPublicCatalogCacheVariant(t, detail)
+			var course catalogpublic.DetailCourse
+			if err := json.Unmarshal(detail.Body.Bytes(), &course); err != nil {
+				t.Fatalf("decoding detail response: %v", err)
+			}
+			if course.Title != test.title || course.Description != test.description || course.Major == nil || course.Major.Label != test.major || course.Subject == nil || course.Subject.Label != test.subject || course.Subject.Code == nil || *course.Subject.Code != "BIO-101" {
+				t.Fatalf("localized detail projection = %#v", course)
+			}
+			if len(course.Sections) != len(test.sectionTitles) {
+				t.Fatalf("section count = %d, want %d: %#v", len(course.Sections), len(test.sectionTitles), course.Sections)
+			}
+			for index, title := range test.sectionTitles {
+				if course.Sections[index].Title != title {
+					t.Fatalf("section %d title = %q, want %q", index, course.Sections[index].Title, title)
+				}
+			}
+		})
+	}
+	if bytes.Equal(responses["Arabic"].Body.Bytes(), responses["English"].Body.Bytes()) {
+		t.Fatal("Arabic and English catalogue responses are identical despite their cache variant")
+	}
+}
+
 func TestPublicCatalogSearchUsesPublishedOnlyLiveRevision(t *testing.T) {
 	freshSchema(t)
 	pool, ctx := pool(t)
@@ -156,7 +262,7 @@ func TestPublicCatalogSearchUsesPublishedOnlyLiveRevision(t *testing.T) {
 	}
 }
 
-func TestPublicCatalogSearchOwnershipJoinUsesTrigramIndex(t *testing.T) {
+func TestPublicCatalogSearchShippedPredicateRecordsTrigramNonParticipation(t *testing.T) {
 	freshSchema(t)
 	pool, ctx := pool(t)
 	seedPublicCatalogOwner(t, pool, ctx)
@@ -168,35 +274,17 @@ func TestPublicCatalogSearchOwnershipJoinUsesTrigramIndex(t *testing.T) {
 		t.Fatalf("acquiring explain connection: %v", err)
 	}
 	defer conn.Release()
-	if _, err := conn.Exec(ctx, `SET enable_seqscan = off`); err != nil {
-		t.Fatalf("preferring trigram index: %v", err)
-	}
-	if _, err := conn.Exec(ctx, `SET enable_indexscan = off`); err != nil {
-		t.Fatalf("preferring trigram bitmap scan: %v", err)
-	}
-	rows, err := conn.Query(ctx, `EXPLAIN (COSTS OFF)
+	plan := publicCatalogExplain(t, conn, ctx, `EXPLAIN (COSTS OFF)
 		SELECT c.id
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
-		WHERE `+catalogpublic.PublishedOnly("c", "cr")+`
-			AND cr.search_text LIKE '%' || catalog_normalize_ar($1) || '%'`, "ownership needle")
-	if err != nil {
-		t.Fatalf("explaining ownership search query: %v", err)
-	}
-	defer rows.Close()
-	plan := make([]string, 0)
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
-			t.Fatalf("scanning explain line: %v", err)
-		}
-		plan = append(plan, line)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("reading explain plan: %v", err)
-	}
-	if !strings.Contains(strings.Join(plan, "\n"), "course_revisions_search_text_trgm_idx") {
-		t.Fatalf("ownership search query omitted trigram index:\n%s", strings.Join(plan, "\n"))
+		JOIN accounts a ON a.id = c.owner_account_id
+		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
+		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
+		WHERE `+catalogpublic.PublishedOnly("c", "cr")+` AND `+catalogpublic.SearchMatchPredicate("$1"), "ownership needle")
+	t.Logf("shipped public-search predicate plan at launch scale (trigram non-participation expected):\n%s", plan)
+	if strings.Contains(plan, "course_revisions_search_text_trgm_idx") {
+		t.Fatalf("shipped three-way search predicate unexpectedly changed trigram participation evidence:\n%s", plan)
 	}
 }
 
@@ -300,6 +388,43 @@ func seedRetiredPublicTaxonomy(t *testing.T, pool *pgxpool.Pool, ctx context.Con
 	}
 }
 
+func seedLocalizedPublicTaxonomy(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID string) {
+	t.Helper()
+	var majorID, subjectID string
+	if err := pool.QueryRow(ctx, `INSERT INTO taxonomy_terms (kind, label_ar, label_en) VALUES ('MAJOR', 'العلوم', 'Science') RETURNING id::text`).Scan(&majorID); err != nil {
+		t.Fatalf("creating localized major: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO taxonomy_terms (kind, label_ar, label_en, academic_code) VALUES ('SUBJECT', 'الأحياء', 'Biology', 'BIO-101') RETURNING id::text`).Scan(&subjectID); err != nil {
+		t.Fatalf("creating localized subject: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET major_term_id = $1::uuid, subject_term_id = $2::uuid WHERE course_id = $3::uuid`, majorID, subjectID, courseID); err != nil {
+		t.Fatalf("assigning localized taxonomy: %v", err)
+	}
+}
+
+func setPublicCourseStudyYear(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID, studyYear string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET study_year = $1::study_year WHERE course_id = $2::uuid`, studyYear, courseID); err != nil {
+		t.Fatalf("setting study year %s: %v", studyYear, err)
+	}
+}
+
+func seedLocalizedPublicSections(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID string) {
+	t.Helper()
+	for position, title := range []struct{ arabic, english string }{
+		{arabic: "القسم الأول", english: "First section"},
+		{arabic: "القسم الثاني", english: "Second section"},
+	} {
+		var identityID string
+		if err := pool.QueryRow(ctx, `INSERT INTO course_section_identities (course_id) VALUES ($1::uuid) RETURNING id::text`, courseID).Scan(&identityID); err != nil {
+			t.Fatalf("creating localized section identity: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO course_sections (revision_id, course_id, section_identity_id, title_ar, title_en, position) VALUES ((SELECT live_revision_id FROM courses WHERE id = $1::uuid), $1::uuid, $2::uuid, $3, $4, $5)`, courseID, identityID, title.arabic, title.english, position); err != nil {
+			t.Fatalf("creating localized section: %v", err)
+		}
+	}
+}
+
 func seedPricedPublicSection(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID string) {
 	t.Helper()
 	var identityID string
@@ -312,9 +437,41 @@ func seedPricedPublicSection(t *testing.T, pool *pgxpool.Pool, ctx context.Conte
 }
 
 func publicCatalogRequest(r *gin.Engine, method, path string) *httptest.ResponseRecorder {
+	return publicCatalogRequestWithLanguage(r, method, path, "")
+}
+
+func publicCatalogRequestWithLanguage(r *gin.Engine, method, path, acceptLanguage string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
-	r.ServeHTTP(recorder, httptest.NewRequest(method, path, nil))
+	request := httptest.NewRequest(method, path, nil)
+	if acceptLanguage != "" {
+		request.Header.Set("Accept-Language", acceptLanguage)
+	}
+	r.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func assertPublicCatalogCacheVariant(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Cache-Control"); got != publicCatalogCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, publicCatalogCacheControl)
+	}
+	if vary := response.Header().Values("Vary"); !containsHeaderToken(vary, "Accept-Language") {
+		t.Fatalf("Vary = %q, want Accept-Language cache variance", vary)
+	}
+}
+
+func containsHeaderToken(values []string, want string) bool {
+	for _, value := range values {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), want) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func assertSamePublicCatalogNotFound(t *testing.T, want, got *httptest.ResponseRecorder) {

@@ -6,10 +6,19 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const currencyKWD = "KWD"
+
+var studyYearLabels = map[string][2]string{
+	"PREP":   {"تمهيدي", "Preparatory"},
+	"YEAR_1": {"السنة الأولى", "Year 1"},
+	"YEAR_2": {"السنة الثانية", "Year 2"},
+	"YEAR_3": {"السنة الثالثة", "Year 3"},
+	"YEAR_4": {"السنة الرابعة", "Year 4"},
+}
 
 type Taxonomy struct {
 	Label string  `json:"label"`
@@ -85,7 +94,7 @@ func (r *Repository) List(ctx context.Context, arabic bool, page, pageSize int) 
 		return ListResult{}, fmt.Errorf("listing public courses: %w", err)
 	}
 	defer rows.Close()
-	items, err := scanCourses(rows)
+	items, err := scanCourses(rows, arabic)
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -98,13 +107,13 @@ func (r *Repository) List(ctx context.Context, arabic bool, page, pageSize int) 
 
 func (r *Repository) Search(ctx context.Context, arabic bool, page, pageSize int, searchQuery string) (ListResult, error) {
 	visibility := r.visibility("c", "cr")
-	query := r.projectionQuery(visibility, ``, `AND `+publicSearchMatch("$2")+` ORDER BY c.id LIMIT $3 OFFSET $4`)
+	query := r.projectionQuery(visibility, ``, `AND `+SearchMatchPredicate("$2")+` ORDER BY c.id LIMIT $3 OFFSET $4`)
 	rows, err := r.pool.Query(ctx, query, arabic, searchQuery, pageSize, (page-1)*pageSize)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("searching public courses: %w", err)
 	}
 	defer rows.Close()
-	items, err := scanCourses(rows)
+	items, err := scanCourses(rows, arabic)
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -122,10 +131,13 @@ func (r *Repository) searchCountQuery(visibility string) string {
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
-		WHERE ` + visibility + ` AND ` + publicSearchMatch("$1")
+		WHERE ` + visibility + ` AND ` + SearchMatchPredicate("$1")
 }
 
-func publicSearchMatch(queryParameter string) string {
+// SearchMatchPredicate is the exact three-way predicate used by Search. It
+// keeps the stored revision document and joined display fields on the same
+// normalized input while PublishedOnly remains the sole visibility authority.
+func SearchMatchPredicate(queryParameter string) string {
 	normalizedQuery := "catalog_normalize_ar(" + queryParameter + ")"
 	joinedFields := "catalog_normalize_ar(concat_ws(' ', a.display_name, major.label_ar, major.label_en, major.academic_code, subject.label_ar, subject.label_en, subject.academic_code, cr.study_year::text))"
 	return "(" + normalizedQuery + " = '' OR cr.search_text LIKE '%' || " + normalizedQuery + " || '%' OR " + joinedFields + " LIKE '%' || " + normalizedQuery + " || '%')"
@@ -140,22 +152,33 @@ func (r *Repository) Detail(ctx context.Context, identifier string, arabic bool)
 		return nil, fmt.Errorf("looking up public course: %w", err)
 	}
 	defer rows.Close()
-	items, err := scanCourses(rows)
+	items, err := scanCourses(rows, arabic)
 	if err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
 		return nil, nil
 	}
-	sections, err := r.sections(ctx, items[0].ID, arabic)
+	description, sections, found, err := r.detailContent(ctx, items[0].ID, arabic)
 	if err != nil {
 		return nil, err
 	}
-	var description string
-	if err := r.pool.QueryRow(ctx, `SELECT CASE WHEN $1 THEN cr.description_ar ELSE cr.description_en END FROM courses c JOIN course_revisions cr ON cr.id = c.live_revision_id WHERE c.id = $2::uuid`, arabic, items[0].ID).Scan(&description); err != nil {
-		return nil, fmt.Errorf("loading public course description: %w", err)
+	if !found {
+		return nil, nil
 	}
 	return &DetailCourse{Course: items[0], Description: description, Sections: sections}, nil
+}
+
+func (r *Repository) detailContent(ctx context.Context, courseID string, arabic bool) (string, []Section, bool, error) {
+	description, found, err := r.description(ctx, courseID, arabic)
+	if err != nil || !found {
+		return description, nil, found, err
+	}
+	sections, found, err := r.sections(ctx, courseID, arabic)
+	if err != nil || !found {
+		return "", nil, found, err
+	}
+	return description, sections, true, nil
 }
 
 func publicCourseIdentifierPredicate(identifier string) string {
@@ -188,7 +211,7 @@ func scanCourses(rows interface {
 	Next() bool
 	Scan(...any) error
 	Err() error
-}) ([]Course, error) {
+}, arabic bool) ([]Course, error) {
 	var items []Course
 	for rows.Next() {
 		var item Course
@@ -204,7 +227,9 @@ func scanCourses(rows interface {
 			item.Subject = &Taxonomy{Label: *subjectLabel, Code: subjectCode}
 		}
 		if studyYear != nil {
-			item.StudyYear = &Taxonomy{Label: *studyYear}
+			if label, ok := localizedStudyYear(*studyYear, arabic); ok {
+				item.StudyYear = &Taxonomy{Label: label}
+			}
 		}
 		if amount != nil {
 			item.Price = &Price{MinorUnits: *amount, Currency: currencyKWD}
@@ -217,24 +242,80 @@ func scanCourses(rows interface {
 	return items, nil
 }
 
-func (r *Repository) sections(ctx context.Context, courseID string, arabic bool) ([]Section, error) {
-	rows, err := r.pool.Query(ctx, `SELECT CASE WHEN $1 THEN cs.title_ar ELSE cs.title_en END, cs.position, count(cl.id) FROM courses c JOIN course_sections cs ON cs.revision_id = c.live_revision_id LEFT JOIN course_lessons cl ON cl.section_id = cs.id WHERE c.id = $2::uuid GROUP BY cs.id ORDER BY cs.position`, arabic, courseID)
+func localizedStudyYear(value string, arabic bool) (string, bool) {
+	label, ok := studyYearLabels[value]
+	if !ok {
+		return "", false
+	}
+	if arabic {
+		return label[0], true
+	}
+	return label[1], true
+}
+
+func (r *Repository) description(ctx context.Context, courseID string, arabic bool) (string, bool, error) {
+	var description string
+	err := r.pool.QueryRow(ctx, `SELECT CASE WHEN $1 THEN cr.description_ar ELSE cr.description_en END
+		FROM courses c
+		JOIN course_revisions cr ON cr.course_id = c.id
+		WHERE `+r.visibility("c", "cr")+` AND c.id = $2::uuid`, arabic, courseID).Scan(&description)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("listing public sections: %w", err)
+		return "", false, fmt.Errorf("loading public course description: %w", err)
+	}
+	return description, true, nil
+}
+
+func (r *Repository) sections(ctx context.Context, courseID string, arabic bool) ([]Section, bool, error) {
+	rows, err := r.pool.Query(ctx, `SELECT cs.id::text,
+		CASE WHEN $1 THEN cs.title_ar ELSE cs.title_en END,
+		cs.position,
+		count(cl.id)
+		FROM courses c
+		JOIN course_revisions cr ON cr.course_id = c.id
+		LEFT JOIN course_sections cs ON cs.revision_id = cr.id
+		LEFT JOIN course_lessons cl ON cl.section_id = cs.id
+		WHERE `+r.visibility("c", "cr")+` AND c.id = $2::uuid
+		GROUP BY cs.id
+		ORDER BY min(cs.position)`, arabic, courseID)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing public sections: %w", err)
 	}
 	defer rows.Close()
 	sections := make([]Section, 0)
+	found := false
 	for rows.Next() {
-		var section Section
-		if err := rows.Scan(&section.Title, &section.Position, &section.LessonCount); err != nil {
-			return nil, fmt.Errorf("scanning public section: %w", err)
+		found = true
+		section, exists, err := scanPublicSection(rows)
+		if err != nil {
+			return nil, false, fmt.Errorf("scanning public section: %w", err)
+		}
+		if !exists {
+			continue
 		}
 		sections = append(sections, section)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading public sections: %w", err)
+		return nil, false, fmt.Errorf("reading public sections: %w", err)
 	}
-	return sections, nil
+	return sections, found, nil
+}
+
+func scanPublicSection(row interface{ Scan(...any) error }) (Section, bool, error) {
+	var sectionID, title *string
+	var position *int
+	var section Section
+	if err := row.Scan(&sectionID, &title, &position, &section.LessonCount); err != nil {
+		return Section{}, false, err
+	}
+	if sectionID == nil {
+		return Section{}, false, nil
+	}
+	section.Title = *title
+	section.Position = *position
+	return section, true, nil
 }
 
 func (r *Repository) visibleCourseQuery() string {

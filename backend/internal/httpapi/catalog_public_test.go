@@ -74,6 +74,26 @@ func TestPublicCatalogRoutesUseTheSharedVisibilityBoundary(t *testing.T) {
 	}
 }
 
+func TestPublicCatalogCacheComposesVaryHeaders(t *testing.T) {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Header("Vary", "Origin")
+	})
+	router.Use(publicCatalogCache())
+	router.GET("/catalog", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/catalog", nil))
+	if got := response.Header().Get("Cache-Control"); got != publicCatalogCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, publicCatalogCacheControl)
+	}
+	if got := response.Header().Get("Vary"); got != "Origin, Accept-Language" {
+		t.Fatalf("Vary = %q, want composed Origin and Accept-Language values", got)
+	}
+}
+
 func TestPublicCatalogRouteExposureGuard(t *testing.T) {
 	r := publicCatalogRouter(t, fakeAuth{}, fakeEntitlements{allowed: true}, fixedPrincipals{})
 	for _, route := range r.Routes() {

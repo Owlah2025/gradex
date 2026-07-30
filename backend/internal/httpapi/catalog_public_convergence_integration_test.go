@@ -56,6 +56,9 @@ func TestPublicCatalogQueryPlansAtLaunchScale(t *testing.T) {
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
 		WHERE `+visibility+` AND c.id = $1::uuid`, "courses_pkey", detailCourseID)
+	if _, err := conn.Exec(ctx, `SET enable_seqscan = on`); err != nil {
+		t.Fatalf("restoring production query-planning defaults: %v", err)
+	}
 
 	plan := publicCatalogExplain(t, conn, ctx, `
 		EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF)
@@ -66,13 +69,14 @@ func TestPublicCatalogQueryPlansAtLaunchScale(t *testing.T) {
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		WHERE `+visibility+`
-			AND catalog_normalize_ar(concat_ws(' ', a.display_name, major.label_ar, major.label_en,
-				major.academic_code, subject.label_ar, subject.label_en, subject.academic_code,
-				cr.study_year::text)) LIKE '%' || catalog_normalize_ar($1) || '%'`, "public owner")
+			AND `+catalogpublic.SearchMatchPredicate("$1"), "public owner")
 	execution := publicCatalogPlanExecutionTime(t, plan)
-	t.Logf("unindexed joined-field search at %d Courses: %s", publicCatalogueLaunchCourseCount, execution)
+	t.Logf("shipped three-way search predicate at %d Courses: %s\n%s", publicCatalogueLaunchCourseCount, execution, plan)
+	if strings.Contains(plan, "course_revisions_search_text_trgm_idx") {
+		t.Fatalf("shipped three-way search predicate unexpectedly uses the trigram index:\n%s", plan)
+	}
 	if execution > publicSearchLaunchBudget {
-		t.Fatalf("unindexed joined-field search = %s, exceeds %s launch budget", execution, publicSearchLaunchBudget)
+		t.Fatalf("shipped three-way search = %s, exceeds %s launch budget", execution, publicSearchLaunchBudget)
 	}
 }
 

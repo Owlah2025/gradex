@@ -352,11 +352,15 @@ Required mutations, each of which must turn a test red:
 > not evidence here.
 
 - [X] T023 Add migration `0011_catalog_search`, the **next** number after committed
-      `0010_revision_integrity`. Additive only: the `catalog_normalize_ar` function, one generated
-      column **on `course_revisions`**, one index over it. `ALTER TABLE course_revisions` — the table
-      that actually holds the authored text; **not** `courses`, which holds no title or description at
-      all. No constraint on any existing table, and **no modification of any existing migration
-      file** — their checksums are enforced by `scripts/docs-guard.sh`
+      `0010_revision_integrity`. Additive only: the `catalog_normalize_ar` Arabic-normalization
+      function; the generated `search_text` column **on `course_revisions`**; the generated
+      `courses.slug` column; the unique `courses_slug_unique_idx`; and the
+      `course_revisions_search_text_trgm_idx` trigram index. `ALTER TABLE course_revisions` — the
+      table that actually holds the authored text; **not** `courses`, which holds no title or
+      description at all. No constraint on any existing table, and **no modification of any existing
+      migration file** — their checksums are enforced by `scripts/docs-guard.sh`. **Clarified
+      2026-07-30 after final feature-wide review; migration `0011_catalog_search` remains the
+      authority.**
       *(FR-002, FR-021 storage support; data-model.md §Migration `0011_catalog_search`)*
 - [X] T023a **Verify the backfill and the upgrade path, do not assume them.**
       `ALTER TABLE … ADD COLUMN … GENERATED … STORED` computes the value for existing rows as part of
@@ -522,12 +526,12 @@ test was observed failing first.
       not a guarantee *(SC-008, FR-003)*
 - [ ] T039 Run the full gate suite from [quickstart.md](quickstart.md), including a **clean** frontend
       build with `.next` removed first, on hosted CI at the exact reviewed head
-- [X] T039a **Production-build commerce-absence evidence.** Against the **clean production build**
-      from T039 — not the dev server — sweep the emitted client bundle and server output and assert the
+- [X] T039a **Production-build commerce-absence evidence.** Against the **locally produced clean
+      production build** — not the dev server — sweep the emitted client bundle and server output and assert the
       absence of any checkout, cart, coupon, buy-now, purchase-submission, payment, payment-callback,
       or webhook route, form action, fetch target, or handler, in either language's rendered output.
       A control absent from the dev render but shipped by a conditional build is the failure this task
-      exists to catch. Record the artefact paths in the daily record *(FR-010a;
+      exists to catch. T039 is the separate hosted-CI confirmation on the reviewed head. Record the artefact paths in the daily record *(FR-010a;
       [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
       BR-020)*
 

@@ -37,8 +37,27 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 func publicCatalogCache() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", publicCatalogCacheControl)
+		appendVary(c, "Accept-Language")
 		c.Next()
 	}
+}
+
+func appendVary(c *gin.Context, value string) {
+	values := make([]string, 0)
+	for _, header := range c.Writer.Header().Values("Vary") {
+		for _, existing := range strings.Split(header, ",") {
+			existing = strings.TrimSpace(existing)
+			if existing == "" {
+				continue
+			}
+			if strings.EqualFold(existing, value) {
+				return
+			}
+			values = append(values, existing)
+		}
+	}
+	values = append(values, value)
+	c.Header("Vary", strings.Join(values, ", "))
 }
 
 func (h *publicCatalogHandlers) list(c *gin.Context) {
