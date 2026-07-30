@@ -1519,3 +1519,115 @@ premise is now known to be defective. Therefore:
 
 **Source:** Codex's Batch 1 blocker report and the product owner's instruction to correct the design, on
 2026-07-30.
+
+---
+
+## D-055 — Codex implements S3 from the corrected planning head and agy reviews it
+
+**Date:** 2026-07-30
+**Status:** Active. Scoped to **S3 only** — Public Catalogue and Bilingual Shell,
+[`specs/004-public-catalogue/`](../specs/004-public-catalogue/tasks.md). Expires when S3 is formally
+closed on a recorded independent reviewer verdict.
+
+### Seats
+
+**Implementation base: `f4269d4aad2d146547f7c1184ba2a6fec95bc818`** — the corrected S3 planning head,
+which `agy` reviewed over
+`77656aec0c512ae590092e62bcd42b74c33a3362..f4269d4aad2d146547f7c1184ba2a6fec95bc818` to `APPROVE` with
+zero findings at every severity. `343aacb` is **not** a valid base and must not be used.
+
+- **Codex — S3 implementation builder.** Codex **may** create and modify the production files the
+  authorized S3 tasks require: backend Go packages, the `0011_catalog_search` migration,
+  schema-version constants, frontend sources, and their tests. Codex works only from task IDs
+  authorized in a bounded batch handoff, and **may not approve its own work.** A slice does not close
+  on its builder's assessment.
+- **`agy` — independent read-only S3 implementation reviewer.** `agy` (Google Antigravity CLI,
+  `gemini-3.1-pro-high`) reviews frozen exact commit ranges through `scripts/agy-review.sh <base>..<head>`
+  under [D-032](#d-032--claude-builds-agy-reviews)'s containment harness. `agy` **may not** edit, stage,
+  commit, push, or implement anything. A `TAINTED` or `UNAVAILABLE` run is never recorded as an approval.
+- **Claude — planner and implementation coordinator only.** Claude prepares bounded batch handoffs,
+  inspects evidence, validates frozen ranges, and reports. Claude **may not provide the independent
+  implementation verdict for S3**, because Claude authored S3's planning artefacts — including the
+  2026-07-30 search-ownership correction — and a review of work derived from one's own plan is not
+  independent in the sense this protocol means.
+
+### The architecture Codex implements
+
+Settled by [D-054](#d-054--claude-corrects-the-s3-catalogue-search-ownership-defect-and-agy-reviews-the-correction)
+and not reopenable by an implementation batch:
+
+> **`course_revisions` owns the generated catalogue-search text. `courses` owns whether a revision may
+> be exposed publicly.**
+
+The generated column is built for **every** revision row from that row's own four authored columns —
+`title_ar`, `title_en`, `description_ar`, `description_en` — with no publication condition and no
+cross-table reference. Public search resolves candidates through
+`courses.live_revision_id = course_revisions.id` and applies the canonical `PublishedOnly` predicate.
+**A populated `search_text` is not evidence of public visibility.** Historical, draft, superseded,
+delisted, retired, and suspended content must never be publicly returned.
+
+**Forbidden**: cross-table generated expressions; copied authored fields on `courses`; synchronization
+triggers; a materialized search-document table; application-side Arabic normalization; any change to an
+S2 authoring or publication write path.
+
+### Boundaries
+
+This assignment grants **no S4, S5, or S6 implementation authority.** Each requires its own dated
+assignment. S3 must not implement authenticated routes, write routes, content authoring, media upload
+or transcoding, protected media delivery, entitlement evaluation, Enrollment creation, progress,
+invitations, approval workflows, checkout, cart, coupons, payment callbacks, refunds, invoices, BNPL,
+or payouts. **No Section price may be exposed in the public API or UI** — Section is not an acquirable
+scope under [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+
+Migration numbering is fixed: `0011_catalog_search` for S3 at schema version **11**, then
+`0012_media_and_entitlement` for S4 and `0013_enrollments` / `0014_protected_learning` for S5.
+
+**Work is handed over in bounded batches, not as all 48 tasks at once.** Each batch names its exact
+task IDs, its required evidence, and its prohibitions, and each freezes a range for independent review
+before the next batch begins. **Batch 1 authorizes storage and the visibility foundation only; the
+public search query is deliberately not in it**, so T027 and the exposure proofs T032, T032a, and T032b
+belong to a later batch.
+
+### Spent decisions — recorded, not rewritten
+
+**[D-053](#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it) is spent for
+implementation purposes.** Codex opened Batch 1 under it, found the approved search design unbuildable
+against the committed S2 schema, and **stopped before editing any file.** No implementation range, no
+commit, no production file, no migration, no test, and no task completion resulted. That was the correct
+outcome — the defect was in the plan.
+
+Two parts of D-053 have different fates, and conflating them would lose real evidence:
+
+- Its **implementation authorization** is spent. Its frozen planning premise was defective, so
+  `343aacb` cannot be built from.
+- Its **Codex-availability reverification remains valid.** The product owner confirmed Codex
+  availability explicitly on 2026-07-30, satisfying
+  [D-033](#d-033--codex-resumes-building-and-claude-resumes-review)'s precondition positively rather
+  than by inference from silence. Nothing about the schema defect touches that confirmation, so this
+  decision inherits it rather than asking for it again.
+
+**[D-054](#d-054--claude-corrects-the-s3-catalogue-search-ownership-defect-and-agy-reviews-the-correction)
+is spent at `f4269d4`**, reviewed to `APPROVE` with zero findings. Its correction is now the approved
+design, above.
+
+**Neither D-053 nor D-054 is edited.** Both recorded true states of affairs when written; superseding a
+decision by rewriting it destroys the record of what was believed at the time. The chain of spent S3
+seats is D-051, D-052, D-053, D-054.
+
+**Reason:** the one condition that blocked implementation after D-053 was a defective planning premise,
+and it is now corrected and independently approved with zero findings. The builder that surfaced the
+defect is the builder best placed to implement the correction, and its availability is already
+confirmed on the record. Claude cannot hold both builder and reviewer seats and cannot review
+implementation of a plan it authored, so the reviewer seat goes to `agy` exactly as it did for every
+range in this sequence.
+
+**Alternatives rejected:** resuming under D-053 without a new decision (its base is invalid and its
+authorization spent, so the range would have no valid premise); editing D-053 to point at the new head
+(destroys the record of the defect and of Codex's correct stop); handing Codex all 48 tasks in one batch
+(an unbounded handoff produces an unreviewable range and defeats Checkpoint 2); including the public
+search query in Batch 1 (its exposure proofs are the highest-risk evidence in the slice and deserve
+their own frozen range); Claude reviewing S3 implementation (not independent of the plan it authored,
+now doubly so after authoring the correction).
+
+**Source:** Product-owner instruction on 2026-07-30, following `agy`'s `APPROVE` of the corrected
+planning head.
