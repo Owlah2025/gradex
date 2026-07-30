@@ -13,6 +13,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/Owlah2025/gradex/backend/internal/health"
@@ -456,6 +457,14 @@ func buildCatalogFoundation(
 	})
 }
 
+func buildPublicCatalogFoundation(pool *pgxpool.Pool) (*httpapi.PublicCatalogFoundation, error) {
+	repository, err := catalogpublic.NewRepository(pool, catalogpublic.PublishedOnly)
+	if err != nil {
+		return nil, err
+	}
+	return httpapi.NewPublicCatalogFoundation(httpapi.PublicCatalogFoundationOptions{Repository: repository})
+}
+
 type ProductionFoundations struct {
 	Options           []httpapi.RouterOption
 	SessionRepository *identity.SessionRepository
@@ -519,6 +528,13 @@ func buildProductionFoundations(
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithCatalogFoundation(catalogFoundation))
+
+	publicCatalogFoundation, err := buildPublicCatalogFoundation(pool)
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.Options = append(pf.Options, httpapi.WithPublicCatalogFoundation(publicCatalogFoundation))
 
 	return pf, nil
 }

@@ -93,6 +93,11 @@ func NewRouter(
 			return nil, fmt.Errorf("mounting catalog routes: %w", err)
 		}
 	}
+	if routerConfig.publicCatalog != nil {
+		if err := mountPublicCatalogRoutes(v1, routerConfig.publicCatalog); err != nil {
+			return nil, fmt.Errorf("mounting public catalogue routes: %w", err)
+		}
+	}
 
 	// Every protected group runs authentication → capability policy → ownership
 	// or Entitlement, in that order. The capability step is what refuses a
@@ -196,10 +201,11 @@ func mountAdmissionRoutesWithBootstrap(
 }
 
 type routerOptions struct {
-	admission *AdmissionFoundation
-	sessions  *SessionFoundation
-	staff     *StaffFoundation
-	catalog   *CatalogFoundation
+	admission     *AdmissionFoundation
+	sessions      *SessionFoundation
+	staff         *StaffFoundation
+	catalog       *CatalogFoundation
+	publicCatalog *PublicCatalogFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
