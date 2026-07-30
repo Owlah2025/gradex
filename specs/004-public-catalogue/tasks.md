@@ -2,45 +2,48 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Implementation seats: PAUSED. The active seat is the planning correction under
-[D-054](../../docs/DECISIONS.md#d-054--claude-corrects-the-s3-catalogue-search-ownership-defect-and-agy-reviews-the-correction).**
+**Implementation seats: ACTIVE. Reissued 2026-07-30 under
+[D-055](../../docs/DECISIONS.md#d-055--codex-implements-s3-from-the-corrected-planning-head-and-agy-reviews-it).**
 
 | Seat | Holder | Authority |
 |---|---|---|
-| Planning-correction builder | **Claude** (D-054) | May edit these S3 planning artefacts only. **No** production implementation authority — no source, migration, schema constant, or test |
+| Implementation builder | **Codex** | May create and modify the production files the authorized tasks require. Works only from task IDs named in a bounded batch. **May not** approve its own work |
 | Independent reviewer | **`agy`** (`gemini-3.1-pro-high`) | Reviews frozen exact ranges through `scripts/agy-review.sh`. **May not** edit, stage, commit, push, or implement |
-| Implementation builder | **unassigned** | D-053's authorization is paused; see the note below. A replacement seat decision must name a builder against the newly approved base |
+| Planner / coordinator | **Claude** | Prepares bounded batch handoffs, inspects evidence, validates ranges. **May not** give the independent implementation verdict — it authored this plan *and* the search-ownership correction |
 
-Under [D-053](../../docs/DECISIONS.md#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it)
-Codex held the implementation-builder seat and Claude was planner and coordinator only. That assignment
-is paused rather than rewritten, and Claude still **may not** give the independent verdict on S3 —
-implementation or planning — because Claude authored these artefacts.
+**Implementation base: `f4269d4aad2d146547f7c1184ba2a6fec95bc818`** — the corrected planning head,
+reviewed over `77656aec..f4269d4` to `APPROVE` with zero findings at every severity.
+**Implementation has not started; 0 of 48 tasks are complete.**
 
-**Implementation base: `343aacb`** — the approved planning head, reviewed to `APPROVE` with zero
-findings. **Implementation has not started; zero tasks are complete.**
-
-> **D-053's implementation authorization is PAUSED as of 2026-07-30, and `343aacb` is no longer a valid
-> implementation base.** Codex began Batch 1, found that the approved search design could not be built
-> against the committed S2 schema, and **stopped before editing any file** — no production file,
-> migration, test, task closure, or commit was produced. That was the correct outcome: the defect was in
-> the plan, not in the implementation of it. The generated `search_text` column was specified as
-> same-row *and* conditioned on Course publication, but `courses` holds no authored text and
-> `course_revisions` holds no Course publication state, so no PostgreSQL generated column can satisfy
+> **`343aacb` is not a valid base and must not be built from.** Codex opened Batch 1 under
+> [D-053](../../docs/DECISIONS.md#d-053--codex-availability-is-reverified-codex-implements-s3-and-agy-reviews-it),
+> found that the approved search design could not be built against the committed S2 schema, and
+> **stopped before editing any file** — no production file, migration, test, task closure, or commit was
+> produced. That was the correct outcome: the defect was in the plan. The generated `search_text` column
+> was specified as same-row *and* conditioned on Course publication, but `courses` holds no authored text
+> and `course_revisions` holds no Course publication state, so no PostgreSQL generated column can satisfy
 > both. See [R-006](research.md#r-006--which-table-owns-the-generated-search-column).
 >
-> T023, T023a, T026, T027, T032, and T034 are corrected below, and T032a and T032b are added.
-> **Implementation must not resume under `343aacb`.** A replacement implementation-seat decision must
-> reassign the builder and reviewer against the new approved base once this correction is reviewed.
-> D-053 is not edited retroactively — it recorded a true state of affairs on a premise that has since
-> been corrected.
+> T023, T023a, T026, T027, T032, and T034 were corrected on that pass, and T032a and T032b were added.
+> **D-053's implementation authorization is spent and D-054's planning-correction seat is spent at
+> `f4269d4`. Neither decision is edited retroactively** — each recorded a true state of affairs when
+> written. D-053's product-owner Codex-availability reverification remains valid and is inherited by
+> D-055 rather than re-requested.
 
 **Codex availability was explicitly reverified by the product owner on 2026-07-30**, satisfying
 [D-033](../../docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)'s precondition
-positively rather than by inference from silence or from the absence of a quota error.
+positively rather than by inference from silence or from the absence of a quota error. That confirmation
+is unaffected by the schema defect and carries forward under D-055.
 
 **Work is handed over in bounded batches, not as all 48 tasks at once.** Each batch names its exact
-task IDs and evidence, and freezes a range for independent review before the next begins. D-053 expires
+task IDs and evidence, and freezes a range for independent review before the next begins. D-055 expires
 when S3 closes on a recorded reviewer verdict.
+
+**Batch 1 — authorized: T001, T002, T003, T004, T023, T023a, T024, T026, T035.** Storage and the
+visibility foundation only. **The public search query is not authorized in Batch 1**, so T027 and the
+exposure proofs T032, T032a, and T032b belong to a later frozen range. Note that T003's wording spans
+list, detail, **and search**: in Batch 1 its search entry point carries no query semantics — no
+live-revision join, no normalization matching — and **T003 therefore stays unchecked until T027 lands.**
 
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
