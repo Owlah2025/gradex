@@ -113,6 +113,36 @@ and Arabic/English commerce controls or vocabulary. `npm run typecheck`, `npm ru
 sweep found no checkout, cart, coupon, buy-now, payment, purchase, or Section-price artifact. T003
 remains unchecked because public search semantics remain for T027, T032, T032a, and T032b.
 
+**Phase 5 implementation evidence — 2026-07-30.** `GET /api/v1/catalog/courses?q=` now uses one
+PostgreSQL-owned normalization function and the existing list projection. The query joins revisions to
+Courses only by `cr.course_id = c.id`; list, detail, and search each apply `PublishedOnly(c, cr)`, whose
+live-revision clause is the sole selector. Before this implementation,
+`GOCACHE=/tmp/gradex-go-cache go test -tags=integration ./internal/httpapi -run
+'^TestPublicCatalogSearchUsesPublishedOnlyLiveRevision$' -count=1` failed because a query for a
+historical title returned the live Course. The same real-PostgreSQL test now covers raw/folded Arabic,
+tatweel, diacritics, Arabic-Indic digits, mixed Arabic/Latin text, display name and taxonomy matching,
+empty-normalized equivalence, bounds/metacharacters, retired taxonomy display, live-pointer repointing,
+and projection exclusion. It also establishes `search_text` for every hidden state before proving search
+omits it. A deterministic `EXPLAIN` test disables sequential and plain index scans so the bitmap plan
+names `course_revisions_search_text_trgm_idx`; this demonstrates eligible trigram participation without
+claiming a tiny fixture must prefer it. The long-description migration/authoring regression remains green.
+
+**T032b mutation evidence — 2026-07-30.** Removing only
+`c.live_revision_id = cr.id` from `PublishedOnly`, then running the named live-revision test above,
+failed with `search historical non-live text exposed course` and rendered `عنوان تاريخي فريد`; restoring
+`PublishedOnly` verbatim made the same command pass. Replacing only Search's `visibility :=
+r.visibility("c", "cr")` with `visibility := "TRUE"`, then running
+`GOCACHE=/tmp/gradex-go-cache go test -tags=integration ./internal/httpapi -run
+'^TestPublicCatalogSearchDoesNotExposeHiddenCourses$' -count=1`, failed with `search draft course
+exposed course` and `عنوان مسودة مخفي`; restoration made the same command pass. A temporary Go
+`normalizeCatalogueQuery` function was detected by the T025 grep, then removed. Final searches found no
+Go/TypeScript catalogue normalizer, no mutation flag/comment residue, no frontend Section-price or
+commerce artifact, and no S2 write-path change. The frontend forwards the raw query to the existing
+route and the full Chromium suite (33 tests) proves Arabic RTL/English LTR search, accessible controls,
+loading, no-results, safe-failure, stable-slug navigation, and phone/tablet/desktop rendering. Full Go,
+race, real-PostgreSQL, frontend, build, vet, migration/max-version, exposure, documentation, clean-code,
+test, and diff gates passed.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -153,7 +183,7 @@ proofs were trusted only after the reviewer reproduced their mutations independe
       exported predicate encoding **all four** exclusions together — lifecycle state, emergency access
       suspension, pending-revision selection, and the live-revision pointer. One condition, because it
       answers one question *(FR-002, FR-004, FR-005; BR-090, BR-017, BR-161)*
-- [ ] T003 Implement the repository in `backend/internal/catalogpublic/repository.go` with list,
+- [X] T003 Implement the repository in `backend/internal/catalogpublic/repository.go` with list,
       detail, and search. **Every** query obtains its rows through T002. The constructor **refuses to
       build** without the predicate — no nil, no default, no fallback *(FR-002; BR-161)*
 - [X] T004 Implement the single not-found response constructor for the public surface. Hidden and
@@ -320,7 +350,7 @@ Required mutations, each of which must turn a test red:
       [data-model.md](data-model.md#1-the-normalize-function--the-single-definition): alef/hamza
       folding, alef maqsura, taa marbuta, Arabic-Indic digits, tashkeel and tatweel removal, Unicode
       case folding, and whitespace collapse *(FR-023; BR-162 matching only — ranking is not in S3)*
-- [ ] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
+- [X] T025 **Write no Go normalization function.** The incoming query is normalized by calling the
       same SQL function inside the query. If a Go helper appears, write/query asymmetry has become
       representable again and the guarantee is gone. The review checks for its absence
 - [X] T026 **Generate `search_text` on `course_revisions`, from that row's own authored columns, for
@@ -350,7 +380,7 @@ Required mutations, each of which must turn a test red:
       [R-006](research.md#r-006--which-table-owns-the-generated-search-column). It was documented as
       redundant with `PublishedOnly`; T032a and T032b now carry that redundancy as runnable proofs.*
       *(FR-021, FR-002; BR-161; data-model.md §2)*
-- [ ] T027 **Build the public search query: live revision, published Course, generated column.** The
+- [X] T027 **Build the public search query: live revision, published Course, generated column.** The
       search must:
       - join `course_revisions` to `courses` through the committed **ownership** foreign key —
         `course_revisions.course_id = courses.id` — and stop there. The join establishes which Course a
@@ -370,20 +400,20 @@ Required mutations, each of which must turn a test red:
 
 ### Red-first test set — each observed failing before its implementation
 
-- [ ] T028 [RED] **Normalized Arabic queries.** `احياء` matches a Course titled `أحياء`; a query
+- [X] T028 [RED] **Normalized Arabic queries.** `احياء` matches a Course titled `أحياء`; a query
       written with tashkeel matches a title without it; a tatweel-padded query matches; Arabic-Indic
       digits match Western ones. Each assertion must fail before T024 exists *(FR-023; BR-162)*
-- [ ] T029 [RED] **Mixed Arabic/Latin content.** A Course whose title mixes both scripts is matched by
+- [X] T029 [RED] **Mixed Arabic/Latin content.** A Course whose title mixes both scripts is matched by
       an Arabic fragment and by a Latin fragment; a Latin query is case-insensitive; normalization of
       the Arabic portion does not corrupt the Latin portion *(FR-023, FR-021; BR-162)*
-- [ ] T030 [RED] **Write/query symmetry.** Assert matching in **both** directions — stored-folded
+- [X] T030 [RED] **Write/query symmetry.** Assert matching in **both** directions — stored-folded
       against raw query, and raw stored against folded query. This is a regression guard: T025 makes
       the asymmetry unrepresentable, and this test is what notices if someone reintroduces a Go
       normalizer *(FR-023)*
-- [ ] T031 [RED] **Empty normalized query.** A query of only diacritics, only tatweel, or only
+- [X] T031 [RED] **Empty normalized query.** A query of only diacritics, only tatweel, or only
       whitespace normalizes to empty and MUST behave exactly as an absent query — the unfiltered
       published list, not an error and not an empty result (FR-023a, SC-009)
-- [ ] T032 [RED] **Unpublished non-disclosure through search.** A Lesson title, a Resource filename,
+- [X] T032 [RED] **Unpublished non-disclosure through search.** A Lesson title, a Resource filename,
       a Draft Course's title, and a Delisted Course's title each return nothing — including when
       queried in normalized Arabic form. Normalization must not become a path around `PublishedOnly`.
       **Assert the harder version of this now that storage no longer filters:** for each of a `DRAFT`,
@@ -393,7 +423,7 @@ Required mutations, each of which must turn a test red:
       for it. A test that only checks the absence of the result would also pass if the text were never
       generated, and would therefore stop proving anything the day generation changed
       *(FR-006, FR-002, FR-022, SC-005; BR-143, BR-161)*
-- [ ] T032a [RED] **The live-revision exposure boundary.** This is the task that carries the guarantee
+- [X] T032a [RED] **The live-revision exposure boundary.** This is the task that carries the guarantee
       the withdrawn population boundary used to claim, and each assertion must fail before T027 exists:
       1. A Published Course **is** found by text authored on its **live** revision.
       2. A non-live revision of that same Course carrying **identical** matching text returns nothing —
@@ -407,7 +437,7 @@ Required mutations, each of which must turn a test red:
       5. Search and detail agree: the text that matches is the text the detail projection renders,
          because both resolve through `PublishedOnly`'s live-revision clause.
       *(FR-005, FR-002, FR-021, FR-022; BR-017, BR-161; plan.md §Exposure boundary)*
-- [ ] T032b **Mutation proofs for the two exposure controls.** Both must be named, run, and their
+- [X] T032b **Mutation proofs for the two exposure controls.** Both must be named, run, and their
       failure output recorded — this is the redundancy that replaced the population boundary, and an
       unrun mutation is prose. Both mutate `PublishedOnly` itself, because that is where both controls
       live; neither requires touching a search-specific join, and **no mutation may require weakening
@@ -425,9 +455,9 @@ Required mutations, each of which must turn a test red:
         confirm the same test passes with no residue.
       Neither mutation may be survivable. If either passes, the control is not where this plan says it
       is *(FR-002, FR-005, FR-022, SC-005; standing clause on mutation evidence)*
-- [ ] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
+- [X] T033 [RED] **Degenerate input.** Empty, whitespace-only, 10 KB, and `%' OR 1=1 --` queries each
       return a well-formed result and never an error disclosing internals (FR-024)
-- [ ] T034 Confirm no stemming, fuzzy matching, ranking, or external search dependency was introduced
+- [X] T034 Confirm no stemming, fuzzy matching, ranking, or external search dependency was introduced
       (FR-023b). Result ordering is stable and documented, not scored. Confirm in the same task that
       **no personalization, recommendation, or paid-placement input** reaches result selection or
       ordering — no visitor identity, no session, no behavioural signal, and no sponsored or boosted
