@@ -5,6 +5,12 @@
 -- 0001_init's IF NOT EXISTS convention and retain pg_trgm on rollback.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
+ALTER TABLE courses
+    ADD COLUMN slug text
+    GENERATED ALWAYS AS ('course-' || replace(id::text, '-', '')) STORED;
+
+CREATE UNIQUE INDEX courses_slug_unique_idx ON courses (slug);
+
 CREATE FUNCTION catalog_normalize_ar(input text) RETURNS text
     LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
     RETURN trim(regexp_replace(

@@ -57,12 +57,19 @@ or publication transaction.
 
 ## Migration `0011_catalog_search`
 
-Additive only: one function, one column, one index. It modifies no existing table's constraints. The
+Additive only: one function, two generated columns, and two indexes. It modifies no existing table's constraints. The
 local, unhosted `0011` definition was corrected before feature-wide review; no checksum-covered applied
 migration was changed. `scripts/applied-migrations.sha256` currently protects the migrations declared
 applied by repository policy (`0001`–`0004`), and its checksums remain unchanged.
 
 ### 1. The normalize function — the single definition
+
+### Stable Course slug
+
+`courses.slug` is a stored generated column: `course-` plus the stable Course UUID with hyphens
+removed. Course identity, rather than a revision, owns it, so authored-title changes, candidate
+creation, and live-revision changes cannot alter a public identifier. The unique index supports the
+same detail route's UUID-or-slug lookup. Human-readable title-derived slugs are deferred to S18.
 
 ```sql
 CREATE FUNCTION catalog_normalize_ar(input text) RETURNS text

@@ -235,6 +235,7 @@ func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
 		pool := openPool(t)
 		assertCatalogNormalization(t, pool, input, wantNormalized)
 		assertSearchTextColumn(t, pool)
+		assertCourseSlugColumn(t, pool)
 	})
 
 	t.Run("upgrade with existing revisions", func(t *testing.T) {
@@ -251,6 +252,7 @@ func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
 		}
 		assertCatalogNormalization(t, pool, input, wantNormalized)
 		assertSearchTextColumn(t, pool)
+		assertCourseSlugColumn(t, pool)
 
 		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 		defer cancel()
@@ -300,6 +302,7 @@ func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
 				}
 			})
 		}
+		assertStableCourseSlug(t, pool, seeded)
 
 		if err := m.Steps(-1); err != nil {
 			t.Fatalf("reverting schema 11: %v", err)
@@ -414,6 +417,7 @@ func TestCatalogSearchIndexSupportsLongDocumentsAndSubstringQuery(t *testing.T) 
 
 type preCatalogSearchRevisions struct {
 	publishedRevisionID string
+	publishedCourseID   string
 }
 
 func seedPreCatalogSearchRevisions(t *testing.T, pool *pgxpool.Pool) preCatalogSearchRevisions {
@@ -458,7 +462,58 @@ func seedPreCatalogSearchRevisions(t *testing.T, pool *pgxpool.Pool) preCatalogS
 	`, publishedRevisionID, publishedCourseID); err != nil {
 		t.Fatalf("publishing seeded course: %v", err)
 	}
-	return preCatalogSearchRevisions{publishedRevisionID: publishedRevisionID}
+	return preCatalogSearchRevisions{publishedRevisionID: publishedRevisionID, publishedCourseID: publishedCourseID}
+}
+
+func assertCourseSlugColumn(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var generated string
+	if err := pool.QueryRow(ctx, `SELECT is_generated FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'courses' AND column_name = 'slug'`).Scan(&generated); err != nil {
+		t.Fatalf("reading course slug metadata: %v", err)
+	}
+	if generated != "ALWAYS" {
+		t.Errorf("courses.slug is_generated = %q, want ALWAYS", generated)
+	}
+	var revisionSlug bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'course_revisions' AND column_name = 'slug')`).Scan(&revisionSlug); err != nil {
+		t.Fatalf("checking revision slug absence: %v", err)
+	}
+	if revisionSlug {
+		t.Error("course_revisions unexpectedly owns slug")
+	}
+}
+
+func assertStableCourseSlug(t *testing.T, pool *pgxpool.Pool, seeded preCatalogSearchRevisions) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	want := "course-" + strings.ReplaceAll(seeded.publishedCourseID, "-", "")
+	var slug string
+	if err := pool.QueryRow(ctx, `SELECT slug FROM courses WHERE id = $1::uuid`, seeded.publishedCourseID).Scan(&slug); err != nil || slug != want {
+		t.Fatalf("upgraded course slug = %q (%v), want %q", slug, err, want)
+	}
+	var newCourseID, newSlug string
+	if err := pool.QueryRow(ctx, `INSERT INTO courses (owner_account_id, lifecycle) VALUES ('11111111-1111-1111-1111-111111111111', 'DRAFT') RETURNING id::text, slug`).Scan(&newCourseID, &newSlug); err != nil {
+		t.Fatalf("creating slugged course: %v", err)
+	}
+	if newSlug != "course-"+strings.ReplaceAll(newCourseID, "-", "") {
+		t.Errorf("new course slug = %q", newSlug)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET title_en = 'Changed title' WHERE id = $1::uuid`, seeded.publishedRevisionID); err != nil {
+		t.Fatalf("changing title: %v", err)
+	}
+	var newRevisionID string
+	if err := pool.QueryRow(ctx, `INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, 'APPROVED', 3, 'عنوان جديد', 'New revision') RETURNING id::text`, seeded.publishedCourseID).Scan(&newRevisionID); err != nil {
+		t.Fatalf("creating new revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, newRevisionID, seeded.publishedCourseID); err != nil {
+		t.Fatalf("changing live revision: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT slug FROM courses WHERE id = $1::uuid`, seeded.publishedCourseID).Scan(&slug); err != nil || slug != want {
+		t.Errorf("stable slug after revision changes = %q (%v), want %q", slug, err, want)
+	}
 }
 
 func assertCatalogNormalization(t *testing.T, pool *pgxpool.Pool, input, want string) {

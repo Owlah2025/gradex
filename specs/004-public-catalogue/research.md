@@ -125,6 +125,13 @@ with `CREATE EXTENSION IF NOT EXISTS`, following `0001`'s `pgcrypto` convention.
 database capability rather than an S3-owned object, so rollback removes the index/column/function but
 does not drop it.
 
+## R-009 — Stable MVP Course slug
+
+**Decision**: the Course UUID owns a generated stable slug on `courses`: `course-` followed by the UUID
+without hyphens. It is deliberately not title-derived and never belongs to `course_revisions`; titles
+and revision pointers are mutable authoring state, while a public identifier must survive both. S18
+owns any later human-readable SEO slug decision.
+
 ## R-008 — Anonymous public-problem correlation
 
 **Decision**: public catalogue concealment errors use `writeAnonymousProblem`, alongside the normal
