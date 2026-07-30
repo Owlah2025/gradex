@@ -89,6 +89,17 @@ enumeration-safe writer: it omits client-visible request identifiers while the r
 server-log correlation; its response-shape and byte-identity tests pass. No correction changes task
 status: T003 remains unchecked and all Phase 3+ work remains deferred.
 
+**Phase 3 implementation evidence — 2026-07-30.** `0011` now also creates the generated stable
+`courses.slug` (`course-` plus UUID without hyphens) and its unique lookup index. Real PostgreSQL
+proves upgrade backfill, new-row generation, title/revision/live-pointer stability, and absence from
+`course_revisions`; UUID and slug detail lookup both reach the shared `PublishedOnly` boundary, while
+unknown/malformed slugs use the same anonymous 404 response. List/detail return only the live revision's
+localized title/description, display name, taxonomy labels, stable slug, optional full-Course KWD price,
+preview flag, and ordered section title/lesson-count outline. Full serialized payload assertions prove
+no Section price, PII, Lesson title, Resource, Lab, owner, or review metadata; retired assigned taxonomy
+still displays and a suspended Instructor's Published Course remains visible. T003 remains unchecked;
+no public search, frontend, S4–S6, or commerce behavior was added.
+
 *Historical, spent:* this file previously named Antigravity as builder and Claude as Tier 1 reviewer
 under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
 That assignment is **not in force** and confers nothing. The Tier 1 review depth D-040 set for S3 is
@@ -186,10 +197,10 @@ Required mutations, each of which must turn a test red:
 
 ## Phase 3 — Catalogue list and Course detail (backend)
 
-- [ ] T010 [P] Implement the paginated list projection: title, Instructor display name, three taxonomy
+- [X] T010 [P] Implement the paginated list projection: title, Instructor display name, three taxonomy
       dimensions in the active interface language, the **full-Course price only** in integer minor
       units, and preview availability *(FR-008, FR-010, FR-013; BR-157, BR-105, BR-158, BR-019)*
-- [ ] T011 [P] Implement the detail projection: authored description, Section outline, the
+- [X] T011 [P] Implement the detail projection: authored description, Section outline, the
       **full-Course price**, and the preview reference. **Serve no Section price.** Section is **not an
       independently acquirable scope** in the MVP, so a per-Section price is not part of this
       projection and must not appear in the payload — not as a field, not as null, not as zero. The
@@ -199,21 +210,21 @@ Required mutations, each of which must turn a test red:
       *(FR-009, FR-010, FR-010a;
       [D-045](../../docs/DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation);
       BR-010, BR-021, BR-019, BR-020)*
-- [ ] T011a Assert the **absence** of any Section price in the detail payload, against the full
+- [X] T011a Assert the **absence** of any Section price in the detail payload, against the full
       serialized response rather than the rendered page, for a Course whose Sections carry authored
       prices in S2's tables. S2 still stores Section prices and the Admin surface still shows them
       (D-045 resolved question 2); this test is what keeps them from reaching a public payload
       *(FR-009, FR-010a; BR-021)*
-- [ ] T012 Assert **no PII beyond display name** appears in any public response, against the full
+- [X] T012 Assert **no PII beyond display name** appears in any public response, against the full
       response body rather than the rendered page. Email, phone, and legal identity must be absent
       from the serialized payload, not merely unrendered *(FR-011, SC-007; BR-105, BR-064)*
-- [ ] T013 Assert Lesson titles, Resources, and Lab Materials are absent from every public response
+- [X] T013 Assert Lesson titles, Resources, and Lab Materials are absent from every public response
       *(FR-006; BR-143, BR-161)*
-- [ ] T013a Assert a **retired** taxonomy term still displays on a Course that already carries it, in
+- [X] T013a Assert a **retired** taxonomy term still displays on a Course that already carries it, in
       both the list and the detail projection. Retirement blocks new assignment, not the display of an
       existing one, and dropping it silently changes what a Course appears to be about
       *(FR-014; BR-160)*
-- [ ] T014 Assert a Published Course whose owning Instructor is **suspended** remains publicly visible
+- [X] T014 Assert a Published Course whose owning Instructor is **suspended** remains publicly visible
       — suspension blocks authoring, not Student access (BR-065). This is an easy over-correction and
       the test exists to catch it *(FR-007; BR-065)*
 

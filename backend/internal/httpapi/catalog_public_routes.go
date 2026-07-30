@@ -3,6 +3,8 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,22 +39,43 @@ func publicCatalogCache() gin.HandlerFunc {
 }
 
 func (h *publicCatalogHandlers) list(c *gin.Context) {
-	if err := h.repository.List(c.Request.Context()); err != nil {
-		writeProblem(c, problem.Internal(""))
-		return
-	}
-	c.Status(http.StatusOK)
-}
-
-func (h *publicCatalogHandlers) detail(c *gin.Context) {
-	visible, err := h.repository.Detail(c.Request.Context(), c.Param("idOrSlug"))
+	page, pageSize := publicCatalogPagination(c)
+	result, err := h.repository.List(c.Request.Context(), publicCatalogArabic(c), page, pageSize)
 	if err != nil {
 		writeProblem(c, problem.Internal(""))
 		return
 	}
-	if !visible {
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *publicCatalogHandlers) detail(c *gin.Context) {
+	course, err := h.repository.Detail(c.Request.Context(), c.Param("idOrSlug"), publicCatalogArabic(c))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	if course == nil {
 		writeAnonymousProblem(c, catalogpublic.NotFound())
 		return
 	}
-	c.Status(http.StatusOK)
+	c.JSON(http.StatusOK, course)
+}
+
+func publicCatalogPagination(c *gin.Context) (int, int) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func publicCatalogArabic(c *gin.Context) bool {
+	return !strings.HasPrefix(strings.ToLower(c.GetHeader("Accept-Language")), "en")
 }
