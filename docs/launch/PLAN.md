@@ -6,10 +6,10 @@
 > [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
 > which supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)'s
 > September target on the date. D-038 and D-039 are retained below as history, not as forecast
-> Active slice: **S4 D8 — Entitlement Evaluation and Protected Delivery.** D7 is independently
-> approved; D8 tasks `T014`–`T032` are active under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required).
-> S5 planning is approved but implementation remains blocked until the full S4 slice independently
-> closes. S1C and S2 are closed.
+> Active slice: **S5 — Protected Learning.** S4 is closed under
+> [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked)
+> after independent D7 and D8 approval. S5 planning is approved and frozen; implementation is active
+> in the queue but has not started. S1C, S2, S3, and S4 are closed.
 > Calendar authority: **[AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan)**,
 > not §6 of this document. §6 is retained as the historical record of the original three-week plan
 > Delivery team: Solo developer. **Seats are assigned per slice and none is currently assigned for S5
@@ -40,14 +40,19 @@ status**, **completed history**, the **active implementation order**, and **defe
 - **S2 — Course authoring and review.** **Closed** at `785d71c` with hosted CI convergence recorded.
   It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range is
   reopened by current work.
+- **S3 — Public catalogue and bilingual shell.** **Closed** at the approved S4 base
+  `2bc8329016f76115d8a3243538f1e2bde81d2768`.
+- **S4 — Media pipeline, protected delivery, and Entitlement evaluation.** **Closed** under
+  [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked)
+  at `944c0a77079d632c6b836c7d60c46ff6144e7aa5`.
 
 ### Active implementation order
 
 | Slice | State | Blocked on |
 |---|---|---|
-| **S3 — Public catalogue and shell** | Specified, not implemented | S2 (closed) |
-| **S4 — Media pipeline, delivery, and Entitlement evaluation** | D7 independently approved; **D8 (`T014`–`T032`) active**, pending independent Tier 3 review | S1C, S2 (both closed) |
-| **S5 — Protected Learning** | **Planning independently approved; implementation not started.** [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md), 78 tasks `T001`–`T078`, **0 complete** | S3, S4 (full independent closure) |
+| **S3 — Public catalogue and shell** | **Closed** at approved base `2bc8329` | — |
+| **S4 — Media pipeline, delivery, and Entitlement evaluation** | **Closed** — D7 and D8 independently approved; 32/32 tasks complete at `944c0a7` | — |
+| **S5 — Protected Learning** | **Active / unblocked.** Planning frozen; implementation not started. [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md), 78 tasks `T001`–`T078`, **0 complete** | — (S2, S3, S4 closed) |
 | **S6 — Course Access Grant** | **Planned, not implemented.** [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) | **S2, S4, and S5** |
 
 **S5 introduces the minimum physical `enrollments` table** required by `progress.enrollment_id`, and

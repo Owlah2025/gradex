@@ -4,8 +4,10 @@
 
 **Date**: 2026-07-29 | **Review Tier 3.** **A builder never closes its own slice.**
 
-**Blocked until S2, S3, and S4 close** on independent verdicts. S5 consumes S4's evaluator, signed
-issuance, trusted duration, and non-production seed; S2's Course graph; S3's bilingual shell.
+**S2, S3, and S4 are closed** on independent verdicts. S5 is active and unblocked, but implementation
+has not started: all tasks remain uncompleted and these approved planning artifacts stay frozen. S5
+consumes S4's evaluator, signed issuance, trusted duration, and non-production seed; S2's Course
+graph; S3's bilingual shell.
 
 ---
 

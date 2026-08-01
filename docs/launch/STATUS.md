@@ -2,7 +2,7 @@
 
 > Current date: **2026-08-01 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-08-01, D-057 S4 D8 implementation assignment after independent D7 approval**; prior
+> Last repository reconciliation: **2026-08-01, D-058 S4 closure after independent D7 and D8 approval**; prior
 > reconciliation 2026-07-28 after local verification of pricing T039–T042
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
@@ -12,35 +12,36 @@
 > **S2 is CLOSED.** Course authoring and review closed at `785d71c` with hosted CI convergence
 > recorded. It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range
 > is reopened by any current work
-> **S4 D7 — Media Pipeline (`T001`–`T013`) is independently approved** at `1e3d7c3`. **S4 D8
-> (`T014`–`T032`) is the active Codex implementation queue** under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required).
-> S5 is explicitly blocked until the full S4 slice closes independently; see
-> the S5 section below
+> **S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is CLOSED** under
+> [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked):
+> D7 (`T001`–`T013`) and D8 (`T014`–`T032`) are independently approved. **S5 is now unblocked and
+> active, with implementation not started.** S6 remains planned and unimplemented.
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
-## S4 D8 — Entitlement Evaluation and Protected Delivery is active
+## S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is closed
 
-**S4 remains split deliberately:** D7 implements the media pipeline (`T001`–`T013`) and is
-independently approved at `1e3d7c3`; D8 implements protected delivery and entitlement evaluation
-(`T014`–`T032`). D8 is active but S4 is not closed.
+**S4 remains split deliberately:** D7 implements the media pipeline (`T001`–`T013`) and D8
+implements protected delivery and Entitlement evaluation (`T014`–`T032`). Both are independently
+approved; [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked)
+formally closes the complete 32-task slice.
 
 | | |
 |---|---|
 | Authoritative directory | [`specs/005-media-and-entitlement-evaluation/`](../../specs/005-media-and-entitlement-evaluation/spec.md) |
-| Active task range | `T014`–`T032` only |
-| State | D7 independently approved; D8 implementation is active and remains pending separate Tier 3 review |
-| Builder | **Codex**, assigned for D8 on 2026-08-01 under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required) |
-| Reviewer | **Independent Tier 3 reviewer**, separate from the builder; neither D8 nor S4 closes on Codex's assessment |
+| Completed task range | `T001`–`T032` |
+| State | **CLOSED** — D7 and D8 independently approved; no implementation finding remains open |
 | D7 | Approved immutable head `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940` |
-| S6 boundary | The sole owner of production Entitlement creation; D8 evaluates only |
+| D8 / S4 head | Approved immutable head `944c0a77079d632c6b836c7d60c46ff6144e7aa5` |
+| Complete approved range | `2bc8329016f76115d8a3243538f1e2bde81d2768..944c0a77079d632c6b836c7d60c46ff6144e7aa5` |
+| S6 boundary | The sole owner of production Entitlement creation; S4 evaluated only |
 
-## S5 — Protected Learning is blocked behind S4
+## S5 — Protected Learning is active and unblocked
 
-**Planning is independently approved and frozen. No implementation has started. S5 is blocked until S4
-has been independently reviewed and closed; this D7 assignment does not authorize S5.**
+**Planning is independently approved and remains frozen. S4 is closed, so S5 is the next active
+implementation feature. No S5 implementation has started and all 78 tasks remain uncompleted.**
 
 | | |
 |---|---|
@@ -50,7 +51,7 @@ has been independently reviewed and closed; this D7 assignment does not authoriz
 | Independent verdict | **`APPROVE`** by `agy` under [D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range) — 0 critical, 0 high, 0 medium, 0 low, no open questions |
 | Tasks | 78 (`T001`–`T078`), **0 complete** |
 | Traceability | 36/36 active functional requirements cited; 12/12 success criteria covered |
-| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority; S5 implementation requires its own dated assignment |
+| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority; activation does not begin implementation |
 
 S5 introduces the minimum physical `enrollments` table required by `progress.enrollment_id` and
 **creates no normal Enrollment row**. It implements no invitation, acceptance, approval, rejection,
@@ -58,7 +59,7 @@ grant, or revocation behaviour. See [SLICES.md §3.4](SLICES.md#34-s5-introduces
 
 **S6 — Course Access Grant is planned and unimplemented**, under
 [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md). It is blocked on
-**S2 (closed), S4, and S5**: it consumes the `enrollments` table S5 introduces, asserts the inherited
+**S2 (closed), S4 (closed), and S5**: it consumes the `enrollments` table S5 introduces, asserts the inherited
 shape before writing, and does not recreate it. S6 owns the Course Access Invitation lifecycle and
 every production Enrollment write.
 

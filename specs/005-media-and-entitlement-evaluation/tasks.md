@@ -2,11 +2,10 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Builder**: Codex under [D-057](../../docs/DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required) for D8 (`T014`–`T032`).
-**Reviewer**: Independent reviewer, separate from the builder. **A builder never closes its own slice.**
+**Builder**: Codex under [D-056](../../docs/DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range) for D7 (`T001`–`T013`) and [D-057](../../docs/DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required) for D8 (`T014`–`T032`).
+**Reviewer**: Independent reviewers, separate from the builder. **D7 and D8 are independently approved; a builder never closes its own slice.**
 
-**D7 is independently approved** at `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940`. **D8 is active and
-remains pending independent Tier 3 review.** S4 is not closed until that separate D8 verdict.
+**S4 is CLOSED** under [D-058](../../docs/DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked): D7 is independently approved at `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940`; D8 is independently approved at `944c0a77079d632c6b836c7d60c46ff6144e7aa5`; all `T001`–`T032` are complete.
 
 **Split across two implementation days** per
 [§3](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan): **D7** = Phases 1–3

@@ -1687,3 +1687,32 @@ Codex the bounded D8 queue on 2026-08-01, while retaining the Tier 3 independent
 and the established consumer-before-producer boundary.
 
 **Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-058 — S4 closes after independent approval of D7 and D8; S5 is unblocked
+
+**Date:** 2026-08-01
+**Status:** Closed. Applies only to the completed S4 Media Pipeline, Protected Delivery, and
+Entitlement Evaluation slice.
+
+**Decision:**
+
+- **D7 — Media Pipeline (`T001`–`T013`)** is independently approved at
+  `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940` after remediation.
+- **D8 — Entitlement Evaluation and Protected Delivery (`T014`–`T032`)** is independently approved
+  at `944c0a77079d632c6b836c7d60c46ff6144e7aa5` with no implementation findings remaining.
+- **S4 is formally closed.** All `T001`–`T032` are complete. The immutable approved S4
+  implementation range is
+  `2bc8329016f76115d8a3243538f1e2bde81d2768..944c0a77079d632c6b836c7d60c46ff6144e7aa5`.
+- **S5 — Protected Learning** is unblocked and becomes the active implementation feature at
+  [`specs/007-protected-learning/`](../specs/007-protected-learning/tasks.md). Its planning remains
+  frozen; no S5 implementation or task completion is recorded by this closure decision.
+- **S6 remains not started and is the exclusive production Entitlement-creation owner.** S4
+  evaluates Entitlements only; closing S4 does not transfer creation ownership to S5.
+
+**Reason:** independent review approved both completed S4 ranges with no remaining implementation
+findings. Recording the closure releases the next dependency-ordered feature without changing its
+approved plan or authorizing its implementation.
+
+**Source:** Product-owner closure instruction on 2026-08-01.
