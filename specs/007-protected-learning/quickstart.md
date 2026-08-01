@@ -215,9 +215,40 @@ A proof that survives its mutation is not evidence. Record the mutation and the 
 ## Convergence
 
 ```bash
+baseline_status=/tmp/gradex-s5-status-baseline.z
+
+git status \
+  --porcelain=v1 \
+  -z \
+  --untracked-files=all \
+  >"$baseline_status"
+```
+
+After the implementation commit:
+
+```bash
+git diff --quiet
+git diff --cached --quiet
+
+final_status=/tmp/gradex-s5-status-final.z
+git status \
+  --porcelain=v1 \
+  -z \
+  --untracked-files=all \
+  >"$final_status"
+
+cmp --silent "$baseline_status" "$final_status"
+git status --short
+```
+
+A passing comparison proves that final repository residue is identical to the pre-implementation
+residue; it does **not** claim that a repository with documented user-owned work has no residue.
+
+Run the local gates before the implementation commit:
+
+```bash
 cd backend && gofmt -l . && go build ./... && go vet ./... && go vet -tags=integration ./... && go test -race ./...
 cd frontend && npm run lint && npm run build && npx playwright test
-git status --porcelain   # must be empty
 ```
 
 **Local green is not closure.** S5 closes on **hosted CI green on the exact head commit** — Backend,

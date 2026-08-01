@@ -1716,3 +1716,27 @@ findings. Recording the closure releases the next dependency-ordered feature wit
 approved plan or authorizing its implementation.
 
 **Source:** Product-owner closure instruction on 2026-08-01.
+
+---
+
+## D-059 — S5 clean-tree evidence compares the recorded baseline
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped only to S5 validation mechanics.
+
+**Decision:** The former absolute-empty S5 T077 status gate conflicts with the mandatory preservation
+of documented user-owned untracked paths. S5 cleanliness is therefore evaluated relative to a
+NUL-delimited porcelain baseline captured immediately before implementation. After the implementation
+commit, the final status must be byte-identical to that baseline, with no newly introduced tracked or
+untracked residue and no baseline path removed, staged, committed, ignored, or relocated. The
+documented user-owned paths remain visible and uncommitted. T078 remains independently owned by hosted
+CI and Tier 3 review.
+
+**Reason:** An absolute-empty status is not a valid implementation gate in a repository where the
+safety contract requires pre-existing user work to remain present. Baseline comparison proves the
+actual requirement: implementation leaves no residue while preserving unrelated work.
+
+**Scope:** This changes validation mechanics only. It changes no S5 product requirement, acceptance
+criterion, implementation boundary, or independent-review requirement.
+
+**Source:** Product-owner instruction on 2026-08-01.
