@@ -17,6 +17,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
+	"github.com/Owlah2025/gradex/backend/internal/entitlement"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -248,11 +249,27 @@ func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient 
 	service, err := media.NewService(media.ServiceOptions{
 		DB: pool, Store: storageClient, Outbox: writer, Scanner: scanner,
 		UploadURLExpiry: cfg.UploadURLExpiry(), MaxUploadBytes: cfg.MaxUploadSizeBytes(),
+		OperatingMode: media.OperatingMode(cfg.MediaOperatingMode()),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return httpapi.NewMediaFoundation(httpapi.MediaFoundationOptions{Service: service})
+	entitlementRepository, err := entitlement.NewRepository(pool)
+	if err != nil {
+		return nil, fmt.Errorf("building entitlement read repository: %w", err)
+	}
+	evaluator, err := entitlement.NewEvaluator(entitlementRepository)
+	if err != nil {
+		return nil, fmt.Errorf("building entitlement evaluator: %w", err)
+	}
+	delivery, err := media.NewDeliveryService(media.DeliveryOptions{
+		DB: pool, Store: storageClient, Evaluator: evaluator,
+		SignatureLifetime: cfg.PlaybackURLExpiry(), BuyerTagKey: []byte(cfg.PlaybackTokenSecret().Expose()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building protected media delivery: %w", err)
+	}
+	return httpapi.NewMediaFoundation(httpapi.MediaFoundationOptions{Service: service, Delivery: delivery})
 }
 
 func buildAdmissionFoundation(

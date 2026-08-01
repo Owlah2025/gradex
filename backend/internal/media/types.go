@@ -28,6 +28,21 @@ func (k AssetKind) Valid() bool {
 	}
 }
 
+// OperatingMode makes the unresolved LG-014 response explicit. Scanner mode
+// keeps normal Instructor upload available but fail-closed; Admin catalogue
+// mode disables it and accepts only an audited Admin procedure with exact
+// out-of-band scan evidence.
+type OperatingMode string
+
+const (
+	OperatingModeScanner        OperatingMode = "SCANNER"
+	OperatingModeAdminCatalogue OperatingMode = "ADMIN_CATALOGUE"
+)
+
+func (m OperatingMode) Valid() bool {
+	return m == OperatingModeScanner || m == OperatingModeAdminCatalogue
+}
+
 var (
 	ErrNotFound               = errors.New("media asset not found")
 	ErrNotAuthorized          = errors.New("media asset not authorized")
@@ -44,6 +59,13 @@ type ObjectStore interface {
 	HeadObjectVersion(context.Context, string, string) (sizeBytes int64, exists bool, err error)
 	DownloadPrefixVersion(context.Context, string, string, int64) ([]byte, error)
 	HashObjectVersion(context.Context, string, string) (string, error)
+}
+
+// DeliveryStore is deliberately narrower than ObjectStore. Protected delivery
+// can mint an expiry-bounded read URL only after the S4 evaluator allows the
+// exact Asset Version; it cannot list, fetch, or make an object public.
+type DeliveryStore interface {
+	PresignGetURL(context.Context, string, time.Duration) (string, error)
 }
 
 type UploadRequest struct {
@@ -141,7 +163,38 @@ type ServiceOptions struct {
 	Scanner         *ScannerAdapter
 	UploadURLExpiry time.Duration
 	MaxUploadBytes  int64
+	OperatingMode   OperatingMode
 	Now             func() time.Time
+}
+
+type CatalogueLoadRequest struct {
+	AdminAccountID string
+	CourseID       string
+	LessonID       string
+	LogicalAssetID string
+	Kind           AssetKind
+	ContentType    string
+	SizeBytes      int64
+}
+
+type CatalogueCompletionRequest struct {
+	AdminAccountID       string
+	AssetVersionID       string
+	ProviderEventID      string
+	StorageObjectKey     string
+	StorageObjectVersion string
+	ContentType          string
+	SizeBytes            int64
+	SHA256Hex            string
+}
+
+type OutOfBandScanEvidence struct {
+	AdminAccountID       string
+	AssetVersionID       string
+	StorageObjectVersion string
+	Method               string
+	Provider             string
+	Reference            string
 }
 
 const DefaultProcessingTimeout = 15 * time.Minute

@@ -31,6 +31,8 @@ const (
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
+var errCatalogueCallbackRace = errors.New("catalogue callback was recorded concurrently")
+
 var allowedContentTypes = map[AssetKind]map[string]struct{}{
 	KindVideo: {
 		"video/mp4": {}, "video/quicktime": {},
@@ -55,6 +57,7 @@ type Service struct {
 	scanner         *ScannerAdapter
 	uploadURLExpiry time.Duration
 	maxUploadBytes  int64
+	operatingMode   OperatingMode
 	now             func() time.Time
 }
 
@@ -106,6 +109,13 @@ func NewService(options ServiceOptions) (*Service, error) {
 	if options.MaxUploadBytes <= 0 {
 		return nil, errors.New("media maximum upload size must be positive")
 	}
+	mode := options.OperatingMode
+	if mode == "" {
+		mode = OperatingModeScanner
+	}
+	if !mode.Valid() {
+		return nil, errors.New("media operating mode is invalid")
+	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
@@ -113,7 +123,7 @@ func NewService(options ServiceOptions) (*Service, error) {
 	return &Service{
 		db: options.DB, store: options.Store, outbox: options.Outbox,
 		scanner: options.Scanner, uploadURLExpiry: options.UploadURLExpiry,
-		maxUploadBytes: options.MaxUploadBytes, now: now,
+		maxUploadBytes: options.MaxUploadBytes, operatingMode: mode, now: now,
 	}, nil
 }
 
@@ -121,6 +131,13 @@ func NewService(options ServiceOptions) (*Service, error) {
 // issuing a private quarantine target. A replacement is represented by a new
 // version ID and never rewrites the prior version.
 func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (UploadTicket, error) {
+	if s.operatingMode == OperatingModeAdminCatalogue {
+		return UploadTicket{}, ErrNotAuthorized
+	}
+	return s.beginUploadForOwner(ctx, request)
+}
+
+func (s *Service) beginUploadForOwner(ctx context.Context, request UploadRequest) (UploadTicket, error) {
 	if err := validateBeginUpload(request, s.maxUploadBytes); err != nil {
 		return UploadTicket{}, err
 	}
@@ -133,6 +150,272 @@ func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (Uploa
 		return UploadTicket{}, fmt.Errorf("%w: presigning quarantine upload: %v", ErrUnavailable, err)
 	}
 	return UploadTicket{AssetVersionID: record.assetVersionID, UploadURL: uploadURL, ExpiresAt: record.expiresAt}, nil
+}
+
+// BeginCatalogueLoad is the explicit LG-014 operating path. It still creates
+// only a private quarantine target; no mode switch can make its bytes READY.
+func (s *Service) BeginCatalogueLoad(ctx context.Context, request CatalogueLoadRequest) (UploadTicket, error) {
+	if s.operatingMode != OperatingModeAdminCatalogue {
+		return UploadTicket{}, ErrNotAuthorized
+	}
+	if err := validateUploadRequest(UploadRequest{Kind: request.Kind, ContentType: request.ContentType, SizeBytes: request.SizeBytes}, s.maxUploadBytes); err != nil {
+		return UploadTicket{}, err
+	}
+	if _, err := uuid.Parse(request.AdminAccountID); err != nil {
+		return UploadTicket{}, ErrNotAuthorized
+	}
+	if _, err := uuid.Parse(request.CourseID); err != nil {
+		return UploadTicket{}, ErrValidation
+	}
+	var ownerID string
+	err := s.db.QueryRow(ctx, `
+		SELECT c.owner_account_id::text
+		FROM courses c JOIN accounts a ON a.id = $1::uuid
+		WHERE c.id = $2::uuid AND a.role = 'ADMIN' AND a.status = 'ACTIVE'
+	`, request.AdminAccountID, request.CourseID).Scan(&ownerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UploadTicket{}, ErrNotAuthorized
+	}
+	if err != nil {
+		return UploadTicket{}, fmt.Errorf("authorizing catalogue load: %w", err)
+	}
+	return s.beginUploadForOwner(ctx, UploadRequest{
+		OwnerAccountID: ownerID, CourseID: request.CourseID, LessonID: request.LessonID,
+		LogicalAssetID: request.LogicalAssetID, Kind: request.Kind,
+		ContentType: request.ContentType, SizeBytes: request.SizeBytes,
+	})
+}
+
+// CompleteCatalogueLoad verifies the actual private object exactly as normal
+// completion does, but requires an Admin in catalogue mode and deliberately
+// does not enqueue scanner work. The next required operation is immutable
+// out-of-band evidence for this exact object version.
+func (s *Service) CompleteCatalogueLoad(ctx context.Context, request CatalogueCompletionRequest) (CompletionResult, error) {
+	if s.operatingMode != OperatingModeAdminCatalogue {
+		return CompletionResult{}, ErrNotAuthorized
+	}
+	completion, err := catalogueCompletionRequest(request)
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return CompletionResult{}, fmt.Errorf("%w: beginning catalogue completion: %v", ErrUnavailable, err)
+	}
+	defer tx.Rollback(ctx)
+	record, duplicate, err := s.authorizeCatalogueCompletion(ctx, tx, request.AdminAccountID, completion)
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	if duplicate {
+		if err := tx.Commit(ctx); err != nil {
+			return CompletionResult{}, fmt.Errorf("committing duplicate catalogue callback: %w", err)
+		}
+		return CompletionResult{AssetVersionID: completion.AssetVersionID, State: record.state, Duplicate: true}, nil
+	}
+	if err := s.verifyCompletedObject(ctx, completion); err != nil {
+		return CompletionResult{}, err
+	}
+	if err := s.quarantineCatalogueObject(ctx, tx, completion); err != nil {
+		if errors.Is(err, errCatalogueCallbackRace) {
+			_ = tx.Rollback(ctx)
+			return s.resolveDuplicateUpload(ctx, completion, completionFingerprint(completion))
+		}
+		return CompletionResult{}, err
+	}
+	if err := appendMediaAudit(ctx, tx, request.AdminAccountID, "ADMIN", "MEDIA_CATALOGUE_LOADED", completion.AssetVersionID, "Admin catalogue load completed into quarantine", map[string]any{"state": string(StateQuarantined)}); err != nil {
+		return CompletionResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return CompletionResult{}, fmt.Errorf("committing catalogue completion: %w", err)
+	}
+	return CompletionResult{AssetVersionID: completion.AssetVersionID, State: StateQuarantined}, nil
+}
+
+func catalogueCompletionRequest(request CatalogueCompletionRequest) (CompleteUploadRequest, error) {
+	completion := CompleteUploadRequest{
+		OwnerAccountID: request.AdminAccountID, AssetVersionID: request.AssetVersionID,
+		ProviderEventID: request.ProviderEventID, StorageObjectKey: request.StorageObjectKey,
+		StorageObjectVersion: request.StorageObjectVersion, ContentType: request.ContentType,
+		SizeBytes: request.SizeBytes, SHA256Hex: request.SHA256Hex,
+	}
+	if err := validateCompletionRequest(completion); err != nil {
+		return CompleteUploadRequest{}, err
+	}
+	return completion, nil
+}
+
+func (s *Service) authorizeCatalogueCompletion(ctx context.Context, tx pgx.Tx, adminID string, completion CompleteUploadRequest) (uploadCompletionRecord, bool, error) {
+	if err := s.requireActiveAdmin(ctx, tx, adminID); err != nil {
+		return uploadCompletionRecord{}, false, err
+	}
+	record, err := s.loadUploadCompletionRecord(ctx, tx, completion.AssetVersionID)
+	if err != nil {
+		return uploadCompletionRecord{}, false, err
+	}
+	if completion.StorageObjectKey != record.expectedKey || completion.ContentType != record.expectedType || completion.SizeBytes != record.expectedSize || completion.SizeBytes > record.maxSize {
+		return uploadCompletionRecord{}, false, ErrConflict
+	}
+	duplicate, err := catalogueCallbackAlreadyRecorded(ctx, tx, completion)
+	if err != nil {
+		return uploadCompletionRecord{}, false, err
+	}
+	if !duplicate && record.state != StateUploaded {
+		return uploadCompletionRecord{}, false, ErrConflict
+	}
+	return record, duplicate, nil
+}
+
+func catalogueCallbackAlreadyRecorded(ctx context.Context, tx pgx.Tx, completion CompleteUploadRequest) (bool, error) {
+	fingerprint := completionFingerprint(completion)
+	var priorAsset, priorFingerprint string
+	err := tx.QueryRow(ctx, `
+		SELECT asset_version_id::text, request_fingerprint
+		FROM media_callback_receipts
+		WHERE callback_kind = $1 AND provider_event_id = $2
+	`, callbackUploadCompleted, completion.ProviderEventID).Scan(&priorAsset, &priorFingerprint)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checking catalogue callback receipt: %w", err)
+	}
+	if priorAsset != completion.AssetVersionID || priorFingerprint != fingerprint {
+		return false, ErrConflict
+	}
+	return true, nil
+}
+
+func (s *Service) quarantineCatalogueObject(ctx context.Context, tx pgx.Tx, completion CompleteUploadRequest) error {
+	fingerprint := completionFingerprint(completion)
+	recorded, err := tx.Exec(ctx, `
+		INSERT INTO media_callback_receipts (provider_event_id, callback_kind, asset_version_id, object_version, request_fingerprint)
+		VALUES ($1, $2, $3::uuid, $4, $5)
+		ON CONFLICT (callback_kind, provider_event_id) DO NOTHING
+	`, completion.ProviderEventID, callbackUploadCompleted, completion.AssetVersionID, completion.StorageObjectVersion, fingerprint)
+	if err != nil {
+		return fmt.Errorf("recording catalogue completion: %w", err)
+	}
+	if recorded.RowsAffected() != 1 {
+		return errCatalogueCallbackRace
+	}
+	updated, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET storage_object_version = $1, size_bytes = $2, sha256_hex = $3, state = 'QUARANTINED'
+		WHERE id = $4::uuid AND state = 'UPLOADED'
+	`, completion.StorageObjectVersion, completion.SizeBytes, strings.ToLower(completion.SHA256Hex), completion.AssetVersionID)
+	if err != nil {
+		return fmt.Errorf("quarantining catalogue asset: %w", err)
+	}
+	if updated.RowsAffected() != 1 {
+		return ErrConcurrentModification
+	}
+	updated, err = tx.Exec(ctx, `UPDATE upload_intents SET completed_at = now(), completion_fingerprint = $1 WHERE asset_version_id = $2::uuid AND completed_at IS NULL`, fingerprint, completion.AssetVersionID)
+	if err != nil {
+		return fmt.Errorf("completing catalogue upload intent: %w", err)
+	}
+	if updated.RowsAffected() != 1 {
+		return ErrConcurrentModification
+	}
+	return nil
+}
+
+// RecordOutOfBandScanEvidence is an Admin-only, append-only record for the
+// exact quarantine object version. It cannot reuse an earlier Asset Version's
+// pass, and it never operates outside explicit Admin-catalogue mode.
+func (s *Service) RecordOutOfBandScanEvidence(ctx context.Context, evidence OutOfBandScanEvidence) error {
+	if !validOutOfBandEvidence(s.operatingMode, evidence) {
+		return ErrNotAuthorized
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: beginning out-of-band evidence: %v", ErrUnavailable, err)
+	}
+	defer tx.Rollback(ctx)
+	if err := s.requireActiveAdmin(ctx, tx, evidence.AdminAccountID); err != nil {
+		return err
+	}
+	target, err := startCatalogueEvidenceScan(ctx, tx, evidence)
+	if err != nil {
+		return err
+	}
+	attempt, err := recordCatalogueEvidenceAttempt(ctx, tx, evidence, target.objectVersion)
+	if err != nil {
+		return err
+	}
+	if err := s.applyCatalogueEvidence(ctx, tx, evidence, target.kind, attempt.id); err != nil {
+		return err
+	}
+	if err := appendMediaAudit(ctx, tx, evidence.AdminAccountID, "ADMIN", "MEDIA_OUT_OF_BAND_SCAN_RECORDED", evidence.AssetVersionID, "Out-of-band exact-version scan evidence recorded", map[string]any{"method": evidence.Method, "provider": evidence.Provider, "reference": evidence.Reference, "object_version": target.objectVersion, "attempt_number": attempt.number}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type catalogueEvidenceTarget struct {
+	kind          AssetKind
+	objectVersion string
+}
+
+type catalogueEvidenceAttempt struct {
+	id     string
+	number int
+}
+
+func validOutOfBandEvidence(mode OperatingMode, evidence OutOfBandScanEvidence) bool {
+	return mode == OperatingModeAdminCatalogue && evidence.AdminAccountID != "" && evidence.AssetVersionID != "" &&
+		evidence.StorageObjectVersion != "" && strings.TrimSpace(evidence.Method) != "" &&
+		strings.TrimSpace(evidence.Provider) != "" && strings.TrimSpace(evidence.Reference) != ""
+}
+
+func startCatalogueEvidenceScan(ctx context.Context, tx pgx.Tx, evidence OutOfBandScanEvidence) (catalogueEvidenceTarget, error) {
+	var state AssetVersionState
+	var target catalogueEvidenceTarget
+	err := tx.QueryRow(ctx, `SELECT state, kind, storage_object_version FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE`, evidence.AssetVersionID).Scan(&state, &target.kind, &target.objectVersion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return catalogueEvidenceTarget{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogueEvidenceTarget{}, fmt.Errorf("loading catalogue evidence target: %w", err)
+	}
+	if state != StateQuarantined || target.objectVersion != evidence.StorageObjectVersion {
+		return catalogueEvidenceTarget{}, ErrConflict
+	}
+	if err := Transition(state, StateScanning); err != nil {
+		return catalogueEvidenceTarget{}, err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, evidence.AssetVersionID); err != nil {
+		return catalogueEvidenceTarget{}, fmt.Errorf("starting recorded scan: %w", err)
+	}
+	return target, nil
+}
+
+func recordCatalogueEvidenceAttempt(ctx context.Context, tx pgx.Tx, evidence OutOfBandScanEvidence, objectVersion string) (catalogueEvidenceAttempt, error) {
+	var attempt catalogueEvidenceAttempt
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM scan_attempts WHERE asset_version_id = $1::uuid AND storage_object_version = $2`, evidence.AssetVersionID, objectVersion).Scan(&attempt.number); err != nil {
+		return catalogueEvidenceAttempt{}, fmt.Errorf("allocating evidence attempt: %w", err)
+	}
+	workID := "out-of-band:" + uuid.NewString()
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO scan_attempts (asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity, reason)
+		VALUES ($1::uuid, $2, $3, $4, 'PASSED', $5, $6) RETURNING id::text
+	`, evidence.AssetVersionID, attempt.number, workID, objectVersion, "out-of-band:"+evidence.Provider, evidence.Method+":"+evidence.Reference).Scan(&attempt.id); err != nil {
+		return catalogueEvidenceAttempt{}, fmt.Errorf("recording out-of-band evidence: %w", err)
+	}
+	return attempt, nil
+}
+
+func (s *Service) applyCatalogueEvidence(ctx context.Context, tx pgx.Tx, evidence OutOfBandScanEvidence, kind AssetKind, attemptID string) error {
+	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid AND state = 'SCANNING'`, attemptID, evidence.AssetVersionID); err != nil {
+		return fmt.Errorf("applying out-of-band scan evidence: %w", err)
+	}
+	if kind == KindVideo {
+		return appendTranscodeWork(ctx, tx, s.outbox, evidence.AssetVersionID, "out-of-band:"+evidence.Reference)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid AND state = 'SCAN_PASSED'`, evidence.AssetVersionID); err != nil {
+		return fmt.Errorf("making scanned catalogue asset ready: %w", err)
+	}
+	return nil
 }
 
 func validateBeginUpload(request UploadRequest, maxUploadBytes int64) error {

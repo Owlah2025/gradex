@@ -2,7 +2,7 @@
 
 > Current date: **2026-08-01 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-08-01, D-056 S4 D7 implementation assignment and dependency correction**; prior
+> Last repository reconciliation: **2026-08-01, D-057 S4 D8 implementation assignment after independent D7 approval**; prior
 > reconciliation 2026-07-28 after local verification of pricing T039–T042
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
@@ -12,27 +12,30 @@
 > **S2 is CLOSED.** Course authoring and review closed at `785d71c` with hosted CI convergence
 > recorded. It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range
 > is reopened by any current work
-> Pending independent re-review: **S4 D7 — Media Pipeline (`T001`–`T013`)** under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
-> S4 D8 remains separate and has not started. S5 is explicitly blocked until S4 closes independently; see
+> **S4 D7 — Media Pipeline (`T001`–`T013`) is independently approved** at `1e3d7c3`. **S4 D8
+> (`T014`–`T032`) is the active Codex implementation queue** under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required).
+> S5 is explicitly blocked until the full S4 slice closes independently; see
 > the S5 section below
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
-## S4 D7 — Media Pipeline is pending independent re-review
+## S4 D8 — Entitlement Evaluation and Protected Delivery is active
 
-**S4 is split deliberately:** D7 implements the media pipeline (`T001`–`T013`); D8 remains a separate
-queue for protected delivery and entitlement evaluation (`T014`–`T032`) and has not started.
+**S4 remains split deliberately:** D7 implements the media pipeline (`T001`–`T013`) and is
+independently approved at `1e3d7c3`; D8 implements protected delivery and entitlement evaluation
+(`T014`–`T032`). D8 is active but S4 is not closed.
 
 | | |
 |---|---|
 | Authoritative directory | [`specs/005-media-and-entitlement-evaluation/`](../../specs/005-media-and-entitlement-evaluation/spec.md) |
-| Active task range | `T001`–`T013` only |
-| State | Remediation is locally validated; independent re-review remains required before D7 or S4 can close |
-| Builder | **Codex**, assigned for D7 on 2026-08-01 under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range) |
-| Reviewer | **Independent reviewer**, separate from the builder; D7 does not close on Codex's assessment |
-| D8 | Not started; remains separately bounded and authorized |
+| Active task range | `T014`–`T032` only |
+| State | D7 independently approved; D8 implementation is active and remains pending separate Tier 3 review |
+| Builder | **Codex**, assigned for D8 on 2026-08-01 under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required) |
+| Reviewer | **Independent Tier 3 reviewer**, separate from the builder; neither D8 nor S4 closes on Codex's assessment |
+| D7 | Approved immutable head `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940` |
+| S6 boundary | The sole owner of production Entitlement creation; D8 evaluates only |
 
 ## S5 — Protected Learning is blocked behind S4
 

@@ -375,6 +375,81 @@ func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
 	}
 }
 
+func TestD8AdminCatalogueModeIsExactVersionAuditedAndFailClosed(t *testing.T) {
+	f := newMediaFixture(t)
+	catalogue, err := NewService(ServiceOptions{
+		DB: f.pool, Store: f.store, Outbox: f.writer, Scanner: f.service.scanner,
+		UploadURLExpiry: 15 * time.Minute, MaxUploadBytes: 10 * 1024 * 1024,
+		OperatingMode: OperatingModeAdminCatalogue,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentType, bytes := uploadBytesForKind(KindResource)
+	if _, err := catalogue.BeginUpload(f.ctx, UploadRequest{
+		OwnerAccountID: f.instructorID, CourseID: f.courseID, Kind: KindResource, ContentType: contentType, SizeBytes: int64(len(bytes)),
+	}); !errors.Is(err, ErrNotAuthorized) {
+		t.Fatalf("Instructor upload in Admin catalogue mode error=%v, want %v", err, ErrNotAuthorized)
+	}
+	if _, err := catalogue.BeginCatalogueLoad(f.ctx, CatalogueLoadRequest{
+		AdminAccountID: f.instructorID, CourseID: f.courseID, Kind: KindResource, ContentType: contentType, SizeBytes: int64(len(bytes)),
+	}); !errors.Is(err, ErrNotAuthorized) {
+		t.Fatalf("non-Admin catalogue load error=%v, want %v", err, ErrNotAuthorized)
+	}
+	ticket, err := catalogue.BeginCatalogueLoad(f.ctx, CatalogueLoadRequest{
+		AdminAccountID: f.adminID, CourseID: f.courseID, Kind: KindResource, ContentType: contentType, SizeBytes: int64(len(bytes)),
+	})
+	if err != nil {
+		t.Fatalf("beginning Admin catalogue load: %v", err)
+	}
+	key := fmt.Sprintf("quarantine/%s/%s/source", f.courseID, ticket.AssetVersionID)
+	f.store.put(key, "catalogue-v1", bytes)
+	sum := sha256.Sum256(bytes)
+	completed, err := catalogue.CompleteCatalogueLoad(f.ctx, CatalogueCompletionRequest{
+		AdminAccountID: f.adminID, AssetVersionID: ticket.AssetVersionID, ProviderEventID: "catalogue-" + ticket.AssetVersionID,
+		StorageObjectKey: key, StorageObjectVersion: "catalogue-v1", ContentType: contentType, SizeBytes: int64(len(bytes)), SHA256Hex: hex.EncodeToString(sum[:]),
+	})
+	if err != nil || completed.State != StateQuarantined {
+		t.Fatalf("catalogue completion=%+v err=%v, want quarantine", completed, err)
+	}
+	duplicate, err := catalogue.CompleteCatalogueLoad(f.ctx, CatalogueCompletionRequest{
+		AdminAccountID: f.adminID, AssetVersionID: ticket.AssetVersionID, ProviderEventID: "catalogue-" + ticket.AssetVersionID,
+		StorageObjectKey: key, StorageObjectVersion: "catalogue-v1", ContentType: contentType, SizeBytes: int64(len(bytes)), SHA256Hex: hex.EncodeToString(sum[:]),
+	})
+	if err != nil || !duplicate.Duplicate || duplicate.State != StateQuarantined {
+		t.Fatalf("duplicate catalogue completion=%+v err=%v", duplicate, err)
+	}
+	if err := catalogue.RecordOutOfBandScanEvidence(f.ctx, OutOfBandScanEvidence{
+		AdminAccountID: f.adminID, AssetVersionID: ticket.AssetVersionID, StorageObjectVersion: "another-version", Method: "manual", Provider: "vendor", Reference: "scan-001",
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cross-version evidence error=%v, want %v", err, ErrConflict)
+	}
+	if err := catalogue.RecordOutOfBandScanEvidence(f.ctx, OutOfBandScanEvidence{
+		AdminAccountID: f.adminID, AssetVersionID: ticket.AssetVersionID, StorageObjectVersion: "catalogue-v1", Method: "manual", Provider: "vendor", Reference: "scan-001",
+	}); err != nil {
+		t.Fatalf("recording exact out-of-band evidence: %v", err)
+	}
+	if got := mediaState(t, f.pool, ticket.AssetVersionID); got != StateReady {
+		t.Fatalf("catalogue asset state=%s, want READY only after exact evidence", got)
+	}
+	var attempts, auditRows, scanEvents, entitlements int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM scan_attempts WHERE asset_version_id = $1::uuid AND storage_object_version = 'catalogue-v1' AND scanner_identity = 'out-of-band:vendor'`, ticket.AssetVersionID).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM audit_events WHERE action = 'MEDIA_OUT_OF_BAND_SCAN_RECORDED' AND target_id = $1`, ticket.AssetVersionID).Scan(&auditRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM outbox_events WHERE event_type = 'media.scan_requested' AND aggregate_id = $1::uuid`, ticket.AssetVersionID).Scan(&scanEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM entitlements`).Scan(&entitlements); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || auditRows != 1 || scanEvents != 0 || entitlements != 0 {
+		t.Fatalf("catalogue evidence attempts=%d audits=%d automatic scans=%d entitlements=%d", attempts, auditRows, scanEvents, entitlements)
+	}
+}
+
 func TestD7ReplacementCreatesAnIndependentImmutableVersion(t *testing.T) {
 	f := newMediaFixture(t)
 	first, firstBytes := f.beginVideoUpload("object-replacement-v1")

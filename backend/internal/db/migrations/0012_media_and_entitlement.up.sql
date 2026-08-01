@@ -30,6 +30,15 @@ ALTER TABLE outbox_events
         source_module IN ('IDENTITY_AND_ACCESS', 'CATALOG_AND_AUTHORING', 'MEDIA_AND_ASSETS')
     );
 
+-- Retirement is a stable graph-identity fact, rather than a revision-row
+-- fact. D8 must evaluate a Section or Lesson retirement consistently across
+-- live and superseded revisions without manufacturing a second graph model.
+ALTER TABLE course_section_identities
+    ADD COLUMN retired_at TIMESTAMPTZ;
+
+ALTER TABLE course_lesson_identities
+    ADD COLUMN retired_at TIMESTAMPTZ;
+
 CREATE TABLE media_outbox_dispatches (
     event_id      UUID PRIMARY KEY REFERENCES outbox_events (id),
     dispatched_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -408,7 +417,7 @@ CREATE TABLE entitlements (
 
 CREATE UNIQUE INDEX entitlements_one_active_student_course
     ON entitlements (student_account_id, course_id)
-    WHERE state = 'ACTIVE';
+    WHERE state = 'ACTIVE' AND scope_kind = 'COURSE';
 CREATE INDEX entitlements_student_course_expiry_idx
     ON entitlements (student_account_id, course_id, access_ends_at);
 

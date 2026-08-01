@@ -1,13 +1,15 @@
 # Gradex MVP Launch Workflow
 
 > Status: Active
-> Last reconciled: **2026-07-29**
+> Last reconciled: **2026-08-01**
 > Public go-live target: **2026-08-15 — hard product-owner decision**, restored under
 > [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
 > which supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)'s
 > September target on the date. D-038 and D-039 are retained below as history, not as forecast
-> Active slice: **S5 — Protected Learning. Planning approved; implementation not started.** S1C and
-> S2 are closed
+> Active slice: **S4 D8 — Entitlement Evaluation and Protected Delivery.** D7 is independently
+> approved; D8 tasks `T014`–`T032` are active under [D-057](../DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required).
+> S5 planning is approved but implementation remains blocked until the full S4 slice independently
+> closes. S1C and S2 are closed.
 > Calendar authority: **[AUGUST_15_EXECUTION_PLAN.md §3](AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan)**,
 > not §6 of this document. §6 is retained as the historical record of the original three-week plan
 > Delivery team: Solo developer. **Seats are assigned per slice and none is currently assigned for S5
@@ -44,8 +46,8 @@ status**, **completed history**, the **active implementation order**, and **defe
 | Slice | State | Blocked on |
 |---|---|---|
 | **S3 — Public catalogue and shell** | Specified, not implemented | S2 (closed) |
-| **S4 — Media pipeline, delivery, and Entitlement evaluation** | Specified, not implemented | S1C, S2 (both closed) |
-| **S5 — Protected Learning** — **the next implementation slice** | **Planning independently approved; implementation not started.** [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md), 78 tasks `T001`–`T078`, **0 complete** | S3, S4 |
+| **S4 — Media pipeline, delivery, and Entitlement evaluation** | D7 independently approved; **D8 (`T014`–`T032`) active**, pending independent Tier 3 review | S1C, S2 (both closed) |
+| **S5 — Protected Learning** | **Planning independently approved; implementation not started.** [`specs/007-protected-learning/`](../../specs/007-protected-learning/spec.md), 78 tasks `T001`–`T078`, **0 complete** | S3, S4 (full independent closure) |
 | **S6 — Course Access Grant** | **Planned, not implemented.** [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) | **S2, S4, and S5** |
 
 **S5 introduces the minimum physical `enrollments` table** required by `progress.enrollment_id`, and

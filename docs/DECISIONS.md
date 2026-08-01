@@ -1657,3 +1657,33 @@ status still pointed at stale earlier work. The product owner explicitly assigne
 S4 D7 queue on 2026-08-01 and retained independent review and the D7/D8 split.
 
 **Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-057 — Codex builds S4 D8 after D7 approval; independent Tier 3 review remains required
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped to **S4 D8 only** — Entitlement evaluation and protected delivery, tasks
+`T014`–`T032`, in
+[`specs/005-media-and-entitlement-evaluation/`](../specs/005-media-and-entitlement-evaluation/tasks.md).
+
+### Seats and boundaries
+
+- **D7 is independently approved** at `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940`. Its approved
+  implementation range remains immutable.
+- **Codex — implementation builder for S4 D8.** This dated product-owner assignment authorizes only
+  `T014`–`T032`. Codex may not approve or close S4.
+- **Independent Tier 3 reviewer — separate review seat.** The reviewer evaluates one frozen exact D8
+  range after implementation. D8 and S4 do not close on the builder's assessment.
+- **S4 remains split into D7 and D8.** D7 is complete and approved; D8 is the active implementation
+  queue. S4 remains open until D8 has an independent closing verdict.
+- **S5 remains blocked until the full S4 slice closes independently.** Its approved planning
+  artifacts remain frozen.
+- **S6 remains the sole owner of production Entitlement creation.** D8 evaluates Entitlements and
+  must not add a producer, invitation workflow, or grant surface.
+
+**Reason:** the product owner independently approved the completed D7 range and explicitly assigned
+Codex the bounded D8 queue on 2026-08-01, while retaining the Tier 3 independent-review requirement
+and the established consumer-before-producer boundary.
+
+**Source:** Product-owner instruction on 2026-08-01.

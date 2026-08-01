@@ -293,7 +293,7 @@ func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionR
 			if commandTag.RowsAffected() != 1 {
 				return ErrConcurrentModification
 			}
-			if err := w.appendTranscodeWork(ctx, tx, version.ID, "scan:"+evidence.attemptID); err != nil {
+			if err := appendTranscodeWork(ctx, tx, w.outbox, version.ID, "scan:"+evidence.attemptID); err != nil {
 				return err
 			}
 			return nil
@@ -340,20 +340,6 @@ func (w *Worker) recordScanFailure(ctx context.Context, version versionRecord, a
 		AssetVersionID: version.ID, StorageObjectVersion: version.Object.StorageObjectVersion,
 		Outcome: outcome, ScannerIdentity: scannerIdentity, Reason: reason,
 	}, StateScanError)
-}
-
-func (w *Worker) appendTranscodeWork(ctx context.Context, tx pgx.Tx, assetVersionID, correlation string) error {
-	eventID := uuid.NewString()
-	_, err := w.outbox.Append(ctx, tx, outbox.Event{
-		ID: eventID, Type: "media.transcode_requested", SchemaVersion: 1,
-		SourceModule: mediaSourceModule, AggregateType: "MEDIA_ASSET_VERSION",
-		AggregateID: assetVersionID, AggregateRevision: 1, CorrelationID: correlation,
-		SafePayload: map[string]any{"asset_version_id": assetVersionID, "operation_id": eventID},
-	}, TranscodeWork{AssetVersionID: assetVersionID, OperationID: eventID})
-	if err != nil {
-		return fmt.Errorf("writing media transcode outbox intent: %w", err)
-	}
-	return nil
 }
 
 // Transcode claims one SCAN_PASSED version, runs the trusted processor, and

@@ -70,6 +70,19 @@ func (r ServiceRole) Valid() bool {
 // role, so that change is one edit with one obvious meaning.
 func (r ServiceRole) RequiresRedis() bool { return true }
 
+// MediaOperatingMode is the explicit LG-014 operating switch. It is typed and
+// startup-validated so an unknown mode cannot silently enable an unsafe path.
+type MediaOperatingMode string
+
+const (
+	MediaOperatingModeScanner        MediaOperatingMode = "SCANNER"
+	MediaOperatingModeAdminCatalogue MediaOperatingMode = "ADMIN_CATALOGUE"
+)
+
+func (m MediaOperatingMode) Valid() bool {
+	return m == MediaOperatingModeScanner || m == MediaOperatingModeAdminCatalogue
+}
+
 // Capability records whether a gated provider surface is available, and when
 // it is not, a safe reason suitable for logs and readiness output.
 //
@@ -230,6 +243,7 @@ type Config struct {
 	ffmpegBinaryPath       string
 	ffprobeBinaryPath      string
 	mediaProcessingTimeout time.Duration
+	mediaOperatingMode     MediaOperatingMode
 
 	authFakeMode bool
 
@@ -305,9 +319,10 @@ func (c *Config) PlaybackURLExpiry() time.Duration { return c.playbackURLExpiry 
 func (c *Config) MaxUploadSizeBytes() int64        { return c.maxUploadSizeBytes }
 func (c *Config) PlaybackTokenSecret() Secret      { return c.playbackTokenSecret }
 
-func (c *Config) FFmpegBinaryPath() string              { return c.ffmpegBinaryPath }
-func (c *Config) FFprobeBinaryPath() string             { return c.ffprobeBinaryPath }
-func (c *Config) MediaProcessingTimeout() time.Duration { return c.mediaProcessingTimeout }
+func (c *Config) FFmpegBinaryPath() string               { return c.ffmpegBinaryPath }
+func (c *Config) FFprobeBinaryPath() string              { return c.ffprobeBinaryPath }
+func (c *Config) MediaProcessingTimeout() time.Duration  { return c.mediaProcessingTimeout }
+func (c *Config) MediaOperatingMode() MediaOperatingMode { return c.mediaOperatingMode }
 
 // AuthFakeMode reports the development-only identity seam. Validation refuses
 // to let it be true in production; see validate.
@@ -399,6 +414,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		ffmpegBinaryPath:       p.str("FFMPEG_BINARY_PATH", "ffmpeg"),
 		ffprobeBinaryPath:      p.str("FFPROBE_BINARY_PATH", "ffprobe"),
 		mediaProcessingTimeout: p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
+		mediaOperatingMode:     MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
 
 		authFakeMode: p.boolean("AUTH_FAKE_MODE", false),
 	}
@@ -703,6 +719,9 @@ func (c *Config) validate(p *parser) {
 
 	if c.maxUploadSizeBytes <= 0 {
 		p.errf("MAX_UPLOAD_SIZE_BYTES must be positive, got %d", c.maxUploadSizeBytes)
+	}
+	if !c.mediaOperatingMode.Valid() {
+		p.errf("MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE, got %q", c.mediaOperatingMode)
 	}
 
 	switch c.logLevel {

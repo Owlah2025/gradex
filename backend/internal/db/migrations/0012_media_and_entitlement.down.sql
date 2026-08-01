@@ -4,6 +4,11 @@ DROP INDEX IF EXISTS entitlements_student_course_expiry_idx;
 DROP INDEX IF EXISTS entitlements_one_active_student_course;
 DROP TABLE IF EXISTS entitlements;
 
+ALTER TABLE IF EXISTS course_lesson_identities
+    DROP COLUMN IF EXISTS retired_at;
+ALTER TABLE IF EXISTS course_section_identities
+    DROP COLUMN IF EXISTS retired_at;
+
 DROP TABLE IF EXISTS media_outbox_dispatches;
 
 DROP TRIGGER IF EXISTS video_renditions_append_only ON video_renditions;

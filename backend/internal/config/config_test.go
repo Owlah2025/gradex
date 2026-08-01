@@ -108,11 +108,26 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if cfg.MediaProcessingTimeout() != 15*time.Minute {
 		t.Errorf("media processing timeout default = %s, want 15m", cfg.MediaProcessingTimeout())
 	}
+	if cfg.MediaOperatingMode() != MediaOperatingModeScanner {
+		t.Errorf("media operating mode default = %q, want SCANNER", cfg.MediaOperatingMode())
+	}
 	if sessions.CSRFKey().IsEmpty() || strings.Contains(
 		fmt.Sprintf("%v", sessions.CSRFKey()), strings.Repeat("s", 32),
 	) {
 		t.Error("session CSRF key is absent or printable")
 	}
+}
+
+func TestMediaOperatingModeIsExplicitAndValidated(t *testing.T) {
+	cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["MEDIA_OPERATING_MODE"] = "ADMIN_CATALOGUE"
+	})
+	if cfg.MediaOperatingMode() != MediaOperatingModeAdminCatalogue {
+		t.Fatalf("catalogue mode = %q", cfg.MediaOperatingMode())
+	}
+	wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["MEDIA_OPERATING_MODE"] = "bypass"
+	}, "MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE")
 }
 
 // Production origin rules. There is no environment in which an http production

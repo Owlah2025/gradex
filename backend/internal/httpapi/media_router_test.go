@@ -19,11 +19,33 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
+	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
 type mediaRouterStore struct {
 	mu           sync.Mutex
 	presignCalls int
+}
+
+// refusingDelivery is a test double for the delivery service boundary, not a
+// replacement router or handler. The real production router remains under
+// test; each protected delivery failure must travel through its one refusal
+// constructor.
+type refusingDelivery struct{ calls int }
+
+func (d *refusingDelivery) IssuePlayback(context.Context, media.PlaybackRequest) (media.PlaybackAuthorization, error) {
+	d.calls++
+	return media.PlaybackAuthorization{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error) {
+	d.calls++
+	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) IssuePreview(context.Context, string) (media.PreviewAuthorization, error) {
+	d.calls++
+	return media.PreviewAuthorization{}, media.ErrProtectedUnavailable
 }
 
 func (s *mediaRouterStore) PresignPutURL(context.Context, string, string, time.Duration) (string, error) {
@@ -52,6 +74,10 @@ func (s *mediaRouterStore) presignCallCount() int {
 }
 
 func mediaRouterUnderTest(t *testing.T, principal identity.Principal) (*gin.Engine, *mediaRouterStore) {
+	return mediaRouterWithDeliveryUnderTest(t, principal, nil)
+}
+
+func mediaRouterWithDeliveryUnderTest(t *testing.T, principal identity.Principal, delivery mediaDeliveryIssuer) (*gin.Engine, *mediaRouterStore) {
 	t.Helper()
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -88,7 +114,7 @@ func mediaRouterUnderTest(t *testing.T, principal identity.Principal) (*gin.Engi
 	if err != nil {
 		t.Fatalf("creating media service: %v", err)
 	}
-	foundation, err := NewMediaFoundation(MediaFoundationOptions{Service: service})
+	foundation, err := NewMediaFoundation(MediaFoundationOptions{Service: service, Delivery: delivery})
 	if err != nil {
 		t.Fatalf("creating media foundation: %v", err)
 	}
@@ -156,5 +182,75 @@ func TestD7ProductionMediaRoutesRequireCapabilitiesBeforeHandlers(t *testing.T) 
 	}
 	if retryStore.presignCallCount() != 0 {
 		t.Fatal("retry handler reached media storage before the admin capability decision")
+	}
+}
+
+func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *testing.T) {
+	student := identity.Principal{
+		AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive,
+	}
+	delivery := &refusingDelivery{}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, student, delivery)
+
+	for _, route := range []string{
+		"POST /api/v1/media/playback-authorizations",
+		"POST /api/v1/media/download-authorizations",
+		"GET /api/v1/media/previews/:id",
+	} {
+		mounted := false
+		for _, actual := range router.Routes() {
+			if actual.Method+" "+actual.Path == route {
+				mounted = true
+				break
+			}
+		}
+		if !mounted {
+			t.Fatalf("production router is missing D8 delivery route %q", route)
+		}
+	}
+
+	type requestCase struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}
+	// The production delivery service turns every typed evaluator denial into
+	// ErrProtectedUnavailable. These requests prove the live router maps the
+	// resulting cases — including the absent target case — to fixed wire bytes.
+	cases := []requestCase{
+		{"non-existent", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000001","asset_version_id":"00000000-0000-0000-0000-000000000001"}`},
+		{"expired", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000002","asset_version_id":"00000000-0000-0000-0000-000000000002"}`},
+		{"revoked", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000003","asset_version_id":"00000000-0000-0000-0000-000000000003"}`},
+		{"out-of-scope", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000004","asset_version_id":"00000000-0000-0000-0000-000000000004"}`},
+		{"account-suspended", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000005","asset_version_id":"00000000-0000-0000-0000-000000000005"}`},
+		{"course-emergency-suspended", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000006","asset_version_id":"00000000-0000-0000-0000-000000000006"}`},
+		{"retired-ineligible", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000007","asset_version_id":"00000000-0000-0000-0000-000000000007"}`},
+	}
+	var wantBody []byte
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s, want uniform 404", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); got != problem.ContentType {
+				t.Fatalf("content type=%q, want %q", got, problem.ContentType)
+			}
+			if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Location") != "" || rec.Header().Get("X-Request-ID") != "" {
+				t.Fatalf("uniform denial headers=%v", rec.Header())
+			}
+			if wantBody == nil {
+				wantBody = append([]byte(nil), rec.Body.Bytes()...)
+			} else if string(wantBody) != rec.Body.String() {
+				t.Fatalf("response body differs from non-existent denial\nwant=%s\n got=%s", wantBody, rec.Body.String())
+			}
+		})
+	}
+	if delivery.calls != len(cases) {
+		t.Fatalf("delivery issuer calls=%d, want %d", delivery.calls, len(cases))
 	}
 }

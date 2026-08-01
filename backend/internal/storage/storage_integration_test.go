@@ -86,3 +86,49 @@ func TestPresignPutAndGet_RealMinIO(t *testing.T) {
 		t.Fatalf("round-tripped content mismatch: got %q, want %q", got, body)
 	}
 }
+
+func TestProtectedMediaObjectsRejectUnsignedMinIOReads(t *testing.T) {
+	ctx := context.Background()
+	c, err := New(ctx, testOptions())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	keys := []string{
+		"integration-protected/hls/master.m3u8",
+		"integration-protected/hls/720p/segment-0001.ts",
+		"integration-protected/resources/guide.pdf",
+		"integration-protected/labs/starter.zip",
+		"integration-protected/previews/preview.m3u8",
+	}
+	for _, key := range keys {
+		if err := c.PutObject(ctx, key, []byte("private "+key), "application/octet-stream"); err != nil {
+			t.Fatalf("PutObject(%q): %v", key, err)
+		}
+		unsigned, err := http.NewRequest(http.MethodGet, "http://localhost:9000/gradex-video/"+key, nil)
+		if err != nil {
+			t.Fatalf("building unsigned GET for %q: %v", key, err)
+		}
+		response, err := httpClient.Do(unsigned)
+		if err != nil {
+			t.Fatalf("unsigned GET for %q: %v", key, err)
+		}
+		_, _ = io.Copy(io.Discard, response.Body)
+		response.Body.Close()
+		if response.StatusCode < http.StatusBadRequest || response.StatusCode == http.StatusOK {
+			t.Fatalf("unsigned GET for private %q returned %d, want refusal", key, response.StatusCode)
+		}
+		presigned, err := c.PresignGetURL(ctx, key, time.Minute)
+		if err != nil {
+			t.Fatalf("PresignGetURL(%q): %v", key, err)
+		}
+		allowed, err := httpClient.Get(presigned)
+		if err != nil {
+			t.Fatalf("signed GET for %q: %v", key, err)
+		}
+		_, _ = io.Copy(io.Discard, allowed.Body)
+		allowed.Body.Close()
+		if allowed.StatusCode != http.StatusOK {
+			t.Fatalf("signed GET for %q returned %d, want 200", key, allowed.StatusCode)
+		}
+	}
+}

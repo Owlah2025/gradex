@@ -208,6 +208,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		"GET /api/v1/media/assets/:id",
 		"POST /api/v1/media/assets/:id/retries",
 	}
+	requiredD8Routes := []string{
+		"POST /api/v1/media/playback-authorizations",
+		"POST /api/v1/media/download-authorizations",
+		"GET /api/v1/media/previews/:id",
+	}
 	mounted := make(map[string]bool)
 	for _, route := range routes {
 		mounted[route.Method+" "+route.Path] = true
@@ -218,6 +223,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	for _, route := range requiredD7Routes {
 		if !mounted[route] {
 			t.Fatalf("production router is missing D7 route %q", route)
+		}
+	}
+	for _, route := range requiredD8Routes {
+		if !mounted[route] {
+			t.Fatalf("production router is missing D8 route %q", route)
 		}
 	}
 

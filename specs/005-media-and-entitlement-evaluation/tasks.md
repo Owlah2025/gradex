@@ -2,11 +2,11 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Builder**: Codex under [D-056](../../docs/DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
+**Builder**: Codex under [D-057](../../docs/DECISIONS.md#d-057--codex-builds-s4-d8-after-d7-approval-independent-tier-3-review-remains-required) for D8 (`T014`–`T032`).
 **Reviewer**: Independent reviewer, separate from the builder. **A builder never closes its own slice.**
 
-**D7 remains pending independent re-review.** D8 does not begin until the separate D7 range has an
-independent closing verdict.
+**D7 is independently approved** at `1e3d7c317e3552012b6c73c1f2a7522b2e6b5940`. **D8 is active and
+remains pending independent Tier 3 review.** S4 is not closed until that separate D8 verdict.
 
 **Split across two implementation days** per
 [§3](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan): **D7** = Phases 1–3
@@ -83,24 +83,24 @@ delivery before `READY`.
 
 ## Phase 4 — Entitlement evaluation, and the absence of creation
 
-- [ ] T014 `backend/internal/entitlement/doc.go` — boundary: **EVALUATION ONLY. Creation is S6.** *(D-045 removed S7)*
-- [ ] T015 Implement the grant record: scope, `original_access_ends_at`, effective `access_ends_at`,
+- [X] T014 `backend/internal/entitlement/doc.go` — boundary: **EVALUATION ONLY. Creation is S6.** *(D-045 removed S7)*
+- [X] T015 Implement the grant record: scope, `original_access_ends_at`, effective `access_ends_at`,
       revocation state, and its **typed `grant_source`** with the originating approved course-access
       invitation where the source is `MANUAL_INVITATION` (BR-021, BR-026, BR-028, BR-113). **No Order,
       payment, or checkout reference** — D-045 removed in-platform payments and replaced Order
       provenance with the grant-source discriminator; S6 creates the record, S4 evaluates it
-- [ ] T016 Implement the **single** `Evaluate(student, lesson, now) → Decision` in `evaluate.go`,
+- [X] T016 Implement the **single** `Evaluate(student, lesson, now) → Decision` in `evaluate.go`,
       answering scope, expiry, emergency suspension, and retirement eligibility in that order.
       **No handler compares an expiry.** Two slices in a row were rejected for a control that existed
       but was not the only one
-- [ ] T017 Implement scope in `scope.go`: Course grant covers every contained Section; Section grant
+- [X] T017 Implement scope in `scope.go`: Course grant covers every contained Section; Section grant
       covers only its Section; overlapping grants are a **union** and stay independent (BR-024)
-- [ ] T018 **Export no creation surface.** No `Create`, no `Grant`, no exported constructor that
+- [X] T018 **Export no creation surface.** No `Create`, no `Grant`, no exported constructor that
       writes a grant. The package's public API makes creation unavailable rather than discouraged
       (FR-017)
-- [ ] T019 Seed mechanism in `seed_nonprod.go` behind `//go:build !production` — **absent from the
+- [X] T019 Seed mechanism in `seed_nonprod.go` behind `//go:build !production` — **absent from the
       production binary**, not disabled within it (FR-018)
-- [ ] T020 **Assert the exclusion.** Build with production constraints and assert the seed symbol is
+- [X] T020 **Assert the exclusion.** Build with production constraints and assert the seed symbol is
       unreachable. T018 and T019 are design; **this is what survives the next contributor**
 
 **Checkpoint B — MANDATORY GATE, blocks all delivery work.** A production build contains no path that
@@ -112,34 +112,34 @@ can mint an Entitlement. Mutation: remove the build tag from `seed_nonprod.go` �
 
 ## Phase 5 — Protected delivery
 
-- [ ] T021 Entitlement checked **before every** signed issuance and **every** download — per download,
+- [X] T021 Entitlement checked **before every** signed issuance and **every** download — per download,
       not per session (BR-023, BR-063)
-- [ ] T022 Playback access: short-lived, **session-scoped**, re-issued per playback session.
+- [X] T022 Playback access: short-lived, **session-scoped**, re-issued per playback session.
       Deliberately **not** single-use — HLS re-requests segments on seek, rebuffer, and rendition
       switch (BR-100)
-- [ ] T023 Authorize only the **exact** approved or historically qualifying Asset Version (BR-050)
-- [ ] T024 Protected Resource and Lab Material downloads; Lab Material URLs MAY be single-use
-- [ ] T025 Opaque per-purchase buyer tag on **Lab Materials only**, never Lesson Resources. Not the
+- [X] T023 Authorize only the **exact** approved or historically qualifying Asset Version (BR-050)
+- [X] T024 Protected Resource and Lab Material downloads; Lab Material URLs MAY be single-use
+- [X] T025 Opaque per-purchase buyer tag on **Lab Materials only**, never Lesson Resources. Not the
       account id, not the email, not a reversible encoding of either (BR-103)
-- [ ] T026 Public preview delivery — available only after validation, quarantine, scan success, and
+- [X] T026 Public preview delivery — available only after validation, quarantine, scan success, and
       Instructor publication confirmation (BR-144); no protected content reachable from it (BR-143)
-- [ ] T027 **No object is publicly readable.** Verify by direct unsigned request to storage (SC-006)
-- [ ] T028 A redirect never grants access; authorization is server-side on every issuance (FR-025)
+- [X] T027 **No object is publicly readable.** Verify by direct unsigned request to storage (SC-006)
+- [X] T028 A redirect never grants access; authorization is server-side on every issuance (FR-025)
 
 ## Phase 6 — Denial uniformity and the LG-014 operating mode
 
-- [ ] T029 **Checkpoint D.** All six denial causes — expired, revoked, out-of-scope, Account
+- [X] T029 **Checkpoint D.** All six denial causes — expired, revoked, out-of-scope, Account
       suspended, emergency-suspended, retired — return a response **byte-identical** to the response
       for an asset that does not exist. Internally typed and audited; externally one refusal. A
       distinguishable denial is a content inventory (BR-023, BR-050, FR-022)
-- [ ] T030 Implement FR-026: the documented operating mode with public upload disabled and Admin-only
+- [X] T030 Implement FR-026: the documented operating mode with public upload disabled and Admin-only
       catalogue loading with recorded out-of-band scanning. **Build the switch now** — it is the
       planned response to an unresolved `LG-014`, not an improvisation for August 13
-- [ ] T031 Prove the mid-playback expiry boundary: an issued signature stays valid for its short
+- [X] T031 Prove the mid-playback expiry boundary: an issued signature stays valid for its short
       lifetime, no new access is issued, and the exposure window is bounded by **signature lifetime**.
       Do not assert instant revocation of an issued presigned URL — that is not achievable and a test
       claiming it would be false
-- [ ] T032 Full gate suite per [quickstart.md](quickstart.md), including a **clean** frontend build
+- [X] T032 Full gate suite per [quickstart.md](quickstart.md), including a **clean** frontend build
 
 ---
 
