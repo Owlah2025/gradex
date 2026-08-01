@@ -92,8 +92,6 @@ func main() {
 			log.Fatalf("building session authenticator: %v", err)
 		}
 	}
-	entitlements := auth.NewFakeEntitlementChecker(pool)
-
 	reporter := health.New(cfg.ReadinessTimeout(),
 		health.Check{
 			Name:     "postgres",
@@ -124,9 +122,7 @@ func main() {
 		cfg,
 		logger,
 		reporter,
-		nil,
 		authenticator,
-		entitlements,
 		principals,
 		routerOptions...,
 	)

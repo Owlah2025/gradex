@@ -28,6 +28,7 @@ them.
 | Field | Notes |
 |---|---|
 | asset_version_id | |
+| attempt_number + work_id | A retry allocates a new append-only attempt for the same immutable object; one committed scan-work identity replays idempotently |
 | storage_object_version | **Repeated deliberately.** A result is valid only for the object version it scanned |
 | outcome | `PASSED`, `FAILED`, `ERROR` — no `SKIPPED`, no `NOT_CONFIGURED` |
 | scanner_identity, scanned_at | Which scanner said so, and when |
@@ -36,8 +37,18 @@ them.
 a pass, and delivery requires a pass. That is the whole fail-closed guarantee expressed in the schema
 rather than in a handler.
 
-A unique constraint on `(asset_version_id, storage_object_version)` makes duplicate scan callbacks
-harmless and makes a stale result for a replaced object structurally unable to satisfy delivery.
+A unique constraint on `(asset_version_id, storage_object_version, attempt_number)` preserves each
+historical retry attempt, while unique `work_id` makes duplicate delivery of one committed scan job
+idempotent. The exact-version foreign key and the authoritative successful-attempt reference prevent
+a stale result for replacement bytes from satisfying delivery.
+
+### Legacy-converted asset posture
+
+Legacy-converted rows remain deliberately **fail-closed and non-deliverable**. Migration `0012` does
+not manufacture scan work for historical bytes, and historical `READY`, `PROCESSING`, or publication
+flags are not grandfathered into delivery evidence. An Instructor must intentionally re-upload bytes,
+or a future separately approved reprocessing procedure must be introduced; D7 provides neither an
+automatic scan nor an automatic delivery path for those historical objects.
 
 ### Entitlement — the grant record S6 will later create
 

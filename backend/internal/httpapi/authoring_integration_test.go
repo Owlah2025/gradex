@@ -188,8 +188,7 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 
 	principals := dbPrincipalResolver{pool: pool}
 
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, sessionFoundation.authenticator,
-		fakeEntitlements{allowed: true}, principals,
+	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
 		WithCatalogFoundation(catalogFoundation),
 	)
@@ -230,9 +229,7 @@ func buildPublicCatalogRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 		cfg,
 		logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info")),
 		reporter,
-		fakeService{},
 		fakeAuth{},
-		fakeEntitlements{allowed: true},
 		fixedPrincipals{},
 		WithPublicCatalogFoundation(foundation),
 	)

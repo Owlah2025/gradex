@@ -125,12 +125,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	reporter := health.New(time.Second)
 
 	authenticator := auth.NewFakeAuthenticator()
-	entitlements := auth.NewFakeEntitlementChecker(pool)
 	principals := identity.NewDBPrincipalResolver(pool)
 
 	routerOptions := append([]httpapi.RouterOption(nil), pf.Options...)
 	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
-	r, err := httpapi.NewRouter(cfg, logger, reporter, nil, authenticator, entitlements, principals, routerOptions...)
+	r, err := httpapi.NewRouter(cfg, logger, reporter, authenticator, principals, routerOptions...)
 	if err != nil {
 		t.Fatalf("httpapi.NewRouter: %v", err)
 	}

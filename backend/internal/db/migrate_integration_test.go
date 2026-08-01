@@ -228,6 +228,108 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 }
 
+// TestMediaMigrationRollbackHandlesD7Data proves 0012 can be rolled back from
+// a database that actually contains its owned media rows and committed outbox
+// work. The pre-D7 source-module constraint cannot be restored while a D7
+// MEDIA_AND_ASSETS event remains, so this exercises the required cleanup order.
+func TestMediaMigrationRollbackHandlesD7Data(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Migrate(uint(CatalogSearchSchemaVersion)); err != nil {
+		t.Fatalf("migrating to pre-D7 schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	const (
+		instructorID = "11111111-1111-1111-1111-111111111111"
+		courseID     = "22222222-2222-2222-2222-222222222222"
+		assetID      = "33333333-3333-3333-3333-333333333333"
+		versionID    = "44444444-4444-4444-4444-444444444444"
+		eventID      = "55555555-5555-5555-5555-555555555555"
+	)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, locale, email_verified_at)
+		VALUES ($1::uuid, 'd7-rollback@example.test', 'd7-rollback@example.test', 'INSTRUCTOR', 'ACTIVE', 'D7 rollback', 'en', now())
+	`, instructorID); err != nil {
+		t.Fatalf("seeding D7 rollback instructor: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle)
+		VALUES ($1::uuid, $2::uuid, 'DRAFT')
+	`, courseID, instructorID); err != nil {
+		t.Fatalf("seeding D7 rollback course: %v", err)
+	}
+	if err := m.Migrate(uint(MediaAndEntitlementSchemaVersion)); err != nil {
+		t.Fatalf("migrating up to 0012: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'RESOURCE', $2::uuid, $3::uuid, 'PROTECTED')
+	`, assetID, instructorID, courseID); err != nil {
+		t.Fatalf("inserting representative media asset: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes
+		) VALUES ($1::uuid, $2::uuid, 'RESOURCE', 'UPLOADED', 'quarantine/rollback/source', 'object-v1', 'application/pdf', 1)
+	`, versionID, assetID); err != nil {
+		t.Fatalf("inserting representative media version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO outbox_events (
+			id, event_type, schema_version, source_module, aggregate_type, aggregate_id,
+			aggregate_revision, safe_payload, correlation_id
+		) VALUES ($1::uuid, 'media.scan_requested', 1, 'MEDIA_AND_ASSETS', 'MEDIA_ASSET_VERSION',
+			$2::uuid, 1, '{}'::jsonb, 'd7-rollback')
+	`, eventID, versionID); err != nil {
+		t.Fatalf("inserting representative D7 outbox event: %v", err)
+	}
+
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back 0012 with representative D7 data: %v", err)
+	}
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after 0012 down: %v", err)
+	}
+	if state.Version != CatalogSearchSchemaVersion || state.Dirty {
+		t.Fatalf("schema after 0012 down = %+v, want clean version %d", state, CatalogSearchSchemaVersion)
+	}
+	var staleEvents int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE source_module = 'MEDIA_AND_ASSETS'`).Scan(&staleEvents); err != nil {
+		t.Fatalf("checking rollback outbox cleanup: %v", err)
+	}
+	if staleEvents != 0 {
+		t.Fatalf("MEDIA_AND_ASSETS outbox rows survived rollback: %d", staleEvents)
+	}
+	var sourceCheck string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'outbox_events_source_module'`).Scan(&sourceCheck); err != nil {
+		t.Fatalf("reading restored source-module constraint: %v", err)
+	}
+	if strings.Contains(sourceCheck, "MEDIA_AND_ASSETS") {
+		t.Fatalf("pre-D7 source-module constraint still accepts media rows: %s", sourceCheck)
+	}
+
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying 0012 after data-bearing rollback: %v", err)
+	}
+	state, err = ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after 0012 up: %v", err)
+	}
+	if state.Version != MediaAndEntitlementSchemaVersion || state.Dirty {
+		t.Fatalf("schema after 0012 up = %+v, want clean version %d", state, MediaAndEntitlementSchemaVersion)
+	}
+	if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'outbox_events_source_module'`).Scan(&sourceCheck); err != nil {
+		t.Fatalf("reading re-applied source-module constraint: %v", err)
+	}
+	if !strings.Contains(sourceCheck, "MEDIA_AND_ASSETS") {
+		t.Fatalf("re-applied source-module constraint does not accept media rows: %s", sourceCheck)
+	}
+}
+
 func TestCatalogSearchMigrationSupportsCleanInstallAndUpgrade(t *testing.T) {
 	const input = "  أإآٱ ىة ٠١٢٣٤٥٦٧٨٩ مَدْرَسـٌ  MIXED\tText  "
 	const wantNormalized = "اااا يه 0123456789 مدرس mixed text"

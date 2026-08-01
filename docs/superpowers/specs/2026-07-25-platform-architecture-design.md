@@ -428,10 +428,10 @@ This platform boundary supersedes none of the known gaps recorded in the
 work. Course revision, Entitlement, Admin preview, and public-preview behaviors remain governed by
 the canonical rules. *(BR-017/023/050/081/143/144)*
 
-The current [`CompleteUpload` implementation](../../../backend/internal/video/upload.go) commits
-video state and then enqueues directly to asynq. The July 28 delivery foundation must migrate that
-handoff to the transactional-outbox/dispatcher path, with reconciliation for any transition period.
-Preserving the working video behavior does not preserve this non-transactional enqueue boundary.
+The current [`CompleteUpload` implementation](../../../backend/internal/media/service.go) commits
+quarantine state and a durable scan outbox intent atomically. The retired legacy video path formerly
+enqueued directly to asynq; D7 replaced that handoff with the committed-outbox dispatcher, so no
+transition-period direct enqueue path remains.
 
 ## 10. Failure and Recovery Behavior
 

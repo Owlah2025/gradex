@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,18 +18,25 @@ import (
 // between enqueue and receipt recording is safe because task IDs are the
 // immutable outbox IDs and worker operations are idempotent.
 type Dispatcher struct {
-	db    *pgxpool.Pool
-	queue *asynq.Client
+	db                *pgxpool.Pool
+	queue             *asynq.Client
+	processingTimeout time.Duration
 }
 
-func NewDispatcher(db *pgxpool.Pool, client *asynq.Client) (*Dispatcher, error) {
+func NewDispatcher(db *pgxpool.Pool, client *asynq.Client, processingTimeout time.Duration) (*Dispatcher, error) {
 	if db == nil {
 		return nil, errors.New("media dispatcher database is required")
 	}
 	if client == nil {
 		return nil, errors.New("media dispatcher queue client is required")
 	}
-	return &Dispatcher{db: db, queue: client}, nil
+	if processingTimeout == 0 {
+		processingTimeout = DefaultProcessingTimeout
+	}
+	if processingTimeout <= 0 {
+		return nil, errors.New("media dispatcher processing timeout must be positive")
+	}
+	return &Dispatcher{db: db, queue: client, processingTimeout: processingTimeout}, nil
 }
 
 // DispatchPending publishes at most limit committed media intents. It is
@@ -78,7 +86,11 @@ func (d *Dispatcher) dispatchEvent(ctx context.Context, eventID, eventType strin
 	if !json.Valid(payload) {
 		return fmt.Errorf("media outbox event %s has invalid task payload", eventID)
 	}
-	_, err := d.queue.EnqueueContext(ctx, asynq.NewTask(taskType, payload, asynq.MaxRetry(3)), asynq.TaskID(eventID))
+	options := []asynq.Option{asynq.MaxRetry(3), asynq.TaskID(eventID)}
+	if taskType == queue.TypeMediaTranscode {
+		options = append(options, asynq.Timeout(d.processingTimeout))
+	}
+	_, err := d.queue.EnqueueContext(ctx, asynq.NewTask(taskType, payload, options...))
 	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
 		return fmt.Errorf("dispatching media outbox event %s: %w", eventID, err)
 	}

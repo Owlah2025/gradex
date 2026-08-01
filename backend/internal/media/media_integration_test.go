@@ -35,8 +35,9 @@ const (
 )
 
 type integrationObjectStore struct {
-	mu      sync.RWMutex
-	objects map[string][]byte
+	mu        sync.RWMutex
+	objects   map[string][]byte
+	hashCalls int
 }
 
 func newIntegrationObjectStore() *integrationObjectStore {
@@ -80,12 +81,27 @@ func (s *integrationObjectStore) DownloadPrefixVersion(_ context.Context, key, v
 }
 
 func (s *integrationObjectStore) HashObjectVersion(_ context.Context, key, version string) (string, error) {
+	s.mu.Lock()
+	s.hashCalls++
+	s.mu.Unlock()
 	bytes, ok := s.object(key, version)
 	if !ok {
 		return "", errors.New("object not found")
 	}
 	sum := sha256.Sum256(bytes)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func (s *integrationObjectStore) resetHashCalls() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hashCalls = 0
+}
+
+func (s *integrationObjectStore) hashCallCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hashCalls
 }
 
 type integrationScannerFunc func(context.Context, ObjectVersion) (ScanObservation, error)
@@ -200,13 +216,12 @@ func newMediaFixture(t *testing.T) *mediaFixture {
 	return &mediaFixture{t: t, ctx: ctx, pool: pool, store: service.store.(*integrationObjectStore), writer: writer, service: service, instructorID: instructorID, adminID: adminID, courseID: courseID}
 }
 
-func (f *mediaFixture) beginVideoUpload(eventVersion string) (CompleteUploadRequest, []byte) {
+func (f *mediaFixture) beginUpload(kind AssetKind, eventVersion string) (CompleteUploadRequest, []byte) {
 	f.t.Helper()
-	bytes := append([]byte{0, 0, 0, 24}, []byte("ftypisom")...)
-	bytes = append(bytes, make([]byte, 16)...)
+	contentType, bytes := uploadBytesForKind(kind)
 	ticket, err := f.service.BeginUpload(f.ctx, UploadRequest{
-		OwnerAccountID: f.instructorID, CourseID: f.courseID, Kind: KindVideo,
-		Filename: "lesson.mp4", ContentType: "video/mp4", SizeBytes: int64(len(bytes)),
+		OwnerAccountID: f.instructorID, CourseID: f.courseID, Kind: kind,
+		ContentType: contentType, SizeBytes: int64(len(bytes)),
 	})
 	if err != nil {
 		f.t.Fatalf("beginning video upload: %v", err)
@@ -217,9 +232,22 @@ func (f *mediaFixture) beginVideoUpload(eventVersion string) (CompleteUploadRequ
 	return CompleteUploadRequest{
 		OwnerAccountID: f.instructorID, AssetVersionID: ticket.AssetVersionID,
 		ProviderEventID: "upload-" + ticket.AssetVersionID, StorageObjectKey: key,
-		StorageObjectVersion: eventVersion, ContentType: "video/mp4", SizeBytes: int64(len(bytes)),
+		StorageObjectVersion: eventVersion, ContentType: contentType, SizeBytes: int64(len(bytes)),
 		SHA256Hex: hex.EncodeToString(sum[:]),
 	}, bytes
+}
+
+func (f *mediaFixture) beginVideoUpload(eventVersion string) (CompleteUploadRequest, []byte) {
+	f.t.Helper()
+	return f.beginUpload(KindVideo, eventVersion)
+}
+
+func uploadBytesForKind(kind AssetKind) (string, []byte) {
+	if kind == KindVideo {
+		bytes := append([]byte{0, 0, 0, 24}, []byte("ftypisom")...)
+		return "video/mp4", append(bytes, make([]byte, 16)...)
+	}
+	return "application/pdf", []byte("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n")
 }
 
 func mediaState(t *testing.T, pool *pgxpool.Pool, versionID string) AssetVersionState {
@@ -229,6 +257,21 @@ func mediaState(t *testing.T, pool *pgxpool.Pool, versionID string) AssetVersion
 		t.Fatalf("reading media state: %v", err)
 	}
 	return state
+}
+
+func scanWorkID(t *testing.T, pool *pgxpool.Pool, versionID string, offset int) string {
+	t.Helper()
+	var workID string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT id::text
+		FROM outbox_events
+		WHERE event_type = 'media.scan_requested' AND aggregate_id = $1::uuid
+		ORDER BY occurred_at, id
+		OFFSET $2 LIMIT 1
+	`, versionID, offset).Scan(&workID); err != nil {
+		t.Fatalf("loading scan work ID %d: %v", offset, err)
+	}
+	return workID
 }
 
 func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
@@ -345,7 +388,7 @@ func TestD7ReplacementCreatesAnIndependentImmutableVersion(t *testing.T) {
 
 	ticket, err := f.service.BeginUpload(f.ctx, UploadRequest{
 		OwnerAccountID: f.instructorID, CourseID: f.courseID, LogicalAssetID: logicalAssetID,
-		Kind: KindVideo, Filename: "lesson-replacement.mp4", ContentType: "video/mp4", SizeBytes: int64(len(firstBytes)),
+		Kind: KindVideo, ContentType: "video/mp4", SizeBytes: int64(len(firstBytes)),
 	})
 	if err != nil {
 		t.Fatalf("beginning replacement upload: %v", err)
@@ -437,6 +480,320 @@ func TestD7CallbacksConvergeUnderReplayAndConcurrency(t *testing.T) {
 	}
 }
 
+func TestD7CompletionAuthorizesBeforeFullObjectHash(t *testing.T) {
+	f := newMediaFixture(t)
+	request, _ := f.beginVideoUpload("object-authorization-order")
+
+	unauthorized := request
+	unauthorized.OwnerAccountID = uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, locale, email_verified_at)
+		VALUES ($1::uuid, $2, $2, 'INSTRUCTOR', 'ACTIVE', 'Other Instructor', 'en', now())
+	`, unauthorized.OwnerAccountID, unauthorized.OwnerAccountID+"@example.test"); err != nil {
+		t.Fatalf("seeding unauthorized instructor: %v", err)
+	}
+	if _, err := f.service.CompleteUpload(f.ctx, unauthorized); !errors.Is(err, ErrNotAuthorized) {
+		t.Fatalf("unauthorized completion error = %v, want ErrNotAuthorized", err)
+	}
+	if calls := f.store.hashCallCount(); calls != 0 {
+		t.Fatalf("unauthorized completion performed %d full object hashes, want 0", calls)
+	}
+
+	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatalf("valid completion: %v", err)
+	}
+	f.store.resetHashCalls()
+	invalidState := request
+	invalidState.ProviderEventID = request.ProviderEventID + "-new"
+	if _, err := f.service.CompleteUpload(f.ctx, invalidState); !errors.Is(err, ErrConflict) {
+		t.Fatalf("completed-version callback error = %v, want ErrConflict", err)
+	}
+	if calls := f.store.hashCallCount(); calls != 0 {
+		t.Fatalf("invalid-state completion performed %d full object hashes, want 0", calls)
+	}
+}
+
+// Regression F-01: a retry must add immutable evidence instead of conflicting
+// with the failed scan attempt for the same exact object version.
+func TestD7AdminRetryPreservesExactVersionScanHistoryAndConverges(t *testing.T) {
+	f := newMediaFixture(t)
+	request, _ := f.beginVideoUpload("object-retry-error-pass")
+	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatalf("completion: %v", err)
+	}
+
+	errorScanner := mustScanner(t, integrationScannerFunc(func(context.Context, ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{}, errors.New("scanner transport failure")
+	}))
+	worker, err := NewWorker(WorkerOptions{
+		DB: f.pool, Scanner: errorScanner,
+		Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+			return TranscodeResult{}, errors.New("processor must not run before scan passes")
+		}),
+		Outbox: f.writer,
+	})
+	if err != nil {
+		t.Fatalf("constructing error scanner worker: %v", err)
+	}
+	firstWorkID := scanWorkID(t, f.pool, request.AssetVersionID, 0)
+	if err := worker.scan(f.ctx, request.AssetVersionID, firstWorkID); err == nil {
+		t.Fatal("scanner error unexpectedly returned success")
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanError {
+		t.Fatalf("state after first scan = %q, want SCAN_ERROR", got)
+	}
+
+	var firstAttemptID, firstOutcome, firstReason string
+	var firstAttemptNumber int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT id::text, attempt_number, outcome, COALESCE(reason, '')
+		FROM scan_attempts WHERE work_id = $1
+	`, firstWorkID).Scan(&firstAttemptID, &firstAttemptNumber, &firstOutcome, &firstReason); err != nil {
+		t.Fatalf("loading first scan attempt: %v", err)
+	}
+	if firstAttemptNumber != 1 || firstOutcome != string(ScanError) || firstReason == "" {
+		t.Fatalf("first attempt = number=%d outcome=%s reason=%q; want 1/ERROR/non-empty", firstAttemptNumber, firstOutcome, firstReason)
+	}
+
+	if err := f.service.Retry(f.ctx, RetryRequest{AssetVersionID: request.AssetVersionID, AdminAccountID: f.adminID, ActorDescriptor: "d7-admin"}); err != nil {
+		t.Fatalf("admin retry: %v", err)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateQuarantined {
+		t.Fatalf("state after retry = %q, want QUARANTINED", got)
+	}
+
+	passScanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{AssetVersionID: object.AssetVersionID, StorageObjectVersion: object.StorageObjectVersion, Outcome: ScanPassed, ScannerIdentity: "passing-retry-scanner"}, nil
+	}))
+	worker, err = NewWorker(WorkerOptions{
+		DB: f.pool, Scanner: passScanner,
+		Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+			return TranscodeResult{}, errors.New("processing is dispatched separately")
+		}),
+		Outbox: f.writer,
+	})
+	if err != nil {
+		t.Fatalf("constructing passing scanner worker: %v", err)
+	}
+	secondWorkID := scanWorkID(t, f.pool, request.AssetVersionID, 1)
+	if secondWorkID == firstWorkID {
+		t.Fatal("admin retry reused its prior scan work identity")
+	}
+	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID); err != nil {
+		t.Fatalf("passing retry scan: %v", err)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanPassed {
+		t.Fatalf("state after passing retry = %q, want SCAN_PASSED", got)
+	}
+
+	var attemptCount int
+	var secondAttemptID, secondOutcome, persistedFirstReason string
+	var secondAttemptNumber int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT count(*) FROM scan_attempts WHERE asset_version_id = $1::uuid
+	`, request.AssetVersionID).Scan(&attemptCount); err != nil {
+		t.Fatalf("counting scan attempts: %v", err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT id::text, attempt_number, outcome
+		FROM scan_attempts WHERE work_id = $1
+	`, secondWorkID).Scan(&secondAttemptID, &secondAttemptNumber, &secondOutcome); err != nil {
+		t.Fatalf("loading second scan attempt: %v", err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT COALESCE(reason, '') FROM scan_attempts WHERE id = $1::uuid`, firstAttemptID).Scan(&persistedFirstReason); err != nil {
+		t.Fatalf("reloading immutable first scan evidence: %v", err)
+	}
+	if attemptCount != 2 || secondAttemptNumber != 2 || secondOutcome != string(ScanPassed) || persistedFirstReason != firstReason {
+		t.Fatalf("attempt history = count=%d second=%s/%d first_reason=%q; want 2/PASSED/2/%q", attemptCount, secondOutcome, secondAttemptNumber, persistedFirstReason, firstReason)
+	}
+	if secondAttemptID == firstAttemptID {
+		t.Fatal("retry reused the prior immutable scan attempt")
+	}
+	var successfulAttempt string
+	if err := f.pool.QueryRow(f.ctx, `SELECT successful_scan_attempt_id::text FROM media_asset_versions WHERE id = $1::uuid`, request.AssetVersionID).Scan(&successfulAttempt); err != nil {
+		t.Fatalf("loading authoritative successful scan reference: %v", err)
+	}
+	if successfulAttempt != secondAttemptID {
+		t.Fatalf("successful scan reference = %q, want retry attempt %q", successfulAttempt, secondAttemptID)
+	}
+	var transcodeEvents int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT count(*) FROM outbox_events
+		WHERE event_type = 'media.transcode_requested' AND aggregate_id = $1::uuid
+	`, request.AssetVersionID).Scan(&transcodeEvents); err != nil {
+		t.Fatalf("counting transcode events: %v", err)
+	}
+	if transcodeEvents != 1 {
+		t.Fatalf("transcode events after successful retry = %d, want 1", transcodeEvents)
+	}
+	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID); err != nil {
+		t.Fatalf("replaying second scan work: %v", err)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got == StateScanning {
+		t.Fatal("replayed successful scan left the asset in SCANNING")
+	}
+
+	var storageKey, storageVersion string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT storage_object_key, storage_object_version
+		FROM media_asset_versions WHERE id = $1::uuid
+	`, request.AssetVersionID).Scan(&storageKey, &storageVersion); err != nil {
+		t.Fatalf("loading exact object identity for conflict test: %v", err)
+	}
+	tx, err := f.pool.Begin(f.ctx)
+	if err != nil {
+		t.Fatalf("beginning same-work conflict transaction: %v", err)
+	}
+	defer tx.Rollback(f.ctx)
+	_, err = recordScanEvidence(f.ctx, tx, versionRecord{
+		ID:     request.AssetVersionID,
+		Object: ObjectVersion{AssetVersionID: request.AssetVersionID, StorageObjectKey: storageKey, StorageObjectVersion: storageVersion},
+	}, secondAttemptNumber, secondWorkID, ScanObservation{
+		AssetVersionID: request.AssetVersionID, StorageObjectVersion: storageVersion,
+		Outcome: ScanFailed, ScannerIdentity: "conflicting-replay", Reason: ErrMalwareDetected.Error(),
+	}, StateScanFailed)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("different result for the same scan work error = %v, want ErrConflict", err)
+	}
+}
+
+func TestD7ConcurrentAdminRetryCreatesOneNewScanWork(t *testing.T) {
+	f := newMediaFixture(t)
+	request, _ := f.beginVideoUpload("object-concurrent-retry")
+	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	errorScanner := mustScanner(t, integrationScannerFunc(func(context.Context, ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{}, errors.New("scanner unavailable")
+	}))
+	worker, err := NewWorker(WorkerOptions{DB: f.pool, Scanner: errorScanner, Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{}, errors.New("not reached")
+	}), Outbox: f.writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0)); err == nil {
+		t.Fatal("scanner error unexpectedly returned success")
+	}
+
+	results := make(chan error, 8)
+	var wait sync.WaitGroup
+	for i := 0; i < cap(results); i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			results <- f.service.Retry(f.ctx, RetryRequest{AssetVersionID: request.AssetVersionID, AdminAccountID: f.adminID, ActorDescriptor: "concurrent-admin"})
+		}()
+	}
+	wait.Wait()
+	close(results)
+	succeeded, conflicted := 0, 0
+	for retryErr := range results {
+		switch {
+		case retryErr == nil:
+			succeeded++
+		case errors.Is(retryErr, ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("concurrent retry error = %v", retryErr)
+		}
+	}
+	if succeeded != 1 || conflicted != 7 {
+		t.Fatalf("concurrent retries succeeded=%d conflicted=%d, want 1/7", succeeded, conflicted)
+	}
+	var scanEvents int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT count(*) FROM outbox_events WHERE event_type = 'media.scan_requested' AND aggregate_id = $1::uuid
+	`, request.AssetVersionID).Scan(&scanEvents); err != nil {
+		t.Fatal(err)
+	}
+	if scanEvents != 2 {
+		t.Fatalf("scan events after concurrent retry = %d, want initial plus one retry", scanEvents)
+	}
+}
+
+func TestD7CleanNonVideoKindsBecomeReadyAfterExactVersionScan(t *testing.T) {
+	for _, kind := range []AssetKind{KindResource, KindLabMaterial, KindPreview} {
+		t.Run(string(kind), func(t *testing.T) {
+			f := newMediaFixture(t)
+			request, _ := f.beginUpload(kind, "object-"+strings.ToLower(string(kind)))
+			if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+				t.Fatalf("completion: %v", err)
+			}
+			passScanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
+				return ScanObservation{AssetVersionID: object.AssetVersionID, StorageObjectVersion: object.StorageObjectVersion, Outcome: ScanPassed, ScannerIdentity: "non-video-scanner"}, nil
+			}))
+			worker, err := NewWorker(WorkerOptions{DB: f.pool, Scanner: passScanner, Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+				return TranscodeResult{}, errors.New("non-video assets must not invoke video processing")
+			}), Outbox: f.writer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := worker.Scan(f.ctx, request.AssetVersionID); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			status, err := f.service.GetStatus(f.ctx, request.AssetVersionID, Viewer{AccountID: f.instructorID, Role: "INSTRUCTOR"})
+			if err != nil {
+				t.Fatalf("status: %v", err)
+			}
+			if status.State != StateReady || !status.Deliverable() || status.TrustedDurationMS != nil {
+				t.Fatalf("non-video status = %+v; want READY deliverable with no trusted video duration", status)
+			}
+			var transcodeEvents, renditions int
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM outbox_events WHERE event_type = 'media.transcode_requested' AND aggregate_id = $1::uuid`, request.AssetVersionID).Scan(&transcodeEvents); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM video_renditions WHERE asset_version_id = $1::uuid`, request.AssetVersionID).Scan(&renditions); err != nil {
+				t.Fatal(err)
+			}
+			if transcodeEvents != 0 || renditions != 0 {
+				t.Fatalf("non-video media scheduled video work: transcodes=%d renditions=%d", transcodeEvents, renditions)
+			}
+		})
+	}
+}
+
+func TestD7NonVideoRetryReturnsThroughScanningToReady(t *testing.T) {
+	f := newMediaFixture(t)
+	request, _ := f.beginUpload(KindResource, "object-resource-retry")
+	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	errorScanner := mustScanner(t, integrationScannerFunc(func(context.Context, ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{}, errors.New("scanner transport failure")
+	}))
+	worker, err := NewWorker(WorkerOptions{DB: f.pool, Scanner: errorScanner, Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{}, errors.New("non-video processor must not run")
+	}), Outbox: f.writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0)); err == nil {
+		t.Fatal("scanner error unexpectedly succeeded")
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanError {
+		t.Fatalf("failed non-video scan state=%q, want SCAN_ERROR", got)
+	}
+	if err := f.service.Retry(f.ctx, RetryRequest{AssetVersionID: request.AssetVersionID, AdminAccountID: f.adminID, ActorDescriptor: "d7-admin"}); err != nil {
+		t.Fatalf("admin retry: %v", err)
+	}
+	passScanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{AssetVersionID: object.AssetVersionID, StorageObjectVersion: object.StorageObjectVersion, Outcome: ScanPassed, ScannerIdentity: "resource-retry-scanner"}, nil
+	}))
+	worker, err = NewWorker(WorkerOptions{DB: f.pool, Scanner: passScanner, Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{}, errors.New("non-video processor must not run")
+	}), Outbox: f.writer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 1)); err != nil {
+		t.Fatalf("passing non-video retry scan: %v", err)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateReady {
+		t.Fatalf("non-video retry state=%q, want READY", got)
+	}
+}
+
 func TestD7CommittedMediaOutboxDispatchesToRedis(t *testing.T) {
 	f := newMediaFixture(t)
 	request, _ := f.beginVideoUpload("object-dispatch")
@@ -457,7 +814,8 @@ func TestD7CommittedMediaOutboxDispatchesToRedis(t *testing.T) {
 	inspector := asynq.NewInspector(asynq.RedisClientOpt{Addr: "localhost:6379"})
 	t.Cleanup(func() { _ = inspector.Close() })
 	t.Cleanup(func() { _ = inspector.DeleteTask("default", eventID) })
-	dispatcher, err := NewDispatcher(f.pool, client)
+	const processingTimeout = 37 * time.Second
+	dispatcher, err := NewDispatcher(f.pool, client, processingTimeout)
 	if err != nil {
 		t.Fatalf("constructing dispatcher: %v", err)
 	}
@@ -478,6 +836,37 @@ func TestD7CommittedMediaOutboxDispatchesToRedis(t *testing.T) {
 	}
 	if work.AssetVersionID != request.AssetVersionID {
 		t.Fatalf("task asset version=%q, want %q", work.AssetVersionID, request.AssetVersionID)
+	}
+	passScanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{AssetVersionID: object.AssetVersionID, StorageObjectVersion: object.StorageObjectVersion, Outcome: ScanPassed, ScannerIdentity: "dispatcher-scanner"}, nil
+	}))
+	worker, err := NewWorker(WorkerOptions{DB: f.pool, Scanner: passScanner, Process: integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{}, errors.New("transcode task is only being dispatched")
+	}), Outbox: f.writer, ProcessingTimeout: processingTimeout})
+	if err != nil {
+		t.Fatalf("constructing dispatcher scan worker: %v", err)
+	}
+	if err := worker.Scan(f.ctx, request.AssetVersionID); err != nil {
+		t.Fatalf("creating committed transcode work: %v", err)
+	}
+	var transcodeEventID string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT id::text FROM outbox_events
+		WHERE source_module = 'MEDIA_AND_ASSETS' AND event_type = 'media.transcode_requested'
+		  AND aggregate_id = $1::uuid
+	`, request.AssetVersionID).Scan(&transcodeEventID); err != nil {
+		t.Fatalf("loading committed transcode event: %v", err)
+	}
+	t.Cleanup(func() { _ = inspector.DeleteTask("default", transcodeEventID) })
+	if dispatched, err := dispatcher.DispatchPending(f.ctx, 10); err != nil || dispatched != 1 {
+		t.Fatalf("transcode dispatch count=%d err=%v; want one committed task", dispatched, err)
+	}
+	transcodeTask, err := inspector.GetTaskInfo("default", transcodeEventID)
+	if err != nil {
+		t.Fatalf("reading dispatched transcode task: %v", err)
+	}
+	if transcodeTask.Type != queue.TypeMediaTranscode || transcodeTask.Timeout != processingTimeout {
+		t.Fatalf("transcode task = type %q timeout %s; want %q/%s", transcodeTask.Type, transcodeTask.Timeout, queue.TypeMediaTranscode, processingTimeout)
 	}
 	if dispatched, err := dispatcher.DispatchPending(f.ctx, 10); err != nil || dispatched != 0 {
 		t.Fatalf("repeated dispatch count=%d err=%v; want zero after receipt", dispatched, err)
@@ -590,6 +979,45 @@ func TestD7ZeroRenditionsAreProcessingFailure(t *testing.T) {
 	}
 }
 
+func TestD7ProcessingTimeoutBecomesProcessFailed(t *testing.T) {
+	f := newMediaFixture(t)
+	request, _ := f.beginVideoUpload("object-processing-timeout")
+	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	scanner := mustScanner(t, integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
+		return ScanObservation{AssetVersionID: object.AssetVersionID, StorageObjectVersion: object.StorageObjectVersion, Outcome: ScanPassed, ScannerIdentity: "timeout-scanner"}, nil
+	}))
+	processor := integrationProcessorFunc(func(ctx context.Context, _ ObjectVersion) (TranscodeResult, error) {
+		<-ctx.Done()
+		return TranscodeResult{}, ctx.Err()
+	})
+	worker, err := NewWorker(WorkerOptions{
+		DB: f.pool, Scanner: scanner, Process: processor, Outbox: f.writer,
+		ProcessingTimeout: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Scan(f.ctx, request.AssetVersionID); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	var operationID string
+	if err := f.pool.QueryRow(f.ctx, `SELECT safe_payload->>'operation_id' FROM outbox_events WHERE event_type = 'media.transcode_requested' AND aggregate_id = $1::uuid`, request.AssetVersionID).Scan(&operationID); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Transcode(f.ctx, request.AssetVersionID, operationID); err == nil {
+		t.Fatal("timed-out processing unexpectedly succeeded")
+	}
+	status, err := f.service.GetStatus(f.ctx, request.AssetVersionID, Viewer{AccountID: f.instructorID, Role: "INSTRUCTOR"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateProcessFailed || status.Deliverable() {
+		t.Fatalf("processing timeout status=%+v; want non-deliverable PROCESS_FAILED", status)
+	}
+}
+
 func TestD7AdminRetryReturnsThroughQuarantineAndAudits(t *testing.T) {
 	f := newMediaFixture(t)
 	request, _ := f.beginVideoUpload("object-retry")
@@ -678,19 +1106,27 @@ func TestD7MigrationContainsMediaAndEntitlementInvariants(t *testing.T) {
 	if !strings.Contains(sourceCheck, "MEDIA_AND_ASSETS") {
 		t.Fatalf("outbox source constraint = %q; media source absent", sourceCheck)
 	}
-	// This query uses the real schema rather than a mock to prove the exact
-	// scan binding is structurally unique.
-	var exactUnique bool
+	// This query uses the real schema rather than a mock to prove retryable
+	// attempts remain exact-version bound without overwriting prior evidence.
+	var exactAttemptUnique, workUnique bool
 	if err := f.pool.QueryRow(f.ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM pg_indexes
-			WHERE tablename = 'scan_attempts' AND indexdef LIKE '%(asset_version_id, storage_object_version)%'
+			WHERE tablename = 'scan_attempts' AND indexdef LIKE '%(asset_version_id, storage_object_version, attempt_number)%'
 		)
-	`).Scan(&exactUnique); err != nil {
+	`).Scan(&exactAttemptUnique); err != nil {
 		t.Fatal(err)
 	}
-	if !exactUnique {
-		t.Fatal("exact object-version scan uniqueness is absent")
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_indexes
+			WHERE tablename = 'scan_attempts' AND indexdef LIKE '%(work_id)%'
+		)
+	`).Scan(&workUnique); err != nil {
+		t.Fatal(err)
+	}
+	if !exactAttemptUnique || !workUnique {
+		t.Fatalf("retryable exact scan identity constraints are absent: exact_attempt=%t work=%t", exactAttemptUnique, workUnique)
 	}
 	var exactForeignKey bool
 	if err := f.pool.QueryRow(f.ctx, `

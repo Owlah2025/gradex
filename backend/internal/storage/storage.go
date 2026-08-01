@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type Client struct {
@@ -120,6 +121,36 @@ func (c *Client) PutObject(ctx context.Context, key string, body []byte, content
 	})
 	if err != nil {
 		return fmt.Errorf("putting object %q: %w", key, err)
+	}
+	return nil
+}
+
+// DeletePrefix removes derived worker output after a failed or timed-out media
+// operation. Callers provide only a media-owned prefix; source quarantine
+// objects are never removed through this helper.
+func (c *Client) DeletePrefix(ctx context.Context, prefix string) error {
+	paginator := s3.NewListObjectsV2Paginator(c.s3, &s3.ListObjectsV2Input{
+		Bucket: aws.String(c.bucket),
+		Prefix: aws.String(prefix),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return fmt.Errorf("listing objects below %q: %w", prefix, err)
+		}
+		if len(page.Contents) == 0 {
+			continue
+		}
+		objects := make([]s3types.ObjectIdentifier, 0, len(page.Contents))
+		for _, object := range page.Contents {
+			objects = append(objects, s3types.ObjectIdentifier{Key: object.Key})
+		}
+		if _, err := c.s3.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: aws.String(c.bucket),
+			Delete: &s3types.Delete{Objects: objects, Quiet: aws.Bool(true)},
+		}); err != nil {
+			return fmt.Errorf("deleting objects below %q: %w", prefix, err)
+		}
 	}
 	return nil
 }

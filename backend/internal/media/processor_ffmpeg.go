@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // FFmpegProcessor is the production processor boundary. It reads only the
@@ -17,9 +18,10 @@ import (
 // and writes HLS output below a media-owned prefix. It never writes legacy
 // videos rows or decides Course publication.
 type FFmpegProcessor struct {
-	store       ProcessingStore
-	ffmpegPath  string
-	ffprobePath string
+	store             ProcessingStore
+	ffmpegPath        string
+	ffprobePath       string
+	processingTimeout time.Duration
 }
 
 // ProcessingStore is the exact-version storage capability needed by the
@@ -29,16 +31,23 @@ type FFmpegProcessor struct {
 type ProcessingStore interface {
 	DownloadToFileVersion(context.Context, string, string) (string, func(), error)
 	PutObject(context.Context, string, []byte, string) error
+	DeletePrefix(context.Context, string) error
 }
 
-func NewFFmpegProcessor(store ProcessingStore, ffmpegPath, ffprobePath string) (*FFmpegProcessor, error) {
+func NewFFmpegProcessor(store ProcessingStore, ffmpegPath, ffprobePath string, processingTimeout time.Duration) (*FFmpegProcessor, error) {
 	if store == nil {
 		return nil, fmt.Errorf("media ffmpeg storage is required")
 	}
 	if strings.TrimSpace(ffmpegPath) == "" || strings.TrimSpace(ffprobePath) == "" {
 		return nil, fmt.Errorf("media ffmpeg and ffprobe paths are required")
 	}
-	return &FFmpegProcessor{store: store, ffmpegPath: ffmpegPath, ffprobePath: ffprobePath}, nil
+	if processingTimeout == 0 {
+		processingTimeout = DefaultProcessingTimeout
+	}
+	if processingTimeout <= 0 {
+		return nil, fmt.Errorf("media processing timeout must be positive")
+	}
+	return &FFmpegProcessor{store: store, ffmpegPath: ffmpegPath, ffprobePath: ffprobePath, processingTimeout: processingTimeout}, nil
 }
 
 type processorProbe struct {
@@ -67,17 +76,35 @@ var hlsLadder = []hlsRung{
 	{Name: "240p", Width: 426, Height: 240, VideoKbps: 400, AudioKbps: 96},
 }
 
-func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (TranscodeResult, error) {
+func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (result TranscodeResult, err error) {
 	if !object.valid() {
 		return TranscodeResult{}, ErrStaleScanEvidence
 	}
-	localPath, cleanup, err := p.store.DownloadToFileVersion(ctx, object.StorageObjectKey, object.StorageObjectVersion)
+	processingCtx, cancel := context.WithTimeout(ctx, p.processingTimeout)
+	defer cancel()
+	prefix := "media/" + object.AssetVersionID + "/hls"
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		// Cleanup cannot rely on the processing context: a timeout or caller
+		// cancellation is precisely when a partial rendition prefix must still
+		// be removed from private storage.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := p.store.DeletePrefix(cleanupCtx, prefix); cleanupErr != nil && err == nil {
+			err = fmt.Errorf("removing partial HLS output: %w", cleanupErr)
+		}
+	}()
+
+	localPath, cleanup, err := p.store.DownloadToFileVersion(processingCtx, object.StorageObjectKey, object.StorageObjectVersion)
 	if err != nil {
 		return TranscodeResult{}, fmt.Errorf("downloading exact media object: %w", err)
 	}
 	defer cleanup()
 
-	probe, err := p.probe(ctx, localPath)
+	probe, err := p.probe(processingCtx, localPath)
 	if err != nil {
 		return TranscodeResult{}, err
 	}
@@ -90,13 +117,13 @@ func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (
 		return TranscodeResult{}, fmt.Errorf("creating HLS scratch directory: %w", err)
 	}
 	defer os.RemoveAll(outDir)
-	if err := p.renderHLS(ctx, localPath, outDir, metadata.rungs); err != nil {
+	if err := p.renderHLS(processingCtx, localPath, outDir, metadata.rungs); err != nil {
 		return TranscodeResult{}, err
 	}
-	prefix := "media/" + object.AssetVersionID + "/hls"
-	if err := p.uploadHLS(ctx, outDir, prefix); err != nil {
+	if err := p.uploadHLS(processingCtx, outDir, prefix); err != nil {
 		return TranscodeResult{}, err
 	}
+	completed = true
 	return transcodeResult(prefix, metadata), nil
 }
 

@@ -33,9 +33,7 @@ func NewRouter(
 	cfg *config.Config,
 	logger *logging.Logger,
 	reporter *health.Reporter,
-	_ any,
 	authenticator auth.Authenticator,
-	entitlements auth.EntitlementChecker,
 	principals identity.PrincipalResolver,
 	options ...RouterOption,
 ) (*gin.Engine, error) {

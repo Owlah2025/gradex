@@ -56,6 +56,10 @@ var transitionTable = map[AssetVersionState]map[AssetVersionState]struct{}{
 	},
 	StateScanPassed: {
 		StateProcessing: {},
+		// Non-video asset kinds become READY immediately after an exact-version
+		// successful scan. The worker and database trigger enforce that this
+		// edge is never used for VIDEO assets.
+		StateReady: {},
 	},
 	StateProcessing: {
 		StateReady:         {},

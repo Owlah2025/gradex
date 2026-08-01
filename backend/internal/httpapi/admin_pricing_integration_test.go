@@ -197,8 +197,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 
 	principals := dbPrincipalResolver{pool: p}
 
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, sessionFoundation.authenticator,
-		fakeEntitlements{allowed: true}, principals,
+	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
 		WithCatalogFoundation(catalogFoundation),
 	)

@@ -2,10 +2,11 @@
 
 **Feature**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md) | **Date**: 2026-07-28
 
-**Builder**: Antigravity under [D-040](../../docs/DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews).
-**Reviewer**: Claude, **Tier 3**. **A builder never closes its own slice.**
+**Builder**: Codex under [D-056](../../docs/DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
+**Reviewer**: Independent reviewer, separate from the builder. **A builder never closes its own slice.**
 
-**Blocked until S2 closes** on an independent verdict.
+**D7 remains pending independent re-review.** D8 does not begin until the separate D7 range has an
+independent closing verdict.
 
 **Split across two implementation days** per
 [§3](../../docs/launch/AUGUST_15_EXECUTION_PLAN.md#3-nineteen-day-execution-plan): **D7** = Phases 1–3

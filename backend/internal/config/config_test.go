@@ -105,6 +105,9 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if sessions.StaleUseWindow() != 5*time.Second {
 		t.Errorf("stale-use default = %s, want 5s", sessions.StaleUseWindow())
 	}
+	if cfg.MediaProcessingTimeout() != 15*time.Minute {
+		t.Errorf("media processing timeout default = %s, want 15m", cfg.MediaProcessingTimeout())
+	}
 	if sessions.CSRFKey().IsEmpty() || strings.Contains(
 		fmt.Sprintf("%v", sessions.CSRFKey()), strings.Repeat("s", 32),
 	) {
@@ -477,6 +480,12 @@ func TestAdmissionDurationsMustBePositive(t *testing.T) {
 			}, key+" must be positive")
 		})
 	}
+}
+
+func TestMediaProcessingTimeoutMustBePositive(t *testing.T) {
+	wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+		s["MEDIA_PROCESSING_TIMEOUT"] = "0s"
+	}, "MEDIA_PROCESSING_TIMEOUT must be positive")
 }
 
 // A renamed key must fail loudly. Silently falling back to the default would

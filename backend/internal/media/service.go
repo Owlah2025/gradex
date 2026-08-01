@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -237,16 +238,14 @@ func (s *Service) verifyLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 	return request.LogicalAssetID, nil
 }
 
-// CompleteUpload verifies the remote object before the PostgreSQL transaction
-// and then records the callback, quarantine transition, audit evidence, and
-// scan outbox intent atomically. The provider event ID is the database-level
-// idempotency key; no process-local lock participates in convergence.
+// CompleteUpload authorizes and locks the immutable upload intent before it
+// performs the bounded object inspection and full trusted hash. Holding the
+// target row lock makes duplicate provider callbacks converge without letting
+// an unauthorized caller force a full read of somebody else's object. The
+// provider event ID is the database-level idempotency key; no process-local
+// lock participates in convergence.
 func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequest) (CompletionResult, error) {
 	if err := validateCompletionRequest(request); err != nil {
-		return CompletionResult{}, err
-	}
-
-	if err := s.verifyCompletedObject(ctx, request); err != nil {
 		return CompletionResult{}, err
 	}
 
@@ -286,6 +285,16 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return CompletionResult{}, fmt.Errorf("checking upload callback receipt: %w", err)
+	}
+	if state != StateUploaded {
+		return CompletionResult{}, fmt.Errorf("%w: media upload has already left the upload state", ErrConflict)
+	}
+
+	// Head and prefix inspection are bounded; HashObjectVersion deliberately
+	// reads the exact complete object and therefore only runs after ownership,
+	// intent identity, idempotency, and current-state checks have passed.
+	if err := s.verifyCompletedObject(ctx, request); err != nil {
+		return CompletionResult{}, err
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -573,8 +582,8 @@ func (s *Service) appendScanWork(ctx context.Context, tx pgx.Tx, assetVersionID,
 		ID: eventID, Type: "media.scan_requested", SchemaVersion: 1,
 		SourceModule: mediaSourceModule, AggregateType: "MEDIA_ASSET_VERSION",
 		AggregateID: assetVersionID, AggregateRevision: 1, CorrelationID: correlation,
-		SafePayload: map[string]any{"asset_version_id": assetVersionID, "kind": kind},
-	}, ScanWork{AssetVersionID: assetVersionID})
+		SafePayload: map[string]any{"asset_version_id": assetVersionID, "kind": kind, "scan_work_id": eventID},
+	}, ScanWork{AssetVersionID: assetVersionID, ScanWorkID: eventID})
 	if err != nil {
 		return fmt.Errorf("writing media scan outbox intent: %w", err)
 	}
@@ -600,9 +609,6 @@ func appendMediaAudit(ctx context.Context, tx pgx.Tx, actorID, actorRole, action
 func validateUploadRequest(request UploadRequest, max int64) error {
 	if !request.Kind.Valid() {
 		return fmt.Errorf("%w: asset kind is invalid", ErrValidation)
-	}
-	if strings.TrimSpace(request.Filename) == "" {
-		return fmt.Errorf("%w: filename is required", ErrValidation)
 	}
 	if request.SizeBytes <= 0 || request.SizeBytes > max {
 		return fmt.Errorf("%w: upload size is outside the configured limit", ErrValidation)
@@ -641,14 +647,30 @@ func contentMatchesDeclaredType(prefix []byte, declared string) bool {
 	if len(prefix) == 0 {
 		return false
 	}
-	detected := strings.ToLower(mimetype.Detect(prefix).String())
 	declared = strings.ToLower(strings.TrimSpace(declared))
+	if declared == "video/mp4" {
+		return hasMP4FileTypeBox(prefix)
+	}
+	detected := strings.ToLower(mimetype.Detect(prefix).String())
 	if detected == declared {
 		return true
 	}
-	// Some valid MP4 files are detected as a generic ISO container. It remains
-	// within the declared video family and is accepted only for video/mp4.
-	return declared == "video/mp4" && (detected == "application/octet-stream" || detected == "application/mp4")
+	return false
+}
+
+// hasMP4FileTypeBox accepts only a bounded ISO-BMFF file-type signature for
+// video/mp4. A client declaration, extension, or generic octet-stream probe
+// is not evidence that arbitrary bytes are an MP4 file.
+func hasMP4FileTypeBox(prefix []byte) bool {
+	if len(prefix) < 16 || binary.BigEndian.Uint32(prefix[:4]) < 16 || string(prefix[4:8]) != "ftyp" {
+		return false
+	}
+	switch string(prefix[8:12]) {
+	case "isom", "iso2", "iso4", "iso5", "iso6", "avc1", "mp41", "mp42", "dash":
+		return true
+	default:
+		return false
+	}
 }
 
 func visibilityForKind(kind AssetKind) string {

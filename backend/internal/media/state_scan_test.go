@@ -17,6 +17,7 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 		{StateScanning, StateScanFailed},
 		{StateScanning, StateScanError},
 		{StateScanPassed, StateProcessing},
+		{StateScanPassed, StateReady},
 		{StateProcessing, StateReady},
 		{StateProcessing, StateProcessFailed},
 		{StateScanFailed, StateQuarantined},

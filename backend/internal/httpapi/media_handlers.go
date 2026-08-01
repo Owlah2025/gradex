@@ -24,7 +24,6 @@ type mediaUploadBody struct {
 	LessonID       string          `json:"lesson_id"`
 	LogicalAssetID string          `json:"logical_asset_id"`
 	Kind           media.AssetKind `json:"kind" binding:"required"`
-	Filename       string          `json:"filename" binding:"required"`
 	ContentType    string          `json:"content_type" binding:"required"`
 	SizeBytes      int64           `json:"size_bytes" binding:"required,gt=0"`
 }
@@ -80,7 +79,7 @@ func (h *mediaHandlers) beginUpload(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*mediaUploadBody)
 	ticket, err := h.service.BeginUpload(c.Request.Context(), media.UploadRequest{
 		OwnerAccountID: c.GetString(ctxUserIDKey), CourseID: body.CourseID, LessonID: body.LessonID,
-		LogicalAssetID: body.LogicalAssetID, Kind: body.Kind, Filename: body.Filename,
+		LogicalAssetID: body.LogicalAssetID, Kind: body.Kind,
 		ContentType: body.ContentType, SizeBytes: body.SizeBytes,
 	})
 	if err != nil {

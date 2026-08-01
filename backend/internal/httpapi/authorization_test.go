@@ -23,7 +23,6 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
-	"github.com/Owlah2025/gradex/backend/internal/video"
 )
 
 // fixedPrincipals returns one principal for every identifier, or an error.
@@ -175,8 +174,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing catalog foundation: %v", err)
 	}
 
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, sessionFoundation.authenticator,
-		fakeEntitlements{allowed: true}, principals,
+	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithStaffFoundation(staffFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
@@ -185,8 +183,6 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
-	mountLegacyVideoRoutesForTests(r, fakeService{}, sessionFoundation.authenticator,
-		fakeEntitlements{allowed: true}, principals, logger)
 	return r, buf
 }
 
@@ -270,32 +266,24 @@ type RouteMatrixEntry struct {
 }
 
 var expectedRouteMatrix = map[string]RouteMatrixEntry{
-	"GET /healthz":                                   {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
-	"GET /readyz":                                    {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
-	"GET /api/v1/session/bootstrap":                  {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
-	"GET /api/v1/registration-policy-set":            {Method: http.MethodGet, Path: "/api/v1/registration-policy-set", Class: ClassAnonymous},
-	"POST /api/v1/student-registrations":             {Method: http.MethodPost, Path: "/api/v1/student-registrations", Class: ClassAnonymous},
-	"POST /api/v1/email-verification-requests":       {Method: http.MethodPost, Path: "/api/v1/email-verification-requests", Class: ClassAnonymous},
-	"POST /api/v1/email-verifications":               {Method: http.MethodPost, Path: "/api/v1/email-verifications", Class: ClassAnonymous},
-	"POST /api/v1/password-reset-requests":           {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
-	"POST /api/v1/password-resets":                   {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
-	"POST /api/v1/sessions":                          {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
-	"GET /api/v1/staff-invitations/preview":          {Method: http.MethodGet, Path: "/api/v1/staff-invitations/preview", Class: ClassAnonymous},
-	"POST /api/v1/staff-invitation-completions":      {Method: http.MethodPost, Path: "/api/v1/staff-invitation-completions", Class: ClassAnonymous},
-	"GET /api/v1/videos/:videoID/manifest/*filepath": {Method: http.MethodGet, Path: "/api/v1/videos/:videoID/manifest/*filepath", Class: ClassAnonymous},
+	"GET /healthz":                              {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
+	"GET /readyz":                               {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
+	"GET /api/v1/session/bootstrap":             {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
+	"GET /api/v1/registration-policy-set":       {Method: http.MethodGet, Path: "/api/v1/registration-policy-set", Class: ClassAnonymous},
+	"POST /api/v1/student-registrations":        {Method: http.MethodPost, Path: "/api/v1/student-registrations", Class: ClassAnonymous},
+	"POST /api/v1/email-verification-requests":  {Method: http.MethodPost, Path: "/api/v1/email-verification-requests", Class: ClassAnonymous},
+	"POST /api/v1/email-verifications":          {Method: http.MethodPost, Path: "/api/v1/email-verifications", Class: ClassAnonymous},
+	"POST /api/v1/password-reset-requests":      {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
+	"POST /api/v1/password-resets":              {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
+	"POST /api/v1/sessions":                     {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
+	"GET /api/v1/staff-invitations/preview":     {Method: http.MethodGet, Path: "/api/v1/staff-invitations/preview", Class: ClassAnonymous},
+	"POST /api/v1/staff-invitation-completions": {Method: http.MethodPost, Path: "/api/v1/staff-invitation-completions", Class: ClassAnonymous},
 
 	"GET /api/v1/session":           {Method: http.MethodGet, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 	"POST /api/v1/session-renewals": {Method: http.MethodPost, Path: "/api/v1/session-renewals", Class: ClassAuthenticatedSessionLifecycle},
 	"DELETE /api/v1/session":        {Method: http.MethodDelete, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 
 	"GET /api/v1/staff-invitations": {Method: http.MethodGet, Path: "/api/v1/staff-invitations", Class: ClassCapabilityProtected},
-
-	"POST /api/v1/lessons/:lessonID/video/upload-url":  {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/upload-url", Class: ClassOwnershipProtected},
-	"POST /api/v1/lessons/:lessonID/video/complete":    {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/complete", Class: ClassOwnershipProtected},
-	"POST /api/v1/lessons/:lessonID/video/retry":       {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/retry", Class: ClassOwnershipProtected},
-	"POST /api/v1/lessons/:lessonID/video/publish":     {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/video/publish", Class: ClassOwnershipProtected},
-	"GET /api/v1/lessons/:lessonID/video/playback-url": {Method: http.MethodGet, Path: "/api/v1/lessons/:lessonID/video/playback-url", Class: ClassOwnershipProtected},
-	"POST /api/v1/lessons/:lessonID/progress":          {Method: http.MethodPost, Path: "/api/v1/lessons/:lessonID/progress", Class: ClassOwnershipProtected},
 
 	"POST /api/v1/staff-invitations":         {Method: http.MethodPost, Path: "/api/v1/staff-invitations", Class: ClassRecentAuthRequired},
 	"DELETE /api/v1/staff-invitations/:id":   {Method: http.MethodDelete, Path: "/api/v1/staff-invitations/:id", Class: ClassRecentAuthRequired},
@@ -517,7 +505,7 @@ func TestUnrestrictedAdminReachesContentManagementRoutes(t *testing.T) {
 	}
 
 	r, _ := authzRouter(t, fixedPrincipals{principal: admin})
-	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	req := newAuthenticatedRequest(http.MethodGet, "/api/v1/admin/review/queue", nil)
 	rec := do(r, req)
 
 	if rec.Code == http.StatusForbidden {
@@ -619,7 +607,7 @@ func TestFreshAdminSucceedsAndStaleAdminIsRefusedOnStaffEndpoints(t *testing.T) 
 func TestUnknownPrincipalIsDenied(t *testing.T) {
 	r, buf := authzRouter(t, fixedPrincipals{err: identity.ErrPrincipalNotFound})
 
-	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	req := newAuthenticatedRequest(http.MethodGet, "/api/v1/admin/review/queue", nil)
 	rec := do(r, req)
 
 	if rec.Code != http.StatusForbidden {
@@ -633,7 +621,7 @@ func TestPrincipalResolutionFailureIsAFaultNotADenial(t *testing.T) {
 		err: errors.New(`pq: duplicate key value violates unique constraint "videos_lesson_id_key"`),
 	})
 
-	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
+	req := newAuthenticatedRequest(http.MethodGet, "/api/v1/admin/review/queue", nil)
 	rec := do(r, req)
 
 	if rec.Code != http.StatusInternalServerError {
@@ -687,63 +675,6 @@ func assertDenyLogged(t *testing.T, buf *syncBuffer, wantReason string) {
 	}
 }
 
-func TestCapabilityPolicyRunsBeforeOwnershipChecks(t *testing.T) {
-	restricted := identity.Principal{
-		AccountID:       "11111111-1111-1111-1111-111111111111",
-		Role:            identity.RoleAdmin,
-		Status:          identity.StatusActive,
-		CredentialState: identity.CredentialChangeRequired,
-	}
-
-	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
-		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
-		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
-	}), config.MapSecretResolver{
-		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
-	})
-	if err != nil {
-		t.Fatalf("config: %v", err)
-	}
-
-	buf := &syncBuffer{}
-	logger := logging.New(buf, "gradex-api-test", "development", logging.LevelFromString("info"))
-	reporter := health.New(time.Second)
-	reporter.MarkStarted()
-
-	var entitlementConsulted bool
-	tripwire := trippingEntitlements{consulted: &entitlementConsulted}
-
-	r, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
-		tripwire, fixedPrincipals{principal: restricted})
-	if err != nil {
-		t.Fatalf("router: %v", err)
-	}
-	mountLegacyVideoRoutesForTests(r, fakeService{}, fakeAuth{}, tripwire, fixedPrincipals{principal: restricted}, logger)
-
-	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
-	rec := do(r, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
-	if entitlementConsulted {
-		t.Error("the ownership check ran before the capability policy denied the request")
-	}
-}
-
-type trippingEntitlements struct{ consulted *bool }
-
-func (e trippingEntitlements) HasAccess(context.Context, string, string) (bool, error) {
-	*e.consulted = true
-	return true, nil
-}
-
-func (e trippingEntitlements) IsInstructorForLesson(context.Context, string, string) (bool, error) {
-	*e.consulted = true
-	return true, nil
-}
-
 func TestRouterRefusesToBuildWithoutAPrincipalResolver(t *testing.T) {
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -759,8 +690,7 @@ func TestRouterRefusesToBuildWithoutAPrincipalResolver(t *testing.T) {
 	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
 	reporter := health.New(time.Second)
 
-	if _, err := NewRouter(cfg, logger, reporter, fakeService{}, fakeAuth{},
-		fakeEntitlements{allowed: true}, nil); err == nil {
+	if _, err := NewRouter(cfg, logger, reporter, fakeAuth{}, nil); err == nil {
 		t.Fatal("a router was built with no principal resolver")
 	}
 }
@@ -817,5 +747,3 @@ func TestSubmitRouteIsMountedAndProtected(t *testing.T) {
 		t.Fatalf("POST /api/v1/courses/course-99/revisions/rev-99/submit returned status %d, want 403 (ownership enforcement)", rec.Code)
 	}
 }
-
-var _ = video.Service(fakeService{})

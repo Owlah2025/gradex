@@ -204,6 +204,65 @@ if hits=$(cd "$BACKEND" && grep -rn -i '[Pp]assword[A-Za-z]*\.Expose()' --includ
   fail=1
 fi
 
+# --- 5. retired D7 legacy media authority ----------------------------------
+# D7 owns the only production path that turns committed media outbox rows into
+# Asynq work. These checks are deliberately semantic rather than filename-only:
+# a direct enqueue or task creation under a new filename is still a second,
+# unsafe media authority. The live production-router test remains the primary
+# composition proof; this guard prevents a simple source-level resurrection
+# from slipping through before that test is reached.
+LEGACY_MEDIA_ROUTE_PATTERN='"(/api/v1)?/lessons/:lessonID/(video|progress)|"(/api/v1)?/videos/:videoID/manifest'
+if hits=$(cd "$BACKEND" && grep -rnE "$LEGACY_MEDIA_ROUTE_PATTERN" --include='*.go' internal cmd 2>/dev/null \
+  | grep -v '_test\.go:' || true); then
+  if [ -n "$hits" ]; then
+    note "expose-guard: retired legacy media HTTP route source was reintroduced:"
+    note "$hits"
+    fail=1
+  fi
+fi
+
+mapfile -t retired_video_files < <(
+  find "$BACKEND/internal/video" -maxdepth 1 -type f -name '*.go' ! -name '*_test.go' -printf '%P\n' 2>/dev/null | sort
+)
+if [ "${#retired_video_files[@]}" -ne 0 ]; then
+  note "expose-guard: retired production internal/video implementation returned:"
+  for file in "${retired_video_files[@]}"; do note "  backend/internal/video/$file"; done
+  fail=1
+fi
+if hits=$(cd "$BACKEND" && grep -rnlE '^package[[:space:]]+video$' --include='*.go' internal cmd 2>/dev/null \
+  | grep -v '_test\.go$' || true); then
+  if [ -n "$hits" ]; then
+    note "expose-guard: retired production video package returned:"
+    note "$hits"
+    fail=1
+  fi
+fi
+
+APPROVED_MEDIA_DISPATCHER='internal/media/dispatcher.go'
+mapfile -t media_task_sites < <(
+  cd "$BACKEND" && grep -rlnE 'asynq\.NewTask[[:space:]]*\(' --include='*.go' internal cmd 2>/dev/null \
+    | grep -v '_test\.go$' | sed 's|^\./||' | sort
+)
+for site in "${media_task_sites[@]:-}"; do
+  [ -z "$site" ] && continue
+  if [ "$site" != "$APPROVED_MEDIA_DISPATCHER" ]; then
+    note "expose-guard: direct Asynq task construction outside committed media dispatcher: backend/$site"
+    fail=1
+  fi
+done
+
+mapfile -t enqueue_sites < <(
+  cd "$BACKEND" && grep -rlnE '\.(Enqueue|EnqueueContext)[[:space:]]*\(' --include='*.go' internal cmd 2>/dev/null \
+    | grep -v '_test\.go$' | sed 's|^\./||' | sort
+)
+for site in "${enqueue_sites[@]:-}"; do
+  [ -z "$site" ] && continue
+  if [ "$site" != "$APPROVED_MEDIA_DISPATCHER" ]; then
+    note "expose-guard: direct queue enqueue outside committed media dispatcher: backend/$site"
+    fail=1
+  fi
+done
+
 if [ "$fail" -eq 0 ]; then
   echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary, ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads)"
 fi

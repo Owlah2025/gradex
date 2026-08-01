@@ -33,6 +33,24 @@ DROP INDEX IF EXISTS media_assets_course_idx;
 DROP INDEX IF EXISTS media_assets_owner_idx;
 DROP TABLE IF EXISTS media_assets;
 
+-- D7 outbox rows are not valid under the pre-D7 source-module constraint.
+-- Outbox evidence is append-only while D7 is active, so temporarily remove
+-- those append-only triggers only to delete D7-owned rows during rollback,
+-- then restore the pre-D7 append-only protections before returning control.
+DROP TRIGGER IF EXISTS outbox_protected_payloads_append_only ON outbox_protected_payloads;
+DROP TRIGGER IF EXISTS outbox_events_append_only ON outbox_events;
+DELETE FROM outbox_protected_payloads
+WHERE event_id IN (
+    SELECT id FROM outbox_events WHERE source_module = 'MEDIA_AND_ASSETS'
+);
+DELETE FROM outbox_events WHERE source_module = 'MEDIA_AND_ASSETS';
+CREATE TRIGGER outbox_events_append_only
+    BEFORE UPDATE OR DELETE ON outbox_events
+    FOR EACH ROW EXECUTE FUNCTION immutable_evidence_reject_mutation();
+CREATE TRIGGER outbox_protected_payloads_append_only
+    BEFORE UPDATE OR DELETE ON outbox_protected_payloads
+    FOR EACH ROW EXECUTE FUNCTION immutable_evidence_reject_mutation();
+
 ALTER TABLE outbox_events
     DROP CONSTRAINT outbox_events_source_module;
 

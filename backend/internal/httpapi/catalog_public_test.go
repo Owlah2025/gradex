@@ -58,7 +58,7 @@ func TestAnonymousProblemWriterOmitsRequestSpecificIdentifiers(t *testing.T) {
 }
 
 func TestPublicCatalogRoutesUseTheSharedVisibilityBoundary(t *testing.T) {
-	r := publicCatalogRouter(t, fakeAuth{}, fakeEntitlements{allowed: true}, fixedPrincipals{})
+	r := publicCatalogRouter(t, fakeAuth{}, fixedPrincipals{})
 	count := 0
 	for _, route := range r.Routes() {
 		if !strings.HasPrefix(route.Path, "/api/v1/catalog") {
@@ -95,7 +95,7 @@ func TestPublicCatalogCacheComposesVaryHeaders(t *testing.T) {
 }
 
 func TestPublicCatalogRouteExposureGuard(t *testing.T) {
-	r := publicCatalogRouter(t, fakeAuth{}, fakeEntitlements{allowed: true}, fixedPrincipals{})
+	r := publicCatalogRouter(t, fakeAuth{}, fixedPrincipals{})
 	for _, route := range r.Routes() {
 		for _, prohibited := range []string{
 			"order", "checkout", "cart", "coupon", "payment", "callback", "webhook", "refund", "invoice", "entitlement",
@@ -126,7 +126,7 @@ func TestPublicCatalogRoutesDoNotReadAuthenticationBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("constructing session authenticator tripwire: %v", err)
 	}
-	r := publicCatalogRouter(t, authenticator, publicCatalogEntitlementTripwire{tripwires: tripwires}, publicCatalogPrincipalTripwire{tripwires: tripwires})
+	r := publicCatalogRouter(t, authenticator, publicCatalogPrincipalTripwire{tripwires: tripwires})
 
 	for _, route := range r.Routes() {
 		if !strings.HasPrefix(route.Path, "/api/v1/catalog") {
@@ -161,7 +161,6 @@ type publicCatalogRouteTripwires struct {
 	credential     bool
 	principal      bool
 	capability     bool
-	entitlement    bool
 }
 
 // Resolve runs only after SessionAuthenticator accepted the valid test cookie,
@@ -183,27 +182,15 @@ func (t publicCatalogPrincipalTripwire) ResolvePrincipal(context.Context, string
 	return identity.Principal{}, nil
 }
 
-type publicCatalogEntitlementTripwire struct{ tripwires *publicCatalogRouteTripwires }
-
-func (t publicCatalogEntitlementTripwire) HasAccess(context.Context, string, string) (bool, error) {
-	t.tripwires.entitlement = true
-	return true, nil
-}
-
-func (t publicCatalogEntitlementTripwire) IsInstructorForLesson(context.Context, string, string) (bool, error) {
-	t.tripwires.entitlement = true
-	return true, nil
-}
-
 func (t *publicCatalogRouteTripwires) assertUntouched(tb testing.TB) {
 	tb.Helper()
-	if t.authentication || t.session || t.credential || t.principal || t.capability || t.entitlement {
-		tb.Fatalf("public catalogue route invoked authentication=%t session=%t credential=%t principal=%t capability=%t entitlement=%t",
-			t.authentication, t.session, t.credential, t.principal, t.capability, t.entitlement)
+	if t.authentication || t.session || t.credential || t.principal || t.capability {
+		tb.Fatalf("public catalogue route invoked authentication=%t session=%t credential=%t principal=%t capability=%t",
+			t.authentication, t.session, t.credential, t.principal, t.capability)
 	}
 }
 
-func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, entitlements auth.EntitlementChecker, principals identity.PrincipalResolver) *gin.Engine {
+func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, principals identity.PrincipalResolver) *gin.Engine {
 	t.Helper()
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
 		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
@@ -236,9 +223,7 @@ func publicCatalogRouter(t *testing.T, authenticator auth.Authenticator, entitle
 		cfg,
 		logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info")),
 		reporter,
-		fakeService{},
 		authenticator,
-		entitlements,
 		principals,
 		WithPublicCatalogFoundation(foundation),
 	)

@@ -227,8 +227,9 @@ type Config struct {
 	maxUploadSizeBytes  int64
 	playbackTokenSecret Secret
 
-	ffmpegBinaryPath  string
-	ffprobeBinaryPath string
+	ffmpegBinaryPath       string
+	ffprobeBinaryPath      string
+	mediaProcessingTimeout time.Duration
 
 	authFakeMode bool
 
@@ -304,8 +305,9 @@ func (c *Config) PlaybackURLExpiry() time.Duration { return c.playbackURLExpiry 
 func (c *Config) MaxUploadSizeBytes() int64        { return c.maxUploadSizeBytes }
 func (c *Config) PlaybackTokenSecret() Secret      { return c.playbackTokenSecret }
 
-func (c *Config) FFmpegBinaryPath() string  { return c.ffmpegBinaryPath }
-func (c *Config) FFprobeBinaryPath() string { return c.ffprobeBinaryPath }
+func (c *Config) FFmpegBinaryPath() string              { return c.ffmpegBinaryPath }
+func (c *Config) FFprobeBinaryPath() string             { return c.ffprobeBinaryPath }
+func (c *Config) MediaProcessingTimeout() time.Duration { return c.mediaProcessingTimeout }
 
 // AuthFakeMode reports the development-only identity seam. Validation refuses
 // to let it be true in production; see validate.
@@ -394,8 +396,9 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		playbackURLExpiry:  p.duration("PLAYBACK_URL_EXPIRY", 5*time.Minute),
 		maxUploadSizeBytes: p.integer("MAX_UPLOAD_SIZE_BYTES", 5*1024*1024*1024),
 
-		ffmpegBinaryPath:  p.str("FFMPEG_BINARY_PATH", "ffmpeg"),
-		ffprobeBinaryPath: p.str("FFPROBE_BINARY_PATH", "ffprobe"),
+		ffmpegBinaryPath:       p.str("FFMPEG_BINARY_PATH", "ffmpeg"),
+		ffprobeBinaryPath:      p.str("FFPROBE_BINARY_PATH", "ffprobe"),
+		mediaProcessingTimeout: p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
 
 		authFakeMode: p.boolean("AUTH_FAKE_MODE", false),
 	}
@@ -663,6 +666,7 @@ func (c *Config) validate(p *parser) {
 		{"READINESS_TIMEOUT", c.readinessTimeout},
 		{"UPLOAD_URL_EXPIRY", c.uploadURLExpiry},
 		{"PLAYBACK_URL_EXPIRY", c.playbackURLExpiry},
+		{"MEDIA_PROCESSING_TIMEOUT", c.mediaProcessingTimeout},
 		{"ANONYMOUS_SESSION_TTL", c.admission.anonymousSessionTTL},
 		{"VERIFICATION_TOKEN_TTL", c.admission.verificationTokenTTL},
 		{"PASSWORD_RESET_TOKEN_TTL", c.admission.passwordResetTokenTTL},

@@ -56,15 +56,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("building scanner adapter: %v", err)
 	}
-	processor, err := media.NewFFmpegProcessor(storageClient, cfg.FFmpegBinaryPath(), cfg.FFprobeBinaryPath())
+	processor, err := media.NewFFmpegProcessor(storageClient, cfg.FFmpegBinaryPath(), cfg.FFprobeBinaryPath(), cfg.MediaProcessingTimeout())
 	if err != nil {
 		log.Fatalf("building media processor: %v", err)
 	}
-	worker, err := media.NewWorker(media.WorkerOptions{DB: pool, Scanner: scanner, Process: processor, Outbox: writer})
+	worker, err := media.NewWorker(media.WorkerOptions{DB: pool, Scanner: scanner, Process: processor, Outbox: writer, ProcessingTimeout: cfg.MediaProcessingTimeout()})
 	if err != nil {
 		log.Fatalf("building media worker: %v", err)
 	}
-	dispatcher, err := media.NewDispatcher(pool, queueClient)
+	dispatcher, err := media.NewDispatcher(pool, queueClient, cfg.MediaProcessingTimeout())
 	if err != nil {
 		log.Fatalf("building media dispatcher: %v", err)
 	}

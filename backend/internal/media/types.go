@@ -52,7 +52,6 @@ type UploadRequest struct {
 	LessonID       string
 	LogicalAssetID string
 	Kind           AssetKind
-	Filename       string
 	ContentType    string
 	SizeBytes      int64
 }
@@ -105,6 +104,7 @@ type RetryRequest struct {
 
 type ScanWork struct {
 	AssetVersionID string `json:"asset_version_id"`
+	ScanWorkID     string `json:"scan_work_id"`
 }
 
 type TranscodeWork struct {
@@ -143,3 +143,5 @@ type ServiceOptions struct {
 	MaxUploadBytes  int64
 	Now             func() time.Time
 }
+
+const DefaultProcessingTimeout = 15 * time.Minute

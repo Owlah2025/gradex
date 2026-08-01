@@ -140,6 +140,7 @@ CREATE TABLE scan_attempts (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     asset_version_id      UUID NOT NULL REFERENCES media_asset_versions (id),
     attempt_number        INTEGER NOT NULL,
+    work_id               TEXT NOT NULL,
     storage_object_version TEXT NOT NULL,
     outcome               media_scan_outcome NOT NULL,
     scanner_identity      TEXT NOT NULL,
@@ -147,12 +148,15 @@ CREATE TABLE scan_attempts (
     scanned_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT scan_attempt_number_positive CHECK (attempt_number >= 1),
+    CONSTRAINT scan_attempt_work_present CHECK (length(trim(work_id)) > 0),
     CONSTRAINT scan_attempt_scanner_present CHECK (length(trim(scanner_identity)) > 0),
     CONSTRAINT scan_attempt_reason_for_failure CHECK (
         outcome = 'PASSED' OR (reason IS NOT NULL AND length(trim(reason)) > 0)
     ),
-    CONSTRAINT scan_attempt_exact_version_unique
-        UNIQUE (asset_version_id, storage_object_version)
+    CONSTRAINT scan_attempt_exact_version_attempt_unique
+        UNIQUE (asset_version_id, storage_object_version, attempt_number),
+    CONSTRAINT scan_attempt_work_unique UNIQUE (work_id),
+    CONSTRAINT scan_attempt_id_asset_version_unique UNIQUE (id, asset_version_id)
 );
 
 ALTER TABLE scan_attempts
@@ -185,7 +189,8 @@ CREATE TABLE processing_attempts (
             AND trusted_duration_ms IS NOT NULL)
         OR (state = 'FAILED' AND error_reason IS NOT NULL AND length(trim(error_reason)) > 0)
     ),
-    CONSTRAINT processing_attempt_operation_unique UNIQUE (asset_version_id, operation_id)
+    CONSTRAINT processing_attempt_operation_unique UNIQUE (asset_version_id, operation_id),
+    CONSTRAINT processing_attempt_id_asset_version_unique UNIQUE (id, asset_version_id)
 );
 
 CREATE INDEX processing_attempts_asset_idx
@@ -193,9 +198,11 @@ CREATE INDEX processing_attempts_asset_idx
 
 ALTER TABLE media_asset_versions
     ADD CONSTRAINT media_asset_versions_successful_scan_fk
-        FOREIGN KEY (successful_scan_attempt_id) REFERENCES scan_attempts (id),
+        FOREIGN KEY (successful_scan_attempt_id, id)
+        REFERENCES scan_attempts (id, asset_version_id),
     ADD CONSTRAINT media_asset_versions_successful_processing_fk
-        FOREIGN KEY (successful_processing_attempt_id) REFERENCES processing_attempts (id);
+        FOREIGN KEY (successful_processing_attempt_id, id)
+        REFERENCES processing_attempts (id, asset_version_id);
 
 CREATE TABLE video_renditions (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -256,6 +263,7 @@ BEGIN
         OR (OLD.state = 'SCAN_FAILED' AND NEW.state = 'QUARANTINED')
         OR (OLD.state = 'SCAN_ERROR' AND NEW.state = 'QUARANTINED')
         OR (OLD.state = 'SCAN_PASSED' AND NEW.state = 'PROCESSING')
+        OR (OLD.state = 'SCAN_PASSED' AND NEW.state = 'READY' AND NEW.kind <> 'VIDEO')
         OR (OLD.state = 'PROCESSING' AND NEW.state IN ('READY', 'PROCESS_FAILED'))
         OR (OLD.state = 'PROCESS_FAILED' AND NEW.state = 'QUARANTINED')
     ) THEN
@@ -269,10 +277,31 @@ BEGIN
         RAISE EXCEPTION 'media version % lacks successful exact-version scan evidence', OLD.id
             USING ERRCODE = 'check_violation';
     END IF;
+    IF NEW.successful_scan_attempt_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM scan_attempts sa
+        WHERE sa.id = NEW.successful_scan_attempt_id
+          AND sa.asset_version_id = NEW.id
+          AND sa.storage_object_version = NEW.storage_object_version
+          AND sa.outcome = 'PASSED'
+    ) THEN
+        RAISE EXCEPTION 'media version % lacks a matching successful exact-version scan attempt', OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
     IF NEW.state = 'READY' AND NEW.kind = 'VIDEO'
         AND (NEW.successful_processing_attempt_id IS NULL OR NEW.trusted_duration_ms IS NULL)
     THEN
         RAISE EXCEPTION 'video version % lacks successful trusted processing evidence', OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.successful_processing_attempt_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM processing_attempts pa
+        WHERE pa.id = NEW.successful_processing_attempt_id
+          AND pa.asset_version_id = NEW.id
+          AND pa.state = 'SUCCEEDED'
+    ) THEN
+        RAISE EXCEPTION 'media version % lacks a matching successful processing attempt', OLD.id
             USING ERRCODE = 'check_violation';
     END IF;
 
@@ -309,9 +338,10 @@ CREATE TRIGGER video_renditions_append_only
     BEFORE UPDATE OR DELETE ON video_renditions
     FOR EACH ROW EXECUTE FUNCTION immutable_evidence_reject_mutation();
 
--- Preserve authentic legacy identifiers as migration input. Historical READY
--- flags are intentionally not readiness evidence: all converted versions must
--- receive a new exact-object scan before any future delivery path can use them.
+-- Preserve authentic legacy identifiers as migration input. Historical bytes
+-- are deliberately fail-closed: no automatic scan work is manufactured and no
+-- historical status is readiness evidence. An intentional re-upload or a
+-- separately approved reprocessing procedure is required before delivery.
 INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility, created_at)
 SELECT gen_random_uuid(), 'VIDEO', c.owner_account_id, c.id, l.id, 'PROTECTED', v.created_at
 FROM videos v
@@ -328,12 +358,7 @@ SELECT
     v.id,
     ma.id,
     'VIDEO',
-    CASE v.status::text
-        WHEN 'PROCESSING' THEN 'PROCESSING'::media_asset_version_state
-        WHEN 'QUEUED' THEN 'PROCESSING'::media_asset_version_state
-        WHEN 'FAILED' THEN 'PROCESS_FAILED'::media_asset_version_state
-        ELSE 'QUARANTINED'::media_asset_version_state
-    END,
+    'QUARANTINED'::media_asset_version_state,
     COALESCE(NULLIF(v.raw_key, ''), 'legacy/' || v.id::text),
     'legacy:' || v.id::text,
     'video/mp4',

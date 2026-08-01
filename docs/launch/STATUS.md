@@ -12,7 +12,7 @@
 > **S2 is CLOSED.** Course authoring and review closed at `785d71c` with hosted CI convergence
 > recorded. It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range
 > is reopened by any current work
-> Active slice: **S4 D7 — Media Pipeline (`T001`–`T013`)** under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
+> Pending independent re-review: **S4 D7 — Media Pipeline (`T001`–`T013`)** under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
 > S4 D8 remains separate and has not started. S5 is explicitly blocked until S4 closes independently; see
 > the S5 section below
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
@@ -20,7 +20,7 @@
 > Days remaining: **18**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
-## S4 D7 — Media Pipeline is the active implementation queue
+## S4 D7 — Media Pipeline is pending independent re-review
 
 **S4 is split deliberately:** D7 implements the media pipeline (`T001`–`T013`); D8 remains a separate
 queue for protected delivery and entitlement evaluation (`T014`–`T032`) and has not started.
@@ -29,6 +29,7 @@ queue for protected delivery and entitlement evaluation (`T014`–`T032`) and ha
 |---|---|
 | Authoritative directory | [`specs/005-media-and-entitlement-evaluation/`](../../specs/005-media-and-entitlement-evaluation/spec.md) |
 | Active task range | `T001`–`T013` only |
+| State | Remediation is locally validated; independent re-review remains required before D7 or S4 can close |
 | Builder | **Codex**, assigned for D7 on 2026-08-01 under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range) |
 | Reviewer | **Independent reviewer**, separate from the builder; D7 does not close on Codex's assessment |
 | D8 | Not started; remains separately bounded and authorized |
