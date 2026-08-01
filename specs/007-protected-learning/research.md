@@ -181,7 +181,7 @@ grant path; the spec names concurrent Progress writes from multiple devices as t
 **Decision.** The monotonic maximum is enforced **in the database statement**, not in Go:
 
 ```
-INSERT ... ON CONFLICT (enrollment_id, lesson_id) DO UPDATE
+INSERT ... ON CONFLICT (enrollment_id, course_lesson_identity_id) DO UPDATE
   SET max_position_seconds = GREATEST(progress.max_position_seconds, EXCLUDED.max_position_seconds),
       last_position_seconds = EXCLUDED.last_position_seconds,
       completed_at = COALESCE(progress.completed_at, EXCLUDED.completed_at),

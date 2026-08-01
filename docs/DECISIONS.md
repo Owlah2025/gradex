@@ -1740,3 +1740,27 @@ actual requirement: implementation leaves no residue while preserving unrelated 
 criterion, implementation boundary, or independent-review requirement.
 
 **Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-060 — S5 Progress uses stable Lesson identities
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped only to S5 Progress identity.
+
+**Decision:** S5 Progress is durably keyed by
+`course_lesson_identity_id → course_lesson_identities(id)`. `course_lessons.id` remains a
+revision-owned content row and `lessons(id)` is not an S5 Progress authority. Current metadata is
+resolved through the authoritative live Course revision; an exact approved Asset Version is validated
+separately and may be retained as completion evidence.
+
+**Boundary:** No compatibility mapping or synthetic legacy `lessons` rows will be introduced, and S5
+does not create a second Student-visible learning graph. This reconciles S5 with the approved S2
+identity model without expanding scope or changing S4/S6 ownership. Production Entitlement creation
+remains absent. The uncommitted, unapproved `0013`/`0014` implementation may be corrected in place.
+
+**Reason:** Stable Lesson identity preserves one Progress record across Course revision cloning,
+metadata changes, and video or Asset Version replacement; a revision-row key cannot provide that
+guarantee.
+
+**Source:** Product-owner instruction on 2026-08-01.

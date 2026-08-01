@@ -94,7 +94,7 @@ that would fabricate provenance for a grant that never happened (FR-015a, Princi
 |---|---|---|
 | `id` | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` | |
 | `enrollment_id` | `UUID NOT NULL` | FK → `enrollments(id)`. **NOT NULL from creation** — never nullable, never re-keyed later (BR-114) |
-| `lesson_id` | `UUID NOT NULL` | FK → `lessons(id)` |
+| `course_lesson_identity_id` | `UUID NOT NULL` | FK → `course_lesson_identities(id)`. The durable Student-visible Lesson identity; current metadata is resolved through the live revision's `course_lessons` row. |
 | `max_position_seconds` | `NUMERIC(10,3) NOT NULL DEFAULT 0` | Monotonic maximum |
 | `last_position_seconds` | `NUMERIC(10,3) NOT NULL DEFAULT 0` | Resume point (BR-052) |
 | `completed_at` | `TIMESTAMPTZ` | `NULL` until complete. Written **exactly once** (FR-012) |
@@ -104,7 +104,7 @@ that would fabricate provenance for a grant that never happened (FR-015a, Princi
 
 | Constraint | Rule | Enforces |
 |---|---|---|
-| `prog_identity` | `UNIQUE (enrollment_id, lesson_id)` | **BR-116's Progress identity.** The upsert conflict target |
+| `prog_identity` | `UNIQUE (enrollment_id, course_lesson_identity_id)` | **BR-116's Progress identity.** The upsert conflict target |
 | `prog_max_non_negative` | `CHECK (max_position_seconds >= 0)` | FR-011 bounding, at the database |
 | `prog_last_non_negative` | `CHECK (last_position_seconds >= 0)` | FR-011 |
 | `prog_max_ge_last` | `CHECK (max_position_seconds >= last_position_seconds)` | The maximum is a maximum. Carried forward from the legacy shape |
@@ -115,7 +115,7 @@ that would fabricate provenance for a grant that never happened (FR-015a, Princi
 | `prog_identity` (the unique constraint) | The upsert, and the per-Lesson read |
 | `idx_progress_enrollment` on `(enrollment_id)` | Per-Course aggregation for Course Home and My Courses (FR-019, FR-021, FR-023) — the second real S5 access pattern |
 
-No index on `lesson_id` alone: S8's analytics will need one and S8 adds it. Speculative indexes cost
+No index on `course_lesson_identity_id` alone: S8's analytics will need one and S8 adds it. Speculative indexes cost
 write throughput on the hottest table in the slice.
 
 #### The monotonic upsert
@@ -124,10 +124,10 @@ Monotonicity and write-once completion are **database semantics**, not applicati
 ([R-06](research.md#r-06--monotonicity-under-concurrency)):
 
 ```sql
-INSERT INTO progress (enrollment_id, lesson_id, max_position_seconds, last_position_seconds,
+INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds,
                       completed_at, completing_asset_version_id, last_watched_at, updated_at)
 VALUES (...)
-ON CONFLICT (enrollment_id, lesson_id) DO UPDATE SET
+ON CONFLICT (enrollment_id, course_lesson_identity_id) DO UPDATE SET
   max_position_seconds        = GREATEST(progress.max_position_seconds, EXCLUDED.max_position_seconds),
   last_position_seconds       = EXCLUDED.last_position_seconds,
   completed_at                = COALESCE(progress.completed_at, EXCLUDED.completed_at),
@@ -144,6 +144,10 @@ application-level locking.
 **`last_position_seconds` is deliberately not monotonic** — it is the resume point, and a Student who
 seeks backwards and stops there should resume there. Only the *maximum* is monotonic, and only the
 maximum feeds completion.
+
+`course_lessons.id` is revision-owned and `lessons(id)` is legacy-only; neither is a durable Progress
+key. An exact Asset Version is validated separately through S4 and remains supporting evidence, not
+the logical Progress identity ([D-060](../../docs/DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities)).
 
 ### `content_reports`
 

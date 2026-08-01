@@ -12,7 +12,7 @@
 
 S5 is the only slice that renders paid content to the person paying for it. It builds three learning
 surfaces (Dashboard learning half, Course Home, Lesson Player), server-authoritative Progress keyed by
-`(enrollment, lesson)`, and Student content reporting — and it does all of it as a **consumer** of
+`(enrollment, course_lesson_identity)`, and Student content reporting — and it does all of it as a **consumer** of
 access decisions S4 owns and S6 creates.
 
 The technical approach is deliberately narrow. One new backend package (`internal/learning`), one new
@@ -82,7 +82,7 @@ Stated as capabilities rather than prose:
 | Update or delete an Enrollment row | No | No (nothing deletes one) |
 
 **Why the table and not the lifecycle.** BR-116 fixes Progress identity as
-`UNIQUE(enrollment_id, lesson_id)` and BR-114 forbids Progress without an Enrollment. S5 writes
+`UNIQUE(enrollment_id, course_lesson_identity_id)` and BR-114 forbids Progress without an Enrollment. S5 writes
 Progress on D5–D6; S6 runs on D8. Defining a table and writing to it are different capabilities, and
 S5 takes only the first. This mirrors the S4/S6 split exactly: the consumer slice defines the record,
 the producer slice populates it.
@@ -104,6 +104,9 @@ Restated because the temptation in each case is real and locally reasonable:
   (FR-006).
 - **No nullable `progress.enrollment_id`**, no temporary `(student, course, lesson)` key, and no
   planned re-key migration. The identity is BR-116's from the first migration that creates it.
+- **No revision-row or legacy Lesson Progress key.** `course_lesson_identity_id` is durable; current
+  metadata is read from the live `course_lessons` row, and exact Asset Version validation remains
+  separate ([D-060](../../docs/DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities)).
 - **No community-link field, payload, or screen element** — deferred to S18 under D-046. FR-036 –
   FR-038 receive no implementation task and their absence is asserted over the production build.
 - **No Course authoring.** S2 owns Course content; S5 renders it and writes none of it.
@@ -238,7 +241,7 @@ review, not as exceptions.*
 | **A — no creation path** | All Progress work | Production build asserted free of any Entitlement-creating and Enrollment-row-creating symbol |
 | **B — request-time revalidation** | Player work | Every protected route in the **mounted production router** denies after mid-session access mutation; removing one revalidation fails a test (SC-002) |
 | **C — denial uniformity** | Slice closure | All six denial causes **byte-identical**, including never-authored Lesson ids |
-| **D — monotonicity under concurrency** | Slice closure | N concurrent writers at one `(enrollment, lesson)`; final maximum correct, `completed_at` written once (Principle V) |
+| **D — monotonicity under concurrency** | Slice closure | N concurrent writers at one `(enrollment, course_lesson_identity)`; final maximum correct, `completed_at` written once (Principle V) |
 | **E — D-046 absence** | Slice closure | No community-link column, payload field, or screen element in the production build |
 | **Final** | Slice closure | Clean tree, hosted CI green on the exact head, independent Tier 3 review verdict |
 

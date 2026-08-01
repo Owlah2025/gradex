@@ -126,15 +126,16 @@ Stated explicitly because S5 sits on top of three slices and beneath two more.
 ## Resolved Conflicts
 
 Constitution Principle I requires a conflict with an approved source document to be surfaced and
-resolved explicitly, never absorbed by assumption. Two were found while writing this spec, and both
-were verified against the repository rather than inferred from the plan. **Both were resolved by the
-developer on 2026-07-29.** The analysis is retained below rather than deleted, because a conflict
+resolved explicitly, never absorbed by assumption. Three were found while writing or implementing this
+spec and verified against the repository rather than inferred from the plan. The analysis is retained
+below rather than deleted, because a conflict
 that leaves no trace comes back as a surprise.
 
 | ID | Conflict | Resolution | Artefact changed |
 |---|---|---|---|
 | **C1** | Progress is keyed by `enrollment_id`, but `enrollments` was assigned to S6, which runs after S5 | **Option A — S5 creates the table; S6 writes to it** | [`specs/006-course-access-grant/data-model.md`](../006-course-access-grant/data-model.md) §1 and §5, corrected 2026-07-29 |
 | **C2** | The community link is a PRD MVP bullet that no slice authors | **Option B — deferred to S18, post-launch** | PRD scope reduction, recorded as [D-046](../../docs/DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch) |
+| **C3** | S5's proposed Progress FK targeted legacy `lessons(id)`, while S2 defines durable Student-visible Lessons as `course_lesson_identities` | **Progress uses the stable S2 Lesson identity** | [D-060](../../docs/DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities) |
 
 **Effect of C1 on this spec**: FR-015 is unblocked. S5 owns the `enrollments` migration, and S5 is the
 first slice to define the record — but it still **creates no Enrollment rows**. Enrollment creation
@@ -145,6 +146,11 @@ different capabilities, and S5 takes only the first.
 retained below, marked `DEFERRED — S18`, on the same reasoning the constitution gives for keeping the
 deferred payment rules present: a requirement that gets deleted comes back as an unreviewed one.
 Nothing else in the slice depended on them.
+
+**Effect of C3 on this spec**: Progress is unique on `(enrollment_id,
+course_lesson_identity_id)`. The live revision's `course_lessons` row supplies current metadata; an
+exact approved Asset Version is validated separately. No legacy mapping or synthetic legacy Lesson
+row is introduced.
 
 ### C1 — S5 needs the Enrollment record, and S6 creates it
 
@@ -430,7 +436,8 @@ Retained, not deleted, so that S18 inherits reviewed requirements rather than re
 - **FR-014**: System MUST revalidate runtime access when handling a delayed, retried, duplicated, or
   out-of-order Progress write, and MUST refuse it if access has since ended. *(BR-053, BR-116)*
 - **FR-015**: System MUST key Progress by `(enrollment, lesson)` with that pair unique, and MUST NOT
-  create a Progress record without a corresponding Enrollment. *(BR-114, BR-116)*
+  create a Progress record without a corresponding Enrollment. `lesson` means the stable
+  `course_lesson_identity_id`, never a revision row or `lessons(id)`. *(BR-114, BR-116, D-060)*
 - **FR-015a**: System MUST create the `enrollments` table with the shape S6 asserts against —
   `(student_account_id, course_id)` unique — and MUST NOT create, modify, or delete any Enrollment
   **row**. Row creation is S6's grant transaction alone. *(BR-114, BR-167, Principle IV;

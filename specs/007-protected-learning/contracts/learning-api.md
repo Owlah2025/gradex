@@ -126,6 +126,9 @@ them and never issues, signs, proxies, or caches those links (FR-028, BR-103, BR
 The only Progress write path (FR-009 – FR-016).
 
 Request carries the reported **position in seconds** and the **Media Asset Version id** being played.
+At every public API boundary, `lessonId` is the stable `course_lesson_identities.id`; the server
+resolves current metadata through the authoritative live `course_lessons` row. It never persists a
+revision-row ID or a legacy `lessons(id)` value as Progress identity.
 
 Reported by the client every **15 s** during playback, and on pause, seek-settled,
 `visibilitychange` → hidden, and `pagehide` (via `sendBeacon`)
@@ -145,7 +148,7 @@ Rate-limited to **12 writes / min / (Student, Lesson)** — sized against that i
 4. **Compute completion server-side**: at least **90%** of the **trusted duration of the exact Asset
    Version played** (FR-010, BR-051). Any client-reported percentage or duration is **ignored** —
    not validated, not trusted as a hint, ignored.
-5. **Upsert** with `GREATEST` for the maximum and `COALESCE` for `completed_at` and the completing
+5. **Upsert** on `(enrollment_id, course_lesson_identity_id)` with `GREATEST` for the maximum and `COALESCE` for `completed_at` and the completing
    Asset Version (FR-012). Monotonicity and write-once completion are database semantics.
 
 **Idempotent and safe under concurrency.** Duplicate, delayed, out-of-order, and concurrent writes
@@ -153,8 +156,8 @@ converge to the same row. Two devices playing the same Lesson never regress each
 ([R-06](../research.md#r-06--monotonicity-under-concurrency)).
 
 **No regression** across seeks, retries, replays, reconnections, concurrent devices, or video
-replacement (FR-012, BR-059). When an Instructor replaces the video, Progress is preserved — it is
-keyed to the Lesson — and the **new** Asset Version's trusted duration governs subsequent completion.
+replacement (FR-012, BR-059). When an Instructor replaces the video, Progress is preserved on the
+stable Lesson identity, and the **new** Asset Version's trusted duration governs subsequent completion.
 
 **Transient failure does not interrupt playback** (FR-013, BR-053). The client retries with backoff;
 playback continues. A failed Progress write is never a reason to stop an otherwise-authorised session.

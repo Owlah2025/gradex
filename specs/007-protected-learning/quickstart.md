@@ -48,7 +48,9 @@ go test -tags=integration -run 'TestMigrateUpDownUp|TestDirtySchema|TestUnsuppor
 ```
 
 **Expect:** `0013_enrollments` applies **before** `0014_protected_learning` on both paths — the
-Progress foreign key depends on it. `db.MaxSchemaVersion` is **14** and CI **derives** its assertion
+Progress foreign key depends on it. `progress.course_lesson_identity_id` references the stable S2
+`course_lesson_identities` record, never `lessons` or a revision-owned `course_lessons` row.
+`db.MaxSchemaVersion` is **14** and CI **derives** its assertion
 from that constant rather than hardcoding a literal.
 
 **The legacy-progress guard** ([R-01](research.md#r-01--the-legacy-progress-cutover-cannot-preserve-rows-and-must-not-synthesise-enrollments)):
@@ -238,6 +240,7 @@ git status \
   >"$final_status"
 
 cmp --silent "$baseline_status" "$final_status"
+test "$(git rev-list --count 9c8348a19b5375b5f4e3eb4d6556426b3323a02c..HEAD)" = 3
 git status --short
 ```
 
