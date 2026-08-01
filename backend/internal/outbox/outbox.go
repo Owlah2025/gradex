@@ -117,7 +117,9 @@ func (w *Writer) validateEvent(event Event) error {
 	if event.SchemaVersion < 1 {
 		return errors.New("outbox schema version must be positive")
 	}
-	if event.SourceModule != "IDENTITY_AND_ACCESS" && event.SourceModule != "CATALOG_AND_AUTHORING" {
+	if event.SourceModule != "IDENTITY_AND_ACCESS" &&
+		event.SourceModule != "CATALOG_AND_AUTHORING" &&
+		event.SourceModule != "MEDIA_AND_ASSETS" {
 		return errors.New("outbox source module is unsupported")
 	}
 	if !uppercaseTypePattern.MatchString(event.AggregateType) {

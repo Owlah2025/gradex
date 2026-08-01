@@ -37,16 +37,16 @@ appeared across S1C and S2. In every case the builder's own report said the work
 
 ## Phase 1 — State machine and the fail-closed core
 
-- [ ] T001 `backend/internal/media/doc.go` — boundary: media **bytes** only; owns no Course metadata
-- [ ] T002 Implement the asset state machine in `state.go` exactly as
+- [X] T001 `backend/internal/media/doc.go` — boundary: media **bytes** only; owns no Course metadata
+- [X] T002 Implement the asset state machine in `state.go` exactly as
       [plan.md](plan.md#fail-closed-stated-as-a-state-machine-rather-than-as-an-adjective) specifies.
       **Deliverability is `state == READY`, expressed once.** Do **not** write a list of excluded
       states — that is a place to forget one, and this pipeline will gain states
-- [ ] T003 Implement the scan **adapter interface** in `scan.go`. `LG-014` is unresolved, so no
+- [X] T003 Implement the scan **adapter interface** in `scan.go`. `LG-014` is unresolved, so no
       implementation is chosen here. **There must be no code path that reasons "no scanner
       configured, therefore proceed."** Absence of a scanner leaves assets in `SCANNING`, which is
       already non-deliverable
-- [ ] T004 Bind a scan result to an **exact stored object version** (FR-004). A logical-asset binding
+- [X] T004 Bind a scan result to an **exact stored object version** (FR-004). A logical-asset binding
       would let a re-upload inherit a previous pass — silent, and the asset is unscanned
 
 **Checkpoint A — MANDATORY GATE.** Prove fail-closed **per failure mode, individually**, not in
@@ -55,22 +55,22 @@ Each must leave the asset non-deliverable. Aggregate proof hides the one mode th
 
 ## Phase 2 — Upload, quarantine, Asset Versions
 
-- [ ] T005 Direct upload to **quarantine** storage with type and size validation before acceptance
-- [ ] T006 Immutable Asset Versions; a new upload creates a version and never mutates one
-- [ ] T007 **Idempotent** completion handling keyed on a provider-supplied identifier — duplicate,
+- [X] T005 Direct upload to **quarantine** storage with type and size validation before acceptance
+- [X] T006 Immutable Asset Versions; a new upload creates a version and never mutates one
+- [X] T007 **Idempotent** completion handling keyed on a provider-supplied identifier — duplicate,
       delayed, and out-of-order callbacks converge to exactly one Asset Version (FR-009)
-- [ ] T008 Scan/processing state visible to the owning Instructor and to an Admin, with Admin retry
+- [X] T008 Scan/processing state visible to the owning Instructor and to an Admin, with Admin retry
 
 ## Phase 3 — Transcode and legacy cutover
 
-- [ ] T009 HLS transcode through the durable queue and outbox boundary
-- [ ] T010 Record the **trusted duration** of the exact Asset Version — S5 computes completion from
+- [X] T009 HLS transcode through the durable queue and outbox boundary
+- [X] T010 Record the **trusted duration** of the exact Asset Version — S5 computes completion from
       it, so an approximate value here becomes a wrong completion there (BR-051)
-- [ ] T011 Zero renditions is a **failure**, not an empty success (FR-008)
-- [ ] T012 **Retire** the legacy `internal/video` direct-to-asynq path. Retire, not disable: a dormant
+- [X] T011 Zero renditions is a **failure**, not an empty success (FR-008)
+- [X] T012 **Retire** the legacy `internal/video` direct-to-asynq path. Retire, not disable: a dormant
       path that publishes unscanned bytes is one route registration from live. SC-008 asserts it is
       **gone**
-- [ ] T013 Migration `0012_media_and_entitlement` up and down, round-tripped against real PostgreSQL;
+- [X] T013 Migration `0012_media_and_entitlement` up and down, round-tripped against real PostgreSQL;
       raise `db.MaxSchemaVersion` and confirm CI **derives** the assertion
 
 **Checkpoint 1** — bytes flow upload → quarantine → scan → transcode → `READY`, and nothing reaches

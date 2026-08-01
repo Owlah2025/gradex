@@ -1,21 +1,9 @@
 package video
 
 import (
+	"context"
 	"errors"
 	"time"
-)
-
-type Status string
-
-const (
-	StatusDraft      Status = "DRAFT"
-	StatusUploading  Status = "UPLOADING"
-	StatusUploaded   Status = "UPLOADED"
-	StatusQueued     Status = "QUEUED"
-	StatusProcessing Status = "PROCESSING"
-	StatusReady      Status = "READY"
-	StatusPublished  Status = "PUBLISHED"
-	StatusFailed     Status = "FAILED"
 )
 
 // Error classes the HTTP boundary maps onto public problem types. They exist
@@ -43,30 +31,22 @@ var (
 	ErrUnavailable = errors.New("dependency unavailable")
 )
 
-type Lesson struct {
-	ID              string
-	CourseID        string
-	Status          Status
-	DurationSeconds *float64
+// Service is retained only as a compile-time compatibility seam for tests
+// that verify the legacy route was removed from production composition. There
+// is deliberately no constructor or implementation in this package anymore;
+// D7 production behavior lives in internal/media.
+type VideoService interface {
+	RequestUpload(context.Context, string, string, string) (UploadTicket, error)
+	CompleteUpload(context.Context, string) error
+	GetPlaybackURL(context.Context, string, string) (SignedURL, error)
+	Retranscode(context.Context, string) error
 }
 
-type Video struct {
-	ID              string
-	LessonID        string
-	Status          Status
-	FailedReason    *string
-	RetryCount      int
-	RawKey          *string
-	HLSMasterKey    *string
-	Resolution      *string
-	Bitrate         *int
-	Codec           *string
-	FPS             *float64
-	FileSizeBytes   *int64
-	Provider        string
-	ProviderAssetID *string
-	ProviderStatus  *string
-	SyncVersion     int
+type Service interface {
+	VideoService
+	Publish(context.Context, string) error
+	UpdateProgress(context.Context, string, string, float64) (Progress, error)
+	ServeManifest(context.Context, string, string, string) ([]byte, string, error)
 }
 
 type Progress struct {
@@ -87,18 +67,4 @@ type SignedURL struct {
 	URL                 string
 	ExpiresAt           time.Time
 	LastPositionSeconds float64
-}
-
-// Job payloads, shared between the API (enqueue) and worker (decode) sides.
-type MetadataExtractPayload struct {
-	VideoID  string `json:"video_id"`
-	LessonID string `json:"lesson_id"`
-	RawKey   string `json:"raw_key"`
-}
-
-type TranscodeJobPayload struct {
-	VideoID    string `json:"video_id"`
-	LessonID   string `json:"lesson_id"`
-	RawKey     string `json:"raw_key"`
-	Resolution string `json:"resolution"`
 }

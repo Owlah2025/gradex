@@ -41,7 +41,6 @@ ALLOWLIST=(
   # passed to Identity as a Secret. Adding a password Expose() to this file
   # would duplicate the plaintext boundary and must be rejected in review.
   "cmd/bootstrap-admin/main.go"
-  "internal/video/playback.go" # HMAC signing boundary for playback tokens
   "internal/config/config.go"  # placeholder validation, inside the boundary itself
   # The encoded Argon2id hash goes to the database driver. No password plaintext
   # is read here — that happens only in credential.go, which check 4 enforces.

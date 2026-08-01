@@ -1631,3 +1631,29 @@ now doubly so after authoring the correction).
 
 **Source:** Product-owner instruction on 2026-07-30, following `agy`'s `APPROVE` of the corrected
 planning head.
+
+---
+
+## D-056 — Codex builds S4 D7 and an independent reviewer reviews the frozen range
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped to **S4 D7 only** — Media Pipeline, tasks `T001`–`T013`, in
+[`specs/005-media-and-entitlement-evaluation/`](../specs/005-media-and-entitlement-evaluation/tasks.md).
+
+### Seats and boundaries
+
+- **Codex — implementation builder for S4 D7.** This dated product-owner assignment replaces the
+  stale Antigravity builder assignment for this implementation run only. Codex may implement only
+  `T001`–`T013`, may not review or close its own range, and receives no authority over D8, S5, or S6.
+- **Independent reviewer — separate review seat.** The reviewer evaluates one frozen exact D7 range;
+  the builder does not provide the independent verdict.
+- **S4 remains split into D7 and D8.** D7 is the media pipeline. D8 is protected delivery and
+  entitlement evaluation and does not begin in this run.
+- **S5 remains blocked until S4 closes independently.** Its approved planning artifacts stay frozen;
+  this decision does not authorize S5 implementation.
+
+**Reason:** the approved dependency order requires S4 before S5, while the active selector and launch
+status still pointed at stale earlier work. The product owner explicitly assigned Codex to the bounded
+S4 D7 queue on 2026-08-01 and retained independent review and the D7/D8 split.
+
+**Source:** Product-owner instruction on 2026-08-01.

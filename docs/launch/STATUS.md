@@ -1,8 +1,8 @@
 # Gradex Launch Status
 
-> Current date: **2026-07-29 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-08-01 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-07-29, D-045/D-046 downstream reconciliation**; prior
+> Last repository reconciliation: **2026-08-01, D-056 S4 D7 implementation assignment and dependency correction**; prior
 > reconciliation 2026-07-28 after local verification of pricing T039–T042
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
@@ -12,16 +12,31 @@
 > **S2 is CLOSED.** Course authoring and review closed at `785d71c` with hosted CI convergence
 > recorded. It is frozen: no file under `specs/003-course-authoring/` and no S2 implementation range
 > is reopened by any current work
-> Active slice: **S5 — Protected Learning. Planning only; implementation has not started.** See
+> Active slice: **S4 D7 — Media Pipeline (`T001`–`T013`)** under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range).
+> S4 D8 remains separate and has not started. S5 is explicitly blocked until S4 closes independently; see
 > the S5 section below
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
 > Days remaining: **18**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
-## S5 — Protected Learning is the next implementation slice
+## S4 D7 — Media Pipeline is the active implementation queue
 
-**Planning is independently approved. No implementation has started.**
+**S4 is split deliberately:** D7 implements the media pipeline (`T001`–`T013`); D8 remains a separate
+queue for protected delivery and entitlement evaluation (`T014`–`T032`) and has not started.
+
+| | |
+|---|---|
+| Authoritative directory | [`specs/005-media-and-entitlement-evaluation/`](../../specs/005-media-and-entitlement-evaluation/spec.md) |
+| Active task range | `T001`–`T013` only |
+| Builder | **Codex**, assigned for D7 on 2026-08-01 under [D-056](../DECISIONS.md#d-056--codex-builds-s4-d7-and-an-independent-reviewer-reviews-the-frozen-range) |
+| Reviewer | **Independent reviewer**, separate from the builder; D7 does not close on Codex's assessment |
+| D8 | Not started; remains separately bounded and authorized |
+
+## S5 — Protected Learning is blocked behind S4
+
+**Planning is independently approved and frozen. No implementation has started. S5 is blocked until S4
+has been independently reviewed and closed; this D7 assignment does not authorize S5.**
 
 | | |
 |---|---|

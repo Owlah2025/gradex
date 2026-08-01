@@ -10,7 +10,6 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
-	"github.com/Owlah2025/gradex/backend/internal/video"
 )
 
 // NewRouter builds the API engine with an explicitly composed middleware
@@ -34,7 +33,7 @@ func NewRouter(
 	cfg *config.Config,
 	logger *logging.Logger,
 	reporter *health.Reporter,
-	svc video.Service,
+	_ any,
 	authenticator auth.Authenticator,
 	entitlements auth.EntitlementChecker,
 	principals identity.PrincipalResolver,
@@ -67,8 +66,6 @@ func NewRouter(
 	r.GET(livenessPath, livenessHandler(reporter))
 	r.GET(readinessPath, readinessHandler(reporter, logger))
 
-	h := &videoHandlers{svc: svc}
-
 	// Staff mutations carry the S1B2 session and CSRF boundary. Without a
 	// session foundation there is nothing to carry it, so the router refuses to
 	// build rather than silently mounting Admin state changes unprotected.
@@ -99,40 +96,9 @@ func NewRouter(
 		}
 	}
 
-	// Every protected group runs authentication → capability policy → ownership
-	// or Entitlement, in that order. The capability step is what refuses a
-	// restricted or suspended principal before any route-specific check runs,
-	// so a route cannot be protected by ownership alone and accidentally admit
-	// an Account that should not be acting at all.
-	instructor := v1.Group("/lessons/:lessonID/video")
-	instructor.Use(
-		requireAuth(authenticator),
-		requireCapability(principals, logger, identity.CapContentManagement),
-		requireInstructor(entitlements),
-	)
-	{
-		instructor.POST("/upload-url", h.requestUpload)
-		instructor.POST("/complete", h.completeUpload)
-		instructor.POST("/retry", h.retry)
-		instructor.POST("/publish", h.publish)
+	if routerConfig.media != nil {
+		mountMediaRoutes(v1, routerConfig.media, authenticator, principals, logger)
 	}
-
-	student := v1.Group("/lessons/:lessonID")
-	student.Use(
-		requireAuth(authenticator),
-		requireCapability(principals, logger, identity.CapLearningAccess),
-		requireStudentAccess(entitlements),
-	)
-	{
-		student.GET("/video/playback-url", h.playbackURL)
-		student.POST("/progress", h.postProgress)
-	}
-
-	// Public (token-authorized, not header-authorized): the HLS player fetches
-	// these directly and won't carry a custom auth header. The manifest token
-	// embedded in the URL by GetPlaybackURL is the actual authorization — see
-	// internal/video/token.go and playback.go's ServeManifest.
-	v1.GET("/videos/:videoID/manifest/*filepath", h.manifest)
 
 	return r, nil
 }
@@ -206,6 +172,7 @@ type routerOptions struct {
 	staff         *StaffFoundation
 	catalog       *CatalogFoundation
 	publicCatalog *PublicCatalogFoundation
+	media         *MediaFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.

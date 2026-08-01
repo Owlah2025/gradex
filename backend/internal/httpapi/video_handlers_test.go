@@ -156,6 +156,7 @@ func videoRouter(t *testing.T, svc video.Service, a fakeAuth, e fakeEntitlements
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
+	mountLegacyVideoRoutesForTests(r, svc, a, e, stubPrincipals{role: principalRole}, logger)
 	return r, buf
 }
 

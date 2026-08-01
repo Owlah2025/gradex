@@ -6,6 +6,8 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -87,12 +89,22 @@ func (c *Client) PresignGetURL(ctx context.Context, key string, expiry time.Dura
 // CompleteUpload to verify the instructor's direct-to-storage PUT actually
 // landed before enqueuing processing.
 func (c *Client) HeadObject(ctx context.Context, key string) (sizeBytes int64, exists bool, err error) {
-	out, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+	return c.HeadObjectVersion(ctx, key, "")
+}
+
+// HeadObjectVersion verifies the exact provider object version. A non-empty
+// version is never silently replaced by the current object at the same key.
+func (c *Client) HeadObjectVersion(ctx context.Context, key, objectVersion string) (sizeBytes int64, exists bool, err error) {
+	input := &s3.HeadObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
-	})
+	}
+	if objectVersion != "" {
+		input.VersionId = aws.String(objectVersion)
+	}
+	out, err := c.s3.HeadObject(ctx, input)
 	if err != nil {
-		return 0, false, nil // treat any head error as "doesn't exist yet" for this narrow use
+		return 0, false, fmt.Errorf("heading object %q version %q: %w", key, objectVersion, err)
 	}
 	return aws.ToInt64(out.ContentLength), true, nil
 }
@@ -127,17 +139,74 @@ func (c *Client) DownloadObject(ctx context.Context, key string) ([]byte, error)
 	return io.ReadAll(out.Body)
 }
 
+// DownloadPrefix reads only the first maxBytes of an object. Media completion
+// uses this to inspect content signatures before accepting a direct upload;
+// the declared MIME type and filename are not sufficient evidence.
+func (c *Client) DownloadPrefix(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	return c.DownloadPrefixVersion(ctx, key, "", maxBytes)
+}
+
+func (c *Client) DownloadPrefixVersion(ctx context.Context, key, objectVersion string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("prefix size must be positive")
+	}
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
+	}
+	if objectVersion != "" {
+		input.VersionId = aws.String(objectVersion)
+	}
+	out, err := c.s3.GetObject(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("getting object prefix %q: %w", key, err)
+	}
+	defer out.Body.Close()
+	return io.ReadAll(io.LimitReader(out.Body, maxBytes))
+}
+
+// HashObjectVersion computes evidence over the exact stored version rather
+// than accepting a client-provided digest as proof of the bytes received.
+func (c *Client) HashObjectVersion(ctx context.Context, key, objectVersion string) (string, error) {
+	input := &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}
+	if objectVersion != "" {
+		input.VersionId = aws.String(objectVersion)
+	}
+	out, err := c.s3.GetObject(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("getting object %q version %q for hashing: %w", key, objectVersion, err)
+	}
+	defer out.Body.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, out.Body); err != nil {
+		return "", fmt.Errorf("hashing object %q version %q: %w", key, objectVersion, err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
 // DownloadToFile streams an object directly to a temp file instead of
 // buffering it in memory — used by the metadata/transcode workers to pull
 // multi-GB raw uploads down to local disk before shelling out to ffmpeg.
 // Caller must invoke cleanup() once done with the file.
 func (c *Client) DownloadToFile(ctx context.Context, key string) (path string, cleanup func(), err error) {
-	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+	return c.DownloadToFileVersion(ctx, key, "")
+}
+
+// DownloadToFileVersion streams the exact provider object version to a temp
+// file. A non-empty version is never replaced by the current object at the
+// same key.
+func (c *Client) DownloadToFileVersion(ctx context.Context, key, objectVersion string) (path string, cleanup func(), err error) {
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
-	})
+	}
+	if objectVersion != "" {
+		input.VersionId = aws.String(objectVersion)
+	}
+	out, err := c.s3.GetObject(ctx, input)
 	if err != nil {
-		return "", nil, fmt.Errorf("getting object %q: %w", key, err)
+		return "", nil, fmt.Errorf("getting object %q version %q: %w", key, objectVersion, err)
 	}
 	defer out.Body.Close()
 
@@ -150,11 +219,11 @@ func (c *Client) DownloadToFile(ctx context.Context, key string) (path string, c
 	if _, err := io.Copy(f, out.Body); err != nil {
 		f.Close()
 		cleanup()
-		return "", nil, fmt.Errorf("streaming object %q to disk: %w", key, err)
+		return "", nil, fmt.Errorf("streaming object %q version %q to disk: %w", key, objectVersion, err)
 	}
 	if err := f.Close(); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("closing temp file for %q: %w", key, err)
+		return "", nil, fmt.Errorf("closing temp file for %q version %q: %w", key, objectVersion, err)
 	}
 	return f.Name(), cleanup, nil
 }

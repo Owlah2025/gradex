@@ -115,6 +115,11 @@ var (
 		"lesson_files",
 		"course_price_changes",
 	}
+	mediaTables = []string{
+		"media_assets", "media_asset_versions", "upload_intents", "media_callback_receipts",
+		"media_outbox_dispatches", "scan_attempts", "processing_attempts", "video_renditions",
+		"legacy_media_mappings", "entitlements", "entitlement_adjustments",
+	}
 )
 
 func allTables() []string {
@@ -124,7 +129,8 @@ func allTables() []string {
 	all = append(all, sessionTables...)
 	all = append(all, admissionTables...)
 	all = append(all, staffTables...)
-	return append(all, catalogTables...)
+	all = append(all, catalogTables...)
+	return append(all, mediaTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,

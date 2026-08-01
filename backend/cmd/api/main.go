@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -20,11 +21,11 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
-	"github.com/Owlah2025/gradex/backend/internal/video"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -73,7 +74,11 @@ func main() {
 	routerOptions := pf.Options
 	sessionRepository = pf.SessionRepository
 
-	svc := video.NewService(pool, storageClient, queueClient, cfg)
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient)
+	if err != nil {
+		log.Fatalf("building media foundation: %v", err)
+	}
+	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
 
 	var authenticator auth.Authenticator
 	if cfg.AuthFakeMode() {
@@ -119,7 +124,7 @@ func main() {
 		cfg,
 		logger,
 		reporter,
-		svc,
+		nil,
 		authenticator,
 		entitlements,
 		principals,
@@ -224,7 +229,34 @@ func buildSessionFoundation(
 }
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.RevisionIntegritySchemaVersion
+	return db.MediaAndEntitlementSchemaVersion
+}
+
+func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient *storage.Client) (*httpapi.MediaFoundation, error) {
+	admission := cfg.Admission()
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("building media outbox writer: %w", err)
+	}
+	unavailable, err := media.NewUnavailableScanner("LG-014 scanner is not configured")
+	if err != nil {
+		return nil, err
+	}
+	scanner, err := media.NewScannerAdapter(unavailable)
+	if err != nil {
+		return nil, err
+	}
+	service, err := media.NewService(media.ServiceOptions{
+		DB: pool, Store: storageClient, Outbox: writer, Scanner: scanner,
+		UploadURLExpiry: cfg.UploadURLExpiry(), MaxUploadBytes: cfg.MaxUploadSizeBytes(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return httpapi.NewMediaFoundation(httpapi.MediaFoundationOptions{Service: service})
 }
 
 func buildAdmissionFoundation(

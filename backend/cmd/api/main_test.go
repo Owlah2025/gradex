@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
-	"github.com/Owlah2025/gradex/backend/internal/video"
+	"github.com/Owlah2025/gradex/backend/internal/storage"
 )
 
 const (
@@ -76,24 +77,6 @@ func apiPool(t *testing.T) (*pgxpool.Pool, context.Context) {
 	return p, ctx
 }
 
-type fakeVideoService struct{}
-
-func (f fakeVideoService) RequestUpload(context.Context, string, string, string) (video.UploadTicket, error) {
-	return video.UploadTicket{}, nil
-}
-func (f fakeVideoService) CompleteUpload(context.Context, string) error { return nil }
-func (f fakeVideoService) Retranscode(context.Context, string) error    { return nil }
-func (f fakeVideoService) Publish(context.Context, string) error        { return nil }
-func (f fakeVideoService) GetPlaybackURL(context.Context, string, string) (video.SignedURL, error) {
-	return video.SignedURL{}, nil
-}
-func (f fakeVideoService) UpdateProgress(context.Context, string, string, float64) (video.Progress, error) {
-	return video.Progress{}, nil
-}
-func (f fakeVideoService) ServeManifest(context.Context, string, string, string) ([]byte, string, error) {
-	return nil, "", nil
-}
-
 func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	freshAPISchema(t)
 	pool, _ := apiPool(t)
@@ -126,6 +109,17 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		t.Fatalf("buildProductionFoundations: %v", err)
 	}
 	defer pf.Close()
+	storageClient, err := storage.New(context.Background(), storage.Options{
+		Endpoint: cfg.S3Endpoint(), AccessKey: cfg.S3AccessKey().Expose(), SecretKey: cfg.S3SecretKey().Expose(),
+		Bucket: cfg.S3Bucket(), Region: cfg.S3Region(), UsePathStyle: cfg.S3UsePathStyle(),
+	})
+	if err != nil {
+		t.Fatalf("building test storage client: %v", err)
+	}
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient)
+	if err != nil {
+		t.Fatalf("building test media foundation: %v", err)
+	}
 
 	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
 	reporter := health.New(time.Second)
@@ -134,7 +128,9 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	entitlements := auth.NewFakeEntitlementChecker(pool)
 	principals := identity.NewDBPrincipalResolver(pool)
 
-	r, err := httpapi.NewRouter(cfg, logger, reporter, fakeVideoService{}, authenticator, entitlements, principals, pf.Options...)
+	routerOptions := append([]httpapi.RouterOption(nil), pf.Options...)
+	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
+	r, err := httpapi.NewRouter(cfg, logger, reporter, nil, authenticator, entitlements, principals, routerOptions...)
 	if err != nil {
 		t.Fatalf("httpapi.NewRouter: %v", err)
 	}
@@ -204,6 +200,25 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		key := req.method + " " + req.path
 		if !d5Mounted[key] {
 			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing D5 route '%s'", key)
+		}
+	}
+
+	requiredD7Routes := []string{
+		"POST /api/v1/media/uploads",
+		"POST /api/v1/media/uploads/:id/completions",
+		"GET /api/v1/media/assets/:id",
+		"POST /api/v1/media/assets/:id/retries",
+	}
+	mounted := make(map[string]bool)
+	for _, route := range routes {
+		mounted[route.Method+" "+route.Path] = true
+		if strings.HasPrefix(route.Path, "/api/v1/lessons/") || strings.HasPrefix(route.Path, "/api/v1/videos/") {
+			t.Fatalf("legacy video route remains in production composition: %s %s", route.Method, route.Path)
+		}
+	}
+	for _, route := range requiredD7Routes {
+		if !mounted[route] {
+			t.Fatalf("production router is missing D7 route %q", route)
 		}
 	}
 

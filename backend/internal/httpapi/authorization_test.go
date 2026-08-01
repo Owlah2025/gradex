@@ -185,6 +185,8 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
+	mountLegacyVideoRoutesForTests(r, fakeService{}, sessionFoundation.authenticator,
+		fakeEntitlements{allowed: true}, principals, logger)
 	return r, buf
 }
 
@@ -717,6 +719,7 @@ func TestCapabilityPolicyRunsBeforeOwnershipChecks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("router: %v", err)
 	}
+	mountLegacyVideoRoutesForTests(r, fakeService{}, fakeAuth{}, tripwire, fixedPrincipals{principal: restricted}, logger)
 
 	req := newAuthenticatedRequest(http.MethodPost, "/api/v1/lessons/lesson-99/video/publish", nil)
 	rec := do(r, req)

@@ -7,8 +7,8 @@ import "github.com/hibiken/asynq"
 // Job type names, colon-namespaced per asynq convention so future job types
 // (thumbnail:generate, subtitle:generate, watermark:apply, virus:scan) don't collide.
 const (
-	TypeMetadataExtract = "video:metadata_extract"
-	TypeTranscode       = "video:transcode"
+	TypeMediaScan      = "media:scan"
+	TypeMediaTranscode = "media:transcode"
 )
 
 func NewClient(redisAddr string) *asynq.Client {
