@@ -21,6 +21,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/learning"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
@@ -80,6 +81,12 @@ func main() {
 		log.Fatalf("building media foundation: %v", err)
 	}
 	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
+	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation)
+	if err != nil {
+		log.Fatalf("building learning foundation: %v", err)
+	}
+	defer learningRedis.Close()
+	routerOptions = append(routerOptions, httpapi.WithLearningFoundation(learningFoundation))
 
 	var authenticator auth.Authenticator
 	if cfg.AuthFakeMode() {
@@ -226,7 +233,71 @@ func buildSessionFoundation(
 }
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.MediaAndEntitlementSchemaVersion
+	return db.ProtectedLearningSchemaVersion
+}
+
+func buildLearningFoundation(cfg *config.Config, pool *pgxpool.Pool, mediaFoundation *httpapi.MediaFoundation) (*httpapi.LearningFoundation, *redis.Client, error) {
+	if mediaFoundation == nil {
+		return nil, nil, errors.New("learning media foundation is required")
+	}
+	repository, err := learning.NewRepository(pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("building learning repository: %w", err)
+	}
+	entitlementRepository, err := entitlement.NewRepository(pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("building learning entitlement reader: %w", err)
+	}
+	evaluator, err := entitlement.NewEvaluator(entitlementRepository)
+	if err != nil {
+		return nil, nil, fmt.Errorf("building learning entitlement evaluator: %w", err)
+	}
+	admission := cfg.Admission()
+	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	limiter, err := ratelimit.New(
+		ratelimit.NewRedisStore(redisClient),
+		[]byte(admission.LimiterHMACKey().Expose()),
+		admission.RateLimitTimeout(),
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, fmt.Errorf("building learning rate limiter: %w", err)
+	}
+	// Report-context issuer (D-065). The key is derived from an existing application cryptographic
+	// secret with explicit domain separation, so it can neither sign nor be signed by any other
+	// artefact; the root secret is never used directly. Composition fails closed: a build that
+	// cannot mint contexts must not serve protected learning at all, because it would render
+	// content the Student cannot report accurately.
+	rootSecret := []byte(cfg.Sessions().CSRFKey().Expose())
+	if len(rootSecret) < 32 {
+		_ = redisClient.Close()
+		return nil, nil, fmt.Errorf("report context root secret must contain at least 32 bytes")
+	}
+	reportContexts, err := learning.NewReportContextSigner(
+		learning.DeriveReportContextKey(rootSecret),
+		learning.DefaultReportContextLifetime,
+		func() time.Time { return time.Now().UTC() },
+		func(b []byte) error { _, err := rand.Read(b); return err },
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, fmt.Errorf("building report context issuer: %w", err)
+	}
+
+	foundation, err := httpapi.NewLearningFoundation(httpapi.LearningFoundationOptions{
+		Repository: repository, Evaluator: evaluator, Media: mediaFoundation.LearningMedia(),
+		ReportContexts: reportContexts, Limiter: limiter,
+		Policies: map[string]ratelimit.Policy{
+			"learning-progress-source": ratelimit.ProtectedLearningProgressSourcePolicy(),
+			"learning-progress":        ratelimit.ProtectedLearningProgressPolicy(),
+			"learning-report":          ratelimit.ProtectedLearningReportPolicy(),
+		},
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+	return foundation, redisClient, nil
 }
 
 func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient *storage.Client) (*httpapi.MediaFoundation, error) {

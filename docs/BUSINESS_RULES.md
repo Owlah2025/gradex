@@ -1,7 +1,7 @@
 # Business Rules
 
 > Status: Active
-> Last Updated: 2026-07-28
+> Last Updated: 2026-08-05
 
 This document is the single source of truth for Gradex's business logic — the rules governing users, courses, course access and entitlement, video/progress, instructors, admin actions, access control, content lifecycle, and data integrity.
 
@@ -181,7 +181,7 @@ These are structural invariants — they translate directly into database constr
 - **BR-113** — An Entitlement must reference an existing Student, exactly one existing Course, and a typed `grant_source` under BR-028. A `MANUAL_INVITATION` Entitlement must also reference the exact approved Course Access Invitation it came from. *(D-045; PRD §11 Course Access)*
 - **BR-114** — A progress record cannot exist without a corresponding enrollment. *(Formalizes BR-023's entitlement-before-access model; new 2026-07-20)*
 - **BR-115** — Every lesson resource and every lab material belongs to exactly one lesson and is removed with that lesson; deletion follows the same enrollment/archival constraint as the lesson's course (BR-018, BR-112). *(Formalizes BR-063/BR-067; new 2026-07-21)*
-- **BR-116** — A Progress write requires runtime Student access and a Lesson reachable through the current approved or qualifying acquired graph. The server uses the exact played Media Asset Version's trusted duration, bounds positions before monotonic update, and preserves `completed_at` plus the first completing Asset Version. `UNIQUE(enrollment_id, lesson_id)` is the Progress identity; expiry/revocation preserves the row but blocks further playback-derived updates. *(BR-023/050/051/053/114)*
+- **BR-116** — A Progress write requires runtime Student access and a Lesson reachable through the current approved or qualifying acquired graph. The server uses the exact played Media Asset Version's trusted duration, bounds positions before monotonic update, and preserves `completed_at` plus the first completing Asset Version. `UNIQUE(enrollment_id, course_lesson_identity_id)` is the Progress identity: the durable Student-visible Lesson identity, never a revision-owned `course_lessons` row and never `lessons(id)`, so one Progress record survives Course revision cloning, Lesson metadata changes, and video or Asset Version replacement (BR-059). Current Lesson metadata is resolved through the live approved revision, and the exact played Asset Version is validated separately and retained as completion evidence. Expiry/revocation preserves the row but blocks further playback-derived updates. *(BR-023/050/051/053/059/114; identity amended on 2026-08-01 by [D-060](DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities), which replaced the original `UNIQUE(enrollment_id, lesson_id)` wording — a revision-row key cannot preserve Progress across revision cloning)*
 
 ## 13. Notification Rules
 

@@ -29,11 +29,12 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const routeSegments = window.location.pathname.split("/");
     const routeLocale = routeSegments[1];
-    // Public catalogue URLs are language-addressable. Other legacy routes keep
-    // respecting the visitor's saved language instead of treating incidental
-    // path segments (for example /en/admin) as a locale selection.
+    // Catalogue and protected-learning URLs are language-addressable. Other
+    // legacy routes keep respecting the visitor's saved language instead of
+    // treating incidental path segments (for example /en/admin) as a locale
+    // selection.
     if (
-      routeSegments[2] === "catalog" &&
+      (routeSegments[2] === "catalog" || routeSegments[2] === "learn") &&
       (routeLocale === "en" || routeLocale === "ar")
     ) {
       setLocaleState(routeLocale);

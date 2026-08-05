@@ -38,6 +38,7 @@ type Entry struct {
 	Key    string
 	Limit  int64
 	Window time.Duration
+	Burst  int64
 }
 
 type Limiter struct {
@@ -94,6 +95,12 @@ func (l *Limiter) Decide(ctx context.Context, policy Policy, input Input) Decisi
 			return Decision{Outcome: OutcomeDenied, RetryAfter: policy.Window}
 		}
 		l.recordDistributedFailure()
+		if policy.FailClosed {
+			return Decision{Outcome: OutcomeUnavailable}
+		}
+	}
+	if policy.FailClosed {
+		return Decision{Outcome: OutcomeUnavailable}
 	}
 
 	allowed, available := l.local.decide(local, policy.LocalMaxKeys)
@@ -115,8 +122,8 @@ func (l *Limiter) entries(policy Policy, input Input) ([]Entry, []Entry, bool) {
 			return nil, nil, false
 		}
 		key := l.opaqueKey(policy.ID, rule.Dimension, value)
-		distributed = append(distributed, Entry{Key: key, Limit: rule.Limit, Window: policy.Window})
-		local = append(local, Entry{Key: key, Limit: rule.LocalLimit, Window: policy.Window})
+		distributed = append(distributed, Entry{Key: key, Limit: rule.Limit, Window: policy.Window, Burst: rule.Burst})
+		local = append(local, Entry{Key: key, Limit: rule.LocalLimit, Window: policy.Window, Burst: rule.Burst})
 	}
 	return distributed, local, true
 }
@@ -129,6 +136,8 @@ func dimensionValue(dimension Dimension, policy Policy, input Input) (string, bo
 		return bounded(input.Identifier, 512)
 	case DimensionNetwork:
 		return networkPrefix(input.ClientIP)
+	case DimensionSourceAddr:
+		return sourceAddress(input.ClientIP)
 	case DimensionAnonymous:
 		return bounded(input.AnonymousID, 256)
 	case DimensionGlobal:
@@ -136,6 +145,17 @@ func dimensionValue(dimension Dimension, policy Policy, input Input) (string, bo
 	default:
 		return "", false
 	}
+}
+
+func sourceAddress(raw string) (string, bool) {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return "", false
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		return ipv4.String(), true
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64", true
 }
 
 func bounded(value string, max int) (string, bool) {

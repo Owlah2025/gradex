@@ -43,9 +43,20 @@ func (d *refusingDelivery) IssueDownload(context.Context, media.DownloadRequest)
 	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
 }
 
+func (d *refusingDelivery) IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error) {
+	d.calls++
+	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
+}
+
 func (d *refusingDelivery) IssuePreview(context.Context, string) (media.PreviewAuthorization, error) {
 	d.calls++
 	return media.PreviewAuthorization{}, media.ErrProtectedUnavailable
+}
+
+type redirectingDelivery struct{ refusingDelivery }
+
+func (*redirectingDelivery) IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error) {
+	return media.DownloadAuthorization{URL: "https://storage.test/fresh-target"}, nil
 }
 
 func (s *mediaRouterStore) PresignPutURL(context.Context, string, string, time.Duration) (string, error) {
@@ -195,6 +206,8 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	for _, route := range []string{
 		"POST /api/v1/media/playback-authorizations",
 		"POST /api/v1/media/download-authorizations",
+		"GET /api/v1/media/lessons/:lessonId/materials/resource",
+		"GET /api/v1/media/lessons/:lessonId/materials/lab-material",
 		"GET /api/v1/media/previews/:id",
 	} {
 		mounted := false
@@ -252,5 +265,55 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	}
 	if delivery.calls != len(cases) {
 		t.Fatalf("delivery issuer calls=%d, want %d", delivery.calls, len(cases))
+	}
+}
+
+func TestD064StableMaterialEntryRedirectIsNoStoreAndContainsNoBody(t *testing.T) {
+	student := identity.Principal{
+		AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive,
+	}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, student, &redirectingDelivery{})
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/media/lessons/lesson-1/materials/resource", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusFound {
+		t.Fatalf("status=%d body=%q, want 302", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Location") != "https://storage.test/fresh-target" {
+		t.Fatalf("location=%q", response.Header().Get("Location"))
+	}
+	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("redirect headers=%v", response.Header())
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("redirect body leaked signed target: %q", response.Body.String())
+	}
+}
+
+func TestD064StableMaterialDenialsRemainUniformWithoutRedirect(t *testing.T) {
+	student := identity.Principal{
+		AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive,
+	}
+	delivery := &refusingDelivery{}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, student, delivery)
+	paths := []string{
+		"/api/v1/media/lessons/lesson-1/materials/resource",
+		"/api/v1/media/lessons/lesson-1/materials/lab-material",
+	}
+	var baseline *httptest.ResponseRecorder
+	for _, path := range paths {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("denial %s = status %d headers=%v", path, response.Code, response.Header())
+		}
+		if baseline == nil {
+			baseline = response
+		} else if response.Body.String() != baseline.Body.String() {
+			t.Fatalf("denial bodies differ: %q vs %q", baseline.Body.String(), response.Body.String())
+		}
+	}
+	if delivery.calls != len(paths) {
+		t.Fatalf("delivery calls=%d, want %d", delivery.calls, len(paths))
 	}
 }

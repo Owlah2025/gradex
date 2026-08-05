@@ -77,6 +77,12 @@ func apiPool(t *testing.T) (*pgxpool.Pool, context.Context) {
 	return p, ctx
 }
 
+func TestBuildLearningFoundationRejectsMissingMedia(t *testing.T) {
+	if _, _, err := buildLearningFoundation(nil, nil, nil); err == nil {
+		t.Fatal("production learning composition accepted a missing media foundation")
+	}
+}
+
 func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	freshAPISchema(t)
 	pool, _ := apiPool(t)
@@ -120,6 +126,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building test media foundation: %v", err)
 	}
+	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation)
+	if err != nil {
+		t.Fatalf("building real learning foundation: %v", err)
+	}
+	defer learningRedis.Close()
 
 	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
 	reporter := health.New(time.Second)
@@ -129,6 +140,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 
 	routerOptions := append([]httpapi.RouterOption(nil), pf.Options...)
 	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
+	routerOptions = append(routerOptions, httpapi.WithLearningFoundation(learningFoundation))
 	r, err := httpapi.NewRouter(cfg, logger, reporter, authenticator, principals, routerOptions...)
 	if err != nil {
 		t.Fatalf("httpapi.NewRouter: %v", err)
@@ -139,11 +151,16 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	t.Logf("Enumerated %d mounted production routes:", len(routes))
 
 	requiredSurfaces := map[string]string{
-		"Sessions":         "/api/v1/sessions",
-		"StudentAdmission": "/api/v1/student-registrations",
-		"Staff":            "/api/v1/staff",
-		"CatalogAuthoring": "/api/v1/courses",
-		"AdminReview":      "/api/v1/admin/review",
+		"Sessions":          "/api/v1/sessions",
+		"StudentAdmission":  "/api/v1/student-registrations",
+		"Staff":             "/api/v1/staff",
+		"CatalogAuthoring":  "/api/v1/courses",
+		"ProtectedLearning": "/api/v1/learn/lessons/:lessonId/progress",
+		"AdminReview":       "/api/v1/admin/review",
+	}
+	requiredLearningRoutes := []string{
+		"POST /api/v1/learn/lessons/:lessonId/playback",
+		"PUT /api/v1/learn/lessons/:lessonId/progress",
 	}
 
 	requiredD5Routes := []struct {
@@ -192,6 +209,19 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	for surfaceName, pathPrefix := range requiredSurfaces {
 		if !surfaceMounted[surfaceName] {
 			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing surface '%s' (%s)", surfaceName, pathPrefix)
+		}
+	}
+	for _, required := range requiredLearningRoutes {
+		methodPath := strings.SplitN(required, " ", 2)
+		var found bool
+		for _, route := range routes {
+			if route.Method == methodPath[0] && route.Path == methodPath[1] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("production router built by cmd/api is missing learning route %q", required)
 		}
 	}
 

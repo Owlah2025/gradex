@@ -14,7 +14,7 @@ export async function ensureAnonymousBrowser(): Promise<string> {
       cache: "no-store",
       headers: { Accept: "application/json, application/problem+json" },
     })
-      .then(readJSON<{ csrf_token: string }>)
+      .then(readJSONResponse<{ csrf_token: string }>)
       .then((body) => {
         anonymousCSRFToken = body.csrf_token;
         return body.csrf_token;
@@ -40,7 +40,7 @@ export async function getJSON<T>(
       "Accept-Language": language,
     },
   });
-  return readJSON<T>(response);
+  return readJSONResponse<T>(response);
 }
 
 export async function postJSON<T>(
@@ -61,7 +61,7 @@ export async function postJSON<T>(
     },
     body: JSON.stringify(body),
   });
-  return readJSON<T>(response);
+  return readJSONResponse<T>(response);
 }
 
 /**
@@ -95,10 +95,10 @@ export async function authenticatedRequest<T>(
   });
 
   if (response.status === 204) return null;
-  return readJSON<T>(response);
+  return readJSONResponse<T>(response);
 }
 
-async function readJSON<T>(response: Response): Promise<T> {
+export async function readJSONResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json().catch(() => null);
   if (response.ok) return body as T;
   if (isProblem(body)) throw new ProblemError(body);

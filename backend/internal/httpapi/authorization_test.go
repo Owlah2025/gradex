@@ -20,6 +20,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/learning"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
@@ -173,12 +174,28 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	if err != nil {
 		t.Fatalf("constructing catalog foundation: %v", err)
 	}
+	learningRepository, err := learning.NewRepository(pool)
+	if err != nil {
+		t.Fatalf("constructing learning repository: %v", err)
+	}
+	learningFoundation, err := NewLearningFoundation(LearningFoundationOptions{
+		ReportContexts: testReportContextIssuer(t),
+		Repository:     learningRepository,
+		Evaluator:      learningFoundationEvaluator{},
+		Media:          learningFoundationMedia{},
+		Limiter:        testLearningLimiter(t),
+		Policies:       testLearningPolicies(),
+	})
+	if err != nil {
+		t.Fatalf("constructing learning foundation: %v", err)
+	}
 
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithStaffFoundation(staffFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
 		WithCatalogFoundation(catalogFoundation),
+		WithLearningFoundation(learningFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
@@ -293,6 +310,12 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/courses":                                                       {Method: http.MethodPost, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses":                                                        {Method: http.MethodGet, Path: "/api/v1/courses", Class: ClassCapabilityProtected},
 	"GET /api/v1/taxonomy/terms":                                                 {Method: http.MethodGet, Path: "/api/v1/taxonomy/terms", Class: ClassCapabilityProtected},
+	"GET /api/v1/learn/dashboard":                                                {Method: http.MethodGet, Path: "/api/v1/learn/dashboard", Class: ClassCapabilityProtected},
+	"GET /api/v1/learn/courses/:courseId":                                        {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId", Class: ClassCapabilityProtected},
+	"GET /api/v1/learn/courses/:courseId/lessons/:lessonId":                      {Method: http.MethodGet, Path: "/api/v1/learn/courses/:courseId/lessons/:lessonId", Class: ClassCapabilityProtected},
+	"POST /api/v1/learn/lessons/:lessonId/playback":                              {Method: http.MethodPost, Path: "/api/v1/learn/lessons/:lessonId/playback", Class: ClassCapabilityProtected},
+	"PUT /api/v1/learn/lessons/:lessonId/progress":                               {Method: http.MethodPut, Path: "/api/v1/learn/lessons/:lessonId/progress", Class: ClassCapabilityProtected},
+	"POST /api/v1/learn/reports":                                                 {Method: http.MethodPost, Path: "/api/v1/learn/reports", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses/:id":                                                    {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/candidate":                                          {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},
@@ -364,6 +387,10 @@ func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
 		})
 	}
 	return result
+}
+
+func isProtectedLearningRoute(path string) bool {
+	return strings.HasPrefix(path, "/api/v1/learn/")
 }
 
 func TestAuthorizationMatrixMatchesMountedRouter(t *testing.T) {
@@ -473,6 +500,16 @@ func TestRestrictedBootstrapAdminIsDeniedOnRealProtectedRoutes(t *testing.T) {
 			req := newAuthenticatedRequest(route.method, route.path, body)
 			rec := do(r, req)
 
+			if isProtectedLearningRoute(route.path) {
+				if rec.Code != http.StatusNotFound {
+					t.Fatalf("learning status = %d, want uniform 404 (body %s)", rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(rec.Body.String(), `"code":"NOT_FOUND"`) {
+					t.Errorf("learning denial body lacks NOT_FOUND code: %s", rec.Body.String())
+				}
+				assertDenyLogged(t, buf, "PASSWORD_CHANGE_REQUIRED")
+				return
+			}
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
 			}
@@ -534,6 +571,13 @@ func TestSuspendedAccountIsDeniedOnRealProtectedRoutes(t *testing.T) {
 			req := newAuthenticatedRequest(route.method, route.path, body)
 			rec := do(r, req)
 
+			if isProtectedLearningRoute(route.path) {
+				if rec.Code != http.StatusNotFound {
+					t.Fatalf("learning status = %d, want uniform 404", rec.Code)
+				}
+				assertDenyLogged(t, buf, "ACCOUNT_SUSPENDED")
+				return
+			}
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", rec.Code)
 			}

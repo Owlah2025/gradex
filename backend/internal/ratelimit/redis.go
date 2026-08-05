@@ -23,13 +23,36 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 var layeredDecisionScript = redis.NewScript(`
 local allowed = 1
 for i, key in ipairs(KEYS) do
-  local arg = ((i - 1) * 2) + 1
-  local count = redis.call("INCR", key)
-  if count == 1 then
-    redis.call("PEXPIRE", key, ARGV[arg + 1])
-  end
-  if count > tonumber(ARGV[arg]) then
-    allowed = 0
+  local arg = ((i - 1) * 3) + 1
+  local limit = tonumber(ARGV[arg])
+  local window = tonumber(ARGV[arg + 1])
+  local burst = tonumber(ARGV[arg + 2])
+  if burst > 0 then
+    local clock = redis.call("TIME")
+    local now = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+    local state = redis.call("HMGET", key, "tokens", "updated_at")
+    local tokens = tonumber(state[1])
+    local updated = tonumber(state[2])
+    if tokens == nil or updated == nil then
+      tokens = burst
+      updated = now
+    end
+    tokens = math.min(burst, tokens + (math.max(0, now - updated) / window) * limit)
+    if tokens < 1 then
+      allowed = 0
+    else
+      tokens = tokens - 1
+    end
+    redis.call("HSET", key, "tokens", tokens, "updated_at", now)
+    redis.call("PEXPIRE", key, math.max(window, math.ceil((burst / limit) * window)))
+  else
+    local count = redis.call("INCR", key)
+    if count == 1 then
+      redis.call("PEXPIRE", key, window)
+    end
+    if count > limit then
+      allowed = 0
+    end
   end
 end
 return allowed
@@ -43,10 +66,10 @@ func (s *RedisStore) Decide(ctx context.Context, entries []Entry) (bool, error) 
 		return false, errors.New("rate-limit decision has no entries")
 	}
 	keys := make([]string, 0, len(entries))
-	args := make([]any, 0, len(entries)*2)
+	args := make([]any, 0, len(entries)*3)
 	for _, entry := range entries {
 		keys = append(keys, entry.Key)
-		args = append(args, entry.Limit, entry.Window.Milliseconds())
+		args = append(args, entry.Limit, entry.Window.Milliseconds(), entry.Burst)
 	}
 	result, err := layeredDecisionScript.Run(ctx, s.client, keys, args...).Int64()
 	if err != nil {

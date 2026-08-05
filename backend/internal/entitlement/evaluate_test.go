@@ -13,6 +13,19 @@ func (f readerFunc) Load(ctx context.Context, studentID, lessonID string) (Snaps
 	return f(ctx, studentID, lessonID)
 }
 
+type courseReadReaderFunc struct {
+	snapshot  Snapshot
+	snapshots []CourseReadSnapshot
+}
+
+func (f courseReadReaderFunc) Load(context.Context, string, string) (Snapshot, error) {
+	return f.snapshot, nil
+}
+
+func (f courseReadReaderFunc) LoadCourseReadSnapshots(context.Context, string) ([]CourseReadSnapshot, error) {
+	return f.snapshots, nil
+}
+
 func TestEvaluatorRequiresReader(t *testing.T) {
 	if _, err := NewEvaluator(nil); err == nil {
 		t.Fatal("NewEvaluator(nil) succeeded")
@@ -117,6 +130,71 @@ func TestEvaluateFailsClosedForMissingOrFaultedInputs(t *testing.T) {
 	}
 	if got := e.Evaluate(context.Background(), "student", "lesson", time.Now()); got.Allowed || got.Reason != ReasonDependency {
 		t.Fatalf("fault decision=%+v, want dependency denial", got)
+	}
+}
+
+func TestEvaluateReadSeparatesActiveExpiredAndDeniedPresentation(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	student := "student"
+	lesson := Lesson{ID: "lesson", CourseID: "course", SectionID: "section", AccountStatus: "ACTIVE"}
+	cases := []struct {
+		name       string
+		endsAt     time.Time
+		state      State
+		wantState  ReadState
+		wantCourse bool
+		wantReason Reason
+	}{
+		{name: "active course grant", endsAt: now.Add(time.Hour), state: StateActive, wantState: ReadActive, wantCourse: true, wantReason: ReasonAllowed},
+		{name: "effective expiry retained for display", endsAt: now, state: StateActive, wantState: ReadExpired, wantCourse: true, wantReason: ReasonExpired},
+		{name: "revoked grant denied", endsAt: now.Add(time.Hour), state: StateRevoked, wantState: ReadDenied, wantCourse: false, wantReason: ReasonNoApplicableGrant},
+		{name: "suspended Account denies even retained expiry", endsAt: now, state: StateActive, wantState: ReadDenied, wantCourse: false, wantReason: ReasonAccountSuspended},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record := testRecord("grant", student, ScopeCourse, "course", "course", now)
+			record.AccessEndsAt, record.OriginalAccessEndsAt, record.State = tc.endsAt, tc.endsAt, tc.state
+			if tc.wantReason == ReasonAccountSuspended {
+				lesson.AccountStatus = "SUSPENDED"
+			}
+			if tc.state == StateRevoked {
+				revokedAt := now.Add(-time.Minute)
+				record.RevokedAt = &revokedAt
+			}
+			evaluator, err := NewEvaluator(courseReadReaderFunc{snapshot: Snapshot{Lesson: lesson, Entitlements: []Record{record}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := evaluator.EvaluateRead(context.Background(), student, lesson.ID, now)
+			if got.State != tc.wantState || got.CourseWide != tc.wantCourse || got.Reason != tc.wantReason {
+				t.Fatalf("read decision = %+v, want state=%s course-wide=%v reason=%s", got, tc.wantState, tc.wantCourse, tc.wantReason)
+			}
+			if got.State == ReadExpired && (got.ExpiresAt == nil || !got.ExpiresAt.Equal(tc.endsAt)) {
+				t.Fatalf("expired read expiry = %v, want %s", got.ExpiresAt, tc.endsAt)
+			}
+		})
+	}
+}
+
+func TestEvaluateCourseReadsUsesOneBulkClassificationBoundary(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	student := "student"
+	active := testRecord("active", student, ScopeCourse, "course-a", "course-a", now)
+	expired := testRecord("expired", student, ScopeCourse, "course-b", "course-b", now)
+	expired.AccessEndsAt = now
+	evaluator, err := NewEvaluator(courseReadReaderFunc{snapshots: []CourseReadSnapshot{
+		{CourseID: "course-a", Lesson: Lesson{ID: "a", CourseID: "course-a", SectionID: "section", AccountStatus: "ACTIVE"}, Entitlements: []Record{active}},
+		{CourseID: "course-b", Lesson: Lesson{ID: "b", CourseID: "course-b", SectionID: "section", AccountStatus: "ACTIVE"}, Entitlements: []Record{expired}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := evaluator.EvaluateCourseReads(context.Background(), student, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["course-a"].State != ReadActive || got["course-b"].State != ReadExpired {
+		t.Fatalf("bulk read classifications = %+v", got)
 	}
 }
 

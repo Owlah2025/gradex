@@ -86,3 +86,31 @@ type Decision struct {
 	Reason        Reason
 	EntitlementID string
 }
+
+// ReadState is the S5 read-model classification. It is internal evidence;
+// handlers expose only the presentation states active and expired.
+type ReadState string
+
+const (
+	ReadDenied  ReadState = "DENIED"
+	ReadActive  ReadState = "ACTIVE"
+	ReadExpired ReadState = "EXPIRED"
+)
+
+// ReadDecision is the narrow S4-owned boundary consumed by protected learning
+// reads. It deliberately carries no entitlement identifier or capability.
+type ReadDecision struct {
+	State      ReadState
+	Reason     Reason
+	ExpiresAt  *time.Time
+	CourseWide bool
+}
+
+// CourseReadSnapshot is loaded in bulk by the S4 repository so Dashboard
+// classification does not run one entitlement query per Course.
+type CourseReadSnapshot struct {
+	CourseID            string
+	EnrollmentCreatedAt time.Time
+	Lesson              Lesson
+	Entitlements        []Record
+}

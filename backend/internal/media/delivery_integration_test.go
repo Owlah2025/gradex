@@ -177,6 +177,92 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 	}
 }
 
+func TestD064StableMaterialEntryResolvesCurrentVersionAndRechecksAuthority(t *testing.T) {
+	f := newDeliveryFixture(t)
+	resource, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource})
+	if err != nil || resource.AssetVersionID != f.resource {
+		t.Fatalf("resource entry=%+v err=%v", resource, err)
+	}
+	lab, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindLabMaterial})
+	if err != nil || lab.AssetVersionID != f.lab {
+		t.Fatalf("lab entry=%+v err=%v", lab, err)
+	}
+
+	replacement := f.readyAsset(KindResource, "resource/replacement.pdf")
+	var lessonRow string
+	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM course_lessons WHERE lesson_identity_id = $1::uuid`, f.lesson).Scan(&lessonRow); err != nil {
+		t.Fatalf("finding lesson row: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE lesson_files SET asset_version_id = $1::uuid WHERE lesson_id = $2::uuid AND kind = 'RESOURCE'`, replacement, lessonRow); err != nil {
+		t.Fatalf("replacing current resource version: %v", err)
+	}
+	replaced, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource})
+	if err != nil || replaced.AssetVersionID != replacement {
+		t.Fatalf("replacement entry=%+v err=%v", replaced, err)
+	}
+
+	beforeDenied := len(f.store.requestedKeys())
+	if _, err := f.pool.Exec(f.ctx, `UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, f.student); err != nil {
+		t.Fatalf("suspending account: %v", err)
+	}
+	if _, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource}); err == nil {
+		t.Fatal("material entry succeeded after account suspension")
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE accounts SET status = 'ACTIVE' WHERE id = $1::uuid`, f.student); err != nil {
+		t.Fatalf("restoring account: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET access_suspended_at = $1, access_suspension_reason = 'd064-test' WHERE id = $2::uuid`, f.now, f.courseID); err != nil {
+		t.Fatalf("suspending Course access: %v", err)
+	}
+	if _, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource}); err == nil {
+		t.Fatal("material entry succeeded during emergency suspension")
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET access_suspended_at = NULL, access_suspension_reason = NULL WHERE id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("restoring Course access: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET retired_at = $1 WHERE id = $2::uuid`, f.now, f.courseID); err != nil {
+		t.Fatalf("retiring Course: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET retirement_eligibility_at = $1 WHERE student_account_id = $2::uuid AND course_id = $3::uuid`, f.now, f.student, f.courseID); err != nil {
+		t.Fatalf("removing retirement eligibility: %v", err)
+	}
+	if _, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource}); err == nil {
+		t.Fatal("material entry succeeded for retired-ineligible Course")
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
+		t.Fatalf("revoking entitlement: %v", err)
+	}
+	if _, err := f.delivery.IssueDownloadEntry(f.ctx, DownloadEntryRequest{StudentID: f.student, LessonID: f.lesson, Kind: KindResource}); err == nil {
+		t.Fatal("material entry succeeded after entitlement revocation")
+	}
+	if got := len(f.store.requestedKeys()); got != beforeDenied {
+		t.Fatalf("signer called after denied entry: before=%d after=%d", beforeDenied, got)
+	}
+}
+
+func TestD064MaterialKindsBulkReadExposesOnlyCurrentReadyKinds(t *testing.T) {
+	f := newDeliveryFixture(t)
+	unknownLesson := uuid.NewString()
+	kinds, err := f.delivery.MaterialKinds(f.ctx, []string{f.lesson, unknownLesson})
+	if err != nil {
+		t.Fatalf("bulk material kinds: %v", err)
+	}
+	got := kinds[f.lesson]
+	if len(got) != 2 || got[0].Kind != MaterialResource || got[1].Kind != MaterialLabMaterial {
+		t.Fatalf("material kinds=%v, want deterministic resource/lab_material", got)
+	}
+	// The exact Asset Version each material resolved to is retained internally, so a report
+	// context can bind the instance this read actually exposed (D-065).
+	for _, material := range got {
+		if material.AssetVersionID == "" {
+			t.Fatalf("%s carried no exact Asset Version", material.Kind)
+		}
+	}
+	if _, ok := kinds[unknownLesson]; ok {
+		t.Fatal("bulk material kinds leaked an unknown Lesson")
+	}
+}
+
 func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) {
 	f := newDeliveryFixture(t)
 	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now.Add(time.Minute), f.student); err != nil {

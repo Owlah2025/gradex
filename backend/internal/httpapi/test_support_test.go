@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
 )
@@ -16,10 +17,13 @@ import (
 // mount routes or emulate a production handler.
 type fakeAuth struct{ err error }
 
-func (f fakeAuth) UserFromRequest(*gin.Context) (string, error) {
+func (f fakeAuth) UserFromRequest(c *gin.Context) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
+	// Both production authenticators publish the authenticated session; a double that does not is
+	// not modelling an authenticated request.
+	c.Set("authenticated_session", identity.Session{ID: "test-session-user-1", AccountID: "user-1", State: identity.SessionActive})
 	return "user-1", nil
 }
 

@@ -36,6 +36,29 @@ Resources do not (BR-103).
 `GET /api/v1/media/previews/{id}` — public preview, **anonymous**, available only after validation,
 quarantine, scan success, and Instructor publication confirmation (BR-144).
 
+### Stable learning-material browser entry points (D-064)
+
+S4 also mounts the following same-origin, protected navigation routes:
+
+- `GET /api/v1/media/lessons/{lessonId}/materials/resource`
+- `GET /api/v1/media/lessons/{lessonId}/materials/lab-material`
+
+They resolve the current material Asset Version for the stable Lesson identity internally, then
+authenticate the active Student, evaluate current Enrollment/Entitlement and retirement/readiness
+policy, and sign only after authorization succeeds. Success is `302 Found` with a fresh `Location`,
+`Cache-Control: no-store`, and `Referrer-Policy: no-referrer`; the signed target is not returned in
+JSON or a body and is never persisted or cached. Failure uses the same uniform protected-unavailable
+`404 application/problem+json` with `Cache-Control: no-store` and no `Location`.
+
+These routes do not accept an Asset Version ID and do not mutate Enrollment, Entitlement, Progress,
+Asset Version, or material lifecycle state. They share the authoritative resolver, evaluator, and
+signer with `POST /api/v1/media/download-authorizations`. S5 may render only these fixed entry
+points; it never signs, proxies, or exposes storage details.
+
+For S5 read models, S4 exposes a bounded read-only bulk classification that returns only whether
+`resource` or `lab_material` is available for current stable Lesson identities. It never returns
+Asset Version IDs, storage keys, signed targets, expiry, readiness internals, or capability state.
+
 ### The single refusal
 
 Every one of these causes returns an **identical** response — same status, headers, schema, and body:

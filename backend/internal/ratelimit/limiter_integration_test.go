@@ -47,3 +47,28 @@ func TestRedisStoreMakesAtomicLayeredAllowDenyDecision(t *testing.T) {
 		t.Cleanup(func() { _ = client.Del(context.Background(), entry.Key).Err() })
 	}
 }
+
+func TestRedisStoreHonorsTokenBucketBurst(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("Redis is required for integration test: %v", err)
+	}
+
+	key := "gradex:rl:token-burst-v1:source:" + fmt.Sprintf("%d", time.Now().UnixNano())
+	entry := Entry{Key: key, Limit: 1, Window: time.Hour, Burst: 2}
+	store := NewRedisStore(client)
+	for attempt := 1; attempt <= 2; attempt++ {
+		allowed, err := store.Decide(ctx, []Entry{entry})
+		if err != nil || !allowed {
+			t.Fatalf("token burst attempt %d = %v, %v; want allow", attempt, allowed, err)
+		}
+	}
+	allowed, err := store.Decide(ctx, []Entry{entry})
+	if err != nil || allowed {
+		t.Fatalf("token burst overflow = %v, %v; want deny", allowed, err)
+	}
+	t.Cleanup(func() { _ = client.Del(context.Background(), key).Err() })
+}

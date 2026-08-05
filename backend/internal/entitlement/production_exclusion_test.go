@@ -37,12 +37,12 @@ func TestProductionBuildExcludesEntitlementSeed(t *testing.T) {
 			t.Fatalf("production entitlement package exposes seed source %q", name)
 		}
 	}
-	build := exec.Command("go", "build", "-tags=production", "./internal/entitlement")
+	build := exec.Command("go", "build", "-tags=production", "-o", filepath.Join(t.TempDir(), "gradex-entitlement.a"), "./internal/entitlement")
 	build.Dir = backendDir
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building production entitlement package: %v\n%s", err, output)
 	}
-	apiBuild := exec.Command("go", "build", "-tags=production", "./cmd/api")
+	apiBuild := exec.Command("go", "build", "-tags=production", "-o", filepath.Join(t.TempDir(), "gradex-api"), "./cmd/api")
 	apiBuild.Dir = backendDir
 	if output, err := apiBuild.CombinedOutput(); err != nil {
 		t.Fatalf("building production API composition: %v\n%s", err, output)

@@ -863,8 +863,29 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 - S2 T066 has repeatable rendered Playwright Chromium evidence for Arabic RTL and English LTR across
   tablet, laptop, and desktop taxonomy screens. The aligned Playwright 1.62.0 runner executed all
-  12 checks successfully in `mcr.microsoft.com/playwright:v1.62.0-resolute`; the retained HTML report
-  is the configured CI artifact, while traces remain failure-only by policy.
+  12 checks successfully in `mcr.microsoft.com/playwright:v1.62.0-resolute`. Traces remain
+  failure-only by policy.
+
+  **Corrected 2026-08-05.** This entry previously said "the retained HTML report is the configured CI
+  artifact". That was not true of the repository: `ci.yml` had no Playwright job and `.github/`
+  contained no `actions/upload-artifact` step, so no CI artifact was configured and no rendered
+  evidence was retained anywhere durable — the report was written to a `.gitignore`d directory and
+  deleted with the next run. The S2 T066 rendered evidence therefore stands as an *executed* result,
+  not a retained artifact.
+
+- **Rendered-evidence retention is now configured, and has not yet produced an artifact.** The
+  `S5 T075 Rendered Evidence` job in [`ci.yml`](../../.github/workflows/ci.yml) runs
+  `frontend/e2e/s5-viewport-evidence.spec.ts` against a real stack, writes the self-contained HTML
+  report plus the 32 rendered PNGs and a manifest into one job-scoped directory, verifies the
+  32-cell matrix, audits the set for credential-shaped values, and uploads it as
+  `gradex-s5-t075-rendered-<commit sha>` through `actions/upload-artifact`. Traces stay failure-only
+  and are deliberately excluded from the upload, because a compressed archive cannot be audited
+  before publication.
+
+  The distinction matters and is deliberate: **the infrastructure is configured; no artifact has
+  been retained yet.** Nothing has been committed or pushed, so no workflow run exists and no
+  artifact identifier can be cited. S5 T075 stays blocked until a real run of this job succeeds and
+  its artifact is verified. Adding the YAML is not the evidence.
 
 ## Current Next Task
 

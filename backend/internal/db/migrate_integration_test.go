@@ -6,6 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +124,7 @@ var (
 		"media_outbox_dispatches", "scan_attempts", "processing_attempts", "video_renditions",
 		"legacy_media_mappings", "entitlements", "entitlement_adjustments",
 	}
+	protectedLearningTables = []string{"enrollments", "content_reports"}
 )
 
 func allTables() []string {
@@ -130,7 +135,8 @@ func allTables() []string {
 	all = append(all, admissionTables...)
 	all = append(all, staffTables...)
 	all = append(all, catalogTables...)
-	return append(all, mediaTables...)
+	all = append(all, mediaTables...)
+	return append(all, protectedLearningTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -327,6 +333,396 @@ func TestMediaMigrationRollbackHandlesD7Data(t *testing.T) {
 	}
 	if !strings.Contains(sourceCheck, "MEDIA_AND_ASSETS") {
 		t.Fatalf("re-applied source-module constraint does not accept media rows: %s", sourceCheck)
+	}
+}
+
+func TestProtectedLearningMigrationSupportsUpgrade(t *testing.T) {
+	for _, startVersion := range []int{
+		0,                              // a clean install must still apply 0013 before 0014.
+		RevisionIntegritySchemaVersion, // the supported pre-S5 upgrade boundary.
+	} {
+		t.Run(fmt.Sprintf("from-%04d", startVersion), func(t *testing.T) {
+			freshDatabase(t)
+			m := openMigrator(t)
+			if startVersion > 0 {
+				if err := m.Migrate(uint(startVersion)); err != nil {
+					t.Fatalf("migrating to pre-S5 schema %d: %v", startVersion, err)
+				}
+			}
+
+			// Stop at 0013 rather than only calling Up: this proves the
+			// enrollment prerequisite exists before 0014 can install Progress.
+			if err := m.Migrate(uint(EnrollmentSchemaVersion)); err != nil {
+				t.Fatalf("migrating through enrollments: %v", err)
+			}
+			pool := openPool(t)
+			if !tableExists(t, pool, "enrollments") || !tableExists(t, pool, "progress") {
+				t.Fatal("0013 did not leave the enrollment and legacy progress prerequisites in place")
+			}
+			assertProgressUsesLegacyShape(t, pool)
+
+			if err := m.Steps(1); err != nil {
+				t.Fatalf("applying 0014 after enrollments: %v", err)
+			}
+			for _, table := range protectedLearningTables {
+				if !tableExists(t, pool, table) {
+					t.Errorf("table %s is missing after protected-learning upgrade", table)
+				}
+			}
+			assertProtectedLearningSchema(t, pool)
+		})
+	}
+}
+
+func TestProgressUsesStableLessonIdentity(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating protected-learning schema: %v", err)
+	}
+	pool := openPool(t)
+
+	assertProtectedLearningSchema(t, pool)
+}
+
+func assertProtectedLearningSchema(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var columns []string
+	rows, err := pool.Query(ctx, `
+		SELECT column_name || ':' || data_type || ':' || is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'progress'
+		ORDER BY ordinal_position
+	`)
+	if err != nil {
+		t.Fatalf("reading progress columns: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatalf("scanning progress column: %v", err)
+		}
+		columns = append(columns, column)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating progress columns: %v", err)
+	}
+	wantColumns := []string{
+		"id:uuid:NO", "enrollment_id:uuid:NO", "course_lesson_identity_id:uuid:NO",
+		"max_position_seconds:numeric:NO", "last_position_seconds:numeric:NO",
+		"completed_at:timestamp with time zone:YES", "completing_asset_version_id:uuid:YES",
+		"last_watched_at:timestamp with time zone:YES", "updated_at:timestamp with time zone:NO",
+	}
+	if strings.Join(columns, ",") != strings.Join(wantColumns, ",") {
+		t.Fatalf("progress columns = %v, want %v", columns, wantColumns)
+	}
+
+	var definition string
+	if err := pool.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = 'progress'::regclass AND conname = 'progress_course_lesson_identity_id_fkey'
+	`).Scan(&definition); err != nil {
+		t.Fatalf("reading progress lesson identity foreign key: %v", err)
+	}
+	if !strings.Contains(definition, "course_lesson_identities") {
+		t.Fatalf("progress lesson identity foreign key = %q", definition)
+	}
+	for _, constraint := range []struct {
+		name string
+		want string
+	}{
+		{"progress_enrollment_id_fkey", "REFERENCES enrollments(id)"},
+		{"prog_identity", "UNIQUE (enrollment_id, course_lesson_identity_id)"},
+		{"prog_max_non_negative", "max_position_seconds >="},
+		{"prog_last_non_negative", "last_position_seconds >="},
+		{"prog_max_ge_last", "max_position_seconds >= last_position_seconds"},
+		{"prog_completion_pair", "completed_at IS NULL"},
+	} {
+		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'progress'::regclass AND conname = $1`, constraint.name).Scan(&definition); err != nil {
+			t.Fatalf("reading progress constraint %s: %v", constraint.name, err)
+		}
+		if !strings.Contains(definition, constraint.want) {
+			t.Fatalf("progress constraint %s = %q, want %q", constraint.name, definition, constraint.want)
+		}
+	}
+	var progressIndex bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'progress' AND indexname = 'idx_progress_enrollment')`).Scan(&progressIndex); err != nil {
+		t.Fatalf("checking progress enrollment index: %v", err)
+	}
+	if !progressIndex {
+		t.Fatal("progress enrollment index is missing")
+	}
+	var legacyForeignKeys int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM pg_constraint
+		WHERE conrelid = 'progress'::regclass
+		  AND contype = 'f'
+		  AND confrelid IN ('lessons'::regclass, 'course_lessons'::regclass)
+	`).Scan(&legacyForeignKeys); err != nil {
+		t.Fatalf("counting legacy progress foreign keys: %v", err)
+	}
+	if legacyForeignKeys != 0 {
+		t.Fatalf("progress has %d legacy or revision-row foreign keys", legacyForeignKeys)
+	}
+}
+
+func assertProgressUsesLegacyShape(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var legacyColumn bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'progress' AND column_name = 'lesson_id')`).Scan(&legacyColumn); err != nil {
+		t.Fatalf("checking pre-cutover progress shape: %v", err)
+	}
+	if !legacyColumn {
+		t.Fatal("0014 was applied before the explicit 0014 step")
+	}
+}
+
+func TestEnrollmentsShapeMatchesS6Contract(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	rows, err := pool.Query(ctx, `
+		SELECT column_name, data_type, is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'enrollments'
+		ORDER BY ordinal_position
+	`)
+	if err != nil {
+		t.Fatalf("reading enrollment shape: %v", err)
+	}
+	defer rows.Close()
+	var columns []string
+	for rows.Next() {
+		var name, typ, nullable string
+		if err := rows.Scan(&name, &typ, &nullable); err != nil {
+			t.Fatalf("scanning enrollment column: %v", err)
+		}
+		columns = append(columns, name+":"+typ+":"+nullable)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating enrollment columns: %v", err)
+	}
+	want := []string{"id:uuid:NO", "student_account_id:uuid:NO", "course_id:uuid:NO", "created_at:timestamp with time zone:NO"}
+	if strings.Join(columns, ",") != strings.Join(want, ",") {
+		t.Fatalf("enrollment columns = %v, want %v", columns, want)
+	}
+	var definition string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'enr_one_per_student_course'`).Scan(&definition); err != nil {
+		t.Fatalf("reading enrollment unique constraint: %v", err)
+	}
+	if !strings.Contains(definition, "UNIQUE (student_account_id, course_id)") {
+		t.Fatalf("enrollment unique constraint = %q", definition)
+	}
+	for _, foreignKey := range []struct {
+		name string
+		want string
+	}{
+		{"enrollments_student_account_id_fkey", "REFERENCES accounts(id)"},
+		{"enrollments_course_id_fkey", "REFERENCES courses(id)"},
+	} {
+		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'enrollments'::regclass AND conname = $1`, foreignKey.name).Scan(&definition); err != nil {
+			t.Fatalf("reading enrollment foreign key %s: %v", foreignKey.name, err)
+		}
+		if !strings.Contains(definition, foreignKey.want) {
+			t.Fatalf("enrollment foreign key %s = %q, want %q", foreignKey.name, definition, foreignKey.want)
+		}
+	}
+}
+
+func TestContentReportsSchemaMatchesS5Contract(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	for _, constraint := range []struct {
+		name string
+		want string
+	}{
+		{"rep_other_needs_explanation", "length(btrim(explanation)) > 0"},
+	} {
+		var definition string
+		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'content_reports'::regclass AND conname = $1`, constraint.name).Scan(&definition); err != nil {
+			t.Fatalf("reading content report constraint %s: %v", constraint.name, err)
+		}
+		if !strings.Contains(definition, constraint.want) {
+			t.Fatalf("content report constraint %s = %q, want %q", constraint.name, definition, constraint.want)
+		}
+	}
+	assertClosedCheckValues(t, pool, "rep_target_kind", []string{"COURSE", "LAB_MATERIAL", "LESSON", "RESOURCE", "VIDEO"})
+	assertClosedCheckValues(t, pool, "rep_reason", []string{"broken_unavailable", "inaccurate", "inappropriate", "other", "suspected_copyright_violation"})
+	var indexDefinition string
+	if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'content_reports' AND indexname = 'rep_no_duplicate_open'`).Scan(&indexDefinition); err != nil {
+		t.Fatalf("reading content report partial unique index: %v", err)
+	}
+	if !strings.Contains(indexDefinition, "UNIQUE INDEX") || !strings.Contains(indexDefinition, "WHERE (resolved_at IS NULL)") {
+		t.Fatalf("content report partial unique index = %q", indexDefinition)
+	}
+}
+
+func assertClosedCheckValues(t *testing.T, pool *pgxpool.Pool, constraint string, want []string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var definition string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'content_reports'::regclass AND conname = $1`, constraint).Scan(&definition); err != nil {
+		t.Fatalf("reading content report constraint %s: %v", constraint, err)
+	}
+	matches := regexp.MustCompile(`'([^']*)'`).FindAllStringSubmatch(definition, -1)
+	got := make([]string, 0, len(matches))
+	for _, match := range matches {
+		got = append(got, match[1])
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("content report constraint %s values = %v, want fixed set %v", constraint, got, want)
+	}
+}
+
+func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating through protected learning: %v", err)
+	}
+	pool := openPool(t)
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back protected learning: %v", err)
+	}
+	if tableExists(t, pool, "content_reports") {
+		t.Fatal("content_reports survived the 0014 rollback")
+	}
+	assertProgressUsesLegacyShape(t, pool)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after 0014 rollback: %v", err)
+	}
+	if state.Version != EnrollmentSchemaVersion || state.Dirty {
+		t.Fatalf("schema after 0014 rollback = %+v, want clean version %d", state, EnrollmentSchemaVersion)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying protected learning after rollback: %v", err)
+	}
+	assertProtectedLearningSchema(t, pool)
+}
+
+func TestMaxSchemaVersionTracksProtectedLearningSchema(t *testing.T) {
+	// Tests elsewhere compare the live database state to MaxSchemaVersion,
+	// rather than a literal. This makes the capability boundary explicit too.
+	if MaxSchemaVersion != ProtectedLearningSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want ProtectedLearningSchemaVersion %d", MaxSchemaVersion, ProtectedLearningSchemaVersion)
+	}
+}
+
+// This searches every S5 production owner, not a single known implementation
+// file. It intentionally excludes historical migrations and 0014 down: those
+// represent the pre-cutover schema only and are required for rollback.
+func TestS5ProductionHasNoLegacyProgressOwnership(t *testing.T) {
+	paths := []string{"../learning", "../httpapi", "migrations/0014_protected_learning.up.sql"}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stating %s: %v", path, err)
+		}
+		if !info.IsDir() {
+			assertNoLegacyProgressOwnership(t, path)
+			continue
+		}
+		err = filepath.Walk(path, func(file string, entry os.FileInfo, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() || !strings.HasSuffix(file, ".go") || strings.HasSuffix(file, "_test.go") {
+				return nil
+			}
+			assertNoLegacyProgressOwnership(t, file)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", path, err)
+		}
+	}
+}
+
+func assertNoLegacyProgressOwnership(t *testing.T, path string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	for _, forbidden := range []string{
+		"ON CONFLICT (enrollment_id, lesson_id)",
+		"INSERT INTO progress (enrollment_id, lesson_id",
+		"course_lessons.id AS progress",
+		"REFERENCES lessons(id)",
+		"REFERENCES course_lessons",
+	} {
+		if strings.Contains(string(contents), forbidden) {
+			t.Fatalf("%s reintroduces legacy or revision-scoped Progress ownership: %q", path, forbidden)
+		}
+	}
+}
+
+func TestLegacyProgressGuardRefusesNonEmptyTable(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Migrate(uint(EnrollmentSchemaVersion)); err != nil {
+		t.Fatalf("migrating through enrollments: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ('11111111-1111-1111-1111-111111111111', 'legacy@example.test', 'legacy@example.test', 'INSTRUCTOR', 'ACTIVE', 'Legacy')
+	`); err != nil {
+		t.Fatalf("seeding owner: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ('22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', 'DRAFT')`); err != nil {
+		t.Fatalf("seeding course: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO sections (id, course_id, title, "order") VALUES ('33333333-3333-3333-3333-333333333333', '22222222-2222-2222-2222-222222222222', 'Legacy', 0)`); err != nil {
+		t.Fatalf("seeding legacy section: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO lessons (id, section_id, title, "order") VALUES ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 'Legacy', 0)`); err != nil {
+		t.Fatalf("seeding legacy lesson: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO progress (user_id, lesson_id) VALUES ('55555555-5555-5555-5555-555555555555', '44444444-4444-4444-4444-444444444444')`); err != nil {
+		t.Fatalf("seeding legacy progress: %v", err)
+	}
+	err := m.Steps(1)
+	if err == nil || !strings.Contains(err.Error(), "legacy progress table contains 1 row") {
+		t.Fatalf("migration error = %v", err)
+	}
+	state, stateErr := ReadSchemaState(ctx, pool)
+	if stateErr != nil {
+		t.Fatalf("reading failed migration state: %v", stateErr)
+	}
+	if state.Version != ProtectedLearningSchemaVersion || !state.Dirty {
+		t.Fatalf("failed cutover state = %+v, want dirty version %d", state, ProtectedLearningSchemaVersion)
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM progress`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("legacy progress rows = %d, err = %v", rows, err)
 	}
 }
 

@@ -949,11 +949,19 @@ func TestD5PublishedCandidateRejectionPreservesLiveStateAndAccess(t *testing.T) 
 	f := newD5Fixture(t)
 	candidate := f.submittedCandidate(t)
 
+	var enrollmentID string
+	if err := f.p.QueryRow(f.ctx, `
+		INSERT INTO enrollments (student_account_id, course_id)
+		VALUES ($1, $2)
+		RETURNING id::text
+	`, f.ownerID, f.courseID).Scan(&enrollmentID); err != nil {
+		t.Fatalf("seeding enrollment: %v", err)
+	}
 	if _, err := f.p.Exec(f.ctx, `
-		INSERT INTO progress (user_id, lesson_id, max_position_seconds, last_position_seconds)
+		INSERT INTO progress (enrollment_id, course_lesson_identity_id, max_position_seconds, last_position_seconds)
 		VALUES ($1, $2, 10, 5)
-	`, f.ownerID, f.legacyLessonID); err != nil {
-		t.Fatalf("seeding access rows: %v", err)
+	`, enrollmentID, f.lessonIdentityID); err != nil {
+		t.Fatalf("seeding stable progress row: %v", err)
 	}
 	if _, err := f.p.Exec(f.ctx, `
 		INSERT INTO fake_entitlements (user_id, lesson_id, role)

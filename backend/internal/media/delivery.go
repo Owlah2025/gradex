@@ -106,6 +106,23 @@ type DownloadRequest struct {
 	Kind           AssetKind
 }
 
+// MaterialKind is the presentation-only kind exposed to protected learning
+// read models. It deliberately carries no Asset Version or storage details.
+type MaterialKind string
+
+const (
+	MaterialResource    MaterialKind = "resource"
+	MaterialLabMaterial MaterialKind = "lab_material"
+)
+
+// DownloadEntryRequest selects a stable Lesson entry point. The current
+// Asset Version is resolved by S4; callers cannot supply one.
+type DownloadEntryRequest struct {
+	StudentID string
+	LessonID  string
+	Kind      AssetKind
+}
+
 type PlaybackAuthorization struct {
 	PlaybackSession string    `json:"playback_session"`
 	ManifestURL     string    `json:"manifest_url"`
@@ -132,7 +149,19 @@ type deliveryTarget struct {
 	kind           AssetKind
 	state          AssetVersionState
 	storageKey     string
+	durationMS     int64
 	retiredAt      *time.Time
+}
+
+// TrustedVideoDuration returns S4-owned READY exact-version metadata for an
+// already-authorized S5 progress write. It does not evaluate access or sign a
+// URL; callers must use the Entitlement evaluator first.
+func (s *DeliveryService) TrustedVideoDuration(ctx context.Context, lessonID, assetVersionID string) (time.Duration, error) {
+	target, err := s.loadApprovedTarget(ctx, lessonID, assetVersionID, KindVideo)
+	if err != nil || target.durationMS <= 0 {
+		return 0, ErrProtectedUnavailable
+	}
+	return time.Duration(target.durationMS) * time.Millisecond, nil
 }
 
 // IssuePlayback evaluates the Student immediately before signing. The route
@@ -173,7 +202,26 @@ func (s *DeliveryService) IssueDownload(ctx context.Context, request DownloadReq
 	if err != nil || target.state != StateReady || target.storageKey == "" {
 		return DownloadAuthorization{}, ErrProtectedUnavailable
 	}
-	decision := s.evaluator.EvaluateTarget(ctx, request.StudentID, request.LessonID, target.retiredAt, s.now().UTC())
+	return s.issueDownloadTarget(ctx, request.StudentID, request.Kind, target)
+}
+
+// IssueDownloadEntry resolves the current live Lesson material and then uses
+// the same authorization and signing path as the existing POST contract.
+// Stable GET entry routes never accept an Asset Version from the client.
+func (s *DeliveryService) IssueDownloadEntry(ctx context.Context, request DownloadEntryRequest) (DownloadAuthorization, error) {
+	if request.StudentID == "" || request.LessonID == "" ||
+		(request.Kind != KindResource && request.Kind != KindLabMaterial) {
+		return DownloadAuthorization{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadCurrentMaterialTarget(ctx, request.LessonID, request.Kind)
+	if err != nil || target.state != StateReady || target.storageKey == "" {
+		return DownloadAuthorization{}, ErrProtectedUnavailable
+	}
+	return s.issueDownloadTarget(ctx, request.StudentID, request.Kind, target)
+}
+
+func (s *DeliveryService) issueDownloadTarget(ctx context.Context, studentID string, kind AssetKind, target deliveryTarget) (DownloadAuthorization, error) {
+	decision := s.evaluator.EvaluateTarget(ctx, studentID, target.lessonID, target.retiredAt, s.now().UTC())
 	if !decision.Allowed {
 		return DownloadAuthorization{}, denyProtected(decision.Reason)
 	}
@@ -183,8 +231,89 @@ func (s *DeliveryService) IssueDownload(ctx context.Context, request DownloadReq
 	}
 	now := s.now().UTC()
 	result := DownloadAuthorization{URL: url, AssetVersionID: target.assetVersionID, ExpiresAt: now.Add(s.signatureLifetime)}
-	if request.Kind == KindLabMaterial {
+	if kind == KindLabMaterial {
 		result.BuyerTag = s.buyerTag(decision.EntitlementID, target.assetVersionID)
+	}
+	return result, nil
+}
+
+// Material is one current, ready material attached to a stable Lesson identity.
+//
+// AssetVersionID is internal: it names the exact version this read resolved, which S5 needs to
+// bind a report context to the instance actually rendered (D-065). It carries no JSON tag and is
+// never serialized — the public material contract exposes only the kind.
+type Material struct {
+	Kind           MaterialKind
+	AssetVersionID string
+}
+
+// MaterialKinds returns only current, ready materials for stable Lesson
+// identities in the approved live graph. It is a bounded bulk read and never
+// signs a target or exposes storage detail.
+func (s *DeliveryService) MaterialKinds(ctx context.Context, lessonIDs []string) (map[string][]Material, error) {
+	result := make(map[string][]Material, len(lessonIDs))
+	if len(lessonIDs) == 0 {
+		return result, nil
+	}
+	// One row per (Lesson, kind), selecting the same version D-064's stable entry route resolves,
+	// so a report context and a download resolve the identical instance. Still one query.
+	rows, err := s.db.Query(ctx, `
+		SELECT lesson_identity_id, kind, asset_version_id
+		FROM (
+			SELECT DISTINCT ON (cl.lesson_identity_id, lf.kind)
+				cl.lesson_identity_id::text AS lesson_identity_id,
+				lf.kind::text AS kind,
+				mav.id::text AS asset_version_id,
+				lf.kind AS ordering_kind
+			FROM courses c
+			JOIN course_revisions cr ON cr.id = c.live_revision_id
+				AND cr.course_id = c.id AND cr.state = 'APPROVED'
+			JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
+			JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+			JOIN lesson_files lf ON lf.lesson_id = cl.id
+			JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
+				AND mav.kind::text = lf.kind::text AND mav.state = 'READY'
+			JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
+				AND scan.asset_version_id = mav.id
+				AND scan.storage_object_version = mav.storage_object_version
+				AND scan.outcome = 'PASSED'
+			WHERE cl.lesson_identity_id = ANY($1::uuid[])
+			ORDER BY cl.lesson_identity_id, lf.kind, lf.position ASC, lf.id ASC, mav.created_at DESC
+		) selected
+		ORDER BY lesson_identity_id ASC,
+			CASE ordering_kind WHEN 'RESOURCE' THEN 0 WHEN 'LAB_MATERIAL' THEN 1 ELSE 2 END ASC
+	`, lessonIDs)
+	if err != nil {
+		return nil, fmt.Errorf("reading current lesson material kinds: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var lessonID, kind, assetVersionID string
+		if err := rows.Scan(&lessonID, &kind, &assetVersionID); err != nil {
+			return nil, fmt.Errorf("scanning current lesson material kinds: %w", err)
+		}
+		var materialKind MaterialKind
+		switch AssetKind(kind) {
+		case KindResource:
+			materialKind = MaterialResource
+		case KindLabMaterial:
+			materialKind = MaterialLabMaterial
+		default:
+			continue
+		}
+		duplicate := false
+		for _, existing := range result[lessonID] {
+			if existing.Kind == materialKind {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			result[lessonID] = append(result[lessonID], Material{Kind: materialKind, AssetVersionID: assetVersionID})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating current lesson material kinds: %w", err)
 	}
 	return result, nil
 }
@@ -229,7 +358,7 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	err := s.db.QueryRow(ctx, `
 		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state,
 		       CASE WHEN mav.kind = 'VIDEO' THEN vr.storage_object_key ELSE mav.storage_object_key END,
-		       ma.retired_at
+		       COALESCE(mav.trusted_duration_ms, 0), ma.retired_at
 		FROM course_lessons cl
 		JOIN course_sections cs ON cs.id = cl.section_id AND cs.course_id = cl.course_id
 		JOIN course_revisions cr ON cr.id = cs.revision_id AND cr.course_id = cl.course_id
@@ -259,12 +388,44 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 						OR ($3::media_asset_kind = 'LAB_MATERIAL' AND lf.kind = 'LAB_MATERIAL')))
 					AND (c.live_revision_id = cr.id AND cr.state = 'APPROVED' OR cr.state = 'SUPERSEDED'))
 		  )
-	`, lessonID, assetVersionID, kind).Scan(&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &assetRetiredAt)
+	`, lessonID, assetVersionID, kind).Scan(&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &assetRetiredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return deliveryTarget{}, ErrProtectedUnavailable
 	}
 	if err != nil {
 		return deliveryTarget{}, fmt.Errorf("loading exact approved delivery target: %w", err)
+	}
+	target.retiredAt = assetRetiredAt
+	return target, nil
+}
+
+func (s *DeliveryService) loadCurrentMaterialTarget(ctx context.Context, lessonID string, kind AssetKind) (deliveryTarget, error) {
+	var target deliveryTarget
+	var assetRetiredAt *time.Time
+	err := s.db.QueryRow(ctx, `
+		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, mav.storage_object_key,
+		       0, ma.retired_at
+		FROM course_lessons cl
+		JOIN course_sections cs ON cs.id = cl.section_id AND cs.course_id = cl.course_id
+		JOIN courses c ON c.id = cl.course_id AND c.live_revision_id = cs.revision_id
+		JOIN course_revisions cr ON cr.id = cs.revision_id AND cr.course_id = c.id AND cr.state = 'APPROVED'
+		JOIN lesson_files lf ON lf.lesson_id = cl.id AND lf.kind = $2::lesson_file_kind
+		JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
+			AND mav.kind = $3::media_asset_kind AND mav.state = 'READY'
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = cl.course_id
+		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
+			AND scan.asset_version_id = mav.id
+			AND scan.storage_object_version = mav.storage_object_version
+			AND scan.outcome = 'PASSED'
+		WHERE cl.lesson_identity_id = $1::uuid
+		ORDER BY lf.position ASC, lf.id ASC, mav.created_at DESC
+		LIMIT 1
+	`, lessonID, kind, kind).Scan(&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &assetRetiredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return deliveryTarget{}, ErrProtectedUnavailable
+	}
+	if err != nil {
+		return deliveryTarget{}, fmt.Errorf("loading current lesson material target: %w", err)
 	}
 	target.retiredAt = assetRetiredAt
 	return target, nil

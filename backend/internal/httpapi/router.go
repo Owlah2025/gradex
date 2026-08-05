@@ -97,6 +97,11 @@ func NewRouter(
 	if routerConfig.media != nil {
 		mountMediaRoutes(v1, routerConfig.media, authenticator, principals, logger)
 	}
+	if routerConfig.learning != nil {
+		if err := mountLearningRoutes(v1, routerConfig.learning, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting learning routes: %w", err)
+		}
+	}
 
 	return r, nil
 }
@@ -171,6 +176,7 @@ type routerOptions struct {
 	catalog       *CatalogFoundation
 	publicCatalog *PublicCatalogFoundation
 	media         *MediaFoundation
+	learning      *LearningFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.

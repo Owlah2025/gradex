@@ -130,3 +130,86 @@ func TestPolicyValidationRejectsUnsafeOrIncompleteDefinitions(t *testing.T) {
 		})
 	}
 }
+
+func TestProtectedLearningProgressPolicyBoundsOneStudentLessonPerMinute(t *testing.T) {
+	policy := ProtectedLearningProgressPolicy()
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("protected learning policy is invalid: %v", err)
+	}
+	if policy.Window != time.Minute || len(policy.Rules) != 1 ||
+		policy.Rules[0].Dimension != DimensionIdentifier || policy.Rules[0].Limit != 12 {
+		t.Fatalf("progress policy = %+v, want 12 writes/minute per stable student-lesson identifier", policy)
+	}
+}
+
+func TestProgressSourcePolicyUsesStrictAddressTokenBucket(t *testing.T) {
+	policy := ProtectedLearningProgressSourcePolicy()
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("progress source policy is invalid: %v", err)
+	}
+	if !policy.FailClosed || policy.Window != time.Minute || len(policy.Rules) != 1 {
+		t.Fatalf("progress source policy = %+v", policy)
+	}
+	rule := policy.Rules[0]
+	if rule.Dimension != DimensionSourceAddr || rule.Limit != ProtectedLearningProgressSourceRequestsPerMinute || rule.Burst != ProtectedLearningProgressSourceBurst {
+		t.Fatalf("progress source rule = %+v", rule)
+	}
+}
+
+func TestProgressSourceBurstIsDeterministicAndLimiterFailureIsStrict(t *testing.T) {
+	store := &scriptedStore{err: errors.New("redis unavailable")}
+	limiter, err := New(store, []byte(strings.Repeat("s", 32)), time.Second)
+	if err != nil {
+		t.Fatalf("constructing limiter: %v", err)
+	}
+	now := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	limiter.now = func() time.Time { return now }
+	limiter.local.now = func() time.Time { return now }
+
+	strict := ProtectedLearningProgressSourcePolicy()
+	if decision := limiter.Decide(context.Background(), strict, Input{ClientIP: "192.0.2.7"}); decision.Outcome != OutcomeUnavailable {
+		t.Fatalf("strict source failure decision = %+v, want unavailable", decision)
+	}
+	if decision := limiter.Decide(context.Background(), strict, Input{ClientIP: "invalid"}); decision.Outcome != OutcomeUnavailable {
+		t.Fatalf("invalid source decision = %+v, want unavailable", decision)
+	}
+
+	strict.FailClosed = false
+	for attempt := int64(0); attempt < ProtectedLearningProgressSourceBurst; attempt++ {
+		decision := limiter.Decide(context.Background(), strict, Input{ClientIP: "192.0.2.7"})
+		if !decision.Allowed || decision.Outcome != OutcomeFallbackAllowed {
+			t.Fatalf("burst request %d decision = %+v, want fallback allow", attempt+1, decision)
+		}
+	}
+	if decision := limiter.Decide(context.Background(), strict, Input{ClientIP: "192.0.2.7"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
+		t.Fatalf("burst overflow decision = %+v, want fallback deny", decision)
+	}
+	now = now.Add(50 * time.Millisecond)
+	if decision := limiter.Decide(context.Background(), strict, Input{ClientIP: "192.0.2.7"}); !decision.Allowed {
+		t.Fatalf("one replenished token decision = %+v, want allow", decision)
+	}
+}
+
+func TestSourceAddressNormalizesIPv4AndIPv6AsRequired(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"ipv4", "192.0.2.17", "192.0.2.17"},
+		{"ipv4 mapped", "::ffff:192.0.2.17", "192.0.2.17"},
+		{"ipv6 first host", "2001:db8:1:2::1", "2001:db8:1:2::/64"},
+		{"ipv6 same network", "2001:0db8:0001:0002:ffff::1", "2001:db8:1:2::/64"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := sourceAddress(tc.raw)
+			if !ok || got != tc.want {
+				t.Fatalf("sourceAddress(%q) = %q, %v; want %q, true", tc.raw, got, ok, tc.want)
+			}
+		})
+	}
+	if _, ok := sourceAddress("not-an-address"); ok {
+		t.Fatal("invalid source address was accepted")
+	}
+}

@@ -34,7 +34,7 @@ revocation (BR-026). **Never an authorisation input** (BR-029, FR-016).
 
 | Constraint | Rule | Enforces |
 |---|---|---|
-| `enr_one_per_student_course` | `UNIQUE (student_account_id, course_id)` | Principle IV's "no duplicate active access" as a **database constraint**, and it keeps Progress single-homed under BR-116's `UNIQUE(enrollment_id, lesson_id)` identity |
+| `enr_one_per_student_course` | `UNIQUE (student_account_id, course_id)` | Principle IV's "no duplicate active access" as a **database constraint**, and it keeps Progress single-homed under BR-116's `UNIQUE(enrollment_id, course_lesson_identity_id)` identity |
 
 | Index | Purpose |
 |---|---|
@@ -159,21 +159,35 @@ Immutable once created. Resolution is S8's (FR-035); S5 has no route that update
 | `reporter_account_id` | `UUID NOT NULL` | FK → `accounts(id)`. Must be a Student Account (FR-007) |
 | `target_kind` | `TEXT NOT NULL` | Closed `CHECK` enumeration — see below |
 | `target_id` | `UUID NOT NULL` | The **stable logical** target (FR-030) |
-| `target_revision_ref` | `UUID` | The **exact visible** Course revision or Media Asset Version at submission (FR-030) |
+| `target_revision_ref` | `UUID` | The **exact visible** Course revision or Media Asset Version the Student was shown (FR-030). Supplied by the encrypted report context minted at render time (D-065), never re-resolved from current content at submission |
 | `reason` | `TEXT NOT NULL` | Closed `CHECK` enumeration — see below |
 | `explanation` | `TEXT` | **Required when `reason = 'other'`** (FR-029) |
-| `resolved_at` | `TIMESTAMPTZ` | Always `NULL` in S5. Present so S8's partial index target exists from creation |
+| `resolved_at` | `TIMESTAMPTZ` | Always `NULL` in S5. Present so S8's partial index target exists from creation. **Never published** — an unresolved state is the Admin-queue concern FR-034 forbids disclosing ([R-16](research.md#r-16--the-acknowledgement-is-an-allowlist-not-a-projection)) |
 | `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | Submission instant, server-assigned |
 
 | Constraint | Rule | Enforces |
 |---|---|---|
 | `rep_target_kind` | `CHECK (target_kind IN ('COURSE','LESSON','VIDEO','RESOURCE','LAB_MATERIAL'))` | FR-029's fixed target set. Widened only by migration, so adding one is a reviewable diff — the convention S6's `grant_source` constraint sets |
 | `rep_reason` | `CHECK (reason IN (...fixed set..., 'other'))` | FR-029's fixed reason set |
-| `rep_other_needs_explanation` | `CHECK (reason <> 'other' OR (explanation IS NOT NULL AND length(btrim(explanation)) > 0))` | FR-029 at the database, so a handler bug cannot bypass it |
+| `rep_other_needs_explanation` | `CHECK (reason <> 'other' OR (explanation IS NOT NULL AND length(btrim(explanation)) > 0))` | FR-029 at the database, so a handler bug cannot bypass it. Single-argument `btrim` strips **spaces**, so this refuses `NULL`, empty, and spaces-only; the domain's `strings.TrimSpace` strips all Unicode whitespace and refuses tab- or newline-only before any SQL runs. The pair is what FR-029 rests on, and both halves are asserted by T067 |
 | `rep_no_duplicate_open` | `UNIQUE (reporter_account_id, target_kind, target_id) WHERE resolved_at IS NULL` | FR-032's duplicate refusal, enforced concurrently-safely rather than by a pre-check ([R-11](research.md#r-11--reports-are-rate-limited-and-deduplicated-which-are-different-controls)) |
 
 Rate limiting (5/hour/Student) is a **separate** control in `internal/ratelimit`; the constraint above
 does not replace it, because they fail differently ([R-11](research.md#r-11--reports-are-rate-limited-and-deduplicated-which-are-different-controls)).
+The throttle holds **no** state in this table and reserves no row: its counters live only in Redis or
+the bounded local fallback, and a throttled submission writes nothing here
+([R-15](research.md#r-15--the-report-submission-throttle)).
+
+The row is inserted in the **same transaction** as the current-Entitlement decision FR-033 requires,
+so access that ends between authorisation and the write refuses the write
+([R-14](research.md#r-14--report-submission-is-authorised-inside-its-own-insert-transaction)).
+`created_at` comes from the injected server clock, never from the client and never from a wall-clock
+read inside the insert.
+
+Only `id` and `created_at` are ever published, and then only to the Student who created the row
+([R-16](research.md#r-16--the-acknowledgement-is-an-allowlist-not-a-projection)). Every other column
+— reporter, stable target, exact visible version reference, reason, explanation, and `resolved_at` —
+is server-side, on every response class this route can return.
 
 ---
 
@@ -189,6 +203,15 @@ does not replace it, because they fail differently ([R-11](research.md#r-11--rep
 ---
 
 ## What is deliberately not in this data model
+
+### Read-model material presentation (D-064)
+
+Course Home Lesson entries and Lesson responses carry an always-present presentation-only
+`materials` array. Its closed values are `resource` and `lab_material`, ordered in that sequence.
+The values are read from S4's bounded current-live material discovery boundary; no Asset Version,
+storage key, signed target, expiry, or capability state is stored in S5. Retained-expired and
+unavailable read models use an empty array. Material activation remains an independently authorized
+S4 operation.
 
 - **No community-link column** anywhere. Deferred to S18 under
   [D-046](../../docs/DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch).

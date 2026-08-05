@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-07-28 (real calendar)
+> Last Updated: 2026-08-02 (real calendar)
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -1660,6 +1660,77 @@ S4 D7 queue on 2026-08-01 and retained independent review and the D7/D8 split.
 
 ---
 
+## D-064 — S4 stable learning-material entry points
+
+**Date:** 2026-08-02
+**Status:** Active. Scoped to T057 and the S4-owned Resource/Lab Material browser entry boundary.
+
+**Decision:** S4 remains the sole owner of material discovery, current Asset Version resolution,
+Student authentication and Entitlement evaluation, retirement/readiness policy, signed-target
+issuance, storage details, and redirect success. S5 may render only fixed same-origin entry links.
+
+S4 mounts `GET /api/v1/media/lessons/:lessonId/materials/resource` and
+`GET /api/v1/media/lessons/:lessonId/materials/lab-material` through the existing media foundation.
+Each request resolves the current live Lesson material internally, reauthorizes the current
+Student, and signs only after that decision. Success is `302 Found` with `Location`,
+`Cache-Control: no-store`, and `Referrer-Policy: no-referrer`; the signed target is never a JSON
+field or persisted value. Failure uses the existing uniform protected-unavailable `404` with no
+`Location`.
+
+S4 also exposes a bounded read-only bulk material-kind boundary for S5. It returns only the
+presentation kinds `resource` and `lab_material` for current ready material attached to stable
+Lesson identities. D-063 Course Home Lesson entries and Lesson responses expose an always-present,
+deterministically ordered `materials` array containing only those kinds; retained-expired and
+unavailable reads expose an empty array. No Asset Version, URL, object key, expiry, capability,
+evaluator decision, or storage field crosses the S5 boundary. The existing POST download
+authorization contract remains supported and shares the same resolver/evaluator/signer path.
+
+**Source:** Product-owner instruction on 2026-08-02.
+
+---
+
+## D-063 — S5 protected learning read-model contract
+
+**Date:** 2026-08-02
+**Status:** Active. Scoped only to the T046–T049 protected learning read surfaces.
+
+**Decision:** Mount exactly `GET /api/v1/learn/dashboard`,
+`GET /api/v1/learn/courses/:courseId`, and
+`GET /api/v1/learn/courses/:courseId/lessons/:lessonId` through the mandatory
+`LearningFoundation`. Successful responses are direct HTTP 200 JSON objects using snake_case,
+string UUIDs, and RFC 3339 UTC timestamps. Protected responses are `Cache-Control: no-store` and
+contain presentation state only; the only exposed state enum is `learning_status: "active" | "expired"`.
+
+The Dashboard returns `courses`, ordered by Enrollment creation descending then Course ID ascending,
+with Course ID, localized title, learning status, nullable expiry, and completed/total/percentage
+Progress. Course Home returns the current live Course title, status, expiry, Course Progress, and
+authored Sections/Lessons with stable IDs and per-Lesson Progress. Lesson metadata returns stable
+Course/Lesson/Section IDs, localized titles, status, expiry, Student-scoped Progress, and previous/
+next stable Lesson IDs across Section boundaries.
+
+Expired read state is narrowly retained only when S4 classifies the access as effective expiry and a
+retained Enrollment exists. It never issues playback, accepts Progress, refreshes or extends access,
+creates Enrollment, or exposes signed media. All other denied or inconsistent states use the existing
+uniform protected-unavailable response. No Entitlement IDs, Enrollment IDs, revision IDs, evaluator
+decisions, capability booleans, trusted duration, Asset Version IDs, manifests, or playback sessions
+are exposed.
+
+When media is unavailable, the Lesson read model remains present without media metadata and the
+separate S4 playback request fails uniformly; a later player surface renders that result as
+content-unavailable without adding another read-model authorization enum.
+
+**Boundary:** S4 owns active-versus-expired classification. S5 reads the authoritative Enrollment,
+live graph, and stable Progress only; it does not reproduce Entitlement policy. The read routes are
+strictly read-only and use bounded bulk queries with no per-Course or per-Lesson authority loops.
+
+**Reason:** The frozen S5 artifacts defined semantic learning surfaces but omitted concrete success
+schemas. This decision supplies the smallest deterministic contract needed for production handlers,
+integration tests, and later browser surfaces without creating a second authorization model.
+
+**Source:** Product-owner instruction on 2026-08-02.
+
+---
+
 ## D-057 — Codex builds S4 D8 after D7 approval; independent Tier 3 review remains required
 
 **Date:** 2026-08-01
@@ -1764,3 +1835,146 @@ metadata changes, and video or Asset Version replacement; a revision-row key can
 guarantee.
 
 **Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-061 — S5 Progress source-address ceiling
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped only to S5 Progress admission.
+
+**Decision:** Progress writes have an additional server-derived source-address ceiling of **1,200
+requests per minute** with a **120-request burst**. IPv4 keys use the individual address; IPv6 keys
+use the `/64` network prefix. The ceiling is evaluated before the existing 12 writes/minute per
+`(Student, stable Lesson identity)` policy and before Enrollment, media, or Progress persistence.
+
+**Boundary:** Source addresses are derived only through the configured trusted-proxy and remote-address
+policy. A quota denial is `429` with `Cache-Control: no-store` and `Retry-After`; a limiter dependency
+failure returns the existing protected-unavailable response. This adds a network ceiling and does not
+replace the Student/Lesson policy, create a second limiter, or alter S4/S6 ownership.
+
+**Reason:** The 1,200/minute rate and 120-request burst support roughly 100 active learners behind a
+shared NAT while bounding abusive traffic from one source.
+
+**Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-062 — S5 Progress retry policy
+
+**Date:** 2026-08-01
+**Status:** Active. Scoped only to S5 client Progress reporting.
+
+**Decision:** A logical client Progress chain has one initial request and at most two automatic
+retries. Ordinary retryable failures use exponential nominal delays of 2 seconds and 4 seconds with
+symmetric ±20% jitter from an injectable randomness source. Network failures except deliberate
+cancellation, and only HTTP 408, 429, 500, 502, 503, and 504, are retryable. Every other status,
+malformed local input, and lifecycle cancellation is final. A new sample coalesces into the active
+chain and never resets its three-attempt budget.
+
+**429 boundary:** A valid `Retry-After` delta-seconds value or future HTTP-date is used without
+jitter. A missing, malformed, negative, or expired value falls back to 15 seconds. It still consumes
+the same attempt budget and cannot create a separate chain.
+
+**Lifecycle:** One reporter instance permits one in-flight request, one pending greatest valid sample,
+and one retry timer, all scoped to a stable Lesson and exact Asset Version. Replacing either identity or
+disposing the reporter aborts the ordinary request where supported and discards timers and pending
+state. `pagehide` uses a same-origin `PUT` JSON `fetch` with credentials and `keepalive: true`; it
+does not use `sendBeacon`, whose POST method cannot satisfy the strict Progress `PUT` contract, and
+never starts a delayed retry.
+
+**Boundary:** Every retry is an ordinary Progress request. It remains subject to authentication,
+both rate limits, S4 entitlement evaluation, strict decoding, trusted-media validation, and the
+stable-key atomic upsert. The client never caches a decision or treats its Asset Version ID as
+trusted.
+
+**Reason:** The bounded sequence fits inside the 15-second reporting cadence for ordinary failures,
+avoids a request storm against the 12-writes/minute limit, and preserves an otherwise-authorised
+playback session without concealing server-side mutation ambiguity.
+
+**Source:** Product-owner instruction on 2026-08-01.
+
+---
+
+## D-065 — Exact-visible report-context binding
+
+**Date:** 2026-08-04
+**Status:** Active. Scoped to S5 T062 (report creation) and T063 (the report route).
+
+**Decision:** A content report references the content instance **actually rendered to the Student**.
+The server must not resolve "whatever is current" at report-submission time while the Student may
+still be viewing an older instance.
+
+The rendered instance is captured as an **authenticated-encrypted opaque report-context token**,
+minted as part of the authoritative read that produced the visible page. "Opaque" means the public
+token does not reveal the encrypted internal binding when decoded: a signed-but-base64-readable
+payload is **not** opaque, because base64 is an encoding rather than a secret and any holder could
+decode the internal graph. The token uses AES-256-GCM under a key derived from the root
+application secret with the explicit domain separation label
+`gradex/learning/report-context/encryption/v1`; the version and purpose are bound as authenticated
+additional data, a fresh random nonce is used per mint, and authentication failure yields no
+plaintext. The context binds: reporter Account
+identity; authenticated session identity; Course identity; report target kind; stable logical
+target identity; exact visible Course Revision; exact visible Media Asset Version where
+applicable; issuance time; expiry; a purpose/audience restricted to content reporting; a token
+format version; and a cryptographically strong nonce.
+
+**The context is evidence, never capability.** It grants no authority for playback, Progress,
+Resource access, Lab Material access, Enrollment, Entitlement, moderation, report resolution, or
+any other operation.
+
+**Consequences:**
+
+- A page rendered from Revision A reports **A** even after Revision B becomes live; likewise for a
+  replaced Media Asset Version.
+- Contexts are minted at original render time. A context requested lazily when the Student clicks
+  "Report" would re-resolve current state and bind **B**, so late issuance that re-resolves is
+  **forbidden**.
+- An expired context is **refused**; the page reloads, which legitimately re-renders — and
+  re-reports — the newer content. Automatic renewal against current content is forbidden, because
+  renewal is silent rebinding.
+- Raw Revision and Asset Version identifiers remain absent from public learning read models
+  (D-063) and are **encrypted** inside the token; the client receives only an opaque string it can
+  neither read, choose, edit, nor forge.
+- Token decryption, expiry, purpose, and session/reporter verification belong to **T063** at the
+  HTTP boundary. Relational verification of the binding — that the revision belongs to the Course,
+  the stable target existed in that revision, and the Asset Version was the one bound to that
+  target and kind — remains inside the **T062** domain boundary, because authenticity proves only
+  that the server minted the values, not that they form a coherent target.
+- Relational verification accepts a genuinely historical instance. It does **not** require the
+  bound revision to still be the live pointer; that requirement is what produced the defect.
+
+**Reason:** Resolving current content at submission records an instance the Student never saw, so
+the report describes content other than the one complained about. An encrypted context is the
+narrowest correction that preserves exact-visible fidelity without exposing internal identifiers to
+the client at all, and without granting any capability.
+
+**Source:** Product-owner instruction on 2026-08-04, after review found T062 resolved current
+content at submission. Amended the same day, after review found the first token format was signed
+but base64-readable and therefore not opaque.
+
+---
+
+## D-066 — Duplicate-open-report granularity
+
+**Date:** 2026-08-04
+**Status:** Active. Scoped to S5 report submission.
+
+**Decision:** One unresolved report per `(reporter_account_id, target_kind, stable target_id)`. The
+duplicate key is intentionally **independent of** the exact Revision or Asset Version, and the
+existing `rep_no_duplicate_open` partial unique index is retained unchanged.
+
+**Consequences:**
+
+- A Student cannot create a second unresolved report for replacement version B while their report
+  for version A remains open.
+- After report A is resolved (S8's behaviour), the Student may file a new report for B.
+- Another Student may independently report B.
+- Different target kinds on the same stable Lesson remain distinct reports.
+- No migration is added for version-granular duplication.
+
+**Reason:** A Student who has already reported a target has been heard; a replacement version does
+not entitle them to a second open queue entry for the same logical content. Duplicate refusal and
+the 5/hour throttle remain separate controls because they fail differently (R-11).
+
+**Source:** Product-owner instruction on 2026-08-04.

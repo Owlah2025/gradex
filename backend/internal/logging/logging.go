@@ -276,6 +276,41 @@ func (l *Logger) AuthorizationFault(ev AuthorizationFaultEvent) {
 	l.slog.Error("authorization_fault", attrs...)
 }
 
+// ProtectedWriteFailureEvent records a protected write that failed for a reason which is not an
+// authorization decision — the store refused it, or the transaction could not be completed.
+//
+// It exists for the same reason AuthorizationFault does. A denial and a database outage are
+// different incidents with different responders, and a protected route answers both with the same
+// uniform refusal, so the log is the only place they can be told apart. Recording a failed insert
+// as `authorization_denied` would make an outage read as a spike in refusals and send whoever is on
+// call looking at the entitlement model.
+//
+// It carries no error text. The store's message is where SQL, constraint names, and column values
+// surface, and a protected-learning log must not become the channel that leaks them. The operation,
+// the stage it failed at, and a closed failure class are enough to name what broke; the request ID
+// correlates it to the rest of the request.
+type ProtectedWriteFailureEvent struct {
+	RequestID     string
+	Method        string
+	RouteTemplate string
+	// Operation and Stage are closed vocabularies owned by the caller — for example
+	// "progress_write" and "persistence" — never free-form text.
+	Operation    string
+	Stage        string
+	FailureClass string
+}
+
+func (l *Logger) ProtectedWriteFailed(ev ProtectedWriteFailureEvent) {
+	l.slog.Error("protected_write_failed",
+		slog.String("request_id", Sanitize(ev.RequestID)),
+		slog.String("method", Sanitize(ev.Method)),
+		slog.String("route_template", Sanitize(ev.RouteTemplate)),
+		slog.String("operation", Sanitize(ev.Operation)),
+		slog.String("stage", Sanitize(ev.Stage)),
+		slog.String("failure_class", Sanitize(ev.FailureClass)),
+	)
+}
+
 // ErrorClassOf names a panic value's type without rendering the value.
 func ErrorClassOf(v any) string { return fmt.Sprintf("%T", v) }
 

@@ -114,7 +114,9 @@ catching it in August is far more expensive than reading §5 now.
 
 **On the `UNIQUE` constraint specifically.** It is Principle IV's "no duplicate active access" as a
 database constraint rather than an application check, and it is what keeps Progress single-homed under
-BR-116's `UNIQUE(enrollment_id, lesson_id)`. S5 creating it is not S5 enforcing enrollment policy —
+BR-116's `UNIQUE(enrollment_id, course_lesson_identity_id)`
+([D-060](../../docs/DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities)). S5 creating it
+is not S5 enforcing enrollment policy —
 it is S5 declining to build a table that would let S6 violate its own invariant.
 
 ---
@@ -129,8 +131,8 @@ to plan time.
 | Setting | Value | Basis |
 |---|---|---|
 | Periodic report interval during playback | **15 s** | Bounds worst-case lost position at 15 s, which is below the threshold at which a Student notices a resume as wrong |
-| Additional report triggers | pause, seek-settled, `visibilitychange` → hidden, `pagehide` | Covers the closed-browser case in SC-003 without waiting for the next tick |
-| Progress write rate limit | **12 writes / minute / (Student, Lesson)** | 4 ticks/min at 15 s plus headroom for pause/seek bursts. Sized against the interval, per FR-017 |
+| Additional report triggers | pause, seek-settled, `visibilitychange` → hidden, `pagehide` | Covers the closed-browser case in SC-003 without waiting for the next tick; pagehide uses same-origin keepalive `PUT` fetch under D-062 |
+| Progress write rate limit | **12 writes / minute / (Student, Lesson)** plus **1,200 requests / minute / source address** with a **120-request burst** | 4 ticks/min at 15 s plus headroom for pause/seek bursts. The source ceiling supports roughly 100 active learners behind a shared NAT while bounding one network source (D-061). |
 | Playback issuance rate limit | **30 issuances / 10 min / Student**, and a separate per-source-address ceiling | An issuance is per playback *session*, not per segment. 30 accommodates heavy Lesson-hopping; sustained excess is scripted extraction |
 
 Both limits reuse `backend/internal/ratelimit` — the package the admission and session routes already
@@ -142,8 +144,23 @@ declared burst headroom. Stating the derivation means a later interval change ha
 corresponding limit change instead of silently pushing legitimate traffic into the limiter.
 
 **On `pagehide` rather than `unload`.** `unload` is unreliable on mobile Safari and is being removed
-from the platform; `visibilitychange` + `pagehide` with `sendBeacon` is the supported pairing. This
-matters because the phone viewport is a first-class target under Principle X, not a degraded one.
+from the platform. `pagehide` remains the final reporting trigger, but D-062 uses same-origin
+keepalive `fetch` rather than `sendBeacon`: beacon emits POST while the strict Progress contract
+requires JSON `PUT`. This matters because the phone viewport is a first-class target under Principle
+X, not a degraded one.
+
+### D-062 — Progress retry policy
+
+**Decision.** D-062 gives each logical Progress report one initial attempt and two automatic retries.
+Network failures other than lifecycle aborts, and only 408, 429, 500, 502, 503, and 504, retry.
+Ordinary delays are 2 seconds and 4 seconds with symmetric ±20% injectable jitter. A valid 429
+`Retry-After` delta-seconds or future HTTP-date takes precedence without jitter; invalid or absent
+values use 15 seconds. One in-flight request, one pending greatest sample, and one retry timer are
+scoped to a single Lesson and Asset Version; a successful request clears the chain.
+
+**Rationale.** The ordinary worst case is 7.2 seconds, leaving room before the next 15-second
+periodic report. The policy is bounded inside the existing 12-writes/minute server limit and still
+reissues each retry through the normal authorization and rate-limit path.
 
 ---
 
@@ -311,6 +328,180 @@ the shape right without a consumer to correct it.
 alone permits 500 reports about 500 different Lessons. They fail differently and both are required by
 FR-032 as written. Putting duplicate refusal in the database rather than a pre-check follows Principle
 VII and survives concurrent submission.
+
+---
+
+## R-12 — D-063 protected learning read models
+
+**Decision.** T046–T049 use three direct JSON read routes mounted through `LearningFoundation`:
+Dashboard, Course Home, and Lesson. The response types use snake_case fields, string UUIDs, RFC 3339
+UTC timestamps, and the presentation-only `learning_status` enum (`active` or `expired`). Protected
+responses are `no-store`; no response exposes evaluator decisions, Entitlement or Enrollment IDs,
+revision IDs, capability booleans, trusted duration, Asset Version IDs, manifests, or playback
+sessions.
+
+Dashboard ordering is Enrollment creation descending then Course ID ascending. Dashboard progress is
+completed stable Lessons over current live-graph Lessons, with integer floor percentage and zero for
+an empty graph. Course Home returns the current live graph in authored order with stable Lesson IDs,
+per-Lesson Progress, Course Progress, localized title, and expiry. Lesson returns the current stable
+Course/Lesson/Section metadata, Student-scoped Progress, and previous/next stable Lesson IDs across
+Section boundaries.
+
+S4 owns active-versus-expired classification through a narrow read boundary. S5 may retain an expired
+read model only when the evaluator classifies effective expiry and a retained Enrollment exists. It
+never issues playback, accepts Progress, or changes authority from retained display state. All other
+denials and inconsistent graphs remain the uniform protected-unavailable response.
+
+The D-063 read schema intentionally has no media-availability or capability boolean. The backend
+content-unavailable state is therefore evidenced by a reachable Lesson read model with no media
+metadata and a separately denied S4 playback issuance; later player surfaces render that result as
+unavailable without adding a second authorization state.
+
+**Query shape.** Course Home uses at most two graph queries and one combined Student Progress query;
+Lesson uses one bounded graph query and one Student Progress lookup; Dashboard uses one bulk Student
+course/progress query and one bulk S4 classification query, independent of Course/Lesson count. No
+read route calls another HTTP handler or loops through per-Course/per-Lesson authority queries.
+
+**Reason.** The original frozen contract supplied semantics but no concrete success payload. D-063
+resolves that gap without adding an authorization model or exposing protected authority state.
+
+---
+
+## R-13 — D-064 stable S4 material entry points
+
+**Decision.** S4 owns stable browser entry routes for current Resource and Lab Material assets:
+`GET /api/v1/media/lessons/:lessonId/materials/resource` and
+`GET /api/v1/media/lessons/:lessonId/materials/lab-material`. Each route resolves the current
+live material internally, re-evaluates the active Student's authority, signs only after approval,
+and returns a no-store 302 redirect. All failures use the existing uniform protected-unavailable
+404. The existing POST download-authorization contract remains and shares the same resolver,
+evaluator, and signer.
+
+S4's read-only bulk boundary reports only `resource` and `lab_material` presentation kinds for
+current ready material attached to stable Lesson identities. D-063 Course Home Lesson entries and
+Lesson responses expose an always-present ordered `materials` array containing those kinds only;
+expired and unavailable reads expose an empty array. No Asset Version, URL, storage, expiry, or
+authority field crosses into S5, and read-model requests never sign or issue targets.
+
+**Reason.** The frozen S5 artifacts defined only that S5 links to S4 material delivery and did not
+provide a stable browser entry route. D-064 closes that boundary without adding a second S5 media
+authority or allowing a client-selected Asset Version.
+
+---
+
+## R-14 — Report submission is authorised inside its own insert transaction
+
+**The question.** FR-033 requires a current Entitlement at submission. Evaluating it in the handler
+and then inserting leaves a window between the decision and the row: the route authorises, the
+Entitlement expires or is revoked, and the report lands anyway.
+
+**Repository state.** This is a solved problem here, not a new one. T042 couples the Progress write
+to its final decision through `SaveProgressGuarded`, whose guard runs inside the transaction
+immediately before the mutation, and `entitlement.EvaluateInTransaction` supplies the identical S4
+policy through a reader bound to that transaction, taking shared locks over the authority rows.
+
+**Decision.** T063 reuses that seam unchanged. `CreateReportGuarded` accepts the same shape of
+guard, runs it first inside the report transaction, and only then performs T062's relational
+verification and the insert. The unguarded `CreateReport` remains the domain boundary for domain
+tests; the HTTP dependency interface exposes **only** the guarded form, so no route can write a
+report without a current-access decision in the same transaction.
+
+**Consequences.**
+
+- No S4 policy is duplicated in the handler or in the learning package — the guard calls the
+  evaluator, and the evaluator alone compares expiry, scope, revocation, and suspension.
+- Course-level reports are authorised against a Lesson of that Course, because every S4 decision is
+  lesson-keyed, plus the same course-wide scope condition Course Home required to issue the context.
+  A Section-scoped grant can therefore never report the Course as a whole.
+- Duplicate refusal stays with the database's partial unique index (R-11): the guard adds no
+  application-level pre-check and no new race.
+
+**Body bound.** The route reuses the established protected-learning mutation bound — the same 16 KiB
+constant `PUT …/progress` uses. The specification defines no report-specific limit and no
+explanation field limit, so the request bound owns both rather than an invented per-field maximum.
+
+---
+
+## R-15 — The report-submission throttle
+
+**Decision.** `POST /api/v1/learn/reports` carries a `learning-report-v1` policy of **5 submissions
+per hour**, one dimension: the **authenticated Account identifier**. Fixed window, no burst — a token
+bucket would let a Student refill mid-hour, which the "5/hour" ceiling does not intend.
+
+**What the key is, and what it is not.** The Account is the whole key. Adding the Course or the
+report target would let one Student open a fresh quota per Course, which is the abuse the limit
+exists to bound. Adding the session would let the same Student reset the quota by signing in again.
+Nothing from the request body and nothing from the encrypted report context contributes — the
+context is not decrypted before this decision runs. No source-address dimension is added: T064
+specifies a per-Student limit, and the general authentication and network limits already in force
+are untouched. The stored key is the limiter's ordinary HMAC digest, so it names no Account.
+
+**Attempt-count semantics: every authenticated request costs one attempt** — `201`, `409`, `400`,
+`422`, and the protected `404` alike. This is read from the repository, not chosen: the contract's
+governing rule says every request *admitted past its route's required rate limits* then evaluates
+Entitlement, so a refused-by-Entitlement request has already spent its attempt; spec scenario 4
+throttles "repeated **or duplicate** submissions", so a `409` counts; D-061 places the S5 limiter
+before persistence; and the accepted Progress route already decides both its limits before binding
+the body. The alternative — counting only valid reports — would let an attacker send unlimited
+tampered or malformed submissions for free, which is precisely the traffic a throttle is for.
+
+Refusals increment the fixed-window counter but never extend it: the window's expiry is set on the
+first increment only, in both backends, so a throttled Student is never punished with a longer wait.
+
+**Ordering.** Route match → authentication → active-Student capability → **throttle** → bounded
+strict JSON → public validation → context verification → current Entitlement → guarded insertion.
+Anonymous, Instructor, and Admin callers are refused before the throttle and spend nothing, so the
+quota cannot become an identity oracle; and no AEAD or database work happens for a refused attempt.
+
+**Both backends, one meaning.** `LocalLimit` equals the distributed limit, so the bounded local
+fallback enforces the same five per hour with the same key. A Redis outage narrows the quota's scope
+to one process; it never widens it, and it never removes it. `FailClosed` stays false precisely so
+the fallback is reachable — setting it true would make the local implementation dead code and leave
+an outage answering the protected refusal for every submission.
+
+**Failure policy.** A quota denial is `429` with `Cache-Control: no-store` and `Retry-After`; a
+limiter that cannot decide at all returns the uniform protected refusal. That split is
+[D-061](../../docs/DECISIONS.md#d-061--s5-progress-source-address-ceiling)'s, reused unchanged, and
+it is why no new decision was needed for T064.
+
+**Not the duplicate control.** D-066's partial unique index answers `409` for one Student's second
+open report about one target. The throttle bounds volume; the index bounds repetition of the same
+complaint. R-11 requires both.
+
+---
+
+## R-16 — The acknowledgement is an allowlist, not a projection
+
+**The question.** FR-034 requires acknowledging a report without disclosing Admin queue state, other
+reports, or moderation outcomes. The stored row carries the reporter, the stable target, the exact
+visible Revision or Asset Version, the reason, the explanation, and the `resolved_at` column S8 will
+own. Any of those reaching the client would satisfy every other report task and still fail FR-034.
+
+**Decision.** The response is a two-field allowlist — `report_id` and `created_at` — constructed by
+name from the stored report, never by serializing it. Both describe only the row this request just
+created, for the Student who created it, so neither is queue state, another report, or a moderation
+outcome. Everything else is absent by construction: a column added to `content_reports` arrives at
+the response constructor as an unread field.
+
+**Why not less.** A bare `204` was considered. The identifier and the instant are what let a Student
+say *which* submission they are following up on, and neither is derivable from anything else they
+hold; withholding them protects nothing, because the report is theirs.
+
+**Why not more.** No `status` field. The database's unresolved state is exactly the Admin-queue
+concern FR-034 names, and a constant `"open"` would either be meaningless or become meaningful the
+moment S8 lands — at which point it would be a moderation outcome on a route that promises none.
+
+**Refusals share the boundary.** The duplicate `409`, the protected `404`, and the throttle `429`
+are the shared problem envelope and nothing more. A duplicate names neither the open report nor
+which other target kind would be accepted; the protected refusal says nothing about whether the
+context decrypted or whether the report would have been new; the throttle discloses only
+`Retry-After`. Field-level `422` violations name the offending request field and never echo the
+submitted value — the encrypted context and the explanation appear in no response and no log.
+
+**Shape invariance.** All five target kinds produce the same properties and the same headers, so the
+acknowledgement cannot be read to learn which kinds carry an Asset Version, whether a Lesson had
+materials, or whether a stale context bound Revision A rather than B. The exact-visible assertions
+stay where they belong: in the database, not on the wire.
 
 ---
 

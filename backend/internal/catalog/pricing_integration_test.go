@@ -180,7 +180,8 @@ func TestExistingCommerceAndAccessFixturesUnchanged(t *testing.T) {
 	ctx := context.Background()
 	p := repo.Pool()
 
-	// Seed legacy access fixtures (`progress` and `fake_entitlements`) using legacy schema rows
+	// fake_entitlements remains a legacy S1 fixture; S5 Progress is no longer
+	// keyed to this legacy Lesson graph.
 	studentID := "20000000-0000-0000-0000-000000000001"
 	legacyCourseID := "30000000-0000-0000-0000-000000000001"
 	legacySecID := "30000000-0000-0000-0000-000000000002"
@@ -208,43 +209,21 @@ func TestExistingCommerceAndAccessFixturesUnchanged(t *testing.T) {
 		t.Fatalf("seeding legacy lesson: %v", err)
 	}
 	if _, err := p.Exec(ctx, `
-		INSERT INTO progress (user_id, lesson_id, max_position_seconds, last_position_seconds, completed)
-		VALUES ($1::uuid, $2::uuid, 120.5, 60.0, true)
-	`, studentID, legacyLesID); err != nil {
-		t.Fatalf("seeding progress fixture: %v", err)
-	}
-	if _, err := p.Exec(ctx, `
 		INSERT INTO fake_entitlements (user_id, lesson_id, role)
 		VALUES ($1::uuid, $2::uuid, 'student')
 	`, studentID, legacyLesID); err != nil {
 		t.Fatalf("seeding fake_entitlements fixture: %v", err)
 	}
 
-	type progressRecord struct {
-		UserID              string
-		LessonID            string
-		MaxPositionSeconds  float64
-		LastPositionSeconds float64
-		Completed           bool
-	}
 	type entitlementRecord struct {
 		UserID   string
 		LessonID string
 		Role     string
 	}
 
-	fetchFixtures := func() (progressRecord, entitlementRecord) {
-		var pr progressRecord
-		err := p.QueryRow(ctx, `
-			SELECT user_id, lesson_id, max_position_seconds, last_position_seconds, completed
-			FROM progress WHERE user_id = $1::uuid AND lesson_id = $2::uuid
-		`, studentID, legacyLesID).Scan(&pr.UserID, &pr.LessonID, &pr.MaxPositionSeconds, &pr.LastPositionSeconds, &pr.Completed)
-		if err != nil {
-			t.Fatalf("querying progress fixture: %v", err)
-		}
-
+	fetchEntitlement := func() entitlementRecord {
 		var er entitlementRecord
-		err = p.QueryRow(ctx, `
+		err := p.QueryRow(ctx, `
 			SELECT user_id, lesson_id, role
 			FROM fake_entitlements WHERE user_id = $1::uuid AND lesson_id = $2::uuid
 		`, studentID, legacyLesID).Scan(&er.UserID, &er.LessonID, &er.Role)
@@ -252,10 +231,10 @@ func TestExistingCommerceAndAccessFixturesUnchanged(t *testing.T) {
 			t.Fatalf("querying fake_entitlements fixture: %v", err)
 		}
 
-		return pr, er
+		return er
 	}
 
-	preProgress, preEntitlement := fetchFixtures()
+	preEntitlement := fetchEntitlement()
 
 	// Add section to courseID for testing section price change
 	c, err := repo.GetOwnedCourse(ctx, courseID, instID)
@@ -297,11 +276,7 @@ func TestExistingCommerceAndAccessFixturesUnchanged(t *testing.T) {
 		t.Fatalf("setting section price: %v", err)
 	}
 
-	postProgress, postEntitlement := fetchFixtures()
-
-	if !reflect.DeepEqual(preProgress, postProgress) {
-		t.Errorf("progress fixture changed!\nBefore: %+v\nAfter:  %+v", preProgress, postProgress)
-	}
+	postEntitlement := fetchEntitlement()
 	if !reflect.DeepEqual(preEntitlement, postEntitlement) {
 		t.Errorf("fake_entitlements fixture changed!\nBefore: %+v\nAfter:  %+v", preEntitlement, postEntitlement)
 	}

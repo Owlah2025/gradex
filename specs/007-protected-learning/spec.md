@@ -154,7 +154,10 @@ row is introduced.
 
 ### C1 — S5 needs the Enrollment record, and S6 creates it
 
-**The conflict.** BR-116 fixes Progress identity as `UNIQUE(enrollment_id, lesson_id)`, and BR-114
+**The conflict.** BR-116 fixes Progress identity as a `UNIQUE` key whose first column is
+`enrollment_id` — the Lesson column was restated as `course_lesson_identity_id` on 2026-08-01 by
+[D-060](../../docs/DECISIONS.md#d-060--s5-progress-uses-stable-lesson-identities), which does not
+change this conflict — and BR-114
 states a Progress record cannot exist without a corresponding Enrollment. S5 writes Progress and runs
 **August 5–6**. But
 [`specs/006-course-access-grant/data-model.md`](../006-course-access-grant/data-model.md) assigns the

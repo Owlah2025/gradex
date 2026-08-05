@@ -34,6 +34,8 @@ func mountMediaDeliveryRoutes(content *gin.RouterGroup, delivery mediaDeliveryIs
 	protected.Use(requireProtectedLearningAccess(authenticator, principals, logger))
 	protected.POST("/playback-authorizations", strictJSONMiddleware(func() any { return &playbackAuthorizationBody{} }, mediaRequestBodyLimit), h.playbackAuthorization)
 	protected.POST("/download-authorizations", strictJSONMiddleware(func() any { return &downloadAuthorizationBody{} }, mediaRequestBodyLimit), h.downloadAuthorization)
+	protected.GET("/lessons/:lessonId/materials/resource", func(c *gin.Context) { h.materialEntry(c, media.KindResource) })
+	protected.GET("/lessons/:lessonId/materials/lab-material", func(c *gin.Context) { h.materialEntry(c, media.KindLabMaterial) })
 	content.GET("/previews/:id", h.preview)
 }
 
@@ -65,6 +67,23 @@ func (h *mediaDeliveryHandlers) downloadAuthorization(c *gin.Context) {
 	c.JSON(http.StatusOK, issued)
 }
 
+func (h *mediaDeliveryHandlers) materialEntry(c *gin.Context, kind media.AssetKind) {
+	issued, err := h.delivery.IssueDownloadEntry(c.Request.Context(), media.DownloadEntryRequest{
+		StudentID: c.GetString(ctxUserIDKey), LessonID: c.Param("lessonId"), Kind: kind,
+	})
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	// The signed target is intentionally carried only in the redirect header.
+	// It is never serialized into an S5 response body or persisted by the app.
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Location", issued.URL)
+	c.Status(http.StatusFound)
+}
+
 func (h *mediaDeliveryHandlers) preview(c *gin.Context) {
 	issued, err := h.delivery.IssuePreview(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -94,12 +113,19 @@ func requireProtectedLearningAccess(authenticator auth.Authenticator, principals
 	return func(c *gin.Context) {
 		accountID, err := authenticator.UserFromRequest(c)
 		if err != nil {
+			logProtectedLearningDenial(c, logger, identity.DenyPrincipalNotFound)
 			writeProtectedUnavailable(c)
 			return
 		}
 		principal, err := principals.ResolvePrincipal(c.Request.Context(), accountID)
-		if err != nil || !identity.Authorize(principal, identity.CapLearningAccess).Allowed {
-			logger.AuthorizationDenied(logging.AuthorizationEvent{Method: c.Request.Method, RouteTemplate: c.FullPath(), Capability: string(identity.CapLearningAccess), DenyReason: "PROTECTED_MEDIA_UNAVAILABLE"})
+		if err != nil {
+			logProtectedLearningDenial(c, logger, identity.DenyPrincipalNotFound)
+			writeProtectedUnavailable(c)
+			return
+		}
+		decision := identity.Authorize(principal, identity.CapLearningAccess)
+		if !decision.Allowed {
+			logProtectedLearningDenial(c, logger, decision.Reason)
 			writeProtectedUnavailable(c)
 			return
 		}
@@ -107,6 +133,15 @@ func requireProtectedLearningAccess(authenticator auth.Authenticator, principals
 		c.Set(ctxPrincipalKey, principal)
 		c.Next()
 	}
+}
+
+func logProtectedLearningDenial(c *gin.Context, logger *logging.Logger, reason identity.DenyReason) {
+	if logger == nil {
+		return
+	}
+	logger.AuthorizationDenied(logging.AuthorizationEvent{
+		Method: c.Request.Method, RouteTemplate: c.FullPath(), Capability: string(identity.CapLearningAccess), DenyReason: string(reason),
+	})
 }
 
 // writeProtectedUnavailable is the only external denial constructor for all

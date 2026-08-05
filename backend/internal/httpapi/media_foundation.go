@@ -15,7 +15,21 @@ import (
 type mediaDeliveryIssuer interface {
 	IssuePlayback(context.Context, media.PlaybackRequest) (media.PlaybackAuthorization, error)
 	IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error)
+	IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error)
 	IssuePreview(context.Context, string) (media.PreviewAuthorization, error)
+}
+
+// LearningMedia returns the same already-composed S4 delivery boundary used by
+// media routes. Learning therefore cannot construct a second signer.
+func (f *MediaFoundation) LearningMedia() LearningMedia {
+	if f == nil {
+		return nil
+	}
+	service, ok := f.delivery.(LearningMedia)
+	if !ok {
+		return nil
+	}
+	return service
 }
 
 // MediaFoundation is the D7 byte-pipeline boundary exposed to HTTP. It does
