@@ -350,16 +350,6 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-    env:
-      # Every transient run-owned path — the compiled API and seeder binaries, the
-      # environment lock, the run-state file, the drained API log — goes to the
-      # job's own temporary directory, which the runner destroys with itself. No
-      # compiled binary is ever written inside the repository.
-      GRADEX_E2E_TMP_DIR: ${{ runner.temp }}/gradex-s5-e2e
-      # The evidence directory this job uploads. The spec writes its PNGs into
-      # rendered/ and the HTML reporter writes into playwright-report/, so one
-      # upload carries the whole set.
-      T075_EVIDENCE_DIR: ${{ runner.temp }}/gradex-s5-t075-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -372,6 +362,29 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Runner-temporary paths are resolved HERE, not in a job-level `env:` block.
+      # The `runner` context does not exist at job level — only from step level —
+      # and using it there is a workflow-validation error that fails the whole
+      # file before any job starts, which is exactly how run 31031033462 produced
+      # zero jobs. `$RUNNER_TEMP` is an ordinary environment variable available to
+      # the shell, and `$GITHUB_ENV` publishes the values to every later step, so
+      # downstream `${{ env.* }}` references stay legal and shell consumers see
+      # them too.
+      #
+      # This step precedes every consumer: npm, Playwright, the manifest, the
+      # audit, and both uploads. Nothing secret is written to `$GITHUB_ENV` —
+      # these are directory paths.
+      - name: Resolve evidence paths and prepare directories
+        run: |
+          evidence_dir="$RUNNER_TEMP/gradex-s5-t075-evidence"
+          tmp_dir="$RUNNER_TEMP/gradex-s5-e2e"
+          {
+            echo "T075_EVIDENCE_DIR=$evidence_dir"
+            echo "GRADEX_E2E_TMP_DIR=$tmp_dir"
+          } >> "$GITHUB_ENV"
+          rm -rf "$evidence_dir"
+          mkdir -p "$evidence_dir/rendered" "$evidence_dir/playwright-report" "$tmp_dir"
+
       - name: Install from lockfile
         working-directory: frontend
         run: npm ci
@@ -382,12 +395,6 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: frontend
         run: npx playwright install --with-deps chromium
-
-      - name: Prepare evidence directory
-        run: |
-          rm -rf "$T075_EVIDENCE_DIR"
-          mkdir -p "$T075_EVIDENCE_DIR/rendered" "$T075_EVIDENCE_DIR/playwright-report"
-          mkdir -p "$GRADEX_E2E_TMP_DIR"
 
       # global-setup compiles the API and seeder to external output paths, creates
       # and seeds an isolated per-run database, starts the run-owned media server
