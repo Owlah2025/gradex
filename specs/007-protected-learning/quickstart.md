@@ -240,12 +240,24 @@ git status \
   >"$final_status"
 
 cmp --silent "$baseline_status" "$final_status"
-test "$(git rev-list --count 9c8348a19b5375b5f4e3eb4d6556426b3323a02c..HEAD)" = 3
 git status --short
+
+# Authorized-history and clean-tree gate in one command (D-067). It repeats the
+# checks above and adds commit classification, so this is the gate of record.
+S5_STATUS_BASELINE="$baseline_status" ./scripts/s5-convergence-gate.sh
 ```
 
 A passing comparison proves that final repository residue is identical to the pre-implementation
 residue; it does **not** claim that a repository with documented user-owned work has no residue.
+
+The former `test "$(git rev-list --count 9c8348a..HEAD)" = 3` has been removed. That numeral was
+written before any CI-produced evidence existed and assumed all remaining S5 work would land in one
+final commit; T075's artifact and T078's hosted-CI-plus-review evidence cannot exist until a commit is
+pushed, so the range must grow. `scripts/s5-convergence-gate.sh` replaces it by pinning the three
+accepted commits by SHA, classifying every later commit against an authorized subject class and path
+allowlist, and rejecting merge commits, unclassified commits, and any post-implementation change to S5
+production scope ([D-067](../../docs/DECISIONS.md#d-067--s5-convergence-is-gated-on-authorized-history-not-a-commit-count)).
+Use `--history-only` to run classification alone while closure edits are still uncommitted.
 
 Run the local gates before the implementation commit:
 

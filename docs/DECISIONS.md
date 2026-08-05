@@ -1978,3 +1978,44 @@ not entitle them to a second open queue entry for the same logical content. Dupl
 the 5/hour throttle remain separate controls because they fail differently (R-11).
 
 **Source:** Product-owner instruction on 2026-08-04.
+
+---
+
+## D-067 — S5 convergence is gated on authorized history, not a commit count
+
+**Date:** 2026-08-05
+**Status:** Active. Scoped only to S5 validation mechanics.
+
+**Decision:** T077's `git rev-list --count 9c8348a..HEAD` **must equal `3`** clause is replaced by a
+semantic authorized-history gate, implemented as `scripts/s5-convergence-gate.sh`. The three accepted
+commits are pinned by exact SHA — `f81d8327` (the D-059 clean-tree gate correction), `e7736077` (the
+D-060 reconciliation), and `5cc8ede0` (the protected-learning implementation). Every later commit in
+the range must match exactly one authorized subject class, and its changed paths must fall inside that
+class's allowlist. Merge commits are forbidden. No commit after the implementation commit may touch S5
+production scope; an authorized subject is not a licence to edit a handler, a repository, a migration,
+or a UI component. An unclassified commit fails the gate.
+
+Authorized classes are the convergence-gate correction, the T075 evidence-workflow validation
+correction, the T075/T076 evidence closure, and the final convergence and independent-review record.
+
+**Why the numeral was wrong:** it was a derived prediction, introduced by `e7736077` before any
+CI-produced evidence existed, and it assumed every remaining S5 task would land inside one final
+implementation commit. That assumption cannot hold. T075's evidence is a GitHub Actions artifact and
+T078's is hosted CI green on an exact head plus an independent Tier 3 verdict, and none of those can
+exist until a commit has been pushed — so the range must legitimately grow after the implementation
+commit, and the fixed count fails for a reason unrelated to the property it was protecting.
+
+**This is a correction, not a relaxation.** A raw count cannot distinguish an authorized commit from
+an unauthorized one of the same number; membership plus path boundaries can, and additionally rejects
+merge commits, unclassified commits, and production edits smuggled under a well-formed subject. The
+gate is therefore strictly stronger than the numeral it replaces.
+
+**Scope:** This changes validation mechanics only. It changes no S5 product requirement, acceptance
+criterion, implementation boundary, performance threshold, information-hiding rule, or
+independent-review requirement. D-059's clean-tree guarantees are unchanged and still enforced: the
+working tree must be clean, the index must be clean, and the NUL-delimited final porcelain status must
+be byte-identical to the recorded pre-implementation baseline, with no baseline path removed, staged,
+committed, ignored, or relocated. T078 remains independently owned by hosted CI and Tier 3 review, and
+the builder still never approves its own slice.
+
+**Source:** Product-owner instruction on 2026-08-05.
