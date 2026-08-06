@@ -2234,5 +2234,20 @@ mutations) are **not** addressed here and remain open. Head `f5985c7` is superse
 against the remediated history; **T078 remains open** and requires a fresh independent Tier 3 review,
 because this pass was authored by the builder.
 
+**Amendment, same day — one more authorized path.** Hosted run
+[31070393404](https://github.com/Owlah2025/gradex/actions/runs/31070393404) failed `Admission Integration`
+on head `b1190f0`. Three places assemble the protected-learning policy map independently — `cmd/api/main.go`,
+the `!production` test helper, and the integration fixture in
+`backend/internal/httpapi/learning_progress_integration_test.go` — and `NewLearningFoundation` refuses to
+construct unless every endpoint in `requiredLearningPolicyEndpoints` is present. Adding the two playback
+endpoints to the first two left the third short, so every `internal/httpapi` integration test that builds
+the production foundation failed. `TIER3_REMEDIATION` therefore also admits that one integration fixture.
+
+This is a *test* path, not a production one: it does not use the production exception, and the exception's
+five-file list is unchanged. The underlying duplication — one required-endpoint list, three independently
+maintained policy maps — is a real defect that will reappear on the next added endpoint, but consolidating
+it means a new exported production constructor, which is outside this pass's authorized scope. It is
+recorded here as open rather than fixed silently.
+
 **Source:** Independent Tier 3 review findings H-1, M-1, M-2 against head `f5985c7`, and the
 product-owner remediation instruction on 2026-08-06.

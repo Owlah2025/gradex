@@ -258,6 +258,7 @@ path_allowed() {
         backend/internal/httpapi/learning_foundation.go|\
         backend/internal/httpapi/learning_foundation_test.go|\
         backend/internal/httpapi/learning_playback_rate_limit_test.go|\
+        backend/internal/httpapi/learning_progress_integration_test.go|\
         backend/cmd/api/main.go|\
         .github/workflows/ci.yml) return 0 ;;
       esac
