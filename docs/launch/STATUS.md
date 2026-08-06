@@ -1,9 +1,10 @@
 # Gradex Launch Status
 
-> Current date: **2026-08-01 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-08-06 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-08-01, D-058 S4 closure after independent D7 and D8 approval**; prior
-> reconciliation 2026-07-28 after local verification of pricing T039–T042
+> Last repository reconciliation: **2026-08-06, S6 pre-implementation reconciliation against the S5
+> closure head `d5ce557`**; prior reconciliation 2026-08-01 at D-058 S4 closure after independent D7
+> and D8 approval
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
 > below and [MVP_SCOPE_RECONCILIATION.md](MVP_SCOPE_RECONCILIATION.md)
@@ -14,11 +15,18 @@
 > is reopened by any current work
 > **S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is CLOSED** under
 > [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked):
-> D7 (`T001`–`T013`) and D8 (`T014`–`T032`) are independently approved. **S5 is now unblocked and
-> active, with implementation not started.** S6 remains planned and unimplemented.
+> D7 (`T001`–`T013`) and D8 (`T014`–`T032`) are independently approved.
+> **S5 — Protected Learning is CLOSED** under
+> [D-072](../DECISIONS.md#d-072--t078-closes-on-hosted-ci-plus-an-independent-tier-3-approve-and-the-closure-commit-is-not-the-reviewed-candidate):
+> `T001`–`T078` complete, reviewed frozen candidate `41373a8`, independent Tier 3 verdict `APPROVE`
+> with 0 critical and 0 high. Its non-blocking follow-ups stay open and tracked; closure does not
+> assert they are fixed
+> **S6 — Course Access Invitation and Entitlement Grant is the ACTIVE slice**, unblocked as of
+> 2026-08-06 because S2, S4, and S5 are all closed. Planning is independently approved and frozen;
+> implementation has not started and its seats are unassigned
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
-> Days remaining: **18**
+> Days remaining: **9**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is closed
@@ -76,11 +84,52 @@ S5 introduces the minimum physical `enrollments` table required by `progress.enr
 **creates no normal Enrollment row**. It implements no invitation, acceptance, approval, rejection,
 grant, or revocation behaviour. See [SLICES.md §3.4](SLICES.md#34-s5-introduces-the-enrollments-table-s6-owns-every-enrollment-write).
 
-**S6 — Course Access Grant is planned and unimplemented**, under
-[`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md). It is blocked on
-**S2 (closed), S4 (closed), and S5**: it consumes the `enrollments` table S5 introduces, asserts the inherited
-shape before writing, and does not recreate it. S6 owns the Course Access Invitation lifecycle and
-every production Enrollment write.
+### S5 follow-ups carried into S6 as backlog, without reopening S5
+
+S5 does not reopen and is not widened. These are carried forward so nothing is silently lost, and the
+severities are the reviewer's:
+
+| ID | Severity | Carried item | Destination |
+|---|---|---|---|
+| `F-1` | Medium | Playback issuance rate limiting has no attributable per-Student/per-source monitoring signal | Observability backlog, S12. Not an S6 task: S6 mounts no playback route |
+| `F-7` | Low | Integration-tagged packages outside hosted CI: `cmd/api`, `internal/catalog`, `internal/db/e2equery`, `internal/entitlement`, `internal/media`, `internal/storage` — 6 of 13 tagged packages. Hosted CI runs 7 | S6 must not enlarge the gap: its new `internal/access` package joins the hosted list in the same commit that creates it |
+
+The full register — `F-3` through `F-6` and the three previously disclosed Low items — stays in
+[`review/S5-TIER3-REREVIEW-2026-08-06.md`](review/S5-TIER3-REREVIEW-2026-08-06.md), which is the
+authoritative list. Carrying two items forward here does not close the others.
+
+## S6 — Course Access Invitation and Entitlement Grant is the active slice
+
+**Unblocked 2026-08-06**: S2, S4, and S5 are all closed on independent verdicts. Planning is
+independently approved and frozen under
+[D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range).
+**No implementation has started.**
+
+S6 owns the Course Access Invitation lifecycle, every production Enrollment write, and the single
+transaction that creates an Entitlement. It **consumes** S4's Entitlement evaluator and S5's
+`enrollments` table, asserts the inherited shapes before writing, and recreates neither.
+
+**S6 introduces no commerce.** No order, checkout session, coupon, refund, payment attempt, payment
+callback, or provider record, and no amount, currency, payment status, gateway identifier, or payer
+instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
+[SLICES.md §2](SLICES.md#2-slice-order) is not silently retargeted onto S6.
+
+| | |
+|---|---|
+| Authoritative directory | [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) |
+| Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
+| Branch | `s6-course-access-grant-20260806` |
+| Tasks | 84 (`T001`–`T079`, plus `T001a`, `T004a`, `T003a`, `T007a`, `T079a`), **0 complete** |
+| Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
+| Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** — derived from committed state, not the planned guess |
+| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority |
+
+**One unresolved blocker.** BR-025 requires a configured future Course `default_access_ends_at`
+instant before any invitation can be approved, and **no committed migration creates that column.** S2
+is closed and frozen, S4 and S5 did not create it, so it is unowned. Without it FR-015 and FR-017 are
+unimplementable and no grant can ever succeed. Recorded as
+[D-073](../DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it)
+and it needs product-owner acknowledgement of the effort consequence before implementation begins.
 
 ## MVP scope changed on 2026-07-28 — D-045: no in-platform payments
 
@@ -908,20 +957,24 @@ Earlier: Claude's independent review of domain-design commit `5ba126c` returned 
 
 ## Current Next Task
 
-**Implement S2 lifecycle/emergency queue T043–T050 under D-044.** Start from the verified pricing
-head, keep T051+ out of the queue, and do not start S3 or ask Claude to review an intermediate queue.
-**D-045 does not interrupt this queue** — no S2 task was cancelled or rewritten.
+**Assign S6 implementation seats, then implement S6 Phase 1.** S6's specification, plan, tasks, and
+contracts exist and are independently approved — the earlier "S6′ has no specification yet" note is
+superseded. What is missing is a dated seat assignment: D-048 is a planning seat only, and no code may
+be written before builder and reviewer seats are recorded. Claude must never hold both.
 
-**Then: specify S6′ through SpecKit.** The Course Access Invitation and Entitlement grant slice has
-no specification yet, and no implementation may begin before one is frozen and the slice's seats are
-assigned. Its acceptance criteria are already written in
-[PRD §11](../PRD.md#11-acceptance-criteria) and its rules in
-[BUSINESS_RULES §21](../BUSINESS_RULES.md#21-course-access-invitation-rules).
+**First, resolve [D-073](../DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).**
+The missing Course `default_access_ends_at` column is a hard precondition for the grant path, and it
+changes S6's 9h Tier-3 estimate. Implementing around it is not available: BR-025 makes its absence a
+refusal, so every approval would refuse.
 
-The [D5 record](daily/2026-07-28-d5.md) carries the exact local, mutation, independent-review, and
-hosted-CI evidence for its historical range. The [S2 tasks](../../specs/003-course-authoring/tasks.md)
-mark T039–T042 complete; lifecycle/emergency controls, taxonomy administration, password-change
-evidence, search, and whole-feature convergence remain unchecked.
+**Then the first dependency-safe implementation subgroup is `T001`–`T007a`** — the two stop-condition
+checks, the `internal/access` package skeleton, and migration `0015`. Nothing in Phase 2 or later may
+start before the migration and `MaxSchemaVersion` land, because every subsequent task writes through
+the schema this subgroup creates.
+
+**S2 is closed and is not reopened.** The earlier instruction to implement the S2 lifecycle/emergency
+queue T043–T050 is historical: S2 closed at `785d71c`, and the [D5 record](daily/2026-07-28-d5.md)
+retains the evidence for its range.
 
 The non-engineering item below is **deferred under D-041**, not forgotten:
 

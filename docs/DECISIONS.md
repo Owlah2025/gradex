@@ -2287,3 +2287,58 @@ retained T075/T076 artifacts are untouched. The reviewed frozen range is unalter
 **Source:** Independent Tier 3 rereview verdict `APPROVE` against frozen head
 `41373a865bf4dc310f9b9b20139daecbb65767e0`, transmitted by the product owner on 2026-08-06, and the
 product-owner closure instruction of the same date.
+
+## D-073 — S6 owns the Course default access-expiry column, because no closed slice created it
+
+**Date:** 2026-08-06
+**Status:** Active, and **awaiting product-owner acknowledgement of the effort consequence.** Scoped to
+S6 planning.
+
+**The gap.** BR-025 requires that "before a Course Access Invitation for a Course can be **approved**, an
+Admin must have configured a future Course `default_access_ends_at` instant," which Admin Approval then
+snapshots onto the Entitlement. The S6 planning artifacts treat that column as inherited: `spec.md`
+lists Course as "Read only — lifecycle state and configured access-expiry instant," and
+[data-model.md §6](../specs/006-course-access-grant/data-model.md#6-the-grant-transaction) step 5
+asserts `course.default_access_ends_at` is present and in the future.
+
+**It does not exist.** Verified against the committed schema at the S5 closure head `d5ce557`: no
+migration `0001`–`0014` creates a `default_access_ends_at` column, and no other course-level
+access-expiry or access-duration column exists on `courses` or `course_revisions`. The only expiry
+columns in the schema are on `entitlements` (`original_access_ends_at`, `access_ends_at`), which are the
+*snapshot targets*, not the source. `course_price_changes` and `course_sections.price_minor_units` carry
+price, not duration.
+
+**Consequence if unowned:** every approval refuses under FR-017, so FR-015 never executes and no
+Entitlement is ever created. The single grant path in the product would be unreachable — a total
+functional failure, not a degradation.
+
+**Decision:** **S6 owns the column and its Admin configuration surface.** The owner is derived, not
+chosen: S2 is closed and frozen at `785d71c` and reopening it would discard the frozen-range evidence
+that closed it; S4 and S5 are closed and did not create it; and
+[SLICES.md §2 rule 2](launch/SLICES.md#1-rules) forbids a forward dependency, so it cannot be left to
+S8. S6 is the first and only slice that needs it, which is the same
+consumer-before-producer test that assigned `enrollments` to S5 under
+[§3.4](launch/SLICES.md#34-s5-introduces-the-enrollments-table-s6-owns-every-enrollment-write) and
+`entitlements` to S4 under [§3.1](launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation).
+
+Migration `0015_course_access_grant` therefore adds `courses.default_access_ends_at TIMESTAMPTZ`,
+**nullable**, because BR-025 makes its absence a refusal condition rather than an invalid state, and a
+`NOT NULL` column would require inventing a default duration that no approved rule supplies.
+
+**BR-025's local-date conversion is part of this scope and had no task.** The rule states that when an
+Admin enters a Kuwait-local calendar date, the platform persists the exclusive boundary as the first
+instant of the following local day converted to UTC. That conversion is a stated rule, so implementing
+it is not a new product decision — but it was uncovered by any S6 task and is now `T003a` and `T007a`.
+
+**What this decision does not do.** It invents no duration, no default, and no policy. It does not
+reopen S2, S4, or S5, and it changes no closed production behaviour. It assigns an owner to an
+already-approved requirement that the slice boundaries left unassigned.
+
+**Effort consequence, stated rather than absorbed:** S6 was sized at 9h Tier 3 on the assumption that
+the Course expiry instant was inherited. It is not, so S6 now also carries a column, a validated Admin
+write path with the local-date conversion, its audit evidence, and an Admin configuration screen. That
+is a real increase against a 2026-08-15 date with 9 days remaining, and it is surfaced for the product
+owner rather than quietly absorbed into the estimate.
+
+**Source:** S6 pre-implementation reconciliation on 2026-08-06 against the S5 closure head
+`d5ce557c67befacaef85fef2d1516e97fd57aee4`; BR-025; [SLICES.md](launch/SLICES.md) §2 rule 2.
