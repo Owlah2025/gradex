@@ -119,7 +119,7 @@ instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
 | Authoritative directory | [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) |
 | Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
 | Branch | `s6-course-access-grant-20260806` |
-| Tasks | 84 (`T001`–`T079`, plus `T001a`, `T004a`, `T003a`, `T007a`, `T079a`), **0 complete** |
+| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a`; **0 complete** |
 | Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
 | Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** — derived from committed state, not the planned guess |
 | Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority |
