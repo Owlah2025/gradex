@@ -2018,4 +2018,23 @@ be byte-identical to the recorded pre-implementation baseline, with no baseline 
 committed, ignored, or relocated. T078 remains independently owned by hosted CI and Tier 3 review, and
 the builder still never approves its own slice.
 
+**Amended 2026-08-05**, after the first hosted run that actually created jobs
+([31035395606](https://github.com/Owlah2025/gradex/actions/runs/31035395606)) failed two jobs and
+exposed test- and evidence-infrastructure defects none of the forecasted classes covered: the E2E
+seeder's `TestMain` refused an ordinary `go test -race ./...`, failing the Backend job, and a failing
+evidence run was undiagnosable because hosted logs need admin rights while `continue-on-error`
+rewrote the step conclusion to success. One further class, **`CI_STABILIZATION`**, is therefore
+authorized under the anchored subject `fix(ci): stabilize hosted S5 verification`. Its allowlist is
+an **exact file list** — `backend/cmd/e2e-seed/seed_test.go`,
+`backend/cmd/e2e-seed/invocation_test.go`, `.github/workflows/ci.yml`, and
+`frontend/scripts/t075-evidence-manifest.mjs` — deliberately not a directory glob, so a future
+non-test file in the same directory is not quietly admitted.
+
+The class cannot reach S5 production learning scope: no handler, repository, migration, schema, API
+contract, or learning page or component. Product behaviour, every S5 acceptance criterion, the
+5-second SC-001 threshold, the information-hiding rules, and T078's independent-review requirement
+are unchanged; this is validation-mechanics maintenance, not product implementation. The exact SHA
+requirements, the no-merge and no-unclassified-commit rules, the global production-scope deny, and
+D-059's clean-tree and baseline checks all remain in force.
+
 **Source:** Product-owner instruction on 2026-08-05.

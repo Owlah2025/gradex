@@ -20,6 +20,7 @@
 # WHAT IT CHECKS
 #   1. The three accepted commits are present at their exact SHAs, in order.
 #   2. Every later commit matches exactly one authorized subject class.
+#      Classes: GATE, WORKFLOW, CI_STABILIZATION, CLOSURE, CONVERGENCE.
 #   3. Every later commit's changed paths lie inside that class's allowlist.
 #   4. No commit in the range touches S5 production scope after the
 #      implementation commit. An authorized subject is not a licence to edit a
@@ -117,9 +118,15 @@ is_production_path() {
 classify_subject() {
   case "$1" in
     "docs(s5): replace fixed convergence count with semantic gate"*) printf 'GATE' ;;
+    # A gate correction may be made more than once — D-067 was itself amended to add
+    # CI_STABILIZATION after hosted CI exposed defects the forecast classes missed. Each
+    # correction carries its own exact subject rather than a `docs(s5): *` prefix, which would
+    # classify any documentation commit as a gate change.
+    "docs(s5): authorize narrow CI stabilization class"*)             printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
     "docs(s5): close T075 and T076"*)                                 printf 'CLOSURE' ;;
     "docs(s5): record convergence and independent review"*)           printf 'CONVERGENCE' ;;
+    "fix(ci): stabilize hosted S5 verification"*)                     printf 'CI_STABILIZATION' ;;
     *) : ;;
   esac
 }
@@ -161,6 +168,19 @@ path_allowed() {
         frontend/scripts/t075-evidence-manifest.mjs|\
         frontend/playwright.config.ts|\
         .github/workflows/ci.yml) return 0 ;;
+      esac
+      ;;
+    CI_STABILIZATION)
+      # Hosted CI exposed two defects the forecast classes did not cover: the seeder's TestMain
+      # failing an ordinary `go test ./...`, and a failing evidence run being undiagnosable without
+      # admin log access. This class authorizes exactly those files and nothing else. It is
+      # deliberately an exact-file list rather than a directory glob — no `backend/cmd/e2e-seed/*`,
+      # because that would quietly admit a future non-test file in the same directory.
+      case "$p" in
+        backend/cmd/e2e-seed/seed_test.go|\
+        backend/cmd/e2e-seed/invocation_test.go|\
+        .github/workflows/ci.yml|\
+        frontend/scripts/t075-evidence-manifest.mjs) return 0 ;;
       esac
       ;;
     CONVERGENCE)
