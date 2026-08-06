@@ -12,11 +12,30 @@ Admin-created Course Access Invitation, identity-bound Student acceptance, Admin
 grant trigger, idempotent Enrollment and Entitlement creation, rejection and cancellation, audit and
 notification evidence, and bilingual screens for both actors.
 
-**Depends on**: S2 (Course graph, lifecycle, configured access-expiry instant) and S4 (the Entitlement
-grant record and its evaluation). **S6 implementation does not begin until both close** on independent
-verdicts.
+**Depends on**: S2 (Course graph and lifecycle), S4 (the Entitlement record and its evaluation), and
+**S5** (the physical `enrollments` table). **S6 implementation does not begin until all three close** on
+independent verdicts. **All three are now closed** — S2 at `785d71c`, S4 at `944c0a7`, S5 at `d5ce557`.
 
-**Effort**: 9h. **Review Tier 3** — shared only with S1C, S4, and S5.
+> **Corrected 2026-08-06 on two points, neither of which changes a requirement.**
+>
+> **S5 was missing from this line.** It read "S2 … and S4 … until **both** close," while
+> [SLICES.md §2](../../docs/launch/SLICES.md#2-slice-order) records S6's dependencies as `S2, S4, S5`
+> and `tasks.md` already said all three. S5 introduces the `enrollments` table S6 writes to
+> ([§3.4](../../docs/launch/SLICES.md#34-s5-introduces-the-enrollments-table-s6-owns-every-enrollment-write)),
+> so it was always a dependency; only this line omitted it.
+>
+> **S2 does not supply the configured access-expiry instant.** This line credited S2 with it. Verified
+> against the committed schema: no migration `0001`–`0014` creates `courses.default_access_ends_at`, and
+> S2 closed without it. BR-025 requires it before any approval, so it is now S6's under
+> [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).
+> What S6 reads from S2 is the Course graph and lifecycle state only.
+
+**Effort**: 9h **as originally scoped**. **Review Tier 3** — shared only with S1C, S4, and S5.
+
+> D-073 adds a column, a validated Admin write path carrying BR-025's Kuwait-local-date to UTC
+> exclusive-boundary conversion, its audit evidence, and an Admin configuration control. The 9h figure
+> assumed the expiry instant was inherited and does not include that work. The revised figure is for the
+> product owner to set, not for this document to assume.
 
 **Governing rules**: BR-007, BR-018, BR-020, BR-021, BR-023, BR-024, BR-025, BR-026, BR-027, BR-028,
 BR-029, BR-082, BR-090, BR-113, BR-120, BR-121, BR-122, BR-123, BR-165, BR-166, BR-167, BR-168,
