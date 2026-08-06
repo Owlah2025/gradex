@@ -33,6 +33,9 @@ const (
 	CapCatalogPublish  Capability = "CATALOG_PUBLISH"
 	CapCatalogPricing  Capability = "CATALOG_PRICING"
 	CapCatalogTaxonomy Capability = "CATALOG_TAXONOMY"
+
+	// S6 Course Access Grant capability — Admin only.
+	CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"
 )
 
 // AllCapabilities is the closed set, used by tests to prove the policy is total
@@ -51,6 +54,7 @@ var AllCapabilities = []Capability{
 	CapCatalogPublish,
 	CapCatalogPricing,
 	CapCatalogTaxonomy,
+	CapCourseAccessGrant,
 }
 
 // DenyReason is the typed reason a decision was negative.
@@ -146,7 +150,8 @@ func Authorize(p Principal, c Capability) Decision {
 		switch c {
 		case CapAdminOperations, CapFinancialOperations, CapSecurityOperations,
 			CapRetentionOperations, CapProviderOperations, CapContentManagement,
-			CapCatalogPublish, CapCatalogPricing, CapCatalogTaxonomy:
+			CapCatalogPublish, CapCatalogPricing, CapCatalogTaxonomy,
+			CapCourseAccessGrant:
 			return allow()
 		}
 		// Deliberately not CapLearningAccess. Admin access to protected content

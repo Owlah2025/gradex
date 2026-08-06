@@ -84,6 +84,7 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapProviderOperations: true, CapContentManagement: true,
 			CapLearningAccess: false,
 			CapCatalogPublish: true, CapCatalogPricing: true, CapCatalogTaxonomy: true,
+			CapCourseAccessGrant: true,
 		},
 		RoleInstructor: {
 			CapPasswordChange: true, CapSessionTerminate: true,
@@ -92,6 +93,7 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapSecurityOperations: false, CapRetentionOperations: false,
 			CapProviderOperations: false, CapLearningAccess: false,
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
+			CapCourseAccessGrant: false,
 		},
 		RoleStudent: {
 			CapPasswordChange: true, CapSessionTerminate: true,
@@ -100,6 +102,7 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapSecurityOperations: false, CapRetentionOperations: false,
 			CapProviderOperations: false, CapContentManagement: false,
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
+			CapCourseAccessGrant: false,
 		},
 	}
 

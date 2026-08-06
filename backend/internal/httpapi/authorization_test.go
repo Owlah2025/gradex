@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/config"
@@ -190,12 +191,24 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing learning foundation: %v", err)
 	}
 
+	accessRepo, err := access.NewRepository(pool)
+	if err != nil {
+		t.Fatalf("constructing access repository: %v", err)
+	}
+	accessFoundation, err := NewAccessFoundation(AccessFoundationOptions{
+		Repository: accessRepo,
+	})
+	if err != nil {
+		t.Fatalf("constructing access foundation: %v", err)
+	}
+
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithStaffFoundation(staffFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
 		WithCatalogFoundation(catalogFoundation),
 		WithLearningFoundation(learningFoundation),
+		WithAccessFoundation(accessFoundation),
 	)
 	if err != nil {
 		t.Fatalf("router: %v", err)
@@ -339,6 +352,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId", Class: ClassCapabilityProtected},
 
 	"PUT /api/v1/admin/courses/:id/price":                     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/price", Class: ClassCapabilityProtected},
+	"PUT /api/v1/admin/courses/:id/default-access-expiry":     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/default-access-expiry", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/sections/:sectionId/price": {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/sections/:sectionId/price", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/courses/:id/price-history":             {Method: http.MethodGet, Path: "/api/v1/admin/courses/:id/price-history", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/courses/:id/delist":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/delist", Class: ClassCapabilityProtected},

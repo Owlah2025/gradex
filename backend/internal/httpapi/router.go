@@ -102,6 +102,11 @@ func NewRouter(
 			return nil, fmt.Errorf("mounting learning routes: %w", err)
 		}
 	}
+	if routerConfig.access != nil {
+		if err := mountAccessRoutes(v1, routerConfig.access, routerConfig.sessions, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting access routes: %w", err)
+		}
+	}
 
 	return r, nil
 }
@@ -177,6 +182,7 @@ type routerOptions struct {
 	publicCatalog *PublicCatalogFoundation
 	media         *MediaFoundation
 	learning      *LearningFoundation
+	access        *AccessFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
