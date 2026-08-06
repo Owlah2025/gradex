@@ -117,3 +117,38 @@ requirements are unchanged.
   uniqueness invariants all need migration design; downstream migration numbering was reserved by S2
   T062 as `0011_catalog_search` and `0012_media_and_entitlement`, so this feature's migration follows
   those.
+  **Resolved 2026-08-06: the migration is `0015_course_access_grant`** and `MaxSchemaVersion` becomes
+  15. Both reserved numbers exist, `0013_enrollments` and `0014_protected_learning` followed, and the
+  sequence `0001`–`0014` has no gap. Of the two uniqueness invariants, **only
+  `cai_one_non_terminal_per_pair` is S6's to create** — S4's `0012` already shipped
+  `entitlements_one_active_student_course`, and the grant-source discriminator and its `CHECK` with it.
+
+## Reconciliation findings, 2026-08-06
+
+The specification and this checklist stand. Nothing below changes a requirement, a success criterion, or
+an approved answer; each is a defect in what the *planning artifacts* asserted about the repository, found
+by re-reading the implemented code at the S5 closure head `d5ce557`.
+
+- [x] Every FR and SC re-checked against the implemented code. **No FR or SC was found unimplementable
+      except through the gap below**, and none was reworded.
+- [ ] **FR-015 and FR-017 have no schema to read.** BR-025 requires a configured future Course
+      `default_access_ends_at`; **no migration `0001`–`0014` creates it**, and no closed slice owns it.
+      The coverage grep could not see this, because the FR *was* cited — by tasks reading a column
+      nothing created. Assigned to S6 as `T003a`/`T007a` under
+      [D-073](../../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it),
+      **pending product-owner acknowledgement of the effort consequence.** This is the slice's one
+      unresolved blocker.
+- [x] BR-025's Kuwait-local-date to UTC exclusive-boundary conversion now has a task. It had none, and it
+      is a stated rule rather than a new decision.
+- [x] The two questions the product owner answered on 2026-07-29 — FR-040 suspended-Student approval and
+      FR-041 separation of duties — are unaffected and are **not** reopened.
+- [x] No payment entity, field, route, or provider entered the slice during reconciliation. The struck S7
+      row was not retargeted onto S6: no order, checkout session, coupon, refund, payment attempt, or
+      callback appears in any S6 artifact (BR-020, FR-005, SC-012).
+- [x] FR-003 and FR-016's "database, not a handler" exception below is **stronger** than when it was
+      written: two of the three invariants were created and independently reviewed by closed slices
+      before the code depending on them existed, which is what
+      [SLICES.md §3.1](../../../docs/launch/SLICES.md#31-entitlement-evaluation-precedes-entitlement-creation)
+      was arranged to produce.
+- [x] FR-020 and SC-006's production-build exception has a working precedent rather than a plan:
+      `internal/entitlement/production_exclusion_test.go` and the `!production`-tagged `cmd/e2e-seed`.

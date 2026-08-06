@@ -10,11 +10,50 @@ the same day: the `enrollments` table is S5's, and only its rows and lifecycle a
 banner below) — the migration
 number is derived rather than assumed (M1), three uncovered requirements gained tasks (H2),
 self-approval auditability gained a test (H1), three concurrency proofs gained mutation checks (M2),
-and **every task now carries its FR/SC citations** (H3).
+and **every requirement-bearing task carries its FR/SC citations** (H3).
+
+> **H3's claim was overstated and is corrected 2026-08-06.** It read "every task now carries its FR/SC
+> citations." Seven do not, and correctly so: `T002` creates a package, `T005` writes a down migration,
+> `T016` is a mutation check on `T015`, `T077` syncs documents, `T078` runs the gate suite, `T079` runs
+> convergence, and `T079a` adds a CI entry. None implements a requirement, so a citation would be
+> invented rather than traced. The corrected wording is "every **requirement-bearing** task," which is
+> verifiable; the original was not.
 
 **Depends on**: S2, S4, **and S5**, all closed on independent verdicts. **T001 is an
 interface-compatibility stop condition** on S4's Entitlement record and evaluator — see
 [research.md §1](research.md#1-the-s4-seam).
+
+> ## Reconciled 2026-08-06 against the implemented repository
+>
+> **All three dependencies are now closed**: S2 at `785d71c`, S4 at `944c0a7`, S5 at `d5ce557` on a
+> Tier 3 `APPROVE`. This task list was written on 2026-07-29 against an expected repository, so its
+> paths, file names, constraint names, and migration number were assumptions. They have been checked
+> and corrected inline. **No task was deleted, no requirement dropped, and no proof weakened.**
+>
+> What changed, and why each matters to the implementer:
+>
+> | Was | Is | Consequence if not corrected |
+> |---|---|---|
+> | S4 created `internal/access`; S6 extends it | S4 created **`internal/entitlement`**; **S6 creates `internal/access`** | `T002` would edit a non-existent package |
+> | Out of scope: `internal/access/entitlement.go` | Out of scope: **all of `internal/entitlement/`** | `T074` would assert a file that does not exist is unmodified — vacuously true |
+> | Migration number derived, possibly not `0015` | **`0015`**, `MaxSchemaVersion` **15**. `0011_catalog_search` exists; the sequence has no gap | `T003`'s hedge is resolved; it becomes a confirmation |
+> | `T004` alters `entitlements` with every §4 column and constraint | S4 **already shipped four of five**. `T004` asserts them and adds only the FK and `ent_manual_needs_invitation` | The migration would fail on duplicate object, or would edit an applied shape |
+> | `T009` grants the capability in `policy_set.go` | The role map is the **`Authorize` switch in `policy.go`** | Would compile and grant nothing — a silent deny-by-default refusal, not a build error |
+> | `T052` drops `ent_one_active_per_student_course` | The live index is **`entitlements_one_active_student_course`** | Dropping a non-existent index is a no-op; the mutation check would pass while proving nothing |
+> | Frontend `(student)`/`(admin)` route groups | Unparenthesised `[locale]/access` and `[locale]/admin/course-access` | Would introduce a layout convention this codebase does not use |
+> | `T007` widens one closed allowlist | **Two**: the purpose allowlist **and** `identity_action_secrets_account_id_purpose` | An invitation to an address with no Account would violate a CHECK at insert |
+>
+> **Four tasks are added**, in the existing suffixed style: `T003a` and `T007a` for the missing Course
+> access-expiry column under [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it),
+> `T014a` for the Student/Admin guards that must not reuse the uniform protected-learning refusal, and
+> `T079a` so the new package does not join the six integration-tagged packages already outside hosted CI.
+> **Total: 85 tasks.**
+>
+> **`T001a` is now a re-verification rather than an open question.** `0013_enrollments` matches
+> [data-model.md §5](data-model.md#5-enrollments--created-by-s5-written-only-by-s6) column for column and
+> constraint name for constraint name, and no production `INSERT INTO enrollments` exists. It is still run
+> against the head being built, because a stop condition that is only ever satisfied on paper is not a
+> stop condition.
 
 > ## The enrollment ownership boundary
 >
@@ -49,9 +88,24 @@ broken code is not evidence — S1C proved that twice in this repository.
 
 ## Out of scope — do not touch
 
-`backend/internal/access/entitlement.go` belongs to S4. This slice **creates** Entitlements and
-**consumes** S4's evaluator. Any task that modifies evaluation, scope resolution, expiry checking, or
-revocation is out of scope and is a finding, not a contribution.
+**`backend/internal/entitlement/` — the whole package — belongs to S4.** This slice **creates**
+Entitlements and **consumes** S4's evaluator. Any task that modifies evaluation, scope resolution,
+expiry checking, or revocation is out of scope and is a finding, not a contribution.
+
+> **Corrected 2026-08-06.** This read `backend/internal/access/entitlement.go`, which does not exist —
+> S4 landed `internal/entitlement`, and `internal/access` is the package **S6 creates**. The corrected
+> boundary is stronger: the producer and the evaluator are in **separate packages**, so FR-027 is provable
+> by package boundary rather than by reading one package's files. Concretely, out of scope are
+> `evaluate.go`, `repository.go`, `types.go`, `scope.go`, `seed_nonprod.go`,
+> `production_exclusion_test.go`, and `doc.go` under `internal/entitlement/`.
+>
+> S6 **imports** `internal/entitlement` for its exported vocabulary — `GrantSourceManualInvitation`,
+> `ScopeCourse`, `StateActive`, `Record`, and `Evaluator.EvaluateInTransaction` — and defines no parallel
+> type set. A second `GrantSource` enum in `internal/access` would be the duplication FR-027 forbids, in
+> Go rather than in SQL.
+
+**Migrations `0001`–`0014` are frozen.** S6 adds `0015` and edits none of them (D-031, Constitution VII).
+`scripts/docs-guard.sh` §5 enforces this against recorded checksums.
 
 **AD07 mutations belong to S8 Admin Operations, exclusively.** S6 ships the read surface only.
 
@@ -65,52 +119,108 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
 
 - [ ] T001 **STOP CONDITION.** Verify S4's interface against
       [research.md §1](research.md#1-the-s4-seam): the `entitlements` table carries scope,
-      `original_access_ends_at`, `access_ends_at`, `retirement_eligibility_at`, and revocation state;
-      `backend/internal/access/` exposes an evaluator and a transaction helper. Record the actual
-      shape. **If it differs, halt and revise plan.md before T002.** *(The `enrollments` table is not
-      part of this check — it is S5's, and T004a asserts it separately)*
+      `original_access_ends_at`, `access_ends_at`, `retirement_eligibility_at`, and revocation state,
+      and **`backend/internal/entitlement/`** exposes the `Evaluator`. **Reconciled 2026-08-06:** two of
+      the three precondition rows hold and the third does not — there is **no transaction helper** on
+      `entitlement.Repository` and none anywhere in the backend, so `internal/access` opens its own
+      `pool.Begin` transaction per the house pattern. Re-run the check against the head being built and
+      **halt if the recorded shape has changed since 2026-08-06** *(The `enrollments` table is not part
+      of this check — it is S5's, and T001a asserts it separately)*
 - [ ] T001a **STOP CONDITION.** Verify **S5's** `enrollments` table exists with the shape
       [data-model.md §5](data-model.md#5-enrollments--created-by-s5-written-only-by-s6) declares —
       `id`, `student_account_id`, `course_id`, `created_at`, and
-      `UNIQUE (student_account_id, course_id)`. **If it differs, halt and revise plan.md before
-      T002.** S6 adapts to the inherited shape; it never alters S5's migration to suit itself
-      *(D-031, Constitution VII)*
-- [ ] T002 Add the S6 files to `backend/internal/access/` with doc comments stating the module
-      boundary, that `entitlement.go` is S4-owned, and that **the `enrollments` table is S5-owned
-      while its rows are S6's**: `invitation.go`, `enrollment.go`, `grant.go`
-- [ ] T003 **Derive the migration number** from the highest existing file in
-      `backend/internal/db/migrations/` and name the pair `NNNN_course_access_grant`. Do **not** assume
-      `0015`: S5 takes two migrations ahead of this slice, but S3's specification states it introduces
-      no write path, so `0011` may never exist *(M1)*
-- [ ] T004 Write `backend/internal/db/migrations/NNNN_course_access_grant.up.sql` creating
-      `course_access_invitations` and altering `entitlements`, with every column and constraint in
-      [data-model.md](data-model.md) §2 and §4. **This migration does not create `enrollments`** —
-      S5 created it *(FR-002, FR-003, FR-016, FR-019, FR-021, FR-022, FR-042)*
+      `CONSTRAINT enr_one_per_student_course UNIQUE (student_account_id, course_id)`. **Verified
+      matching on 2026-08-06**, constraint name included; re-verify against the head being built and
+      **halt on divergence.** Also assert **no production `INSERT INTO enrollments` exists** — every
+      one must be in a `_test.go` file or under the `!production`-tagged `cmd/e2e-seed`, which is what
+      makes S6 the only production writer. S6 adapts to the inherited shape; it never alters S5's
+      migration to suit itself *(D-031, Constitution VII)*
+- [ ] T002 Create the `backend/internal/access/` package — `doc.go`, `invitation.go`, `enrollment.go`,
+      `grant.go`, `repository.go` — with a `doc.go` boundary comment stating that **evaluation lives in
+      `internal/entitlement` and is not touched here**, and that **the `enrollments` table is S5-owned
+      while its rows are S6's**. Follow `internal/entitlement/doc.go` and `internal/learning/doc.go`.
+      **The package does not exist yet: S4 landed `internal/entitlement`, not `internal/access`**
+- [ ] T003 **Confirm the migration number is `0015`** and name the pair `0015_course_access_grant`.
+      Recalculated 2026-08-06 from the committed schema: `0001`–`0014` with no gap,
+      `0011_catalog_search` present so S3's no-write-path caveat is moot, highest pair
+      `0014_protected_learning`, and `db.MaxSchemaVersion = ProtectedLearningSchemaVersion = 14`.
+      Re-derive from the highest existing file and **halt if it is no longer `0014`** *(M1)*
+- [ ] T003a **The BR-025 Course access-expiry column does not exist.** In the same migration, add
+      `courses.default_access_ends_at TIMESTAMPTZ` — **nullable**, because BR-025 makes its absence a
+      refusal condition rather than an invalid state, and `NOT NULL` would require inventing a default
+      duration no rule supplies. Verified 2026-08-06: no migration `0001`–`0014` creates it under this
+      or any other name, so [data-model.md §6](data-model.md#6-the-grant-transaction) step 5 currently
+      reads a column that is not there and **no grant could ever complete**. Assigned to S6 under
+      [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).
+      Add no other column to `courses` *(BR-025, FR-015, FR-017)*
+- [ ] T004 Write `backend/internal/db/migrations/0015_course_access_grant.up.sql` creating
+      `course_access_invitations` with every column and constraint in
+      [data-model.md §2](data-model.md#2-courseaccessinvitations). On `entitlements`, **assert** the
+      four elements S4 already shipped — `grant_source`, `source_invitation_id`,
+      `entitlements_grant_source_implemented`, `entitlements_one_active_student_course` — and **add only**
+      `fk_entitlements_source_invitation` and `ent_manual_needs_invitation`, which S4 did **not** ship
+      and without which FR-021 and BR-113 are unenforced. **Do not drop, recreate, or redefine an
+      applied constraint**, and **do not create `enrollments`** — S5 did *(FR-002, FR-003, FR-016,
+      FR-019, FR-021, FR-022, FR-042)*
 - [ ] T004a In the same migration, **assert** the inherited `enrollments` columns, types, nullability,
       and unique constraint exist as [data-model.md §5](data-model.md#5-enrollments--created-by-s5-written-only-by-s6)
       declares, and **fail loudly** if they diverge rather than altering the table into agreement —
       the same treatment this migration gives `entitlements` *(Principle VII)*
 - [ ] T005 Write the matching `.down.sql` and verify the full `up`/`down`/`up` lifecycle against real
-      PostgreSQL in `backend/internal/db/migrate_integration_test.go`
-- [ ] T006 Raise `MaxSchemaVersion` to the **derived** number in `backend/internal/db/schema.go` using
-      a named constant in the existing style, and confirm CI derives its assertion through
-      `migrate max-version` rather than carrying a literal — the drift that failed S1B2's hosted CI
-      *(M1)*
-- [ ] T007 Add the new action-secret purpose and the seven audit/security event types to their closed
-      allowlists by migration, following the `0007` precedent *(FR-031)*
+      PostgreSQL in `backend/internal/db/migrate_integration_test.go`. The `down` must drop only what
+      `0015` created — it must **not** drop `grant_source`, `source_invitation_id`, or either S4
+      constraint, and must not drop `enrollments`
+- [ ] T006 Add `CourseAccessGrantSchemaVersion = 15` to `backend/internal/db/schema.go` and repoint
+      `MaxSchemaVersion` at it, in the existing named-constant style alongside
+      `EnrollmentSchemaVersion = 13` and `ProtectedLearningSchemaVersion = 14`. **CI already derives its
+      assertion** through `expected="$(go run ./cmd/migrate max-version)"` in
+      `.github/workflows/ci.yml` — confirm that, do not rebuild it, and do not introduce a literal. This
+      is the drift that failed S1B2's hosted CI *(M1)*
+- [ ] T007 Widen **two** closed allowlists by migration, following the `0007` precedent
+      *(FR-007, FR-031)*:
+      - `identity_action_secrets_purpose` gains `'COURSE_ACCESS_INVITATION'` alongside
+        `'EMAIL_VERIFICATION'`, `'PASSWORD_RESET'`, `'STAFF_INVITATION'`.
+      - **`identity_action_secrets_account_id_purpose` must gain it on the arm that permits a null
+        `account_id`**, because the invited address may have no Account. Missed by the original task,
+        which named only the purpose allowlist; without it every invitation to an unregistered address
+        violates a CHECK at insert.
+      - **The seven audit actions need no migration.** `audit_events.action` carries a *format* check,
+        `CHECK (action ~ '^[A-Z][A-Z0-9_]*$')`, not a closed enumeration — which is why `T065`'s
+        enumeration test is the only thing preventing an unaudited transition. Widen
+        `identity_security_events_type` only if S6 records a security event.
+- [ ] T007a **Implement the Admin write path for the expiry instant `T003a` adds**, in
+      `backend/internal/httpapi/access_routes.go` and `backend/internal/access/`, gated on
+      `COURSE_ACCESS_GRANT`, with CSRF, strict body-limit binding, and an audit record like any other
+      privileged Course mutation. **BR-025's conversion is part of the rule, not a choice**: when an
+      Admin supplies a Kuwait-local calendar date, persist the exclusive boundary as the first instant
+      of the following local day converted to UTC. Unit-test the conversion at a DST-free offset
+      boundary and at month and year rollover. No backfill is implied — BR-025's "changing the Course
+      default afterwards affects only future approvals" is already guaranteed by the Entitlement
+      snapshot *(BR-025, FR-017; [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it))*
 
 ## Phase 2 — Foundational (blocks every user story)
 
-- [ ] T008 Add `CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"` to
-      `backend/internal/identity/policy.go`, registering it in `AllCapabilities` and the `Authorize`
-      switch *(FR-001, FR-014)*
-- [ ] T009 Grant `COURSE_ACCESS_GRANT` to the **Admin role only** in
-      `backend/internal/identity/policy_set.go`. No Instructor and no Student grant — this is what
-      makes FR-001 a property of the capability set rather than of a handler *(FR-001)*
-- [ ] T010 Implement the repository with the canonical lock order from
-      [plan.md](plan.md#canonical-lock-order) — Course `FOR SHARE` → Invitation `FOR UPDATE` →
-      Enrollment `FOR UPDATE` → Entitlement insert — in `backend/internal/access/repository.go`. Every
-      precondition is re-asserted **inside** the transaction *(FR-015, FR-016)*
+- [ ] T008 Add `CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"` to the capability `const` block
+      in `backend/internal/identity/policy.go` and register it in `AllCapabilities`, which currently
+      holds twelve entries *(FR-001, FR-014)*
+- [ ] T009 Grant `COURSE_ACCESS_GRANT` to the **Admin role only**, in the **`case RoleAdmin:` arm of the
+      `Authorize` switch in `backend/internal/identity/policy.go`**, alongside `CapCatalogPublish`,
+      `CapCatalogPricing`, and `CapCatalogTaxonomy`. No Instructor and no Student grant — this is what
+      makes FR-001 a property of the capability set rather than of a handler.
+      **Corrected 2026-08-06: not `policy_set.go`.** That file holds registration policy documents
+      (`PolicyKind`, `RegistrationPolicySet`, `Locale`, `PolicySetResolver`) and contains no capability
+      reference at all. An entry added there would compile and grant nothing, and `Authorize`'s
+      deny-by-default fallthrough would turn the mistake into a silent refusal rather than a build
+      failure *(FR-001)*
+- [ ] T010 Implement the repository in `backend/internal/access/repository.go` with the canonical lock
+      order from [plan.md](plan.md#canonical-lock-order) — Course `FOR SHARE` → Invitation `FOR UPDATE`
+      → Enrollment `FOR UPDATE` → Entitlement insert. **It owns its own transaction via
+      `pool.Begin(ctx)`**, following `internal/catalog/repository.go:79`,
+      `internal/identity/staff.go:49`, and `internal/learning/report.go:168`, because
+      `internal/entitlement.Repository` exposes no transaction helper and nothing is added to it. Where
+      in-transaction evaluation is needed, call
+      `entitlement.Evaluator.EvaluateInTransaction(ctx, tx, …)`. Every precondition is re-asserted
+      **inside** the transaction *(FR-015, FR-016)*
 - [ ] T011 Implement the invitation state machine and its guards in
       `backend/internal/access/invitation.go`, per [data-model.md §3](data-model.md#3-invitation-state-machine)
       *(FR-002, FR-024, BR-168)*
@@ -121,13 +231,26 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       the rows and the lifecycle; S5 owns the table.** Reuse an existing row, never create a second
       *(FR-015, BR-167, Principle IV)*
 - [ ] T014 Map PostgreSQL unique violations to their distinguishable conflict classes —
-      `duplicate-invitation`, `already-has-active-access` — in
-      `backend/internal/access/repository.go`. **A unique violation must never surface as a 500**
-      *(FR-003, FR-016)*
-- [ ] T015 Extend the derived authorization sweep in
+      `cai_one_non_terminal_per_pair` → `duplicate-invitation`,
+      `entitlements_one_active_student_course` → `already-has-active-access` — in
+      `backend/internal/access/repository.go`, keying on the live constraint name rather than on the
+      planned one. **A unique violation must never surface as a 500** *(FR-003, FR-016)*
+- [ ] T014a Build the Student and Admin guards in a new
+      `backend/internal/httpapi/access_foundation.go`, following `learning_foundation.go` and
+      `media_foundation.go` for dependency validation. **The Student guard must not reuse
+      `requireProtectedLearningAccess`** (`media_delivery_handlers.go:112`): it writes a uniform
+      `writeProtectedUnavailable` refusal on every failure, which would collapse the 403/404/409/410/422
+      classes in [contracts/course-access-api.md](contracts/course-access-api.md) into one response and
+      defeat FR-009's byte-identical-404 by making everything byte-identical. Emit the
+      `internal/problem` envelope instead. `CapLearningAccess` is still the right capability class — an
+      Active Student holds it independently of any Entitlement, so an invited Student with no access
+      reaches their own acceptance screen *(FR-008, FR-009, FR-014)*
+- [ ] T015 Extend the derived authorization sweep in the existing
       `backend/internal/httpapi/authorization_test.go` so every route under the new prefixes is
       asserted to carry its capability guard, deriving the route list from `r.Routes()`. A new
-      unguarded route must **fail** this test *(FR-001, FR-014)*
+      unguarded route must **fail** this test. Note `/me` is a **new top-level prefix** — no `/me` route
+      exists in the router today — so the sweep must cover it explicitly and not assume it inherits
+      `/learn`'s guard *(FR-001, FR-014)*
 - [ ] T016 Mutation check for T015: mount a route without its guard and confirm the sweep fails
 
 ## Phase 3 — US1: An Admin invites a Student to one Course (P1)
@@ -160,7 +283,11 @@ Enrollment or Entitlement row exists.
 - [ ] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
       *(FR-032)*
 - [ ] T025 [P] [US1] Build the AD06 invitation queue and creation form in
-      `frontend/src/app/[locale]/(admin)/course-access/`, Arabic and English *(FR-038, FR-039)*
+      `frontend/src/app/[locale]/admin/course-access/`, Arabic and English, with shared components under
+      `frontend/src/components/access/`. **Include the Course access-expiry configuration control** for
+      the instant `T003a` and `T007a` introduce — without it an Admin cannot satisfy BR-025 and no
+      approval can succeed. **Corrected 2026-08-06: no `(admin)` route group exists under `[locale]`**;
+      the live convention is unparenthesised, as in `[locale]/admin/catalog` *(FR-038, FR-039; BR-025)*
 
 ## Phase 4 — US2: The Student accepts, and still has no access (P1)
 
@@ -187,8 +314,11 @@ never invited to.
 - [ ] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
       fails. **This is the single most important mutation check in the slice** *(FR-010, SC-002)*
 - [ ] T033 [P] [US2] Build the ST03 acceptance screen in
-      `frontend/src/app/[locale]/(student)/access/`, stating explicitly that acceptance does not grant
-      access *(FR-037, FR-039)*
+      `frontend/src/app/[locale]/access/`, stating explicitly that acceptance does not grant
+      access. **Corrected 2026-08-06: no `(student)` route group exists, and this must not sit under
+      `[locale]/learn/`** — `learn` is the entitled area, and an invited Student arriving from an emailed
+      link holds no Entitlement yet, so nesting acceptance there would gate acceptance behind the access
+      it exists to obtain *(FR-037, FR-039)*
 
 ## Phase 5 — US3: Admin Approval creates access (P1)
 
@@ -212,7 +342,9 @@ changes nothing.
       **permit** under emergency access suspension, in `backend/internal/access/grant.go`
       *(FR-018, BR-018, BR-090 as amended 2026-07-29)*
 - [ ] T037 [US3] Refuse approval when the Course has no configured expiry instant or it is not in the
-      future, naming the missing configuration, in `backend/internal/access/grant.go` *(FR-017)*
+      future, naming the missing configuration, in `backend/internal/access/grant.go`. Reads
+      `courses.default_access_ends_at`, which **`T003a` creates** — this task is unimplementable before
+      it, and until then every approval refuses here *(FR-017, BR-025)*
 - [ ] T038 [US3] Mount `POST …/{id}/approve` returning **`200` with the existing grant** on a repeat,
       not `409`, in `backend/internal/httpapi/access_routes.go` *(FR-016)*
 - [ ] T039 [US3] Integration test in `backend/internal/access/grant_integration_test.go`: approval
@@ -231,8 +363,9 @@ changes nothing.
 - [ ] T044 [US3] Mutation check for T039: break the transaction boundary so audit commits separately,
       and confirm the test fails *(FR-015)*
 - [ ] T045 [P] [US3] Build the AD07 entitlement detail **read-only** view in
-      `frontend/src/app/[locale]/(admin)/course-access/`. **No expiry-adjustment or revocation
-      control** — those are S8's *(FR-039)*
+      `frontend/src/app/[locale]/admin/course-access/`. **No expiry-adjustment or revocation
+      control** — those are S8's. Adjustment history comes from `entitlement_adjustments`, which S4's
+      `0012` already created as an append-only table, so the read model has a real source *(FR-039)*
 
 ## Phase 6 — Concurrency proofs (mandatory, Constitution V)
 
@@ -253,8 +386,13 @@ substitute for a concurrent one.** *(SC-003)*
       invitations for the same Student and Course → exactly one Entitlement, loser returns
       `409 already-has-active-access` *(FR-016, SC-003)*
 - [ ] T052 **Index-drop mutation check**: drop `cai_one_non_terminal_per_pair` and
-      `ent_one_active_per_student_course`, then confirm **T046, T049, and T051 fail**. If they still
-      pass they were testing the handler, not the invariant, and they are not evidence
+      **`entitlements_one_active_student_course`**, then confirm **T046, T049, and T051 fail**. If they
+      still pass they were testing the handler, not the invariant, and they are not evidence.
+      **Corrected 2026-08-06: the second index is S4's, under S4's name.** It was planned here as
+      `ent_one_active_per_student_course`, which does not exist — dropping it is a silent no-op and this
+      mutation check would pass while proving nothing. The live definition is
+      `UNIQUE (student_account_id, course_id) WHERE state = 'ACTIVE' AND scope_kind = 'COURSE'`; the
+      `scope_kind` predicate is coextensive with S6's whole-Course-only writes
 - [ ] T053 **Mutation checks for the non-index-backed races** *(M2)*. T047, T048, and T050 are not
       protected by a unique index, so the index-drop mutation cannot prove them. Each carries its own
       instead, and the reason is recorded rather than assumed:
@@ -282,7 +420,7 @@ substitute for a concurrent one.** *(SC-003)*
 - [ ] T058 [US5] Integration test: the Student projection **excludes** `admin_note`,
       `external_reference`, `decided_by_account_id`, and all approval evidence *(FR-036)*
 - [ ] T059 [P] [US5] Build the ST04 access-status and ST10 access-history screens in
-      `frontend/src/app/[locale]/(student)/access/` *(FR-035, FR-039)*
+      `frontend/src/app/[locale]/access/` *(FR-035, FR-039)*
 - [ ] T060 [US6] Implement acceptance-link reissue superseding every prior secret and leaving state
       unchanged, refusing for an accepted or terminal invitation, in
       `backend/internal/access/invitation.go` *(FR-025)*
@@ -293,7 +431,12 @@ substitute for a concurrent one.** *(SC-003)*
 
 - [ ] T062 Invariant 1: enumerate the live route table and assert **no route creates an Entitlement
       except approve**, in `backend/internal/httpapi/access_invariants_test.go`. Proven by
-      enumeration, not inspection *(FR-013, FR-020, SC-006)*
+      enumeration, not inspection. **Extend the existing production-exclusion precedent rather than
+      inventing one**: `internal/entitlement/production_exclusion_test.go` already proves `seed_nonprod.go`
+      is absent from a `-tags=production` build and that the package still builds under it, and every
+      `cmd/e2e-seed` file is `//go:build !production`. This task must also assert those `cmd/e2e-seed`
+      entitlement inserts stay production-excluded, so the only production creation path really is
+      approval *(FR-013, FR-020, SC-006)*
 - [ ] T063 Invariant 2: assert no authorization decision **implemented by S6** reads Course Access
       Invitation state — playback, protected download, and Progress write — in
       `backend/internal/httpapi/access_invariants_test.go`. **The Instructor roster is deliberately
@@ -333,7 +476,11 @@ substitute for a concurrent one.** *(SC-003)*
 - [ ] T074 **S6 implements no Entitlement evaluation** *(H2 follow-on)*. Assert in
       `backend/internal/httpapi/access_invariants_test.go` that no S6-authored file performs scope
       resolution, expiry comparison, or revocation checking — S6 calls S4's evaluator and duplicates
-      none of it — and that `backend/internal/access/entitlement.go` is unmodified by this slice
+      none of it — and that **every file under `backend/internal/entitlement/` is unmodified by this
+      slice**, verified by diff against the S5 closure head `d5ce557`. Additionally assert
+      `internal/access` declares no `GrantSource`, `ScopeKind`, or `State` type of its own and imports
+      S4's. **Corrected 2026-08-06: the path was `backend/internal/access/entitlement.go`, which does
+      not exist** — asserting a non-existent file is unmodified is vacuously true and proves nothing
       *(FR-027, SLICES §3.1)*
 
 ## Phase 9 — Cross-cutting and convergence
@@ -344,33 +491,59 @@ substitute for a concurrent one.** *(SC-003)*
       protected action, the Entitlement is byte-identical before, during, and after, and approval for
       a suspended Student still returns `200` *(FR-029, FR-040, SC-009)*
 - [ ] T077 Update `docs/BUSINESS_RULES.md` cross-references, the API contract documents, and
-      `docs/launch/STATUS.md`; record the S4 interface as verified or revised (Constitution XI — a
-      behaviour change without its document update is incomplete, not done)
+      `docs/launch/STATUS.md` (Constitution XI — a behaviour change without its document update is
+      incomplete, not done). **The S4 interface is already recorded as verified-and-revised** by the
+      2026-08-06 reconciliation in [research.md §1](research.md#1-the-s4-seam) and
+      [plan.md](plan.md#module-placement); this task records the *implementation* outcome against that
+      record, and must state whether the shape still held at the head that was built
 - [ ] T078 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
-      frontend build with `.next` removed first, and both repository guards
+      frontend build with `.next` removed first, and both repository guards. `scripts/docs-guard.sh` §5
+      also proves no migration `0001`–`0014` was edited
 - [ ] T079 Run `speckit.converge`; complete any appended work through another `speckit.implement`
       pass until convergence is clean, then push the exact head and verify hosted CI passes every job.
       Only then freeze the range for independent Tier 3 review
+- [ ] T079a **Add `./internal/access` to the hosted integration list** in `.github/workflows/ci.yml`, in
+      the same commit that creates the package. Hosted CI currently runs `-tags=integration` against
+      seven packages — `./internal/db`, `./internal/identity`, `./internal/outbox`, `./internal/httpapi`,
+      `./internal/catalogpublic`, `./internal/ratelimit`, `./internal/learning` — while **thirteen**
+      carry integration-tagged tests. The six already outside it are `cmd/api`, `internal/catalog`,
+      `internal/db/e2equery`, `internal/entitlement`, `internal/media`, and `internal/storage`, retained
+      as S5 follow-up `F-7`. S6 **does not close that gap and does not widen it**: the concurrency proofs
+      in `internal/access` are the highest-risk evidence in the slice, and a proof that runs only on the
+      builder's machine is the exact failure mode S5's `M-1` finding recorded when hosted CI omitted
+      `./internal/learning`
 
 ---
 
 ## Dependencies
 
 ```text
-T001 (STOP CONDITION — S4 interface)
-  └─→ Phase 1 setup (T002–T007)
+D-073 acknowledged  ← product-owner gate, not a task. T003a/T007a/T037 are blocked on it
+  │
+T001, T001a (STOP CONDITIONS — S4 interface, S5 enrollments shape)
+  └─→ Phase 1 setup (T002–T007a)
+        │     migration 0015 + MaxSchemaVersion 15 land here; nothing later works without them
         └─→ Phase 2 foundational (T008–T016)   ← blocks every user story
               ├─→ Phase 3  US1  (T017–T025)
               │     └─→ Phase 4  US2  (T026–T033)
               │           └─→ Phase 5  US3  (T034–T045)
               │                 ├─→ Phase 6  concurrency (T046–T053)
               │                 └─→ Phase 7  US4/US5/US6 (T054–T061)
-              └─────────────────→ Phase 8  invariants + coverage (T062–T073)
-                                    └─→ Phase 9 convergence (T075–T079)
+              └─────────────────→ Phase 8  invariants + coverage (T062–T074)
+                                    └─→ Phase 9 convergence (T075–T079a)
 ```
 
 US1 → US2 → US3 are genuinely sequential: each builds the state the next transitions from. US4, US5,
 and US6 depend only on US3 and are independent of one another.
+
+**Two dependency edges added by the 2026-08-06 reconciliation:**
+
+- **`T037`, `T042`, and every approval-path proof depend on `T003a`.** They read
+  `courses.default_access_ends_at`, which does not exist in the committed schema. Until `T003a` adds it,
+  approval refuses at grant-transaction step 5 and no proof past `T039` can pass.
+- **`T007a` should land with `T025`, not after it.** An Admin who cannot configure the expiry instant
+  cannot approve anything, so a queue screen without the configuration control is a queue that can only
+  reject.
 
 ## Parallel opportunities
 
@@ -388,10 +561,13 @@ they must run alone.
 
 ## MVP scope
 
-**US1 + US2 + US3** (T001–T045) plus **Phase 6** (T046–T053) is the minimum that delivers a working
-product: an Admin can grant access and a Student can learn. Phase 6 is **not** optional in that MVP —
-an idempotency guarantee never exercised concurrently is an assumption, and Constitution V now requires
-the proof.
+**US1 + US2 + US3** (T001–T045, including `T001a`, `T003a`, `T004a`, `T007a`, `T014a`) plus **Phase 6**
+(T046–T053) is the minimum that delivers a working product: an Admin can grant access and a Student can
+learn. Phase 6 is **not** optional in that MVP — an idempotency guarantee never exercised concurrently
+is an assumption, and Constitution V now requires the proof.
+
+`T003a` and `T007a` are inside this MVP, not adjacent to it: without the Course expiry instant an Admin
+cannot grant access at all, so the minimum product does not exist without them.
 
 US4, US5, and US6 make the workflow operable and supportable, but no Student is blocked from learning
 without them.
@@ -399,7 +575,20 @@ without them.
 ## Requirement coverage
 
 Every FR-001…FR-042 and every SC except the explicitly deferred SC-010 is cited by at least one task
-above. The map is verifiable by grepping FR/SC identifiers out of this file and diffing against
-[spec.md](spec.md); `/speckit-analyze` performs exactly that check.
+above — **42 of 42 functional requirements, 12 of 13 success criteria**. The map is verifiable by
+grepping FR/SC identifiers out of this file and diffing against [spec.md](spec.md);
+`/speckit-analyze` performs exactly that check.
 
 **SC-010 is deferred by decision**, not missed — see §Out of scope.
+
+**Task count: 85** — `T001`–`T079` plus the six suffixed tasks `T001a`, `T003a`, `T004a`, `T007a`,
+`T014a`, `T079a`. The 2026-08-06 reconciliation added four of those six (`T003a`, `T007a`, `T014a`,
+`T079a`); `T001a` and `T004a` came from the 2026-07-29 `/speckit-analyze` pass. **No task was removed and
+no requirement lost coverage.**
+
+**One requirement gained a task it never had.** BR-025's Kuwait-local-date to UTC exclusive-boundary
+conversion is cited by FR-017 through the "configured access-expiry instant" it depends on, but no task
+implemented the conversion or the column it writes to. `T003a` and `T007a` close that, under
+[D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).
+It was invisible to the coverage grep because the FR was cited — by tasks that read a column nothing
+created.
