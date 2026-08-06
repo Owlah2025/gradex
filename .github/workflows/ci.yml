@@ -403,14 +403,47 @@ jobs:
       #
       # continue-on-error keeps the upload and audit steps reachable on failure;
       # the job is failed explicitly at the end, so a red run is still red.
+      # `continue-on-error` keeps the audit and upload steps reachable on failure, but it also
+      # rewrites this step's *conclusion* to success in the API while `steps.t075.outcome` holds the
+      # truth — which made hosted run 31035395606 look like it passed a step it had failed. The raw
+      # output is captured so a failure is classifiable without admin log access, and `pipefail`
+      # keeps `tee` from masking the real exit status.
+      #
+      # The raw log stays in the runner temp and is NEVER uploaded: on failure Playwright prints the
+      # received value of the failing assertion, and the leak detector compares against the whole
+      # rendered page, which legitimately carries the encrypted report context. Only the sanitized
+      # copy enters the artifact.
       - name: Run T075 rendered-evidence suite
         id: t075
         continue-on-error: true
         working-directory: frontend
+        shell: bash
         env:
           GRADEX_T075_EVIDENCE_DIR: ${{ env.T075_EVIDENCE_DIR }}/rendered
           GRADEX_PLAYWRIGHT_HTML_DIR: ${{ env.T075_EVIDENCE_DIR }}/playwright-report
-        run: npx playwright test e2e/s5-viewport-evidence.spec.ts
+        run: |
+          set -o pipefail
+          npx playwright test e2e/s5-viewport-evidence.spec.ts 2>&1 | tee "$RUNNER_TEMP/t075-playwright-raw.log"
+
+      # Sanitized before anything is published: opaque runs long enough to be a token are replaced
+      # by their length and every line is capped. Runs on success and failure so the artifact always
+      # explains itself.
+      - name: Sanitize evidence log
+        if: always()
+        working-directory: frontend
+        run: node scripts/t075-evidence-manifest.mjs sanitize-log "$RUNNER_TEMP/t075-playwright-raw.log" "$T075_EVIDENCE_DIR"
+
+      # Surface the failing tests as annotations, from the sanitized digest only.
+      - name: Annotate failing tests
+        if: steps.t075.outcome != 'success'
+        run: |
+          digest="$T075_EVIDENCE_DIR/logs/t075-failure-digest.txt"
+          echo "::error title=T075 rendered evidence::the S5 rendered-evidence matrix failed; see the FAILED artifact's logs/ directory"
+          if [ -f "$digest" ]; then
+            while IFS= read -r line; do
+              [ -n "$line" ] && echo "::error::${line}"
+            done < "$digest"
+          fi
 
       - name: Generate evidence manifest
         if: steps.t075.outcome == 'success'
@@ -469,6 +502,8 @@ jobs:
             else
               echo "| Artifact | \`gradex-s5-t075-rendered-FAILED-${{ github.sha }}\` (diagnostic only) |"
             fi
+            echo "| Test step outcome (pre-continue-on-error) | ${{ steps.t075.outcome }} |"
+            echo "| Sanitized log in artifact | \`logs/t075-playwright.log\` |"
             echo "| HTML report in artifact | \`playwright-report/index.html\` |"
             echo "| Manifest in artifact | \`manifest.json\` |"
             if [ -f "$MANIFEST" ]; then

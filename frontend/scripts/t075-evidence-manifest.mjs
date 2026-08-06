@@ -13,6 +13,7 @@
  *   generate  write manifest.json describing every artifact, with sizes and SHA-256 digests
  *   verify    prove the 32-cell matrix is exactly covered and every manifest claim holds
  *   audit     prove no real credential, token, cookie, or connection string is being uploaded
+ *   sanitize-log  copy a Playwright log into the artifact with long opaque runs redacted
  *
  * `verify` and `audit` are separate from `generate` on purpose: a manifest that described whatever
  * it happened to find would pass by construction. `verify` re-derives the expected matrix from the
@@ -23,6 +24,7 @@
  *   node scripts/t075-evidence-manifest.mjs generate <evidence-dir>
  *   node scripts/t075-evidence-manifest.mjs verify   <evidence-dir>
  *   node scripts/t075-evidence-manifest.mjs audit    <evidence-dir>
+ *   node scripts/t075-evidence-manifest.mjs sanitize-log <raw-log> <evidence-dir>
  */
 
 import { createHash } from "node:crypto";
@@ -328,10 +330,65 @@ function audit(dir) {
   console.log(`t075-evidence: sensitive-data audit passed — ${files.length} files, no credential-shaped value`);
 }
 
+// ------------------------------------------------------------------- sanitize-log
+
+/**
+ * Copies a Playwright run log into the artifact with anything token-shaped removed.
+ *
+ * Hosted job logs need admin rights to read and artifacts need authentication, so a failing run was
+ * effectively undiagnosable: the API even reports the test step as `success`, because
+ * `continue-on-error` rewrites the step conclusion while `steps.t075.outcome` holds the truth. A log
+ * inside the diagnostic artifact fixes that.
+ *
+ * It cannot be the raw log. On failure Playwright prints the received value of the assertion that
+ * failed, and `expectNothingLeaked` compares against the whole normalized page — which legitimately
+ * carries the encrypted report context, since D-065 has the client hold it. Publishing that verbatim
+ * would put a live context token in an artifact. So every run of opaque characters long enough to be
+ * a token is replaced by its length, and every line is capped: enough to identify the failing test
+ * and assertion, never enough to carry a secret.
+ */
+function sanitizeLog(rawPath, dir) {
+  const MAX_LINE = 500;
+  const OPAQUE_RUN = /[A-Za-z0-9_-]{40,}/g;
+  if (!fs.existsSync(rawPath)) fail(`raw log is missing: ${rawPath}`);
+
+  const outDir = path.join(dir, "logs");
+  fs.mkdirSync(outDir, { recursive: true });
+  const outPath = path.join(outDir, "t075-playwright.log");
+
+  let redactions = 0;
+  let truncated = 0;
+  const lines = fs.readFileSync(rawPath, "utf8").split(/\r?\n/).map((line) => {
+    let out = line.replace(OPAQUE_RUN, (m) => {
+      redactions += 1;
+      return `<redacted-opaque-${m.length}-chars>`;
+    });
+    if (out.length > MAX_LINE) {
+      truncated += 1;
+      out = `${out.slice(0, MAX_LINE)}… <line truncated>`;
+    }
+    return out;
+  });
+
+  fs.writeFileSync(outPath, `${lines.join("\n")}\n`);
+  console.log(
+    `t075-evidence: sanitized log -> logs/t075-playwright.log (${lines.length} lines, ${redactions} opaque run(s) redacted, ${truncated} line(s) truncated)`,
+  );
+
+  // A concise, already-sanitized failure digest for the workflow summary and annotations.
+  const failing = lines.filter((l) => /^\s*\d+\)|✘|Error:|expect\(/.test(l)).slice(0, 40);
+  if (failing.length) {
+    fs.writeFileSync(path.join(outDir, "t075-failure-digest.txt"), `${failing.join("\n")}\n`);
+    console.log(`t075-evidence: failure digest -> logs/t075-failure-digest.txt (${failing.length} line(s))`);
+  }
+}
+
 // --------------------------------------------------------------------------------- main
 
-const [mode, dir] = process.argv.slice(2);
-if (!mode || !dir) fail("usage: t075-evidence-manifest.mjs <generate|verify|audit> <evidence-dir>");
+const [mode, arg1, arg2] = process.argv.slice(2);
+if (!mode || !arg1) fail("usage: t075-evidence-manifest.mjs <generate|verify|audit|sanitize-log> ...");
+const dir = mode === "sanitize-log" ? arg2 : arg1;
+if (!dir) fail("usage: t075-evidence-manifest.mjs sanitize-log <raw-log> <evidence-dir>");
 if (!fs.existsSync(dir)) fail(`evidence directory does not exist: ${dir}`);
 
 switch (mode) {
@@ -343,6 +400,9 @@ switch (mode) {
     break;
   case "audit":
     audit(dir);
+    break;
+  case "sanitize-log":
+    sanitizeLog(arg1, dir);
     break;
   default:
     fail(`unknown mode: ${mode}`);

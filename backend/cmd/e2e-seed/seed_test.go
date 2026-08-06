@@ -31,6 +31,19 @@ const (
 	migrationsSource = "file://internal/db/migrations"
 )
 
+// validateSeedSafety is the single fail-closed gate every tool invocation passes through. It is a
+// named function rather than an inline struct literal so invocation_test.go can prove it still
+// refuses the application database, a database outside the E2E prefix, a remote host, and a missing
+// reset acknowledgement.
+func validateSeedSafety(allowReset, adminDSN, targetDSN, appDSN string) error {
+	return e2esafety.ValidateE2EDatabaseTarget(e2esafety.SafetyConfig{
+		AdminDSN:                adminDSN,
+		TargetDSN:               targetDSN,
+		AppDSN:                  appDSN,
+		ResetAcknowledgementEnv: allowReset,
+	})
+}
+
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 
@@ -55,6 +68,26 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
 	flag.Parse()
+
+	// Is this the seeding tool, or an ordinary repository-wide `go test ./...`?
+	//
+	// This package is a tool built with `go test -c`, not a test suite, so TestMain used to resolve
+	// DSNs and run the fail-closed safety validation unconditionally. Under `go test ./...` none of
+	// the E2E contract is present, so that validation refused — correctly — and failed the whole
+	// Backend job. The gate is not relaxed: it still runs on every invocation that asks for the
+	// tool, including a partially configured one. Absent every signal, nothing environment-dependent
+	// happens: no DSN is resolved, no connection opened, no database created, dropped, or migrated,
+	// and no fixture seeded. See invocation_test.go.
+	if !e2eToolInvocationRequested(seedInvocation{
+		AllowReset:     os.Getenv("GRADEX_E2E_ALLOW_DATABASE_RESET"),
+		TargetDBName:   os.Getenv("GRADEX_E2E_TARGET_DB_NAME"),
+		TargetDSN:      os.Getenv("GRADEX_E2E_TARGET_DB_URL"),
+		AdminDSN:       os.Getenv("GRADEX_E2E_ADMIN_DB_URL"),
+		LegacyAdminDSN: os.Getenv("ADMIN_DATABASE_URL"),
+		ToolFlagsSet:   countToolFlagsSet(flag.CommandLine),
+	}) {
+		os.Exit(m.Run())
+	}
 
 	targetDB := os.Getenv("GRADEX_E2E_TARGET_DB_NAME")
 	if targetDB == "" {
@@ -85,13 +118,7 @@ func TestMain(m *testing.M) {
 	allowReset := os.Getenv("GRADEX_E2E_ALLOW_DATABASE_RESET")
 
 	// 1. Fail-closed safety validation
-	safetyCfg := e2esafety.SafetyConfig{
-		AdminDSN:                adminDSN,
-		TargetDSN:               targetDSN,
-		AppDSN:                  appDSN,
-		ResetAcknowledgementEnv: allowReset,
-	}
-	if err := e2esafety.ValidateE2EDatabaseTarget(safetyCfg); err != nil {
+	if err := validateSeedSafety(allowReset, adminDSN, targetDSN, appDSN); err != nil {
 		log.Fatalf("E2E database safety validation failed: %v", err)
 	}
 
