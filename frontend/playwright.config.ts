@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { defineConfig, devices } from "@playwright/test";
 import { apiOrigin, frontendOrigin, runPort, API_PORT_ENV, FRONTEND_PORT_ENV } from "./src/lib/api/e2e-ports";
 
@@ -6,6 +8,57 @@ import { apiOrigin, frontendOrigin, runPort, API_PORT_ENV, FRONTEND_PORT_ENV } f
 // Nothing here may assume port 3000: a developer server on 3000 is unrelated to this run.
 const frontendPort = runPort(FRONTEND_PORT_ENV);
 const apiPort = runPort(API_PORT_ENV);
+
+/**
+ * T076 measures SC-001 against the **built** frontend, not `next dev`.
+ *
+ * SC-001 is a claim about the shipped application. Measured against the development server the figure
+ * is dominated by on-demand compilation and unoptimized, unbundled assets: under the deterministic
+ * 4 Mbps profile roughly 86% of the elapsed time passed before the Play control even appeared, and
+ * media start itself was ~1.2 s. That measures the dev server, not the product.
+ *
+ * Production mode is opt-in and affects only an invocation that explicitly asks for it, so T075 and
+ * every existing suite keep their current `next dev` behaviour unchanged. `next build` must already
+ * have produced output before Playwright starts — the build is not part of the measured interval, and
+ * no browser request is issued while it runs. Missing build output fails closed rather than silently
+ * falling back to dev mode.
+ *
+ * The port stays dynamically allocated. The suite deliberately stopped assuming 3000 so a developer
+ * server on that port can never be adopted or collided with; forcing 3000 here would reintroduce
+ * exactly that hazard. The frontend binds to loopback and the spec records the origin it actually
+ * used, rather than asserting a port it does not own.
+ */
+const productionFrontend = process.env.GRADEX_E2E_FRONTEND_MODE === "production";
+
+if (productionFrontend) {
+  const buildManifest = path.join(__dirname, ".next", "BUILD_ID");
+  if (!fs.existsSync(buildManifest)) {
+    throw new Error(
+      "GRADEX_E2E_FRONTEND_MODE=production requires a completed production build: " +
+        `${buildManifest} is missing. Run \`npm run build\` before invoking Playwright.`,
+    );
+  }
+}
+
+/**
+ * In production mode Playwright supervises the run-owned production-origin proxy instead of a bare
+ * `next start`.
+ *
+ * A standalone `next start` is not the deployed topology: the browser client calls relative
+ * `/api/v1/...` and `next.config.mjs` deliberately provides rewrites only in development, because the
+ * deployed edge fronts the app and the Go API behind one external origin. Served by `next start`
+ * alone those calls 404 and the Lesson Player renders "This lesson could not start."
+ *
+ * The proxy binds the public frontend port this run already allocated — so `baseURL` and every
+ * existing origin helper are unchanged — supervises the built server on a separate internal loopback
+ * port, and forwards `/api/*` to the run-owned Go API. It exposes the public port only once the
+ * internal server is genuinely ready, so `webServer.url` cannot pass early.
+ */
+const internalNextPort = productionFrontend ? runPort("GRADEX_E2E_INTERNAL_NEXT_PORT") : 0;
+
+const frontendCommand = productionFrontend
+  ? "node e2e/production-origin-proxy.mjs"
+  : `npm run dev -- --port ${frontendPort} --hostname 127.0.0.1`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -27,7 +80,7 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `npm run dev -- --port ${frontendPort} --hostname 127.0.0.1`,
+    command: frontendCommand,
     url: frontendOrigin(),
     // Never adopt a server this run did not start, on any port.
     reuseExistingServer: false,
@@ -35,6 +88,18 @@ export default defineConfig({
       GRADEX_API_ORIGIN: apiOrigin(),
       [FRONTEND_PORT_ENV]: String(frontendPort),
       [API_PORT_ENV]: String(apiPort),
+      // Production mode only. Narrowly named and fully specified: the proxy takes no arbitrary
+      // command and no per-request target, and validates both upstreams as loopback itself.
+      ...(productionFrontend
+        ? {
+            GRADEX_E2E_FRONTEND_MODE: "production",
+            GRADEX_E2E_API_ORIGIN: apiOrigin(),
+            GRADEX_E2E_PUBLIC_FRONTEND_PORT: String(frontendPort),
+            GRADEX_E2E_INTERNAL_NEXT_PORT: String(internalNextPort),
+            GRADEX_E2E_PUBLIC_FRONTEND_ORIGIN: frontendOrigin(),
+            GRADEX_E2E_INTERNAL_NEXT_ORIGIN: `http://127.0.0.1:${internalNextPort}`,
+          }
+        : {}),
     },
   },
 });

@@ -466,6 +466,77 @@ jobs:
             done < "$digest"
           fi
 
+      # ---------------- T076: SC-001 time-to-first-frame, production bundle ----------------
+      # A separate Playwright invocation with its own report directory, so nothing here can overwrite
+      # T075's report, manifest, screenshots, or log. SC-001 is a claim about the built application, so
+      # this runs against `next build` output behind the run-owned production-origin proxy — a bare
+      # `next start` would 404 the client's relative /api/v1 calls, because production rewrites are
+      # deliberately absent and the deployed edge supplies the same-origin boundary instead.
+      - name: Build production frontend for T076
+        if: steps.t075.outcome == 'success'
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run T076 SC-001 performance suite
+        id: t076
+        if: steps.t075.outcome == 'success'
+        continue-on-error: true
+        working-directory: frontend
+        shell: bash
+        env:
+          GRADEX_E2E_FRONTEND_MODE: production
+          GRADEX_T076_EVIDENCE_DIR: ${{ env.T075_EVIDENCE_DIR }}/performance
+          GRADEX_PLAYWRIGHT_HTML_DIR: ${{ env.T075_EVIDENCE_DIR }}/playwright-performance-report
+        run: |
+          set -o pipefail
+          npx playwright test e2e/s5-playback-performance.spec.ts 2>&1 | tee "$RUNNER_TEMP/t076-playwright-raw.log"
+
+      # Raw log stays runner-local; only the sanitized copy is ever published.
+      # Sanitized into a scratch directory first, then moved into place. The sanitizer always writes
+      # `logs/t075-playwright.log`, so running it straight into the artifact would overwrite T075's own
+      # sanitized log — T075 evidence must survive this step untouched.
+      - name: Sanitize T076 evidence log
+        if: always() && steps.t075.outcome == 'success'
+        working-directory: frontend
+        run: |
+          scratch="$RUNNER_TEMP/t076-sanitize"
+          rm -rf "$scratch"
+          mkdir -p "$scratch" "$T075_EVIDENCE_DIR/performance"
+          node scripts/t075-evidence-manifest.mjs sanitize-log "$RUNNER_TEMP/t076-playwright-raw.log" "$scratch"
+          mv "$scratch/logs/t075-playwright.log" "$T075_EVIDENCE_DIR/performance/t076-playback-performance.sanitized.log"
+
+      # Re-derives the contract rather than trusting the file: four unique viewports, every timing a
+      # number under the threshold, the exact CDP profile, a permitted first-frame signal, loopback
+      # origins, and zero public dependencies.
+      - name: Verify T076 measurements
+        if: steps.t076.outcome == 'success'
+        working-directory: frontend
+        shell: bash
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const p = process.env.T075_EVIDENCE_DIR + "/performance/t076-playback-performance.json";
+            if (!fs.existsSync(p)) { console.error("t076: evidence JSON missing"); process.exit(1); }
+            const d = JSON.parse(fs.readFileSync(p, "utf8"));
+            const problems = [];
+            if (d.schema !== "gradex.t076.playback-performance/1") problems.push("unexpected schema " + d.schema);
+            if (d.threshold_ms !== 5000) problems.push("threshold is not 5000: " + d.threshold_ms);
+            if (d.frontend_mode !== "production") problems.push("not measured in production mode: " + d.frontend_mode);
+            const want = { name: "gradex-sc001-deterministic-4g", offline: false, latency_ms: 150, download_bytes_per_second: 500000, upload_bytes_per_second: 125000, connection_type: "cellular4g", cache_disabled: true };
+            for (const [k, v] of Object.entries(want)) if (d.profile?.[k] !== v) problems.push(`profile.${k} is ${d.profile?.[k]}, expected ${v}`);
+            const vps = (d.measurements ?? []).map((m) => m.viewport);
+            if (vps.length !== 4 || new Set(vps).size !== 4) problems.push("expected 4 unique viewports, got " + JSON.stringify(vps));
+            for (const m of d.measurements ?? []) {
+              if (typeof m.elapsed_ms !== "number" || !(m.elapsed_ms < 5000)) problems.push(`${m.viewport}: elapsed_ms ${m.elapsed_ms} is not a number under 5000`);
+              if (!["totalVideoFrames", "timeupdate"].includes(m.first_frame_signal)) problems.push(`${m.viewport}: signal ${m.first_frame_signal} is not permitted first-frame evidence`);
+              if (m.passed !== true) problems.push(`${m.viewport}: not marked passed`);
+            }
+            if (d.origins?.all_loopback !== true) problems.push("origins are not all loopback");
+            if (d.origins?.public_dependency_count !== 0) problems.push("public dependency count is " + d.origins?.public_dependency_count);
+            if (problems.length) { for (const x of problems) console.error("t076: " + x); process.exit(1); }
+            console.log(`t076: ok — 4/4 viewports under ${d.threshold_ms} ms: ` + d.measurements.map((m) => `${m.viewport}=${m.elapsed_ms}ms/${m.first_frame_signal}`).join(", "));
+          '
+
       - name: Generate evidence manifest
         if: steps.t075.outcome == 'success'
         working-directory: frontend
@@ -487,7 +558,7 @@ jobs:
         run: node scripts/t075-evidence-manifest.mjs audit "$T075_EVIDENCE_DIR"
 
       - name: Upload retained evidence
-        if: steps.t075.outcome == 'success'
+        if: steps.t075.outcome == 'success' && steps.t076.outcome == 'success'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: gradex-s5-t075-rendered-${{ github.sha }}
@@ -497,7 +568,7 @@ jobs:
       # A distinct name, so a diagnostic upload can never be mistaken for the
       # retained evidence of a passing run.
       - name: Upload failure diagnostics
-        if: steps.t075.outcome != 'success'
+        if: steps.t075.outcome != 'success' || steps.t076.outcome != 'success'
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: gradex-s5-t075-rendered-FAILED-${{ github.sha }}
@@ -525,6 +596,22 @@ jobs:
             fi
             echo "| Test step outcome (pre-continue-on-error) | ${{ steps.t075.outcome }} |"
             echo "| Sanitized log in artifact | \`logs/t075-playwright.log\` |"
+            echo "| T076 outcome | ${{ steps.t076.outcome }} |"
+            T076_JSON="$T075_EVIDENCE_DIR/performance/t076-playback-performance.json"
+            if [ -f "$T076_JSON" ]; then
+              echo
+              echo "### T076 — SC-001 time-to-first-frame (threshold 5000 ms)"
+              echo
+              echo "| Viewport | elapsed_ms | first-frame signal | result |"
+              echo "|---|---|---|---|"
+              node --input-type=module -e '
+                import fs from "node:fs";
+                const d = JSON.parse(fs.readFileSync(process.env.T076_JSON, "utf8"));
+                for (const m of d.measurements ?? []) {
+                  console.log(`| ${m.viewport} | ${m.elapsed_ms} | ${m.first_frame_signal} | ${m.passed ? "PASS" : "FAIL"} |`);
+                }
+              '
+            fi
             echo "| HTML report in artifact | \`playwright-report/index.html\` |"
             echo "| Manifest in artifact | \`manifest.json\` |"
             if [ -f "$MANIFEST" ]; then
@@ -534,8 +621,9 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail if T075 did not pass
-        if: steps.t075.outcome != 'success'
+      - name: Fail if T075 or T076 did not pass
+        if: steps.t075.outcome != 'success' || steps.t076.outcome != 'success'
         run: |
-          echo "T075 rendered-evidence suite failed; see the diagnostic artifact." >&2
+          echo "T075 outcome=${{ steps.t075.outcome }} T076 outcome=${{ steps.t076.outcome }};" >&2
+          echo "see the FAILED artifact's logs/ and performance/ directories." >&2
           exit 1
