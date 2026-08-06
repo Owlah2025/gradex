@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/google/uuid"
+
 	"github.com/Owlah2025/gradex/backend/internal/entitlement"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
@@ -56,14 +58,25 @@ func constraintViolation(t *testing.T, err error) (code, constraint string) {
 // seedReportEntitlement gives the fixture Student a live Course-scoped Entitlement.
 func seedReportEntitlement(t *testing.T, ctx context.Context, fixture learningFixture, now time.Time) string {
 	t.Helper()
+	var instructorID string
+	if err := fixture.repository.pool.QueryRow(ctx, `SELECT owner_account_id::text FROM courses WHERE id = $1::uuid`, fixture.courseID).Scan(&instructorID); err != nil {
+		t.Fatalf("reading course owner: %v", err)
+	}
+	invID := uuid.NewString()
+	if _, err := fixture.repository.pool.Exec(ctx, `
+		INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ($1::uuid, $2::uuid, 'student@example.test', 'student@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')
+	`, invID, fixture.courseID, instructorID, fixture.studentID); err != nil {
+		t.Fatalf("seeding invitation: %v", err)
+	}
 	var id string
 	if err := fixture.repository.pool.QueryRow(ctx, `
 		INSERT INTO entitlements
-			(id, student_account_id, scope_kind, scope_id, course_id, grant_source,
+			(id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id,
 			 original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-		VALUES (gen_random_uuid(), $1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')
+		VALUES (gen_random_uuid(), $1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $5::uuid, $3, $3, $4, 'ACTIVE')
 		RETURNING id::text
-	`, fixture.studentID, fixture.courseID, now.Add(time.Hour), now.Add(-time.Hour)).Scan(&id); err != nil {
+	`, fixture.studentID, fixture.courseID, now.Add(time.Hour), now.Add(-time.Hour), invID).Scan(&id); err != nil {
 		t.Fatalf("seeding entitlement: %v", err)
 	}
 	return id

@@ -57,7 +57,7 @@ func seedT059HTTPCourse(t *testing.T, f learningIntegrationFixture) (string, str
 	if err := f.pool.QueryRow(ctx, `SELECT owner_account_id::text FROM courses WHERE id = $1::uuid`, f.courseID).Scan(&instructorID); err != nil {
 		t.Fatalf("reading shared Instructor: %v", err)
 	}
-	courseID, revisionID, sectionIdentity, sectionRow, lessonID, lessonRow := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	courseID, revisionID, sectionIdentity, sectionRow, lessonID, lessonRow, invID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, statement := range []struct {
 		query string
 		args  []any
@@ -70,7 +70,8 @@ func seedT059HTTPCourse(t *testing.T, f learningIntegrationFixture) (string, str
 		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'Shared Section', 'Shared Section', 0)`, []any{sectionRow, revisionID, courseID, sectionIdentity}},
 		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'Shared Lesson', 'Shared Lesson', 0)`, []any{lessonRow, sectionRow, courseID, sectionIdentity, lessonID}},
 		{`INSERT INTO enrollments (student_account_id, course_id) VALUES ($1::uuid, $2::uuid)`, []any{f.studentID, courseID}},
-		{`INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')`, []any{f.studentID, courseID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
+		{`INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student@example.com', 'student@example.com', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')`, []any{invID, courseID, instructorID, f.studentID}},
+		{`INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $5, 'ACTIVE')`, []any{f.studentID, courseID, invID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
 	} {
 		if _, err := f.pool.Exec(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seeding shared-Instructor Course: %v", err)

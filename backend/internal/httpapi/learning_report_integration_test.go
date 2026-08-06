@@ -553,7 +553,7 @@ func TestReportDuplicateGranularityFollowsD066(t *testing.T) {
 func seedSecondStudent(t *testing.T, f learningIntegrationFixture) string {
 	t.Helper()
 	ctx := context.Background()
-	student := uuid.NewString()
+	student, invID := uuid.NewString(), uuid.NewString()
 	statements := []struct {
 		query string
 		args  []any
@@ -562,9 +562,11 @@ func seedSecondStudent(t *testing.T, f learningIntegrationFixture) string {
 			[]any{student, "s5-student-2@example.test"}},
 		{`INSERT INTO password_credentials (account_id, password_hash, state) VALUES ($1::uuid, '$argon2id$fixture', 'ACTIVE')`, []any{student}},
 		{`INSERT INTO enrollments (student_account_id, course_id) VALUES ($1::uuid, $2::uuid)`, []any{student, f.courseID}},
-		{`INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-		  VALUES ($1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid, 'MANUAL_INVITATION', $4, $4, $5, 'ACTIVE')`,
-			[]any{uuid.NewString(), student, f.courseID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
+		{`INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, $4, $4, $3::uuid, $3::uuid, $3::uuid, 'APPROVED')`,
+			[]any{invID, f.courseID, student, "s5-student-2@example.test"}},
+		{`INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		  VALUES ($1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid, 'MANUAL_INVITATION', $4::uuid, $5, $5, $6, 'ACTIVE')`,
+			[]any{uuid.NewString(), student, f.courseID, invID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
 	}
 	for _, statement := range statements {
 		if _, err := f.pool.Exec(ctx, statement.query, statement.args...); err != nil {

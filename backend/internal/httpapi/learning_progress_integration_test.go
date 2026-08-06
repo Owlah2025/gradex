@@ -342,7 +342,11 @@ func seedLearningIntegrationGraph(t *testing.T, ctx context.Context, f learningI
 	if _, err := f.pool.Exec(ctx, `UPDATE courses SET live_revision_id = $1::uuid, lifecycle = 'PUBLISHED' WHERE id = $2::uuid`, revisionID, f.courseID); err != nil {
 		t.Fatalf("publishing course: %v", err)
 	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid, 'MANUAL_INVITATION', $4, $4, $5, 'ACTIVE')`, uuid.NewString(), f.studentID, f.courseID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)); err != nil {
+	invID := uuid.NewString()
+	if _, err := f.pool.Exec(ctx, `INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student@example.com', 'student@example.com', $3::uuid, $3::uuid, $3::uuid, 'APPROVED')`, invID, f.courseID, f.studentID); err != nil {
+		t.Fatalf("seeding invitation: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx, `INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid, 'MANUAL_INVITATION', $4::uuid, $5, $5, $6, 'ACTIVE')`, uuid.NewString(), f.studentID, f.courseID, invID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("seeding entitlement: %v", err)
 	}
 }

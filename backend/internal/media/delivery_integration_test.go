@@ -151,7 +151,11 @@ func (f *deliveryFixture) readyAsset(kind AssetKind, outputKey string) string {
 
 func (f *deliveryFixture) seedGrant(id string, scope entitlement.ScopeKind, scopeID string, ends time.Time) {
 	f.t.Helper()
-	if _, err := f.pool.Exec(f.ctx, `INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, 'MANUAL_INVITATION', $6, $6, $7, 'ACTIVE')`, id, f.student, scope, scopeID, f.courseID, ends, f.now.Add(-time.Hour)); err != nil {
+	invID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student@example.test', 'student@example.test', $3::uuid, $3::uuid, $3::uuid, 'APPROVED')`, invID, f.courseID, f.student); err != nil {
+		f.t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, 'MANUAL_INVITATION', $6::uuid, $7, $7, $8, 'ACTIVE')`, id, f.student, scope, scopeID, f.courseID, invID, ends, f.now.Add(-time.Hour)); err != nil {
 		f.t.Fatal(err)
 	}
 }

@@ -224,7 +224,7 @@ func TestLearningDashboardScopesOrdersAndRetainsExpiry(t *testing.T) {
 	if err := f.pool.QueryRow(context.Background(), `SELECT owner_account_id::text FROM courses WHERE id = $1::uuid`, f.courseID).Scan(&ownerID); err != nil {
 		t.Fatalf("reading course owner: %v", err)
 	}
-	otherRevisionID, otherSectionID, otherSectionRowID, otherLessonID, otherLessonRowID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	otherRevisionID, otherSectionID, otherSectionRowID, otherLessonID, otherLessonRowID, invID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, statement := range []struct {
 		query string
 		args  []any
@@ -237,7 +237,8 @@ func TestLearningDashboardScopesOrdersAndRetainsExpiry(t *testing.T) {
 		{`INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس ثانية', 'Second Lesson', 0)`, []any{otherLessonRowID, otherSectionRowID, otherCourseID, otherSectionID, otherLessonID}},
 		{`UPDATE courses SET live_revision_id = $1::uuid, lifecycle = 'PUBLISHED' WHERE id = $2::uuid`, []any{otherRevisionID, otherCourseID}},
 		{`INSERT INTO enrollments (student_account_id, course_id, created_at) VALUES ($1::uuid, $2::uuid, $3)`, []any{f.studentID, otherCourseID, f.clock.Now().Add(-2 * time.Hour)}},
-		{`INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')`, []any{f.studentID, otherCourseID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
+		{`INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student@example.com', 'student@example.com', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')`, []any{invID, otherCourseID, ownerID, f.studentID}},
+		{`INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $5, 'ACTIVE')`, []any{f.studentID, otherCourseID, invID, f.clock.Now().Add(time.Hour), f.clock.Now().Add(-time.Hour)}},
 	} {
 		if _, err := f.pool.Exec(context.Background(), statement.query, statement.args...); err != nil {
 			t.Fatalf("seeding dashboard Course: %v", err)

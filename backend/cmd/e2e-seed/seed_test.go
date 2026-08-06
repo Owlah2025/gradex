@@ -739,18 +739,30 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	entitlement1ID := "90000000-0000-0000-0000-000000000001"
 	entitlement2ID := "90000000-0000-0000-0000-000000000002"
 
+	inv1ID := "c0000000-0000-0000-0000-000000000001"
+	inv2ID := "c0000000-0000-0000-0000-000000000002"
+
 	_, err = tx.Exec(ctx, `
-		INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-		VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $4, $4, 'ACTIVE')
-	`, entitlement1ID, student1ID, courseID, activeExpiry)
+		INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ($1, $2, 'student1@example.test', 'student1@example.test', $3, $3, $3, 'APPROVED'),
+		       ($4, $2, 'student2@example.test', 'student2@example.test', $5, $5, $5, 'APPROVED')
+	`, inv1ID, courseID, student1ID, inv2ID, student2ID)
+	if err != nil {
+		return fmt.Errorf("insert seed invitations: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $5, $5, $5, 'ACTIVE')
+	`, entitlement1ID, student1ID, courseID, inv1ID, activeExpiry)
 	if err != nil {
 		return fmt.Errorf("insert entitlement 1: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-		VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $4, $4, 'ACTIVE')
-	`, entitlement2ID, student2ID, courseID, expiredExpiry)
+		INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $5, $5, $5, 'ACTIVE')
+	`, entitlement2ID, student2ID, courseID, inv2ID, expiredExpiry)
 	if err != nil {
 		return fmt.Errorf("insert entitlement 2: %w", err)
 	}

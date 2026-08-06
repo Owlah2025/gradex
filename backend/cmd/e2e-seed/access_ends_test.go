@@ -94,11 +94,19 @@ func seedAccessEndsScenarios(
 			return fmt.Errorf("insert access-ends student %d credentials: %w", scenario.slot, err)
 		}
 
+		invID := uuid.NewString()
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+			VALUES ($1, $2, 'student@example.test', 'student@example.test', $3, $3, $3, 'APPROVED')
+		`, invID, scenario.courseID, scenario.accountID); err != nil {
+			return fmt.Errorf("insert access-ends invitation %d: %w", scenario.slot, err)
+		}
+
 		// Active for real: a future access_ends_at, ACTIVE state, no revocation.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $4, $4, 'ACTIVE')
-		`, entitlementID, scenario.accountID, scenario.courseID, accessEndsAt); err != nil {
+			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $5, $5, $5, 'ACTIVE')
+		`, entitlementID, scenario.accountID, scenario.courseID, invID, accessEndsAt); err != nil {
 			return fmt.Errorf("insert access-ends entitlement %d: %w", scenario.slot, err)
 		}
 

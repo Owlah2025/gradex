@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -139,10 +140,18 @@ func seedRotatingStudents(
 			return fmt.Errorf("insert rotating student %d credentials: %w", index, err)
 		}
 
+		invID := uuid.NewString()
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $4, $4, 'ACTIVE')
-		`, rotatingEntitlementID(index), accountID, courseID, accessEndsAt); err != nil {
+			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED')
+		`, invID, courseID, accountID, email); err != nil {
+			return fmt.Errorf("insert rotating student %d invitation: %w", index, err)
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $5, $5, $5, 'ACTIVE')
+		`, rotatingEntitlementID(index), accountID, courseID, invID, accessEndsAt); err != nil {
 			return fmt.Errorf("insert rotating student %d entitlement: %w", index, err)
 		}
 
@@ -194,10 +203,18 @@ func seedRotatingExpiredStudents(
 			return fmt.Errorf("insert rotating expired student %d credentials: %w", index, err)
 		}
 
+		expiredInvID := uuid.NewString()
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
-			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $4, $4, 'ACTIVE')
-		`, rotatingExpiredEntitlementID(index), accountID, courseID, expiredAccessEndsAt); err != nil {
+			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED')
+		`, expiredInvID, courseID, accountID, email); err != nil {
+			return fmt.Errorf("insert rotating expired student %d invitation: %w", index, err)
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+			VALUES ($1, $2, 'COURSE', $3, $3, 'MANUAL_INVITATION', $4, $5, $5, $5, 'ACTIVE')
+		`, rotatingExpiredEntitlementID(index), accountID, courseID, expiredInvID, expiredAccessEndsAt); err != nil {
 			return fmt.Errorf("insert rotating expired student %d entitlement: %w", index, err)
 		}
 

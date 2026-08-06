@@ -205,7 +205,8 @@ jobs:
               'accounts','password_credentials','bootstrap_operations','audit_events',
               'sessions','session_credentials','policy_acceptances',
               'identity_action_secrets','identity_security_events',
-              'outbox_events','outbox_protected_payloads'
+              'outbox_events','outbox_protected_payloads',
+              'course_access_invitations'
             ]) AS t
             WHERE to_regclass('public.' || t) IS NULL;
             IF missing IS NOT NULL THEN
@@ -286,7 +287,7 @@ jobs:
         working-directory: backend
         run: |
           go test -tags=integration ./internal/db
-          go test -tags=integration ./internal/identity ./internal/outbox ./internal/httpapi ./internal/catalogpublic ./internal/ratelimit ./internal/learning
+          go test -tags=integration ./internal/identity ./internal/outbox ./internal/httpapi ./internal/catalogpublic ./internal/ratelimit ./internal/learning ./internal/access
 
   guards:
     name: Guards

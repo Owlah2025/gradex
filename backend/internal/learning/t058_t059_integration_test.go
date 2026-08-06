@@ -119,14 +119,22 @@ func TestT059SharedInstructorCoursesRemainIsolatedAtRepositoryBoundary(t *testin
 	courseB, lessonB := uuid.NewString(), uuid.NewString()
 	seedT059Course(t, fixture, instructorID, courseB, lessonB, "Shared Course", "shared lesson")
 	clock := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')`, fixture.studentID, fixture.courseID, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
+	invA := uuid.NewString()
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student-a@example.test', 'student-a@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')`, invA, fixture.courseID, instructorID, fixture.studentID); err != nil {
+		t.Fatalf("seeding invitation A: %v", err)
+	}
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $5, 'ACTIVE')`, fixture.studentID, fixture.courseID, invA, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
 		t.Fatalf("seeding Student A Course A Entitlement: %v", err)
 	}
 	var enrollmentB string
 	if err := fixture.repository.pool.QueryRow(ctx, `INSERT INTO enrollments (student_account_id, course_id) VALUES ($1::uuid, $2::uuid) RETURNING id::text`, studentB, courseB).Scan(&enrollmentB); err != nil {
 		t.Fatalf("enrolling Student B: %v", err)
 	}
-	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')`, studentB, courseB, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
+	invB := uuid.NewString()
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student-b@example.test', 'student-b@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')`, invB, courseB, instructorID, studentB); err != nil {
+		t.Fatalf("seeding invitation B: %v", err)
+	}
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $5, 'ACTIVE')`, studentB, courseB, invB, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
 		t.Fatalf("seeding Student B Course B Entitlement: %v", err)
 	}
 	graphA, err := fixture.repository.ReadCourseGraph(ctx, fixture.courseID)
@@ -244,7 +252,11 @@ func seedT059Course(t *testing.T, fixture learningFixture, instructorID, courseI
 		t.Fatalf("seeding shared-Instructor Enrollment: %v", err)
 	}
 	clock := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
-	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3, $3, $4, 'ACTIVE')`, fixture.studentID, courseID, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
+	invID := uuid.NewString()
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state) VALUES ($1::uuid, $2::uuid, 'student@example.test', 'student@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')`, invID, courseID, instructorID, fixture.studentID); err != nil {
+		t.Fatalf("seeding shared-Instructor Invitation: %v", err)
+	}
+	if _, err := fixture.repository.pool.Exec(ctx, `INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $5, 'ACTIVE')`, fixture.studentID, courseID, invID, clock.Add(time.Hour), clock.Add(-time.Hour)); err != nil {
 		t.Fatalf("seeding shared-Instructor Entitlement: %v", err)
 	}
 }
