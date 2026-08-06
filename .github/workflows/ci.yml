@@ -287,7 +287,7 @@ jobs:
         working-directory: backend
         run: |
           go test -tags=integration ./internal/db
-          go test -tags=integration ./internal/identity ./internal/outbox ./internal/httpapi ./internal/catalogpublic ./internal/ratelimit ./internal/learning ./internal/access
+          go test -tags=integration ./internal/identity ./internal/outbox ./internal/httpapi ./internal/catalogpublic ./internal/ratelimit ./internal/learning ./internal/access ./internal/entitlement
 
   guards:
     name: Guards
