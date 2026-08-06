@@ -396,6 +396,27 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # The HLS fixture is generated, not downloaded. `e2e-media-server.ts` calls
+      # `execFileSync("ffmpeg", …)` by bare name, so it needs a real ffmpeg on
+      # PATH — Playwright's cached ffmpeg build is not installed by
+      # `playwright install --with-deps chromium` and is not exposed as `ffmpeg`
+      # anyway. GitHub's ubuntu-latest image no longer ships ffmpeg, which is why
+      # run 31058573516 died in global setup with `spawnSync ffmpeg ENOENT`
+      # before a single T075 test ran. It never reproduced locally because this
+      # workstation has /usr/bin/ffmpeg.
+      #
+      # The fixture encodes H.264 video and AAC audio from lavfi sources, so a
+      # full distribution build is required, not a minimal one. Ubuntu's package
+      # provides libx264 and the native AAC encoder, and it also installs
+      # ffprobe, which covers FFPROBE_BINARY_PATH should anything reach for it.
+      # No third-party binary is downloaded and no public media URL is used.
+      - name: Install ffmpeg for the generated HLS fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
       # global-setup compiles the API and seeder to external output paths, creates
       # and seeds an isolated per-run database, starts the run-owned media server
       # and the Go API, and probes readiness; global-teardown stops all of it and
