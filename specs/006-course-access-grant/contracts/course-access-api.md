@@ -5,7 +5,30 @@
 Binding contract for S6's HTTP surface. All routes are under `/api/v1`, use the existing RFC 9457
 Problem Details envelope for errors, and are covered by the derived authorization sweep in
 `backend/internal/httpapi/authorization_test.go` — a new route that does not carry its guard fails
-that test.
+that test. *(Verified 2026-08-06: that file exists.)*
+
+> **Reconciled 2026-08-06 against the router at the S5 closure head `d5ce557`. No status code, response
+> class, or route semantic changed.** Four facts about how these paths land in the live router:
+>
+> - **`/admin/…` has precedent; `/me/…` does not.** `catalog_routes.go` already mounts
+>   `v1.Group("/admin/review")`, `/admin/courses/:id`, and `/admin/taxonomy/terms`, so
+>   `/admin/course-access-invitations` follows the house convention. There is **no `/me` prefix anywhere
+>   in the backend** — the existing Student surface is `v1.Group("/learn")`. `/me` is therefore a **new
+>   top-level prefix this slice introduces.** It is kept rather than folded into `/learn`, because
+>   `/learn` carries the protected-learning guard and an invited Student holds no Entitlement yet.
+> - **Path parameters are `:id`, not `{id}`.** The router is Gin. `{id}` below is documentation notation;
+>   the mounted paths read `/admin/course-access-invitations/:id/approve` and
+>   `/me/course-access-invitations/:id/accept`.
+> - **The Student routes must not reuse `requireProtectedLearningAccess`.** That middleware
+>   (`media_delivery_handlers.go:112`, used by `/learn/*` and the protected media paths) writes a uniform
+>   `writeProtectedUnavailable` refusal for every failure. Reusing it would collapse the 403/404/409/410/422
+>   classes below into one response and would defeat FR-009's byte-identical-404 requirement by making
+>   *everything* byte-identical. S6 supplies its own Student guard in `access_foundation.go`, emitting the
+>   `internal/problem` envelope. `CapLearningAccess` remains the correct capability class: `Authorize`
+>   grants it to every Active Student independently of any Entitlement.
+> - **`GET /admin/entitlements/:id` is a new route.** S4 mounted no admin entitlement read model. The
+>   `entitlement_adjustments` table exists in `0012` and supplies this route's adjustment history, so the
+>   read model has a real source.
 
 ---
 
@@ -50,7 +73,7 @@ Queue. Filterable by `state` and `course_id`, paginated.
 | Invitation not in `PENDING_ADMIN_APPROVAL` | `409` | `invitation-state-conflict`, naming the state found |
 | Student already holds active access | `409` | `already-has-active-access` (race 6) |
 | Course archived, delisted, or retired | `409` | `course-not-grantable`, naming the state |
-| Course has no future configured expiry instant | `422` | `validation-failed`, naming the missing configuration (FR-017) |
+| Course has no future configured expiry instant | `422` | `validation-failed`, naming the missing configuration (FR-017). **The column this reads did not exist at the S5 closure head** — see [D-073](../../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it) |
 | Missing capability | `403` | `insufficient-capability` |
 | Stale authentication | `403` | `recent-authentication-required` |
 

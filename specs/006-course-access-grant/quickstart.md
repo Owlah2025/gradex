@@ -8,9 +8,16 @@ negative scenarios are the point of the slice and are not optional.
 ## Prerequisites
 
 - PostgreSQL, Redis, and MinIO running (`backend/docker-compose.yml`)
-- Schema migrated to the version this feature's migration produces (**derived from repository state**, not assumed to be 13 — see [plan.md §Migration](plan.md#migration-and-schema))
-- S2 and S4 closed on independent verdicts — this slice does not start otherwise
-- A published Course with a **future** configured access-expiry instant
+- Schema migrated to **15** — this feature's migration is `0015_course_access_grant`, recalculated
+  2026-08-06 from the committed schema, whose highest pair is `0014_protected_learning` with
+  `db.MaxSchemaVersion = 14`. See [plan.md §Migration](plan.md#migration-and-schema)
+- **S2, S4, and S5** all closed on independent verdicts — this slice does not start otherwise. S5 closed
+  2026-08-06 at `d5ce557` on a Tier 3 `APPROVE`
+- A published Course with a **future** configured access-expiry instant. **This requires
+  `courses.default_access_ends_at`, which no closed slice created** — see
+  [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).
+  Until `0015` adds the column and its Admin write path, this prerequisite cannot be satisfied and every
+  approval scenario below refuses at step 5 of the grant transaction
 - One Admin holding `COURSE_ACCESS_GRANT`, one Student account, one unrelated Student account
 
 ```bash
@@ -124,20 +131,36 @@ Set the Course to each state and attempt approval on a fresh accepted invitation
 
 Each of these runs under `-race` against real PostgreSQL. **A sequential repeat is not a substitute.**
 
-1. Fire N concurrent approvals of one invitation → **exactly one** Entitlement and one Enrollment.
-2. Fire approve and cancel concurrently → one wins; the loser returns `409`; no partial state.
-3. Fire two creations for the same pair concurrently → one row; the loser returns `409`, **not 500**.
-4. Approve two different invitations for the same Student and Course concurrently → **exactly one**
-   Entitlement; the loser returns `409 already-has-active-access`.
-5. Approve while another transaction changes the Course expiry → the snapshot equals exactly one
-   committed value, never a torn or rolled-back one.
+> **Corrected 2026-08-06.** This list previously enumerated race 6 twice — as items 4 and 6, with item 6
+> annotated "distinct from 4's same-invitation case" when item 4 described the same two-invitation case —
+> and **omitted race 3 entirely**. The mutation-check sentence then mislabelled which proofs are
+> index-backed. The list below is one item per race, numbered to match
+> [plan.md §The five races](plan.md#the-five-races) and `tasks.md` Phase 6, so "all six proofs" now means
+> six distinct proofs.
 
-6. Approve two different invitations for the same Student and Course concurrently → **exactly one**
-   Entitlement (this is race 6, distinct from 4's same-invitation case).
+| # | Proof | Task | Backed by |
+|---|---|---|---|
+| 1 | Fire N concurrent approvals of one invitation → **exactly one** Entitlement and one Enrollment | `T046` | Index |
+| 2 | Fire approve and cancel concurrently → one wins; the loser returns `409`; no partial state | `T047` | Lock |
+| 3 | Fire accept and cancel concurrently → one wins; the loser returns `409` | `T048` | Lock |
+| 4 | Fire two creations for the same pair concurrently → one row; the loser returns `409`, **not 500** | `T049` | Index |
+| 5 | Approve while another transaction changes the Course expiry → the snapshot equals exactly one committed value, never torn and never rolled back | `T050` | Lock |
+| 6 | Approve two *different* invitations for the same Student and Course concurrently → **exactly one** Entitlement; the loser returns `409 already-has-active-access` | `T051` | Index |
 
-**Mutation checks**: drop the partial unique indexes and re-run 1, 3, and 6 — if they still pass they
-are testing the handler rather than the invariant, and they are not evidence. Races 2, 4, and 5 are
-not index-backed and carry their own mutations, documented in `tasks.md` Phase 6.
+**Index mutation check** — proofs **1, 4, and 6**: drop `cai_one_non_terminal_per_pair` and
+`entitlements_one_active_student_course` and re-run them. If they still pass they are testing the handler
+rather than the invariant, and they are not evidence.
+
+> The index name matters. `entitlements_one_active_student_course` is S4's, shipped in
+> `0012_media_and_entitlement`. Dropping the planned-but-nonexistent
+> `ent_one_active_per_student_course` would be a silent no-op, and the mutation check would pass while
+> proving nothing.
+
+**Lock mutation checks** — proofs **2, 3, and 5** are not index-backed and carry their own, in `tasks.md`
+`T053`: replace the invitation `SELECT … FOR UPDATE` with a plain `SELECT` (proofs 2 and 3 must fail), and
+replace the Course `FOR SHARE` with a plain `SELECT` (proof 5 must fail). These are ordering invariants
+over one row rather than uniqueness invariants over a set, so no constraint expresses them and removing
+the lock is the only mutation that tests them.
 
 ## Scenario 9 — Suspension *(SC-009)*
 
@@ -174,9 +197,16 @@ ST03 states explicitly that acceptance does not grant access.
 
 A range is offered for review only when all of the following hold:
 
-- [ ] Every scenario above passes, including all **six** concurrency proofs
-- [ ] The mutation check in Scenario 8 **fails** the tests when the indexes are dropped
+- [ ] Every scenario above passes, including all **six distinct** concurrency proofs
+- [ ] The index mutation check in Scenario 8 **fails** proofs 1, 4, and 6 when the indexes are dropped, and
+      the lock mutation checks fail proofs 2, 3, and 5
 - [ ] Full gate suite green, with a **clean** frontend build
-- [ ] Hosted CI green on the exact head, all jobs
-- [ ] `migrate max-version` equals `db.MaxSchemaVersion` and CI derives its assertion rather than carrying a literal
-- [ ] No unreviewed change to `internal/access/entitlement.go` — S4 owns evaluation
+- [ ] Hosted CI green on the exact head, all jobs — **including `./internal/access` in the hosted
+      integration list**, so the new package does not join the six integration-tagged packages that
+      already run only locally (S5 `F-7`)
+- [ ] `migrate max-version` equals `db.MaxSchemaVersion` = **15**, and CI derives its assertion rather
+      than carrying a literal *(already true in `ci.yml`; confirm, do not rebuild)*
+- [ ] **No change at all to `backend/internal/entitlement/`** — S4 owns evaluation. *(Corrected
+      2026-08-06: the path was `internal/access/entitlement.go`, which does not exist. `internal/access`
+      is the package S6 creates; `internal/entitlement` is S4's.)*
+- [ ] No edit to any migration `0001`–`0014`, verified by `scripts/docs-guard.sh` and by diff
