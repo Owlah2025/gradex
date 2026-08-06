@@ -120,17 +120,13 @@ instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
 | Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
 | Branch | `s6-course-access-grant-20260806` |
 | Reconciliation reviewed | `d5ce557..9b66a24` and `9b66a24..ed3fb65`, both **`APPROVE`** — 0 critical, 0 high, 0 medium, 0 low, findings none. Reviewer independent of the builder and made no edit. See [`review/S6-PLANNING-RECONCILIATION-2026-08-06.md`](review/S6-PLANNING-RECONCILIATION-2026-08-06.md) |
-| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a`; **0 complete** |
+| Initial Subgroup Review | `d9e483f..a5a2748` returned **`REJECT`** (C1, H2, H3, H4, H5, M1, M2, M3, M4, M5). Range not approved; S6 remains active and open. |
+| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a` |
 | Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
-| Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** — derived from committed state, not the planned guess |
-| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority |
+| Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** |
+| Implementation seats | **Antigravity (`agy`)** as implementation builder; **Claude** as independent reviewer (under D-036). |
 
-**One unresolved blocker.** BR-025 requires a configured future Course `default_access_ends_at`
-instant before any invitation can be approved, and **no committed migration creates that column.** S2
-is closed and frozen, S4 and S5 did not create it, so it is unowned. Without it FR-015 and FR-017 are
-unimplementable and no grant can ever succeed. Recorded as
-[D-073](../DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it)
-and it needs product-owner acknowledgement of the effort consequence before implementation begins.
+**D-073 acknowledged.** Product Owner acknowledged D-073 and its effort consequence (adding `courses.default_access_ends_at TIMESTAMPTZ`, Admin configuration route, Kuwait-local date conversion, audit, and UI surface). S6 remains active and open for bounded remediation and implementation.
 
 ## MVP scope changed on 2026-07-28 — D-045: no in-platform payments
 

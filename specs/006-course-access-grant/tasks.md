@@ -200,13 +200,13 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
 
 ## Phase 2 — Foundational (blocks every user story)
 
-- [ ] T008 Add `CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"` to the capability `const` block
+- [x] T008 Add `CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"` to the capability `const` block
       in `backend/internal/identity/policy.go` and register it in `AllCapabilities`, which currently
-      holds twelve entries *(FR-001, FR-014)*
-- [ ] T009 Grant `COURSE_ACCESS_GRANT` to the **Admin role only**, in the **`case RoleAdmin:` arm of the
+      holds twelve entries *(FR-001, FR-014)*. **Completed & consumed as dependency of T007a.**
+- [x] T009 Grant `COURSE_ACCESS_GRANT` to the **Admin role only**, in the **`case RoleAdmin:` arm of the
       `Authorize` switch in `backend/internal/identity/policy.go`**, alongside `CapCatalogPublish`,
       `CapCatalogPricing`, and `CapCatalogTaxonomy`. No Instructor and no Student grant — this is what
-      makes FR-001 a property of the capability set rather than of a handler.
+      makes FR-001 a property of the capability set rather than of a handler. **Completed & consumed as dependency of T007a.**
       **Corrected 2026-08-06: not `policy_set.go`.** That file holds registration policy documents
       (`PolicyKind`, `RegistrationPolicySet`, `Locale`, `PolicySetResolver`) and contains no capability
       reference at all. An entry added there would compile and grant nothing, and `Authorize`'s

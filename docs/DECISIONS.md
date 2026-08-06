@@ -2291,8 +2291,8 @@ product-owner closure instruction of the same date.
 ## D-073 — S6 owns the Course default access-expiry column, because no closed slice created it
 
 **Date:** 2026-08-06
-**Status:** Active, and **awaiting product-owner acknowledgement of the effort consequence.** Scoped to
-S6 planning.
+**Status:** Active. **Acknowledged by Product Owner (2026-08-06)** with effort consequence acknowledged. Scoped to
+S6 planning and implementation.
 
 **The gap.** BR-025 requires that "before a Course Access Invitation for a Course can be **approved**, an
 Admin must have configured a future Course `default_access_ends_at` instant," which Admin Approval then
