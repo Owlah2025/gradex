@@ -2072,3 +2072,55 @@ own text requires — separate authorization changes who may commit a closure, n
 demands.
 
 **Source:** Product-owner instruction on 2026-08-06.
+
+---
+
+## D-069 — SC-001 is measured against the built frontend behind a run-owned same-origin proxy
+
+**Date:** 2026-08-06
+**Status:** Active. Scoped only to S5 T076 evidence mechanics.
+
+**Decision:** T076 measures SC-001 against `next build` output, not `next dev`, and serves it behind a
+test-only loopback proxy that reproduces the deployed same-origin frontend/API boundary. One new gate
+class, **`T076_EVIDENCE`**, is authorized under the exact subject
+`test(s5): add production-origin SC-001 evidence`, permitting exactly four files:
+`frontend/e2e/s5-playback-performance.spec.ts`, `frontend/e2e/production-origin-proxy.mjs`,
+`frontend/playwright.config.ts`, and `.github/workflows/ci.yml`. The gate-extension commit carries the
+exact `GATE` subject `docs(s5): authorize production-origin T076 evidence`.
+
+**Why not `next dev`:** measured there, the figure is dominated by on-demand compilation and
+unoptimized, unbundled assets. Under the deterministic profile every viewport measured
+between 8722 ms and 9941 ms, and a diagnostic showed roughly 86% of that elapsed before the Play
+control appeared, with media start itself about 1.2 s. That measures the development server, not the
+shipped product SC-001 describes.
+
+**Why a proxy is required:** the browser client calls relative `/api/v1/...`, and `next.config.mjs`
+deliberately provides rewrites **only** in development because the deployed edge fronts the frontend
+and the Go API behind one external origin. A standalone `next start` therefore serves those calls
+itself and returns 404 — observed as "This lesson could not start." The proxy supplies that one
+deployed property for evidence only: `/api/*` forwards to the run-owned Go API, every other route to
+the built Next server, and the generated HLS fixture stays on its existing dynamic loopback origin.
+`next.config.mjs` is **not** modified, no production rewrite is added, and no package or lockfile
+changes — the proxy uses Node built-ins alone.
+
+**Measurement semantics, unchanged:** the deterministic CDP profile
+`gradex-sc001-deterministic-4g` (offline false, 150 ms latency, 500,000 B/s down, 125,000 B/s up,
+`cellular4g`, cache disabled) applied through `Network.enable`, `Network.setCacheDisabled`, and
+`Network.emulateNetworkConditions`; the clock starts immediately before navigation and the real Play
+action stays inside the measured interval; first-frame evidence is `totalVideoFrames > 0` or a
+`timeupdate` with `currentTime > 0`, never `loadedmetadata`, `loadeddata`, `canplay`, `readyState`, or
+visibility; and every viewport must remain **strictly below 5000 ms**, asserted per viewport rather
+than averaged. Neither the profile nor the threshold may be tuned after observing a result.
+
+**Boundary:** browser-visible frontend and API share one origin, which is the deployed contract and
+must not be mistaken for a defect; the media fixture keeps its own dynamic loopback port and is never
+claimed to be on port 3000; every application, API, and media dependency stays loopback with a public
+dependency count of zero. Production mode is opt-in through `GRADEX_E2E_FRONTEND_MODE=production`, so
+T075 and every existing suite keep their current behaviour, and a missing production build fails
+closed rather than falling back to the development server.
+
+**Scope:** Evidence mechanics only. No production behaviour, player preload, autoplay, buffering,
+media architecture, acceptance criterion, or independent-review requirement changes. T077 and T078
+remain separately gated.
+
+**Source:** Product-owner instruction on 2026-08-06.

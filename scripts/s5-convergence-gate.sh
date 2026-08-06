@@ -20,7 +20,8 @@
 # WHAT IT CHECKS
 #   1. The three accepted commits are present at their exact SHAs, in order.
 #   2. Every later commit matches exactly one authorized subject class.
-#      Classes: GATE, WORKFLOW, CI_STABILIZATION, CLOSURE, CONVERGENCE.
+#      Classes: GATE, WORKFLOW, CI_STABILIZATION, T076_EVIDENCE, CLOSURE,
+#      CONVERGENCE.
 #   3. Every later commit's changed paths lie inside that class's allowlist.
 #   4. No commit in the range touches S5 production scope after the
 #      implementation commit. An authorized subject is not a licence to edit a
@@ -124,6 +125,7 @@ classify_subject() {
     # classify any documentation commit as a gate change.
     "docs(s5): authorize narrow CI stabilization class"*)             printf 'GATE' ;;
     "docs(s5): authorize separate S5 closures")                       printf 'GATE' ;;
+    "docs(s5): authorize production-origin T076 evidence")             printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
     # T075 and T076 are independently evidenced tasks — T075 on a verified hosted artifact, T076 on
     # its own time-to-first-frame measurement — so each is closed by its own truthful commit. The
@@ -137,6 +139,7 @@ classify_subject() {
     "docs(s5): close T076")                                           printf 'CLOSURE' ;;
     "docs(s5): record convergence and independent review"*)           printf 'CONVERGENCE' ;;
     "fix(ci): stabilize hosted S5 verification"*)                     printf 'CI_STABILIZATION' ;;
+    "test(s5): add production-origin SC-001 evidence")                 printf 'T076_EVIDENCE' ;;
     *) : ;;
   esac
 }
@@ -176,6 +179,20 @@ path_allowed() {
         frontend/e2e/s5-playback-performance.spec.ts|\
         frontend/e2e/s5-viewport-evidence.spec.ts|\
         frontend/scripts/t075-evidence-manifest.mjs|\
+        frontend/playwright.config.ts|\
+        .github/workflows/ci.yml) return 0 ;;
+      esac
+      ;;
+    T076_EVIDENCE)
+      # SC-001 is a claim about the built application, so T076 measures `next build` output behind a
+      # run-owned loopback proxy that reproduces the deployed same-origin frontend/API boundary. Four
+      # exact files, no glob: the spec, the proxy, the Playwright config's opt-in production branch,
+      # and the evidence job. Deliberately absent — `next.config.mjs` (production configuration),
+      # `package.json`/`package-lock.json` (the proxy uses Node built-ins only), and every application
+      # path.
+      case "$p" in
+        frontend/e2e/s5-playback-performance.spec.ts|\
+        frontend/e2e/production-origin-proxy.mjs|\
         frontend/playwright.config.ts|\
         .github/workflows/ci.yml) return 0 ;;
       esac
