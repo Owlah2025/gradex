@@ -119,6 +119,7 @@ instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
 | Authoritative directory | [`specs/006-course-access-grant/`](../../specs/006-course-access-grant/spec.md) |
 | Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
 | Branch | `s6-course-access-grant-20260806` |
+| Reconciliation reviewed | `d5ce557..9b66a24` and `9b66a24..ed3fb65`, both **`APPROVE`** — 0 critical, 0 high, 0 medium, 0 low, findings none. Reviewer independent of the builder and made no edit. See [`review/S6-PLANNING-RECONCILIATION-2026-08-06.md`](review/S6-PLANNING-RECONCILIATION-2026-08-06.md) |
 | Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a`; **0 complete** |
 | Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
 | Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** — derived from committed state, not the planned guess |
