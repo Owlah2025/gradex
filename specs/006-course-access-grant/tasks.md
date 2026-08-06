@@ -117,7 +117,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
 
 ## Phase 1 — Setup and the S4 interface check
 
-- [ ] T001 **STOP CONDITION.** Verify S4's interface against
+- [x] T001 **STOP CONDITION.** Verify S4's interface against
       [research.md §1](research.md#1-the-s4-seam): the `entitlements` table carries scope,
       `original_access_ends_at`, `access_ends_at`, `retirement_eligibility_at`, and revocation state,
       and **`backend/internal/entitlement/`** exposes the `Evaluator`. **Reconciled 2026-08-06:** two of
@@ -126,7 +126,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       `pool.Begin` transaction per the house pattern. Re-run the check against the head being built and
       **halt if the recorded shape has changed since 2026-08-06** *(The `enrollments` table is not part
       of this check — it is S5's, and T001a asserts it separately)*
-- [ ] T001a **STOP CONDITION.** Verify **S5's** `enrollments` table exists with the shape
+- [x] T001a **STOP CONDITION.** Verify **S5's** `enrollments` table exists with the shape
       [data-model.md §5](data-model.md#5-enrollments--created-by-s5-written-only-by-s6) declares —
       `id`, `student_account_id`, `course_id`, `created_at`, and
       `CONSTRAINT enr_one_per_student_course UNIQUE (student_account_id, course_id)`. **Verified
@@ -135,17 +135,17 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       one must be in a `_test.go` file or under the `!production`-tagged `cmd/e2e-seed`, which is what
       makes S6 the only production writer. S6 adapts to the inherited shape; it never alters S5's
       migration to suit itself *(D-031, Constitution VII)*
-- [ ] T002 Create the `backend/internal/access/` package — `doc.go`, `invitation.go`, `enrollment.go`,
+- [x] T002 Create the `backend/internal/access/` package — `doc.go`, `invitation.go`, `enrollment.go`,
       `grant.go`, `repository.go` — with a `doc.go` boundary comment stating that **evaluation lives in
       `internal/entitlement` and is not touched here**, and that **the `enrollments` table is S5-owned
       while its rows are S6's**. Follow `internal/entitlement/doc.go` and `internal/learning/doc.go`.
       **The package does not exist yet: S4 landed `internal/entitlement`, not `internal/access`**
-- [ ] T003 **Confirm the migration number is `0015`** and name the pair `0015_course_access_grant`.
+- [x] T003 **Confirm the migration number is `0015`** and name the pair `0015_course_access_grant`.
       Recalculated 2026-08-06 from the committed schema: `0001`–`0014` with no gap,
       `0011_catalog_search` present so S3's no-write-path caveat is moot, highest pair
       `0014_protected_learning`, and `db.MaxSchemaVersion = ProtectedLearningSchemaVersion = 14`.
       Re-derive from the highest existing file and **halt if it is no longer `0014`** *(M1)*
-- [ ] T003a **The BR-025 Course access-expiry column does not exist.** In the same migration, add
+- [x] T003a **The BR-025 Course access-expiry column does not exist.** In the same migration, add
       `courses.default_access_ends_at TIMESTAMPTZ` — **nullable**, because BR-025 makes its absence a
       refusal condition rather than an invalid state, and `NOT NULL` would require inventing a default
       duration no rule supplies. Verified 2026-08-06: no migration `0001`–`0014` creates it under this
@@ -153,7 +153,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       reads a column that is not there and **no grant could ever complete**. Assigned to S6 under
       [D-073](../../docs/DECISIONS.md#d-073--s6-owns-the-course-default-access-expiry-column-because-no-closed-slice-created-it).
       Add no other column to `courses` *(BR-025, FR-015, FR-017)*
-- [ ] T004 Write `backend/internal/db/migrations/0015_course_access_grant.up.sql` creating
+- [x] T004 Write `backend/internal/db/migrations/0015_course_access_grant.up.sql` creating
       `course_access_invitations` with every column and constraint in
       [data-model.md §2](data-model.md#2-courseaccessinvitations). On `entitlements`, **assert** the
       four elements S4 already shipped — `grant_source`, `source_invitation_id`,
@@ -162,21 +162,21 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       and without which FR-021 and BR-113 are unenforced. **Do not drop, recreate, or redefine an
       applied constraint**, and **do not create `enrollments`** — S5 did *(FR-002, FR-003, FR-016,
       FR-019, FR-021, FR-022, FR-042)*
-- [ ] T004a In the same migration, **assert** the inherited `enrollments` columns, types, nullability,
+- [x] T004a In the same migration, **assert** the inherited `enrollments` columns, types, nullability,
       and unique constraint exist as [data-model.md §5](data-model.md#5-enrollments--created-by-s5-written-only-by-s6)
       declares, and **fail loudly** if they diverge rather than altering the table into agreement —
       the same treatment this migration gives `entitlements` *(Principle VII)*
-- [ ] T005 Write the matching `.down.sql` and verify the full `up`/`down`/`up` lifecycle against real
+- [x] T005 Write the matching `.down.sql` and verify the full `up`/`down`/`up` lifecycle against real
       PostgreSQL in `backend/internal/db/migrate_integration_test.go`. The `down` must drop only what
       `0015` created — it must **not** drop `grant_source`, `source_invitation_id`, or either S4
       constraint, and must not drop `enrollments`
-- [ ] T006 Add `CourseAccessGrantSchemaVersion = 15` to `backend/internal/db/schema.go` and repoint
+- [x] T006 Add `CourseAccessGrantSchemaVersion = 15` to `backend/internal/db/schema.go` and repoint
       `MaxSchemaVersion` at it, in the existing named-constant style alongside
       `EnrollmentSchemaVersion = 13` and `ProtectedLearningSchemaVersion = 14`. **CI already derives its
       assertion** through `expected="$(go run ./cmd/migrate max-version)"` in
       `.github/workflows/ci.yml` — confirm that, do not rebuild it, and do not introduce a literal. This
       is the drift that failed S1B2's hosted CI *(M1)*
-- [ ] T007 Widen **two** closed allowlists by migration, following the `0007` precedent
+- [x] T007 Widen **two** closed allowlists by migration, following the `0007` precedent
       *(FR-007, FR-031)*:
       - `identity_action_secrets_purpose` gains `'COURSE_ACCESS_INVITATION'` alongside
         `'EMAIL_VERIFICATION'`, `'PASSWORD_RESET'`, `'STAFF_INVITATION'`.
@@ -188,7 +188,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
         `CHECK (action ~ '^[A-Z][A-Z0-9_]*$')`, not a closed enumeration — which is why `T065`'s
         enumeration test is the only thing preventing an unaudited transition. Widen
         `identity_security_events_type` only if S6 records a security event.
-- [ ] T007a **Implement the Admin write path for the expiry instant `T003a` adds**, in
+- [x] T007a **Implement the Admin write path for the expiry instant `T003a` adds**, in
       `backend/internal/httpapi/access_routes.go` and `backend/internal/access/`, gated on
       `COURSE_ACCESS_GRANT`, with CSRF, strict body-limit binding, and an audit record like any other
       privileged Course mutation. **BR-025's conversion is part of the rule, not a choice**: when an
