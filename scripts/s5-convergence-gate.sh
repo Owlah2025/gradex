@@ -21,11 +21,14 @@
 #   1. The three accepted commits are present at their exact SHAs, in order.
 #   2. Every later commit matches exactly one authorized subject class.
 #      Classes: GATE, WORKFLOW, CI_STABILIZATION, T076_EVIDENCE, CLOSURE,
-#      CONVERGENCE.
+#      TIER3_REMEDIATION, TIER3_EVIDENCE, CONVERGENCE.
 #   3. Every later commit's changed paths lie inside that class's allowlist.
 #   4. No commit in the range touches S5 production scope after the
 #      implementation commit. An authorized subject is not a licence to edit a
-#      handler.
+#      handler. Exactly one exception exists, recorded as (class, exact path)
+#      pairs: TIER3_REMEDIATION carries the FR-017/BR-102 playback ceilings the
+#      implementation commit shipped without, and a rate limit has nowhere to
+#      live but production code. See D-071.
 #   5. No merge commit is in the range.
 #   6. The working tree is clean, nothing is staged, and the NUL-delimited
 #      porcelain status is byte-identical to the recorded baseline (D-059).
@@ -114,6 +117,26 @@ is_production_path() {
   esac
 }
 
+# --- the single authorized production exception -------------------------------
+# Clause 4 forbids production edits after the implementation commit. One exception exists,
+# and it is deliberately expressed as (class, exact path) pairs rather than as a hole in
+# is_production_path: TIER3_REMEDIATION carries the FR-017/BR-102 playback ceilings that the
+# implementation commit omitted, and a rate limit cannot be implemented anywhere except in
+# production code. No other class may use it, and no directory glob appears in it.
+#
+# production_exception_allowed <class> <path>
+production_exception_allowed() {
+  [ "$1" = "TIER3_REMEDIATION" ] || return 1
+  case "$2" in
+    backend/internal/ratelimit/policy.go|\
+    backend/internal/httpapi/learning_handlers.go|\
+    backend/internal/httpapi/learning_rate_limit.go|\
+    backend/internal/httpapi/learning_foundation.go|\
+    backend/cmd/api/main.go) return 0 ;;
+  esac
+  return 1
+}
+
 # --- authorized classes for commits after the implementation commit ----------
 # classify_subject <subject> -> prints class name, or nothing when unclassified.
 classify_subject() {
@@ -127,6 +150,7 @@ classify_subject() {
     "docs(s5): authorize separate S5 closures")                       printf 'GATE' ;;
     "docs(s5): authorize production-origin T076 evidence")             printf 'GATE' ;;
     "docs(s5): authorize T077 convergence closure")                   printf 'GATE' ;;
+    "docs(s5): authorize Tier 3 playback remediation")                printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
     # T075 and T076 are independently evidenced tasks — T075 on a verified hosted artifact, T076 on
     # its own time-to-first-frame measurement — so each is closed by its own truthful commit. The
@@ -145,6 +169,14 @@ classify_subject() {
     "docs(s5): record convergence and independent review"*)           printf 'CONVERGENCE' ;;
     "fix(ci): stabilize hosted S5 verification"*)                     printf 'CI_STABILIZATION' ;;
     "test(s5): add production-origin SC-001 evidence")                 printf 'T076_EVIDENCE' ;;
+    # Independent Tier 3 review found playback issuance shipped without the FR-017/BR-102 rate
+    # limits. Remediating that requires editing production scope after the implementation commit,
+    # which every other class is forbidden to do -- so it gets its own class, its own exact-file
+    # production carve-out (see production_exception_allowed), and its own review. Exact subjects,
+    # no globs.
+    "fix(s5): enforce playback issuance rate limits")                  printf 'TIER3_REMEDIATION' ;;
+    "docs(s5): reconcile Tier 3 remediation evidence")                 printf 'TIER3_EVIDENCE' ;;
+    "docs(s5): refresh T077 after Tier 3 remediation")                 printf 'TIER3_EVIDENCE' ;;
     *) : ;;
   esac
 }
@@ -215,6 +247,32 @@ path_allowed() {
         frontend/scripts/t075-evidence-manifest.mjs) return 0 ;;
       esac
       ;;
+    TIER3_REMEDIATION)
+      # The exact files that carry the two playback ceilings, plus the hosted-CI package list
+      # (M-1) and the executable evidence. Production files here are additionally gated by
+      # production_exception_allowed, so a typo'd path fails twice rather than passing once.
+      case "$p" in
+        backend/internal/ratelimit/policy.go|\
+        backend/internal/httpapi/learning_handlers.go|\
+        backend/internal/httpapi/learning_rate_limit.go|\
+        backend/internal/httpapi/learning_foundation.go|\
+        backend/internal/httpapi/learning_foundation_test.go|\
+        backend/internal/httpapi/learning_playback_rate_limit_test.go|\
+        backend/cmd/api/main.go|\
+        .github/workflows/ci.yml) return 0 ;;
+      esac
+      ;;
+    TIER3_EVIDENCE)
+      # Records only. No production path and no test path: the remediation itself is already
+      # closed by TIER3_REMEDIATION, and reopening code under an evidence subject is exactly the
+      # substitution this gate exists to prevent.
+      case "$p" in
+        specs/007-protected-learning/tasks.md|\
+        docs/DECISIONS.md|\
+        docs/launch/STATUS.md|\
+        docs/launch/daily/*.md) return 0 ;;
+      esac
+      ;;
     CONVERGENCE)
       case "$p" in
         specs/007-protected-learning/tasks.md|\
@@ -261,7 +319,7 @@ for idx in "${!RANGE[@]}"; do
 
   while IFS= read -r p; do
     [ -n "$p" ] || continue
-    if is_production_path "$p"; then
+    if is_production_path "$p" && ! production_exception_allowed "$class" "$p"; then
       problem "commit ${sha} (${class}, '${subject}') changes S5 production scope: ${p}"
       continue
     fi

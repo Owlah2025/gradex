@@ -2153,3 +2153,86 @@ no-merge and no-unclassified rules, the global production-scope denial, and D-05
 baseline comparison all remain in force. No production behaviour changes.
 
 **Source:** Product-owner instruction on 2026-08-06.
+
+## D-071 — Playback issuance enforces two rate ceilings, and the gate opens exactly one production exception
+
+**Date:** 2026-08-06
+**Status:** Active. Scoped to the S5 protected-learning slice.
+
+**Decision:** Playback issuance enforces two independent ceilings, decided before authorization and
+before any issuance:
+
+| Ceiling | Dimension | Quota | Window |
+| --- | --- | --- | --- |
+| Student | `identifier` | 30 issuances | 10 minutes |
+| Source address | `source_address` | 600 issuances | 10 minutes |
+
+Both policies set `FailClosed: true`. The source-address ceiling is asked first, then the Student
+ceiling, matching the order the Progress mutation already uses. A denied quota answers `429` with
+`Cache-Control: no-store` and a `Retry-After` equal to the policy window. An *undecidable* ceiling —
+the rate-limit dependency unavailable — is refused as protected-unavailable and never issues.
+
+The convergence gate gains one GATE anchor (`docs(s5): authorize Tier 3 playback remediation`), a
+`TIER3_REMEDIATION` class for the fix, a `TIER3_EVIDENCE` class for the records, and exactly one
+production-scope exception, expressed as (class, exact path) pairs.
+
+**Why:** Independent Tier 3 review of frozen head `f5985c76a9c69dea7a3d2e8128ad069ae6a663fd` found
+(H-1, High) that playback issuance shipped with **no** rate limit, although FR-017, BR-102,
+`contracts/learning-api.md`, and research R-04 all require one. The Student figure of 30 per 10 minutes
+is the quota those documents already state; it is not a new number and was not re-derived here.
+
+The source-address ceiling **was** chosen in this pass, because no numeric value for it exists in any
+requirement. It is set at 600 per 10 minutes — twenty times one Student's quota — on three constraints:
+
+1. **No ordinary Student may exhaust it.** A Student who fully spends their own 30 consumes 5% of the
+   source ceiling, so a shared address cannot be bricked by one legitimate learner.
+2. **It must survive a real campus NAT.** D-061 already sizes the Progress source ceiling against a
+   shared university or campus egress address. At a plausible 6 issuances per learner per 10 minutes,
+   600 accommodates roughly 100 concurrent learners behind one address.
+3. **It must still catch bulk extraction.** 600 per 10 minutes caps sustained scripted issuance at one
+   per second — far below what unattended enumeration of a course library needs, so the abnormal case
+   is bounded even when the attacker rotates Student sessions behind one address.
+
+The two ceilings stay separate policies with separate keys. Merging them would let one heavy Student
+consume a shared address's headroom, or let a NAT population mask a single extracting account.
+
+The Student bucket is keyed on the Student alone — not on the Lesson, and not on the session. Keying it
+per Lesson would hand an extractor a fresh quota for every Lesson, which is the exact pattern R-04
+sized this control against.
+
+`FailClosed: true` is required rather than incidental. The local in-process fallback cannot decide a
+shared quota, so approximating one when the dependency is down would answer a security question with a
+guess. Refusing is the only honest answer, and it matches `learning-progress-source`.
+
+**Why the gate needed a production exception:** clause 4 forbids production edits after the
+implementation commit, and it was right to — that clause is what stops an authorized *subject* from
+becoming a licence to edit a handler. But a rate limit has nowhere to live except production code, so
+H-1 could not be remediated under any existing class. The exception is therefore written as an explicit
+(class, exact path) predicate rather than as a hole in the production-path detector: only
+`TIER3_REMEDIATION` can use it, only five named files are reachable through it, no directory glob
+appears in it, and every one of those files is *also* inside the class's own path allowlist, so a
+mistyped path fails two checks instead of passing one. `TIER3_EVIDENCE` deliberately reaches no
+production and no test path.
+
+**Also in this pass:**
+
+- **M-1 (Medium).** The hosted Admission Integration job's package list omitted `./internal/learning`,
+  so that package's integration tests compiled under vet but never executed in hosted CI. The package
+  is added to the list.
+- **M-2 (Medium, evidence chain).** The T075 closure record cited a GitHub artifact ID and byte size
+  that are no longer retrievable. The record is corrected to state the supersession history truthfully
+  rather than re-pointing the original audit claim at a different byte set. See the T075 note in
+  `specs/007-protected-learning/tasks.md`.
+- **FR-017 traceability.** T025 is amended so the playback half of FR-017 has an explicit owning task.
+  The amendment is dated and marked as review remediation; it does **not** claim the original
+  implementation commit contained the control, because it did not.
+
+**Boundary:** playback authorization semantics are unchanged, and the playback signature lifetime is
+unchanged. The three Low findings from the same review (stale report-throttle comments, `completed_at`
+using `time.Now()` rather than an injected clock, and no server-side CSRF middleware on learning
+mutations) are **not** addressed here and remain open. Head `f5985c7` is superseded. T077 is revalidated
+against the remediated history; **T078 remains open** and requires a fresh independent Tier 3 review,
+because this pass was authored by the builder.
+
+**Source:** Independent Tier 3 review findings H-1, M-1, M-2 against head `f5985c7`, and the
+product-owner remediation instruction on 2026-08-06.
