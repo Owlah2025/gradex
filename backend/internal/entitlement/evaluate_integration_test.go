@@ -121,7 +121,18 @@ func (f *evaluationFixture) insertSectionAndLessons(revision, sectionID string, 
 
 func (f *evaluationFixture) seed(id string, scope ScopeKind, scopeID string) Record {
 	f.t.Helper()
-	record := Record{ID: id, StudentAccountID: f.student, ScopeKind: scope, ScopeID: scopeID, CourseID: f.course, GrantSource: GrantSourceManualInvitation, OriginalAccessEndsAt: f.now.Add(48 * time.Hour), AccessEndsAt: f.now.Add(24 * time.Hour), RetirementEligibilityAt: f.now.Add(-time.Hour), State: StateActive, CreatedAt: f.now.Add(-time.Hour), UpdatedAt: f.now.Add(-time.Hour)}
+	invID := uuid.NewString()
+	var instructorID string
+	if err := f.pool.QueryRow(f.ctx, `SELECT owner_account_id::text FROM courses WHERE id = $1::uuid`, f.course).Scan(&instructorID); err != nil {
+		f.t.Fatalf("reading course owner: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ($1::uuid, $2::uuid, 'student@example.test', 'student@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')
+	`, invID, f.course, instructorID, f.student); err != nil {
+		f.t.Fatalf("seeding test invitation: %v", err)
+	}
+	record := Record{ID: id, StudentAccountID: f.student, ScopeKind: scope, ScopeID: scopeID, CourseID: f.course, GrantSource: GrantSourceManualInvitation, SourceInvitationID: &invID, OriginalAccessEndsAt: f.now.Add(48 * time.Hour), AccessEndsAt: f.now.Add(24 * time.Hour), RetirementEligibilityAt: f.now.Add(-time.Hour), State: StateActive, CreatedAt: f.now.Add(-time.Hour), UpdatedAt: f.now.Add(-time.Hour)}
 	if err := seedEvaluationRecord(f.ctx, f.pool, record); err != nil {
 		f.t.Fatalf("seeding record: %v", err)
 	}

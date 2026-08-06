@@ -118,4 +118,5 @@ ALTER TABLE entitlements
 
 ALTER TABLE entitlements
     ADD CONSTRAINT ent_manual_needs_invitation
-        CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL);
+        CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL)
+        NOT VALID;

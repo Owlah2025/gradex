@@ -4,6 +4,10 @@ ALTER TABLE entitlements
 ALTER TABLE entitlements
     DROP CONSTRAINT IF EXISTS fk_entitlements_source_invitation;
 
+UPDATE entitlements
+    SET source_invitation_id = NULL
+    WHERE source_invitation_id IS NOT NULL;
+
 DROP TABLE IF EXISTS course_access_invitations;
 
 ALTER TABLE identity_action_secrets

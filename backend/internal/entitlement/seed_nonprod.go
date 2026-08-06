@@ -20,21 +20,6 @@ func seedEvaluationRecord(ctx context.Context, pool *pgxpool.Pool, record Record
 		!record.State.Valid() || record.CreatedAt.IsZero() || record.UpdatedAt.IsZero() {
 		return errors.New("complete valid non-production entitlement fixture is required")
 	}
-	invID := stringValue(record.SourceInvitationID)
-	if record.GrantSource == GrantSourceManualInvitation {
-		if invID == "" {
-			invID = record.ID
-		}
-		_, err := pool.Exec(ctx, `
-			INSERT INTO course_access_invitations (
-				id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, 'fixture-student@example.com', 'fixture-student@example.com', $3::uuid, $3::uuid, $3::uuid, 'APPROVED', $4, $4)
-			ON CONFLICT (id) DO NOTHING
-		`, invID, record.CourseID, record.StudentAccountID, record.CreatedAt)
-		if err != nil {
-			return fmt.Errorf("seeding invitation fixture: %w", err)
-		}
-	}
 	_, err := pool.Exec(ctx, `
 		INSERT INTO entitlements (
 			id, student_account_id, scope_kind, scope_id, course_id, grant_source,
@@ -43,7 +28,7 @@ func seedEvaluationRecord(ctx context.Context, pool *pgxpool.Pool, record Record
 		) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6, NULLIF($7, '')::uuid,
 			$8, $9, $10, $11, $12, $13, $14)
 	`, record.ID, record.StudentAccountID, record.ScopeKind, record.ScopeID, record.CourseID,
-		record.GrantSource, invID, record.OriginalAccessEndsAt,
+		record.GrantSource, stringValue(record.SourceInvitationID), record.OriginalAccessEndsAt,
 		record.AccessEndsAt, record.RevokedAt, record.RetirementEligibilityAt, record.State,
 		record.CreatedAt, record.UpdatedAt)
 	if err != nil {
