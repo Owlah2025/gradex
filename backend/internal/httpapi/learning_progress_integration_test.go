@@ -241,6 +241,10 @@ func newLearningIntegrationFixtureWith(t *testing.T, options learningFixtureOpti
 			"learning-progress-source": ratelimit.ProtectedLearningProgressSourcePolicy(),
 			"learning-progress":        ratelimit.ProtectedLearningProgressPolicy(),
 			"learning-report":          ratelimit.ProtectedLearningReportPolicy(),
+			// Every endpoint in requiredLearningPolicyEndpoints must be present or the
+			// foundation refuses to construct, so the playback ceilings belong here too.
+			"learning-playback-source": ratelimit.ProtectedLearningPlaybackSourcePolicy(),
+			"learning-playback":        ratelimit.ProtectedLearningPlaybackPolicy(),
 		},
 	})
 	if err != nil {
