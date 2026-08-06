@@ -123,8 +123,18 @@ classify_subject() {
     # correction carries its own exact subject rather than a `docs(s5): *` prefix, which would
     # classify any documentation commit as a gate change.
     "docs(s5): authorize narrow CI stabilization class"*)             printf 'GATE' ;;
+    "docs(s5): authorize separate S5 closures")                       printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
-    "docs(s5): close T075 and T076"*)                                 printf 'CLOSURE' ;;
+    # T075 and T076 are independently evidenced tasks — T075 on a verified hosted artifact, T076 on
+    # its own time-to-first-frame measurement — so each is closed by its own truthful commit. The
+    # former combined subject `docs(s5): close T075 and T076` is deliberately gone: it was false for
+    # a T075-only closure, and there was no honest way to phrase one under it.
+    #
+    # These two are matched EXACTLY, with no trailing glob. A prefix would re-admit both the obsolete
+    # combined subject and near-matches like `docs(s5): close T075 evidence`, which is precisely what
+    # the exactness is here to reject.
+    "docs(s5): close T075")                                           printf 'CLOSURE' ;;
+    "docs(s5): close T076")                                           printf 'CLOSURE' ;;
     "docs(s5): record convergence and independent review"*)           printf 'CONVERGENCE' ;;
     "fix(ci): stabilize hosted S5 verification"*)                     printf 'CI_STABILIZATION' ;;
     *) : ;;

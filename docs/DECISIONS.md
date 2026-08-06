@@ -2038,3 +2038,37 @@ requirements, the no-merge and no-unclassified-commit rules, the global producti
 D-059's clean-tree and baseline checks all remain in force.
 
 **Source:** Product-owner instruction on 2026-08-05.
+
+---
+
+## D-068 — S5 task closures are authorized separately, one truthful commit each
+
+**Date:** 2026-08-06
+**Status:** Active. Scoped only to S5 validation mechanics.
+
+**Decision:** The convergence gate's combined closure subject `docs(s5): close T075 and T076` is
+replaced by two exactly matched subjects, `docs(s5): close T075` and `docs(s5): close T076`. Each is
+matched with no trailing glob, so neither the obsolete combined subject nor a near-match such as
+`docs(s5): close T075 evidence` classifies. The gate-extension commit that introduces this carries
+its own exact `GATE` subject, `docs(s5): authorize separate S5 closures`.
+
+**Why:** T075 and T076 are independently evidenced tasks. T075 closes on a verified retained hosted
+artifact; T076 closes on its own time-to-first-frame measurement under SC-001. The combined subject
+forced a choice between two bad options — commit a subject asserting that T076 was closed when it had
+not been begun, or leave verified T075 evidence uncommitted indefinitely. A commit message is
+permanent history, so a subject that misstates what a commit does is not an acceptable cost of
+satisfying a gate. Separate authorization also means T076's own closure needs no further gate change.
+
+**Boundary:** The closure path allowlist is **unchanged** — the same closure evidence paths as before,
+with no new application, test, workflow, or general documentation scope, and no broad subject prefix
+or path glob. Neither closure subject may touch S5 production scope; the global production denial
+still applies. The exact accepted SHA requirements, the no-merge and no-unclassified rules, and
+D-059's clean-tree and baseline comparison all remain in force.
+
+**Scope:** Validation mechanics only. No product requirement, acceptance criterion, implementation
+boundary, performance threshold, information-hiding rule, or independent-review requirement changes.
+T077 and T078 remain independently gated, and no task may be marked complete without the evidence its
+own text requires — separate authorization changes who may commit a closure, never what closing it
+demands.
+
+**Source:** Product-owner instruction on 2026-08-06.
