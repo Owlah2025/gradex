@@ -42,3 +42,12 @@ func progressRateIdentifier(studentID, lessonID string) string {
 // open a fresh quota per Course; and never the request body or the encrypted
 // context, which this decision runs before either is read.
 func reportRateIdentifier(studentID string) string { return studentID }
+
+// playbackRateIdentifier keys the playback issuance quota on the authenticated
+// Student and nothing else (FR-017).
+//
+// Named for the same reason the report identifier is: the scope is stated where it
+// is chosen. Not the Lesson, so Lesson-hopping cannot open a fresh quota per Lesson
+// -- the extraction pattern R-04 sized this limit against. Not the session, so
+// signing in again does not reset it. Never the request path or body.
+func playbackRateIdentifier(studentID string) string { return studentID }

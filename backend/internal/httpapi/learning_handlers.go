@@ -521,6 +521,19 @@ func (h *learningHandlers) authorize(c *gin.Context, lessonID string) bool {
 
 func (h *learningHandlers) issuePlayback(c *gin.Context) {
 	lessonID := c.Param("lessonId")
+	// FR-017 / BR-102: both playback ceilings are decided before authorization and
+	// before any issuance, in the same order the Progress mutation uses -- source
+	// address first, then Student. Deciding first means a throttled caller learns
+	// nothing about entitlement, Course inventory, or media identity, and quota state
+	// never becomes an authorization input. A limiter dependency failure fails closed
+	// inside requireRateDecision with the uniform protected refusal, so no signed
+	// target is ever issued when a ceiling cannot be evaluated.
+	if !h.requireRateDecision(c, "learning-playback-source", ratelimit.Input{ClientIP: c.ClientIP()}) {
+		return
+	}
+	if !h.requireRateDecision(c, "learning-playback", ratelimit.Input{Identifier: playbackRateIdentifier(c.GetString(ctxUserIDKey))}) {
+		return
+	}
 	if !h.authorize(c, lessonID) {
 		return
 	}

@@ -15,7 +15,14 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
-var requiredLearningPolicyEndpoints = [...]string{"learning-progress-source", "learning-progress", "learning-report"}
+// requiredLearningPolicyEndpoints must list every endpoint policy the learning
+// surface depends on. A build that forgets to wire one fails foundation validation
+// rather than serving that endpoint unthrottled -- which is how FR-017's playback
+// half went unenforced until Tier 3 review found it (D-071).
+var requiredLearningPolicyEndpoints = [...]string{
+	"learning-progress-source", "learning-progress", "learning-report",
+	"learning-playback-source", "learning-playback",
+}
 
 type learningEvaluator interface {
 	Evaluate(context.Context, string, string, time.Time) entitlement.Decision

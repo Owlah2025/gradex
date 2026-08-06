@@ -270,6 +270,84 @@ func ProtectedLearningReportPolicy() Policy {
 	}
 }
 
+const (
+	// ProtectedLearningPlaybackIssuancesPer10Min is FR-017's Student ceiling, sized
+	// by R-04: an issuance is per playback *session*, not per segment, so 30 in ten
+	// minutes accommodates heavy Lesson-hopping while sustained excess is scripted
+	// extraction rather than study.
+	ProtectedLearningPlaybackIssuancesPer10Min int64 = 30
+	// ProtectedLearningPlaybackSourceIssuancesPer10Min is the separate per-source
+	// ceiling FR-017 and BR-102 require. R-04 mandates that a source ceiling exist
+	// but fixes no number, so this one is chosen and recorded in D-071.
+	//
+	// 600 is twenty times one Student's full quota, so no single ordinary Student can
+	// exhaust it — the property that keeps a shared campus NAT usable. It still
+	// supports roughly 100 concurrent learners behind one address at a heavy six
+	// issuances per ten minutes each, consistent with the population D-061 sized the
+	// Progress source ceiling against, while capping sustained scripted extraction at
+	// one issuance per second from any single network source.
+	ProtectedLearningPlaybackSourceIssuancesPer10Min int64 = 600
+	// playbackIssuanceWindow is R-04's ten-minute window, shared by both dimensions
+	// so the two ceilings are comparable.
+	playbackIssuanceWindow = 10 * time.Minute
+)
+
+// ProtectedLearningPlaybackPolicy bounds one Student's playback issuances
+// (FR-017, BR-102, R-04).
+//
+// The authenticated Account is the whole key. Adding the Lesson would let one
+// Student open a fresh quota per Lesson, which is exactly the Lesson-hopping
+// extraction this limit bounds; adding the session would let the quota reset by
+// signing in again. Nothing from the request body or path contributes, and the
+// decision runs before authorization, so quota state never becomes an
+// authorization input and never reveals entitlement state.
+//
+// The local fallback carries the identical limit, so a Redis outage narrows the
+// quota's scope to one process but never widens it.
+func ProtectedLearningPlaybackPolicy() Policy {
+	return Policy{
+		ID:       "learning-playback-v1",
+		Category: "PROTECTED_LEARNING",
+		Endpoint: "learning-playback",
+		Window:   playbackIssuanceWindow,
+		Rules: []Rule{{
+			Dimension:  DimensionIdentifier,
+			Limit:      ProtectedLearningPlaybackIssuancesPer10Min,
+			LocalLimit: ProtectedLearningPlaybackIssuancesPer10Min,
+		}},
+		LocalMaxKeys: 8192,
+		// FR-017 requires a decided ceiling before any issuance. A local in-process
+		// fallback cannot decide a shared quota, so an undecidable ceiling must refuse
+		// rather than approximate: playback fails closed like learning-progress-source.
+		FailClosed: true,
+	}
+}
+
+// ProtectedLearningPlaybackSourcePolicy bounds playback issuance per network
+// source, independently of any Student (FR-017, BR-102, D-071).
+//
+// Keyed on the source-address dimension alone, so it cannot collide with the
+// identifier-keyed Student policy even for the same request: the two live under
+// different endpoints and different dimensions.
+func ProtectedLearningPlaybackSourcePolicy() Policy {
+	return Policy{
+		ID:       "learning-playback-source-v1",
+		Category: "PROTECTED_LEARNING",
+		Endpoint: "learning-playback-source",
+		Window:   playbackIssuanceWindow,
+		Rules: []Rule{{
+			Dimension:  DimensionSourceAddr,
+			Limit:      ProtectedLearningPlaybackSourceIssuancesPer10Min,
+			LocalLimit: ProtectedLearningPlaybackSourceIssuancesPer10Min,
+		}},
+		LocalMaxKeys: 8192,
+		// FR-017 requires a decided ceiling before any issuance. A local in-process
+		// fallback cannot decide a shared quota, so an undecidable ceiling must refuse
+		// rather than approximate: playback fails closed like learning-progress-source.
+		FailClosed: true,
+	}
+}
+
 // ProtectedLearningProgressPolicy limits one Student's writes for one stable
 // Lesson. The key is assembled only from authenticated server state, never
 // from a request body.

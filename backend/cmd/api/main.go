@@ -288,6 +288,8 @@ func buildLearningFoundation(cfg *config.Config, pool *pgxpool.Pool, mediaFounda
 		Repository: repository, Evaluator: evaluator, Media: mediaFoundation.LearningMedia(),
 		ReportContexts: reportContexts, Limiter: limiter,
 		Policies: map[string]ratelimit.Policy{
+			"learning-playback-source": ratelimit.ProtectedLearningPlaybackSourcePolicy(),
+			"learning-playback":        ratelimit.ProtectedLearningPlaybackPolicy(),
 			"learning-progress-source": ratelimit.ProtectedLearningProgressSourcePolicy(),
 			"learning-progress":        ratelimit.ProtectedLearningProgressPolicy(),
 			"learning-report":          ratelimit.ProtectedLearningReportPolicy(),

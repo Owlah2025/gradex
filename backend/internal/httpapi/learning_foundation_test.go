@@ -39,6 +39,8 @@ func testLearningPolicies() map[string]ratelimit.Policy {
 		"learning-progress-source": ratelimit.ProtectedLearningProgressSourcePolicy(),
 		"learning-progress":        ratelimit.ProtectedLearningProgressPolicy(),
 		"learning-report":          ratelimit.ProtectedLearningReportPolicy(),
+		"learning-playback-source": ratelimit.ProtectedLearningPlaybackSourcePolicy(),
+		"learning-playback":        ratelimit.ProtectedLearningPlaybackPolicy(),
 	}
 }
 
