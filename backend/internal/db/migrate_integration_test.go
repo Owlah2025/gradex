@@ -125,6 +125,7 @@ var (
 		"legacy_media_mappings", "entitlements", "entitlement_adjustments",
 	}
 	protectedLearningTables = []string{"enrollments", "content_reports"}
+	courseAccessGrantTables = []string{"course_access_invitations"}
 )
 
 func allTables() []string {
@@ -136,7 +137,8 @@ func allTables() []string {
 	all = append(all, staffTables...)
 	all = append(all, catalogTables...)
 	all = append(all, mediaTables...)
-	return append(all, protectedLearningTables...)
+	all = append(all, protectedLearningTables...)
+	return append(all, courseAccessGrantTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -599,7 +601,7 @@ func assertClosedCheckValues(t *testing.T, pool *pgxpool.Pool, constraint string
 func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	freshDatabase(t)
 	m := openMigrator(t)
-	if err := m.Up(); err != nil {
+	if err := m.Migrate(uint(ProtectedLearningSchemaVersion)); err != nil {
 		t.Fatalf("migrating through protected learning: %v", err)
 	}
 	pool := openPool(t)
@@ -625,11 +627,11 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
-func TestMaxSchemaVersionTracksProtectedLearningSchema(t *testing.T) {
+func TestMaxSchemaVersionTracksCourseAccessGrantSchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
-	if MaxSchemaVersion != ProtectedLearningSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want ProtectedLearningSchemaVersion %d", MaxSchemaVersion, ProtectedLearningSchemaVersion)
+	if MaxSchemaVersion != CourseAccessGrantSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want CourseAccessGrantSchemaVersion %d", MaxSchemaVersion, CourseAccessGrantSchemaVersion)
 	}
 }
 
@@ -1398,5 +1400,118 @@ func TestStaffLifecycleSchemaInvariants(t *testing.T) {
 		adminAccountID,
 	); err != nil {
 		t.Fatalf("creating suspension security events: %v", err)
+	}
+}
+
+func TestCourseAccessGrantSchemaInvariants(t *testing.T) {
+	freshDatabase(t)
+	pool := openPool(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var adminAccountID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO accounts (normalized_email, email, role, status, display_name)
+		 VALUES ('admin-s6@example.com', 'Admin-S6@Example.com', 'ADMIN', 'ACTIVE', 'Admin S6')
+		 RETURNING id::text`,
+	).Scan(&adminAccountID); err != nil {
+		t.Fatalf("creating Admin Account fixture: %v", err)
+	}
+
+	var courseID string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO courses (owner_account_id, lifecycle)
+		 VALUES ($1, 'DRAFT')
+		 RETURNING id::text`,
+		adminAccountID,
+	).Scan(&courseID); err != nil {
+		t.Fatalf("creating Course fixture: %v", err)
+	}
+
+	// 1. COURSE_ACCESS_INVITATION action secret with NULL account_id succeeds.
+	var secretID1 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES (NULL, 'COURSE_ACCESS_INVITATION', decode(repeat('c1', 32), 'hex'), now() + interval '1 hour')
+		 RETURNING id::text`,
+	).Scan(&secretID1); err != nil {
+		t.Fatalf("creating COURSE_ACCESS_INVITATION secret: %v", err)
+	}
+
+	// 2. course_access_invitations insertion and partial unique index on non-terminal pair.
+	var invID1 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO course_access_invitations
+		   (normalized_email, email, course_id, created_by_account_id, state, action_secret_id)
+		 VALUES ('student@example.com', 'Student@Example.com', $1, $2, 'PENDING_STUDENT_ACCEPTANCE', $3)
+		 RETURNING id::text`,
+		courseID, adminAccountID, secretID1,
+	).Scan(&invID1); err != nil {
+		t.Fatalf("creating course_access_invitation: %v", err)
+	}
+
+	// Inserting second PENDING invitation for same (normalized_email, course_id) must fail.
+	var secretID2 string
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO identity_action_secrets
+		   (account_id, purpose, secret_digest, expires_at)
+		 VALUES (NULL, 'COURSE_ACCESS_INVITATION', decode(repeat('c2', 32), 'hex'), now() + interval '1 hour')
+		 RETURNING id::text`,
+	).Scan(&secretID2); err != nil {
+		t.Fatalf("creating second COURSE_ACCESS_INVITATION secret: %v", err)
+	}
+
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO course_access_invitations
+		   (normalized_email, email, course_id, created_by_account_id, state, action_secret_id)
+		 VALUES ('student@example.com', 'Student@Example.com', $1, $2, 'PENDING_STUDENT_ACCEPTANCE', $3)`,
+		courseID, adminAccountID, secretID2,
+	)
+
+	// 3. Foreign key fk_entitlements_source_invitation and ent_manual_needs_invitation check.
+	// MANUAL_INVITATION grant without source_invitation_id must fail.
+	assertStatementFails(t, pool, ctx,
+		`INSERT INTO entitlements
+		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		 VALUES ($1, 'COURSE', $2, $2, 'MANUAL_INVITATION', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
+		adminAccountID, courseID,
+	)
+
+	// 4. Verification that courses.default_access_ends_at column exists.
+	if _, err := pool.Exec(ctx, `UPDATE courses SET default_access_ends_at = now() + interval '30 days' WHERE id = $1`, courseID); err != nil {
+		t.Fatalf("updating default_access_ends_at: %v", err)
+	}
+}
+
+func TestCourseAccessGrantRollbackRestoresPreGrantSchema(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating through course access grant: %v", err)
+	}
+	pool := openPool(t)
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back course access grant: %v", err)
+	}
+	if tableExists(t, pool, "course_access_invitations") {
+		t.Fatal("course_access_invitations survived the 0015 rollback")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after 0015 rollback: %v", err)
+	}
+	if state.Version != ProtectedLearningSchemaVersion || state.Dirty {
+		t.Fatalf("schema after 0015 rollback = %+v, want clean version %d", state, ProtectedLearningSchemaVersion)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("reapplying course access grant after rollback: %v", err)
 	}
 }
