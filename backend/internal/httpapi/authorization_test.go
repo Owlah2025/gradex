@@ -191,7 +191,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing learning foundation: %v", err)
 	}
 
-	accessRepo, err := access.NewRepository(pool)
+	accessRepo, err := access.NewRepository(pool, outboxWriter)
 	if err != nil {
 		t.Fatalf("constructing access repository: %v", err)
 	}
@@ -368,6 +368,13 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PATCH /api/v1/admin/taxonomy/terms/:id":                  {Method: http.MethodPatch, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/taxonomy/terms/:id/retire":            {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms/:id/retire", Class: ClassCapabilityProtected},
 	"DELETE /api/v1/admin/taxonomy/terms/:id":                 {Method: http.MethodDelete, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
+
+	"POST /api/v1/admin/course-access-invitations":        {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/course-access-invitations":         {Method: http.MethodGet, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access-invitations":            {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access-invitations/:id":        {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/me/course-access-invitations/:id/accept": {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access":                        {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
@@ -583,6 +584,29 @@ func buildPublicCatalogFoundation(pool *pgxpool.Pool) (*httpapi.PublicCatalogFou
 	return httpapi.NewPublicCatalogFoundation(httpapi.PublicCatalogFoundationOptions{Repository: repository})
 }
 
+func buildAccessFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+) (*httpapi.AccessFoundation, error) {
+	admission := cfg.Admission()
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	repository, err := access.NewRepository(pool, writer)
+	if err != nil {
+		return nil, err
+	}
+
+	return httpapi.NewAccessFoundation(httpapi.AccessFoundationOptions{
+		Repository: repository,
+	})
+}
+
 type ProductionFoundations struct {
 	Options           []httpapi.RouterOption
 	SessionRepository *identity.SessionRepository
@@ -653,6 +677,13 @@ func buildProductionFoundations(
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithPublicCatalogFoundation(publicCatalogFoundation))
+
+	accessFoundation, err := buildAccessFoundation(cfg, pool)
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.Options = append(pf.Options, httpapi.WithAccessFoundation(accessFoundation))
 
 	return pf, nil
 }
