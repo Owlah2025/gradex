@@ -597,18 +597,22 @@ jobs:
             echo "| Test step outcome (pre-continue-on-error) | ${{ steps.t075.outcome }} |"
             echo "| Sanitized log in artifact | \`logs/t075-playwright.log\` |"
             echo "| T076 outcome | ${{ steps.t076.outcome }} |"
-            T076_JSON="$T075_EVIDENCE_DIR/performance/t076-playback-performance.json"
+            # `export`, not a bare assignment: the Node process below reads this through
+            # `process.env`, and a shell variable that is not exported is simply absent there. Run
+            # 31064763659 produced every piece of T076 evidence correctly and then failed this step
+            # alone, because `readFileSync(undefined)` threw.
+            export T076_JSON="$T075_EVIDENCE_DIR/performance/t076-playback-performance.json"
             if [ -f "$T076_JSON" ]; then
               echo
-              echo "### T076 — SC-001 time-to-first-frame (threshold 5000 ms)"
+              echo "### T076 — SC-001 time-to-first-frame"
               echo
-              echo "| Viewport | elapsed_ms | first-frame signal | result |"
-              echo "|---|---|---|---|"
+              echo "| Viewport | elapsed_ms | first-frame signal | threshold_ms | result |"
+              echo "|---|---|---|---|---|"
               node --input-type=module -e '
                 import fs from "node:fs";
                 const d = JSON.parse(fs.readFileSync(process.env.T076_JSON, "utf8"));
                 for (const m of d.measurements ?? []) {
-                  console.log(`| ${m.viewport} | ${m.elapsed_ms} | ${m.first_frame_signal} | ${m.passed ? "PASS" : "FAIL"} |`);
+                  console.log(`| ${m.viewport} | ${m.elapsed_ms} | ${m.first_frame_signal} | ${d.threshold_ms} | ${m.passed ? "PASS" : "FAIL"} |`);
                 }
               '
             fi
