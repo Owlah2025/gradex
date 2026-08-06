@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
@@ -18,7 +19,8 @@ import (
 const accessMutationBodyLimit = 16 * 1024
 
 type accessHandlers struct {
-	repo *access.Repository
+	repo  *access.Repository
+	clock func() time.Time
 }
 
 type setDefaultAccessExpiryBody struct {
@@ -44,7 +46,12 @@ func mountAccessRoutes(
 		return errors.New("access foundation and repository are required")
 	}
 
-	h := &accessHandlers{repo: foundation.repository}
+	clock := foundation.clock
+	if clock == nil {
+		clock = time.Now
+	}
+
+	h := &accessHandlers{repo: foundation.repository, clock: clock}
 
 	adminAccessGroup := v1.Group("/admin/courses")
 	adminAccessGroup.Use(
@@ -65,6 +72,11 @@ func mountAccessRoutes(
 func (h *accessHandlers) setCourseDefaultAccessExpiry(c *gin.Context) {
 	adminAccountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
+
+	if _, err := uuid.Parse(courseID); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
 
 	body := c.MustGet(strictJSONBodyContextKey).(*setDefaultAccessExpiryBody)
 
@@ -88,8 +100,22 @@ func (h *accessHandlers) setCourseDefaultAccessExpiry(c *gin.Context) {
 		return
 	}
 
-	utcExpiry, err := access.ConvertKuwaitDateToUTCExpiry(body.Date)
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+
+	utcExpiry, err := access.ConvertKuwaitDateToUTCExpiry(body.Date, now)
 	if err != nil {
+		if errors.Is(err, access.ErrExpiryInPast) {
+			writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+				Code:      "EXPIRY_IN_PAST",
+				Detail:    "Default access expiry must be in the future",
+				Location:  problem.LocationBody,
+				Parameter: "date",
+			}))
+			return
+		}
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
 			Code:      "INVALID_DATE_FORMAT",
 			Detail:    "Date must be a valid Kuwait local date in YYYY-MM-DD format",

@@ -3,23 +3,30 @@ package httpapi
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/access"
 )
 
 type AccessFoundation struct {
 	repository *access.Repository
+	clock      func() time.Time
 }
 
 type AccessFoundationOptions struct {
 	Repository *access.Repository
+	Clock      func() time.Time
 }
 
 func NewAccessFoundation(options AccessFoundationOptions) (*AccessFoundation, error) {
 	if options.Repository == nil {
 		return nil, errors.New("access repository is required")
 	}
-	return &AccessFoundation{repository: options.Repository}, nil
+	clock := options.Clock
+	if clock == nil {
+		clock = time.Now
+	}
+	return &AccessFoundation{repository: options.Repository, clock: clock}, nil
 }
 
 func WithAccessFoundation(foundation *AccessFoundation) RouterOption {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,13 +190,73 @@ func TestAdminAccessExpiryHTTPAPI_RealPostgreSQL(t *testing.T) {
 			t.Errorf("DB default_access_ends_at = %s, want %s", dbEndsAt.UTC().Format(time.RFC3339), wantUTC)
 		}
 
-		var auditCount int
+		var auditRecord struct {
+			Module   string `json:"module"`
+			Metadata string `json:"metadata"`
+		}
 		err = pool.QueryRow(ctx, `
-			SELECT COUNT(*) FROM audit_events
+			SELECT module, metadata::text FROM audit_events
 			WHERE action = 'COURSE_DEFAULT_ACCESS_EXPIRY_SET' AND target_type = 'COURSE' AND target_id = $1 AND actor_account_id = $2::uuid
-		`, courseID, adminID).Scan(&auditCount)
-		if err != nil || auditCount != 1 {
-			t.Errorf("audit_events count = %d (err=%v), want 1", auditCount, err)
+		`, courseID, adminID).Scan(&auditRecord.Module, &auditRecord.Metadata)
+		if err != nil {
+			t.Fatalf("reading audit_events record: %v", err)
+		}
+		if auditRecord.Module != "CATALOG_AND_AUTHORING" {
+			t.Errorf("got audit module = %q, want %q", auditRecord.Module, "CATALOG_AND_AUTHORING")
+		}
+		if !strings.Contains(auditRecord.Metadata, "new_default_access_ends_at") || !strings.Contains(auditRecord.Metadata, wantUTC) {
+			t.Errorf("got audit metadata = %q, want containing new_default_access_ends_at %q", auditRecord.Metadata, wantUTC)
+		}
+	})
+
+	t.Run("Malformed course ID returns 404", func(t *testing.T) {
+		malformedURL := ts.URL + "/api/v1/admin/courses/invalid-uuid/default-access-expiry"
+		body := []byte(`{"date": "2026-12-31", "reason": "Valid reason"}`)
+		resp := doPricingRequest(t, client, "PUT", malformedURL, adminToken, validOrigin, adminToken, body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("Malformed course ID status = %d, want 404", resp.StatusCode)
+		}
+	})
+
+	t.Run("Past date returns 422 and creates no DB or audit mutation", func(t *testing.T) {
+		var initialAuditCount int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&initialAuditCount)
+
+		body := []byte(`{"date": "2020-01-01", "reason": "Past date"}`)
+		resp := doPricingRequest(t, client, "PUT", expiryURL, adminToken, validOrigin, adminToken, body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("Past date status = %d, want 422", resp.StatusCode)
+		}
+
+		var afterAuditCount int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&afterAuditCount)
+		if afterAuditCount != initialAuditCount {
+			t.Errorf("audit_events count changed from %d to %d on past date refusal", initialAuditCount, afterAuditCount)
+		}
+	})
+
+	t.Run("Instructor role returns 403 and creates no DB or audit mutation", func(t *testing.T) {
+		instToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x52}, 32))
+		body := []byte(`{"date": "2026-12-31", "reason": "Instructor attempt"}`)
+
+		var initialAuditCount int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&initialAuditCount)
+
+		resp := doPricingRequest(t, client, "PUT", expiryURL, instToken, validOrigin, instToken, body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("Instructor PUT default access expiry status = %d, want 403", resp.StatusCode)
+		}
+
+		var afterAuditCount int
+		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events`).Scan(&afterAuditCount)
+		if afterAuditCount != initialAuditCount {
+			t.Errorf("audit_events count changed from %d to %d on forbidden role refusal", initialAuditCount, afterAuditCount)
 		}
 	})
 

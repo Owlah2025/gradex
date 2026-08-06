@@ -51,8 +51,11 @@ func (r *Repository) SetCourseDefaultAccessExpiry(ctx context.Context, params Se
 	}
 	defer tx.Rollback(ctx)
 
-	var existingCourseID string
-	err = tx.QueryRow(ctx, "SELECT id::text FROM courses WHERE id = $1 FOR UPDATE", params.CourseID).Scan(&existingCourseID)
+	var (
+		existingCourseID string
+		oldExpiry        *time.Time
+	)
+	err = tx.QueryRow(ctx, "SELECT id::text, default_access_ends_at FROM courses WHERE id = $1 FOR UPDATE", params.CourseID).Scan(&existingCourseID, &oldExpiry)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrCourseNotFound
 	}
@@ -68,8 +71,15 @@ func (r *Repository) SetCourseDefaultAccessExpiry(ctx context.Context, params Se
 		return ErrCourseNotFound
 	}
 
+	var oldExpiryStr *string
+	if oldExpiry != nil && !oldExpiry.IsZero() {
+		formatted := oldExpiry.UTC().Format(time.RFC3339)
+		oldExpiryStr = &formatted
+	}
+
 	metadata, err := json.Marshal(map[string]any{
-		"default_access_ends_at": params.DefaultAccessEndsAt.UTC().Format(time.RFC3339),
+		"old_default_access_ends_at": oldExpiryStr,
+		"new_default_access_ends_at": params.DefaultAccessEndsAt.UTC().Format(time.RFC3339),
 	})
 	if err != nil {
 		return fmt.Errorf("marshaling audit metadata: %w", err)
@@ -87,7 +97,7 @@ func (r *Repository) SetCourseDefaultAccessExpiry(ctx context.Context, params Se
 			reason, metadata
 		) VALUES (
 			$1, 'ADMIN', $2,
-			'COURSE_DEFAULT_ACCESS_EXPIRY_SET', 'IDENTITY_AND_ACCESS', 'COURSE', $3,
+			'COURSE_DEFAULT_ACCESS_EXPIRY_SET', 'CATALOG_AND_AUTHORING', 'COURSE', $3,
 			$4, $5
 		)
 	`

@@ -18,6 +18,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1306,6 +1307,28 @@ func assertStatementFails(
 	}
 }
 
+func assertConstraintViolation(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	ctx context.Context,
+	expectedConstraint string,
+	statement string,
+	args ...any,
+) {
+	t.Helper()
+	_, err := pool.Exec(ctx, statement, args...)
+	if err == nil {
+		t.Fatalf("statement unexpectedly succeeded, expected constraint violation %s: %s", expectedConstraint, statement)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("expected pgconn.PgError for constraint %s, got %v", expectedConstraint, err)
+	}
+	if pgErr.ConstraintName != expectedConstraint {
+		t.Fatalf("expected constraint violation %s, got constraint %s (code %s, msg: %s)", expectedConstraint, pgErr.ConstraintName, pgErr.Code, pgErr.Message)
+	}
+}
+
 func TestStaffLifecycleSchemaInvariants(t *testing.T) {
 	freshDatabase(t)
 	pool := openPool(t)
@@ -1456,7 +1479,7 @@ func TestCourseAccessGrantSchemaInvariants(t *testing.T) {
 		t.Fatalf("creating course_access_invitation: %v", err)
 	}
 
-	// Inserting second PENDING invitation for same (normalized_email, course_id) must fail.
+	// Inserting second PENDING invitation for same (normalized_email, course_id) must fail with cai_one_non_terminal_per_pair.
 	var secretID2 string
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO identity_action_secrets
@@ -1467,51 +1490,246 @@ func TestCourseAccessGrantSchemaInvariants(t *testing.T) {
 		t.Fatalf("creating second COURSE_ACCESS_INVITATION secret: %v", err)
 	}
 
-	assertStatementFails(t, pool, ctx,
+	assertConstraintViolation(t, pool, ctx, "cai_one_non_terminal_per_pair",
 		`INSERT INTO course_access_invitations
 		   (normalized_email, email, course_id, created_by_account_id, state, action_secret_id)
 		 VALUES ('student@example.com', 'Student@Example.com', $1, $2, 'PENDING_STUDENT_ACCEPTANCE', $3)`,
 		courseID, adminAccountID, secretID2,
 	)
 
-	// 3. Foreign key fk_entitlements_source_invitation and ent_manual_needs_invitation check.
-	// MANUAL_INVITATION grant without source_invitation_id must fail.
-	assertStatementFails(t, pool, ctx,
+	// 3. Exact constraint assertions on course_access_invitations
+	// cai_state_valid
+	assertConstraintViolation(t, pool, ctx, "cai_state_valid",
+		`INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		 VALUES ('invalid@example.com', 'invalid@example.com', $1, $2, $2, $2, 'INVALID_STATE')`,
+		courseID, adminAccountID,
+	)
+
+	// cai_rejection_needs_reason
+	assertConstraintViolation(t, pool, ctx, "cai_rejection_needs_reason",
+		`INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state, decision_reason)
+		 VALUES ('rej@example.com', 'rej@example.com', $1, $2, $2, $2, 'REJECTED', NULL)`,
+		courseID, adminAccountID,
+	)
+
+	// cai_decided_has_actor
+	assertConstraintViolation(t, pool, ctx, "cai_decided_has_actor",
+		`INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, state, decided_by_account_id, accepted_by_account_id)
+		 VALUES ('dec@example.com', 'dec@example.com', $1, $2, 'APPROVED', NULL, $2)`,
+		courseID, adminAccountID,
+	)
+
+	// cai_accepted_has_actor
+	assertConstraintViolation(t, pool, ctx, "cai_accepted_has_actor",
+		`INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, state, decided_by_account_id, accepted_by_account_id)
+		 VALUES ('acc@example.com', 'acc@example.com', $1, $2, 'APPROVED', $2, NULL)`,
+		courseID, adminAccountID,
+	)
+
+	// cai_email_present
+	assertConstraintViolation(t, pool, ctx, "cai_email_present",
+		`INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, state)
+		 VALUES ('', '', $1, $2, 'PENDING_STUDENT_ACCEPTANCE')`,
+		courseID, adminAccountID,
+	)
+
+	// 4. Foreign key fk_entitlements_source_invitation and ent_manual_needs_invitation check.
+	assertConstraintViolation(t, pool, ctx, "ent_manual_needs_invitation",
 		`INSERT INTO entitlements
 		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
 		 VALUES ($1, 'COURSE', $2, $2, 'MANUAL_INVITATION', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
 		adminAccountID, courseID,
 	)
 
-	// 4. Verification that courses.default_access_ends_at column exists.
+	// 5. Verification that courses.default_access_ends_at column exists.
 	if _, err := pool.Exec(ctx, `UPDATE courses SET default_access_ends_at = now() + interval '30 days' WHERE id = $1`, courseID); err != nil {
 		t.Fatalf("updating default_access_ends_at: %v", err)
 	}
 }
 
-func TestCourseAccessGrantRollbackRestoresPreGrantSchema(t *testing.T) {
+func TestPre0015EntitlementMigrationAndConstraints(t *testing.T) {
 	freshDatabase(t)
 	m := openMigrator(t)
-	if err := m.Up(); err != nil {
-		t.Fatalf("migrating through course access grant: %v", err)
+
+	// 1. Migrate through version 14.
+	if err := m.Migrate(uint(ProtectedLearningSchemaVersion)); err != nil {
+		t.Fatalf("migrating through version 14: %v", err)
 	}
+
 	pool := openPool(t)
-	if err := m.Steps(-1); err != nil {
-		t.Fatalf("rolling back course access grant: %v", err)
-	}
-	if tableExists(t, pool, "course_access_invitations") {
-		t.Fatal("course_access_invitations survived the 0015 rollback")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
 	defer cancel()
+
+	var adminID, courseID string
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (normalized_email, email, role, status, display_name) VALUES ('pre15@example.com', 'pre15@example.com', 'ADMIN', 'ACTIVE', 'Pre15 User') RETURNING id::text`).Scan(&adminID); err != nil {
+		t.Fatalf("seeding pre-0015 account: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO courses (owner_account_id, lifecycle) VALUES ($1::uuid, 'DRAFT') RETURNING id::text`, adminID).Scan(&courseID); err != nil {
+		t.Fatalf("seeding pre-0015 course: %v", err)
+	}
+
+	// 2. Insert valid pre-0015 Entitlement with null source_invitation_id (MANUAL_INVITATION without invitation ID on v14 schema).
+	var pre15EntitlementID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO entitlements
+			(student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', NULL, now() + interval '30 days', now() + interval '30 days', now(), 'ACTIVE')
+		RETURNING id::text
+	`, adminID, courseID).Scan(&pre15EntitlementID); err != nil {
+		t.Fatalf("seeding pre-0015 entitlement: %v", err)
+	}
+
+	// 3. Migrate to version 15 successfully.
+	if err := m.Migrate(uint(CourseAccessGrantSchemaVersion)); err != nil {
+		t.Fatalf("migrating to version 15 with pre-0015 entitlement: %v", err)
+	}
+
+	// 4. Confirm dirty = false and version = 15.
 	state, err := ReadSchemaState(ctx, pool)
-	if err != nil {
-		t.Fatalf("reading schema after 0015 rollback: %v", err)
+	if err != nil || state.Version != CourseAccessGrantSchemaVersion || state.Dirty {
+		t.Fatalf("schema state = %+v (err=%v), want clean version 15", state, err)
 	}
-	if state.Version != ProtectedLearningSchemaVersion || state.Dirty {
-		t.Fatalf("schema after 0015 rollback = %+v, want clean version %d", state, ProtectedLearningSchemaVersion)
+
+	// 5. Confirm legacy row remains intact.
+	var legacySourceInvID *string
+	if err := pool.QueryRow(ctx, `SELECT source_invitation_id::text FROM entitlements WHERE id = $1::uuid`, pre15EntitlementID).Scan(&legacySourceInvID); err != nil {
+		t.Fatalf("reading pre-0015 entitlement: %v", err)
 	}
+	if legacySourceInvID != nil {
+		t.Errorf("legacy entitlement source_invitation_id = %v, want nil", legacySourceInvID)
+	}
+
+	// 6. Confirm new manual-invitation Entitlement without invitation ID is rejected on ent_manual_needs_invitation.
+	var newStudentID string
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (normalized_email, email, role, status, display_name) VALUES ('newstudent@example.com', 'newstudent@example.com', 'STUDENT', 'ACTIVE', 'New Student') RETURNING id::text`).Scan(&newStudentID); err != nil {
+		t.Fatalf("seeding new student account: %v", err)
+	}
+
+	assertConstraintViolation(t, pool, ctx, "ent_manual_needs_invitation",
+		`INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		 VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', NULL, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')`,
+		newStudentID, courseID,
+	)
+
+	// 7. Confirm valid new manual-invitation Entitlement with invitation ID succeeds.
+	var invID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ('newstudent@example.com', 'newstudent@example.com', $1::uuid, $2::uuid, $3::uuid, $2::uuid, 'APPROVED')
+		RETURNING id::text
+	`, courseID, adminID, newStudentID).Scan(&invID); err != nil {
+		t.Fatalf("creating invitation fixture: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
+	`, newStudentID, courseID, invID); err != nil {
+		t.Fatalf("inserting valid invitation-backed entitlement: %v", err)
+	}
+}
+
+func TestCourseAccessGrantRollbackAndReUpgradeSafe(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+
+	// 1. Migrate to version 15.
+	if err := m.Migrate(uint(CourseAccessGrantSchemaVersion)); err != nil {
+		t.Fatalf("migrating to version 15: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var adminID, courseID string
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (normalized_email, email, role, status, display_name) VALUES ('rollback@example.com', 'rollback@example.com', 'ADMIN', 'ACTIVE', 'Rollback User') RETURNING id::text`).Scan(&adminID); err != nil {
+		t.Fatalf("seeding account: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO courses (owner_account_id, lifecycle) VALUES ($1::uuid, 'DRAFT') RETURNING id::text`, adminID).Scan(&courseID); err != nil {
+		t.Fatalf("seeding course: %v", err)
+	}
+
+	// 2. Create valid S6 invitation.
+	var invID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ('rollback-inv@example.com', 'rollback-inv@example.com', $1::uuid, $2::uuid, $2::uuid, $2::uuid, 'APPROVED')
+		RETURNING id::text
+	`, courseID, adminID).Scan(&invID); err != nil {
+		t.Fatalf("seeding invitation: %v", err)
+	}
+
+	// 3. Create Entitlement referencing that invitation.
+	var entID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
+		RETURNING id::text
+	`, adminID, courseID, invID).Scan(&entID); err != nil {
+		t.Fatalf("seeding entitlement: %v", err)
+	}
+
+	// 4. Migrate down one version (to 14).
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("rolling back to version 14: %v", err)
+	}
+
+	// 5. Verify Entitlement still exists.
+	var entCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM entitlements WHERE id = $1::uuid`, entID).Scan(&entCount); err != nil || entCount != 1 {
+		t.Fatalf("entitlement count after rollback = %d (err=%v), want 1", entCount, err)
+	}
+
+	// 6. Verify source_invitation_id is null.
+	var rolledBackInvID *string
+	if err := pool.QueryRow(ctx, `SELECT source_invitation_id::text FROM entitlements WHERE id = $1::uuid`, entID).Scan(&rolledBackInvID); err != nil {
+		t.Fatalf("reading entitlement source_invitation_id after rollback: %v", err)
+	}
+	if rolledBackInvID != nil {
+		t.Errorf("source_invitation_id after rollback = %v, want nil", rolledBackInvID)
+	}
+
+	// 7. Migrate back to version 15.
 	if err := m.Steps(1); err != nil {
-		t.Fatalf("reapplying course access grant after rollback: %v", err)
+		t.Fatalf("re-upgrading to version 15: %v", err)
 	}
+
+	// 8. Verify version 15 is clean.
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil || state.Version != CourseAccessGrantSchemaVersion || state.Dirty {
+		t.Fatalf("re-upgrade schema state = %+v (err=%v), want clean version 15", state, err)
+	}
+
+	// 9. Verify recreated foreign key works.
+	var studentBAccountID string
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (normalized_email, email, role, status, display_name) VALUES ('studentb@example.com', 'studentb@example.com', 'STUDENT', 'ACTIVE', 'Student B') RETURNING id::text`).Scan(&studentBAccountID); err != nil {
+		t.Fatalf("seeding student B account: %v", err)
+	}
+
+	var newInvID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ('studentb@example.com', 'studentb@example.com', $1::uuid, $2::uuid, $3::uuid, $2::uuid, 'APPROVED')
+		RETURNING id::text
+	`, courseID, adminID, studentBAccountID).Scan(&newInvID); err != nil {
+		t.Fatalf("creating new invitation after re-upgrade: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
+	`, studentBAccountID, courseID, newInvID); err != nil {
+		t.Fatalf("inserting entitlement with recreated FK: %v", err)
+	}
+
+	var studentCAccountID string
+	if err := pool.QueryRow(ctx, `INSERT INTO accounts (normalized_email, email, role, status, display_name) VALUES ('studentc@example.com', 'studentc@example.com', 'STUDENT', 'ACTIVE', 'Student C') RETURNING id::text`).Scan(&studentCAccountID); err != nil {
+		t.Fatalf("seeding student C account: %v", err)
+	}
+
+	badFKID := "99999999-9999-9999-9999-999999999999"
+	assertConstraintViolation(t, pool, ctx, "fk_entitlements_source_invitation", `
+		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
+	`, studentCAccountID, courseID, badFKID)
 }
