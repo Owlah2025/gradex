@@ -2124,3 +2124,32 @@ media architecture, acceptance criterion, or independent-review requirement chan
 remain separately gated.
 
 **Source:** Product-owner instruction on 2026-08-06.
+
+---
+
+## D-070 — T077 closes on the verified convergence gate, independently of T078
+
+**Date:** 2026-08-06
+**Status:** Active. Scoped only to S5 closure authorization.
+
+**Decision:** The convergence gate authorizes one further closure subject, `docs(s5): close T077`,
+matched exactly with no trailing glob and restricted to the existing closure evidence paths. No new
+application, test, workflow, or general documentation scope is added.
+
+**Why:** T077 is a *local* gate — clean working tree and index, final NUL-delimited porcelain
+byte-identical to the recorded pre-implementation baseline, the accepted commits present at their exact
+SHAs, every later commit classified inside its class's path allowlist, no post-implementation
+production-scope change, no merge commit, and no unclassified commit. All of that is verifiable by the
+builder on the final history, so T077 can and should close on its own evidence.
+
+T078 cannot. It requires hosted CI green on one exact head **and** a recorded independent Tier 3
+reviewer verdict against one frozen commit range, with every critical and high finding resolved.
+Builder verification is not independent review, a local green run does not satisfy it, and a review
+that yields no retrievable verdict is `UNAVAILABLE` rather than approval. Closing T077 therefore says
+nothing about T078, and the exact-match subject exists so no commit can imply otherwise.
+
+**Boundary:** the closure path allowlist is unchanged; the exact accepted SHA requirements, the
+no-merge and no-unclassified rules, the global production-scope denial, and D-059's clean-tree and
+baseline comparison all remain in force. No production behaviour changes.
+
+**Source:** Product-owner instruction on 2026-08-06.

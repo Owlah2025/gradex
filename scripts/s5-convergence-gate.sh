@@ -126,6 +126,7 @@ classify_subject() {
     "docs(s5): authorize narrow CI stabilization class"*)             printf 'GATE' ;;
     "docs(s5): authorize separate S5 closures")                       printf 'GATE' ;;
     "docs(s5): authorize production-origin T076 evidence")             printf 'GATE' ;;
+    "docs(s5): authorize T077 convergence closure")                   printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
     # T075 and T076 are independently evidenced tasks — T075 on a verified hosted artifact, T076 on
     # its own time-to-first-frame measurement — so each is closed by its own truthful commit. The
@@ -137,6 +138,10 @@ classify_subject() {
     # the exactness is here to reject.
     "docs(s5): close T075")                                           printf 'CLOSURE' ;;
     "docs(s5): close T076")                                           printf 'CLOSURE' ;;
+    # T077 verifies this gate on the final implementation history and closes independently of T078,
+    # which needs hosted CI on a frozen head plus an independent Tier 3 verdict the builder can never
+    # supply. Exact match, no glob: a prefix would admit a combined subject falsely claiming T078.
+    "docs(s5): close T077")                                           printf 'CLOSURE' ;;
     "docs(s5): record convergence and independent review"*)           printf 'CONVERGENCE' ;;
     "fix(ci): stabilize hosted S5 verification"*)                     printf 'CI_STABILIZATION' ;;
     "test(s5): add production-origin SC-001 evidence")                 printf 'T076_EVIDENCE' ;;
