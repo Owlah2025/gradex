@@ -1,10 +1,8 @@
 # Gradex Launch Status
 
-> Current date: **2026-08-06 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-08-07 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-08-06, S6 pre-implementation reconciliation against the S5
-> closure head `d5ce557`**; prior reconciliation 2026-08-01 at D-058 S4 closure after independent D7
-> and D8 approval
+> Last repository reconciliation: **2026-08-07, S6 documentation remediation pass against head `681f4a9`**; prior reconciliation 2026-08-06 at S6 pre-implementation reconciliation against S5 closure head `d5ce557`
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
 > below and [MVP_SCOPE_RECONCILIATION.md](MVP_SCOPE_RECONCILIATION.md)
@@ -23,10 +21,10 @@
 > assert they are fixed
 > **S6 — Course Access Invitation and Entitlement Grant is the ACTIVE slice**, unblocked as of
 > 2026-08-06 because S2, S4, and S5 are all closed. Planning is independently approved and frozen;
-> implementation has not started and its seats are unassigned
+> implementation has started under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews) with Antigravity as builder and Claude as independent reviewer. 13 of 85 tasks are complete at current head. Initial implementation range `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected; the complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation. S6 remains open; no next subgroup is authorized yet.
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
-> Days remaining: **9**
+> Days remaining: **8**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is closed
@@ -103,7 +101,7 @@ authoritative list. Carrying two items forward here does not close the others.
 **Unblocked 2026-08-06**: S2, S4, and S5 are all closed on independent verdicts. Planning is
 independently approved and frozen under
 [D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range).
-**No implementation has started.**
+**Implementation has started.** Implementation seats are assigned under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews) with Antigravity (`agy`) as implementation builder and Claude as independent reviewer. **13 of 85 tasks are complete at current head** (`T001`, `T001a`, `T002`, `T003`, `T003a`, `T004`, `T004a`, `T005`, `T006`, `T007`, `T007a`, `T008`, `T009`). Initial implementation range `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected (`VERDICT: REJECT`); the complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation. S6 remains active and open; no next subgroup is authorized yet.
 
 S6 owns the Course Access Invitation lifecycle, every production Enrollment write, and the single
 transaction that creates an Entitlement. It **consumes** S4's Entitlement evaluator and S5's
@@ -120,13 +118,25 @@ instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
 | Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
 | Branch | `s6-course-access-grant-20260806` |
 | Reconciliation reviewed | `d5ce557..9b66a24` and `9b66a24..ed3fb65`, both **`APPROVE`** — 0 critical, 0 high, 0 medium, 0 low, findings none. Reviewer independent of the builder and made no edit. See [`review/S6-PLANNING-RECONCILIATION-2026-08-06.md`](review/S6-PLANNING-RECONCILIATION-2026-08-06.md) |
-| Initial Subgroup Review | `d9e483f..a5a2748` returned **`REJECT`** (C1, H2, H3, H4, H5, M1, M2, M3, M4, M5). Range not approved; S6 remains active and open. |
-| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a` |
+| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a` (**13 complete**) |
+| Initial Subgroup Review | `d9e483f..a5a2748` returned **`REJECT`** (C1, H2, H3, H4, H5, M1, M2, M3, M4, M5). Range not approved. |
+| Remediation Subgroup Review | `a5a2748..681f4a9` returned **`REJECT`** (R8/N1, R9/N2, R10/N3 documentation blockers). Complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation; S6 remains active and open. |
 | Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
 | Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** |
-| Implementation seats | **Antigravity (`agy`)** as implementation builder; **Claude** as independent reviewer (under D-036). |
+| Implementation seats | **Antigravity (`agy`)** as implementation builder; **Claude** as independent reviewer (under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews)). |
 
-**D-073 acknowledged.** Product Owner acknowledged D-073 and its effort consequence (adding `courses.default_access_ends_at TIMESTAMPTZ`, Admin configuration route, Kuwait-local date conversion, audit, and UI surface). S6 remains active and open for bounded remediation and implementation.
+**D-073 explicitly acknowledged.** Product Owner Ahmed Hazem explicitly acknowledged D-073 and its effort and schedule consequences on August 7, 2026 through direct instruction, establishing D-073 provenance. S6 owns `courses.default_access_ends_at TIMESTAMPTZ`, Admin configuration route, Kuwait-local date conversion, audit, and UI surface.
+
+### S6 residual migration risk and rollback provenance gating S8
+
+Migration `0015_course_access_grant` adds constraint `ent_manual_needs_invitation` as `NOT VALID`:
+`ALTER TABLE entitlements ADD CONSTRAINT ent_manual_needs_invitation CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL) NOT VALID;`
+
+**Residual Risk & Trade-off Documentation:**
+1. **Grandfathered legacy rows:** Pre-0015 `entitlements` rows with `grant_source = 'MANUAL_INVITATION'` and null `source_invitation_id` survive migration 0015 because `NOT VALID` skips validation of existing data. No legacy rows were invalidated or fabricated.
+2. **Enforcement on future operations:** `NOT VALID` enforces the constraint for all future `INSERT` and `UPDATE` operations. Grandfathered rows therefore cannot undergo `UPDATE` until their `source_invitation_id` provenance is reconciled.
+3. **Rollback behavior:** Migration `0015_course_access_grant.down.sql` clears `source_invitation_id` (`UPDATE entitlements SET source_invitation_id = NULL WHERE source_invitation_id IS NOT NULL`) before dropping `course_access_invitations`. A production rollback after real S6 grants is **provenance-destructive**: invitation references are destroyed while `entitlements` rows survive. Upon re-upgrade, those previously valid rows become grandfathered and un-updatable.
+4. **Gating S8 (BR-026 Entitlement Expiry Adjustment):** S8 implements Admin Entitlement expiry adjustments (`UPDATE entitlements SET access_ends_at = ...`). Before S8 ships any production `UPDATE` path, the project must define an approved provenance reconciliation/backfill strategy for legacy and rolled-back rows, execute it, and validate the constraint (`ALTER TABLE entitlements VALIDATE CONSTRAINT ent_manual_needs_invitation`). Production rollback post-launch must be treated as provenance-destructive, requiring manual operational recovery before S8 updates.
 
 ## MVP scope changed on 2026-07-28 — D-045: no in-platform payments
 

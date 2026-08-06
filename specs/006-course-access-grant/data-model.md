@@ -142,7 +142,7 @@ PENDING_STUDENT_ACCEPTANCE ──accept──→ PENDING_ADMIN_APPROVAL ──ap
 | `entitlements_grant_source_implemented` | `CHECK (grant_source = 'MANUAL_INVITATION')` | **Exists** (S4). Planned here as `ent_grant_source_implemented`; the live name is authoritative. Reserved values are *not* permitted — a future source is added by amending this constraint in its own migration, which makes adding one a reviewable event rather than a silent insert. **FR-019, FR-020, BR-028** |
 | `entitlements_grant_source_present` | `CHECK (length(trim(grant_source)) > 0)` | **Exists** (S4), not planned here. Retained; it forbids a whitespace grant source independently of the allowlist |
 | `entitlements_one_active_student_course` | `UNIQUE (student_account_id, course_id) WHERE state = 'ACTIVE' AND scope_kind = 'COURSE'` | **Exists** (S4). Planned here as `ent_one_active_per_student_course` with no `scope_kind` predicate; the live predicate is **narrower** and is coextensive with S6's whole-Course-only writes. **FR-016, BR-024. Races 1 and 6** |
-| `ent_manual_needs_invitation` | `CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL)` | **Missing — S6 creates it.** `source_invitation_id` is currently nullable with nothing requiring it, so FR-021 and BR-113 are **not yet enforced by the database**. This is the one substantive addition §4 still owes |
+| `ent_manual_needs_invitation` | `CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL) NOT VALID` | **Created by S6** in `0015_course_access_grant.up.sql`. Added `NOT VALID` so pre-0015 legacy `entitlements` rows survive without invalidation or fake invitation fabrication. See §4.1 |
 | `fk_entitlements_source_invitation` | `FOREIGN KEY (source_invitation_id) REFERENCES course_access_invitations (id)` | **S6 creates it**, in the same migration that creates the referenced table. Not previously named here |
 
 **S6's migration asserts the four existing elements and fails loudly if any is absent or has a different
@@ -152,6 +152,23 @@ shape**, the same treatment §5 gives `enrollments`. It does not drop, recreate,
 > values now would let a future insert quietly use one; requiring a migration to widen it means adding
 > `PAID_ORDER` is a diff someone reviews. The reserved names live in documentation, not in a
 > permissive constraint.
+
+### 4.1 Residual Migration Risk, Grandfathered Rows, and S8 Gate
+
+Migration `0015_course_access_grant` adds constraint `ent_manual_needs_invitation` as `NOT VALID`:
+```sql
+ALTER TABLE entitlements ADD CONSTRAINT ent_manual_needs_invitation
+  CHECK (grant_source <> 'MANUAL_INVITATION' OR source_invitation_id IS NOT NULL) NOT VALID;
+```
+
+**Trade-off & Consequence Analysis:**
+- **Legacy Preservation:** Pre-0015 `entitlements` rows created with `grant_source = 'MANUAL_INVITATION'` and null `source_invitation_id` survive migration 0015 without invalidation or fake invitation fabrication because `NOT VALID` skips existing row verification.
+- **Enforcement Scope:** PostgreSQL enforces `NOT VALID` constraints on all subsequent `INSERT` and `UPDATE` statements. Consequently, grandfathered legacy rows cannot undergo `UPDATE` unless their `source_invitation_id` provenance is reconciled first.
+- **Rollback Provenance Destruction:** Migration `0015_course_access_grant.down.sql` clears `source_invitation_id` (`UPDATE entitlements SET source_invitation_id = NULL WHERE source_invitation_id IS NOT NULL`) before dropping `course_access_invitations`. A production rollback executed after real S6 grant invitations exist will destroy invitation references while preserving `entitlements` rows. Upon re-upgrade, those rows become grandfathered and un-updatable.
+- **S8 Dependency Gate:** S8 implements Admin Entitlement expiry adjustments (BR-026). Before S8 ships any production Entitlement `UPDATE` path:
+  1. The project must define an approved provenance reconciliation and backfill strategy for legacy and rolled-back rows.
+  2. The constraint must be validated in PostgreSQL (`ALTER TABLE entitlements VALIDATE CONSTRAINT ent_manual_needs_invitation`).
+  3. Production rollbacks after real S6 grants must be treated as provenance-destructive operational events requiring manual recovery.
 
 ---
 

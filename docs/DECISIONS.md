@@ -2291,8 +2291,9 @@ product-owner closure instruction of the same date.
 ## D-073 — S6 owns the Course default access-expiry column, because no closed slice created it
 
 **Date:** 2026-08-06
-**Status:** Active. **Acknowledged by Product Owner (2026-08-06)** with effort consequence acknowledged. Scoped to
-S6 planning and implementation.
+**Status:** Active. **Acknowledged by Product Owner Ahmed Hazem (2026-08-07)** with effort and schedule consequences explicitly acknowledged. Scoped to S6 planning and implementation.
+
+**Provenance.** On August 7, 2026, Product Owner Ahmed Hazem issued an explicit product-owner instruction acknowledging D-073, approving S6 ownership of `courses.default_access_ends_at`, acknowledging the associated effort and schedule consequences, confirming that the D-073 work already implemented in the first S6 subgroup was authorized, and establishing this instruction as the authoritative provenance. This acknowledgement was transmitted through the implementation instruction for the S6 documentation remediation pass. This acknowledgement does not approve any independently rejected implementation range (`d9e483f..a5a2748` and `a5a2748..681f4a9` remain rejected).
 
 **The gap.** BR-025 requires that "before a Course Access Invitation for a Course can be **approved**, an
 Admin must have configured a future Course `default_access_ends_at` instant," which Admin Approval then
@@ -2337,8 +2338,26 @@ already-approved requirement that the slice boundaries left unassigned.
 **Effort consequence, stated rather than absorbed:** S6 was sized at 9h Tier 3 on the assumption that
 the Course expiry instant was inherited. It is not, so S6 now also carries a column, a validated Admin
 write path with the local-date conversion, its audit evidence, and an Admin configuration screen. That
-is a real increase against a 2026-08-15 date with 9 days remaining, and it is surfaced for the product
+is a real increase against a 2026-08-15 date with 8 days remaining, and it is surfaced for the product
 owner rather than quietly absorbed into the estimate.
 
-**Source:** S6 pre-implementation reconciliation on 2026-08-06 against the S5 closure head
-`d5ce557c67befacaef85fef2d1516e97fd57aee4`; BR-025; [SLICES.md](launch/SLICES.md) §2 rule 2.
+**Source:** Explicit Product Owner instruction issued by Ahmed Hazem on 2026-08-07; S6 pre-implementation reconciliation on 2026-08-06 against the S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4`; BR-025; [SLICES.md](launch/SLICES.md) §2 rule 2.
+
+## D-074 — Antigravity builds S6 Course Access Grant and Claude independently reviews
+
+**Date:** 2026-08-07
+**Status:** Active. Scoped to S6 Course Access Grant (`specs/006-course-access-grant/`).
+
+**Decision:**
+1. **Scope:** S6 Course Access Grant (`specs/006-course-access-grant/`).
+2. **Seats:** Antigravity (`agy`) is assigned as the implementation builder; Claude is assigned as the independent read-only reviewer.
+3. **Effective Date:** August 7, 2026.
+4. **Authority:** Explicit Product Owner instruction issued by Ahmed Hazem on August 7, 2026.
+5. **Review Protocol:** The builder (`agy`) cannot independently review or approve its own work. The independent reviewer (Claude) must review one exact frozen commit range from a clean disposable worktree.
+6. **Subgroup Scope:** Approval applies only to the bounded subgroup reviewed and does not automatically authorize later S6 work.
+7. **Independence & Rejection Persistence:** Seat assignments do not silently carry to another slice. The ranges rejected by Claude (`d9e483f..a5a2748` and `a5a2748..681f4a9`) remain rejected until a later independent approval explicitly accepts them.
+8. **Duration:** This decision remains effective for S6 until replaced by another explicit Product Owner decision or until S6 closes.
+
+**Reason:** Scopes seat authority explicitly to S6 under direct Product Owner authorization, enforcing strict independent review protocol and preventing seat carry-over.
+
+**Source:** Explicit Product Owner instruction issued by Ahmed Hazem on 2026-08-07.
