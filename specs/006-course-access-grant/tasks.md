@@ -212,7 +212,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       reference at all. An entry added there would compile and grant nothing, and `Authorize`'s
       deny-by-default fallthrough would turn the mistake into a silent refusal rather than a build
       failure *(FR-001)*
-- [ ] T010 Implement the repository in `backend/internal/access/repository.go` with the canonical lock
+- [x] T010 Implement the repository in `backend/internal/access/repository.go` with the canonical lock
       order from [plan.md](plan.md#canonical-lock-order) — Course `FOR SHARE` → Invitation `FOR UPDATE`
       → Enrollment `FOR UPDATE` → Entitlement insert. **It owns its own transaction via
       `pool.Begin(ctx)`**, following `internal/catalog/repository.go:79`,
@@ -221,21 +221,21 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       in-transaction evaluation is needed, call
       `entitlement.Evaluator.EvaluateInTransaction(ctx, tx, …)`. Every precondition is re-asserted
       **inside** the transaction *(FR-015, FR-016)*
-- [ ] T011 Implement the invitation state machine and its guards in
+- [x] T011 Implement the invitation state machine and its guards in
       `backend/internal/access/invitation.go`, per [data-model.md §3](data-model.md#3-invitation-state-machine)
       *(FR-002, FR-024, BR-168)*
-- [ ] T012 [P] Unit-test every legal and illegal transition in
+- [x] T012 [P] Unit-test every legal and illegal transition in
       `backend/internal/access/invitation_test.go`, including that all three terminal states refuse
       every further transition *(FR-024, BR-168)*
 - [ ] T013 Implement Enrollment create-or-reuse in `backend/internal/access/enrollment.go` — **S6 owns
       the rows and the lifecycle; S5 owns the table.** Reuse an existing row, never create a second
       *(FR-015, BR-167, Principle IV)*
-- [ ] T014 Map PostgreSQL unique violations to their distinguishable conflict classes —
+- [x] T014 Map PostgreSQL unique violations to their distinguishable conflict classes —
       `cai_one_non_terminal_per_pair` → `duplicate-invitation`,
       `entitlements_one_active_student_course` → `already-has-active-access` — in
       `backend/internal/access/repository.go`, keying on the live constraint name rather than on the
       planned one. **A unique violation must never surface as a 500** *(FR-003, FR-016)*
-- [ ] T014a Build the Student and Admin guards in a new
+- [x] T014a Build the Student and Admin guards in a new
       `backend/internal/httpapi/access_foundation.go`, following `learning_foundation.go` and
       `media_foundation.go` for dependency validation. **The Student guard must not reuse
       `requireProtectedLearningAccess`** (`media_delivery_handlers.go:112`): it writes a uniform
@@ -245,13 +245,13 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       `internal/problem` envelope instead. `CapLearningAccess` is still the right capability class — an
       Active Student holds it independently of any Entitlement, so an invited Student with no access
       reaches their own acceptance screen *(FR-008, FR-009, FR-014)*
-- [ ] T015 Extend the derived authorization sweep in the existing
+- [x] T015 Extend the derived authorization sweep in the existing
       `backend/internal/httpapi/authorization_test.go` so every route under the new prefixes is
       asserted to carry its capability guard, deriving the route list from `r.Routes()`. A new
       unguarded route must **fail** this test. Note `/me` is a **new top-level prefix** — no `/me` route
       exists in the router today — so the sweep must cover it explicitly and not assume it inherits
       `/learn`'s guard *(FR-001, FR-014)*
-- [ ] T016 Mutation check for T015: mount a route without its guard and confirm the sweep fails
+- [x] T016 Mutation check for T015: mount a route without its guard and confirm the sweep fails
 
 ## Phase 3 — US1: An Admin invites a Student to one Course (P1)
 
@@ -259,28 +259,28 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
 **Independent test**: create an invitation; the queue shows it, the address receives a link, and no
 Enrollment or Entitlement row exists.
 
-- [ ] T017 [US1] Implement invitation creation in `backend/internal/access/invitation.go`: bind
+- [x] T017 [US1] Implement invitation creation in `backend/internal/access/invitation.go`: bind
       normalized email, Course, creating Admin, state, and timestamps; preserve the original
       correspondence email separately (the S1B1 correction) *(FR-002, FR-005)*
-- [ ] T018 [US1] Refuse creation when the target email is attached to a non-Student Account, in
+- [x] T018 [US1] Refuse creation when the target email is attached to a non-Student Account, in
       `backend/internal/access/invitation.go` *(FR-004, BR-082)*
-- [ ] T019 [US1] Issue the acceptance link as an expiring, single-use, purpose-bound
+- [x] T019 [US1] Issue the acceptance link as an expiring, single-use, purpose-bound
       `identity_action_secrets` row, following `backend/internal/identity/invitation.go`, in
       `backend/internal/access/invitation.go` *(FR-007, BR-169)*
-- [ ] T020 [US1] Co-commit the invitation-issued outbox intent using `outbox.VerificationDelivery`
+- [x] T020 [US1] Co-commit the invitation-issued outbox intent using `outbox.VerificationDelivery`
       inside the creation transaction, in `backend/internal/access/invitation.go`. The intent is part
       of the invariant, not an optional extra *(FR-032)*
-- [ ] T021 [US1] Mount `POST` and `GET /admin/course-access-invitations` in
+- [x] T021 [US1] Mount `POST` and `GET /admin/course-access-invitations` in
       `backend/internal/httpapi/access_routes.go` with capability guard, CSRF, and strict body-limit
       binding — the S1C correction where two routes bypassed strict binding with their declared limits
       unreferenced *(FR-001, FR-038)*
-- [ ] T022 [US1] Integration test in `backend/internal/httpapi/access_routes_integration_test.go`:
+- [x] T022 [US1] Integration test in `backend/internal/httpapi/access_routes_integration_test.go`:
       creation returns `201`, writes audit and outbox rows, and creates **zero** Enrollment and
       Entitlement rows *(FR-006, FR-031, FR-032)*
-- [ ] T023 [US1] Integration test: a second creation for the same pair returns
+- [x] T023 [US1] Integration test: a second creation for the same pair returns
       `409 duplicate-invitation`, and the acceptance secret appears in no response body and no log
       *(FR-003)*
-- [ ] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
+- [x] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
       *(FR-032)*
 - [ ] T025 [P] [US1] Build the AD06 invitation queue and creation form in
       `frontend/src/app/[locale]/admin/course-access/`, Arabic and English, with shared components under
@@ -295,23 +295,23 @@ Enrollment or Entitlement row exists.
 **Independent test**: accept, then request playback — still denied, denial byte-identical to a Course
 never invited to.
 
-- [ ] T026 [US2] Implement acceptance in `backend/internal/access/invitation.go`: permit only an
+- [x] T026 [US2] Implement acceptance in `backend/internal/access/invitation.go`: permit only an
       authenticated Account whose normalized email equals the invitation's; refuse every other
       identity server-side *(FR-008, FR-010)*
-- [ ] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
+- [x] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
       verification so an invited Student without an Account returns to acceptance, reusing the S1B3
       `returnTo` mechanism, in `backend/internal/httpapi/access_routes.go` *(FR-011)*
-- [ ] T028 [US2] Mount `GET`/`POST /me/course-access-invitations` and `…/{id}/accept` in
+- [x] T028 [US2] Mount `GET`/`POST /me/course-access-invitations` and `…/{id}/accept` in
       `backend/internal/httpapi/access_routes.go`, returning **404 for a wrong identity — never 403**
       *(FR-008, FR-009)*
-- [ ] T029 [US2] Integration test: acceptance moves state to `PENDING_ADMIN_APPROVAL`, writes audit,
+- [x] T029 [US2] Integration test: acceptance moves state to `PENDING_ADMIN_APPROVAL`, writes audit,
       and creates **zero** Enrollment and Entitlement rows *(FR-010, SC-002)*
-- [ ] T030 [US2] Security integration test: a different Student, an Instructor, an Admin, and an
+- [x] T030 [US2] Security integration test: a different Student, an Instructor, an Admin, and an
       unauthenticated visitor each fail to accept a valid link; every authenticated wrong-identity
       response is byte-identical to not-found *(FR-008, FR-009, SC-004)*
-- [ ] T031 [US2] Integration test: an expired acceptance token returns `410` and leaves the invitation
+- [x] T031 [US2] Integration test: an expired acceptance token returns `410` and leaves the invitation
       **unchanged and unexpired** *(FR-012, BR-169)*
-- [ ] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
+- [x] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
       fails. **This is the single most important mutation check in the slice** *(FR-010, SC-002)*
 - [ ] T033 [P] [US2] Build the ST03 acceptance screen in
       `frontend/src/app/[locale]/access/`, stating explicitly that acceptance does not grant
@@ -378,7 +378,7 @@ substitute for a concurrent one.** *(SC-003)*
 - [ ] T047 Race 2: concurrent approve and cancel → one wins, no partial state, loser returns `409`
       *(FR-024, SC-003)*
 - [ ] T048 Race 3: concurrent accept and cancel → one wins, loser returns `409` *(FR-024, SC-003)*
-- [ ] T049 Race 4: concurrent creation of the same pair → one row, loser returns `409` **not 500**
+- [x] T049 Race 4: concurrent creation of the same pair → one row, loser returns `409` **not 500**
       *(FR-003, SC-003)*
 - [ ] T050 Race 5: approval concurrent with a Course expiry change → the snapshot equals exactly one
       committed value, never torn and never rolled back *(FR-015, SC-003)*
