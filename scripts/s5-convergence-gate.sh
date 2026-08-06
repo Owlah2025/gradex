@@ -21,7 +21,7 @@
 #   1. The three accepted commits are present at their exact SHAs, in order.
 #   2. Every later commit matches exactly one authorized subject class.
 #      Classes: GATE, WORKFLOW, CI_STABILIZATION, T076_EVIDENCE, CLOSURE,
-#      TIER3_REMEDIATION, TIER3_EVIDENCE, CONVERGENCE.
+#      TIER3_REMEDIATION, TIER3_EVIDENCE, T078_CLOSURE, CONVERGENCE.
 #   3. Every later commit's changed paths lie inside that class's allowlist.
 #   4. No commit in the range touches S5 production scope after the
 #      implementation commit. An authorized subject is not a licence to edit a
@@ -151,6 +151,7 @@ classify_subject() {
     "docs(s5): authorize production-origin T076 evidence")             printf 'GATE' ;;
     "docs(s5): authorize T077 convergence closure")                   printf 'GATE' ;;
     "docs(s5): authorize Tier 3 playback remediation")                printf 'GATE' ;;
+    "docs(s5): authorize independent T078 closure")                  printf 'GATE' ;;
     "fix(ci): validate S5 rendered evidence workflow"*)               printf 'WORKFLOW' ;;
     # T075 and T076 are independently evidenced tasks — T075 on a verified hosted artifact, T076 on
     # its own time-to-first-frame measurement — so each is closed by its own truthful commit. The
@@ -176,6 +177,11 @@ classify_subject() {
     # no globs.
     "fix(s5): enforce playback issuance rate limits")                  printf 'TIER3_REMEDIATION' ;;
     "docs(s5): reconcile Tier 3 remediation evidence")                 printf 'TIER3_EVIDENCE' ;;
+    # T078 closes only on hosted CI green on the frozen candidate plus an independent Tier 3
+    # APPROVE. Exact match, no glob: a bare `docs(s5): close T078` is deliberately NOT accepted,
+    # because the subject must carry the fact that closure rests on an independent approval rather
+    # than on the builder's own assessment.
+    "docs(s5): close T078 after independent approval")                 printf 'T078_CLOSURE' ;;
     "docs(s5): refresh T077 after Tier 3 remediation")                 printf 'TIER3_EVIDENCE' ;;
     *) : ;;
   esac
@@ -272,6 +278,18 @@ path_allowed() {
         docs/DECISIONS.md|\
         docs/launch/STATUS.md|\
         docs/launch/daily/*.md) return 0 ;;
+      esac
+      ;;
+    T078_CLOSURE)
+      # Records only, four exact paths, no glob -- not even docs/launch/review/*, because this class
+      # authorizes one named review record and nothing else in that directory. No production, test,
+      # migration, workflow, or general specification path: the reviewed candidate is frozen, and a
+      # closure record that could touch code would let the closure change what was approved.
+      case "$p" in
+        specs/007-protected-learning/tasks.md|\
+        docs/launch/daily/2026-08-06.md|\
+        docs/launch/STATUS.md|\
+        docs/launch/review/S5-TIER3-REREVIEW-2026-08-06.md) return 0 ;;
       esac
       ;;
     CONVERGENCE)

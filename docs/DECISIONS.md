@@ -2251,3 +2251,39 @@ recorded here as open rather than fixed silently.
 
 **Source:** Independent Tier 3 review findings H-1, M-1, M-2 against head `f5985c7`, and the
 product-owner remediation instruction on 2026-08-06.
+
+## D-072 — T078 closes on hosted CI plus an independent Tier 3 APPROVE, and the closure commit is not the reviewed candidate
+
+**Date:** 2026-08-06
+**Status:** Active. Scoped to S5 closure.
+
+**Decision:** T078 closes when two things exist together and not otherwise: hosted CI green on the exact
+frozen candidate, and an independent Tier 3 verdict of `APPROVE` against that candidate's range with no
+unresolved Critical or High finding. Both conditions are met. The approved reviewed range ends at
+`41373a865bf4dc310f9b9b20139daecbb65767e0`; hosted run
+[31100802602](https://github.com/Owlah2025/gradex/actions/runs/31100802602) was green on all six jobs.
+
+The convergence gate gains one GATE anchor (`docs(s5): authorize independent T078 closure`) and one
+`T078_CLOSURE` class permitting four exact record paths — the task register, the 2026-08-06 daily record,
+`STATUS.md`, and one named review record. No glob, and deliberately not `docs/launch/review/*`.
+
+**Why the closure commit sits outside the reviewed range:** recording a verdict necessarily happens after
+the verdict exists, so the commit that records it cannot be inside the range the verdict covers. That is
+not a loophole to be papered over — it is a boundary that has to be stated, or the record would imply the
+reviewer approved its own citation. The reviewer approved `9c8348a1..41373a865bf4dc310f9b9b20139daecbb65767e0`.
+The closure commit is documentation and evidence only, is confined to the four paths above, and changes no
+production behaviour, so it needs no further independent review. A closure commit that strayed outside
+that boundary would change what was approved and would require a new review.
+
+**Follow-ups remain open, and closure does not resolve them.** The reviewer retained one Medium
+(`F-1`, playback rate limiting has no attributable per-Student/per-source monitoring signal) and several
+Low findings, alongside three previously disclosed Low items. Only `F-2` — `STATUS.md` materially
+understating S5 delivery state — is reconciled in this pass, because it is a truthfulness defect in the
+status record itself. The rest are tracked, not fixed, and S5 does not reopen merely because they remain.
+
+**Boundary:** no production code, test, migration, CI, or rate-limit value changes in this pass. The
+retained T075/T076 artifacts are untouched. The reviewed frozen range is unaltered.
+
+**Source:** Independent Tier 3 rereview verdict `APPROVE` against frozen head
+`41373a865bf4dc310f9b9b20139daecbb65767e0`, transmitted by the product owner on 2026-08-06, and the
+product-owner closure instruction of the same date.
