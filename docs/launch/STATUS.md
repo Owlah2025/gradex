@@ -38,10 +38,25 @@ formally closes the complete 32-task slice.
 | Complete approved range | `2bc8329016f76115d8a3243538f1e2bde81d2768..944c0a77079d632c6b836c7d60c46ff6144e7aa5` |
 | S6 boundary | The sole owner of production Entitlement creation; S4 evaluated only |
 
-## S5 — Protected Learning is active and unblocked
+## S5 — Protected Learning is implemented, independently approved, and closed
 
-**Planning is independently approved and remains frozen. S4 is closed, so S5 is the next active
-implementation feature. No S5 implementation has started and all 78 tasks remain uncompleted.**
+**S5 implementation and evidence work are complete.** `T001`–`T078` are all complete as of the closure
+commit on 2026-08-06. The frozen reviewed candidate is `41373a865bf4dc310f9b9b20139daecbb65767e0`, hosted
+run [31100802602](https://github.com/Owlah2025/gradex/actions/runs/31100802602) was green on all six jobs,
+and the independent Tier 3 verdict is **`APPROVE`** with **no unresolved Critical or High finding**.
+
+The reviewer retained eight non-blocking follow-ups (one Medium, seven Low) plus three previously
+disclosed Low items. **These are tracked, not resolved** — only `F-2`, this record's own understatement of
+S5 delivery state, was fixed at closure. `F-1` — playback rate limiting has no attributable
+per-Student/per-source monitoring signal — remains an explicit open Medium follow-up. See
+[`review/S5-TIER3-REREVIEW-2026-08-06.md`](review/S5-TIER3-REREVIEW-2026-08-06.md) for the full register.
+
+**The closure record commit is documentation and evidence only and is not the reviewed candidate.** A
+verdict can only be recorded after it exists, so the commit citing it necessarily falls outside the
+reviewed range and was not itself reviewed. It changes no production behaviour. See
+[D-072](../DECISIONS.md#d-072--t078-closes-on-hosted-ci-plus-an-independent-tier-3-approve-and-the-closure-commit-is-not-the-reviewed-candidate).
+
+Planning remains independently approved and frozen.
 
 | | |
 |---|---|
@@ -49,9 +64,13 @@ implementation feature. No S5 implementation has started and all 78 tasks remain
 | Planning review range | `785d71ce0b44ba4f591f2274285a6bc2f890b6c6..bae064d285f82703ee7cd61696e09c20d237a349` |
 | Approved planning head | `bae064d285f82703ee7cd61696e09c20d237a349` |
 | Independent verdict | **`APPROVE`** by `agy` under [D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range) — 0 critical, 0 high, 0 medium, 0 low, no open questions |
-| Tasks | 78 (`T001`–`T078`), **0 complete** |
+| Tasks | 78 (`T001`–`T078`), **78 complete** |
+| Frozen reviewed candidate | `41373a865bf4dc310f9b9b20139daecbb65767e0` |
+| Implementation review range | `9c8348a1..41373a865bf4dc310f9b9b20139daecbb65767e0` — 23 commits classified, no merge commit |
+| Hosted CI on that head | [31100802602](https://github.com/Owlah2025/gradex/actions/runs/31100802602) — all six jobs success |
+| Independent implementation verdict | **`APPROVE`** — 0 critical, 0 high; 1 Medium and 7 Low retained as non-blocking follow-ups |
 | Traceability | 36/36 active functional requirements cited; 12/12 success criteria covered |
-| Implementation seats | **Unassigned.** D-048 is a planning seat and grants no implementation authority; activation does not begin implementation |
+| Implementation seats | Claude built the slice; the independent Tier 3 reviewer approved it. The builder never approved its own slice, and seats do not renew implicitly |
 
 S5 introduces the minimum physical `enrollments` table required by `progress.enrollment_id` and
 **creates no normal Enrollment row**. It implements no invitation, acceptance, approval, rejection,

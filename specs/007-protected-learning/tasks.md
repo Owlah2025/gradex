@@ -274,7 +274,36 @@ visible.
   against the new frozen head: the reviewed range moved, no verdict carries forward, and this remediation
   was authored by the builder.
   **T078 was not reviewed and is not closed.** This verification is the builder's own, and builder verification is explicitly not independent review: T078 requires hosted CI green on the exact frozen head **and** a recorded independent Tier 3 reviewer verdict against one frozen commit range with every critical and high finding resolved. A local green run does not satisfy it, and a review producing no retrievable verdict is `UNAVAILABLE`, not approval. The builder never approves its own slice.
-- [ ] T078 **Convergence — cannot be marked complete on local evidence.** Requires **hosted CI green on the exact head commit** (Backend, Frontend, migrations, integration, and Guards jobs) **and** a recorded **independent Tier 3 reviewer verdict** against one frozen commit range, with every critical and high finding resolved. A local green run does not satisfy this task. If the review produces no retrievable verdict, that is review `UNAVAILABLE`, **not** approval, and the slice does not close. **The builder never approves its own slice**
+- [X] T078 **Convergence — cannot be marked complete on local evidence.** Requires **hosted CI green on the exact head commit** (Backend, Frontend, migrations, integration, and Guards jobs) **and** a recorded **independent Tier 3 reviewer verdict** against one frozen commit range, with every critical and high finding resolved. A local green run does not satisfy this task. If the review produces no retrievable verdict, that is review `UNAVAILABLE`, **not** approval, and the slice does not close. **The builder never approves its own slice**
+  **CLOSED 2026-08-06 on an independent Tier 3 `APPROVE`.** Both required conditions hold together.
+
+```text
+Independent verdict:   APPROVE
+Reviewed frozen HEAD:  41373a865bf4dc310f9b9b20139daecbb65767e0
+Reviewed range:        9c8348a1..41373a865bf4dc310f9b9b20139daecbb65767e0
+Hosted run:            31100802602
+Critical findings:     0
+High findings:         0
+T078 eligible:         yes
+```
+
+  The reviewer's verdict line, verbatim: `VERDICT: APPROVE`. The eligibility statement, verbatim:
+  `T078 is eligible for closure on frozen HEAD 41373a865bf4dc310f9b9b20139daecbb65767e0.` Neither is a
+  paraphrase, and neither is inferred from favourable prose. Hosted run
+  [31100802602](https://github.com/Owlah2025/gradex/actions/runs/31100802602) on that exact head was green
+  on all six jobs — Backend, Frontend, Migrations, Admission Integration, Guards, and S5 T075 Rendered
+  Evidence — with retained artifact `gradex-s5-t075-rendered-41373a865bf4dc310f9b9b20139daecbb65767e0`,
+  id `8967489099`, 1,935,837 bytes, expiring 2026-11-04, and no `FAILED` marker in the name. The reviewer
+  was independent of the builder, did not modify the repository, and did not close this task. The prior
+  review's H-1, M-1, and M-2 were confirmed resolved; every remaining finding is Medium or Low and
+  non-blocking. Full record: [`docs/launch/review/S5-TIER3-REREVIEW-2026-08-06.md`](../../docs/launch/review/S5-TIER3-REREVIEW-2026-08-06.md).
+  **This closure commit is not part of the reviewed range and was not reviewed** — a verdict can only be
+  recorded after it exists, so the recording commit necessarily follows the range it cites. It is
+  documentation and evidence only, confined to the four paths authorized by
+  [D-072](../../docs/DECISIONS.md#d-072--t078-closes-on-hosted-ci-plus-an-independent-tier-3-approve-and-the-closure-commit-is-not-the-reviewed-candidate),
+  and changes no production behaviour. **Closure does not resolve the retained follow-ups**: one Medium
+  (`F-1`, no attributable per-Student/per-source playback monitoring signal) and seven Low items remain
+  open and tracked, and S5 does not reopen because they remain.
 
 ---
 
