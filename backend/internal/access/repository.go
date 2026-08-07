@@ -146,11 +146,10 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 	if strings.TrimSpace(params.CourseID) == "" {
 		return Invitation{}, "", ErrCourseNotFound
 	}
-	rawEmail := strings.TrimSpace(params.Email)
-	if rawEmail == "" {
-		return Invitation{}, "", errors.New("email is required")
+	normalizedEmail, err := identity.NormalizeEmail(params.Email)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("%w: %v", ErrInvalidEmail, err)
 	}
-	normalizedEmail := strings.ToLower(rawEmail)
 
 	now := params.Now
 	if now.IsZero() {
@@ -161,17 +160,6 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 		ttl = 7 * 24 * time.Hour
 	}
 	expiresAt := now.Add(ttl)
-
-	// Check eligibility: if an account exists for this normalized email, it MUST be a STUDENT account (FR-004, BR-082).
-	var role string
-	err := r.pool.QueryRow(ctx, "SELECT role FROM accounts WHERE normalized_email = $1", normalizedEmail).Scan(&role)
-	if err == nil {
-		if role != "STUDENT" {
-			return Invitation{}, "", ErrIneligibleRecipient
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return Invitation{}, "", fmt.Errorf("checking account eligibility: %w", err)
-	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -187,6 +175,17 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 	}
 	if err != nil {
 		return Invitation{}, "", fmt.Errorf("locking course: %w", err)
+	}
+
+	// Authoritative recipient eligibility check inside transaction (FR-004, BR-082)
+	var role string
+	err = tx.QueryRow(ctx, "SELECT role FROM accounts WHERE normalized_email = $1", normalizedEmail).Scan(&role)
+	if err == nil {
+		if role != "STUDENT" {
+			return Invitation{}, "", ErrIneligibleRecipient
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, "", fmt.Errorf("checking account eligibility in transaction: %w", err)
 	}
 
 	// Generate action secret
@@ -220,7 +219,7 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 			'PENDING_STUDENT_ACCEPTANCE', $6, $7, $8::uuid, $9
 		) RETURNING id::text, normalized_email, email, course_id::text, created_by_account_id::text,
 		            state, admin_note, external_reference, action_secret_id::text, created_at
-	`, invitationID, normalizedEmail, rawEmail, params.CourseID, params.AdminAccountID,
+	`, invitationID, normalizedEmail, strings.TrimSpace(params.Email), params.CourseID, params.AdminAccountID,
 		params.AdminNote, params.ExternalReference, actionSecretID, now,
 	).Scan(
 		&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
@@ -228,8 +227,13 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && (pgErr.ConstraintName == "cai_one_non_terminal_per_pair" || pgErr.Code == "23505") {
-			return Invitation{}, "", ErrDuplicateInvitation
+		if errors.As(err, &pgErr) {
+			if pgErr.ConstraintName == "cai_one_non_terminal_per_pair" || pgErr.Code == "23505" {
+				return Invitation{}, "", ErrDuplicateInvitation
+			}
+			if pgErr.ConstraintName == "cai_email_present" {
+				return Invitation{}, "", ErrInvalidEmail
+			}
 		}
 		return Invitation{}, "", fmt.Errorf("inserting invitation: %w", err)
 	}

@@ -3,6 +3,8 @@ package access
 import (
 	"errors"
 	"time"
+
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
 type State string
@@ -38,6 +40,7 @@ var (
 	ErrDuplicateInvitation     = errors.New("duplicate invitation")
 	ErrIneligibleRecipient     = errors.New("ineligible recipient")
 	ErrAcceptanceTokenExpired  = errors.New("acceptance token expired")
+	ErrInvalidEmail            = identity.ErrInvalidEmail
 )
 
 type Invitation struct {

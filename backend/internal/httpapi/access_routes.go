@@ -113,7 +113,6 @@ func mountAccessRoutes(
 	{
 		meReadGroup.GET("/course-access-invitations", h.listStudentCourseAccessInvitations)
 		meReadGroup.GET("/course-access-invitations/:id", h.getStudentCourseAccessInvitation)
-		meReadGroup.GET("/course-access", h.getStudentCourseAccessHistory)
 	}
 
 	// Student mutations
@@ -230,10 +229,9 @@ func (h *accessHandlers) createCourseAccessInvitation(c *gin.Context) {
 		return
 	}
 
-	email := strings.TrimSpace(body.Email)
-	if email == "" || !strings.Contains(email, "@") {
+	if _, err := identity.NormalizeEmail(body.Email); err != nil {
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
-			Code:      "EMAIL_REQUIRED",
+			Code:      "INVALID_EMAIL",
 			Detail:    "A valid email address is required",
 			Location:  problem.LocationBody,
 			Parameter: "email",
@@ -248,7 +246,7 @@ func (h *accessHandlers) createCourseAccessInvitation(c *gin.Context) {
 
 	inv, _, err := h.repo.CreateInvitation(c.Request.Context(), access.CreateInvitationParams{
 		CourseID:          body.CourseID,
-		Email:             email,
+		Email:             body.Email,
 		AdminAccountID:    adminAccountID,
 		AdminNote:         body.AdminNote,
 		ExternalReference: body.ExternalReference,
@@ -257,6 +255,15 @@ func (h *accessHandlers) createCourseAccessInvitation(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, access.ErrCourseNotFound) {
 			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrInvalidEmail) {
+			writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+				Code:      "INVALID_EMAIL",
+				Detail:    "A valid email address is required",
+				Location:  problem.LocationBody,
+				Parameter: "email",
+			}))
 			return
 		}
 		if errors.Is(err, access.ErrIneligibleRecipient) {
@@ -408,23 +415,4 @@ func (h *accessHandlers) acceptStudentCourseAccessInvitation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, inv.ToStudentProjection())
-}
-
-func (h *accessHandlers) getStudentCourseAccessHistory(c *gin.Context) {
-	studentAccountID := c.GetString(ctxUserIDKey)
-
-	invitations, err := h.repo.ListStudentInvitations(c.Request.Context(), studentAccountID)
-	if err != nil {
-		writeProblem(c, problem.Internal(""))
-		return
-	}
-
-	projections := make([]access.StudentInvitation, 0, len(invitations))
-	for _, inv := range invitations {
-		projections = append(projections, inv.ToStudentProjection())
-	}
-
-	c.JSON(http.StatusOK, studentInvitationListResponse{
-		Invitations: projections,
-	})
 }

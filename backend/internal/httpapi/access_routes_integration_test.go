@@ -370,7 +370,7 @@ func TestBatchA_CourseAccessInvitationHTTPAPI_RealPostgreSQL(t *testing.T) {
 		}
 	})
 
-	t.Run("Ineligible recipient (non-student) returns 409 ineligible-recipient", func(t *testing.T) {
+	t.Run("Ineligible recipient (non-student) returns 409 ineligible-recipient and commits zero partial rows", func(t *testing.T) {
 		body := []byte(`{"course_id":"` + courseID + `","email":"instructor-access@example.com"}`)
 		resp := doPricingRequest(t, client, "POST", invitationsURL, adminToken, validOrigin, adminToken, body)
 		defer resp.Body.Close()
@@ -385,6 +385,69 @@ func TestBatchA_CourseAccessInvitationHTTPAPI_RealPostgreSQL(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&prob)
 		if prob.Code != "INELIGIBLE_RECIPIENT" {
 			t.Errorf("prob.Code = %q, want INELIGIBLE_RECIPIENT", prob.Code)
+		}
+
+		// Assert zero partial rows committed inside transaction (R-A3)
+		var invCount, secretCount, auditCount, outboxCount int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM course_access_invitations WHERE normalized_email = 'instructor-access@example.com'`).Scan(&invCount)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM identity_action_secrets WHERE purpose = 'COURSE_ACCESS_INVITATION' AND issued_at > now() - interval '1 minute'`).Scan(&secretCount)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'COURSE_ACCESS_INVITATION_ISSUED' AND metadata->>'normalized_email' = 'instructor-access@example.com'`).Scan(&auditCount)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE type = 'access.invitation_issued' AND safe_payload->>'course_id' = $1 AND safe_payload->>'normalized_email' = 'instructor-access@example.com'`, courseID).Scan(&outboxCount)
+
+		if invCount != 0 || auditCount != 0 || outboxCount != 0 {
+			t.Errorf("got invCount=%d, auditCount=%d, outboxCount=%d; want 0, 0, 0", invCount, auditCount, outboxCount)
+		}
+	})
+
+	t.Run("Malformed email addresses return 422 and create zero database rows (R-A2)", func(t *testing.T) {
+		malformedEmails := []string{
+			"x@y",
+			"@x.com",
+			"foo bar@x.com",
+			"a@",
+			"@example.com",
+			"user@localhost",
+			"user name@example.com",
+			strings.Repeat("a", 315) + "@example.com", // >320 chars
+		}
+
+		for _, malformed := range malformedEmails {
+			t.Run("email="+malformed, func(t *testing.T) {
+				reqBody, _ := json.Marshal(map[string]any{
+					"course_id": courseID,
+					"email":     malformed,
+				})
+				resp := doPricingRequest(t, client, "POST", invitationsURL, adminToken, validOrigin, adminToken, reqBody)
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusUnprocessableEntity {
+					t.Fatalf("Malformed email %q status = %d, want 422 (never 500)", malformed, resp.StatusCode)
+				}
+
+				var prob struct {
+					Code       string `json:"code"`
+					Violations []struct {
+						Parameter string `json:"parameter"`
+					} `json:"violations"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&prob); err != nil {
+					t.Fatalf("decoding error response: %v", err)
+				}
+				if prob.Code != "VALIDATION_FAILED" {
+					t.Errorf("Code = %q, want VALIDATION_FAILED", prob.Code)
+				}
+
+				// Verify zero DB rows were created
+				var invCount, secretCount, auditCount, outboxCount int
+				_ = pool.QueryRow(ctx, `SELECT count(*) FROM course_access_invitations WHERE email = $1 OR normalized_email = $1`, malformed).Scan(&invCount)
+				_ = pool.QueryRow(ctx, `SELECT count(*) FROM identity_action_secrets WHERE purpose = 'COURSE_ACCESS_INVITATION' AND issued_at > now() - interval '10 seconds'`).Scan(&secretCount)
+				_ = pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE created_at > now() - interval '10 seconds' AND action = 'COURSE_ACCESS_INVITATION_ISSUED'`).Scan(&auditCount)
+				_ = pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE created_at > now() - interval '10 seconds' AND type = 'access.invitation_issued'`).Scan(&outboxCount)
+
+				if invCount != 0 || auditCount != 0 || outboxCount != 0 {
+					t.Errorf("malformed %q created DB rows: inv=%d, audit=%d, outbox=%d, want all 0", malformed, invCount, auditCount, outboxCount)
+				}
+			})
 		}
 	})
 
