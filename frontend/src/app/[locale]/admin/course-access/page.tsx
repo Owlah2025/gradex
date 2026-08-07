@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useLocale } from "@/lib/i18n/locale-provider";
 import {
   CourseAccessInvitation,
   AdminEntitlementDetail,
@@ -15,7 +16,18 @@ import {
 } from "@/lib/api/access";
 import { ProblemError } from "@/lib/api/problem";
 
+function getProblemErrorMessage(e: unknown, fallback: string): string {
+  if (e instanceof ProblemError) {
+    return e.problem.detail || e.problem.title || fallback;
+  }
+  if (e && typeof e === "object" && "message" in e && typeof e.message === "string") {
+    return e.message;
+  }
+  return fallback;
+}
+
 export default function AdminCourseAccessPage() {
+  const { locale } = useLocale();
   const [invitations, setInvitations] = useState<CourseAccessInvitation[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,28 +55,24 @@ export default function AdminCourseAccessPage() {
   const [detailModal, setDetailModal] = useState<AdminEntitlementDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
 
-  const fetchInvitations = async () => {
+  const fetchInvitations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await listAdminCourseAccessInvitations(1, 100, "en");
+      const res = await listAdminCourseAccessInvitations(1, 100, locale);
       if (res && res.invitations) {
         setInvitations(res.invitations);
       }
-    } catch (e: any) {
-      if (e instanceof ProblemError) {
-        setError(e.detail || e.title || "Failed to fetch invitations");
-      } else {
-        setError(e?.message || "Failed to fetch invitations");
-      }
+    } catch (e: unknown) {
+      setError(getProblemErrorMessage(e, "Failed to fetch invitations"));
     } finally {
       setLoading(false);
     }
-  };
+  }, [locale]);
 
   useEffect(() => {
     fetchInvitations();
-  }, []);
+  }, [fetchInvitations]);
 
   const handleSetExpiry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,13 +81,13 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await setCourseDefaultAccessExpiry(expiryCourseId, expiryDate, expiryReason, "en");
+      await setCourseDefaultAccessExpiry(expiryCourseId, expiryDate, expiryReason, locale);
       setSuccess(`Default access expiry configured for course ${expiryCourseId}`);
       setExpiryCourseId("");
       setExpiryDate("");
       setExpiryReason("");
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Failed to set default access expiry");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Failed to set default access expiry"));
     } finally {
       setExpirySubmitting(false);
     }
@@ -97,7 +105,7 @@ export default function AdminCourseAccessPage() {
         createEmail,
         createNote || undefined,
         createRef || undefined,
-        "en",
+        locale,
       );
       setSuccess(`Course access invitation created for ${created?.email || createEmail}`);
       setCreateCourseId("");
@@ -105,8 +113,8 @@ export default function AdminCourseAccessPage() {
       setCreateNote("");
       setCreateRef("");
       fetchInvitations();
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Failed to create invitation");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Failed to create invitation"));
     } finally {
       setCreateSubmitting(false);
     }
@@ -116,11 +124,11 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await approveCourseAccessInvitation(id, "en");
+      const res = await approveCourseAccessInvitation(id, locale);
       setSuccess(`Invitation approved! Entitlement ID: ${res?.entitlement?.id}`);
       fetchInvitations();
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Approval failed");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Approval failed"));
     }
   };
 
@@ -131,13 +139,13 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await rejectCourseAccessInvitation(rejectingInvId, rejectReason.trim(), "en");
+      await rejectCourseAccessInvitation(rejectingInvId, rejectReason.trim(), locale);
       setSuccess(`Invitation ${rejectingInvId} rejected.`);
       setRejectingInvId(null);
       setRejectReason("");
       fetchInvitations();
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Rejection failed");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Rejection failed"));
     } finally {
       setRejectSubmitting(false);
     }
@@ -147,11 +155,11 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await cancelCourseAccessInvitation(id, "en");
+      await cancelCourseAccessInvitation(id, locale);
       setSuccess(`Invitation ${id} cancelled.`);
       fetchInvitations();
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Cancellation failed");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Cancellation failed"));
     }
   };
 
@@ -159,23 +167,23 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await resendCourseAccessInvitation(id, "en");
+      await resendCourseAccessInvitation(id, locale);
       setSuccess(`New acceptance link generated and queued for invitation ${id}.`);
       fetchInvitations();
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Resend failed");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Resend failed"));
     }
   };
 
   const handleViewEntitlement = async (entitlementId: string) => {
     setDetailLoading(true);
     try {
-      const detail = await getAdminEntitlementDetail(entitlementId, "en");
+      const detail = await getAdminEntitlementDetail(entitlementId, locale);
       if (detail) {
         setDetailModal(detail);
       }
-    } catch (err: any) {
-      setError(err?.detail || err?.title || "Failed to load entitlement details");
+    } catch (err: unknown) {
+      setError(getProblemErrorMessage(err, "Failed to load entitlement details"));
     } finally {
       setDetailLoading(false);
     }

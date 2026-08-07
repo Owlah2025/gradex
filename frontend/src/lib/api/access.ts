@@ -1,4 +1,5 @@
-import { authenticatedRequest, getJSON, postJSON } from "./http";
+import { authenticatedRequest, ensureAnonymousBrowser, getJSON, postJSON } from "./http";
+import { currentCSRFToken } from "../identity/session";
 
 export interface CourseAccessInvitation {
   id: string;
@@ -86,6 +87,13 @@ export interface AdminInvitationListResponse {
   limit: number;
 }
 
+async function resolveCSRF(csrf?: string): Promise<string> {
+  if (csrf) return csrf;
+  const current = currentCSRFToken();
+  if (current) return current;
+  return ensureAnonymousBrowser();
+}
+
 export async function setCourseDefaultAccessExpiry(
   courseId: string,
   date: string,
@@ -93,11 +101,12 @@ export async function setCourseDefaultAccessExpiry(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<{ course_id: string; default_access_ends_at: string; reason: string }>(
     `/admin/courses/${courseId}/default-access-expiry`,
     "PUT",
     lang,
-    csrf,
+    token,
     { date, reason },
   );
 }
@@ -110,11 +119,12 @@ export async function createCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<CourseAccessInvitation>(
     "/admin/course-access-invitations",
     "POST",
     lang,
-    csrf,
+    token,
     {
       course_id: courseId,
       email,
@@ -143,11 +153,12 @@ export async function approveCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<ApproveInvitationResult>(
     `/admin/course-access-invitations/${invitationId}/approve`,
     "POST",
     lang,
-    csrf,
+    token,
   );
 }
 
@@ -157,11 +168,12 @@ export async function rejectCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<CourseAccessInvitation>(
     `/admin/course-access-invitations/${invitationId}/reject`,
     "POST",
     lang,
-    csrf,
+    token,
     { reason },
   );
 }
@@ -171,11 +183,12 @@ export async function cancelCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<CourseAccessInvitation>(
     `/admin/course-access-invitations/${invitationId}/cancel`,
     "POST",
     lang,
-    csrf,
+    token,
   );
 }
 
@@ -184,11 +197,12 @@ export async function resendCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<CourseAccessInvitation>(
     `/admin/course-access-invitations/${invitationId}/resend`,
     "POST",
     lang,
-    csrf,
+    token,
   );
 }
 
@@ -236,11 +250,12 @@ export async function acceptStudentCourseAccessInvitation(
   lang: "ar" | "en" = "en",
   csrf?: string,
 ) {
+  const token = await resolveCSRF(csrf);
   return authenticatedRequest<StudentCourseAccessInvitation>(
     `/me/course-access-invitations/${id}/accept`,
     "POST",
     lang,
-    csrf,
+    token,
     { acceptance_token: acceptanceToken },
   );
 }

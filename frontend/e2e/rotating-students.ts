@@ -101,3 +101,22 @@ export async function authenticateRotatingStudent(
     },
   ]);
 }
+
+export function queryInvitationToken(invitationID: string): string {
+  if (!fs.existsSync(RUN_STATE_FILE_PATH)) {
+    throw new Error(`E2E run state is missing at ${RUN_STATE_FILE_PATH}; cannot query invitation token.`);
+  }
+  const state = JSON.parse(fs.readFileSync(RUN_STATE_FILE_PATH, "utf-8"));
+  const output = execFileSync(SEED_BINARY_PATH, ["-query-invitation-token", "-invitation", invitationID], {
+    env: {
+      ...process.env,
+      GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
+      GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
+      GRADEX_E2E_TARGET_DB_NAME: state.dbName,
+      GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
+      DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+    },
+  });
+  const parsed = JSON.parse(output.toString("utf-8"));
+  return parsed.verification_token;
+}

@@ -172,3 +172,59 @@ export async function waitForProgress(
   }
   return latest;
 }
+
+export type LearningStateSnapshot = {
+  entitlement: {
+    found: boolean;
+    state: string;
+    access_ends_at: string;
+    original_access_ends_at: string;
+    revoked_at?: string | null;
+    revision: number;
+  };
+  enrollment: {
+    found: boolean;
+    created_at: string;
+  };
+  progress: Array<{
+    lesson_identity_id: string;
+    max_position_seconds: number;
+    last_position_seconds: number;
+    completed: boolean;
+    completed_at: string;
+    updated_at: string;
+  }>;
+};
+
+export function queryLearningState(studentID: string, courseID: string): LearningStateSnapshot {
+  if (!fs.existsSync(RUN_STATE_FILE_PATH)) {
+    throw new Error(`E2E run state is missing at ${RUN_STATE_FILE_PATH}; cannot read learning state evidence.`);
+  }
+  const state = JSON.parse(fs.readFileSync(RUN_STATE_FILE_PATH, "utf-8"));
+
+  const output = execFileSync(
+    SEED_BINARY_PATH,
+    [
+      "-query-learning-state",
+      "-dbname",
+      state.dbName,
+      "-student",
+      studentID,
+      "-course",
+      courseID,
+    ],
+    {
+      env: {
+        ...process.env,
+        GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
+        GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
+        GRADEX_E2E_TARGET_DB_NAME: state.dbName,
+        GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
+        DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+      },
+      encoding: "utf-8",
+    }
+  );
+
+  return JSON.parse(output.trim());
+}

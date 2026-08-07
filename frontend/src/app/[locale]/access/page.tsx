@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLocale } from "@/lib/i18n/locale-provider";
+import { safeReturnTo } from "@/lib/identity/return-to";
 import {
   StudentCourseAccessInvitation,
   StudentCourseAccessHistoryItem,
@@ -13,6 +15,7 @@ import {
 import { ProblemError } from "@/lib/api/problem";
 
 export default function StudentCourseAccessPage() {
+  const { locale } = useLocale();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -26,42 +29,48 @@ export default function StudentCourseAccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const fetchStudentData = async () => {
+  const fetchStudentData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       if (invitationId) {
         try {
-          const inv = await getStudentCourseAccessInvitation(invitationId, "en");
+          const inv = await getStudentCourseAccessInvitation(invitationId, locale);
           setActiveInvitation(inv);
-        } catch (e: any) {
-          if (e instanceof ProblemError && e.status === 404) {
-            setError("Invitation not found or addressed to a different account.");
+        } catch (e: unknown) {
+          if (e instanceof ProblemError) {
+            if (e.problem.status === 404) {
+              setError("Invitation not found or addressed to a different account.");
+            } else {
+              setError(e.problem.detail || e.problem.title || "Unable to load invitation details.");
+            }
+          } else if (e && typeof e === "object" && "message" in e && typeof e.message === "string") {
+            setError(e.message);
           } else {
-            setError(e?.detail || e?.title || "Unable to load invitation details.");
+            setError("Unable to load invitation details.");
           }
         }
       }
 
-      const hist = await getStudentCourseAccessHistory("en");
+      const hist = await getStudentCourseAccessHistory(locale);
       if (hist && hist.items) {
         setHistoryItems(hist.items);
       }
-    } catch (e: any) {
-      // If student is unauthenticated, redirect to sign-in with returnTo
-      if (e instanceof ProblemError && e.status === 401) {
-        const currentUrl = `/access?${searchParams.toString()}`;
-        router.push(`/login?returnTo=${encodeURIComponent(currentUrl)}`);
+    } catch (e: unknown) {
+      if (e instanceof ProblemError && e.problem.status === 401) {
+        const rawTarget = `/${locale}/access?${searchParams.toString()}`;
+        const validatedTarget = safeReturnTo(rawTarget) || `/${locale}/access`;
+        router.push(`/login?returnTo=${encodeURIComponent(validatedTarget)}`);
         return;
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, [invitationId, locale, router, searchParams]);
 
   useEffect(() => {
     fetchStudentData();
-  }, [invitationId]);
+  }, [fetchStudentData]);
 
   const handleAccept = async () => {
     if (!invitationId || !token) {
@@ -74,23 +83,25 @@ export default function StudentCourseAccessPage() {
     setSuccess(null);
 
     try {
-      const updated = await acceptStudentCourseAccessInvitation(invitationId, token, "en");
+      const updated = await acceptStudentCourseAccessInvitation(invitationId, token, locale);
       setActiveInvitation(updated);
       setSuccess("Invitation accepted successfully! Your request is now pending admin approval.");
       fetchStudentData();
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (err instanceof ProblemError) {
-        if (err.status === 410) {
+        if (err.problem.status === 410) {
           setError("This acceptance link has expired, been consumed, or superseded. Please request a new link.");
-        } else if (err.status === 409) {
+        } else if (err.problem.status === 409) {
           setError("This invitation is not in an acceptable state.");
-        } else if (err.status === 404) {
+        } else if (err.problem.status === 404) {
           setError("Invitation not found or addressed to another account.");
         } else {
-          setError(err.detail || err.title || "Acceptance failed.");
+          setError(err.problem.detail || err.problem.title || "Acceptance failed.");
         }
+      } else if (err && typeof err === "object" && "message" in err && typeof err.message === "string") {
+        setError(err.message);
       } else {
-        setError(err?.message || "Acceptance failed.");
+        setError("Acceptance failed.");
       }
     } finally {
       setSubmitting(false);
@@ -182,7 +193,7 @@ export default function StudentCourseAccessPage() {
                   </p>
                   <div>
                     <Link
-                      href={`/learn/courses/${activeInvitation.course_id}`}
+                      href={`/${locale}/learn/courses/${activeInvitation.course_id}`}
                       className="inline-block bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-md text-sm shadow-sm"
                     >
                       Open & Watch Course
@@ -236,7 +247,7 @@ export default function StudentCourseAccessPage() {
                 <div>
                   {item.has_active_access ? (
                     <Link
-                      href={`/learn/courses/${item.course_id}`}
+                      href={`/${locale}/learn/courses/${item.course_id}`}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded text-xs inline-block"
                     >
                       Watch Course

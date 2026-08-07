@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -19,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db/e2equery"
 	"github.com/Owlah2025/gradex/backend/internal/db/e2esafety"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -57,13 +60,17 @@ func TestMain(m *testing.M) {
 	var issueSessionFlag bool
 	var emailParam string
 	var accessMutationParam string
+	var queryInvitationToken bool
+	var invitationIDParam string
 	flag.StringVar(&dbName, "dbname", "", "Target database name")
 	flag.BoolVar(&dropOnly, "drop", false, "Drop target database and exit")
 	flag.BoolVar(&queryProgress, "query-progress", false, "Query progress position for a student and lesson")
 	flag.BoolVar(&queryLearningState, "query-learning-state", false, "Emit the Entitlement, Enrollment, Progress, and material snapshot for a student and course")
+	flag.BoolVar(&queryInvitationToken, "query-invitation-token", false, "Emit the verification token for an invitation from outbox")
 	flag.StringVar(&studentIDParam, "student", "", "Student ID for query")
 	flag.StringVar(&lessonIDParam, "lesson", "", "Lesson ID for query")
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
+	flag.StringVar(&invitationIDParam, "invitation", "", "Invitation ID for query")
 	flag.BoolVar(&issueSessionFlag, "issue-session", false, "Issue a production-valid session for a seeded Student and emit its cookie and CSRF token")
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
@@ -197,6 +204,27 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			log.Fatalf("encoding learning state snapshot: %v", err)
 		}
+		fmt.Printf("%s", encoded)
+		os.Exit(0)
+	}
+
+	if queryInvitationToken {
+		if invitationIDParam == "" {
+			log.Fatalf("-query-invitation-token requires -invitation flag")
+		}
+		targetPool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for invitation token query: %v", err)
+		}
+		token, err := queryInvitationTokenFromOutbox(ctx, targetPool, invitationIDParam)
+		targetPool.Close()
+		if err != nil {
+			log.Fatalf("reading invitation verification token: %v", err)
+		}
+		encoded, _ := json.Marshal(map[string]string{
+			"invitation_id":      invitationIDParam,
+			"verification_token": token,
+		})
 		fmt.Printf("%s", encoded)
 		os.Exit(0)
 	}
@@ -428,6 +456,23 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	// RFC 3339 UTC value in every read model and in the machine-readable `<time>` attribute.
 	expiredExpiry := now.Add(-24 * time.Hour).Truncate(time.Second)
 
+	// Create Admin Account
+	adminAccountID := "a0000000-0000-0000-0000-000000000000"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'admin@example.test', 'admin@example.test', 'ADMIN', 'ACTIVE', 'System Admin', $2)
+	`, adminAccountID, now)
+	if err != nil {
+		return fmt.Errorf("insert admin account: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'ACTIVE')
+	`, adminAccountID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert admin creds: %w", err)
+	}
+
 	// Create Student 1 (Active)
 	student1ID := "a0000000-0000-0000-0000-000000000001"
 	_, err = tx.Exec(ctx, `
@@ -460,6 +505,23 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	`, student2ID, passwordHash.Expose())
 	if err != nil {
 		return fmt.Errorf("insert student 2 creds: %w", err)
+	}
+
+	// Create Student 3 (Unentitled)
+	student3ID := "a0000000-0000-0000-0000-000000000099"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'student-unentitled@example.test', 'student-unentitled@example.test', 'STUDENT', 'ACTIVE', 'Unentitled Student', $2)
+	`, student3ID, now)
+	if err != nil {
+		return fmt.Errorf("insert student 3: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'ACTIVE')
+	`, student3ID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert student 3 creds: %w", err)
 	}
 
 	// Create Instructor
@@ -832,4 +894,80 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	return tx.Commit(ctx)
+}
+
+func queryInvitationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Pool, invitationID string) (string, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("loading config: %w", err)
+	}
+
+	admissionCfg := cfg.Admission()
+	key := []byte(admissionCfg.ProtectedPayloadKey().Expose())
+
+	var keyVersion string
+	var nonce, ciphertext []byte
+	var eventID, eventType, sourceModule, aggType, aggID string
+	var schemaVer, aggRev int
+
+	err = targetPool.QueryRow(ctx, `
+		SELECT oe.id::text, oe.event_type, oe.schema_version, oe.source_module,
+		       oe.aggregate_type, oe.aggregate_id::text, oe.aggregate_revision,
+		       opp.key_version, opp.nonce, opp.ciphertext
+		FROM outbox_events oe
+		JOIN outbox_protected_payloads opp ON opp.event_id = oe.id
+		WHERE oe.aggregate_id = $1
+		ORDER BY oe.occurred_at DESC
+		LIMIT 1
+	`, invitationID).Scan(
+		&eventID, &eventType, &schemaVer, &sourceModule,
+		&aggType, &aggID, &aggRev,
+		&keyVersion, &nonce, &ciphertext,
+	)
+	if err != nil {
+		return "", fmt.Errorf("querying outbox protected payload: %w", err)
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("cipher: %w", err)
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("aead: %w", err)
+	}
+
+	aad, err := json.Marshal(struct {
+		ID                string `json:"id"`
+		Type              string `json:"type"`
+		SchemaVersion     int    `json:"schema_version"`
+		SourceModule      string `json:"source_module"`
+		AggregateType     string `json:"aggregate_type"`
+		AggregateID       string `json:"aggregate_id"`
+		AggregateRevision int    `json:"aggregate_revision"`
+	}{
+		ID:                eventID,
+		Type:              eventType,
+		SchemaVersion:     schemaVer,
+		SourceModule:      sourceModule,
+		AggregateType:     aggType,
+		AggregateID:       aggID,
+		AggregateRevision: aggRev,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshaling aad: %w", err)
+	}
+
+	plaintext, err := aead.Open(nil, nonce, ciphertext, aad)
+	if err != nil {
+		return "", fmt.Errorf("decrypting payload: %w", err)
+	}
+
+	var delivery struct {
+		VerificationToken string `json:"verification_token"`
+	}
+	if err := json.Unmarshal(plaintext, &delivery); err != nil {
+		return "", fmt.Errorf("unmarshaling delivery: %w", err)
+	}
+	return delivery.VerificationToken, nil
 }
