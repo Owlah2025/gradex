@@ -251,7 +251,7 @@ operators after launch. No task claims them; this is an explicit exclusion, not 
       unguarded route must **fail** this test. Note `/me` is a **new top-level prefix** — no `/me` route
       exists in the router today — so the sweep must cover it explicitly and not assume it inherits
       `/learn`'s guard *(FR-001, FR-014)*
-- [x] T016 Mutation check for T015: mount a route without its guard and confirm the sweep fails
+- [ ] T016 Mutation check for T015: mount a route without its guard and confirm the sweep fails
 
 ## Phase 3 — US1: An Admin invites a Student to one Course (P1)
 
@@ -280,7 +280,7 @@ Enrollment or Entitlement row exists.
 - [x] T023 [US1] Integration test: a second creation for the same pair returns
       `409 duplicate-invitation`, and the acceptance secret appears in no response body and no log
       *(FR-003)*
-- [x] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
+- [ ] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
       *(FR-032)*
 - [ ] T025 [P] [US1] Build the AD06 invitation queue and creation form in
       `frontend/src/app/[locale]/admin/course-access/`, Arabic and English, with shared components under
@@ -298,7 +298,7 @@ never invited to.
 - [x] T026 [US2] Implement acceptance in `backend/internal/access/invitation.go`: permit only an
       authenticated Account whose normalized email equals the invitation's; refuse every other
       identity server-side *(FR-008, FR-010)*
-- [x] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
+- [ ] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
       verification so an invited Student without an Account returns to acceptance, reusing the S1B3
       `returnTo` mechanism, in `backend/internal/httpapi/access_routes.go` *(FR-011)*
 - [x] T028 [US2] Mount `GET`/`POST /me/course-access-invitations` and `…/{id}/accept` in
@@ -311,7 +311,7 @@ never invited to.
       response is byte-identical to not-found *(FR-008, FR-009, SC-004)*
 - [x] T031 [US2] Integration test: an expired acceptance token returns `410` and leaves the invitation
       **unchanged and unexpired** *(FR-012, BR-169)*
-- [x] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
+- [ ] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
       fails. **This is the single most important mutation check in the slice** *(FR-010, SC-002)*
 - [ ] T033 [P] [US2] Build the ST03 acceptance screen in
       `frontend/src/app/[locale]/access/`, stating explicitly that acceptance does not grant
