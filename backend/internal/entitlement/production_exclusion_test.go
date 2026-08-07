@@ -89,7 +89,7 @@ func assertNoProductionMintingSurface(t *testing.T, backendDir string) {
 				return err
 			}
 			content := string(bytes)
-			for _, forbidden := range []string{"INSERT INTO entitlements", "\"/entitlements", "CreateEntitlement", "GrantEntitlement", "MintEntitlement"} {
+			for _, forbidden := range []string{"INSERT INTO entitlements", "\"POST /entitlements", "\"PUT /entitlements", "CreateEntitlement", "GrantEntitlement", "MintEntitlement"} {
 				if strings.Contains(content, forbidden) {
 					return &productionMintingSurfaceError{path: path, token: forbidden}
 				}

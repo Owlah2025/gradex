@@ -369,11 +369,17 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/taxonomy/terms/:id/retire":            {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms/:id/retire", Class: ClassCapabilityProtected},
 	"DELETE /api/v1/admin/taxonomy/terms/:id":                 {Method: http.MethodDelete, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
 
-	"POST /api/v1/admin/course-access-invitations":         {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
-	"GET /api/v1/admin/course-access-invitations":          {Method: http.MethodGet, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
-	"GET /api/v1/me/course-access-invitations":             {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations", Class: ClassCapabilityProtected},
-	"GET /api/v1/me/course-access-invitations/:id":         {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
-	"POST /api/v1/me/course-access-invitations/:id/accept": {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/course-access-invitations":             {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/course-access-invitations":              {Method: http.MethodGet, Path: "/api/v1/admin/course-access-invitations", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/course-access-invitations/:id/approve": {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/approve", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/course-access-invitations/:id/reject":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/reject", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/course-access-invitations/:id/cancel":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/cancel", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/course-access-invitations/:id/resend":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/resend", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/entitlements/:id":                       {Method: http.MethodGet, Path: "/api/v1/admin/entitlements/:id", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access-invitations":                 {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access-invitations/:id":             {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/me/course-access-invitations/:id/accept":     {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access":                             {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}

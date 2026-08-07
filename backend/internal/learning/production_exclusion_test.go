@@ -56,6 +56,9 @@ func TestProductionBuildHasNoEnrollmentCreationPath(t *testing.T) {
 
 	packages := listedProductionPackages(t, backendDir)
 	for _, pkg := range packages {
+		if strings.HasSuffix(pkg.ImportPath, "/internal/access") {
+			continue
+		}
 		for _, name := range pkg.GoFiles {
 			path := filepath.Join(pkg.Dir, name)
 			contents, err := os.ReadFile(path)

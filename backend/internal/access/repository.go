@@ -660,3 +660,755 @@ func (r *Repository) GetStudentInvitationByID(ctx context.Context, id string, ca
 	inv.ActionSecretID = actionSecretID
 	return inv, nil
 }
+
+func (r *Repository) ApproveInvitation(ctx context.Context, params ApproveInvitationParams) (ApproveInvitationResult, error) {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
+		return ApproveInvitationResult{}, errors.New("repository is not initialized")
+	}
+	invID := strings.TrimSpace(params.InvitationID)
+	if invID == "" {
+		return ApproveInvitationResult{}, ErrInvitationNotFound
+	}
+	if _, err := uuid.Parse(invID); err != nil {
+		return ApproveInvitationResult{}, ErrInvitationNotFound
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Lock course_access_invitations FOR UPDATE
+	var inv Invitation
+	var actionSecretID *string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, normalized_email, email, course_id::text, created_by_account_id::text,
+		       decided_by_account_id::text, accepted_by_account_id::text, state, decision_reason,
+		       admin_note, external_reference, action_secret_id::text, created_at, accepted_at,
+		       decided_at, cancelled_at
+		  FROM course_access_invitations
+		 WHERE id = $1::uuid FOR UPDATE
+	`, invID).Scan(
+		&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
+		&inv.DecidedByAccountID, &inv.AcceptedByAccountID, &inv.State, &inv.DecisionReason,
+		&inv.AdminNote, &inv.ExternalReference, &actionSecretID, &inv.CreatedAt, &inv.AcceptedAt,
+		&inv.DecidedAt, &inv.CancelledAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ApproveInvitationResult{}, ErrInvitationNotFound
+	}
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("locking invitation: %w", err)
+	}
+	inv.ActionSecretID = actionSecretID
+
+	// 2. If already APPROVED, return existing grant (Idempotent 200, FR-016, Race 1)
+	if inv.State == StateApproved {
+		var ent Entitlement
+		var sourceInvID *string
+		var revokedAt *time.Time
+		err = tx.QueryRow(ctx, `
+			SELECT id::text, student_account_id::text, scope_kind, scope_id::text, course_id::text,
+			       grant_source, source_invitation_id::text, original_access_ends_at, access_ends_at,
+			       revoked_at, retirement_eligibility_at, state, revision, created_at, updated_at
+			  FROM entitlements
+			 WHERE source_invitation_id = $1::uuid
+			 LIMIT 1
+		`, inv.ID).Scan(
+			&ent.ID, &ent.StudentAccountID, &ent.ScopeKind, &ent.ScopeID, &ent.CourseID,
+			&ent.GrantSource, &sourceInvID, &ent.OriginalAccessEndsAt, &ent.AccessEndsAt,
+			&revokedAt, &ent.RetirementEligibilityAt, &ent.State, &ent.Revision, &ent.CreatedAt, &ent.UpdatedAt,
+		)
+		if err == nil {
+			ent.SourceInvitationID = sourceInvID
+			ent.RevokedAt = revokedAt
+			return ApproveInvitationResult{
+				Invitation:  inv,
+				Entitlement: ent,
+			}, nil
+		}
+	}
+
+	// 3. Must be in PENDING_ADMIN_APPROVAL
+	if inv.State != StatePendingAdminApproval {
+		return ApproveInvitationResult{}, ErrInvitationStateConflict
+	}
+
+	// 4. Lock Course FOR SHARE and check lifecycle & default_access_ends_at
+	var (
+		courseLifecycle     string
+		defaultAccessEndsAt *time.Time
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT lifecycle, default_access_ends_at
+		  FROM courses
+		 WHERE id = $1::uuid FOR SHARE
+	`, inv.CourseID).Scan(&courseLifecycle, &defaultAccessEndsAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ApproveInvitationResult{}, ErrCourseNotFound
+	}
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("locking course: %w", err)
+	}
+
+	switch strings.ToUpper(courseLifecycle) {
+	case "ARCHIVED", "DELISTED", "RETIRED":
+		return ApproveInvitationResult{}, ErrCourseNotGrantable
+	}
+
+	if defaultAccessEndsAt == nil || defaultAccessEndsAt.IsZero() {
+		return ApproveInvitationResult{}, ErrExpiryRequired
+	}
+	if !defaultAccessEndsAt.After(now.UTC()) {
+		return ApproveInvitationResult{}, ErrExpiryInPast
+	}
+
+	// 5. Identify recipient student account
+	var studentAccountID string
+	if inv.AcceptedByAccountID != nil && *inv.AcceptedByAccountID != "" {
+		studentAccountID = *inv.AcceptedByAccountID
+	} else {
+		err = tx.QueryRow(ctx, "SELECT id::text FROM accounts WHERE normalized_email = $1", inv.NormalizedEmail).Scan(&studentAccountID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ApproveInvitationResult{}, ErrIneligibleRecipient
+		}
+		if err != nil {
+			return ApproveInvitationResult{}, fmt.Errorf("finding recipient account: %w", err)
+		}
+	}
+
+	var role, status string
+	err = tx.QueryRow(ctx, "SELECT role, status FROM accounts WHERE id = $1::uuid", studentAccountID).Scan(&role, &status)
+	if err != nil || role != "STUDENT" {
+		return ApproveInvitationResult{}, ErrIneligibleRecipient
+	}
+
+	// 6. Check for active pre-existing entitlement for this student & course
+	var existingActiveEntID string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text FROM entitlements
+		 WHERE student_account_id = $1::uuid AND course_id = $2::uuid AND state = 'ACTIVE' AND scope_kind = 'COURSE'
+		 FOR UPDATE
+	`, studentAccountID, inv.CourseID).Scan(&existingActiveEntID)
+	if err == nil {
+		return ApproveInvitationResult{}, ErrAlreadyHasActiveAccess
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return ApproveInvitationResult{}, fmt.Errorf("checking active entitlement: %w", err)
+	}
+
+	// 7. Create or reuse Enrollment
+	var enrollmentID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO enrollments (id, student_account_id, course_id, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+		ON CONFLICT (student_account_id, course_id) DO UPDATE SET created_at = enrollments.created_at
+		RETURNING id::text
+	`, uuid.NewString(), studentAccountID, inv.CourseID, now).Scan(&enrollmentID)
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("creating or reusing enrollment: %w", err)
+	}
+
+	// 8. Create Entitlement
+	entitlementID := uuid.NewString()
+	var ent Entitlement
+	var sourceInvID *string
+	var revokedAt *time.Time
+	err = tx.QueryRow(ctx, `
+		INSERT INTO entitlements (
+			id, student_account_id, scope_kind, scope_id, course_id,
+			grant_source, source_invitation_id, original_access_ends_at,
+			access_ends_at, retirement_eligibility_at, state, revision, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid,
+			'MANUAL_INVITATION', $4::uuid, $5,
+			$5, $6, 'ACTIVE', 1, $6, $6
+		) RETURNING id::text, student_account_id::text, scope_kind, scope_id::text, course_id::text,
+		            grant_source, source_invitation_id::text, original_access_ends_at, access_ends_at,
+		            revoked_at, retirement_eligibility_at, state, revision, created_at, updated_at
+	`, entitlementID, studentAccountID, inv.CourseID, inv.ID, *defaultAccessEndsAt, now).Scan(
+		&ent.ID, &ent.StudentAccountID, &ent.ScopeKind, &ent.ScopeID, &ent.CourseID,
+		&ent.GrantSource, &sourceInvID, &ent.OriginalAccessEndsAt, &ent.AccessEndsAt,
+		&revokedAt, &ent.RetirementEligibilityAt, &ent.State, &ent.Revision, &ent.CreatedAt, &ent.UpdatedAt,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.ConstraintName == "entitlements_one_active_student_course" || pgErr.Code == "23505") {
+			return ApproveInvitationResult{}, ErrAlreadyHasActiveAccess
+		}
+		return ApproveInvitationResult{}, fmt.Errorf("inserting entitlement: %w", err)
+	}
+	ent.SourceInvitationID = sourceInvID
+	ent.RevokedAt = revokedAt
+
+	// 9. Update Invitation to APPROVED
+	inv.State = StateApproved
+	inv.DecidedByAccountID = &params.AdminAccountID
+	inv.DecidedAt = &now
+	if inv.AcceptedByAccountID == nil {
+		inv.AcceptedByAccountID = &studentAccountID
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE course_access_invitations
+		   SET state = 'APPROVED',
+		       decided_by_account_id = $1::uuid,
+		       decided_at = $2,
+		       accepted_by_account_id = COALESCE(accepted_by_account_id, $3::uuid)
+		 WHERE id = $4::uuid
+	`, params.AdminAccountID, now, studentAccountID, inv.ID)
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("updating invitation decision: %w", err)
+	}
+
+	// 10. Audit events: invitation decided & entitlement granted
+	auditDecidedMeta, _ := json.Marshal(map[string]any{
+		"course_id":        inv.CourseID,
+		"normalized_email": inv.NormalizedEmail,
+		"entitlement_id":   ent.ID,
+		"enrollment_id":    enrollmentID,
+	})
+	auditGrantMeta, _ := json.Marshal(map[string]any{
+		"course_id":            inv.CourseID,
+		"source_invitation_id": inv.ID,
+		"access_ends_at":       ent.AccessEndsAt.UTC().Format(time.RFC3339),
+	})
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES
+		(
+			$1::uuid, 'ADMIN', $2,
+			'COURSE_ACCESS_INVITATION_DECIDED', 'IDENTITY_AND_ACCESS', 'COURSE_ACCESS_INVITATION', $3,
+			'Course access invitation approved', $4
+		),
+		(
+			$1::uuid, 'ADMIN', $2,
+			'ENTITLEMENT_GRANTED', 'IDENTITY_AND_ACCESS', 'ENTITLEMENT', $5,
+			'Course access entitlement granted by invitation approval', $6
+		)
+	`, params.AdminAccountID, params.AdminAccountID, inv.ID, auditDecidedMeta, ent.ID, auditGrantMeta)
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("writing audit events: %w", err)
+	}
+
+	// 11. Co-commit Outbox Event (access.granted)
+	outboxEvt := outbox.Event{
+		ID:                uuid.NewString(),
+		Type:              "access.granted",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "ENTITLEMENT",
+		AggregateID:       ent.ID,
+		AggregateRevision: 1,
+		CorrelationID:     uuid.NewString(),
+		SafePayload: map[string]any{
+			"entitlement_id":       ent.ID,
+			"student_account_id":   studentAccountID,
+			"course_id":            inv.CourseID,
+			"source_invitation_id": inv.ID,
+			"access_ends_at":       ent.AccessEndsAt.UTC().Format(time.RFC3339),
+		},
+	}
+	notice := outbox.NoticeDelivery{
+		Destination:      inv.NormalizedEmail,
+		Locale:           "en",
+		TemplateContract: "course-access-granted-v1",
+	}
+	_, err = r.outboxWriter.Append(ctx, tx, outboxEvt, notice)
+	if err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("writing outbox event in tx: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return ApproveInvitationResult{}, fmt.Errorf("committing grant transaction: %w", err)
+	}
+
+	return ApproveInvitationResult{
+		Invitation:  inv,
+		Entitlement: ent,
+	}, nil
+}
+
+func (r *Repository) RejectInvitation(ctx context.Context, params RejectInvitationParams) (Invitation, error) {
+	if r == nil || r.pool == nil {
+		return Invitation{}, errors.New("repository is not initialized")
+	}
+	invID := strings.TrimSpace(params.InvitationID)
+	if invID == "" {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if _, err := uuid.Parse(invID); err != nil {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return Invitation{}, ErrReasonRequired
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var inv Invitation
+	var actionSecretID *string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, normalized_email, email, course_id::text, created_by_account_id::text,
+		       decided_by_account_id::text, accepted_by_account_id::text, state, decision_reason,
+		       admin_note, external_reference, action_secret_id::text, created_at, accepted_at,
+		       decided_at, cancelled_at
+		  FROM course_access_invitations
+		 WHERE id = $1::uuid FOR UPDATE
+	`, invID).Scan(
+		&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
+		&inv.DecidedByAccountID, &inv.AcceptedByAccountID, &inv.State, &inv.DecisionReason,
+		&inv.AdminNote, &inv.ExternalReference, &actionSecretID, &inv.CreatedAt, &inv.AcceptedAt,
+		&inv.DecidedAt, &inv.CancelledAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("locking invitation: %w", err)
+	}
+	inv.ActionSecretID = actionSecretID
+
+	if inv.State != StatePendingAdminApproval {
+		return Invitation{}, ErrInvitationStateConflict
+	}
+
+	inv.State = StateRejected
+	inv.DecisionReason = &reason
+	inv.DecidedByAccountID = &params.AdminAccountID
+	inv.DecidedAt = &now
+
+	_, err = tx.Exec(ctx, `
+		UPDATE course_access_invitations
+		   SET state = 'REJECTED',
+		       decision_reason = $1,
+		       decided_by_account_id = $2::uuid,
+		       decided_at = $3
+		 WHERE id = $4::uuid
+	`, reason, params.AdminAccountID, now, inv.ID)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("updating invitation rejection: %w", err)
+	}
+
+	metadata, _ := json.Marshal(map[string]any{
+		"course_id":        inv.CourseID,
+		"normalized_email": inv.NormalizedEmail,
+		"reason":           reason,
+	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES (
+			$1::uuid, 'ADMIN', $2,
+			'COURSE_ACCESS_INVITATION_DECIDED', 'IDENTITY_AND_ACCESS', 'COURSE_ACCESS_INVITATION', $3,
+			'Course access invitation rejected', $4
+		)
+	`, params.AdminAccountID, params.AdminAccountID, inv.ID, metadata)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("writing audit event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, fmt.Errorf("committing transaction: %w", err)
+	}
+
+	return inv, nil
+}
+
+func (r *Repository) CancelInvitation(ctx context.Context, params CancelInvitationParams) (Invitation, error) {
+	if r == nil || r.pool == nil {
+		return Invitation{}, errors.New("repository is not initialized")
+	}
+	invID := strings.TrimSpace(params.InvitationID)
+	if invID == "" {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if _, err := uuid.Parse(invID); err != nil {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var inv Invitation
+	var actionSecretID *string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, normalized_email, email, course_id::text, created_by_account_id::text,
+		       decided_by_account_id::text, accepted_by_account_id::text, state, decision_reason,
+		       admin_note, external_reference, action_secret_id::text, created_at, accepted_at,
+		       decided_at, cancelled_at
+		  FROM course_access_invitations
+		 WHERE id = $1::uuid FOR UPDATE
+	`, invID).Scan(
+		&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
+		&inv.DecidedByAccountID, &inv.AcceptedByAccountID, &inv.State, &inv.DecisionReason,
+		&inv.AdminNote, &inv.ExternalReference, &actionSecretID, &inv.CreatedAt, &inv.AcceptedAt,
+		&inv.DecidedAt, &inv.CancelledAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, ErrInvitationNotFound
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("locking invitation: %w", err)
+	}
+	inv.ActionSecretID = actionSecretID
+
+	if inv.State.IsTerminal() {
+		return Invitation{}, ErrInvitationStateConflict
+	}
+
+	inv.State = StateCancelled
+	inv.CancelledAt = &now
+
+	_, err = tx.Exec(ctx, `
+		UPDATE course_access_invitations
+		   SET state = 'CANCELLED',
+		       cancelled_at = $1
+		 WHERE id = $2::uuid
+	`, now, inv.ID)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("updating invitation cancellation: %w", err)
+	}
+
+	if actionSecretID != nil && strings.TrimSpace(*actionSecretID) != "" {
+		if _, err := uuid.Parse(*actionSecretID); err == nil {
+			_, err = tx.Exec(ctx, `UPDATE identity_action_secrets SET consumed_at = $1 WHERE id = $2::uuid AND consumed_at IS NULL`, now, *actionSecretID)
+			if err != nil {
+				return Invitation{}, fmt.Errorf("consuming action secret: %w", err)
+			}
+		}
+	}
+
+	metadata, _ := json.Marshal(map[string]any{
+		"course_id":        inv.CourseID,
+		"normalized_email": inv.NormalizedEmail,
+	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES (
+			$1::uuid, 'ADMIN', $2,
+			'COURSE_ACCESS_INVITATION_CANCELLED', 'IDENTITY_AND_ACCESS', 'COURSE_ACCESS_INVITATION', $3,
+			'Course access invitation cancelled', $4
+		)
+	`, params.AdminAccountID, params.AdminAccountID, inv.ID, metadata)
+	if err != nil {
+		return Invitation{}, fmt.Errorf("writing audit event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, fmt.Errorf("committing transaction: %w", err)
+	}
+
+	return inv, nil
+}
+
+func (r *Repository) ResendInvitation(ctx context.Context, params ResendInvitationParams) (Invitation, string, error) {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
+		return Invitation{}, "", errors.New("repository is not initialized")
+	}
+	invID := strings.TrimSpace(params.InvitationID)
+	if invID == "" {
+		return Invitation{}, "", ErrInvitationNotFound
+	}
+	if _, err := uuid.Parse(invID); err != nil {
+		return Invitation{}, "", ErrInvitationNotFound
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	ttl := params.TTL
+	if ttl <= 0 {
+		ttl = 7 * 24 * time.Hour
+	}
+	expiresAt := now.Add(ttl)
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var inv Invitation
+	var actionSecretID *string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text, normalized_email, email, course_id::text, created_by_account_id::text,
+		       decided_by_account_id::text, accepted_by_account_id::text, state, decision_reason,
+		       admin_note, external_reference, action_secret_id::text, created_at, accepted_at,
+		       decided_at, cancelled_at
+		  FROM course_access_invitations
+		 WHERE id = $1::uuid FOR UPDATE
+	`, invID).Scan(
+		&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
+		&inv.DecidedByAccountID, &inv.AcceptedByAccountID, &inv.State, &inv.DecisionReason,
+		&inv.AdminNote, &inv.ExternalReference, &actionSecretID, &inv.CreatedAt, &inv.AcceptedAt,
+		&inv.DecidedAt, &inv.CancelledAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, "", ErrInvitationNotFound
+	}
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("locking invitation: %w", err)
+	}
+
+	if inv.State != StatePendingStudentAcceptance {
+		return Invitation{}, "", ErrInvitationStateConflict
+	}
+
+	if actionSecretID != nil {
+		_, _ = tx.Exec(ctx, `UPDATE identity_action_secrets SET consumed_at = $1 WHERE id = $2::uuid`, now, *actionSecretID)
+	}
+
+	rawBytes := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, rawBytes); err != nil {
+		return Invitation{}, "", fmt.Errorf("generating action secret: %w", err)
+	}
+	bearerToken := base64.RawURLEncoding.EncodeToString(rawBytes)
+	digest := sha256.Sum256([]byte(bearerToken))
+
+	newActionSecretID := uuid.NewString()
+	_, err = tx.Exec(ctx, `
+		INSERT INTO identity_action_secrets (
+			id, account_id, purpose, secret_digest, issued_at, expires_at
+		) VALUES (
+			$1::uuid, NULL, 'COURSE_ACCESS_INVITATION', $2, $3, $4
+		)
+	`, newActionSecretID, digest[:], now, expiresAt)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("inserting action secret: %w", err)
+	}
+
+	inv.ActionSecretID = &newActionSecretID
+
+	_, err = tx.Exec(ctx, `
+		UPDATE course_access_invitations
+		   SET action_secret_id = $1::uuid
+		 WHERE id = $2::uuid
+	`, newActionSecretID, inv.ID)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("updating invitation action secret: %w", err)
+	}
+
+	metadata, _ := json.Marshal(map[string]any{
+		"course_id":        inv.CourseID,
+		"normalized_email": inv.NormalizedEmail,
+		"action_secret_id": newActionSecretID,
+	})
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES (
+			$1::uuid, 'ADMIN', $2,
+			'COURSE_ACCESS_INVITATION_LINK_REISSUED', 'IDENTITY_AND_ACCESS', 'COURSE_ACCESS_INVITATION', $3,
+			'Course access invitation link reissued', $4
+		)
+	`, params.AdminAccountID, params.AdminAccountID, inv.ID, metadata)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("writing audit event: %w", err)
+	}
+
+	outboxEvt := outbox.Event{
+		ID:                uuid.NewString(),
+		Type:              "access.invitation_issued",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "COURSE_ACCESS_INVITATION",
+		AggregateID:       inv.ID,
+		AggregateRevision: 1,
+		CorrelationID:     uuid.NewString(),
+		SafePayload: map[string]any{
+			"action_secret_id":  newActionSecretID,
+			"purpose":           string(identity.ActionCourseAccessInvitation),
+			"course_id":         inv.CourseID,
+			"secret_expires_at": expiresAt,
+		},
+	}
+	delivery := outbox.VerificationDelivery{
+		Destination:       inv.NormalizedEmail,
+		Locale:            "en",
+		TemplateContract:  "course-access-invitation-v1",
+		VerificationToken: bearerToken,
+		ExpiresAt:         expiresAt,
+	}
+	_, err = r.outboxWriter.Append(ctx, tx, outboxEvt, delivery)
+	if err != nil {
+		return Invitation{}, "", fmt.Errorf("writing outbox event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, "", fmt.Errorf("committing transaction: %w", err)
+	}
+
+	return inv, bearerToken, nil
+}
+
+func (r *Repository) GetStudentAccessHistory(ctx context.Context, callerAccountID string) (StudentCourseAccessHistoryResponse, error) {
+	if r == nil || r.pool == nil {
+		return StudentCourseAccessHistoryResponse{}, errors.New("repository is not initialized")
+	}
+
+	var callerNormalizedEmail string
+	err := r.pool.QueryRow(ctx, "SELECT normalized_email FROM accounts WHERE id = $1", callerAccountID).Scan(&callerNormalizedEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StudentCourseAccessHistoryResponse{Items: []StudentCourseAccessHistoryItem{}}, nil
+	}
+	if err != nil {
+		return StudentCourseAccessHistoryResponse{}, fmt.Errorf("fetching caller account: %w", err)
+	}
+
+	invitations, err := r.ListStudentInvitations(ctx, callerAccountID)
+	if err != nil {
+		return StudentCourseAccessHistoryResponse{}, err
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT course_id::text, access_ends_at
+		  FROM entitlements
+		 WHERE student_account_id = $1::uuid AND state = 'ACTIVE' AND scope_kind = 'COURSE'
+	`, callerAccountID)
+	if err != nil {
+		return StudentCourseAccessHistoryResponse{}, fmt.Errorf("querying entitlements: %w", err)
+	}
+	defer rows.Close()
+
+	activeEntitlements := make(map[string]time.Time)
+	for rows.Next() {
+		var cID string
+		var endsAt time.Time
+		if err := rows.Scan(&cID, &endsAt); err == nil {
+			activeEntitlements[cID] = endsAt
+		}
+	}
+
+	itemsByCourse := make(map[string]*StudentCourseAccessHistoryItem)
+	for _, inv := range invitations {
+		proj := inv.ToStudentProjection()
+		item, exists := itemsByCourse[inv.CourseID]
+		if !exists {
+			item = &StudentCourseAccessHistoryItem{
+				CourseID: inv.CourseID,
+			}
+			itemsByCourse[inv.CourseID] = item
+		}
+		if item.Invitation == nil {
+			item.Invitation = &proj
+		}
+	}
+
+	for cID, endsAt := range activeEntitlements {
+		item, exists := itemsByCourse[cID]
+		if !exists {
+			item = &StudentCourseAccessHistoryItem{
+				CourseID: cID,
+			}
+			itemsByCourse[cID] = item
+		}
+		item.HasActiveAccess = true
+		endsAtCopy := endsAt
+		item.AccessEndsAt = &endsAtCopy
+	}
+
+	items := make([]StudentCourseAccessHistoryItem, 0, len(itemsByCourse))
+	for _, item := range itemsByCourse {
+		items = append(items, *item)
+	}
+	if items == nil {
+		items = []StudentCourseAccessHistoryItem{}
+	}
+
+	return StudentCourseAccessHistoryResponse{Items: items}, nil
+}
+
+func (r *Repository) GetAdminEntitlementByID(ctx context.Context, entitlementID string) (AdminEntitlementDetail, error) {
+	if r == nil || r.pool == nil {
+		return AdminEntitlementDetail{}, errors.New("repository is not initialized")
+	}
+	eID := strings.TrimSpace(entitlementID)
+	if eID == "" {
+		return AdminEntitlementDetail{}, errors.New("entitlement not found")
+	}
+	if _, err := uuid.Parse(eID); err != nil {
+		return AdminEntitlementDetail{}, errors.New("entitlement not found")
+	}
+
+	var ent Entitlement
+	var sourceInvID *string
+	var revokedAt *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT id::text, student_account_id::text, scope_kind, scope_id::text, course_id::text,
+		       grant_source, source_invitation_id::text, original_access_ends_at, access_ends_at,
+		       revoked_at, retirement_eligibility_at, state, revision, created_at, updated_at
+		  FROM entitlements
+		 WHERE id = $1::uuid
+	`, eID).Scan(
+		&ent.ID, &ent.StudentAccountID, &ent.ScopeKind, &ent.ScopeID, &ent.CourseID,
+		&ent.GrantSource, &sourceInvID, &ent.OriginalAccessEndsAt, &ent.AccessEndsAt,
+		&revokedAt, &ent.RetirementEligibilityAt, &ent.State, &ent.Revision, &ent.CreatedAt, &ent.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AdminEntitlementDetail{}, errors.New("entitlement not found")
+	}
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("getting entitlement: %w", err)
+	}
+	ent.SourceInvitationID = sourceInvID
+	ent.RevokedAt = revokedAt
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT id::text, entitlement_id::text, old_access_ends_at, new_access_ends_at,
+		       reason, actor_account_id::text, support_reference, adjusted_at
+		  FROM entitlement_adjustments
+		 WHERE entitlement_id = $1::uuid
+		 ORDER BY adjusted_at ASC
+	`, eID)
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("querying adjustments: %w", err)
+	}
+	defer rows.Close()
+
+	var adjustments []EntitlementAdjustment
+	for rows.Next() {
+		var adj EntitlementAdjustment
+		if err := rows.Scan(
+			&adj.ID, &adj.EntitlementID, &adj.OldAccessEndsAt, &adj.NewAccessEndsAt,
+			&adj.Reason, &adj.ActorAccountID, &adj.SupportReference, &adj.AdjustedAt,
+		); err == nil {
+			adjustments = append(adjustments, adj)
+		}
+	}
+	if adjustments == nil {
+		adjustments = []EntitlementAdjustment{}
+	}
+
+	return AdminEntitlementDetail{
+		Entitlement: ent,
+		Adjustments: adjustments,
+	}, nil
+}

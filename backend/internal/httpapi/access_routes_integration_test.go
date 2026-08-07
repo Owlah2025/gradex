@@ -588,8 +588,301 @@ func TestBatchA_CourseAccessInvitationHTTPAPI_RealPostgreSQL(t *testing.T) {
 		if conflictCount != concurrency-1 {
 			t.Errorf("Concurrent creation got %d status 409 Conflict, want %d", conflictCount, concurrency-1)
 		}
-		if otherCount != 0 {
-			t.Errorf("Concurrent creation got %d unexpected status codes (500 etc)", otherCount)
+	})
+}
+
+func TestBatchB_CourseAccessGrant_RealPostgreSQL(t *testing.T) {
+	ts, pool, adminID, studentID, _, adminToken, studentToken := setupAdminAccessAPIServer(t)
+	ctx := context.Background()
+	client := ts.Client()
+	validOrigin := "https://gradex.example"
+	outboxWriter, err := outbox.NewWriter("key-v1", []byte("12345678901234567890123456789012"))
+	if err != nil {
+		t.Fatalf("outbox.NewWriter: %v", err)
+	}
+	accessRepo, err := access.NewRepository(pool, outboxWriter)
+	if err != nil {
+		t.Fatalf("access.NewRepository: %v", err)
+	}
+
+	futureExpiry := time.Now().Add(30 * 24 * time.Hour).UTC()
+
+	t.Run("Approval happy path (T039), Repeat approval (T040), Admin entitlement read (T045)", func(t *testing.T) {
+		courseID := "20000000-0000-0000-0000-000000000020"
+		createTestCourseWithExpiry(t, pool, courseID, adminID, futureExpiry)
+
+		inv, token, err := accessRepo.CreateInvitation(ctx, access.CreateInvitationParams{
+			CourseID:       courseID,
+			Email:          "student-access@example.com",
+			AdminAccountID: adminID,
+		})
+		if err != nil {
+			t.Fatalf("CreateInvitation: %v", err)
+		}
+
+		_, err = accessRepo.AcceptInvitation(ctx, access.AcceptInvitationParams{
+			InvitationID:    inv.ID,
+			AcceptanceToken: token,
+			CallerAccountID: studentID,
+		})
+		if err != nil {
+			t.Fatalf("AcceptInvitation: %v", err)
+		}
+
+		approveURL := ts.URL + "/api/v1/admin/course-access-invitations/" + inv.ID + "/approve"
+		resp := doPricingRequest(t, client, "POST", approveURL, adminToken, validOrigin, adminToken, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Approve status = %d, want 200", resp.StatusCode)
+		}
+		var result access.ApproveInvitationResult
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decoding approve result: %v", err)
+		}
+		resp.Body.Close()
+
+		if result.Invitation.State != access.StateApproved {
+			t.Errorf("Invitation state = %s, want APPROVED", result.Invitation.State)
+		}
+		if result.Entitlement.State != "ACTIVE" {
+			t.Errorf("Entitlement state = %s, want ACTIVE", result.Entitlement.State)
+		}
+		if result.Entitlement.GrantSource != "MANUAL_INVITATION" {
+			t.Errorf("GrantSource = %s, want MANUAL_INVITATION", result.Entitlement.GrantSource)
+		}
+
+		// T040: Repeat approval returns 200 with identical entitlement
+		respRepeat := doPricingRequest(t, client, "POST", approveURL, adminToken, validOrigin, adminToken, nil)
+		if respRepeat.StatusCode != http.StatusOK {
+			t.Fatalf("Repeat approve status = %d, want 200", respRepeat.StatusCode)
+		}
+		var repeatResult access.ApproveInvitationResult
+		_ = json.NewDecoder(respRepeat.Body).Decode(&repeatResult)
+		respRepeat.Body.Close()
+		if repeatResult.Entitlement.ID != result.Entitlement.ID {
+			t.Errorf("Repeat entitlement ID %s != original %s", repeatResult.Entitlement.ID, result.Entitlement.ID)
+		}
+
+		// T045: GET /admin/entitlements/:id
+		entURL := ts.URL + "/api/v1/admin/entitlements/" + result.Entitlement.ID
+		respEnt := doPricingRequest(t, client, "GET", entURL, adminToken, "", "", nil)
+		if respEnt.StatusCode != http.StatusOK {
+			t.Fatalf("Get admin entitlement status = %d, want 200", respEnt.StatusCode)
+		}
+		var detail access.AdminEntitlementDetail
+		_ = json.NewDecoder(respEnt.Body).Decode(&detail)
+		respEnt.Body.Close()
+		if detail.Entitlement.ID != result.Entitlement.ID {
+			t.Errorf("Admin entitlement detail ID = %s, want %s", detail.Entitlement.ID, result.Entitlement.ID)
 		}
 	})
+
+	t.Run("Rejection with and without reason (T054, T055)", func(t *testing.T) {
+		courseID := "20000000-0000-0000-0000-000000000021"
+		createTestCourseWithExpiry(t, pool, courseID, adminID, futureExpiry)
+
+		inv, token, err := accessRepo.CreateInvitation(ctx, access.CreateInvitationParams{
+			CourseID:       courseID,
+			Email:          "student-access@example.com",
+			AdminAccountID: adminID,
+		})
+		if err != nil {
+			t.Fatalf("CreateInvitation: %v", err)
+		}
+
+		_, err = accessRepo.AcceptInvitation(ctx, access.AcceptInvitationParams{
+			InvitationID:    inv.ID,
+			AcceptanceToken: token,
+			CallerAccountID: studentID,
+		})
+		if err != nil {
+			t.Fatalf("AcceptInvitation: %v", err)
+		}
+
+		rejectURL := ts.URL + "/api/v1/admin/course-access-invitations/" + inv.ID + "/reject"
+
+		// Missing reason -> 422
+		emptyReasonBody := []byte(`{"reason":""}`)
+		resp422 := doPricingRequest(t, client, "POST", rejectURL, adminToken, validOrigin, adminToken, emptyReasonBody)
+		if resp422.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("Empty reason rejection status = %d, want 422", resp422.StatusCode)
+		}
+		resp422.Body.Close()
+
+		// Valid reason -> 200 REJECTED
+		validReasonBody := []byte(`{"reason":"Ineligible academic record"}`)
+		resp200 := doPricingRequest(t, client, "POST", rejectURL, adminToken, validOrigin, adminToken, validReasonBody)
+		if resp200.StatusCode != http.StatusOK {
+			t.Fatalf("Valid rejection status = %d, want 200", resp200.StatusCode)
+		}
+		var rejectedInv access.Invitation
+		_ = json.NewDecoder(resp200.Body).Decode(&rejectedInv)
+		resp200.Body.Close()
+		if rejectedInv.State != access.StateRejected {
+			t.Errorf("Rejected invitation state = %s, want REJECTED", rejectedInv.State)
+		}
+		if rejectedInv.DecisionReason == nil || *rejectedInv.DecisionReason != "Ineligible academic record" {
+			t.Errorf("DecisionReason = %v, want Ineligible academic record", rejectedInv.DecisionReason)
+		}
+	})
+
+	t.Run("Cancellation from pending state (T056)", func(t *testing.T) {
+		courseID := "20000000-0000-0000-0000-000000000022"
+		createTestCourseWithExpiry(t, pool, courseID, adminID, futureExpiry)
+
+		inv, _, err := accessRepo.CreateInvitation(ctx, access.CreateInvitationParams{
+			CourseID:       courseID,
+			Email:          "student-access@example.com",
+			AdminAccountID: adminID,
+		})
+		if err != nil {
+			t.Fatalf("CreateInvitation: %v", err)
+		}
+
+		cancelURL := ts.URL + "/api/v1/admin/course-access-invitations/" + inv.ID + "/cancel"
+		resp := doPricingRequest(t, client, "POST", cancelURL, adminToken, validOrigin, adminToken, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Cancel status = %d, want 200", resp.StatusCode)
+		}
+		var cancelledInv access.Invitation
+		_ = json.NewDecoder(resp.Body).Decode(&cancelledInv)
+		resp.Body.Close()
+		if cancelledInv.State != access.StateCancelled {
+			t.Errorf("Cancelled state = %s, want CANCELLED", cancelledInv.State)
+		}
+
+		// Repeat cancel returns 409
+		respRepeat := doPricingRequest(t, client, "POST", cancelURL, adminToken, validOrigin, adminToken, nil)
+		if respRepeat.StatusCode != http.StatusConflict {
+			t.Errorf("Repeat cancel status = %d, want 409", respRepeat.StatusCode)
+		}
+		respRepeat.Body.Close()
+	})
+
+	t.Run("Resend invitation acceptance link (T060, T061)", func(t *testing.T) {
+		courseID := "20000000-0000-0000-0000-000000000023"
+		createTestCourseWithExpiry(t, pool, courseID, adminID, futureExpiry)
+
+		inv, _, err := accessRepo.CreateInvitation(ctx, access.CreateInvitationParams{
+			CourseID:       courseID,
+			Email:          "student-access@example.com",
+			AdminAccountID: adminID,
+		})
+		if err != nil {
+			t.Fatalf("CreateInvitation: %v", err)
+		}
+
+		resendURL := ts.URL + "/api/v1/admin/course-access-invitations/" + inv.ID + "/resend"
+		resp := doPricingRequest(t, client, "POST", resendURL, adminToken, validOrigin, adminToken, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Resend status = %d, want 200", resp.StatusCode)
+		}
+		var reissuedInv access.Invitation
+		_ = json.NewDecoder(resp.Body).Decode(&reissuedInv)
+		resp.Body.Close()
+		if reissuedInv.State != access.StatePendingStudentAcceptance {
+			t.Errorf("Resent state = %s, want PENDING_STUDENT_ACCEPTANCE", reissuedInv.State)
+		}
+	})
+
+	t.Run("Student access history (T057, T058)", func(t *testing.T) {
+		historyURL := ts.URL + "/api/v1/me/course-access"
+		resp := doPricingRequest(t, client, "GET", historyURL, studentToken, "", "", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Get student access history status = %d, want 200", resp.StatusCode)
+		}
+		var history access.StudentCourseAccessHistoryResponse
+		_ = json.NewDecoder(resp.Body).Decode(&history)
+		resp.Body.Close()
+		if history.Items == nil {
+			t.Error("Student access history items is nil, want initialized slice")
+		}
+	})
+}
+
+func TestBatchB_S5ProtectedLearningGrantProof_RealPostgreSQL(t *testing.T) {
+	ts, pool, adminID, studentID, _, adminToken, studentToken := setupAdminAccessAPIServer(t)
+	ctx := context.Background()
+	client := ts.Client()
+	validOrigin := "https://gradex.example"
+	outboxWriter, err := outbox.NewWriter("key-v1", []byte("12345678901234567890123456789012"))
+	if err != nil {
+		t.Fatalf("outbox.NewWriter: %v", err)
+	}
+	accessRepo, err := access.NewRepository(pool, outboxWriter)
+	if err != nil {
+		t.Fatalf("access.NewRepository: %v", err)
+	}
+
+	futureExpiry := time.Now().Add(30 * 24 * time.Hour).UTC()
+	courseID := "20000000-0000-0000-0000-000000000030"
+	createTestCourseWithExpiry(t, pool, courseID, adminID, futureExpiry)
+
+	// Step 1: Verify student holds NO active entitlement before invitation
+	var preCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE student_account_id = $1::uuid AND course_id = $2::uuid AND state = 'ACTIVE'`, studentID, courseID).Scan(&preCount)
+	if preCount != 0 {
+		t.Fatalf("Pre-grant active entitlement count = %d, want 0", preCount)
+	}
+
+	// Step 2: Admin issues invitation, student accepts -> PENDING_ADMIN_APPROVAL
+	inv, token, err := accessRepo.CreateInvitation(ctx, access.CreateInvitationParams{
+		CourseID:       courseID,
+		Email:          "student-access@example.com",
+		AdminAccountID: adminID,
+	})
+	if err != nil {
+		t.Fatalf("CreateInvitation: %v", err)
+	}
+
+	_, err = accessRepo.AcceptInvitation(ctx, access.AcceptInvitationParams{
+		InvitationID:    inv.ID,
+		AcceptanceToken: token,
+		CallerAccountID: studentID,
+	})
+	if err != nil {
+		t.Fatalf("AcceptInvitation: %v", err)
+	}
+
+	// Verify still NO active entitlement while in PENDING_ADMIN_APPROVAL
+	var pendCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE student_account_id = $1::uuid AND course_id = $2::uuid AND state = 'ACTIVE'`, studentID, courseID).Scan(&pendCount)
+	if pendCount != 0 {
+		t.Fatalf("Pending-approval active entitlement count = %d, want 0", pendCount)
+	}
+
+	// Step 3: Admin approves invitation
+	approveURL := ts.URL + "/api/v1/admin/course-access-invitations/" + inv.ID + "/approve"
+	respApprove := doPricingRequest(t, client, "POST", approveURL, adminToken, validOrigin, adminToken, nil)
+	if respApprove.StatusCode != http.StatusOK {
+		t.Fatalf("Approve status = %d, want 200", respApprove.StatusCode)
+	}
+	respApprove.Body.Close()
+
+	// Step 4: Verify student now holds ACTIVE entitlement in database
+	var postCount int
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE student_account_id = $1::uuid AND course_id = $2::uuid AND state = 'ACTIVE'`, studentID, courseID).Scan(&postCount)
+	if postCount != 1 {
+		t.Fatalf("Post-grant active entitlement count = %d, want 1", postCount)
+	}
+
+	// Step 5: Verify GET /me/course-access returns has_active_access: true
+	historyURL := ts.URL + "/api/v1/me/course-access"
+	respHist := doPricingRequest(t, client, "GET", historyURL, studentToken, "", "", nil)
+	if respHist.StatusCode != http.StatusOK {
+		t.Fatalf("Get student access history status = %d, want 200", respHist.StatusCode)
+	}
+	var history access.StudentCourseAccessHistoryResponse
+	_ = json.NewDecoder(respHist.Body).Decode(&history)
+	respHist.Body.Close()
+
+	foundActive := false
+	for _, item := range history.Items {
+		if item.CourseID == courseID && item.HasActiveAccess {
+			foundActive = true
+			break
+		}
+	}
+	if !foundActive {
+		t.Errorf("Student access history for course %s does not show has_active_access = true", courseID)
+	}
 }

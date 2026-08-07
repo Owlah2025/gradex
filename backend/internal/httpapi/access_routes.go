@@ -46,6 +46,10 @@ type acceptInvitationBody struct {
 	AcceptanceToken string `json:"acceptance_token"`
 }
 
+type rejectInvitationBody struct {
+	Reason string `json:"reason"`
+}
+
 type adminInvitationListResponse struct {
 	Invitations []access.Invitation `json:"invitations"`
 	Total       int                 `json:"total"`
@@ -92,6 +96,19 @@ func mountAccessRoutes(
 			strictJSONMiddleware(func() any { return &createInvitationBody{} }, accessMutationBodyLimit),
 			h.createCourseAccessInvitation,
 		)
+		adminAccessGroup.POST("/course-access-invitations/:id/approve",
+			h.approveCourseAccessInvitation,
+		)
+		adminAccessGroup.POST("/course-access-invitations/:id/reject",
+			strictJSONMiddleware(func() any { return &rejectInvitationBody{} }, accessMutationBodyLimit),
+			h.rejectCourseAccessInvitation,
+		)
+		adminAccessGroup.POST("/course-access-invitations/:id/cancel",
+			h.cancelCourseAccessInvitation,
+		)
+		adminAccessGroup.POST("/course-access-invitations/:id/resend",
+			h.resendCourseAccessInvitation,
+		)
 	}
 
 	// Admin reads
@@ -102,6 +119,7 @@ func mountAccessRoutes(
 	)
 	{
 		adminReadGroup.GET("/course-access-invitations", h.listAdminCourseAccessInvitations)
+		adminReadGroup.GET("/entitlements/:id", h.getAdminEntitlement)
 	}
 
 	// Student reads
@@ -113,6 +131,7 @@ func mountAccessRoutes(
 	{
 		meReadGroup.GET("/course-access-invitations", h.listStudentCourseAccessInvitations)
 		meReadGroup.GET("/course-access-invitations/:id", h.getStudentCourseAccessInvitation)
+		meReadGroup.GET("/course-access", h.getStudentCourseAccessHistory)
 	}
 
 	// Student mutations
@@ -415,4 +434,228 @@ func (h *accessHandlers) acceptStudentCourseAccessInvitation(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, inv.ToStudentProjection())
+}
+
+func (h *accessHandlers) approveCourseAccessInvitation(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+
+	var session identity.Session
+	if val, ok := c.Get("authenticated_session"); ok {
+		if s, ok := val.(identity.Session); ok {
+			session = s
+		}
+	}
+
+	if !session.AuthenticatedAt.IsZero() {
+		if err := identity.CheckRecentAuthentication(session, 15*time.Minute, now); err != nil {
+			writeProblem(c, problem.New(http.StatusForbidden, "recent-authentication-required",
+				"Recent authentication required", "This operation requires recent authentication"))
+			return
+		}
+	}
+
+	res, err := h.repo.ApproveInvitation(c.Request.Context(), access.ApproveInvitationParams{
+		InvitationID:   id,
+		AdminAccountID: adminAccountID,
+		Now:            now,
+	})
+	if err != nil {
+		if errors.Is(err, access.ErrInvitationNotFound) || errors.Is(err, access.ErrCourseNotFound) {
+			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrInvitationStateConflict) {
+			writeProblem(c, problem.New(http.StatusConflict, "invitation-state-conflict",
+				"Invitation state conflict", "Invitation is not in decision-ready state"))
+			return
+		}
+		if errors.Is(err, access.ErrAlreadyHasActiveAccess) {
+			writeProblem(c, problem.New(http.StatusConflict, "already-has-active-access",
+				"Already has active access", "Student already holds active access entitlement for this course"))
+			return
+		}
+		if errors.Is(err, access.ErrCourseNotGrantable) {
+			writeProblem(c, problem.New(http.StatusConflict, "course-not-grantable",
+				"Course not grantable", "Course is not in a grantable lifecycle state"))
+			return
+		}
+		if errors.Is(err, access.ErrExpiryRequired) || errors.Is(err, access.ErrExpiryInPast) {
+			writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+				Code:      "MISSING_DEFAULT_ACCESS_EXPIRY",
+				Detail:    "Course has no valid future default access expiry instant configured",
+				Location:  problem.LocationBody,
+				Parameter: "default_access_ends_at",
+			}))
+			return
+		}
+		if errors.Is(err, access.ErrIneligibleRecipient) {
+			writeProblem(c, problem.New(http.StatusConflict, "ineligible-recipient",
+				"Ineligible recipient", "The recipient account does not satisfy recipient eligibility"))
+			return
+		}
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
+func (h *accessHandlers) rejectCourseAccessInvitation(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	body := c.MustGet(strictJSONBodyContextKey).(*rejectInvitationBody)
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+
+	inv, err := h.repo.RejectInvitation(c.Request.Context(), access.RejectInvitationParams{
+		InvitationID:   id,
+		AdminAccountID: adminAccountID,
+		Reason:         body.Reason,
+		Now:            now,
+	})
+	if err != nil {
+		if errors.Is(err, access.ErrInvitationNotFound) {
+			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrReasonRequired) {
+			writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+				Code:      "REASON_REQUIRED",
+				Detail:    "A non-empty decision reason is required for rejection",
+				Location:  problem.LocationBody,
+				Parameter: "reason",
+			}))
+			return
+		}
+		if errors.Is(err, access.ErrInvitationStateConflict) {
+			writeProblem(c, problem.New(http.StatusConflict, "invitation-state-conflict",
+				"Invitation state conflict", "Invitation is not in decision-ready state"))
+			return
+		}
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+
+	c.JSON(http.StatusOK, inv)
+}
+
+func (h *accessHandlers) cancelCourseAccessInvitation(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+
+	inv, err := h.repo.CancelInvitation(c.Request.Context(), access.CancelInvitationParams{
+		InvitationID:   id,
+		AdminAccountID: adminAccountID,
+		Now:            now,
+	})
+	if err != nil {
+		if errors.Is(err, access.ErrInvitationNotFound) {
+			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrInvitationStateConflict) {
+			writeProblem(c, problem.New(http.StatusConflict, "invitation-state-conflict",
+				"Invitation state conflict", "Terminal invitation cannot be cancelled"))
+			return
+		}
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+
+	c.JSON(http.StatusOK, inv)
+}
+
+func (h *accessHandlers) resendCourseAccessInvitation(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+
+	inv, _, err := h.repo.ResendInvitation(c.Request.Context(), access.ResendInvitationParams{
+		InvitationID:   id,
+		AdminAccountID: adminAccountID,
+		Now:            now,
+	})
+	if err != nil {
+		if errors.Is(err, access.ErrInvitationNotFound) {
+			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrInvitationStateConflict) {
+			writeProblem(c, problem.New(http.StatusConflict, "invitation-state-conflict",
+				"Invitation state conflict", "Accepted or terminal invitation cannot be reissued"))
+			return
+		}
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+
+	c.JSON(http.StatusOK, inv)
+}
+
+func (h *accessHandlers) getAdminEntitlement(c *gin.Context) {
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	ent, err := h.repo.GetAdminEntitlementByID(c.Request.Context(), id)
+	if err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	c.JSON(http.StatusOK, ent)
+}
+
+func (h *accessHandlers) getStudentCourseAccessHistory(c *gin.Context) {
+	studentAccountID := c.GetString(ctxUserIDKey)
+
+	history, err := h.repo.GetStudentAccessHistory(c.Request.Context(), studentAccountID)
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+
+	c.JSON(http.StatusOK, history)
 }

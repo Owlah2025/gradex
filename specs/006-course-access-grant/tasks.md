@@ -326,41 +326,41 @@ never invited to.
 **Independent test**: approve; exactly one Entitlement exists, playback succeeds, a second approval
 changes nothing.
 
-- [ ] T034 [US3] Implement the grant transaction in `backend/internal/access/grant.go` exactly as
+- [x] T034 [US3] Implement the grant transaction in `backend/internal/access/grant.go` exactly as
       specified in [data-model.md §6](data-model.md#6-the-grant-transaction): canonical lock order,
       in-transaction state re-assertion, Enrollment create-or-reuse, one Entitlement with
       `grant_source`, snapshotted `original_access_ends_at`, `retirement_eligibility_at` from the
       approval instant, audit, and outbox — all in one transaction. The access-granted intent is
       raised **only after** the Entitlement row exists, never on creation, acceptance, rejection, or
       cancellation *(FR-013, FR-015, FR-019, FR-021, FR-034)*
-- [ ] T035 [US3] Enforce capability **and** recent authentication on approval using
+- [x] T035 [US3] Enforce capability **and** recent authentication on approval using
       `identity.CheckRecentAuthentication` with the configured security window, in
       `backend/internal/httpapi/access_routes.go`. Absent either, **refuse** — no default, no
       fallback, no conditional *(FR-014)*
-- [ ] T036 [US3] Implement the Course-state gate from
+- [x] T036 [US3] Implement the Course-state gate from
       [plan.md](plan.md#course-state-outcomes-at-approval): refuse on archived, delisted, and retired;
       **permit** under emergency access suspension, in `backend/internal/access/grant.go`
       *(FR-018, BR-018, BR-090 as amended 2026-07-29)*
-- [ ] T037 [US3] Refuse approval when the Course has no configured expiry instant or it is not in the
+- [x] T037 [US3] Refuse approval when the Course has no configured expiry instant or it is not in the
       future, naming the missing configuration, in `backend/internal/access/grant.go`. Reads
       `courses.default_access_ends_at`, which **`T003a` creates** — this task is unimplementable before
       it, and until then every approval refuses here *(FR-017, BR-025)*
-- [ ] T038 [US3] Mount `POST …/{id}/approve` returning **`200` with the existing grant** on a repeat,
+- [x] T038 [US3] Mount `POST …/{id}/approve` returning **`200` with the existing grant** on a repeat,
       not `409`, in `backend/internal/httpapi/access_routes.go` *(FR-016)*
-- [ ] T039 [US3] Integration test in `backend/internal/access/grant_integration_test.go`: approval
+- [x] T039 [US3] Integration test in `backend/internal/access/grant_integration_test.go`: approval
       creates exactly one Enrollment and one `ACTIVE` Entitlement with correct `grant_source`,
       `source_invitation_id`, snapshotted expiry, and approval-instant retirement eligibility
       *(FR-015, FR-019, FR-021)*
-- [ ] T040 [US3] Integration test: sequential repeat approval returns `200` with the same Entitlement;
+- [x] T040 [US3] Integration test: sequential repeat approval returns `200` with the same Entitlement;
       still exactly one row *(FR-016)*
-- [ ] T041 [US3] Integration test: approval without capability, and with stale authentication, each
+- [x] T041 [US3] Integration test: approval without capability, and with stale authentication, each
       return `403` and leave **no** Enrollment, Entitlement, grant audit record, or notification intent
       *(FR-014, SC-005)*
-- [ ] T042 [US3] Integration test: each Course state produces its outcome from T036, and a missing or
+- [x] T042 [US3] Integration test: each Course state produces its outcome from T036, and a missing or
       past expiry instant returns `422` *(FR-017, FR-018)*
-- [ ] T043 [US3] E2E test: after approval the Student plays a Lesson, and the authorization path reads
+- [x] T043 [US3] E2E test: after approval the Student plays a Lesson, and the authorization path reads
       the Entitlement and **never** the invitation *(FR-026, SC-007)*
-- [ ] T044 [US3] Mutation check for T039: break the transaction boundary so audit commits separately,
+- [x] T044 [US3] Mutation check for T039: break the transaction boundary so audit commits separately,
       and confirm the test fails *(FR-015)*
 - [ ] T045 [P] [US3] Build the AD07 entitlement detail **read-only** view in
       `frontend/src/app/[locale]/admin/course-access/`. **No expiry-adjustment or revocation
@@ -373,19 +373,19 @@ Each runs under `-race` against real PostgreSQL in
 `backend/internal/access/grant_concurrency_integration_test.go`. **A sequential repeat is not a
 substitute for a concurrent one.** *(SC-003)*
 
-- [ ] T046 Race 1: N concurrent approvals of one invitation → exactly one Entitlement, one Enrollment
+- [x] T046 Race 1: N concurrent approvals of one invitation → exactly one Entitlement, one Enrollment
       *(FR-016, SC-003)*
-- [ ] T047 Race 2: concurrent approve and cancel → one wins, no partial state, loser returns `409`
+- [x] T047 Race 2: concurrent approve and cancel → one wins, no partial state, loser returns `409`
       *(FR-024, SC-003)*
-- [ ] T048 Race 3: concurrent accept and cancel → one wins, loser returns `409` *(FR-024, SC-003)*
+- [x] T048 Race 3: concurrent accept and cancel → one wins, loser returns `409` *(FR-024, SC-003)*
 - [x] T049 Race 4: concurrent creation of the same pair → one row, loser returns `409` **not 500**
       *(FR-003, SC-003)*
-- [ ] T050 Race 5: approval concurrent with a Course expiry change → the snapshot equals exactly one
+- [x] T050 Race 5: approval concurrent with a Course expiry change → the snapshot equals exactly one
       committed value, never torn and never rolled back *(FR-015, SC-003)*
-- [ ] T051 Race 6 (**not named in the spec**, added by the plan): concurrent approval of two different
+- [x] T051 Race 6 (**not named in the spec**, added by the plan): concurrent approval of two different
       invitations for the same Student and Course → exactly one Entitlement, loser returns
       `409 already-has-active-access` *(FR-016, SC-003)*
-- [ ] T052 **Index-drop mutation check**: drop `cai_one_non_terminal_per_pair` and
+- [x] T052 **Index-drop mutation check**: drop `cai_one_non_terminal_per_pair` and
       **`entitlements_one_active_student_course`**, then confirm **T046, T049, and T051 fail**. If they
       still pass they were testing the handler, not the invariant, and they are not evidence.
       **Corrected 2026-08-06: the second index is S4's, under S4's name.** It was planned here as
@@ -393,7 +393,7 @@ substitute for a concurrent one.** *(SC-003)*
       mutation check would pass while proving nothing. The live definition is
       `UNIQUE (student_account_id, course_id) WHERE state = 'ACTIVE' AND scope_kind = 'COURSE'`; the
       `scope_kind` predicate is coextensive with S6's whole-Course-only writes
-- [ ] T053 **Mutation checks for the non-index-backed races** *(M2)*. T047, T048, and T050 are not
+- [x] T053 **Mutation checks for the non-index-backed races** *(M2)*. T047, T048, and T050 are not
       protected by a unique index, so the index-drop mutation cannot prove them. Each carries its own
       instead, and the reason is recorded rather than assumed:
       - **T047, T048** — replace `SELECT … FOR UPDATE` on the invitation with a plain `SELECT`. Both
@@ -408,28 +408,28 @@ substitute for a concurrent one.** *(SC-003)*
 
 ## Phase 7 — US4, US5, US6: rejection, status, reissue (P2, P3)
 
-- [ ] T054 [US4] Implement rejection requiring a reason, and cancellation from either non-terminal
+- [x] T054 [US4] Implement rejection requiring a reason, and cancellation from either non-terminal
       state invalidating any outstanding acceptance secret, in
       `backend/internal/access/invitation.go` *(FR-022, FR-024)*
-- [ ] T055 [US4] Mount `POST …/{id}/reject` and `…/{id}/cancel` with their response classes in
+- [x] T055 [US4] Mount `POST …/{id}/reject` and `…/{id}/cancel` with their response classes in
       `backend/internal/httpapi/access_routes.go` *(FR-022, FR-024)*
-- [ ] T056 [US4] Integration test: rejection without a reason returns `422`; a new invitation for a
+- [x] T056 [US4] Integration test: rejection without a reason returns `422`; a new invitation for a
       previously rejected pair succeeds and the earlier record is unchanged *(FR-022, FR-023)*
-- [ ] T057 [US5] Implement `GET /me/course-access` returning per-Course invitation state, timestamps,
+- [x] T057 [US5] Implement `GET /me/course-access` returning per-Course invitation state, timestamps,
       and access-until, in `backend/internal/httpapi/access_routes.go` *(FR-035)*
-- [ ] T058 [US5] Integration test: the Student projection **excludes** `admin_note`,
+- [x] T058 [US5] Integration test: the Student projection **excludes** `admin_note`,
       `external_reference`, `decided_by_account_id`, and all approval evidence *(FR-036)*
 - [ ] T059 [P] [US5] Build the ST04 access-status and ST10 access-history screens in
       `frontend/src/app/[locale]/access/` *(FR-035, FR-039)*
-- [ ] T060 [US6] Implement acceptance-link reissue superseding every prior secret and leaving state
+- [x] T060 [US6] Implement acceptance-link reissue superseding every prior secret and leaving state
       unchanged, refusing for an accepted or terminal invitation, in
       `backend/internal/access/invitation.go` *(FR-025)*
-- [ ] T061 [US6] Integration test: the reissued link works, every prior link fails, invitation state
+- [x] T061 [US6] Integration test: the reissued link works, every prior link fails, invitation state
       and history are unchanged, and the reissue is audited *(FR-025, FR-031)*
 
 ## Phase 8 — Contract-level invariants and requirement coverage
 
-- [ ] T062 Invariant 1: enumerate the live route table and assert **no route creates an Entitlement
+- [x] T062 Invariant 1: enumerate the live route table and assert **no route creates an Entitlement
       except approve**, in `backend/internal/httpapi/access_invariants_test.go`. Proven by
       enumeration, not inspection. **Extend the existing production-exclusion precedent rather than
       inventing one**: `internal/entitlement/production_exclusion_test.go` already proves `seed_nonprod.go`
@@ -437,17 +437,17 @@ substitute for a concurrent one.** *(SC-003)*
       `cmd/e2e-seed` file is `//go:build !production`. This task must also assert those `cmd/e2e-seed`
       entitlement inserts stay production-excluded, so the only production creation path really is
       approval *(FR-013, FR-020, SC-006)*
-- [ ] T063 Invariant 2: assert no authorization decision **implemented by S6** reads Course Access
+- [x] T063 Invariant 2: assert no authorization decision **implemented by S6** reads Course Access
       Invitation state — playback, protected download, and Progress write — in
       `backend/internal/httpapi/access_invariants_test.go`. **The Instructor roster is deliberately
       out of range: it ships in S8 and carries its own assertion there** *(FR-026, SC-007; L1)*
-- [ ] T064 Invariant 3: assert no request or response body carries an amount, currency, payment
+- [x] T064 Invariant 3: assert no request or response body carries an amount, currency, payment
       status, gateway identifier, or payer instrument *(FR-005, SC-012)*
-- [ ] T065 Invariant 4: enumerate every mutation and assert each writes audit evidence before its
+- [x] T065 Invariant 4: enumerate every mutation and assert each writes audit evidence before its
       transaction commits, with the enumeration **failing if a new transition ships without one**;
       additionally assert the access-granted notification intent exists for approval and for **no other**
       transition *(FR-031, FR-034, SC-008)*
-- [ ] T066 Invariant 5: assert every mutation carries CSRF and a referenced strict body limit
+- [x] T066 Invariant 5: assert every mutation carries CSRF and a referenced strict body limit
 - [ ] T067 Invariant 6: assert wrong-identity access returns `404` and never `403` *(FR-009, SC-004)*
 - [ ] T068 **Self-approval auditability** *(H1)*. Integration test in
       `backend/internal/access/grant_integration_test.go` proving `created_by_account_id` and
