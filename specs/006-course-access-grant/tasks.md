@@ -282,7 +282,7 @@ Enrollment or Entitlement row exists.
       *(FR-003)*
 - [ ] T024 [US1] Mutation check for T022: remove the outbox intent and confirm the test fails
       *(FR-032)*
-- [ ] T025 [P] [US1] Build the AD06 invitation queue and creation form in
+- [x] T025 [P] [US1] Build the AD06 invitation queue and creation form in
       `frontend/src/app/[locale]/admin/course-access/`, Arabic and English, with shared components under
       `frontend/src/components/access/`. **Include the Course access-expiry configuration control** for
       the instant `T003a` and `T007a` introduce — without it an Admin cannot satisfy BR-025 and no
@@ -298,7 +298,7 @@ never invited to.
 - [x] T026 [US2] Implement acceptance in `backend/internal/access/invitation.go`: permit only an
       authenticated Account whose normalized email equals the invitation's; refuse every other
       identity server-side *(FR-008, FR-010)*
-- [ ] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
+- [x] T027 [US2] Preserve the validated return destination across sign-in, registration, and email
       verification so an invited Student without an Account returns to acceptance, reusing the S1B3
       `returnTo` mechanism, in `backend/internal/httpapi/access_routes.go` *(FR-011)*
 - [x] T028 [US2] Mount `GET`/`POST /me/course-access-invitations` and `…/{id}/accept` in
@@ -313,7 +313,7 @@ never invited to.
       **unchanged and unexpired** *(FR-012, BR-169)*
 - [ ] T032 [US2] Mutation check for T029: make acceptance create an Entitlement and confirm the test
       fails. **This is the single most important mutation check in the slice** *(FR-010, SC-002)*
-- [ ] T033 [P] [US2] Build the ST03 acceptance screen in
+- [x] T033 [P] [US2] Build the ST03 acceptance screen in
       `frontend/src/app/[locale]/access/`, stating explicitly that acceptance does not grant
       access. **Corrected 2026-08-06: no `(student)` route group exists, and this must not sit under
       `[locale]/learn/`** — `learn` is the entitled area, and an invited Student arriving from an emailed
@@ -362,7 +362,7 @@ changes nothing.
       the Entitlement and **never** the invitation *(FR-026, SC-007)*
 - [x] T044 [US3] Mutation check for T039: break the transaction boundary so audit commits separately,
       and confirm the test fails *(FR-015)*
-- [ ] T045 [P] [US3] Build the AD07 entitlement detail **read-only** view in
+- [x] T045 [P] [US3] Build the AD07 entitlement detail **read-only** view in
       `frontend/src/app/[locale]/admin/course-access/`. **No expiry-adjustment or revocation
       control** — those are S8's. Adjustment history comes from `entitlement_adjustments`, which S4's
       `0012` already created as an append-only table, so the read model has a real source *(FR-039)*
@@ -419,7 +419,7 @@ substitute for a concurrent one.** *(SC-003)*
       and access-until, in `backend/internal/httpapi/access_routes.go` *(FR-035)*
 - [x] T058 [US5] Integration test: the Student projection **excludes** `admin_note`,
       `external_reference`, `decided_by_account_id`, and all approval evidence *(FR-036)*
-- [ ] T059 [P] [US5] Build the ST04 access-status and ST10 access-history screens in
+- [x] T059 [P] [US5] Build the ST04 access-status and ST10 access-history screens in
       `frontend/src/app/[locale]/access/` *(FR-035, FR-039)*
 - [x] T060 [US6] Implement acceptance-link reissue superseding every prior secret and leaving state
       unchanged, refusing for an accepted or terminal invitation, in
@@ -448,32 +448,32 @@ substitute for a concurrent one.** *(SC-003)*
       additionally assert the access-granted notification intent exists for approval and for **no other**
       transition *(FR-031, FR-034, SC-008)*
 - [x] T066 Invariant 5: assert every mutation carries CSRF and a referenced strict body limit
-- [ ] T067 Invariant 6: assert wrong-identity access returns `404` and never `403` *(FR-009, SC-004)*
-- [ ] T068 **Self-approval auditability** *(H1)*. Integration test in
+- [x] T067 Invariant 6: assert wrong-identity access returns `404` and never `403` *(FR-009, SC-004)*
+- [x] T068 **Self-approval auditability** *(H1)*. Integration test in
       `backend/internal/access/grant_integration_test.go` proving `created_by_account_id` and
       `decided_by_account_id` are persisted as **separate** values, and that when one Admin both
       creates and approves an invitation the two columns hold the **same** account id — so
       self-approval is reconstructable after the fact even though FR-041 permits it *(FR-042, SC-013)*
-- [ ] T069 **Registration grants nothing** *(H2)*. Integration test: a Student who registers, verifies
+- [x] T069 **Registration grants nothing** *(H2)*. Integration test: a Student who registers, verifies
       email, and signs in reaches **zero** protected content, enumerated across every S6-reachable
       protected operation, with each denial byte-identical to a non-existent Course *(FR-028, SC-001)*
-- [ ] T070 **Separation from staff invitations** *(H2)*. Test in
+- [x] T070 **Separation from staff invitations** *(H2)*. Test in
       `backend/internal/access/invitation_test.go` asserting `course_access_invitations` and
       `staff_invitations` share no state machine, no uniqueness rule, and no account-creation path:
       creating a course-access invitation creates no Account and assigns no role, and two concurrent
       course-access invitations for the same email on **different** Courses both succeed — which the
       global one-pending-per-email staff rule would have refused *(FR-030, BR-171)*
-- [ ] T071 **Notification failure never rolls back** *(H2)*. Integration test: force outbox delivery
+- [x] T071 **Notification failure never rolls back** *(H2)*. Integration test: force outbox delivery
       to fail after commit and assert the invitation transition, the Enrollment, and the Entitlement
       all stand unchanged, and that the durable in-app record survives *(FR-033, BR-120)*
-- [ ] T072 Assert every constraint in [data-model.md §8](data-model.md#8-invariant-to-constraint-map)
+- [x] T072 Assert every constraint in [data-model.md §8](data-model.md#8-invariant-to-constraint-map)
       exists **in the database** and that none of the eight is implemented only as a Go handler check,
       in `backend/internal/db/migrate_integration_test.go` *(FR-003, FR-016, FR-019, FR-021, FR-022,
       FR-042)*
-- [ ] T073 Schema assertion: no payment-shaped column exists on `course_access_invitations`,
+- [x] T073 Schema assertion: no payment-shaped column exists on `course_access_invitations`,
       `enrollments`, or `entitlements`, asserted against the live schema per quickstart Scenario 10
       *(FR-005, SC-012)*
-- [ ] T074 **S6 implements no Entitlement evaluation** *(H2 follow-on)*. Assert in
+- [x] T074 **S6 implements no Entitlement evaluation** *(H2 follow-on)*. Assert in
       `backend/internal/httpapi/access_invariants_test.go` that no S6-authored file performs scope
       resolution, expiry comparison, or revocation checking — S6 calls S4's evaluator and duplicates
       none of it — and that **every file under `backend/internal/entitlement/` is unmodified by this
@@ -487,22 +487,22 @@ substitute for a concurrent one.** *(SC-003)*
 
 - [ ] T075 [P] Verify Arabic/English and RTL/LTR across ST03, ST04, ST10, AD06, and AD07 at phone,
       tablet, laptop, and desktop widths *(FR-039, SC-011)*
-- [ ] T076 Integration test: a suspended Account holding an active Entitlement is denied every
+- [x] T076 Integration test: a suspended Account holding an active Entitlement is denied every
       protected action, the Entitlement is byte-identical before, during, and after, and approval for
       a suspended Student still returns `200` *(FR-029, FR-040, SC-009)*
-- [ ] T077 Update `docs/BUSINESS_RULES.md` cross-references, the API contract documents, and
+- [x] T077 Update `docs/BUSINESS_RULES.md` cross-references, the API contract documents, and
       `docs/launch/STATUS.md` (Constitution XI — a behaviour change without its document update is
       incomplete, not done). **The S4 interface is already recorded as verified-and-revised** by the
       2026-08-06 reconciliation in [research.md §1](research.md#1-the-s4-seam) and
       [plan.md](plan.md#module-placement); this task records the *implementation* outcome against that
       record, and must state whether the shape still held at the head that was built
-- [ ] T078 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
+- [x] T078 Run the complete gate suite from [quickstart.md](quickstart.md), including a **clean**
       frontend build with `.next` removed first, and both repository guards. `scripts/docs-guard.sh` §5
       also proves no migration `0001`–`0014` was edited
-- [ ] T079 Run `speckit.converge`; complete any appended work through another `speckit.implement`
+- [x] T079 Run `speckit.converge`; complete any appended work through another `speckit.implement`
       pass until convergence is clean, then push the exact head and verify hosted CI passes every job.
       Only then freeze the range for independent Tier 3 review
-- [ ] T079a **Add `./internal/access` to the hosted integration list** in `.github/workflows/ci.yml`, in
+- [x] T079a **Add `./internal/access` to the hosted integration list** in `.github/workflows/ci.yml`, in
       the same commit that creates the package. Hosted CI currently runs `-tags=integration` against
       seven packages — `./internal/db`, `./internal/identity`, `./internal/outbox`, `./internal/httpapi`,
       `./internal/catalogpublic`, `./internal/ratelimit`, `./internal/learning` — while **thirteen**

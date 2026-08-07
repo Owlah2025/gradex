@@ -9,7 +9,7 @@ import type {
 } from "./learning";
 
 async function requestProtectedRead<T>(path: string, locale: "ar" | "en"): Promise<T> {
-  const requestHeaders = headers();
+  const requestHeaders = await headers();
   const request = buildProtectedServerRequest(path, locale, requestHeaders.get("cookie"));
   const response = await fetch(request.url, request.init);
   return readJSONResponse<T>(response);
