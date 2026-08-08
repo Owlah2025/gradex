@@ -101,9 +101,9 @@
 
 **Independent Test**: N → N+1 → N restores frontend/API/worker health and retains schema 15/provenance.
 
-- [ ] T039 [US6] Add release selection and application-only rollback commands in `deploy/scripts/application-rollback.sh` with explicit schema-down refusal (FR-017, FR-018)
-- [ ] T040 [US6] Exercise two compatible artifact versions, roll back application artifacts, verify frontend and both API probes, and assert unchanged schema/provenance (SC-008)
-- [ ] T041 [US6] Record evidence in `docs/launch/evidence/s12/rollback.md`, update the runbook, run guards, and commit Batch G
+- [x] T039 [US6] Add release selection and application-only rollback commands in `deploy/scripts/application-rollback.sh` with explicit schema-down refusal (FR-017, FR-018)
+- [x] T040 [US6] Exercise two compatible artifact versions, roll back application artifacts, verify frontend and both API probes, and assert unchanged schema/provenance (SC-008)
+- [x] T041 [US6] Record evidence in `docs/launch/evidence/s12/rollback.md`, update the runbook, run guards, and commit Batch G
 
 ## Phase 9 — Batch H / US6: Deployed MVP smoke and convergence (P2)
 

@@ -40,6 +40,7 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/verify-edge-security.sh
 ./deploy/scripts/verify-worker-media.sh
 ./deploy/scripts/verify-observability.sh
+./deploy/scripts/verify-application-rollback.sh
 ```
 
 The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
@@ -82,6 +83,13 @@ restore target, provisions a fresh `restore-postgres` container/database, and re
 `--clean`. The verifier asserts schema 15 plus fixed identity, invitation-provenance, Entitlement, and
 Enrollment records before starting `api-restore` against the restored database.
 Each successful backup also writes an ignored completion timestamp used by the freshness monitor.
+
+`application-rollback.sh apply RELEASE_MANIFEST` changes only the API, worker, and frontend image
+selection. A release manifest contains an immutable release ID plus backend/frontend image references.
+The command verifies clean forward schema 15, recreates only those application processes, and runs the
+TLS-edge probes. It intentionally has no schema-down operation; `migrate`, `downgrade`, `schema`, and
+`database` commands are refused. `verify-application-rollback.sh` builds two real compatible revisions
+and proves N → N+1 → N while comparing Entitlement invitation-provenance counts.
 
 ## Configuration
 
