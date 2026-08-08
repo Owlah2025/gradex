@@ -14,6 +14,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 var r2ProviderHTTPClient = &http.Client{
@@ -56,23 +59,43 @@ func TestCloudflareR2PreservesPrivateVersionBoundMediaContract(t *testing.T) {
 		}
 	}()
 
-	first := []byte("gradex-r2-provider-version-one")
-	firstVersion, unsignedURL := putPresignedProviderObject(t, ctx, store, key, first)
-	assertProviderCORS(t, ctx, unsignedURL, publicOrigin)
-	assertUnsignedProviderReadDenied(t, ctx, unsignedURL)
-	assertProviderVersion(t, ctx, store, key, firstVersion, first)
+	first := []byte("A")
+	firstUpload := putPresignedProviderObject(t, ctx, store, key, first, publicOrigin)
+	assertProviderCORS(t, ctx, firstUpload.objectURL, publicOrigin)
+	assertUnsignedProviderReadDenied(t, ctx, firstUpload.objectURL)
+	assertProviderVersion(t, ctx, store, key, firstUpload, first)
+	t.Log("upload A: success; ETag present; provider VersionId present; exact HEAD and GET returned A")
 
-	second := []byte("gradex-r2-provider-version-two-is-distinct")
-	secondVersion, _ := putPresignedProviderObject(t, ctx, store, key, second)
-	if firstVersion == secondVersion {
+	second := []byte("B")
+	secondUpload := putPresignedProviderObject(t, ctx, store, key, second, publicOrigin)
+	if firstUpload.versionID == secondUpload.versionID {
 		t.Fatal("R2 returned the same object version after replacement")
 	}
-	assertProviderVersion(t, ctx, store, key, secondVersion, second)
+	if firstUpload.etag == secondUpload.etag {
+		t.Fatal("R2 returned the same ETag for distinct object bytes")
+	}
+	current, err := store.DownloadPrefix(ctx, key, int64(len(second)+1))
+	if err != nil || !bytes.Equal(current, second) {
+		t.Fatal("current provider object did not resolve to replacement bytes B")
+	}
+	assertProviderVersion(t, ctx, store, key, secondUpload, second)
+	t.Log("upload B: success; distinct ETag and VersionId present; current and exact-version GET returned B")
 
-	old, err := store.DownloadPrefixVersion(ctx, key, firstVersion, int64(len(second)))
-	if err == nil && !bytes.Equal(old, first) {
+	old, err := store.DownloadPrefixVersion(ctx, key, firstUpload.versionID, int64(len(first)+1))
+	if err != nil {
+		t.Fatal("R2 could not retrieve historical version A after the same key was replaced")
+	}
+	if !bytes.Equal(old, first) {
 		t.Fatal("R2 silently substituted current bytes for the requested historical object version")
 	}
+	assertProviderHeadMetadata(t, ctx, store, key, firstUpload)
+	t.Log("historical retrieval: exact VersionId A remained addressable and returned A after overwrite")
+}
+
+type providerUpload struct {
+	versionID string
+	etag      string
+	objectURL string
 }
 
 func requiredProviderEnvironment(t *testing.T, name string) string {
@@ -108,7 +131,7 @@ func randomProviderSuffix(t *testing.T) string {
 	return hex.EncodeToString(random)
 }
 
-func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client, key string, body []byte) (string, string) {
+func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client, key string, body []byte, publicOrigin string) providerUpload {
 	t.Helper()
 	presigned, err := store.PresignPutURL(ctx, key, "video/mp4", 5*time.Minute)
 	if err != nil {
@@ -119,6 +142,7 @@ func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client
 		t.Fatal("constructing provider upload request")
 	}
 	req.Header.Set("Content-Type", "video/mp4")
+	req.Header.Set("Origin", publicOrigin)
 	response, err := r2ProviderHTTPClient.Do(req)
 	if err != nil {
 		t.Fatal("provider upload request failed")
@@ -132,27 +156,64 @@ func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client
 	if version == "" {
 		t.Fatal("R2 upload omitted x-amz-version-id required by the frozen media provenance contract")
 	}
+	etag := strings.TrimSpace(response.Header.Get("ETag"))
+	if etag == "" {
+		t.Fatal("R2 upload omitted ETag metadata")
+	}
+	if response.Header.Get("Access-Control-Allow-Origin") != publicOrigin {
+		t.Fatal("provider upload response did not allow the exact staging origin")
+	}
+	if !headerContainsToken(response.Header.Get("Access-Control-Expose-Headers"), "etag") ||
+		!headerContainsToken(response.Header.Get("Access-Control-Expose-Headers"), "x-amz-version-id") {
+		t.Fatal("provider upload response did not expose ETag and x-amz-version-id to the browser")
+	}
 	parsed, err := url.Parse(presigned)
 	if err != nil {
 		t.Fatal("parsing provider upload URL")
 	}
 	parsed.RawQuery = ""
-	return version, parsed.String()
+	return providerUpload{versionID: version, etag: etag, objectURL: parsed.String()}
 }
 
-func assertProviderVersion(t *testing.T, ctx context.Context, store *Client, key, version string, expected []byte) {
+func assertProviderVersion(t *testing.T, ctx context.Context, store *Client, key string, upload providerUpload, expected []byte) {
 	t.Helper()
-	size, exists, err := store.HeadObjectVersion(ctx, key, version)
+	size, exists, err := store.HeadObjectVersion(ctx, key, upload.versionID)
 	if err != nil || !exists || size != int64(len(expected)) {
-		t.Fatalf("exact provider object version head failed: exists=%t size=%d err=%v", exists, size, err)
+		t.Fatalf("exact provider object version HEAD failed: exists=%t size=%d", exists, size)
 	}
-	got, err := store.DownloadPrefixVersion(ctx, key, version, int64(len(expected)+1))
+	assertProviderHeadMetadata(t, ctx, store, key, upload)
+	got, err := store.DownloadPrefixVersion(ctx, key, upload.versionID, int64(len(expected)+1))
 	if err != nil {
-		t.Fatalf("reading exact provider object version: %v", err)
+		t.Fatal("reading exact provider object version failed")
 	}
 	if !bytes.Equal(got, expected) {
 		t.Fatal("exact provider object version bytes differ")
 	}
+}
+
+func assertProviderHeadMetadata(t *testing.T, ctx context.Context, store *Client, key string, upload providerUpload) {
+	t.Helper()
+	out, err := store.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(store.bucket), Key: aws.String(key), VersionId: aws.String(upload.versionID),
+	})
+	if err != nil {
+		t.Fatal("provider exact-version HEAD metadata request failed")
+	}
+	if strings.TrimSpace(aws.ToString(out.VersionId)) != upload.versionID {
+		t.Fatal("provider exact-version HEAD did not return the requested VersionId")
+	}
+	if strings.TrimSpace(aws.ToString(out.ETag)) != upload.etag {
+		t.Fatal("provider exact-version HEAD did not return the upload ETag")
+	}
+}
+
+func headerContainsToken(header, want string) bool {
+	for _, value := range strings.Split(header, ",") {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertProviderCORS(t *testing.T, ctx context.Context, objectURL, publicOrigin string) {
