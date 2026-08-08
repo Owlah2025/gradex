@@ -114,8 +114,17 @@
 - [x] T042 [US6] Parameterize the existing production-mode Playwright harness for an externally supplied staging origin without changing S5/S6 business assertions (FR-019)
 - [x] T043 [US6] Run the deployed journey through invitation acceptance with zero access, Admin Approval, exactly one Entitlement/Enrollment, protected playback, progress, and unrelated-Student denial (SC-012)
 - [x] T044 [US6] Run complete backend/frontend/CI-equivalent validation, exposure guard, documentation guard, `git diff --check`, and record results in `docs/launch/evidence/s12/convergence.md`
+
+## Phase 10 — Release hardening, provider staging, and independent review
+
+**Goal**: Close the remaining production-security gaps, repeat the proven deployment contract at the selected provider, and obtain independent review.
+
+**Independent Test**: The production audit has no unmitigated Critical/High finding, authenticated TLS Redis passes API/worker recovery tests, and the public staging origin passes provider restore, rollback, alert, protected-browser-media, and MVP smoke evidence.
+
 - [ ] T045 [US1] Upgrade or independently mitigate the High production `next`/`postcss`/`nanoid` dependency findings, then rerun the frontend gates and production audit
-- [ ] T046 Run `speckit.converge`, reconcile remaining tasks/evidence, freeze the exact S12 implementation range, and dispatch independent review without self-approving closure
+- [ ] T046 [US2] Add provider-neutral Redis authentication/TLS configuration for API and worker, fail closed in production, and prove it against a disposable authenticated TLS endpoint
+- [ ] T047 [US6] Deploy the frozen artifacts to the selected provider and record public TLS/DNS, managed PostgreSQL/Redis/private-storage browser CORS, scanner evidence, external alert delivery, provider backup/isolated restore, application rollback, and external MVP smoke results
+- [ ] T048 Run `speckit.converge`, reconcile remaining tasks/evidence, freeze the exact S12 implementation range, and dispatch independent review without self-approving closure
 
 ## Dependencies
 
@@ -127,7 +136,9 @@ Planning T001–T006
             ├─ Batch D T026–T029 ─┼─ Batch G T039–T041
             ├─ Batch E T030–T033 ─┤
             └─ Batch F T034–T038 ─┘
-                                   └─ Batch H T042–T046
+                                   └─ Batch H T042–T044
+                                        └─ Release hardening T045–T047
+                                             └─ Convergence/review T048
 ```
 
 - T007, T008, and T011 may run in parallel; T009/T010 follow their relevant artifact design.
@@ -138,7 +149,7 @@ Planning T001–T006
 
 ## Task Summary
 
-- Total tasks: **46**
+- Total tasks: **48**
 - Planning: 6
 - Batch A / US1: 8
 - Batch B / US2: 6
@@ -147,4 +158,5 @@ Planning T001–T006
 - Batch E / US2: 4
 - Batch F / US5: 5
 - Batch G / US6: 3
-- Batch H / US6 and convergence: 5
+- Batch H / US6: 3
+- Release hardening, provider staging, and convergence: 4

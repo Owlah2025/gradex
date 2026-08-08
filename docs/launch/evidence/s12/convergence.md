@@ -88,8 +88,9 @@ git diff --check
 
 The SpecKit prerequisite check resolved feature directory
 `specs/008-staging-production-infrastructure` and found the research, data-model, contracts,
-quickstart, and tasks artifacts. Convergence added the production dependency finding to the remaining
-task set. Independent review is intentionally not self-approved.
+quickstart, and tasks artifacts. Convergence retained 44 completed tasks and added explicit remaining
+tasks for production dependency remediation, authenticated/TLS Redis, provider staging execution,
+and independent review. Independent review is intentionally not self-approved.
 
 ## Evidence boundary
 
