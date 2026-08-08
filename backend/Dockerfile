@@ -12,7 +12,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/a
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-worker ./cmd/worker \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-migrate ./cmd/migrate
 
-FROM alpine:3.22.5
+FROM build AS proof-build
+
+RUN CGO_ENABLED=0 go test -c -trimpath -o /out/gradex-e2e-seed ./cmd/e2e-seed
+
+FROM alpine:3.22.5 AS runtime-base
 
 RUN apk add --no-cache ca-certificates ffmpeg tzdata \
     && addgroup -S gradex \
@@ -20,12 +24,22 @@ RUN apk add --no-cache ca-certificates ffmpeg tzdata \
 
 WORKDIR /app
 
+USER gradex
+
+FROM runtime-base AS proof
+
+COPY --from=proof-build /out/gradex-e2e-seed /usr/local/bin/gradex-e2e-seed
+COPY --from=build /src/internal/db/migrations ./internal/db/migrations
+
+ENTRYPOINT ["gradex-e2e-seed"]
+
+FROM runtime-base AS runtime
+
 COPY --from=build /out/gradex-api /usr/local/bin/gradex-api
 COPY --from=build /out/gradex-worker /usr/local/bin/gradex-worker
 COPY --from=build /out/gradex-migrate /usr/local/bin/gradex-migrate
 COPY --from=build /src/internal/db/migrations ./internal/db/migrations
 
-USER gradex
 EXPOSE 8080
 
 CMD ["gradex-api"]

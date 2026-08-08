@@ -186,13 +186,13 @@ func TestProtectedPlaybackDoesNotExtendS4TokenBoundary(t *testing.T) {
 	if !issued.ExpiresAt.After(accessEnds) {
 		t.Fatalf("issued URL expires at %s, want after access boundary %s", issued.ExpiresAt, accessEnds)
 	}
-	if f.store.callCount() != 1 {
-		t.Fatalf("initial playback signed %d URLs, want 1", f.store.callCount())
+	if f.store.callCount() != 0 {
+		t.Fatalf("playback authorization signed %d storage URLs before manifest revalidation, want 0", f.store.callCount())
 	}
 
 	f.clock.now = accessEnds.Add(time.Second)
 	assertProtectedUnavailable(t, f.request(method, path, body))
-	if f.store.callCount() != 1 {
-		t.Fatalf("post-expiry request created a new signed URL; calls=%d", f.store.callCount())
+	if f.store.callCount() != 0 {
+		t.Fatalf("post-expiry request created a storage URL; calls=%d", f.store.callCount())
 	}
 }

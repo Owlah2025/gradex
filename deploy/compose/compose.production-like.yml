@@ -72,6 +72,18 @@ services:
       retries: 30
     restart: unless-stopped
 
+  media-proof-redis:
+    profiles: [media-proof]
+    image: redis:7.4.9-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: "no"
+
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: server /data
@@ -177,6 +189,64 @@ services:
         condition: service_completed_successfully
     networks: [app]
     restart: unless-stopped
+
+  media-proof-tool:
+    profiles: [media-proof]
+    image: ${GRADEX_PROOF_IMAGE:-gradex-backend-proof:s12-local}
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      GRADEX_E2E_ADMIN_DB_URL: postgres://gradex:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/postgres?sslmode=disable
+      GRADEX_E2E_TARGET_DB_NAME: gradex_playwright_e2e_s12media01
+      GRADEX_E2E_TARGET_DB_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
+      GRADEX_E2E_ALLOW_DATABASE_RESET: "1"
+      REDIS_ADDR: media-proof-redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app]
+    restart: "no"
+
+  api-media-proof:
+    profiles: [media-proof]
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+      DATABASE_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
+      REDIS_ADDR: media-proof-redis:6379
+    depends_on:
+      media-proof-redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: "no"
+
+  worker-media-proof:
+    profiles: [media-proof]
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-worker"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: worker
+      DATABASE_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
+      REDIS_ADDR: media-proof-redis:6379
+    depends_on:
+      media-proof-redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [app]
+    restart: "no"
 
   frontend:
     image: ${GRADEX_FRONTEND_IMAGE:-gradex-frontend:s12-local}

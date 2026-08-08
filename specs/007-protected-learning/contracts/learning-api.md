@@ -208,8 +208,9 @@ content-unavailable without introducing another authorization enum into this rea
 
 ### `POST /api/v1/learn/lessons/{lessonId}/playback`
 
-Requests a freshly issued, short-lived, **session-scoped** signed URL from S4 for one playback session
-(FR-008, BR-100).
+Requests a freshly issued, short-lived, **session-scoped** same-origin manifest URL from S4 for one
+playback session (FR-008, BR-100). The manifest request revalidates access and rewrites its media
+references to exact-object private-storage signatures; video bytes do not pass through the API.
 
 - Issued **per playback session**, not per segment. HLS re-requests the same segment on seek,
   rebuffer, and rendition switch, so a single-use signature would break playback (S4's plan §Signed

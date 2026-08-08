@@ -78,10 +78,10 @@
 
 **Independent Test**: Safe work enqueues/consumes, recovers after Redis/worker restart, and protected media remains private and authorized.
 
-- [ ] T030 [US2] Add a production-like queue/storage/media proof harness in `deploy/scripts/verify-worker-media.sh` reusing existing S4/S5 fixtures (FR-009, FR-010)
-- [ ] T031 [US2] Prove Redis unavailable failure, restart, PostgreSQL outbox reconciliation, idempotent worker consumption, and observable failure/recovery (SC-004)
-- [ ] T032 [US2] Prove source/derived objects are private and protected signed playback succeeds without API byte proxying (SC-005)
-- [ ] T033 [US2] Record evidence in `docs/launch/evidence/s12/queue-media.md`, run guards, and commit Batch E
+- [x] T030 [US2] Add a production-like queue/storage/media proof harness in `deploy/scripts/verify-worker-media.sh` reusing existing S4/S5 fixtures (FR-009, FR-010)
+- [x] T031 [US2] Prove Redis unavailable failure, restart, PostgreSQL outbox reconciliation, idempotent worker consumption, and observable failure/recovery (SC-004)
+- [x] T032 [US2] Prove source/derived objects are private and protected signed playback succeeds without API byte proxying (SC-005)
+- [x] T033 [US2] Record evidence in `docs/launch/evidence/s12/queue-media.md`, run guards, and commit Batch E
 
 ## Phase 7 — Batch F / US5: Observability and alerts (P2)
 

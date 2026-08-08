@@ -38,6 +38,11 @@ func (d *refusingDelivery) IssuePlayback(context.Context, media.PlaybackRequest)
 	return media.PlaybackAuthorization{}, media.ErrProtectedUnavailable
 }
 
+func (d *refusingDelivery) IssuePlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error) {
+	d.calls++
+	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
+}
+
 func (d *refusingDelivery) IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error) {
 	d.calls++
 	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
@@ -205,6 +210,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 
 	for _, route := range []string{
 		"POST /api/v1/media/playback-authorizations",
+		"GET /api/v1/media/playback-manifests/:playbackSession/index.m3u8",
 		"POST /api/v1/media/download-authorizations",
 		"GET /api/v1/media/lessons/:lessonId/materials/resource",
 		"GET /api/v1/media/lessons/:lessonId/materials/lab-material",
@@ -232,6 +238,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	// ErrProtectedUnavailable. These requests prove the live router maps the
 	// resulting cases — including the absent target case — to fixed wire bytes.
 	cases := []requestCase{
+		{"invalid-playback-session", http.MethodGet, "/api/v1/media/playback-manifests/invalid/index.m3u8", ""},
 		{"non-existent", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000001","asset_version_id":"00000000-0000-0000-0000-000000000001"}`},
 		{"expired", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000002","asset_version_id":"00000000-0000-0000-0000-000000000002"}`},
 		{"revoked", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000003","asset_version_id":"00000000-0000-0000-0000-000000000003"}`},

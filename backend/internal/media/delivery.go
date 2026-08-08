@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -130,6 +133,13 @@ type PlaybackAuthorization struct {
 	ExpiresAt       time.Time `json:"expires_at"`
 }
 
+// PlaybackManifest carries only the rewritten HLS manifest text. Video
+// segments remain direct private-storage responses through exact presigned
+// URLs and never pass through the API process.
+type PlaybackManifest struct {
+	Contents []byte
+}
+
 type DownloadAuthorization struct {
 	URL            string    `json:"url"`
 	AssetVersionID string    `json:"asset_version_id"`
@@ -179,15 +189,104 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 	if !decision.Allowed {
 		return PlaybackAuthorization{}, denyProtected(decision.Reason)
 	}
-	url, err := s.store.PresignGetURL(ctx, target.storageKey, s.signatureLifetime)
-	if err != nil {
-		return PlaybackAuthorization{}, ErrProtectedUnavailable
-	}
 	now := s.now().UTC()
+	expiresAt := now.Add(s.signatureLifetime)
+	playbackSession := s.playbackSession(request.StudentID, request.LessonID, target.assetVersionID, expiresAt)
 	return PlaybackAuthorization{
-		PlaybackSession: s.playbackSession(request.StudentID, target.assetVersionID, now.Add(s.signatureLifetime)),
-		ManifestURL:     url, AssetVersionID: target.assetVersionID, ExpiresAt: now.Add(s.signatureLifetime),
+		PlaybackSession: playbackSession,
+		ManifestURL:     "/api/v1/media/playback-manifests/" + playbackSession + "/index.m3u8",
+		AssetVersionID:  target.assetVersionID,
+		ExpiresAt:       expiresAt,
 	}, nil
+}
+
+const maxPlaybackManifestBytes = 1024 * 1024
+
+type playbackSessionClaims struct {
+	StudentID      string `json:"student_id"`
+	LessonID       string `json:"lesson_id"`
+	AssetVersionID string `json:"asset_version_id"`
+	ExpiresAt      int64  `json:"expires_at"`
+}
+
+// IssuePlaybackManifest revalidates the authenticated Student and exact
+// approved Asset Version before reading one small rendition playlist. Every
+// media URI is replaced with an exact-object private-storage capability whose
+// expiry cannot exceed the playback session. Segment bytes remain direct S3
+// responses.
+func (s *DeliveryService) IssuePlaybackManifest(ctx context.Context, studentID, token string) (PlaybackManifest, error) {
+	now := s.now().UTC()
+	claims, err := s.verifyPlaybackSession(token, studentID, now)
+	if err != nil {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadApprovedTarget(ctx, claims.LessonID, claims.AssetVersionID, KindVideo)
+	if err != nil || target.state != StateReady || target.storageKey == "" {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	decision := s.evaluator.EvaluateTarget(ctx, studentID, claims.LessonID, target.retiredAt, now)
+	if !decision.Allowed {
+		return PlaybackManifest{}, denyProtected(decision.Reason)
+	}
+	contents, err := s.store.DownloadObject(ctx, target.storageKey)
+	if err != nil || len(contents) == 0 || len(contents) > maxPlaybackManifestBytes {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	rewritten, err := s.rewritePlaybackManifest(ctx, target.storageKey, contents, time.Unix(claims.ExpiresAt, 0).Sub(now))
+	if err != nil {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	return PlaybackManifest{Contents: rewritten}, nil
+}
+
+func (s *DeliveryService) rewritePlaybackManifest(ctx context.Context, storageKey string, contents []byte, expiry time.Duration) ([]byte, error) {
+	if expiry <= 0 {
+		return nil, ErrProtectedUnavailable
+	}
+	directory := path.Dir(storageKey)
+	lines := strings.Split(string(contents), "\n")
+	type mediaReference struct {
+		lineIndex int
+		objectKey string
+	}
+	references := make([]mediaReference, 0)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			if strings.Contains(strings.ToUpper(trimmed), "URI=") {
+				return nil, errors.New("HLS tag URI requires explicit rewriting support")
+			}
+			continue
+		}
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(parsed.Path, "/") ||
+			parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, errors.New("HLS media reference must be a plain relative path")
+		}
+		clean := path.Clean(parsed.Path)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return nil, errors.New("HLS media reference escapes its rendition directory")
+		}
+		objectKey := path.Join(directory, clean)
+		if !strings.HasPrefix(objectKey, directory+"/") {
+			return nil, errors.New("HLS media reference escapes its rendition directory")
+		}
+		references = append(references, mediaReference{lineIndex: i, objectKey: objectKey})
+	}
+	if len(references) == 0 {
+		return nil, errors.New("HLS manifest contains no media references")
+	}
+	for _, reference := range references {
+		signed, err := s.store.PresignGetURL(ctx, reference.objectKey, expiry)
+		if err != nil {
+			return nil, err
+		}
+		lines[reference.lineIndex] = signed
+	}
+	return []byte(strings.Join(lines, "\n")), nil
 }
 
 // IssueDownload protects Resource and Lab Material bytes independently on each
@@ -431,17 +530,36 @@ func (s *DeliveryService) loadCurrentMaterialTarget(ctx context.Context, lessonI
 	return target, nil
 }
 
-func (s *DeliveryService) playbackSession(studentID, assetVersionID string, expiresAt time.Time) string {
-	payload, _ := json.Marshal(struct {
-		StudentID      string `json:"student_id"`
-		AssetVersionID string `json:"asset_version_id"`
-		ExpiresAt      int64  `json:"expires_at"`
-	}{studentID, assetVersionID, expiresAt.Unix()})
+func (s *DeliveryService) playbackSession(studentID, lessonID, assetVersionID string, expiresAt time.Time) string {
+	payload, _ := json.Marshal(playbackSessionClaims{
+		StudentID: studentID, LessonID: lessonID, AssetVersionID: assetVersionID, ExpiresAt: expiresAt.Unix(),
+	})
 	mac := hmac.New(sha256.New, s.buyerTagKey)
-	_, _ = mac.Write([]byte("gradex:s4:playback-session:v1\x00"))
+	_, _ = mac.Write([]byte("gradex:s4:playback-session:v2\x00"))
 	_, _ = mac.Write(payload)
 	signature := mac.Sum(nil)
 	return base64.RawURLEncoding.EncodeToString(append(payload, signature...))
+}
+
+func (s *DeliveryService) verifyPlaybackSession(token, studentID string, now time.Time) (playbackSessionClaims, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) <= sha256.Size {
+		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	payload, signature := raw[:len(raw)-sha256.Size], raw[len(raw)-sha256.Size:]
+	mac := hmac.New(sha256.New, s.buyerTagKey)
+	_, _ = mac.Write([]byte("gradex:s4:playback-session:v2\x00"))
+	_, _ = mac.Write(payload)
+	if !hmac.Equal(signature, mac.Sum(nil)) {
+		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	var claims playbackSessionClaims
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.StudentID == "" ||
+		claims.LessonID == "" || claims.AssetVersionID == "" || claims.ExpiresAt <= 0 ||
+		claims.StudentID != studentID || !now.Before(time.Unix(claims.ExpiresAt, 0)) {
+		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	return claims, nil
 }
 
 func (s *DeliveryService) buyerTag(entitlementID, assetVersionID string) string {

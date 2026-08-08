@@ -208,15 +208,15 @@ func TestDenialsAreByteIdentical(t *testing.T) {
 			route := playbackRoute(t, f)
 			method, path, body := protectedLearningRequest(t, f, route)
 			assertLearningAllowed(t, route, f.request(method, path, body))
-			if f.store.callCount() != 1 {
-				t.Fatalf("initial allowed playback signed %d URLs, want 1", f.store.callCount())
+			if f.store.callCount() != 0 {
+				t.Fatalf("initial playback authorization signed %d storage URLs before manifest revalidation, want 0", f.store.callCount())
 			}
 			tc.mutate(t, f)
 			if tc.requestFor != nil {
 				path = tc.requestFor(f, path)
 			}
 			denied := assertProtectedUnavailable(t, f.request(method, path, body))
-			if f.store.callCount() != 1 {
+			if f.store.callCount() != 0 {
 				t.Fatalf("denied %s request issued another playback URL", tc.name)
 			}
 			if baseline == nil {

@@ -29,6 +29,13 @@ Neither route makes anything deliverable. They move an object to `QUARANTINED`.
 the exact approved or historically qualifying Asset Version (BR-050, BR-100). Deliberately not
 single-use: HLS re-requests segments on seek, rebuffer, and rendition switch.
 
+`GET /api/v1/media/playback-manifests/{playbackSession}/index.m3u8` — authenticates the Student,
+revalidates the exact approved Asset Version and current Entitlement, reads only the small private
+rendition playlist, and rewrites every media reference to an exact-object presigned URL bounded by
+the playback-session expiry. It returns `Cache-Control: no-store` and proxies no segment/video bytes.
+This route was made explicit during S12 production-like storage verification after a private S3
+store correctly refused the unsigned relative segment produced by a directly signed playlist.
+
 `POST /api/v1/media/download-authorizations` — issues signed access to a protected Resource or Lab
 Material. Lab Material URLs MAY be single-use. Lab Materials carry the opaque buyer tag; Lesson
 Resources do not (BR-103).

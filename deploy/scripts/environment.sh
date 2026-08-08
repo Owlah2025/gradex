@@ -26,6 +26,14 @@ prepare() {
   mkdir -p "$S12_STATE_DIR"
   chmod 700 "$S12_STATE_DIR"
   if [ -f "$S12_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$S12_ENV_FILE"
+    set +a
+    if grep -q 'gradex_playwright_e2e_s12_media' "$S12_ENV_FILE"; then
+      sed -i 's/gradex_playwright_e2e_s12_media/gradex_playwright_e2e_s12media01/g' "$S12_ENV_FILE"
+      note "corrected existing media-proof database name to the repository safety pattern"
+    fi
     if ! grep -q '^RESTORE_POSTGRES_PASSWORD=' "$S12_ENV_FILE"; then
       umask 077
       restore_postgres_password="$(openssl rand -hex 24)"
@@ -35,6 +43,14 @@ prepare() {
           "$restore_postgres_password"
       } >>"$S12_ENV_FILE"
       note "upgraded existing ignored environment state for isolated restore"
+    fi
+    if ! grep -q '^MEDIA_PROOF_DATABASE_URL=' "$S12_ENV_FILE"; then
+      {
+        printf 'MEDIA_PROOF_DATABASE_URL=postgres://gradex:%s@postgres:5432/gradex_playwright_e2e_s12media01?sslmode=disable\n' \
+          "$POSTGRES_PASSWORD"
+        printf 'GRADEX_PROOF_IMAGE=gradex-backend-proof:s12-local\n'
+      } >>"$S12_ENV_FILE"
+      note "upgraded existing ignored environment state for media proof"
     fi
     note "using existing ignored environment state"
     return
@@ -56,6 +72,8 @@ prepare() {
     printf 'RESTORE_POSTGRES_PASSWORD=%s\n' "$restore_postgres_password"
     printf 'RESTORE_DATABASE_URL=postgres://gradex_restore:%s@restore-postgres:5432/gradex_restore?sslmode=disable\n' \
       "$restore_postgres_password"
+    printf 'MEDIA_PROOF_DATABASE_URL=postgres://gradex:%s@postgres:5432/gradex_playwright_e2e_s12media01?sslmode=disable\n' \
+      "$postgres_password"
     printf 'S3_ACCESS_KEY=%s\n' "$s3_access_key"
     printf 'S3_SECRET_KEY=%s\n' "$s3_secret_key"
     printf 'MINIO_ROOT_USER=%s\n' "$minio_root_user"
@@ -69,6 +87,7 @@ prepare() {
     printf 'GRADEX_BACKEND_IMAGE=gradex-backend:s12-local\n'
     printf 'GRADEX_FRONTEND_IMAGE=gradex-frontend:s12-local\n'
     printf 'GRADEX_EDGE_IMAGE=gradex-edge:s12-local\n'
+    printf 'GRADEX_PROOF_IMAGE=gradex-backend-proof:s12-local\n'
   } >"$S12_ENV_FILE"
   note "created ignored environment state"
 }
@@ -92,6 +111,9 @@ build_images() {
   tar --exclude=.git --exclude=.env --exclude='.env.*' --exclude='*.out' --exclude=coverage \
     -C "$S12_ROOT/backend" -cf - . |
     docker build --tag "$GRADEX_BACKEND_IMAGE" -
+  tar --exclude=.git --exclude=.env --exclude='.env.*' --exclude='*.out' --exclude=coverage \
+    -C "$S12_ROOT/backend" -cf - . |
+    docker build --target proof --tag "$GRADEX_PROOF_IMAGE" -
   tar --exclude=node_modules --exclude=.next --exclude=coverage \
     -C "$S12_ROOT/frontend" -cf - . |
     docker build --tag "$GRADEX_FRONTEND_IMAGE" -

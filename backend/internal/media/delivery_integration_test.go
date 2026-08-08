@@ -17,8 +17,9 @@ import (
 )
 
 type signedDeliveryStore struct {
-	mu   sync.Mutex
-	keys []string
+	mu       sync.Mutex
+	keys     []string
+	manifest []byte
 }
 
 func (s *signedDeliveryStore) PresignGetURL(_ context.Context, key string, _ time.Duration) (string, error) {
@@ -28,10 +29,28 @@ func (s *signedDeliveryStore) PresignGetURL(_ context.Context, key string, _ tim
 	return "https://storage.test/signed/" + key, nil
 }
 
+func (s *signedDeliveryStore) DownloadObject(_ context.Context, key string) ([]byte, error) {
+	if !strings.HasSuffix(key, ".m3u8") {
+		return nil, fmt.Errorf("unexpected manifest key %q", key)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.manifest != nil {
+		return append([]byte(nil), s.manifest...), nil
+	}
+	return []byte("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment000.ts\n#EXT-X-ENDLIST\n"), nil
+}
+
 func (s *signedDeliveryStore) requestedKeys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.keys...)
+}
+
+func (s *signedDeliveryStore) setManifest(contents string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.manifest = []byte(contents)
 }
 
 type deliveryFixture struct {
@@ -163,8 +182,12 @@ func (f *deliveryFixture) seedGrant(id string, scope entitlement.ScopeKind, scop
 func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video})
-	if err != nil || issued.AssetVersionID != f.video || !strings.Contains(issued.ManifestURL, "video/hls/playlist.m3u8") || issued.ExpiresAt.Sub(f.now) != 5*time.Minute {
+	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/media/playback-manifests/") || issued.ExpiresAt.Sub(f.now) != 5*time.Minute {
 		t.Fatalf("playback issuance=%+v err=%v", issued, err)
+	}
+	manifest, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession)
+	if err != nil || !strings.Contains(string(manifest.Contents), "https://storage.test/signed/video/hls/segment000.ts") {
+		t.Fatalf("playback manifest=%q err=%v", manifest.Contents, err)
 	}
 	replacement := f.readyAsset(KindVideo, "replacement/hls/playlist.m3u8")
 	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: replacement}); err == nil {
@@ -177,7 +200,44 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 		t.Fatal("new playback issuance succeeded after effective expiry")
 	}
 	if len(f.store.requestedKeys()) != 1 {
-		t.Fatalf("signed storage calls=%v, want one allowed exact rendition", f.store.requestedKeys())
+		t.Fatalf("signed storage calls=%v, want one allowed exact segment", f.store.requestedKeys())
+	}
+}
+
+func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T) {
+	f := newDeliveryFixture(t)
+	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
+		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+	})
+	if err != nil {
+		t.Fatalf("issuing playback: %v", err)
+	}
+	tampered := issued.PlaybackSession[:len(issued.PlaybackSession)-1] + "A"
+	if tampered == issued.PlaybackSession {
+		tampered = issued.PlaybackSession[:len(issued.PlaybackSession)-1] + "B"
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, tampered); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("tampered session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, uuid.NewString(), issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("cross-Student session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+
+	for name, manifest := range map[string]string{
+		"parent traversal": "#EXTM3U\n../other/segment.ts\n",
+		"absolute target":  "#EXTM3U\nhttps://public.example/segment.ts\n",
+		"tag URI":          "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\nsegment.ts\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f.store.setManifest(manifest)
+			before := len(f.store.requestedKeys())
+			if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+				t.Fatalf("unsafe manifest error=%v, want %v", err, ErrProtectedUnavailable)
+			}
+			if got := len(f.store.requestedKeys()); got != before {
+				t.Fatalf("unsafe manifest signed %d storage references", got-before)
+			}
+		})
 	}
 }
 
@@ -279,6 +339,9 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	if got := issued.ExpiresAt.Sub(f.now); got != 5*time.Minute {
 		t.Fatalf("issued signature lifetime=%s, want 5m", got)
 	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
+		t.Fatalf("issuing pre-expiry manifest: %v", err)
+	}
 
 	// The storage signature was already minted. Advancing the injected clock
 	// past access_ends_at cannot revoke that third-party capability, but its
@@ -289,6 +352,9 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	}
 	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("post-expiry re-issuance error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("post-expiry manifest error=%v, want %v", err, ErrProtectedUnavailable)
 	}
 	if len(f.store.requestedKeys()) != 1 {
 		t.Fatalf("post-expiry re-issuance minted another signed URL: %v", f.store.requestedKeys())

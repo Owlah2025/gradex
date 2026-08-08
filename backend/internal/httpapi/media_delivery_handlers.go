@@ -33,10 +33,27 @@ func mountMediaDeliveryRoutes(content *gin.RouterGroup, delivery mediaDeliveryIs
 	protected := content.Group("")
 	protected.Use(requireProtectedLearningAccess(authenticator, principals, logger))
 	protected.POST("/playback-authorizations", strictJSONMiddleware(func() any { return &playbackAuthorizationBody{} }, mediaRequestBodyLimit), h.playbackAuthorization)
+	protected.GET("/playback-manifests/:playbackSession/index.m3u8", h.playbackManifest)
 	protected.POST("/download-authorizations", strictJSONMiddleware(func() any { return &downloadAuthorizationBody{} }, mediaRequestBodyLimit), h.downloadAuthorization)
 	protected.GET("/lessons/:lessonId/materials/resource", func(c *gin.Context) { h.materialEntry(c, media.KindResource) })
 	protected.GET("/lessons/:lessonId/materials/lab-material", func(c *gin.Context) { h.materialEntry(c, media.KindLabMaterial) })
 	content.GET("/previews/:id", h.preview)
+}
+
+func (h *mediaDeliveryHandlers) playbackManifest(c *gin.Context) {
+	manifest, err := h.delivery.IssuePlaybackManifest(
+		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("playbackSession"),
+	)
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", manifest.Contents)
 }
 
 func (h *mediaDeliveryHandlers) playbackAuthorization(c *gin.Context) {

@@ -66,6 +66,7 @@ type ObjectStore interface {
 // exact Asset Version; it cannot list, fetch, or make an object public.
 type DeliveryStore interface {
 	PresignGetURL(context.Context, string, time.Duration) (string, error)
+	DownloadObject(context.Context, string) ([]byte, error)
 }
 
 type UploadRequest struct {

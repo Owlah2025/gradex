@@ -39,6 +39,10 @@ func (s *learningIntegrationStore) PresignGetURL(_ context.Context, key string, 
 	return "https://storage.example.test/" + key, nil
 }
 
+func (*learningIntegrationStore) DownloadObject(context.Context, string) ([]byte, error) {
+	return []byte("#EXTM3U\n#EXTINF:6,\nsegment000.ts\n#EXT-X-ENDLIST\n"), nil
+}
+
 func (s *learningIntegrationStore) callCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
