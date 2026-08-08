@@ -52,6 +52,8 @@ test("protected learning pages remain dynamic and uncached", () => {
   const frontendRoot = process.cwd().endsWith("/frontend") ? process.cwd() : join(process.cwd(), "frontend");
   const serverAdapter = readFileSync(join(frontendRoot, "src/lib/api/learning-server.ts"), "utf8");
   assert.match(serverAdapter, /^import ["']server-only["'];/m);
+  // S11 browser evidence exposed Next 15 rejecting synchronous request-header access.
+  assert.match(serverAdapter, /const requestHeaders = await headers\(\)/);
   const pages = [
     "src/app/[locale]/learn/dashboard/page.tsx",
     "src/app/[locale]/learn/courses/[courseId]/page.tsx",
