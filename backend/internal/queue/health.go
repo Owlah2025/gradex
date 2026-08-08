@@ -17,8 +17,8 @@ type HealthClient struct {
 	rdb *redis.Client
 }
 
-func NewHealthClient(redisAddr string) *HealthClient {
-	return &HealthClient{rdb: redis.NewClient(&redis.Options{Addr: redisAddr})}
+func (c *Connection) NewHealthClient() *HealthClient {
+	return &HealthClient{rdb: c.NewRedisClient()}
 }
 
 // Ping issues one bounded, non-mutating command. It creates no persistent test

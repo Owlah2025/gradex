@@ -9,6 +9,11 @@ x-backend-environment: &backend-environment
   SHUTDOWN_TIMEOUT: 20s
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   REDIS_ADDR: redis:6379
+  REDIS_USERNAME: ${REDIS_USERNAME:-}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  REDIS_TLS_ENABLED: "true"
+  REDIS_TLS_SERVER_NAME: redis
+  REDIS_TLS_CA_CERT_FILE: /run/gradex/redis/ca.crt
   S3_ENDPOINT: http://minio:9000
   S3_BUCKET: gradex-private-media
   S3_REGION: us-east-1
@@ -26,6 +31,9 @@ x-backend-environment: &backend-environment
   STUDENT_REGISTRATION_ENABLED: "false"
   PASSWORD_SCREEN_MODE: unavailable
   AUTH_FAKE_MODE: "false"
+
+x-backend-volumes: &backend-volumes
+  - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
 
 services:
   postgres:
@@ -63,10 +71,24 @@ services:
 
   redis:
     image: redis:7.4.9-alpine
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec redis-server --appendonly no --save "" --port 0 --tls-port 6379 \
+          --tls-cert-file /run/gradex/redis/server.crt \
+          --tls-key-file /run/gradex/redis/server.key \
+          --tls-ca-cert-file /run/gradex/redis/ca.crt \
+          --tls-auth-clients no --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+      - ${REDIS_TLS_SERVER_CERT_FILE_HOST:?REDIS_TLS_SERVER_CERT_FILE_HOST is required}:/run/gradex/redis/server.crt:ro
+      - ${REDIS_TLS_SERVER_KEY_FILE_HOST:?REDIS_TLS_SERVER_KEY_FILE_HOST is required}:/run/gradex/redis/server.key:ro
     networks: [app]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /run/gradex/redis/ca.crt ping"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -75,10 +97,24 @@ services:
   media-proof-redis:
     profiles: [media-proof]
     image: redis:7.4.9-alpine
-    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec redis-server --appendonly no --save "" --port 0 --tls-port 6379 \
+          --tls-cert-file /run/gradex/redis/server.crt \
+          --tls-key-file /run/gradex/redis/server.key \
+          --tls-ca-cert-file /run/gradex/redis/ca.crt \
+          --tls-auth-clients no --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+      - ${REDIS_TLS_SERVER_CERT_FILE_HOST:?REDIS_TLS_SERVER_CERT_FILE_HOST is required}:/run/gradex/redis/server.crt:ro
+      - ${REDIS_TLS_SERVER_KEY_FILE_HOST:?REDIS_TLS_SERVER_KEY_FILE_HOST is required}:/run/gradex/redis/server.key:ro
     networks: [app]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /run/gradex/redis/ca.crt ping"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -128,6 +164,7 @@ services:
     environment:
       <<: *backend-environment
       SERVICE_ROLE: api
+    volumes: *backend-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,6 +182,7 @@ services:
       <<: *backend-environment
       SERVICE_ROLE: api
       PORT: 8080
+    volumes: *backend-volumes
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -166,6 +204,7 @@ services:
       SERVICE_ROLE: api
       PORT: 8080
       DATABASE_URL: ${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required}
+    volumes: *backend-volumes
     depends_on:
       restore-postgres:
         condition: service_healthy
@@ -184,6 +223,7 @@ services:
     environment:
       <<: *backend-environment
       SERVICE_ROLE: worker
+    volumes: *backend-volumes
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -201,6 +241,8 @@ services:
       GRADEX_E2E_TARGET_DB_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
       GRADEX_E2E_ALLOW_DATABASE_RESET: "1"
       REDIS_ADDR: media-proof-redis:6379
+      REDIS_TLS_SERVER_NAME: media-proof-redis
+    volumes: *backend-volumes
     depends_on:
       postgres:
         condition: service_healthy
@@ -217,6 +259,8 @@ services:
       PORT: 8080
       DATABASE_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
       REDIS_ADDR: media-proof-redis:6379
+      REDIS_TLS_SERVER_NAME: media-proof-redis
+    volumes: *backend-volumes
     depends_on:
       media-proof-redis:
         condition: service_healthy
@@ -240,6 +284,8 @@ services:
       SERVICE_ROLE: worker
       DATABASE_URL: ${MEDIA_PROOF_DATABASE_URL:?MEDIA_PROOF_DATABASE_URL is required}
       REDIS_ADDR: media-proof-redis:6379
+      REDIS_TLS_SERVER_NAME: media-proof-redis
+    volumes: *backend-volumes
     depends_on:
       media-proof-redis:
         condition: service_healthy

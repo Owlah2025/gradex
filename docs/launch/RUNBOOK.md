@@ -12,7 +12,12 @@ The application requires the following environment variables in production:
 |---|---|---|
 | `APP_ENV` | `production` | Enables hardened security defaults |
 | `DATABASE_URL` | `postgres://gradex:<PASS>@<HOST>:5432/gradex?sslmode=verify-full` | Managed PostgreSQL connection string |
-| `REDIS_ADDR` | `<HOST>:6379` | Session and rate-limiting store |
+| `REDIS_ADDR` | `<HOST>:6379` | Credential-free Redis host and port |
+| `REDIS_PASSWORD` | `<MANAGED_SECRET>` | Required Redis authentication secret |
+| `REDIS_USERNAME` | blank or `<MANAGED_SECRET>` | Optional Redis ACL username |
+| `REDIS_TLS_ENABLED` | `true` | Required in staging and production |
+| `REDIS_TLS_SERVER_NAME` | `<CERTIFICATE_HOSTNAME>` | Optional certificate name override |
+| `REDIS_TLS_CA_CERT_FILE` | blank or mounted PEM path | Optional private CA; blank uses system roots |
 | `PUBLIC_ORIGIN` | `https://gradex.example` | Production origin for CSRF and action secrets |
 | `CORS_ALLOWED_ORIGINS` | `https://gradex.example` | CORS policy restriction |
 | `PLAYBACK_TOKEN_SECRET` | `<SECURE_RANDOM_SECRET>` | HMAC key for media playback tokens |
@@ -119,6 +124,10 @@ Verify schema and identity/access-critical records in the restored target, then 
 Gradex instance whose `DATABASE_URL` points to that target. Database recovery and application rollback
 are separate operations. Do not add `--clean` or point the restore command at the active source
 database merely to demonstrate recovery.
+
+Staging and production require authenticated Redis over verified TLS. Certificate verification
+cannot be disabled. Supply `REDIS_PASSWORD` through the secret platform; add `REDIS_USERNAME` only
+for an ACL account. `REDIS_ADDR` must contain only `host:port`, never a credential-bearing URL.
 
 ---
 

@@ -31,6 +31,11 @@ The authoritative key names remain `backend/.env.example` and the frontend serve
 `GRADEX_API_ORIGIN`. Deployment examples contain no secret values. Real values enter through the
 platform's secret facility at runtime. Production rejects fake authentication, non-HTTPS public/CORS
 origins, wildcard production CORS, missing secrets, and placeholder playback signing material.
+Development may use unauthenticated plaintext Redis. Staging and production require a password and
+verified TLS for every API and worker/asynq Redis client. `REDIS_USERNAME` optionally selects ACL
+authentication; certificate verification has no skip mode. A mounted private CA may augment the
+system trust store, and a server-name override supports provider endpoints whose certificate name
+differs from the configured address.
 
 ## Migration/recovery contract
 

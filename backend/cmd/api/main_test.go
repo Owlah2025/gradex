@@ -25,6 +25,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
 )
 
@@ -78,7 +79,7 @@ func apiPool(t *testing.T) (*pgxpool.Pool, context.Context) {
 }
 
 func TestBuildLearningFoundationRejectsMissingMedia(t *testing.T) {
-	if _, _, err := buildLearningFoundation(nil, nil, nil); err == nil {
+	if _, _, err := buildLearningFoundation(nil, nil, nil, nil); err == nil {
 		t.Fatal("production learning composition accepted a missing media foundation")
 	}
 }
@@ -109,8 +110,12 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
+	redisConnection, err := queue.NewConnection(cfg.Redis())
+	if err != nil {
+		t.Fatalf("Redis connection configuration: %v", err)
+	}
 
-	pf, err := buildProductionFoundations(cfg, pool)
+	pf, err := buildProductionFoundations(cfg, pool, redisConnection)
 	if err != nil {
 		t.Fatalf("buildProductionFoundations: %v", err)
 	}
@@ -126,7 +131,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building test media foundation: %v", err)
 	}
-	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation)
+	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation, redisConnection)
 	if err != nil {
 		t.Fatalf("building real learning foundation: %v", err)
 	}

@@ -7,6 +7,10 @@ S12_COMPOSE_FILE="$S12_ROOT/deploy/compose/compose.production-like.yml"
 S12_STATE_DIR="$S12_ROOT/deploy/.state"
 S12_ENV_FILE="$S12_STATE_DIR/production-like.env"
 S12_CA_FILE="$S12_STATE_DIR/caddy-root.crt"
+S12_REDIS_TLS_DIR="$S12_STATE_DIR/redis-tls"
+S12_REDIS_TLS_CA_FILE="$S12_REDIS_TLS_DIR/ca.crt"
+S12_REDIS_TLS_SERVER_CERT_FILE="$S12_REDIS_TLS_DIR/server.crt"
+S12_REDIS_TLS_SERVER_KEY_FILE="$S12_REDIS_TLS_DIR/server.key"
 S12_PROJECT="gradex-s12"
 
 note() { printf 's12-environment: %s\n' "$*" >&2; }
@@ -14,10 +18,40 @@ die() { note "$*"; exit 1; }
 
 require_tools() {
   local tool
-  for tool in curl docker grep openssl sed tar; do
+  for tool in curl docker grep openssl sed tar timeout; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
+}
+
+prepare_redis_tls() {
+  if [ -s "$S12_REDIS_TLS_CA_FILE" ] && [ -s "$S12_REDIS_TLS_SERVER_CERT_FILE" ] && [ -s "$S12_REDIS_TLS_SERVER_KEY_FILE" ]; then
+    chmod 644 "$S12_REDIS_TLS_CA_FILE" "$S12_REDIS_TLS_SERVER_CERT_FILE"
+    chmod 600 "$S12_REDIS_TLS_SERVER_KEY_FILE"
+    return
+  fi
+  local ca_key server_request
+  ca_key="$S12_REDIS_TLS_DIR/ca.key"
+  server_request="$S12_REDIS_TLS_DIR/server.csr"
+  mkdir -p "$S12_REDIS_TLS_DIR"
+  chmod 700 "$S12_REDIS_TLS_DIR"
+  rm -f -- "$S12_REDIS_TLS_CA_FILE" "$S12_REDIS_TLS_SERVER_CERT_FILE" "$S12_REDIS_TLS_SERVER_KEY_FILE" "$ca_key" "$server_request"
+  umask 077
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 30 \
+    -subj '/CN=Gradex S12 Redis CA' \
+    -addext 'basicConstraints=critical,CA:TRUE' \
+    -addext 'keyUsage=critical,keyCertSign,cRLSign' \
+    -keyout "$ca_key" -out "$S12_REDIS_TLS_CA_FILE" >/dev/null 2>&1
+  openssl req -new -newkey rsa:2048 -sha256 -nodes -subj '/CN=redis' \
+    -keyout "$S12_REDIS_TLS_SERVER_KEY_FILE" -out "$server_request" >/dev/null 2>&1
+  openssl x509 -req -sha256 -days 30 -in "$server_request" \
+    -CA "$S12_REDIS_TLS_CA_FILE" -CAkey "$ca_key" -CAcreateserial \
+    -extfile "$S12_ROOT/deploy/compose/redis-server.ext" \
+    -out "$S12_REDIS_TLS_SERVER_CERT_FILE" >/dev/null 2>&1
+  rm -f -- "$ca_key" "$server_request" "$S12_REDIS_TLS_DIR/ca.srl"
+  chmod 644 "$S12_REDIS_TLS_CA_FILE" "$S12_REDIS_TLS_SERVER_CERT_FILE"
+  chmod 600 "$S12_REDIS_TLS_SERVER_KEY_FILE"
+  note "created ignored Redis TLS certificate state"
 }
 
 prepare() {
@@ -25,6 +59,7 @@ prepare() {
   local restore_postgres_password
   mkdir -p "$S12_STATE_DIR"
   chmod 700 "$S12_STATE_DIR"
+  prepare_redis_tls
   if [ -f "$S12_ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -52,13 +87,25 @@ prepare() {
       } >>"$S12_ENV_FILE"
       note "upgraded existing ignored environment state for media proof"
     fi
+    if ! grep -q '^REDIS_PASSWORD=' "$S12_ENV_FILE"; then
+      printf 'REDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >>"$S12_ENV_FILE"
+    fi
+    if ! grep -q '^REDIS_TLS_CA_CERT_FILE_HOST=' "$S12_ENV_FILE"; then
+      {
+        printf 'REDIS_TLS_CA_CERT_FILE_HOST=%s\n' "$S12_REDIS_TLS_CA_FILE"
+        printf 'REDIS_TLS_SERVER_CERT_FILE_HOST=%s\n' "$S12_REDIS_TLS_SERVER_CERT_FILE"
+        printf 'REDIS_TLS_SERVER_KEY_FILE_HOST=%s\n' "$S12_REDIS_TLS_SERVER_KEY_FILE"
+      } >>"$S12_ENV_FILE"
+      note "upgraded existing ignored environment state for authenticated TLS Redis"
+    fi
     note "using existing ignored environment state"
     return
   fi
 
   umask 077
-  local postgres_password s3_access_key s3_secret_key minio_root_user minio_root_password
+  local postgres_password redis_password s3_access_key s3_secret_key minio_root_user minio_root_password
   postgres_password="$(openssl rand -hex 24)"
+  redis_password="$(openssl rand -hex 24)"
   restore_postgres_password="$(openssl rand -hex 24)"
   s3_access_key="s12$(openssl rand -hex 8)"
   s3_secret_key="$(openssl rand -hex 24)"
@@ -69,6 +116,10 @@ prepare() {
     printf 'PUBLIC_ORIGIN=https://gradex.localhost:18443\n'
     printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password"
     printf 'DATABASE_URL=postgres://gradex:%s@postgres:5432/gradex?sslmode=disable\n' "$postgres_password"
+    printf 'REDIS_PASSWORD=%s\n' "$redis_password"
+    printf 'REDIS_TLS_CA_CERT_FILE_HOST=%s\n' "$S12_REDIS_TLS_CA_FILE"
+    printf 'REDIS_TLS_SERVER_CERT_FILE_HOST=%s\n' "$S12_REDIS_TLS_SERVER_CERT_FILE"
+    printf 'REDIS_TLS_SERVER_KEY_FILE_HOST=%s\n' "$S12_REDIS_TLS_SERVER_KEY_FILE"
     printf 'RESTORE_POSTGRES_PASSWORD=%s\n' "$restore_postgres_password"
     printf 'RESTORE_DATABASE_URL=postgres://gradex_restore:%s@restore-postgres:5432/gradex_restore?sslmode=disable\n' \
       "$restore_postgres_password"
@@ -211,7 +262,7 @@ verify_data_plane() {
 
   docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname gradex \
     --tuples-only --command 'SELECT version, dirty FROM schema_migrations;'
-  docker exec "$redis_id" redis-cli ping
+  docker exec "$redis_id" redis-cli --tls --cacert /run/gradex/redis/ca.crt ping
 
   object_url="http://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@minio:9000"
   printf 'gradex-s12-storage-proof\n' |
@@ -238,6 +289,32 @@ verify_data_plane() {
   note "database, Redis, and private object-storage operations passed"
 }
 
+verify_redis_security() {
+  load_environment
+  local redis_id plaintext_result unauthenticated_result authenticated_result
+  redis_id="$(service_id redis)"
+  [ -n "$redis_id" ] || die "redis container is absent"
+
+  openssl verify -CAfile "$S12_REDIS_TLS_CA_FILE" "$S12_REDIS_TLS_SERVER_CERT_FILE" >/dev/null ||
+    die "Redis server certificate failed CA verification"
+
+  plaintext_result="$(timeout 5 docker exec "$redis_id" redis-cli -h redis -p 6379 ping 2>&1 || true)"
+  [ "$plaintext_result" != "PONG" ] || die "Redis accepted a plaintext connection"
+
+  unauthenticated_result="$(docker exec --env REDISCLI_AUTH= "$redis_id" \
+    redis-cli --tls --cacert /run/gradex/redis/ca.crt -h redis -p 6379 ping 2>&1 || true)"
+  case "$unauthenticated_result" in
+    *NOAUTH*) ;;
+    *) die "Redis did not reject an unauthenticated TLS connection" ;;
+  esac
+
+  authenticated_result="$(docker exec "$redis_id" \
+    redis-cli --tls --cacert /run/gradex/redis/ca.crt -h redis -p 6379 ping 2>&1)"
+  [ "$authenticated_result" = "PONG" ] || die "authenticated Redis TLS probe failed"
+
+  note "Redis rejected plaintext and unauthenticated access; authenticated verified TLS passed"
+}
+
 stop_environment() {
   load_environment
   compose down
@@ -249,11 +326,12 @@ reset_environment() {
     compose down --volumes --remove-orphans
   fi
   rm -f "$S12_ENV_FILE" "$S12_CA_FILE"
+  rm -rf -- "$S12_REDIS_TLS_DIR"
   note "removed only $S12_PROJECT containers, networks, volumes, and generated state"
 }
 
 usage() {
-  printf 'usage: %s {prepare|build|up|verify|data-plane|status|logs|stop|reset}\n' "$0" >&2
+  printf 'usage: %s {prepare|build|up|verify|data-plane|redis-security|status|logs|stop|reset}\n' "$0" >&2
   exit 2
 }
 
@@ -263,6 +341,7 @@ case "${1:-}" in
   up) start_environment ;;
   verify) verify_environment ;;
   data-plane) verify_data_plane ;;
+  redis-security) verify_redis_security ;;
   status) load_environment; compose ps ;;
   logs)
     load_environment

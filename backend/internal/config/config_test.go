@@ -16,6 +16,7 @@ func validSettings() map[string]string {
 		"CORS_ALLOWED_ORIGINS":   "https://gradex.example",
 		"CORS_ALLOW_CREDENTIALS": "true",
 		"REDIS_ADDR":             "redis:6379",
+		"REDIS_TLS_ENABLED":      "true",
 		"S3_ENDPOINT":            "https://storage.example",
 		"S3_BUCKET":              "gradex-media",
 		"AUTH_FAKE_MODE":         "false",
@@ -25,6 +26,7 @@ func validSettings() map[string]string {
 func validSecrets() MapSecretResolver {
 	return MapSecretResolver{
 		"DATABASE_URL":                 "postgres://gradex:pw@db:5432/gradex",
+		"REDIS_PASSWORD":               "redis-password-canary",
 		"S3_ACCESS_KEY":                "access",
 		"S3_SECRET_KEY":                "secret",
 		"PLAYBACK_TOKEN_SECRET":        "9f2c1de4a7b3085c6e1d4f7a2b9c0e3d",
@@ -116,6 +118,68 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	) {
 		t.Error("session CSRF key is absent or printable")
 	}
+}
+
+func TestRedisSecurityBoundary(t *testing.T) {
+	t.Run("development permits explicit plaintext without authentication", func(t *testing.T) {
+		cfg := mustLoad(t, func(settings map[string]string, secrets MapSecretResolver) {
+			settings["APP_ENV"] = "development"
+			settings["REDIS_TLS_ENABLED"] = "false"
+			delete(secrets, "REDIS_PASSWORD")
+		})
+		if cfg.Redis().TLSEnabled() || !cfg.Redis().Password().IsEmpty() {
+			t.Fatal("development Redis unexpectedly requires TLS or authentication")
+		}
+	})
+
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment+" requires authentication", func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, secrets MapSecretResolver) {
+				settings["APP_ENV"] = environment
+				delete(secrets, "REDIS_PASSWORD")
+			}, "REDIS_PASSWORD is required outside development")
+		})
+
+		t.Run(environment+" requires TLS", func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["APP_ENV"] = environment
+				settings["REDIS_TLS_ENABLED"] = "false"
+			}, "REDIS_TLS_ENABLED must be true outside development")
+		})
+	}
+
+	t.Run("ACL username requires password", func(t *testing.T) {
+		wantErrContaining(t, func(settings map[string]string, secrets MapSecretResolver) {
+			settings["APP_ENV"] = "development"
+			secrets["REDIS_USERNAME"] = "gradex-acl"
+			delete(secrets, "REDIS_PASSWORD")
+		}, "REDIS_PASSWORD is required when REDIS_USERNAME is configured")
+	})
+
+	t.Run("TLS metadata requires TLS", func(t *testing.T) {
+		wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+			settings["APP_ENV"] = "development"
+			settings["REDIS_TLS_ENABLED"] = "false"
+			settings["REDIS_TLS_SERVER_NAME"] = "redis.internal"
+		}, "require REDIS_TLS_ENABLED=true")
+	})
+
+	t.Run("credentials in address are refused", func(t *testing.T) {
+		wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+			settings["REDIS_ADDR"] = "rediss://gradex:secret@redis.internal:6379"
+		}, "credential-free host:port")
+	})
+
+	t.Run("credentials remain redacted", func(t *testing.T) {
+		cfg := mustLoad(t, func(_ map[string]string, secrets MapSecretResolver) {
+			secrets["REDIS_USERNAME"] = "redis-username-canary"
+			secrets["REDIS_PASSWORD"] = "redis-password-canary"
+		})
+		rendered := fmt.Sprintf("%v", cfg.Redis())
+		if strings.Contains(rendered, "redis-username-canary") || strings.Contains(rendered, "redis-password-canary") {
+			t.Fatal("Redis credentials were printable")
+		}
+	})
 }
 
 func TestMediaOperatingModeIsExplicitAndValidated(t *testing.T) {

@@ -16,19 +16,15 @@ const (
 	TypeMediaTranscode = "media:transcode"
 )
 
-func NewClient(redisAddr string) *asynq.Client {
-	return asynq.NewClient(asynq.RedisClientOpt{Addr: redisAddr})
-}
-
 type ServerOptions struct {
 	ErrorHandler    asynq.ErrorHandler
 	HealthCheckFunc func(error)
 	Logger          asynq.Logger
 }
 
-func NewServer(redisAddr string, options ServerOptions) *asynq.Server {
+func (c *Connection) NewServer(options ServerOptions) *asynq.Server {
 	return asynq.NewServer(
-		asynq.RedisClientOpt{Addr: redisAddr},
+		c.asynqOptions(),
 		asynq.Config{
 			Concurrency:     10,
 			ErrorHandler:    options.ErrorHandler,

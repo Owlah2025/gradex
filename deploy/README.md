@@ -36,6 +36,7 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/environment.sh up
 ./deploy/scripts/environment.sh verify
 ./deploy/scripts/environment.sh data-plane
+./deploy/scripts/environment.sh redis-security
 ./deploy/scripts/environment.sh status
 ./deploy/scripts/verify-edge-security.sh
 ./deploy/scripts/verify-worker-media.sh
@@ -49,6 +50,8 @@ The `verify` command extracts that CA certificate into ignored state and uses it
 frontend plus `/healthz` and `/readyz`. `data-plane` verifies schema 15, Redis, an application-credential
 object write/read/delete, and the bucket's private policy. Use `logs [service]`, `stop`, or `reset` for
 the corresponding lifecycle operation. `stop` preserves volumes; `reset` removes them.
+`redis-security` verifies the generated certificate chain, proves the Redis port refuses plaintext
+and unauthenticated TLS, then proves authenticated verified TLS without printing the credential.
 
 `verify-edge-security.sh` verifies the HTTP redirect and TLS hostname, probes through the HTTPS edge,
 checks the host-only Secure/HttpOnly/SameSite=Strict anonymous cookie, exercises trusted and hostile
@@ -104,6 +107,11 @@ services remain available at the verified local origin for inspection.
 - `env/production.env.example` lists the production contract.
 - `env/production-like.env.example` lists non-secret disposable settings.
 - `backend/.env.example` remains the authoritative exhaustive backend key reference.
+- `REDIS_ADDR` is a credential-free `host:port`. Development may omit authentication and TLS.
+  Staging and production require `REDIS_PASSWORD` plus `REDIS_TLS_ENABLED=true`; `REDIS_USERNAME`
+  enables ACL authentication. `REDIS_TLS_CA_CERT_FILE` optionally mounts a private CA and
+  `REDIS_TLS_SERVER_NAME` overrides certificate name derivation. Certificate verification cannot be
+  disabled, and API, readiness, rate-limiter, worker, and asynq clients share this contract.
 - `GRADEX_API_ORIGIN` is server-only and required by protected server-rendered requests in production.
   It must identify the API origin reachable from the frontend server.
 - Browser API calls use the public same-origin edge; no `NEXT_PUBLIC_*` secret is required.
@@ -130,7 +138,8 @@ into layers, or print a populated environment.
 ## Failure behavior
 
 Production configuration rejects missing required secrets, non-HTTPS public/CORS origins, wildcard
-production CORS, fake authentication, and the example playback-secret prefix. The frontend refuses a
+production CORS, unauthenticated/plaintext Redis, fake authentication, and the example playback-secret
+prefix. The frontend refuses a
 protected server request in production when `GRADEX_API_ORIGIN` is absent. The API exits on PostgreSQL
 startup failure and reports Redis failure through `/readyz`; the worker exits on PostgreSQL, Redis, or
 storage preflight failure.
@@ -140,3 +149,8 @@ storage preflight failure.
 Select earlier immutable frontend and backend application images while retaining the forward-compatible
 database schema. Never use migration `0015_course_access_grant.down.sql` as the normal rollback after real
 S6 grants because it clears `source_invitation_id` provenance.
+
+Enabling mandatory Redis TLS/authentication is a deployment compatibility boundary: do not select a
+pre-T046 backend image after the Redis service has been hardened. Establish the first T046-capable
+release as the new known-good rollback floor, and exercise subsequent N → N+1 → N application drills
+only between artifacts that implement this Redis contract.

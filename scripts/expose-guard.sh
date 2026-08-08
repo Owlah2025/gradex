@@ -42,6 +42,9 @@ ALLOWLIST=(
   # would duplicate the plaintext boundary and must be rejected in review.
   "cmd/bootstrap-admin/main.go"
   "internal/config/config.go"  # placeholder validation, inside the boundary itself
+  # Redis username/password cross directly into go-redis/asynq options. The
+  # dedicated boundary check below pins the exact plaintext reads.
+  "internal/queue/connection.go"
   # The encoded Argon2id hash goes to the database driver. No password plaintext
   # is read here — that happens only in credential.go, which check 4 enforces.
   "internal/identity/bootstrap.go"
@@ -78,6 +81,10 @@ ALLOWLIST=(
 PASSWORD_BOUNDARY_FILE="internal/identity/credential.go"
 PASSWORD_BOUNDARY_MARKER="gradex:plaintext-boundary"
 PASSWORD_BOUNDARY_EXPOSURES=2
+
+REDIS_PASSWORD_BOUNDARY_FILE="internal/queue/connection.go"
+REDIS_PASSWORD_BOUNDARY_MARKER="gradex:redis-password-plaintext-boundary"
+REDIS_PASSWORD_BOUNDARY_EXPOSURES=2
 
 # Packages that exist to send data outward. Expose() here is a defect even if
 # someone adds the file to the allowlist, so this check runs independently.
@@ -138,9 +145,9 @@ if hits=$(cd "$BACKEND" && grep -rn 'string(.*\.Expose())' --include='*.go' . 2>
 fi
 
 # --- 4. the password-plaintext boundary -------------------------------------
-# Password plaintext is exposed at exactly one reviewed production boundary:
-# the Identity credential operation in credential.go, which validates and hashes
-# a new password and verifies a current one.
+# Account password plaintext is exposed at exactly one reviewed production
+# boundary: the Identity credential operation in credential.go, which validates
+# and hashes a new password and verifies a current one.
 #
 # The other checks bound which *files* may call Expose(). This one bounds the
 # password specifically, because a second plaintext read is a duplicated
@@ -191,12 +198,46 @@ else
   fi
 fi
 
-# A password Expose() anywhere outside the boundary file, including in an
-# otherwise-allowlisted entrypoint.
+# Redis credentials have a separate driver-only boundary. Both the username and
+# password reads are pinned so another plaintext handling path cannot arrive
+# silently inside an otherwise-approved adapter.
+mapfile -t redis_markers < <(
+  cd "$BACKEND" && grep -rn "$REDIS_PASSWORD_BOUNDARY_MARKER" --include='*.go' . 2>/dev/null \
+    | grep -v '_test\.go:' | sed 's|^\./||' | sort
+)
+
+if [ "${#redis_markers[@]}" -ne 1 ]; then
+  note "expose-guard: expected exactly 1 Redis credential boundary marker, found ${#redis_markers[@]}"
+  fail=1
+else
+  redis_marker_file="${redis_markers[0]%%:*}"
+  redis_marker_line="${redis_markers[0]#*:}"
+  redis_marker_line="${redis_marker_line%%:*}"
+  if [ "$redis_marker_file" != "$REDIS_PASSWORD_BOUNDARY_FILE" ]; then
+    note "expose-guard: Redis credential boundary moved to $redis_marker_file"
+    fail=1
+  else
+    redis_exposures=$(cd "$BACKEND" && grep -c '\.Expose()' "$redis_marker_file" || true)
+    if [ "$redis_exposures" -ne "$REDIS_PASSWORD_BOUNDARY_EXPOSURES" ]; then
+      note "expose-guard: $redis_marker_file has $redis_exposures Expose() calls, expected $REDIS_PASSWORD_BOUNDARY_EXPOSURES"
+      fail=1
+    fi
+    redis_early=$(cd "$BACKEND" && grep -n '\.Expose()' "$redis_marker_file" | awk -F: -v m="$redis_marker_line" '$1 < m')
+    if [ -n "$redis_early" ]; then
+      note "expose-guard: Redis credential plaintext is read above its boundary marker:"
+      note "$redis_early"
+      fail=1
+    fi
+  fi
+fi
+
+# A password Expose() anywhere outside the two reviewed boundary files,
+# including in an otherwise-allowlisted entrypoint.
 if hits=$(cd "$BACKEND" && grep -rn -i '[Pp]assword[A-Za-z]*\.Expose()' --include='*.go' . 2>/dev/null \
-    | grep -v '_test\.go:' \
-    | sed 's|^\./||' \
-    | grep -v "^$PASSWORD_BOUNDARY_FILE:"); then
+  | grep -v '_test\.go:' \
+  | sed 's|^\./||' \
+  | grep -v "^$PASSWORD_BOUNDARY_FILE:" \
+  | grep -v "^$REDIS_PASSWORD_BOUNDARY_FILE:"); then
   note "expose-guard: password plaintext exposed outside the reviewed boundary:"
   note "$hits"
   note "  Resolve the secret, keep it as config.Secret, and let Identity expose"

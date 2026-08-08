@@ -15,6 +15,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"strconv"
@@ -204,6 +205,39 @@ func (s SessionSettings) CSRFKey() Secret               { return s.csrfKey }
 // non-development validation requires it.
 func (s SessionSettings) Enabled() bool { return !s.csrfKey.IsEmpty() }
 
+// RedisSettings is the immutable connection contract shared by every API and
+// worker Redis client. Credentials remain redacting Secrets until the queue
+// adapter hands them directly to go-redis/asynq.
+type RedisSettings struct {
+	addr          string
+	username      Secret
+	password      Secret
+	tlsEnabled    bool
+	tlsServerName string
+	tlsCACertFile string
+}
+
+func (s RedisSettings) Addr() string          { return s.addr }
+func (s RedisSettings) Username() Secret      { return s.username }
+func (s RedisSettings) Password() Secret      { return s.password }
+func (s RedisSettings) TLSEnabled() bool      { return s.tlsEnabled }
+func (s RedisSettings) TLSServerName() string { return s.tlsServerName }
+func (s RedisSettings) TLSCACertFile() string { return s.tlsCACertFile }
+
+func (s RedisSettings) String() string {
+	return fmt.Sprintf("{addr:%q credentials:%s tls:%t}", s.addr, redacted, s.tlsEnabled)
+}
+
+func (s RedisSettings) GoString() string { return s.String() }
+
+func (s RedisSettings) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("addr", s.addr),
+		slog.String("credentials", redacted),
+		slog.Bool("tls", s.tlsEnabled),
+	)
+}
+
 // Config is the immutable runtime configuration. Construct it only through
 // Load or LoadFrom.
 type Config struct {
@@ -226,7 +260,7 @@ type Config struct {
 	sessions SessionSettings
 
 	databaseURL Secret
-	redisAddr   string
+	redis       RedisSettings
 
 	s3Endpoint     string
 	s3Bucket       string
@@ -304,8 +338,8 @@ func (c *Config) ShutdownTimeout() time.Duration  { return c.shutdownTimeout }
 
 func (c *Config) Sessions() SessionSettings { return c.sessions }
 
-func (c *Config) DatabaseURL() Secret { return c.databaseURL }
-func (c *Config) RedisAddr() string   { return c.redisAddr }
+func (c *Config) DatabaseURL() Secret  { return c.databaseURL }
+func (c *Config) Redis() RedisSettings { return c.redis }
 
 func (c *Config) S3Endpoint() string   { return c.s3Endpoint }
 func (c *Config) S3Bucket() string     { return c.s3Bucket }
@@ -400,7 +434,12 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 			staleUseWindow: p.duration("SESSION_STALE_USE_WINDOW", 5*time.Second),
 		},
 
-		redisAddr: p.str("REDIS_ADDR", ""),
+		redis: RedisSettings{
+			addr:          p.str("REDIS_ADDR", ""),
+			tlsEnabled:    p.boolean("REDIS_TLS_ENABLED", false),
+			tlsServerName: p.str("REDIS_TLS_SERVER_NAME", ""),
+			tlsCACertFile: p.str("REDIS_TLS_CA_CERT_FILE", ""),
+		},
 
 		s3Endpoint:     p.str("S3_ENDPOINT", ""),
 		s3Bucket:       p.str("S3_BUCKET", ""),
@@ -432,6 +471,8 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	secrets := map[string]Secret{}
 	for _, ref := range []SecretRef{
 		{Name: "DATABASE_URL", Required: true},
+		{Name: "REDIS_USERNAME"},
+		{Name: "REDIS_PASSWORD"},
 		{Name: "S3_ACCESS_KEY", Required: true},
 		{Name: "S3_SECRET_KEY", Required: true},
 		{Name: "PLAYBACK_TOKEN_SECRET", Required: true},
@@ -455,6 +496,8 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	}
 
 	cfg.databaseURL = secrets["DATABASE_URL"]
+	cfg.redis.username = secrets["REDIS_USERNAME"]
+	cfg.redis.password = secrets["REDIS_PASSWORD"]
 	cfg.s3AccessKey = secrets["S3_ACCESS_KEY"]
 	cfg.s3SecretKey = secrets["S3_SECRET_KEY"]
 	cfg.playbackTokenSecret = secrets["PLAYBACK_TOKEN_SECRET"]
@@ -627,8 +670,25 @@ func (c *Config) validate(p *parser) {
 		p.errf("APP_ENV must be one of development, staging, production; got %q", c.environment)
 	}
 
-	if c.redisAddr == "" {
+	if c.redis.addr == "" {
 		p.errf("REDIS_ADDR is required")
+	}
+	if strings.Contains(c.redis.addr, "://") || strings.Contains(c.redis.addr, "@") {
+		p.errf("REDIS_ADDR must be a credential-free host:port")
+	}
+	if !c.redis.username.IsEmpty() && c.redis.password.IsEmpty() {
+		p.errf("REDIS_PASSWORD is required when REDIS_USERNAME is configured")
+	}
+	if !c.redis.tlsEnabled && (c.redis.tlsServerName != "" || c.redis.tlsCACertFile != "") {
+		p.errf("REDIS_TLS_SERVER_NAME and REDIS_TLS_CA_CERT_FILE require REDIS_TLS_ENABLED=true")
+	}
+	if c.environment != EnvDevelopment {
+		if c.redis.password.IsEmpty() {
+			p.errf("REDIS_PASSWORD is required outside development")
+		}
+		if !c.redis.tlsEnabled {
+			p.errf("REDIS_TLS_ENABLED must be true outside development")
+		}
 	}
 	if c.environment != EnvDevelopment && c.sessions.csrfKey.IsEmpty() {
 		p.errf("SESSION_CSRF_KEY is required outside development")

@@ -68,14 +68,18 @@ func main() {
 		log.Fatalf("connecting to storage: %v", err)
 	}
 
-	queueClient := queue.NewClient(cfg.RedisAddr())
+	redisConnection, err := queue.NewConnection(cfg.Redis())
+	if err != nil {
+		log.Fatalf("configuring Redis: %v", err)
+	}
+	queueClient := redisConnection.NewClient()
 	defer queueClient.Close()
 
-	redisHealth := queue.NewHealthClient(cfg.RedisAddr())
+	redisHealth := redisConnection.NewHealthClient()
 	defer redisHealth.Close()
 
 	var sessionRepository *identity.SessionRepository
-	pf, err := buildProductionFoundations(cfg, pool)
+	pf, err := buildProductionFoundations(cfg, pool, redisConnection)
 	if err != nil {
 		log.Fatalf("building production router foundations: %v", err)
 	}
@@ -89,7 +93,7 @@ func main() {
 		log.Fatalf("building media foundation: %v", err)
 	}
 	routerOptions = append(routerOptions, httpapi.WithMediaFoundation(mediaFoundation))
-	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation)
+	learningFoundation, learningRedis, err := buildLearningFoundation(cfg, pool, mediaFoundation, redisConnection)
 	if err != nil {
 		log.Fatalf("building learning foundation: %v", err)
 	}
@@ -196,6 +200,7 @@ func main() {
 func buildSessionFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
 ) (*httpapi.SessionFoundation, *identity.SessionRepository, *redis.Client, error) {
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
 		Pool: pool, Settings: cfg.Sessions(),
@@ -206,7 +211,7 @@ func buildSessionFoundation(
 	}
 
 	admission := cfg.Admission()
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
 		[]byte(admission.LimiterHMACKey().Expose()),
@@ -244,7 +249,12 @@ func requiredSchemaVersion(cfg *config.Config) int64 {
 	return db.ProtectedLearningSchemaVersion
 }
 
-func buildLearningFoundation(cfg *config.Config, pool *pgxpool.Pool, mediaFoundation *httpapi.MediaFoundation) (*httpapi.LearningFoundation, *redis.Client, error) {
+func buildLearningFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	mediaFoundation *httpapi.MediaFoundation,
+	redisConnection *queue.Connection,
+) (*httpapi.LearningFoundation, *redis.Client, error) {
 	if mediaFoundation == nil {
 		return nil, nil, errors.New("learning media foundation is required")
 	}
@@ -261,7 +271,7 @@ func buildLearningFoundation(cfg *config.Config, pool *pgxpool.Pool, mediaFounda
 		return nil, nil, fmt.Errorf("building learning entitlement evaluator: %w", err)
 	}
 	admission := cfg.Admission()
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
 		[]byte(admission.LimiterHMACKey().Expose()),
@@ -356,6 +366,7 @@ func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient 
 func buildAdmissionFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
 ) (*httpapi.AdmissionFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
 	if cfg.Environment() != config.EnvDevelopment {
@@ -388,7 +399,7 @@ func buildAdmissionFoundation(
 	if err != nil {
 		return nil, nil, err
 	}
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
 		[]byte(admission.LimiterHMACKey().Expose()),
@@ -494,6 +505,7 @@ func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error)
 func buildStaffFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
 ) (*httpapi.StaffFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
 	if cfg.Environment() != config.EnvDevelopment {
@@ -526,7 +538,7 @@ func buildStaffFoundation(
 		return nil, nil, err
 	}
 
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr()})
+	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
 		[]byte(admission.LimiterHMACKey().Expose()),
@@ -637,11 +649,12 @@ func (f *ProductionFoundations) Close() {
 func buildProductionFoundations(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
 ) (*ProductionFoundations, error) {
 	pf := &ProductionFoundations{}
 
 	if cfg.Sessions().Enabled() {
-		sessionFoundation, sessionRepo, sessionRedis, err := buildSessionFoundation(cfg, pool)
+		sessionFoundation, sessionRepo, sessionRedis, err := buildSessionFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()
 			return nil, err
@@ -652,7 +665,7 @@ func buildProductionFoundations(
 	}
 
 	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool)
+		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()
 			return nil, err
@@ -662,7 +675,7 @@ func buildProductionFoundations(
 	}
 
 	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildStaffFoundation(cfg, pool)
+		foundation, limiterClient, err := buildStaffFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()
 			return nil, err

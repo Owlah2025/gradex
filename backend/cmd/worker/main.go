@@ -62,9 +62,14 @@ func main() {
 		return
 	}
 
-	queueClient := queue.NewClient(cfg.RedisAddr())
+	redisConnection, err := queue.NewConnection(cfg.Redis())
+	if err != nil {
+		exitWorker(logger, "redis_config", logging.ErrorClassOf(err))
+		return
+	}
+	queueClient := redisConnection.NewClient()
 	defer queueClient.Close()
-	redisHealth := queue.NewHealthClient(cfg.RedisAddr())
+	redisHealth := redisConnection.NewHealthClient()
 	defer redisHealth.Close()
 	if err := redisHealth.Ping(startupCtx); err != nil {
 		cancelStartup()
@@ -109,7 +114,7 @@ func main() {
 		exitWorker(logger, "worker_registration", logging.ErrorClassOf(err))
 		return
 	}
-	server := queue.NewServer(cfg.RedisAddr(), queue.ServerOptions{
+	server := redisConnection.NewServer(queue.ServerOptions{
 		Logger: workerQueueLogger{logger: logger},
 		ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
 			taskID, _ := asynq.GetTaskID(ctx)
