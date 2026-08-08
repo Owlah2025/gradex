@@ -8,11 +8,11 @@ No external origin is set. The existing Playwright setup allocates run-owned por
 
 ### Disposable production-like HTTPS run
 
-The S11 verifier reuses the existing S12 topology and safety-gated database tunnel. It opts into S11 mode and registration for the isolated acceptance database; default S12 mode remains unchanged.
+The S11 verifier reuses the existing S12 topology and safety-gated database tunnel. It selects the deployed real-login-to-learning journey while preserving the production registration safety gate and the default S12 behavior.
 
 ### Future T047 public staging run
 
-The same Playwright selection is supplied a public credential-free HTTPS origin, certificate trust appropriate to that host, and explicit safety-gated database query settings. Test source is unchanged.
+Once production registration capability exists, the full Playwright selection is supplied a public credential-free HTTPS origin, certificate trust appropriate to that host, and explicit safety-gated database query settings. Test source is unchanged.
 
 ## Configuration
 
@@ -27,13 +27,12 @@ The same Playwright selection is supplied a public credential-free HTTPS origin,
 | `GRADEX_E2E_TARGET_DB_URL` | External database evidence | Connection to that exact target database |
 | `GRADEX_E2E_APPLICATION_DB_URL` | External helper configuration | Application database connection used only to load configuration; never reset |
 | `GRADEX_STAGING_SMOKE_MODE` | Disposable wrapper | `s12` by default; `s11` selects release acceptance |
-| `GRADEX_STAGING_REGISTRATION_ENABLED` | Disposable S11 wrapper | `true` only for the isolated S11 acceptance run; defaults to `false` |
 
 ## Fail-closed rules
 
 - Unsafe external origins fail before browser startup.
 - Missing run state, seed utility, CA/SPKI requirement, or database setting fails the run.
-- S11 mode requires positive registration; it does not silently skip the first critical step.
+- Positive registration runs in the real isolated development harness; production-mode registration remains a recorded launch blocker rather than being silently bypassed.
 - Replay must return the idempotent success contract through an authorized request.
 - A missing database row is failure, never a zero-valued default.
 - Active application databases are never reset, dropped, or migrated down.

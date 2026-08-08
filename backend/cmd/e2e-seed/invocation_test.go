@@ -100,7 +100,15 @@ func TestGoTestOwnFlagsAreNotToolFlags(t *testing.T) {
 		}
 	}
 	// The tool's real verbs must count.
-	for _, name := range []string{"dbname", "drop", "issue-session", "query-progress", "access-mutation", "email"} {
+	for _, name := range []string{
+		"dbname",
+		"drop",
+		"issue-session",
+		"query-progress",
+		"query-email-verification-token",
+		"access-mutation",
+		"email",
+	} {
 		if !isToolFlagName(name) {
 			t.Fatalf("%q is a tool verb and must count as a tool invocation", name)
 		}

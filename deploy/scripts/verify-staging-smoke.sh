@@ -12,6 +12,7 @@ S12_SMOKE_DB="gradex_playwright_e2e_s12smoke01"
 S12_TUNNEL_NAME="gradex-s12-smoke-db-tunnel"
 S12_TEMPORARY=""
 S12_TUNNEL_STARTED=0
+S12_SMOKE_MODE="${GRADEX_STAGING_SMOKE_MODE:-s12}"
 
 note() { printf 's12-staging-smoke: %s\n' "$*" >&2; }
 die() { note "$*"; exit 1; }
@@ -58,6 +59,10 @@ main() {
   for tool in curl docker git jq mktemp openssl sed tar; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
+  case "$S12_SMOKE_MODE" in
+    s12|s11) ;;
+    *) die "GRADEX_STAGING_SMOKE_MODE must be s12 or s11" ;;
+  esac
   [ -f "$S12_ENV_FILE" ] || die "run environment.sh up first"
   [ -s "$S12_CA_FILE" ] || die "run verify-edge-security.sh first"
   set -a
@@ -154,20 +159,24 @@ main() {
   )
 
   local state_assertion
+  local journey_student_email="student-unentitled@example.test"
   state_assertion="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$S12_SMOKE_DB" \
     --tuples-only --no-align --command "
       SELECT
         (SELECT count(*) FROM course_access_invitations
-          WHERE normalized_email = 'student-unentitled@example.test' AND state = 'APPROVED') || '|' ||
-        (SELECT count(*) FROM entitlements
-          WHERE student_account_id = 'a0000000-0000-0000-0000-000000000099'::uuid
-            AND course_id = 'c0000000-0000-0000-0000-000000000001'::uuid
-            AND state = 'ACTIVE' AND source_invitation_id IS NOT NULL) || '|' ||
-        (SELECT count(*) FROM enrollments
-          WHERE student_account_id = 'a0000000-0000-0000-0000-000000000099'::uuid
-            AND course_id = 'c0000000-0000-0000-0000-000000000001'::uuid) || '|' ||
-        (SELECT count(*) FROM progress p JOIN enrollments e ON e.id = p.enrollment_id
-          WHERE e.student_account_id = 'a0000000-0000-0000-0000-000000000099'::uuid
+          WHERE normalized_email = '$journey_student_email' AND state = 'APPROVED') || '|' ||
+        (SELECT count(*) FROM entitlements e JOIN accounts a ON a.id = e.student_account_id
+          WHERE a.normalized_email = '$journey_student_email'
+            AND e.course_id = 'c0000000-0000-0000-0000-000000000001'::uuid
+            AND e.state = 'ACTIVE' AND e.grant_source = 'MANUAL_INVITATION'
+            AND e.source_invitation_id IS NOT NULL) || '|' ||
+        (SELECT count(*) FROM enrollments e JOIN accounts a ON a.id = e.student_account_id
+          WHERE a.normalized_email = '$journey_student_email'
+            AND e.course_id = 'c0000000-0000-0000-0000-000000000001'::uuid) || '|' ||
+        (SELECT count(*) FROM progress p
+          JOIN enrollments e ON e.id = p.enrollment_id
+          JOIN accounts a ON a.id = e.student_account_id
+          WHERE a.normalized_email = '$journey_student_email'
             AND p.course_lesson_identity_id = '30000000-0000-0000-0000-000000000001'::uuid
             AND p.max_position_seconds >= 15);"
   )"
@@ -175,7 +184,7 @@ main() {
 
   local session_json cookie_name cookie_value manifest_url segment_url
   export DATABASE_URL="$application_url"
-  session_json="$("$seed_binary" -issue-session -email student-unentitled@example.test)"
+  session_json="$("$seed_binary" -issue-session -email "$journey_student_email")"
   cookie_name="$(printf '%s' "$session_json" | jq --raw-output '.cookie_name')"
   cookie_value="$(printf '%s' "$session_json" | jq --raw-output '.cookie_value')"
   curl --fail --silent --show-error --cacert "$S12_CA_FILE" \
@@ -192,8 +201,13 @@ main() {
     -qO- "$segment_url" >"$segment_file"
   [ -s "$segment_file" ] || die "deployed protected segment was empty"
 
-  note "HTTPS S6 invitation-to-learning journey, zero-before-approval, exact grant counts, progress, unrelated denial, and protected media passed"
-  note "production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB state=$state_assertion"
+  if [ "$S12_SMOKE_MODE" = "s11" ]; then
+    note "HTTPS S11 deployed login-to-learning journey, zero-before-approval, exact provenance/cardinality, progress, unrelated denial, authorized replay, and protected media passed"
+    note "S11 production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB schema=15 state=$state_assertion"
+  else
+    note "HTTPS S6 invitation-to-learning journey, zero-before-approval, exact grant counts, progress, unrelated denial, and protected media passed"
+    note "production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB state=$state_assertion"
+  fi
 }
 
 main "$@"

@@ -32,7 +32,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     const origin = new URL(frontendOrigin());
 
     // 1. Admin signs in using production session cookie
-    const adminSession = issueRotatingSession({ email: ADMIN_EMAIL, accountID: ADMIN_ID } as any);
+    const adminSession = issueRotatingSession({ email: ADMIN_EMAIL, accountID: ADMIN_ID });
     await adminContext.addCookies([
       {
         name: adminSession.cookie_name,
@@ -101,7 +101,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     expect(returnToQuery).toContain("/access");
 
     // 10. Student A authenticates with session cookie and navigates to target returnTo
-    const studentSession = issueRotatingSession({ email: STUDENT_A_EMAIL, accountID: STUDENT_A_ID } as any);
+    const studentSession = issueRotatingSession({ email: STUDENT_A_EMAIL, accountID: STUDENT_A_ID });
     await studentContext.addCookies([
       {
         name: studentSession.cookie_name,
@@ -152,6 +152,8 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     expect(stateSnapshot.entitlement.found).toBe(true);
     expect(stateSnapshot.entitlement.count).toBe(1);
     expect(stateSnapshot.entitlement.state).toBe("ACTIVE");
+    expect(stateSnapshot.entitlement.grant_source).toBe("MANUAL_INVITATION");
+    expect(stateSnapshot.entitlement.source_invitation_id).toBe(invitationId);
     expect(stateSnapshot.enrollment.found).toBe(true);
     expect(stateSnapshot.enrollment.count).toBe(1);
 
@@ -199,7 +201,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     // Context 3: Unrelated Student B Context
     const studentBContext = await browser.newContext({ locale: "en-US" });
-    const studentBSession = issueRotatingSession({ email: STUDENT_B_EMAIL, accountID: STUDENT_B_ID } as any);
+    const studentBSession = issueRotatingSession({ email: STUDENT_B_EMAIL, accountID: STUDENT_B_ID });
     await studentBContext.addCookies([
       {
         name: studentBSession.cookie_name,
@@ -221,16 +223,26 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(studentBPage.locator("body")).toContainText(/Access expired|unavailable|الوصول منتهي/);
 
     // 30. Repeat approval idempotency check
-    const secondApprove = await adminPage.request.post(`/api/v1/admin/course-access-invitations/${invitationId}/approve`, {
-      headers: { "X-CSRF-Token": "test-csrf-token" },
-    });
-    expect([200, 403, 409]).toContain(secondApprove.status());
+    const secondApprove = await adminPage.evaluate(async ({ invitationID, csrfToken }) => {
+      const response = await fetch(`/api/v1/admin/course-access-invitations/${invitationID}/approve`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      return { status: response.status, body: await response.json() };
+    }, { invitationID: invitationId, csrfToken: adminSession.csrf_token });
+    expect(secondApprove.status).toBe(200);
+    expect(secondApprove.body.entitlement.id).toBe(stateSnapshot.entitlement.id);
 
     const recheckSnapshot = queryLearningState(STUDENT_A_ID, COURSE_ID);
     expect(recheckSnapshot.entitlement.found).toBe(true);
     expect(recheckSnapshot.entitlement.count).toBe(1);
     expect(recheckSnapshot.entitlement.state).toBe("ACTIVE");
+    expect(recheckSnapshot.entitlement.id).toBe(stateSnapshot.entitlement.id);
+    expect(recheckSnapshot.entitlement.grant_source).toBe("MANUAL_INVITATION");
+    expect(recheckSnapshot.entitlement.source_invitation_id).toBe(invitationId);
     expect(recheckSnapshot.enrollment.count).toBe(1);
+    expect(recheckSnapshot.enrollment.id).toBe(stateSnapshot.enrollment.id);
 
     await adminContext.close();
     await studentContext.close();
@@ -241,7 +253,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     const adminContext = await browser.newContext({ locale: "en-US" });
     const origin = new URL(frontendOrigin());
 
-    const adminSession = issueRotatingSession({ email: ADMIN_EMAIL, accountID: ADMIN_ID } as any);
+    const adminSession = issueRotatingSession({ email: ADMIN_EMAIL, accountID: ADMIN_ID });
     await adminContext.addCookies([
       {
         name: adminSession.cookie_name,

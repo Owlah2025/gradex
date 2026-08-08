@@ -104,6 +104,9 @@ export default async function globalSetup() {
       S3_ACCESS_KEY: "gradexminio",
       S3_SECRET_KEY: "gradexminio",
       AUTH_FAKE_MODE: "false",
+      STUDENT_REGISTRATION_ENABLED: "true",
+      REGISTRATION_POLICY_SET_ID: "e2e-policy-v1",
+      PASSWORD_SCREEN_MODE: "deterministic",
       SESSION_CSRF_KEY: "0123456789abcdef0123456789abcdef",
       ANONYMOUS_COOKIE_SIGNING_KEY: "1123456789abcdef0123456789abcdef",
       ANONYMOUS_CSRF_KEY: "2123456789abcdef0123456789abcdef",
@@ -136,6 +139,7 @@ export default async function globalSetup() {
       "ANONYMOUS_CSRF_KEY", "ADMISSION_LIMITER_HMAC_KEY", "PLAYBACK_TOKEN_SECRET",
       "OUTBOX_PROTECTED_PAYLOAD_KEY", "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", "REDIS_ADDR",
       "S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY", "AUTH_FAKE_MODE",
+      "STUDENT_REGISTRATION_ENABLED", "REGISTRATION_POLICY_SET_ID", "PASSWORD_SCREEN_MODE",
       "PUBLIC_ORIGIN", "CORS_ALLOWED_ORIGINS", "CORS_ALLOW_CREDENTIALS"]) {
       process.env[key] = (env as Record<string, string>)[key];
     }

@@ -4,6 +4,7 @@ import type { BrowserContext } from "@playwright/test";
 import { e2eDatabaseEnvironment, SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "../src/lib/api/e2e-infrastructure";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import type { RotatingStudent } from "../src/lib/api/e2e-students";
+export { queryEmailVerificationAction } from "../src/lib/api/e2e-actions";
 
 /**
  * Rate-limit-safe Student allocation and production-valid session issuance for the E2E suite.
@@ -44,7 +45,7 @@ type IssuedSession = {
  * it validates a browser login. It is never written to the run-state file and never exposed to
  * browser JavaScript.
  */
-export function issueRotatingSession(student: RotatingStudent): IssuedSession {
+export function issueRotatingSession(student: Pick<RotatingStudent, "accountID" | "email">): IssuedSession {
   if (!fs.existsSync(RUN_STATE_FILE_PATH)) {
     throw new Error(`E2E run state is missing at ${RUN_STATE_FILE_PATH}; cannot issue a session.`);
   }

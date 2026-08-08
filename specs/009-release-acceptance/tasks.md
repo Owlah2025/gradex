@@ -15,7 +15,7 @@ description: "Implementation tasks for S11 release acceptance"
 
 **Purpose**: Add an S11 selection around existing S12 infrastructure while preserving S12 defaults.
 
-- [ ] T001 Add opt-in S11 registration and suite-mode variables with default S12 behavior in `deploy/compose/compose.production-like.yml` and `deploy/scripts/verify-staging-smoke.sh`
+- [ ] T001 Add S11 suite selection while preserving the production registration safety gate and default S12 behavior in `deploy/scripts/verify-staging-smoke.sh`
 - [ ] T002 Add a thin production-like S11 entry point that delegates to the existing verifier in `deploy/scripts/verify-s11-release-acceptance.sh`
 - [ ] T003 Add the local release-acceptance Playwright command in `frontend/package.json`
 
@@ -92,7 +92,7 @@ description: "Implementation tasks for S11 release acceptance"
 - [ ] T022 [US4] Add verifier mode/default and shell-syntax regression coverage in `deploy/scripts/verify-s11-release-acceptance.sh` and existing shell validation commands
 - [ ] T023 [US4] Record exact-head redacted results, schema, reused coverage, findings, and provider boundary in `docs/launch/evidence/s11/release-acceptance.md`
 
-**Checkpoint**: The disposable HTTPS run passes and T047 requires configuration only.
+**Checkpoint**: The disposable HTTPS run passes; T047 needs configuration plus the separately tracked production registration capability, not S11 test-source changes.
 
 ---
 

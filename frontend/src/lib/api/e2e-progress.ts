@@ -173,7 +173,10 @@ export type LearningStateSnapshot = {
   entitlement: {
     found: boolean;
     count: number;
+    id: string;
     state: string;
+    grant_source: string;
+    source_invitation_id: string | null;
     access_ends_at: string;
     original_access_ends_at: string;
     revoked_at?: string | null;
@@ -182,6 +185,7 @@ export type LearningStateSnapshot = {
   enrollment: {
     found: boolean;
     count: number;
+    id: string;
     created_at: string;
   };
   progress: Array<{
@@ -193,6 +197,46 @@ export type LearningStateSnapshot = {
     updated_at: string;
   }>;
 };
+
+export function parseLearningStateSnapshot(raw: string): LearningStateSnapshot {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    throw new Error("Learning-state query returned no output; the seeder helper did not run.");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error(`Learning-state query returned non-JSON output: ${trimmed.slice(0, 200)}`);
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Learning-state query returned an unusable snapshot.");
+  }
+
+  const snapshot = parsed as Partial<LearningStateSnapshot>;
+  if (
+    typeof snapshot.entitlement?.found !== "boolean" ||
+    !Number.isInteger(snapshot.entitlement.count) ||
+    typeof snapshot.enrollment?.found !== "boolean" ||
+    !Number.isInteger(snapshot.enrollment.count) ||
+    !Array.isArray(snapshot.progress)
+  ) {
+    throw new Error(`Learning-state query returned an unusable snapshot: ${trimmed.slice(0, 200)}`);
+  }
+  if (
+    snapshot.entitlement.found &&
+    (!snapshot.entitlement.id ||
+      !snapshot.entitlement.grant_source ||
+      !snapshot.entitlement.source_invitation_id)
+  ) {
+    throw new Error("A found Entitlement is missing identity or grant provenance.");
+  }
+  if (snapshot.enrollment.found && !snapshot.enrollment.id) {
+    throw new Error("A found Enrollment is missing its identity.");
+  }
+  return snapshot as LearningStateSnapshot;
+}
 
 export function queryLearningState(studentID: string, courseID: string): LearningStateSnapshot {
   if (!fs.existsSync(RUN_STATE_FILE_PATH)) {
@@ -220,5 +264,5 @@ export function queryLearningState(studentID: string, courseID: string): Learnin
     }
   );
 
-  return JSON.parse(output.trim());
+  return parseLearningStateSnapshot(output);
 }

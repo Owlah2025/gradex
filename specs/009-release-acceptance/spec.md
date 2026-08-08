@@ -61,7 +61,7 @@ Students and Admins can retry safe actions after an invalid secret or repeated r
 
 ### User Story 4 - Run one acceptance contract in disposable and public staging (Priority: P2)
 
-The release owner can run the same acceptance suite against the existing disposable HTTPS deployment now and a future public T047 staging URL later by changing configuration only.
+The release owner can run the deployed login-to-learning selection against the existing disposable HTTPS deployment now, and the full acceptance selection is structured to target a future public T047 staging URL by configuration once production registration adapters are available.
 
 **Why this priority**: Acceptance evidence must describe the deployed topology and remain reusable when the externally blocked provider environment becomes available.
 
@@ -70,7 +70,7 @@ The release owner can run the same acceptance suite against the existing disposa
 **Acceptance Scenarios**:
 
 1. **Given** an isolated safety-gated acceptance database and HTTPS origin, **when** the suite runs, **then** it uses the configured origin and database and does not start or attach to an unrelated local server.
-2. **Given** a future public staging URL, **when** the origin and environment credentials are supplied, **then** the same suite selection runs without source changes.
+2. **Given** a future public staging URL with production registration capability, **when** the origin and environment credentials are supplied, **then** the full suite selection runs without test-source changes.
 3. **Given** an acceptance run, **when** evidence is retained, **then** it identifies the exact commit, origin class, schema version, commands, outcomes, and any unproven provider-only boundary without storing secrets.
 
 ### Edge Cases
@@ -81,14 +81,14 @@ The release owner can run the same acceptance suite against the existing disposa
 - A repeat approval must prove an authorized `200` idempotent response; a `401`, `403`, or generic conflict is not acceptable replay evidence.
 - An existing Enrollment is reused and Progress remains single-homed.
 - A playback response that merely contains a non-empty URL is insufficient; the protected manifest and at least one non-empty signed media object must be retrieved.
-- Registration may be disabled in a prelaunch environment, but positive registration acceptance is mandatory before public launch and the suite must fail closed when enabled behavior is expected.
+- Registration is disabled in production mode because the approved policy and compromised-password adapters are not integrated; positive registration is proven only by the real development harness and remains a launch blocker for public staging.
 - The suite must not reset, migrate down, or otherwise mutate the active application database.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: The release suite MUST prove Student registration, email verification, and password login through production routes and user-facing screens when registration is configured as enabled.
+- **FR-001**: The release suite MUST prove Student registration, email verification, and password login through real API routes and user-facing screens in the isolated development harness while production registration remains unavailable.
 - **FR-002**: The suite MUST prove real HTTP login against the deployed origin even when a prelaunch environment intentionally disables new registration.
 - **FR-003**: The suite MUST prove that only an Admin can configure the Course default access end and create a Course Access Invitation (BR-025, BR-165).
 - **FR-004**: The suite MUST prove identity-bound Student acceptance and refusal of a mismatched or invalid acceptance secret (BR-166, BR-169).
@@ -130,14 +130,14 @@ The release owner can run the same acceptance suite against the existing disposa
 - **SC-004**: The intended Student retrieves protected Course, Lesson, manifest, and a non-empty signed media object, while the unrelated Student succeeds at none of those protected operations.
 - **SC-005**: The persisted Progress row reaches at least the position submitted by the acceptance journey and remains attached to the unique Enrollment.
 - **SC-006**: Invalid-secret recovery and authorized repeated approval both complete without partial or duplicate access state.
-- **SC-007**: The release suite runs against the disposable HTTPS environment and accepts a future public staging origin solely through configuration.
+- **SC-007**: The deployed selection runs against the disposable HTTPS environment; the full selection accepts a future public staging origin solely through configuration after the production registration capability is integrated.
 - **SC-008**: All selected browser, integration, type, lint, build, schema, and safety checks pass at one clean exact HEAD with zero unresolved Critical or High finding.
 - **SC-009**: The acceptance package adds zero schema migrations and zero commerce, S8, Entitlement-update, or provider-deployment behavior.
 
 ## Assumptions
 
 - S1 identity, S4 protected delivery, S5 protected learning, S6 access granting, and S12 disposable staging behavior at the starting revision are inputs; S11 composes and strengthens their acceptance evidence rather than reopening their product scopes.
-- The disposable environment may enable registration only for its isolated S11 acceptance database; its default S12 prelaunch policy remains unchanged.
+- The disposable production-mode environment cannot safely enable registration at this revision: startup rejects the missing approved policy and compromised-password adapters. S11 does not bypass that gate.
 - T047 public infrastructure remains externally blocked and is not required to complete the local production-like S11 run.
 - Existing seeded Admin and unrelated Student fixtures remain test-only identities and are never production grant paths.
 - S8 and Entitlement correction/update behavior remain explicitly out of scope because migration 0015 provenance reconciliation is unresolved.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   parseProgressSnapshot,
+  parseLearningStateSnapshot,
   requireNoProgressRow,
   requireProgressRow,
   type ProgressSnapshot,
@@ -78,4 +79,43 @@ test("requireNoProgressRow throws when a row unexpectedly exists", () => {
 
 test("requireNoProgressRow accepts genuine absence", () => {
   assert.doesNotThrow(() => requireNoProgressRow(parseProgressSnapshot(JSON.stringify({ found: false })), "unenrolled Student"));
+});
+
+const absentLearningState = {
+  entitlement: { found: false, count: 0 },
+  enrollment: { found: false, count: 0 },
+  progress: [],
+  material_kinds: {},
+  video_asset_version_state: "READY",
+};
+
+test("parses an explicit zero-grant learning state", () => {
+  const parsed = parseLearningStateSnapshot(JSON.stringify(absentLearningState));
+  assert.equal(parsed.entitlement.count, 0);
+  assert.equal(parsed.enrollment.count, 0);
+  assert.deepEqual(parsed.progress, []);
+});
+
+test("rejects missing learning-state helper output", () => {
+  assert.throws(() => parseLearningStateSnapshot(""), /did not run/);
+});
+
+test("rejects a found Entitlement without Invitation provenance", () => {
+  assert.throws(
+    () => parseLearningStateSnapshot(JSON.stringify({
+      ...absentLearningState,
+      entitlement: { found: true, count: 1, id: "entitlement-1", grant_source: "MANUAL_INVITATION" },
+    })),
+    /missing identity or grant provenance/
+  );
+});
+
+test("rejects a found Enrollment without its identity", () => {
+  assert.throws(
+    () => parseLearningStateSnapshot(JSON.stringify({
+      ...absentLearningState,
+      enrollment: { found: true, count: 1 },
+    })),
+    /missing its identity/
+  );
 });

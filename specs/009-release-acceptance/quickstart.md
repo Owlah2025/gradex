@@ -40,7 +40,7 @@ Expected: registration, verification, login, Invitation acceptance, zero pre-app
 ./deploy/scripts/verify-s11-release-acceptance.sh
 ```
 
-Expected: the thin S11 entry point reuses the S12 deployment, database safety gate, certificate pin, media fixture, browser harness, and protected manifest/segment verification. The active `gradex` database remains untouched.
+Expected: the S11 entry point runs the selected recovery/concurrency integrations, then reuses the S12 deployment, database safety gate, certificate pin, media fixture, browser harness, and protected manifest/segment verification. The active `gradex` database remains untouched. This production-mode run begins at real HTTP login because registration is safety-disabled until the approved production adapters exist.
 
 ## 4. Schema and scope audit
 

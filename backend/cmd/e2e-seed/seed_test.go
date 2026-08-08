@@ -61,12 +61,14 @@ func TestMain(m *testing.M) {
 	var emailParam string
 	var accessMutationParam string
 	var queryInvitationToken bool
+	var queryEmailVerificationToken bool
 	var invitationIDParam string
 	flag.StringVar(&dbName, "dbname", "", "Target database name")
 	flag.BoolVar(&dropOnly, "drop", false, "Drop target database and exit")
 	flag.BoolVar(&queryProgress, "query-progress", false, "Query progress position for a student and lesson")
 	flag.BoolVar(&queryLearningState, "query-learning-state", false, "Emit the Entitlement, Enrollment, Progress, and material snapshot for a student and course")
 	flag.BoolVar(&queryInvitationToken, "query-invitation-token", false, "Emit the verification token for an invitation from outbox")
+	flag.BoolVar(&queryEmailVerificationToken, "query-email-verification-token", false, "Emit the email verification token and Account ID for a registered Student")
 	flag.StringVar(&studentIDParam, "student", "", "Student ID for query")
 	flag.StringVar(&lessonIDParam, "lesson", "", "Lesson ID for query")
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
@@ -229,6 +231,30 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if queryEmailVerificationToken {
+		if emailParam == "" {
+			log.Fatalf("-query-email-verification-token requires -email flag")
+		}
+		targetPool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for email verification token query: %v", err)
+		}
+		accountID, token, err := queryEmailVerificationTokenFromOutbox(ctx, targetPool, emailParam)
+		targetPool.Close()
+		if err != nil {
+			log.Fatalf("reading email verification token: %v", err)
+		}
+		encoded, err := json.Marshal(map[string]string{
+			"account_id":         accountID,
+			"verification_token": token,
+		})
+		if err != nil {
+			log.Fatalf("encoding email verification token result: %v", err)
+		}
+		fmt.Printf("%s", encoded)
+		os.Exit(0)
+	}
+
 	quotedTargetDB, err := e2esafety.QuoteIdentifier(targetDB)
 	if err != nil {
 		log.Fatalf("invalid target database identifier %q: %v", targetDB, err)
@@ -296,7 +322,10 @@ type learningStateSnapshot struct {
 	Entitlement struct {
 		Found                bool    `json:"found"`
 		Count                int     `json:"count"`
+		ID                   string  `json:"id"`
 		State                string  `json:"state"`
+		GrantSource          string  `json:"grant_source"`
+		SourceInvitationID   *string `json:"source_invitation_id"`
 		AccessEndsAt         string  `json:"access_ends_at"`
 		OriginalAccessEndsAt string  `json:"original_access_ends_at"`
 		RevokedAt            *string `json:"revoked_at"`
@@ -305,6 +334,7 @@ type learningStateSnapshot struct {
 	Enrollment struct {
 		Found     bool   `json:"found"`
 		Count     int    `json:"count"`
+		ID        string `json:"id"`
 		CreatedAt string `json:"created_at"`
 	} `json:"enrollment"`
 	Progress               []learningProgressSnapshot `json:"progress"`
@@ -342,11 +372,15 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 	var accessEndsAt, originalAccessEndsAt time.Time
 	var revokedAt *time.Time
 	err := pool.QueryRow(ctx, `
-		SELECT state, access_ends_at, original_access_ends_at, revoked_at, revision
+		SELECT id::text, state, grant_source, source_invitation_id::text,
+		       access_ends_at, original_access_ends_at, revoked_at, revision
 		FROM entitlements
 		WHERE student_account_id = $1 AND course_id = $2
 	`, studentID, courseID).Scan(
+		&snapshot.Entitlement.ID,
 		&snapshot.Entitlement.State,
+		&snapshot.Entitlement.GrantSource,
+		&snapshot.Entitlement.SourceInvitationID,
 		&accessEndsAt,
 		&originalAccessEndsAt,
 		&revokedAt,
@@ -367,11 +401,10 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 		}
 	}
 
-	var enrollmentID string
 	var enrollmentCreatedAt time.Time
 	err = pool.QueryRow(ctx, `
-		SELECT id, created_at FROM enrollments WHERE student_account_id = $1 AND course_id = $2
-	`, studentID, courseID).Scan(&enrollmentID, &enrollmentCreatedAt)
+		SELECT id::text, created_at FROM enrollments WHERE student_account_id = $1 AND course_id = $2
+	`, studentID, courseID).Scan(&snapshot.Enrollment.ID, &enrollmentCreatedAt)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return snapshot, fmt.Errorf("querying enrollment: %w", err)
 	}
@@ -384,7 +417,7 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 			FROM progress
 			WHERE enrollment_id = $1
 			ORDER BY course_lesson_identity_id
-		`, enrollmentID)
+		`, snapshot.Enrollment.ID)
 		if queryErr != nil {
 			return snapshot, fmt.Errorf("querying progress: %w", queryErr)
 		}
@@ -905,6 +938,36 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func queryInvitationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Pool, invitationID string) (string, error) {
+	return queryVerificationTokenFromOutbox(ctx, targetPool, invitationID, "access.invitation_issued")
+}
+
+func queryEmailVerificationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Pool, email string) (string, string, error) {
+	var accountID string
+	if err := targetPool.QueryRow(
+		ctx,
+		`SELECT id::text FROM accounts WHERE normalized_email = lower(btrim($1))`,
+		email,
+	).Scan(&accountID); err != nil {
+		return "", "", fmt.Errorf("resolving registered Account: %w", err)
+	}
+	token, err := queryVerificationTokenFromOutbox(
+		ctx,
+		targetPool,
+		accountID,
+		"identity.email_verification_requested",
+	)
+	if err != nil {
+		return "", "", err
+	}
+	return accountID, token, nil
+}
+
+func queryVerificationTokenFromOutbox(
+	ctx context.Context,
+	targetPool *pgxpool.Pool,
+	aggregateID string,
+	eventTypeFilter string,
+) (string, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return "", fmt.Errorf("loading config: %w", err)
@@ -924,10 +987,10 @@ func queryInvitationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Poo
 		       opp.key_version, opp.nonce, opp.ciphertext
 		FROM outbox_events oe
 		JOIN outbox_protected_payloads opp ON opp.event_id = oe.id
-		WHERE oe.aggregate_id = $1
+		WHERE oe.aggregate_id = $1 AND oe.event_type = $2
 		ORDER BY oe.occurred_at DESC
 		LIMIT 1
-	`, invitationID).Scan(
+	`, aggregateID, eventTypeFilter).Scan(
 		&eventID, &eventType, &schemaVer, &sourceModule,
 		&aggType, &aggID, &aggRev,
 		&keyVersion, &nonce, &ciphertext,

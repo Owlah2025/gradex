@@ -16,13 +16,13 @@
 
 **Alternatives considered**: A T047-specific config file would require source changes at provider availability. A bare command-line base URL would bypass the existing validation and server-ownership guarantees.
 
-## R3. Enable registration only in isolated S11 acceptance mode
+## R3. Preserve the production registration safety gate
 
-**Decision**: Preserve the S12 default of disabled registration, but allow the disposable compose service to read an explicit S11-only registration setting. The thin S11 verifier selects enabled registration for its resettable isolated database.
+**Decision**: Prove positive registration, email verification, and password login in the real isolated development harness. Keep registration disabled in the disposable production-mode environment and prove real deployed login through the existing S5/S6 selection.
 
-**Rationale**: Positive registration is part of the launch-critical journey, while the existing prelaunch S12 smoke intentionally disables it. An opt-in preserves both contracts without changing product behavior or provider deployment.
+**Rationale**: Production startup explicitly refuses enabled registration until approved policy and compromised-password adapters are integrated. Bypassing that fail-closed boundary in an acceptance slice would create false launch evidence. The split exposes the missing production capability as a launch finding while still proving the rest of the deployed journey.
 
-**Alternatives considered**: Skipping browser registration would leave the first critical step unproven. Permanently enabling it in S12 or provider configuration would broaden this slice and change operational policy.
+**Alternatives considered**: Enabling development adapters in production mode would weaken the shipped safety contract. Skipping positive registration entirely would leave the first critical step unproven.
 
 ## R4. Query protected action secrets through the safety-gated test utility
 
