@@ -1,0 +1,9 @@
+[
+  {
+    "AllowedOrigins": ["${PUBLIC_ORIGIN}"],
+    "AllowedMethods": ["GET", "HEAD", "PUT"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["etag", "x-amz-version-id"],
+    "MaxAgeSeconds": 3600
+  }
+]

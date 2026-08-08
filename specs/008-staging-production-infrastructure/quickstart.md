@@ -80,3 +80,8 @@ origin.
 Store only redacted command output and identifiers in the S12 evidence location defined by the task that
 runs each drill. Never claim live cloud, public TLS, external alert delivery, restore, or rollback evidence
 from this guide alone.
+
+For the selected Hostinger/Cloudflare provider execution, follow `deploy/hostinger/README.md`. The
+provider path adds immutable image transfer, a non-mutating host baseline audit, TLS-only authenticated
+Redis on the private network, a credential-gated R2 compatibility proof, public edge verification,
+provider-hosted isolated restore, and T046-compatible application rollback.

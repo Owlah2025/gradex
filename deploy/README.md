@@ -102,6 +102,13 @@ Course Access Grant Playwright journey at the HTTPS edge, then independently ver
 Enrollment, Progress, and protected-media results. The tunnel is removed on exit; the production-like
 services remain available at the verified local origin for inspection.
 
+## Hostinger and Cloudflare public staging
+
+[`hostinger/README.md`](hostinger/README.md) is the provider execution guide for the selected Hostinger
+KVM 2, Cloudflare DNS/proxy, and private Cloudflare R2 topology. It preserves the same images and
+process boundaries, adds no provider SDK to application code, and requires real public evidence before
+T047 can be checked.
+
 ## Configuration
 
 - `env/production.env.example` lists the production contract.

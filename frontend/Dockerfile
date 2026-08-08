@@ -15,6 +15,9 @@ RUN npm run build
 
 FROM node:22.22.3-alpine3.22
 
+ARG GRADEX_REVISION=unknown
+LABEL org.opencontainers.image.revision=$GRADEX_REVISION
+
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

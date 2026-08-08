@@ -1,0 +1,255 @@
+x-backend-environment: &backend-environment
+  APP_ENV: staging
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+  CORS_ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+  CORS_ALLOW_CREDENTIALS: "true"
+  TRUSTED_PROXIES: 172.16.0.0/12
+  LOG_LEVEL: info
+  READINESS_TIMEOUT: 5s
+  SHUTDOWN_TIMEOUT: 30s
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_ADDR: redis:6379
+  REDIS_USERNAME: ${REDIS_USERNAME:-}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  REDIS_TLS_ENABLED: "true"
+  REDIS_TLS_SERVER_NAME: redis
+  REDIS_TLS_CA_CERT_FILE: /run/gradex/redis/ca.crt
+  S3_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT is required}
+  S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+  S3_REGION: auto
+  S3_USE_PATH_STYLE: "false"
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+  PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET:?PLAYBACK_TOKEN_SECRET is required}
+  SESSION_CSRF_KEY: ${SESSION_CSRF_KEY:?SESSION_CSRF_KEY is required}
+  ANONYMOUS_COOKIE_SIGNING_KEY: ${ANONYMOUS_COOKIE_SIGNING_KEY:?ANONYMOUS_COOKIE_SIGNING_KEY is required}
+  ANONYMOUS_CSRF_KEY: ${ANONYMOUS_CSRF_KEY:?ANONYMOUS_CSRF_KEY is required}
+  ADMISSION_LIMITER_HMAC_KEY: ${ADMISSION_LIMITER_HMAC_KEY:?ADMISSION_LIMITER_HMAC_KEY is required}
+  OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION: ${OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION:?OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION is required}
+  OUTBOX_PROTECTED_PAYLOAD_KEY: ${OUTBOX_PROTECTED_PAYLOAD_KEY:?OUTBOX_PROTECTED_PAYLOAD_KEY is required}
+  MEDIA_OPERATING_MODE: ADMIN_CATALOGUE
+  STUDENT_REGISTRATION_ENABLED: "false"
+  PASSWORD_SCREEN_MODE: unavailable
+  AUTH_FAKE_MODE: "false"
+
+x-backend-volumes: &backend-volumes
+  - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_USER: gradex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradex -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: unless-stopped
+
+  restore-postgres:
+    profiles: [restore]
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    environment:
+      POSTGRES_USER: gradex_restore
+      POSTGRES_PASSWORD: ${RESTORE_POSTGRES_PASSWORD:?RESTORE_POSTGRES_PASSWORD is required}
+      POSTGRES_DB: gradex_restore
+    volumes:
+      - restore-data:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradex_restore -d gradex_restore"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: "no"
+
+  redis:
+    image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec redis-server --appendonly no --save "" --port 0 --tls-port 6379 \
+          --tls-cert-file /run/gradex/redis/server.crt \
+          --tls-key-file /run/gradex/redis/server.key \
+          --tls-ca-cert-file /run/gradex/redis/ca.crt \
+          --tls-auth-clients no --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+      - ${REDIS_TLS_SERVER_CERT_FILE_HOST:?REDIS_TLS_SERVER_CERT_FILE_HOST is required}:/run/gradex/redis/server.crt:ro
+      - ${REDIS_TLS_SERVER_KEY_FILE_HOST:?REDIS_TLS_SERVER_KEY_FILE_HOST is required}:/run/gradex/redis/server.key:ro
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /run/gradex/redis/ca.crt -h redis ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: unless-stopped
+
+  migrate:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-migrate", "up"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+    volumes: *backend-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+
+  api:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+    volumes: *backend-volumes
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+
+  api-restore:
+    profiles: [restore]
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+      DATABASE_URL: ${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required}
+    volumes: *backend-volumes
+    depends_on:
+      restore-postgres:
+        condition: service_healthy
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *default-logging
+    restart: "no"
+
+  worker:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-worker"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: worker
+    volumes: *backend-volumes
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app, edge]
+    logging: *default-logging
+    restart: unless-stopped
+
+  proof-tool:
+    profiles: [proof]
+    image: ${GRADEX_PROOF_IMAGE:?GRADEX_PROOF_IMAGE is required}
+    pull_policy: never
+    environment:
+      GRADEX_E2E_ALLOW_DATABASE_RESET: "1"
+      GRADEX_E2E_ADMIN_DB_URL: ${GRADEX_E2E_ADMIN_DB_URL:?GRADEX_E2E_ADMIN_DB_URL is required}
+      GRADEX_E2E_TARGET_DB_NAME: ${POSTGRES_DB:?POSTGRES_DB is required}
+      GRADEX_E2E_TARGET_DB_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      S3_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT is required}
+      S3_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+
+  frontend:
+    image: ${GRADEX_FRONTEND_IMAGE:?GRADEX_FRONTEND_IMAGE is required}
+    pull_policy: never
+    environment:
+      GRADEX_API_ORIGIN: http://api:8080
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+
+  edge:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      STAGING_HOSTNAME: ${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    logging: *default-logging
+    restart: unless-stopped
+
+networks:
+  app:
+    internal: true
+  edge: {}
+
+volumes:
+  postgres-data:
+  restore-data:
+  caddy-data:
+  caddy-config:

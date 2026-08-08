@@ -14,9 +14,13 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/a
 
 FROM build AS proof-build
 
-RUN CGO_ENABLED=0 go test -c -trimpath -o /out/gradex-e2e-seed ./cmd/e2e-seed
+RUN CGO_ENABLED=0 go test -c -trimpath -o /out/gradex-e2e-seed ./cmd/e2e-seed \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-storage-fixture ./cmd/storage-fixture
 
 FROM alpine:3.22.5 AS runtime-base
+
+ARG GRADEX_REVISION=unknown
+LABEL org.opencontainers.image.revision=$GRADEX_REVISION
 
 RUN apk add --no-cache ca-certificates ffmpeg tzdata \
     && addgroup -S gradex \
@@ -28,12 +32,19 @@ USER gradex
 
 FROM runtime-base AS proof
 
+ARG GRADEX_REVISION=unknown
+LABEL org.opencontainers.image.revision=$GRADEX_REVISION
+
 COPY --from=proof-build /out/gradex-e2e-seed /usr/local/bin/gradex-e2e-seed
+COPY --from=proof-build /out/gradex-storage-fixture /usr/local/bin/gradex-storage-fixture
 COPY --from=build /src/internal/db/migrations ./internal/db/migrations
 
 ENTRYPOINT ["gradex-e2e-seed"]
 
 FROM runtime-base AS runtime
+
+ARG GRADEX_REVISION=unknown
+LABEL org.opencontainers.image.revision=$GRADEX_REVISION
 
 COPY --from=build /out/gradex-api /usr/local/bin/gradex-api
 COPY --from=build /out/gradex-worker /usr/local/bin/gradex-worker
