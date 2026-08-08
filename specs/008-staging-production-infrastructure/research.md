@@ -85,3 +85,40 @@ disposable sink.
 choosing a vendor prematurely.
 **Alternatives considered**: A full metrics stack exceeds launch need. Log-only operation cannot
 demonstrate that someone is notified.
+
+## 9. Production frontend dependency remediation
+
+**Decision**: Move from Next.js 14.2.35 to the first audit-clean compatible release, Next.js 15.5.21,
+while retaining React and React DOM 18.3.1. Constrain PostCSS to 8.5.23 and nanoid to 3.3.17 so the
+direct and Next-nested dependency paths both receive their smallest patched versions.
+
+**Rationale**: The affected Next.js ranges include every available 14.x release, while 15.5.21 still
+supports React 18. A constrained transitive resolution is required because Next.js 15.5.21 declares
+PostCSS 8.4.31. The production audit, optimized build, and S5/S6 deployed smoke remain acceptance
+evidence.
+
+**Alternatives considered**: Retaining Next.js 14 with runtime mitigations cannot satisfy the required
+production audit. Next.js 16 is a larger unnecessary migration. An unconstrained forced audit fix
+would obscure the exact dependency changes.
+
+## 10. Authenticated TLS Redis
+
+**Decision**: Keep `REDIS_ADDR` for host/address compatibility and add one shared validated Redis
+settings contract for password-only or username/password ACL authentication, verified TLS, optional
+server-name override, and an optional custom CA file. Development may explicitly use plaintext and no
+authentication. Staging and production require authentication plus TLS and never permit certificate
+verification to be disabled.
+
+API queueing, API rate-limit clients, API readiness, worker queueing, worker consumption, and worker
+startup checks all derive clients from the same connection factory. The production-like Compose
+environment runs Redis with authentication and TLS so this is executable evidence rather than an
+unused configuration surface.
+
+**Rationale**: Both go-redis and asynq natively support username, password, and `tls.Config`. A single
+factory prevents API/worker drift and limits plaintext credential exposure to reviewed driver
+construction calls. System certificate roots remain the default; an injected CA file supports
+private provider or disposable certificate authorities.
+
+**Alternatives considered**: A credential-bearing Redis URL is easy to leak in diagnostics and would
+replace the existing address contract. Separate API/asynq configuration paths can silently diverge.
+An insecure TLS verification switch is outside the approved security boundary.
