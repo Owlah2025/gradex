@@ -37,6 +37,7 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/environment.sh verify
 ./deploy/scripts/environment.sh data-plane
 ./deploy/scripts/environment.sh status
+./deploy/scripts/verify-edge-security.sh
 ```
 
 The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
@@ -44,6 +45,13 @@ The `verify` command extracts that CA certificate into ignored state and uses it
 frontend plus `/healthz` and `/readyz`. `data-plane` verifies schema 15, Redis, an application-credential
 object write/read/delete, and the bucket's private policy. Use `logs [service]`, `stop`, or `reset` for
 the corresponding lifecycle operation. `stop` preserves volumes; `reset` removes them.
+
+`verify-edge-security.sh` verifies the HTTP redirect and TLS hostname, probes through the HTTPS edge,
+checks the host-only Secure/HttpOnly/SameSite=Strict anonymous cookie, exercises trusted and hostile
+Origin/CSRF requests, refuses cross-origin preflight, verifies trusted request-ID replacement, confirms
+fake authentication is off, and scans service logs plus frontend static assets for the generated
+runtime secrets. Temporary response bodies, the cookie jar, and the local CA remain under ignored
+mode-0700 `deploy/.state/` and are removed when the check exits.
 
 For the isolated database recovery drill after the environment is up:
 
@@ -67,6 +75,8 @@ Enrollment records before starting `api-restore` against the restored database.
 - `GRADEX_API_ORIGIN` is server-only and required by protected server-rendered requests in production.
   It must identify the API origin reachable from the frontend server.
 - Browser API calls use the public same-origin edge; no `NEXT_PUBLIC_*` secret is required.
+- The public browser surface does not grant cross-origin CORS access. Browser API calls are same-origin;
+  the edge check proves a foreign preflight receives no allow-origin or allow-credentials header.
 
 Every secret entry in the committed examples is blank. Supply real values through the deployment
 platform's managed secret/environment facility. Do not pass secrets as image build arguments, bake them

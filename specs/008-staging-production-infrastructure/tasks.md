@@ -67,10 +67,10 @@
 
 **Independent Test**: Production-mode tests pass through the HTTPS edge for cookies, CORS, CSRF/origin, trusted forwarding, and secret absence.
 
-- [ ] T026 [US4] Add production-edge security checks in `deploy/scripts/verify-edge-security.sh` (FR-011, FR-021)
-- [ ] T027 [US4] Add focused automated coverage for trusted proxy and production-origin behavior in existing backend/frontend test files (FR-004, FR-011)
-- [ ] T028 [US4] Run HTTPS redirect, certificate, cookie, CORS, CSRF/origin, forwarded-header, fake-auth exclusion, bundle/log secret scans; record evidence in `docs/launch/evidence/s12/edge-security.md` (SC-009)
-- [ ] T029 [US4] Run guards and commit Batch D
+- [x] T026 [US4] Add production-edge security checks in `deploy/scripts/verify-edge-security.sh` (FR-011, FR-021)
+- [x] T027 [US4] Confirm focused automated coverage for trusted proxy and production-origin behavior in existing backend/frontend test files (FR-004, FR-011)
+- [x] T028 [US4] Run HTTPS redirect, certificate, cookie, CORS, CSRF/origin, forwarded-header, fake-auth exclusion, bundle/log secret scans; record evidence in `docs/launch/evidence/s12/edge-security.md` (SC-009)
+- [x] T029 [US4] Run guards and commit Batch D
 
 ## Phase 6 — Batch E / US2: Redis, worker, storage, and protected media (P1)
 
