@@ -5,6 +5,8 @@
 > The full isolated registration-to-learning Chromium journey and the existing S12 disposable HTTPS
 > login-to-learning journey pass at schema 15. S11 is **not closed**: production registration still
 > lacks the approved policy-set and compromised-password adapters, an unresolved launch-blocking High.
+> Frozen independent-review candidate:
+> `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >

@@ -12,7 +12,7 @@ Branch: `s11-release-e2e-20260808`
   - `ee59f0c42bff84e5fa8d2df5ffe1d4c89c6f7640` — release journey, evidence helpers, replay hardening, and reusable verifier
   - `c424e8a0be4baa8c97ccda3aa2c2a7e25d7fd801` — Next.js protected-request header fix and regression assertion
   - `182bfa59354f86485ca9d6dc13538101d5f4e5f4` — exact Invitation rejection/cancellation integration selection
-- Evidence commit / frozen candidate end: `PENDING_EVIDENCE_COMMIT`
+- Evidence commit / frozen candidate end: `aff4fd7feddb9436d14244ca377c3235ead47046`
 - S11 artifacts: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/release-suite.md`, `contracts/traceability.md`, `checklists/requirements.md`, and `tasks.md` under `specs/009-release-acceptance/`
 - Task count: 29. Tasks T001–T028 are complete in the evidence candidate; T029 is completed by the subsequent documentation-only freeze marker.
 
@@ -96,7 +96,7 @@ No commerce, S8 support/Entitlement-update, provider deployment, or product feat
 
 - Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
 - Launch-blocking defects: one unresolved High (production registration adapters).
-- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..PENDING_EVIDENCE_COMMIT`.
+- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
 - Ready for independent review: yes, as an exact acceptance implementation/evidence range.
 - Ready for independent closure: **no**. FR-022/SC-008 correctly prevent closure while the production-registration High remains open.
 - Recommended next launch-critical action: integrate and approve the production registration policy-set and compromised-password adapters, rerun the full S11 selection in production mode, then execute T047 when Hostinger/R2/DNS become available. Do not start S8 in this pass.

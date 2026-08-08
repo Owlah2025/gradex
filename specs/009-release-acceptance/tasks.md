@@ -105,7 +105,7 @@ description: "Implementation tasks for S11 release acceptance"
 - [x] T026 Run the local isolated S11 Chromium journey from `frontend/` and record exact results in `docs/launch/evidence/s11/release-acceptance.md`
 - [x] T027 Run the S11 production-like HTTPS verifier from `deploy/scripts/verify-s11-release-acceptance.sh` and record exact results in `docs/launch/evidence/s11/release-acceptance.md`
 - [x] T028 Audit migration/schema version, changed paths, commerce/S8/Entitlement-update/provider exclusions, and secret-free evidence in `docs/launch/evidence/s11/release-acceptance.md`
-- [ ] T029 Mark completed tasks, commit final evidence, verify a clean final HEAD, and record the frozen range in `specs/009-release-acceptance/tasks.md` and `docs/launch/evidence/s11/release-acceptance.md`
+- [x] T029 Mark completed tasks, commit final evidence, verify a clean final HEAD, and record the frozen range in `specs/009-release-acceptance/tasks.md` and `docs/launch/evidence/s11/release-acceptance.md`
 
 ---
 
