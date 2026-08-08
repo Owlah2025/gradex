@@ -56,7 +56,9 @@ the checksum on the VPS before `docker load`. The image tags, image IDs, and OCI
 the ignored manifest bind the release to one full Git SHA. Do not use `latest`.
 
 Create two releases at two T046-compatible commits before the provider rollback drill. A pre-T046
-backend is not an acceptable rollback target once Redis is TLS/auth-only.
+backend is not an acceptable rollback target once Redis is TLS/auth-only. If a compatible release was
+built before a later tooling commit, run `release.sh record <full-sha>` and
+`release.sh export <full-sha>` while its three labeled images remain local.
 
 ## 3. Protected runtime configuration
 
