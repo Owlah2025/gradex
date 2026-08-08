@@ -29,6 +29,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -39,6 +40,12 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
+	}
+	if cfg.ServiceRole() != config.RoleAPI {
+		log.Fatalf("SERVICE_ROLE=%s cannot run the API process; expected %s", cfg.ServiceRole(), config.RoleAPI)
+	}
+	if cfg.Environment() != config.EnvDevelopment {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	logger := logging.New(os.Stdout, "gradex-api", string(cfg.Environment()), logging.LevelFromString(cfg.LogLevel()))

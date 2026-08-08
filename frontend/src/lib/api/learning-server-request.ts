@@ -18,8 +18,11 @@ function sessionCookie(cookieHeader: string | null): string | null {
 }
 
 function apiOrigin(): string {
-  const configuredOrigin = process.env.GRADEX_API_ORIGIN ?? localApiOrigin;
-  const parsedOrigin = new URL(configuredOrigin);
+  const configuredOrigin = process.env.GRADEX_API_ORIGIN;
+  if (!configuredOrigin && process.env.NODE_ENV === "production") {
+    throw new Error("GRADEX_API_ORIGIN is required in production.");
+  }
+  const parsedOrigin = new URL(configuredOrigin ?? localApiOrigin);
   if (parsedOrigin.protocol !== "http:" && parsedOrigin.protocol !== "https:") {
     throw new Error("GRADEX_API_ORIGIN must use HTTP or HTTPS.");
   }

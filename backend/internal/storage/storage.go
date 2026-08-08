@@ -58,6 +58,16 @@ func New(ctx context.Context, opts Options) (*Client, error) {
 	}, nil
 }
 
+// CheckBucket verifies that the configured private bucket is reachable with
+// the injected credentials without reading or writing an object.
+func (c *Client) CheckBucket(ctx context.Context) error {
+	_, err := c.s3.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(c.bucket)})
+	if err != nil {
+		return fmt.Errorf("checking storage bucket: %w", err)
+	}
+	return nil
+}
+
 // PresignPutURL returns a time-limited URL the caller can PUT a file's bytes
 // directly to (browser or instructor tool), bypassing the API server.
 func (c *Client) PresignPutURL(ctx context.Context, key, contentType string, expiry time.Duration) (string, error) {

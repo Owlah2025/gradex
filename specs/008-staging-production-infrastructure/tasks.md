@@ -27,14 +27,14 @@
 
 **Independent Test**: Clean host and container builds; valid production-like startup; invalid configuration exits non-zero; API probes and API/worker termination behavior pass.
 
-- [ ] T007 [P] [US1] Add a multi-stage shared backend image containing API, worker, and migrate binaries plus FFmpeg runtime in `backend/Dockerfile` and `backend/.dockerignore` (FR-001, FR-003)
-- [ ] T008 [P] [US1] Add a standalone production frontend image in `frontend/Dockerfile`, `frontend/.dockerignore`, and `frontend/next.config.mjs` (FR-001, FR-004)
-- [ ] T009 [US1] Add PostgreSQL/Redis/storage startup preflight, signal-aware worker cancellation, and safe asynq drain with structured lifecycle failure behavior in `backend/cmd/worker/main.go` and focused tests in `backend/cmd/worker/main_test.go` (FR-003)
-- [ ] T010 [US1] Remove production loopback fallback and test server/client environment separation in `frontend/src/lib/api/learning-server-request.ts` and `frontend/src/lib/api/learning-server-request.test.ts` (FR-004)
-- [ ] T011 [P] [US1] Define non-secret production and production-like environment examples in `deploy/env/production.env.example` and `deploy/env/production-like.env.example` (FR-005)
-- [ ] T012 [US1] Document exact artifact commands, process commands, configuration contract, and failure behavior in `deploy/README.md` (FR-001–FR-005)
-- [ ] T013 [US1] Run backend format/build/vet/unit/race checks, frontend install/typecheck/test/lint/build, container builds, config-negative checks, API probe checks, and API/worker termination checks; record exact evidence in `docs/launch/evidence/s12/batch-a.md`
-- [ ] T014 [US1] Run clean-code, test, docs, and exposure guards plus `git diff --check`; mark T007–T013 complete and commit Batch A
+- [x] T007 [P] [US1] Add a multi-stage shared backend image containing API, worker, and migrate binaries plus FFmpeg runtime in `backend/Dockerfile` and `backend/.dockerignore` (FR-001, FR-003)
+- [x] T008 [P] [US1] Add a standalone production frontend image in `frontend/Dockerfile`, `frontend/.dockerignore`, and `frontend/next.config.mjs` (FR-001, FR-004)
+- [x] T009 [US1] Add PostgreSQL/Redis/storage startup preflight, signal-aware worker cancellation, and safe asynq drain in `backend/cmd/worker/main.go` and `backend/internal/storage/storage.go`; prove startup failure and termination behavior in T013 (FR-003)
+- [x] T010 [US1] Remove production loopback fallback and test server/client environment separation in `frontend/src/lib/api/learning-server-request.ts` and `frontend/src/lib/api/learning-server.test.ts` (FR-004)
+- [x] T011 [P] [US1] Define non-secret production and production-like environment examples in `deploy/env/production.env.example` and `deploy/env/production-like.env.example` (FR-005)
+- [x] T012 [US1] Document exact artifact commands, process commands, configuration contract, and failure behavior in `deploy/README.md` (FR-001–FR-005)
+- [x] T013 [US1] Run backend format/build/vet/unit/race checks, frontend install/typecheck/test/lint/build, container builds, config-negative checks, API probe checks, and API/worker termination checks; record exact evidence in `docs/launch/evidence/s12/batch-a.md`
+- [x] T014 [US1] Run clean-code, test, docs, and exposure guards plus `git diff --check`; mark T007–T013 complete and commit Batch A
 
 ## Phase 3 — Batch B / US2: Production-like disposable deployment (P1)
 
