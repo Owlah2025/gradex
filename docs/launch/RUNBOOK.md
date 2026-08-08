@@ -89,20 +89,28 @@ pg_dump -U gradex -h <HOST> -F c -b -v -f gradex_s6_pre_deploy.dump gradex
 ### Emergency Rollback & Recovery Procedure
 
 If a deployment fault occurs:
-1. Roll back API binaries to the previous approved release.
-2. The database schema version 15 is backward-compatible with S5 read evaluators.
-3. To restore from backup if data corruption occurred:
+1. Roll back frontend, API, and worker artifacts to the previous approved application release.
+2. Keep the forward-compatible database schema at version 15. After real S6 grants exist, do not run
+   migration `0015_course_access_grant.down.sql`: it clears `source_invitation_id` and destroys grant
+   provenance.
+3. For recovery proof, create a fresh separate database and restore into it. Never use the active
+   Gradex database as the routine restore-drill target:
 
 ```bash
-pg_restore -U gradex -h <HOST> -d gradex --clean --if-exists gradex_s6_pre_deploy.dump
+createdb -U gradex -h <HOST> gradex_restore_<TIMESTAMP>
+pg_restore -U gradex -h <HOST> -d gradex_restore_<TIMESTAMP> gradex_s6_pre_deploy.dump
 ```
+
+Verify schema and identity/access-critical records in the restored target, then start an isolated
+Gradex instance whose `DATABASE_URL` points to that target. Database recovery and application rollback
+are separate operations.
 
 ---
 
 ## 7. Health Checks & Verification Sequence
 
-- **Readiness Check**: `GET /health/ready` -> returns `200 OK`
-- **Liveness Check**: `GET /health/live` -> returns `200 OK`
+- **Readiness Check**: `GET /readyz` -> returns `200 OK`
+- **Liveness Check**: `GET /healthz` -> returns `200 OK`
 - **Go/No-Go Verification**:
   1. Admin signs in -> 200 OK
   2. Admin configures course default expiry -> 200 OK

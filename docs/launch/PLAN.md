@@ -6,6 +6,9 @@
 > [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews),
 > which supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september)'s
 > September target on the date. D-038 and D-039 are retained below as history, not as forecast
+> The 2026-08-08 Product Owner execution decision makes **S12 staging infrastructure upstream of S11
+> deployed E2E/acceptance testing**. Dated daily entries remain historical where they differ and do
+> not reintroduce an S12-on-S11 dependency.
 > Active slice: **S5 — Protected Learning.** S4 is closed under
 > [D-058](../DECISIONS.md#d-058--s4-closes-after-independent-approval-of-d7-and-d8-s5-is-unblocked)
 > after independent D7 and D8 approval. S5 planning is approved and frozen; implementation is active

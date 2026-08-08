@@ -1,5 +1,11 @@
 # Gradex Launch Status
 
+> **2026-08-08 S12 implementation authority:** Product Owner decision fixes
+> `dde093bc9f8e75b89cc96667c73a30fea5f8baee` as the S12 base, directs that S6 production behavior not
+> be reopened, and makes S12 staging infrastructure upstream of S11 deployed acceptance testing.
+> Remaining non-blocking S6 task bookkeeping stays backlog. This current authority supersedes lower
+> historical statements that describe S6 as the active implementation slice.
+
 > Current date: **2026-08-07 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
 > Last repository reconciliation: **2026-08-07, S6 documentation remediation pass against head `681f4a9`**; prior reconciliation 2026-08-06 at S6 pre-implementation reconciliation against S5 closure head `d5ce557`

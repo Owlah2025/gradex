@@ -37,8 +37,8 @@ rather than absorbed as improvisation during implementation.
 | S8 | Admin support operations (reduced; moderation deferred) + **Instructor roster** | **Aug 12** | Reporting, Moderation, Audit | S5, S6 |
 | S9 | Transactional notifications only; **office hours deferred post-launch** | folded into S4/S6 | Office Hours, Notifications | S4, S5 |
 | S10 | Bilingual legal/support pages (reduced; no revenue/payout screens) | **Aug 12** | Support | S6, S8 |
-| S11 | End-to-end integration | **Aug 13** | all | S1A–S10 |
-| S12 | Production infrastructure and observability | **Aug 7** | operational | S11 |
+| S11 | End-to-end integration | **Aug 13** | all | S1A–S10, **S12 staging** |
+| S12 | Production infrastructure and observability | **Aug 7** | operational | S6 implementation base `dde093b`; **does not depend on S11** |
 | S13 | Security and quality gate | **Aug 13** | all | S12 |
 | S14 | Staging acceptance and gate audit | **Aug 14** | all | S13 |
 | S15 | Production rehearsal and soft launch | **Aug 14** | operational | S14 |
