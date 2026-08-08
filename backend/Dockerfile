@@ -12,7 +12,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/a
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-worker ./cmd/worker \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-migrate ./cmd/migrate
 
-FROM alpine:3.22
+FROM alpine:3.22.5
 
 RUN apk add --no-cache ca-certificates ffmpeg tzdata \
     && addgroup -S gradex \

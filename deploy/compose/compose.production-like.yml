@@ -1,0 +1,185 @@
+x-backend-environment: &backend-environment
+  APP_ENV: production
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+  CORS_ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+  CORS_ALLOW_CREDENTIALS: "true"
+  TRUSTED_PROXIES: 172.16.0.0/12
+  LOG_LEVEL: info
+  READINESS_TIMEOUT: 2s
+  SHUTDOWN_TIMEOUT: 20s
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+  REDIS_ADDR: redis:6379
+  S3_ENDPOINT: http://minio:9000
+  S3_BUCKET: gradex-private-media
+  S3_REGION: us-east-1
+  S3_USE_PATH_STYLE: "true"
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+  PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET:?PLAYBACK_TOKEN_SECRET is required}
+  SESSION_CSRF_KEY: ${SESSION_CSRF_KEY:?SESSION_CSRF_KEY is required}
+  ANONYMOUS_COOKIE_SIGNING_KEY: ${ANONYMOUS_COOKIE_SIGNING_KEY:?ANONYMOUS_COOKIE_SIGNING_KEY is required}
+  ANONYMOUS_CSRF_KEY: ${ANONYMOUS_CSRF_KEY:?ANONYMOUS_CSRF_KEY is required}
+  ADMISSION_LIMITER_HMAC_KEY: ${ADMISSION_LIMITER_HMAC_KEY:?ADMISSION_LIMITER_HMAC_KEY is required}
+  OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION: production-like-v1
+  OUTBOX_PROTECTED_PAYLOAD_KEY: ${OUTBOX_PROTECTED_PAYLOAD_KEY:?OUTBOX_PROTECTED_PAYLOAD_KEY is required}
+  MEDIA_OPERATING_MODE: ADMIN_CATALOGUE
+  STUDENT_REGISTRATION_ENABLED: "false"
+  PASSWORD_SCREEN_MODE: unavailable
+  AUTH_FAKE_MODE: "false"
+
+services:
+  postgres:
+    image: postgres:16.14-alpine
+    environment:
+      POSTGRES_USER: gradex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: gradex
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradex -d gradex"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.9-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    volumes:
+      - media-data:/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/gradex-private-media
+        mc anonymous set none local/gradex-private-media
+        mc version enable local/gradex-private-media
+        mc admin user add local "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}" || mc admin user enable local "$${S3_ACCESS_KEY}"
+        mc admin policy attach local readwrite --user "$${S3_ACCESS_KEY}"
+    networks: [app]
+    restart: "no"
+
+  migrate:
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-migrate", "up"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [app]
+    restart: "no"
+
+  api:
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  worker:
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-worker"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app]
+    restart: unless-stopped
+
+  frontend:
+    image: ${GRADEX_FRONTEND_IMAGE:-gradex-frontend:s12-local}
+    environment:
+      GRADEX_API_ORIGIN: http://api:8080
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped
+
+  edge:
+    image: ${GRADEX_EDGE_IMAGE:-gradex-edge:s12-local}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18081:80"
+      - "127.0.0.1:18443:18443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  app:
+    internal: true
+  edge: {}
+
+volumes:
+  postgres-data:
+  media-data:
+  caddy-data:
+  caddy-config:

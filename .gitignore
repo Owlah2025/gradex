@@ -27,5 +27,8 @@ Thumbs.db
 # dispositions are transcribed into the daily record, which is the committed evidence
 /docs/launch/review/artifacts/
 
+# S12 disposable deployment secrets and locally extracted trust material
+/deploy/.state/
+
 # Compiled frontend logic tests (node:test output)
 .frontend-test-build/

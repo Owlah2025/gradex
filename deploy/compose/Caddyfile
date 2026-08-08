@@ -1,0 +1,17 @@
+{
+	admin off
+}
+
+https://gradex.localhost:18443 {
+	tls internal
+	encode zstd gzip
+
+	@api path /api/* /healthz /readyz
+	handle @api {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

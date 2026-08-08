@@ -42,12 +42,12 @@
 
 **Independent Test**: One command provisions from zero, migrates to 15, reaches frontend/API readiness, runs worker, and keeps storage administration private.
 
-- [ ] T015 [P] [US2] Define isolated PostgreSQL, Redis, S3-compatible storage, migration, API, worker, frontend, and edge services in `deploy/compose/compose.production-like.yml` (FR-006–FR-010)
-- [ ] T016 [P] [US2] Define disposable TLS routing and private-service boundaries in `deploy/compose/Caddyfile` (FR-006, FR-011)
-- [ ] T017 [US2] Add fail-closed setup/start/status/stop commands in `deploy/scripts/environment.sh` without printing secret values (FR-006, FR-007)
-- [ ] T018 [US2] Provision from empty volumes, migrate zero-to-15, start all processes, and record exact health/readiness/schema/process evidence in `docs/launch/evidence/s12/batch-b.md` (SC-003)
-- [ ] T019 [US2] Prove one representative database operation, Redis connectivity, worker startup, and private storage access from the application network (FR-006–FR-010)
-- [ ] T020 [US2] Run guards and `git diff --check`; mark T015–T019 complete and commit Batch B
+- [x] T015 [P] [US2] Define isolated PostgreSQL, Redis, S3-compatible storage, migration, API, worker, frontend, and edge services in `deploy/compose/compose.production-like.yml` (FR-006–FR-010)
+- [x] T016 [P] [US2] Define disposable TLS routing and private-service boundaries in `deploy/compose/Caddyfile` (FR-006, FR-011)
+- [x] T017 [US2] Add fail-closed setup/start/status/stop commands in `deploy/scripts/environment.sh` without printing secret values (FR-006, FR-007)
+- [x] T018 [US2] Provision from empty volumes, migrate zero-to-15, start all processes, and record exact health/readiness/schema/process evidence in `docs/launch/evidence/s12/batch-b.md` (SC-003)
+- [x] T019 [US2] Prove one representative database operation, Redis connectivity, worker startup, and private storage access from the application network (FR-006–FR-010)
+- [x] T020 [US2] Run guards and `git diff --check`; mark T015–T019 complete and commit Batch B
 
 ## Phase 4 — Batch C / US3: Migration, backup, and isolated restore (P1)
 

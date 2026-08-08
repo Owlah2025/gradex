@@ -24,6 +24,27 @@ gradex-migrate version
 The frontend image starts `node server.js`. Set `PORT` for each runtime. The API binds `PORT`; the
 frontend standalone server uses its own `PORT` and `HOSTNAME=0.0.0.0`.
 
+## Disposable production-like environment
+
+The local S12 topology keeps PostgreSQL, Redis, MinIO, API, worker, and frontend ports private and
+publishes only a Caddy TLS edge on loopback. It generates secrets into the ignored, mode-0700
+`deploy/.state/` directory and never prints their values.
+
+```bash
+./deploy/scripts/environment.sh build
+./deploy/scripts/environment.sh reset  # removes only the gradex-s12 project and its disposable volumes
+./deploy/scripts/environment.sh up
+./deploy/scripts/environment.sh verify
+./deploy/scripts/environment.sh data-plane
+./deploy/scripts/environment.sh status
+```
+
+The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
+The `verify` command extracts that CA certificate into ignored state and uses it to validate the
+frontend plus `/healthz` and `/readyz`. `data-plane` verifies schema 15, Redis, an application-credential
+object write/read/delete, and the bucket's private policy. Use `logs [service]`, `stop`, or `reset` for
+the corresponding lifecycle operation. `stop` preserves volumes; `reset` removes them.
+
 ## Configuration
 
 - `env/production.env.example` lists the production contract.
