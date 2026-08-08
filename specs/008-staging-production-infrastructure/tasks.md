@@ -111,10 +111,11 @@
 
 **Independent Test**: Existing S5/S6 automation passes through the deployed edge and proves unrelated-Student denial.
 
-- [ ] T042 [US6] Parameterize the existing production-mode Playwright harness for an externally supplied staging origin without changing S5/S6 business assertions (FR-019)
-- [ ] T043 [US6] Run the deployed journey through invitation acceptance with zero access, Admin Approval, exactly one Entitlement/Enrollment, protected playback, progress, and unrelated-Student denial (SC-012)
-- [ ] T044 [US6] Run complete backend/frontend/CI-equivalent validation, exposure guard, documentation guard, `git diff --check`, and record results in `docs/launch/evidence/s12/convergence.md`
-- [ ] T045 Run `speckit.converge`, reconcile remaining tasks/evidence, freeze the exact S12 implementation range, and dispatch independent review without self-approving closure
+- [x] T042 [US6] Parameterize the existing production-mode Playwright harness for an externally supplied staging origin without changing S5/S6 business assertions (FR-019)
+- [x] T043 [US6] Run the deployed journey through invitation acceptance with zero access, Admin Approval, exactly one Entitlement/Enrollment, protected playback, progress, and unrelated-Student denial (SC-012)
+- [x] T044 [US6] Run complete backend/frontend/CI-equivalent validation, exposure guard, documentation guard, `git diff --check`, and record results in `docs/launch/evidence/s12/convergence.md`
+- [ ] T045 [US1] Upgrade or independently mitigate the High production `next`/`postcss`/`nanoid` dependency findings, then rerun the frontend gates and production audit
+- [ ] T046 Run `speckit.converge`, reconcile remaining tasks/evidence, freeze the exact S12 implementation range, and dispatch independent review without self-approving closure
 
 ## Dependencies
 
@@ -126,7 +127,7 @@ Planning T001–T006
             ├─ Batch D T026–T029 ─┼─ Batch G T039–T041
             ├─ Batch E T030–T033 ─┤
             └─ Batch F T034–T038 ─┘
-                                   └─ Batch H T042–T045
+                                   └─ Batch H T042–T046
 ```
 
 - T007, T008, and T011 may run in parallel; T009/T010 follow their relevant artifact design.
@@ -137,7 +138,7 @@ Planning T001–T006
 
 ## Task Summary
 
-- Total tasks: **45**
+- Total tasks: **46**
 - Planning: 6
 - Batch A / US1: 8
 - Batch B / US2: 6
@@ -146,4 +147,4 @@ Planning T001–T006
 - Batch E / US2: 4
 - Batch F / US5: 5
 - Batch G / US6: 3
-- Batch H / US6 and convergence: 4
+- Batch H / US6 and convergence: 5

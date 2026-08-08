@@ -69,6 +69,27 @@ test("e2e-ports: an unusable published port fails loudly rather than silently re
   });
 });
 
+test("e2e-ports: an explicit staging origin is reused without allocating a frontend port", () => {
+  withEnv([FRONTEND_PORT_ENV, "GRADEX_E2E_EXTERNAL_ORIGIN"], () => {
+    process.env.GRADEX_E2E_EXTERNAL_ORIGIN = "https://staging.gradex.example";
+    assert.equal(frontendOrigin(), "https://staging.gradex.example");
+    assert.equal(process.env[FRONTEND_PORT_ENV], undefined);
+  });
+});
+
+test("e2e-ports: external origins fail closed on insecure or credential-bearing values", () => {
+  for (const origin of [
+    "http://staging.gradex.example",
+    "https://user:password@staging.gradex.example",
+    "https://staging.gradex.example/path",
+  ]) {
+    withEnv(["GRADEX_E2E_EXTERNAL_ORIGIN"], () => {
+      process.env.GRADEX_E2E_EXTERNAL_ORIGIN = origin;
+      assert.throws(() => frontendOrigin(), /credential-free HTTPS origin/);
+    });
+  }
+});
+
 // The defect this replaces made an E2E run collide with a legitimate developer server on 3000.
 test("e2e-ports: a process already listening on 3000 does not affect the run's allocation", async () => {
   let squatter: net.Server | null = null;

@@ -295,6 +295,7 @@ func TestMain(m *testing.M) {
 type learningStateSnapshot struct {
 	Entitlement struct {
 		Found                bool    `json:"found"`
+		Count                int     `json:"count"`
 		State                string  `json:"state"`
 		AccessEndsAt         string  `json:"access_ends_at"`
 		OriginalAccessEndsAt string  `json:"original_access_ends_at"`
@@ -303,6 +304,7 @@ type learningStateSnapshot struct {
 	} `json:"entitlement"`
 	Enrollment struct {
 		Found     bool   `json:"found"`
+		Count     int    `json:"count"`
 		CreatedAt string `json:"created_at"`
 	} `json:"enrollment"`
 	Progress               []learningProgressSnapshot `json:"progress"`
@@ -330,6 +332,12 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 	var snapshot learningStateSnapshot
 	snapshot.Progress = []learningProgressSnapshot{}
 	snapshot.MaterialKinds = map[string]int{}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE student_account_id = $1 AND course_id = $2`, studentID, courseID).Scan(&snapshot.Entitlement.Count); err != nil {
+		return snapshot, fmt.Errorf("counting entitlements: %w", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM enrollments WHERE student_account_id = $1 AND course_id = $2`, studentID, courseID).Scan(&snapshot.Enrollment.Count); err != nil {
+		return snapshot, fmt.Errorf("counting enrollments: %w", err)
+	}
 
 	var accessEndsAt, originalAccessEndsAt time.Time
 	var revokedAt *time.Time

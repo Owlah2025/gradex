@@ -40,6 +40,22 @@ export const RUN_STATE_FILE_PATH = `${E2E_TMP_DIR}/gradex-s5-e2e-run-state.json`
 export const API_BINARY_PATH = `${E2E_TMP_DIR}/gradex-s5-playwright-api`;
 export const SEED_BINARY_PATH = `${E2E_TMP_DIR}/gradex-s5-e2e-seed`;
 
+// External staging runs keep using the same safety-gated seed/query binary,
+// but their PostgreSQL endpoint is supplied by the deployment harness rather
+// than assumed to be the local developer Compose port.
+export function e2eDatabaseEnvironment(dbName: string): Record<string, string> {
+  return {
+    GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
+    GRADEX_E2E_ADMIN_DB_URL:
+      process.env.GRADEX_E2E_ADMIN_DB_URL || "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
+    GRADEX_E2E_TARGET_DB_NAME: dbName,
+    GRADEX_E2E_TARGET_DB_URL:
+      process.env.GRADEX_E2E_TARGET_DB_URL || `postgres://gradex:gradex@localhost:5432/${dbName}?sslmode=disable`,
+    DATABASE_URL:
+      process.env.GRADEX_E2E_APPLICATION_DB_URL || "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+  };
+}
+
 export type LockInfo = {
   ownerPid: number;
   ownerCmd: string;

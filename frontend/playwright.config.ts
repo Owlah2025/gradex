@@ -6,8 +6,9 @@ import { apiOrigin, frontendOrigin, runPort, API_PORT_ENV, FRONTEND_PORT_ENV } f
 // Allocated once in the runner process and published through the environment, so worker
 // processes re-evaluating this config reuse the same ports instead of allocating new ones.
 // Nothing here may assume port 3000: a developer server on 3000 is unrelated to this run.
-const frontendPort = runPort(FRONTEND_PORT_ENV);
-const apiPort = runPort(API_PORT_ENV);
+const externalDeployment = Boolean(process.env.GRADEX_E2E_EXTERNAL_ORIGIN);
+const frontendPort = externalDeployment ? 0 : runPort(FRONTEND_PORT_ENV);
+const apiPort = externalDeployment ? 0 : runPort(API_PORT_ENV);
 
 /**
  * T076 measures SC-001 against the **built** frontend, not `next dev`.
@@ -28,7 +29,7 @@ const apiPort = runPort(API_PORT_ENV);
  * exactly that hazard. The frontend binds to loopback and the spec records the origin it actually
  * used, rather than asserting a port it does not own.
  */
-const productionFrontend = process.env.GRADEX_E2E_FRONTEND_MODE === "production";
+const productionFrontend = !externalDeployment && process.env.GRADEX_E2E_FRONTEND_MODE === "production";
 
 if (productionFrontend) {
   const buildManifest = path.join(__dirname, ".next", "BUILD_ID");
@@ -64,8 +65,8 @@ export default defineConfig({
   testDir: "./e2e",
   testIgnore: "**/s3-public-catalogue-performance.spec.ts",
   fullyParallel: false,
-  globalSetup: "./e2e/global-setup.ts",
-  globalTeardown: "./e2e/global-teardown.ts",
+  globalSetup: externalDeployment ? undefined : "./e2e/global-setup.ts",
+  globalTeardown: externalDeployment ? undefined : "./e2e/global-teardown.ts",
   // The HTML report is the retained artifact of record, so its destination is overridable: the CI
   // evidence job writes it straight into the directory it uploads rather than into the ignored
   // local default. Unset — which is every existing local run — behaves exactly as before.
@@ -77,9 +78,12 @@ export default defineConfig({
     baseURL: frontendOrigin(),
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    launchOptions: process.env.GRADEX_E2E_TLS_SPKI
+      ? { args: [`--ignore-certificate-errors-spki-list=${process.env.GRADEX_E2E_TLS_SPKI}`] }
+      : undefined,
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
+  webServer: externalDeployment ? undefined : {
     command: frontendCommand,
     url: frontendOrigin(),
     // Never adopt a server this run did not start, on any port.

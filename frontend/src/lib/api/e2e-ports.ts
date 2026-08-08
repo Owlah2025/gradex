@@ -52,7 +52,19 @@ export function runPort(envVar: string): number {
 export const FRONTEND_PORT_ENV = "GRADEX_E2E_FRONTEND_PORT";
 export const API_PORT_ENV = "GRADEX_E2E_API_PORT";
 
+function externalOrigin(): string | null {
+  const configured = process.env.GRADEX_E2E_EXTERNAL_ORIGIN;
+  if (!configured) return null;
+  const parsed = new URL(configured);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("GRADEX_E2E_EXTERNAL_ORIGIN must be a credential-free HTTPS origin with no path, query, or fragment.");
+  }
+  return parsed.origin;
+}
+
 export function frontendOrigin(): string {
+  const external = externalOrigin();
+  if (external) return external;
   return `http://127.0.0.1:${runPort(FRONTEND_PORT_ENV)}`;
 }
 

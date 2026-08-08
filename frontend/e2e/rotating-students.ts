@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import fs from "fs";
 import type { BrowserContext } from "@playwright/test";
-import { SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "../src/lib/api/e2e-infrastructure";
+import { e2eDatabaseEnvironment, SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "../src/lib/api/e2e-infrastructure";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import type { RotatingStudent } from "../src/lib/api/e2e-students";
 
@@ -53,13 +53,7 @@ export function issueRotatingSession(student: RotatingStudent): IssuedSession {
   const output = execFileSync(SEED_BINARY_PATH, ["-issue-session", "-email", student.email], {
     env: {
       ...process.env,
-      GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
-      GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
-      GRADEX_E2E_TARGET_DB_NAME: state.dbName,
-      GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
-      // The application DSN, kept distinct from the per-run target so the fail-closed safety
-      // validator can prove this helper is not pointed at the application database.
-      DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+      ...e2eDatabaseEnvironment(state.dbName),
     },
     encoding: "utf-8",
   });
@@ -110,11 +104,7 @@ export function queryInvitationToken(invitationID: string): string {
   const output = execFileSync(SEED_BINARY_PATH, ["-query-invitation-token", "-invitation", invitationID], {
     env: {
       ...process.env,
-      GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
-      GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
-      GRADEX_E2E_TARGET_DB_NAME: state.dbName,
-      GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
-      DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+      ...e2eDatabaseEnvironment(state.dbName),
     },
   });
   const parsed = JSON.parse(output.toString("utf-8"));

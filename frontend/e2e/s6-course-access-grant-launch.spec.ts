@@ -126,6 +126,10 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(studentPage.locator("body")).toContainText("PENDING_ADMIN_APPROVAL");
     await expect(studentPage.locator('[role="status"]')).toContainText("pending admin approval");
 
+    const preApprovalState = queryLearningState(STUDENT_A_ID, COURSE_ID);
+    expect(preApprovalState.entitlement.count).toBe(0);
+    expect(preApprovalState.enrollment.count).toBe(0);
+
     // 13. Assert Student A does NOT have protected access before Admin approval
     await studentPage.goto(`/en/learn/courses/${COURSE_ID}`);
     // Protected course page when unentitled returns generic unavailable card or 404
@@ -146,8 +150,10 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     // 17. Database assertion: verify exactly 1 Entitlement & 1 Enrollment exist
     const stateSnapshot = queryLearningState(STUDENT_A_ID, COURSE_ID);
     expect(stateSnapshot.entitlement.found).toBe(true);
+    expect(stateSnapshot.entitlement.count).toBe(1);
     expect(stateSnapshot.entitlement.state).toBe("ACTIVE");
     expect(stateSnapshot.enrollment.found).toBe(true);
+    expect(stateSnapshot.enrollment.count).toBe(1);
 
     // 18. Student A refreshes/revisits access page
     await studentPage.goto("/en/access");
@@ -222,7 +228,9 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     const recheckSnapshot = queryLearningState(STUDENT_A_ID, COURSE_ID);
     expect(recheckSnapshot.entitlement.found).toBe(true);
+    expect(recheckSnapshot.entitlement.count).toBe(1);
     expect(recheckSnapshot.entitlement.state).toBe("ACTIVE");
+    expect(recheckSnapshot.enrollment.count).toBe(1);
 
     await adminContext.close();
     await studentContext.close();

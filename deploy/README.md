@@ -41,6 +41,7 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/verify-worker-media.sh
 ./deploy/scripts/verify-observability.sh
 ./deploy/scripts/verify-application-rollback.sh
+./deploy/scripts/verify-staging-smoke.sh
 ```
 
 The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
@@ -90,6 +91,13 @@ The command verifies clean forward schema 15, recreates only those application p
 TLS-edge probes. It intentionally has no schema-down operation; `migrate`, `downgrade`, `schema`, and
 `database` commands are refused. `verify-application-rollback.sh` builds two real compatible revisions
 and proves N → N+1 → N while comparing Entitlement invitation-provenance counts.
+
+`verify-staging-smoke.sh` resets only `gradex_playwright_e2e_s12smoke01`, exposes PostgreSQL through
+a pinned disposable tunnel bound to loopback for the safety-gated seed/query tool, and deploys the
+production API/worker/frontend against that database. It points the existing S5 login smoke and S6
+Course Access Grant Playwright journey at the HTTPS edge, then independently verifies exact grant,
+Enrollment, Progress, and protected-media results. The tunnel is removed on exit; the production-like
+services remain available at the verified local origin for inspection.
 
 ## Configuration
 

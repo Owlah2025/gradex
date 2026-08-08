@@ -1,6 +1,6 @@
 import { execFileSync } from "child_process";
 import fs from "fs";
-import { SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "./e2e-infrastructure";
+import { e2eDatabaseEnvironment, SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "./e2e-infrastructure";
 
 /**
  * Test-runner-side Progress evidence.
@@ -100,11 +100,7 @@ export function queryProgress(query: ProgressQuery): ProgressSnapshot {
     {
       env: {
         ...process.env,
-        GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
-        GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
-        GRADEX_E2E_TARGET_DB_NAME: state.dbName,
-        GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
-        DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+        ...e2eDatabaseEnvironment(state.dbName),
       },
       encoding: "utf-8",
     }
@@ -176,6 +172,7 @@ export async function waitForProgress(
 export type LearningStateSnapshot = {
   entitlement: {
     found: boolean;
+    count: number;
     state: string;
     access_ends_at: string;
     original_access_ends_at: string;
@@ -184,6 +181,7 @@ export type LearningStateSnapshot = {
   };
   enrollment: {
     found: boolean;
+    count: number;
     created_at: string;
   };
   progress: Array<{
@@ -216,11 +214,7 @@ export function queryLearningState(studentID: string, courseID: string): Learnin
     {
       env: {
         ...process.env,
-        GRADEX_E2E_ALLOW_DATABASE_RESET: "1",
-        GRADEX_E2E_ADMIN_DB_URL: "postgres://gradex:gradex@localhost:5432/postgres?sslmode=disable",
-        GRADEX_E2E_TARGET_DB_NAME: state.dbName,
-        GRADEX_E2E_TARGET_DB_URL: `postgres://gradex:gradex@localhost:5432/${state.dbName}?sslmode=disable`,
-        DATABASE_URL: "postgres://gradex:gradex@localhost:5432/gradex?sslmode=disable",
+        ...e2eDatabaseEnvironment(state.dbName),
       },
       encoding: "utf-8",
     }
