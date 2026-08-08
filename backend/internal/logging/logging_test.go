@@ -164,6 +164,40 @@ func TestRequestLevelFollowsStatus(t *testing.T) {
 	}
 }
 
+func TestWorkerEventsAreStructuredCorrelatableAndExcludeRawErrors(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New(&buf, "gradex-worker", "production", slog.LevelInfo)
+	logger.WorkerLifecycle(WorkerReady)
+	logger.WorkerFailed(WorkerFailureEvent{
+		Operation: "job_process", ErrorClass: "*errors.errorString", JobType: "media:transcode",
+		TaskID: "task-correlation-id", RetryCount: 2, MaxRetry: 5,
+	})
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("worker log lines=%d, want 2", len(lines))
+	}
+	lifecycle := decode(t, lines[0])
+	if lifecycle["msg"] != "worker_lifecycle" || lifecycle["phase"] != "READY" {
+		t.Fatalf("lifecycle record=%v", lifecycle)
+	}
+	failure := decode(t, lines[1])
+	for field, want := range map[string]any{
+		"msg": "worker_failure", "operation": "job_process", "error_class": "*errors.errorString",
+		"job_type": "media:transcode", "task_id": "task-correlation-id",
+		"retry_count": float64(2), "max_retry": float64(5),
+	} {
+		if failure[field] != want {
+			t.Errorf("%s=%v, want %v", field, failure[field], want)
+		}
+	}
+	for _, forbidden := range []string{"error", "payload", "asset_version_id", "token", "cookie", "password"} {
+		if _, present := failure[forbidden]; present {
+			t.Errorf("worker failure emitted forbidden field %q", forbidden)
+		}
+	}
+}
+
 // The panic value is excluded on purpose: it routinely holds whatever the
 // handler was working with.
 func TestPanicRecoveredExcludesPanicValue(t *testing.T) {

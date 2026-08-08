@@ -311,6 +311,56 @@ func (l *Logger) ProtectedWriteFailed(ev ProtectedWriteFailureEvent) {
 	)
 }
 
+// WorkerPhase is a closed lifecycle vocabulary for the independently deployed
+// worker process.
+type WorkerPhase string
+
+const (
+	WorkerStarting WorkerPhase = "STARTING"
+	WorkerReady    WorkerPhase = "READY"
+	WorkerDraining WorkerPhase = "DRAINING"
+	WorkerStopped  WorkerPhase = "STOPPED"
+)
+
+// WorkerLifecycle records process state without carrying configuration or
+// dependency values into the log sink.
+func (l *Logger) WorkerLifecycle(phase WorkerPhase) {
+	l.slog.Info("worker_lifecycle", slog.String("phase", Sanitize(string(phase))))
+}
+
+// WorkerFailureEvent identifies a failed worker operation. ErrorClass is a
+// type or a closed classification, never raw error text; task IDs remain
+// stable across Asynq retries and provide correlation without exposing job
+// payloads or business identifiers.
+type WorkerFailureEvent struct {
+	Operation  string
+	ErrorClass string
+	JobType    string
+	TaskID     string
+	RetryCount int
+	MaxRetry   int
+}
+
+func (l *Logger) WorkerFailed(ev WorkerFailureEvent) {
+	attrs := []any{
+		slog.String("operation", Sanitize(ev.Operation)),
+		slog.String("error_class", Sanitize(ev.ErrorClass)),
+	}
+	if ev.JobType != "" {
+		attrs = append(attrs, slog.String("job_type", Sanitize(ev.JobType)))
+	}
+	if ev.TaskID != "" {
+		attrs = append(attrs, slog.String("task_id", Sanitize(ev.TaskID)))
+	}
+	if ev.RetryCount >= 0 {
+		attrs = append(attrs, slog.Int("retry_count", ev.RetryCount))
+	}
+	if ev.MaxRetry >= 0 {
+		attrs = append(attrs, slog.Int("max_retry", ev.MaxRetry))
+	}
+	l.slog.Error("worker_failure", attrs...)
+}
+
 // ErrorClassOf names a panic value's type without rendering the value.
 func ErrorClassOf(v any) string { return fmt.Sprintf("%T", v) }
 

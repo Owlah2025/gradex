@@ -183,7 +183,7 @@ main() {
   local attempts=0
   while [ "$attempts" -lt 30 ]; do
     compose logs --no-color worker-media-proof >"$worker_logs"
-    if grep --fixed-strings --quiet 'media outbox dispatch failed' "$worker_logs"; then
+    if grep --fixed-strings --quiet '"operation":"media_outbox_dispatch"' "$worker_logs"; then
       break
     fi
     attempts=$((attempts + 1))

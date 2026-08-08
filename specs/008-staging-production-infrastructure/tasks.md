@@ -89,11 +89,11 @@
 
 **Independent Test**: Induced API/dependency/media-job failures produce redacted correlated output and reach a disposable alert sink.
 
-- [ ] T034 [US5] Use the existing backend logging vocabulary for structured worker lifecycle/job events in `backend/cmd/worker/main.go` and `backend/internal/logging/` with focused tests (FR-012)
-- [ ] T035 [US5] Define provider-neutral health/error/backup monitoring and alert webhook configuration in `deploy/monitoring/` (FR-013, FR-014)
-- [ ] T036 [US5] Add a disposable alert sink and safe failure scenarios in `deploy/scripts/verify-observability.sh` (FR-014)
-- [ ] T037 [US5] Prove correlation and redaction plus disposable alert delivery in `docs/launch/evidence/s12/observability.md`; record external production alert delivery separately as pending when credentials are absent (SC-010, SC-011)
-- [ ] T038 [US5] Run guards and commit Batch F
+- [x] T034 [US5] Use the existing backend logging vocabulary for structured worker lifecycle/job events in `backend/cmd/worker/main.go` and `backend/internal/logging/` with focused tests (FR-012)
+- [x] T035 [US5] Define provider-neutral health/error/backup monitoring and alert webhook configuration in `deploy/monitoring/` (FR-013, FR-014)
+- [x] T036 [US5] Add a disposable alert sink and safe failure scenarios in `deploy/scripts/verify-observability.sh` (FR-014)
+- [x] T037 [US5] Prove correlation and redaction plus disposable alert delivery in `docs/launch/evidence/s12/observability.md`; record external production alert delivery separately as pending when credentials are absent (SC-010, SC-011)
+- [x] T038 [US5] Run guards and commit Batch F
 
 ## Phase 8 — Batch G / US6: Application rollback (P2)
 

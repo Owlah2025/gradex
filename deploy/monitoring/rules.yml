@@ -1,0 +1,28 @@
+version: 1
+checks:
+  - id: api_health
+    source: http
+    path: /healthz
+    expected_status: 200
+  - id: api_readiness
+    source: http
+    path: /readyz
+    expected_status: 200
+    covers: [postgresql, redis, schema]
+  - id: worker_process
+    source: platform_process
+    expected_running_replicas: 1
+  - id: backup_freshness
+    source: backup_completed_at
+    maximum_age_seconds: 93600
+log_alerts:
+  - id: unexpected_server_error
+    event: http_request
+    condition: status >= 500
+  - id: worker_failure
+    event: worker_failure
+    condition: operation in [job_process, media_outbox_dispatch, redis_health, queue_runtime]
+delivery:
+  type: webhook
+  required_secret: GRADEX_ALERT_WEBHOOK_TOKEN
+  required_environment: GRADEX_ALERT_WEBHOOK_URL

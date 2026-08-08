@@ -37,7 +37,8 @@ committed a `media.transcode_requested` outbox row in PostgreSQL. It then stoppe
 before dispatch:
 
 - proof API `/readyz` returned HTTP 503;
-- the worker remained running and logged `media outbox dispatch failed` for event
+- the worker remained running and emitted a structured `worker_failure` with operation
+  `media_outbox_dispatch`; the durable event under test was
   `90000000-0000-0000-0000-00000000e004`;
 - `media_outbox_dispatches` remained zero for that event, while the authoritative outbox row and
   `SCAN_PASSED` Asset Version remained in PostgreSQL.

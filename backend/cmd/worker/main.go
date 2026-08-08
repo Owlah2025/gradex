@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
+	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
@@ -23,15 +24,22 @@ func main() {
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("loading config: %v", err)
+		bootstrapLogger := logging.New(os.Stderr, "gradex-worker", "unknown", logging.LevelFromString("info"))
+		exitWorker(bootstrapLogger, "config_load", logging.ErrorClassOf(err))
+		return
 	}
+	logger := logging.New(os.Stdout, "gradex-worker", string(cfg.Environment()), logging.LevelFromString(cfg.LogLevel()))
 	if cfg.ServiceRole() != config.RoleWorker {
-		log.Fatalf("SERVICE_ROLE=%s cannot run the worker process; expected %s", cfg.ServiceRole(), config.RoleWorker)
+		exitWorker(logger, "service_role_validation", "invalid_service_role")
+		return
 	}
+	logger.WorkerLifecycle(logging.WorkerStarting)
+	queue.SuppressRedisInternalLogs()
 
 	pool, err := db.Connect(ctx, cfg.DatabaseURL().Expose())
 	if err != nil {
-		log.Fatalf("connecting to database: %v", err)
+		exitWorker(logger, "database_connect", logging.ErrorClassOf(err))
+		return
 	}
 	defer pool.Close()
 
@@ -44,12 +52,14 @@ func main() {
 		UsePathStyle: cfg.S3UsePathStyle(),
 	})
 	if err != nil {
-		log.Fatalf("connecting to storage: %v", err)
+		exitWorker(logger, "storage_connect", logging.ErrorClassOf(err))
+		return
 	}
 	startupCtx, cancelStartup := context.WithTimeout(ctx, cfg.ReadinessTimeout())
 	if err := storageClient.CheckBucket(startupCtx); err != nil {
 		cancelStartup()
-		log.Fatalf("checking storage: %v", err)
+		exitWorker(logger, "storage_check", logging.ErrorClassOf(err))
+		return
 	}
 
 	queueClient := queue.NewClient(cfg.RedisAddr())
@@ -58,64 +68,120 @@ func main() {
 	defer redisHealth.Close()
 	if err := redisHealth.Ping(startupCtx); err != nil {
 		cancelStartup()
-		log.Fatalf("checking redis: %v", err)
+		exitWorker(logger, "redis_check", logging.ErrorClassOf(err))
+		return
 	}
 	cancelStartup()
 
 	writer, err := outbox.NewWriter(cfg.Admission().ProtectedPayloadKeyVersion(), []byte(cfg.Admission().ProtectedPayloadKey().Expose()))
 	if err != nil {
-		log.Fatalf("building media outbox writer: %v", err)
+		exitWorker(logger, "outbox_build", logging.ErrorClassOf(err))
+		return
 	}
 	unavailable, err := media.NewUnavailableScanner("LG-014 scanner is not configured")
 	if err != nil {
-		log.Fatalf("building scanner capability: %v", err)
+		exitWorker(logger, "scanner_build", logging.ErrorClassOf(err))
+		return
 	}
 	scanner, err := media.NewScannerAdapter(unavailable)
 	if err != nil {
-		log.Fatalf("building scanner adapter: %v", err)
+		exitWorker(logger, "scanner_adapter_build", logging.ErrorClassOf(err))
+		return
 	}
 	processor, err := media.NewFFmpegProcessor(storageClient, cfg.FFmpegBinaryPath(), cfg.FFprobeBinaryPath(), cfg.MediaProcessingTimeout())
 	if err != nil {
-		log.Fatalf("building media processor: %v", err)
+		exitWorker(logger, "media_processor_build", logging.ErrorClassOf(err))
+		return
 	}
 	worker, err := media.NewWorker(media.WorkerOptions{DB: pool, Scanner: scanner, Process: processor, Outbox: writer, ProcessingTimeout: cfg.MediaProcessingTimeout()})
 	if err != nil {
-		log.Fatalf("building media worker: %v", err)
+		exitWorker(logger, "media_worker_build", logging.ErrorClassOf(err))
+		return
 	}
 	dispatcher, err := media.NewDispatcher(pool, queueClient, cfg.MediaProcessingTimeout())
 	if err != nil {
-		log.Fatalf("building media dispatcher: %v", err)
+		exitWorker(logger, "media_dispatcher_build", logging.ErrorClassOf(err))
+		return
 	}
 
 	mux := asynq.NewServeMux()
 	if err := worker.Register(mux); err != nil {
-		log.Fatalf("registering media worker: %v", err)
+		exitWorker(logger, "worker_registration", logging.ErrorClassOf(err))
+		return
 	}
-	server := queue.NewServer(cfg.RedisAddr())
-	log.Println("gradex media worker starting")
+	server := queue.NewServer(cfg.RedisAddr(), queue.ServerOptions{
+		Logger: workerQueueLogger{logger: logger},
+		ErrorHandler: asynq.ErrorHandlerFunc(func(ctx context.Context, task *asynq.Task, err error) {
+			taskID, _ := asynq.GetTaskID(ctx)
+			retryCount, _ := asynq.GetRetryCount(ctx)
+			maxRetry, _ := asynq.GetMaxRetry(ctx)
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "job_process", ErrorClass: logging.ErrorClassOf(err), JobType: task.Type(),
+				TaskID: taskID, RetryCount: retryCount, MaxRetry: maxRetry,
+			})
+		}),
+		HealthCheckFunc: func(err error) {
+			if err != nil {
+				logger.WorkerFailed(logging.WorkerFailureEvent{
+					Operation: "redis_health", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+				})
+			}
+		},
+	})
 	if err := server.Start(mux); err != nil {
-		log.Fatalf("worker error: %v", err)
+		exitWorker(logger, "worker_start", logging.ErrorClassOf(err))
+		return
 	}
+	logger.WorkerLifecycle(logging.WorkerReady)
 
 	dispatcherDone := make(chan struct{})
 	go func() {
 		defer close(dispatcherDone)
-		runMediaDispatcher(ctx, dispatcher)
+		runMediaDispatcher(ctx, dispatcher, logger)
 	}()
 
 	<-ctx.Done()
-	log.Println("gradex media worker draining")
+	logger.WorkerLifecycle(logging.WorkerDraining)
 	server.Shutdown()
 	<-dispatcherDone
-	log.Println("gradex media worker stopped")
+	logger.WorkerLifecycle(logging.WorkerStopped)
 }
 
-func runMediaDispatcher(ctx context.Context, dispatcher *media.Dispatcher) {
+func exitWorker(logger *logging.Logger, operation, errorClass string) {
+	logger.WorkerFailed(logging.WorkerFailureEvent{
+		Operation: operation, ErrorClass: errorClass, RetryCount: -1, MaxRetry: -1,
+	})
+	os.Exit(1)
+}
+
+type workerQueueLogger struct{ logger *logging.Logger }
+
+func (l workerQueueLogger) Debug(...interface{}) {}
+func (l workerQueueLogger) Info(...interface{})  {}
+func (l workerQueueLogger) Warn(...interface{}) {
+	l.failed("queue_runtime_warning")
+}
+func (l workerQueueLogger) Error(...interface{}) {
+	l.failed("queue_runtime_error")
+}
+func (l workerQueueLogger) Fatal(...interface{}) {
+	l.failed("queue_runtime_fatal")
+	os.Exit(1)
+}
+func (l workerQueueLogger) failed(classification string) {
+	l.logger.WorkerFailed(logging.WorkerFailureEvent{
+		Operation: "queue_runtime", ErrorClass: classification, RetryCount: -1, MaxRetry: -1,
+	})
+}
+
+func runMediaDispatcher(ctx context.Context, dispatcher *media.Dispatcher, logger *logging.Logger) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if _, err := dispatcher.DispatchPending(ctx, 50); err != nil {
-			log.Printf("media outbox dispatch failed: %v", err)
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "media_outbox_dispatch", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
 		}
 		select {
 		case <-ctx.Done():

@@ -39,6 +39,7 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/environment.sh status
 ./deploy/scripts/verify-edge-security.sh
 ./deploy/scripts/verify-worker-media.sh
+./deploy/scripts/verify-observability.sh
 ```
 
 The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
@@ -61,6 +62,12 @@ FFmpeg HLS transcode into private storage, same-origin protected manifest rewrit
 segment delivery, and refusal for an unrelated Student. The default backend image excludes the
 E2E seed binary; that binary exists only in the explicitly selected `proof` image target.
 
+`verify-observability.sh` induces a safe Redis readiness failure, verifies a structured redacted
+worker event and correlated API request log, delivers an authenticated alert to a disposable sink,
+then restores Redis and proves healthy monitoring emits no second alert. The provider-neutral rule
+and webhook contract live in `deploy/monitoring/`; a real external alert destination remains a
+separate staging/production configuration action.
+
 For the isolated database recovery drill after the environment is up:
 
 ```bash
@@ -74,6 +81,7 @@ The restore command checksum-verifies the custom-format backup, removes only the
 restore target, provisions a fresh `restore-postgres` container/database, and restores without
 `--clean`. The verifier asserts schema 15 plus fixed identity, invitation-provenance, Entitlement, and
 Enrollment records before starting `api-restore` against the restored database.
+Each successful backup also writes an ignored completion timestamp used by the freshness monitor.
 
 ## Configuration
 

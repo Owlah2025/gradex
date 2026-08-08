@@ -9,6 +9,7 @@ S12_ENV_FILE="$S12_STATE_DIR/production-like.env"
 S12_BACKUP_DIR="$S12_STATE_DIR/backups"
 S12_BACKUP_FILE="$S12_BACKUP_DIR/gradex-s12.dump"
 S12_CHECKSUM_FILE="$S12_BACKUP_FILE.sha256"
+S12_COMPLETED_AT_FILE="$S12_BACKUP_FILE.completed-at"
 S12_PROJECT="gradex-s12"
 
 note() { printf 's12-recovery: %s\n' "$*" >&2; }
@@ -93,7 +94,8 @@ create_backup() {
   [ -s "$partial_file" ] || die "backup is empty"
   mv "$partial_file" "$S12_BACKUP_FILE"
   sha256sum "$S12_BACKUP_FILE" >"$S12_CHECKSUM_FILE"
-  chmod 600 "$S12_BACKUP_FILE" "$S12_CHECKSUM_FILE"
+  date +%s >"$S12_COMPLETED_AT_FILE"
+  chmod 600 "$S12_BACKUP_FILE" "$S12_CHECKSUM_FILE" "$S12_COMPLETED_AT_FILE"
   note "backup and checksum created in ignored state"
 }
 
