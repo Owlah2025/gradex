@@ -37,12 +37,10 @@ npm test             # 163 passed, 0 failed
 npm run build         # optimized Next.js production build passed
 ```
 
-`npm audit --omit=dev` reports three High production dependency findings: direct `next`, direct
-`postcss`, and transitive `nanoid`. The current production configuration has no production rewrite,
-Server Action, remote image optimizer, custom server, or WebSocket upgrade surface, but the installed
-Next.js 14 line remains affected by advisories for other App Router/request-processing paths. This is
-a release finding, not a failed reproducible build; it remains open for upgrade or independently
-reviewed mitigation before production release.
+T045 upgraded Next.js to 15.5.21 and constrained every PostCSS path to 8.5.23, nanoid to 3.3.17,
+and the Next-optional sharp path to 0.35.0. `npm audit --omit=dev --audit-level=high` now reports zero
+vulnerabilities. The full frontend gates and deployed S5/S6 smoke passed; exact dependency evidence
+is in `release-hardening.md`.
 
 ## Production artifacts and deployed checks
 
@@ -88,9 +86,9 @@ git diff --check
 
 The SpecKit prerequisite check resolved feature directory
 `specs/008-staging-production-infrastructure` and found the research, data-model, contracts,
-quickstart, and tasks artifacts. Convergence retained 44 completed tasks and added explicit remaining
-tasks for production dependency remediation, authenticated/TLS Redis, provider staging execution,
-and independent review. Independent review is intentionally not self-approved.
+quickstart, and tasks artifacts. Release hardening completed 46 of 48 tasks. Provider staging
+execution and independent review remain explicit open tasks; independent review is intentionally not
+self-approved.
 
 ## Evidence boundary
 

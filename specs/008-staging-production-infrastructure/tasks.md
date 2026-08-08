@@ -121,8 +121,8 @@
 
 **Independent Test**: The production audit has no unmitigated Critical/High finding, authenticated TLS Redis passes API/worker recovery tests, and the public staging origin passes provider restore, rollback, alert, protected-browser-media, and MVP smoke evidence.
 
-- [ ] T045 [US1] Upgrade or independently mitigate the High production `next`/`postcss`/`nanoid` dependency findings, then rerun the frontend gates and production audit
-- [ ] T046 [US2] Add provider-neutral Redis authentication/TLS configuration for API and worker, fail closed in production, and prove it against a disposable authenticated TLS endpoint
+- [x] T045 [US1] Upgrade or independently mitigate the High production `next`/`postcss`/`nanoid` dependency findings, then rerun the frontend gates and production audit
+- [x] T046 [US2] Add provider-neutral Redis authentication/TLS configuration for API and worker, fail closed in production, and prove it against a disposable authenticated TLS endpoint
 - [ ] T047 [US6] Deploy the frozen artifacts to the selected provider and record public TLS/DNS, managed PostgreSQL/Redis/private-storage browser CORS, scanner evidence, external alert delivery, provider backup/isolated restore, application rollback, and external MVP smoke results
 - [ ] T048 Run `speckit.converge`, reconcile remaining tasks/evidence, freeze the exact S12 implementation range, and dispatch independent review without self-approving closure
 
