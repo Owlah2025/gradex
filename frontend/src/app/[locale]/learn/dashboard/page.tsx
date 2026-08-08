@@ -8,8 +8,9 @@ import { LearningLocaleToggle } from "@/components/learning/learning-locale-togg
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function LearningDashboardPage({ params }: { params: { locale: string } }) {
-  const locale = params.locale === "en" ? "en" : "ar";
+export default async function LearningDashboardPage({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale: requestedLocale } = await params;
+  const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
   try {
     const dashboard = await requestLearningDashboardServer(locale);

@@ -13,7 +13,7 @@ PostgreSQL authoritative, Redis disposable, storage private, and schema 15 forwa
 
 ## Technical Context
 
-**Language/Version**: Go 1.26.5 from `backend/go.mod`; Node.js 22 from CI; Next.js 14.2.35 and TypeScript from the frontend lockfile
+**Language/Version**: Go 1.26.5 from `backend/go.mod`; Node.js 22 from CI; Next.js 15.5.21 with React 18.3.1 and TypeScript from the frontend lockfile
 
 **Primary Dependencies**: Gin, pgx, go-redis, asynq, AWS S3 SDK, Next.js, PostgreSQL 16, Redis 7, S3-compatible storage, FFmpeg
 

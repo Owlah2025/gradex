@@ -11,11 +11,12 @@ import { reportLabels } from "@/components/learning/report-labels";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function CourseHomePage({ params }: { params: { locale: string; courseId: string } }) {
-  const locale = params.locale === "en" ? "en" : "ar";
+export default async function CourseHomePage({ params }: { params: Promise<{ locale: string; courseId: string }> }) {
+  const { locale: requestedLocale, courseId } = await params;
+  const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
   try {
-    const course = await requestCourseHomeServer(params.courseId, locale);
+    const course = await requestCourseHomeServer(courseId, locale);
     return (
       <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto min-h-screen max-w-6xl px-5 py-10 sm:px-6">
         <header className="mb-8">

@@ -1,2 +1,5 @@
 import { CatalogueDetail } from "@/components/catalog/public-catalogue";
-export default function CatalogueDetailPage({ params }: { params: { idOrSlug: string } }) { return <CatalogueDetail idOrSlug={params.idOrSlug} />; }
+export default async function CatalogueDetailPage({ params }: { params: Promise<{ idOrSlug: string }> }) {
+  const { idOrSlug } = await params;
+  return <CatalogueDetail idOrSlug={idOrSlug} />;
+}

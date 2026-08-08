@@ -90,7 +90,8 @@ demonstrate that someone is notified.
 
 **Decision**: Move from Next.js 14.2.35 to the first audit-clean compatible release, Next.js 15.5.21,
 while retaining React and React DOM 18.3.1. Constrain PostCSS to 8.5.23 and nanoid to 3.3.17 so the
-direct and Next-nested dependency paths both receive their smallest patched versions.
+direct and Next-nested dependency paths both receive their smallest patched versions. Constrain the
+Next-optional sharp dependency to 0.35.0, the first release outside its inherited libvips advisory.
 
 **Rationale**: The affected Next.js ranges include every available 14.x release, while 15.5.21 still
 supports React 18. A constrained transitive resolution is required because Next.js 15.5.21 declares

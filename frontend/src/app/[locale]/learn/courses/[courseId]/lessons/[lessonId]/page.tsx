@@ -19,14 +19,15 @@ import { formatLearningPositionSeconds } from "@/lib/formatters/learning";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default function LessonPage({
+export default async function LessonPage({
   params,
 }: {
-  params: { locale: "ar" | "en"; courseId: string; lessonId: string };
+  params: Promise<{ locale: "ar" | "en"; courseId: string; lessonId: string }>;
 }) {
-  const locale = params.locale === "en" ? "en" : "ar";
+  const { locale: requestedLocale, courseId, lessonId } = await params;
+  const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
-  return <LessonContent courseID={params.courseId} lessonID={params.lessonId} locale={locale} labels={dictionary.learning} playerLabels={dictionary.player} localeSwitchLabel={dictionary.meta.switchToAria} />;
+  return <LessonContent courseID={courseId} lessonID={lessonId} locale={locale} labels={dictionary.learning} playerLabels={dictionary.player} localeSwitchLabel={dictionary.meta.switchToAria} />;
 }
 
 async function LessonContent({
