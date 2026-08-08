@@ -1,0 +1,102 @@
+# S11 Release Acceptance Evidence
+
+Date: 2026-08-09  
+Hard launch target: 2026-08-15  
+Branch: `s11-release-e2e-20260808`
+
+## Revision and artifacts
+
+- Starting HEAD: `6bf694daa7a8a823a849a4e2da9588988b6d2358`
+- Planning commit: `0d460230de2eb6f1a426039d9ee1d1afaf5d8da8`
+- Implementation commits:
+  - `ee59f0c42bff84e5fa8d2df5ffe1d4c89c6f7640` — release journey, evidence helpers, replay hardening, and reusable verifier
+  - `c424e8a0be4baa8c97ccda3aa2c2a7e25d7fd801` — Next.js protected-request header fix and regression assertion
+  - `182bfa59354f86485ca9d6dc13538101d5f4e5f4` — exact Invitation rejection/cancellation integration selection
+- Evidence commit / frozen candidate end: `PENDING_EVIDENCE_COMMIT`
+- S11 artifacts: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/release-suite.md`, `contracts/traceability.md`, `checklists/requirements.md`, and `tasks.md` under `specs/009-release-acceptance/`
+- Task count: 29. Tasks T001–T028 are complete in the evidence candidate; T029 is completed by the subsequent documentation-only freeze marker.
+
+## Acceptance coverage
+
+The local isolated Chromium journey proves the complete critical path through real browser screens, the real Go API, real PostgreSQL, real sessions, and the existing media fixture:
+
+```text
+Student registration -> delivered email verification -> password login
+-> Admin Course expiry -> Course Access Invitation -> Student acceptance
+-> exactly zero Entitlements and zero Enrollments before approval
+-> protected Course/Lesson/playback/Progress denial before approval
+-> authorized Admin Approval
+-> exactly one ACTIVE MANUAL_INVITATION Entitlement with source_invitation_id
+-> exactly one Enrollment -> protected Course -> protected Lesson -> playback
+-> Progress persistence -> unrelated Student denial
+-> authorized repeated approval returns 200 and preserves both identities/cardinalities
+```
+
+Negative coverage asserts Course, Lesson, playback, and Progress denial both before approval and for an unrelated Student, with zero grant/enrollment/progress side effects. Existing S4/S5 integration coverage supplies byte-identical denial, per-route authority revalidation, all-denial side-effect checks, and protected-media refusal. The HTTPS verifier additionally retrieves the protected manifest and a non-empty signed HLS segment.
+
+Recovery coverage submits an invalid email-verification bearer before the valid bearer, an invalid Invitation bearer before the valid bearer, and an authorized approval replay. The focused release command also selects the complete identity journey, Invitation rejection/cancellation behavior, verification single-use/supersession, reset-secret expiry/replay/wrong-purpose, concurrent approval, denial equivalence, authority revalidation, and denial side-effect integration tests.
+
+## Validation results
+
+All commands below ran from the candidate containing `182bfa5` plus no uncommitted implementation changes.
+
+| Gate | Command | Result |
+|---|---|---|
+| Go format/shell syntax/diff | `gofmt`, `bash -n`, `git diff --check` on changed paths | PASS |
+| Backend static/full | `go vet ./... && go test ./...` | PASS across every backend package |
+| Backend complete integration | `go test -tags=integration ./internal/... -count=1` | PASS across every internal package; HTTP API 201.639 s, identity 109.818 s, learning 61.349 s, media 59.908 s |
+| Frontend type/unit | `npm run typecheck && npm test` | PASS; 169/169 tests |
+| Frontend lint/build | `npm run lint && npm run build` | PASS; no ESLint warnings or errors and production build completed |
+| Local S11 browser | `npm run test:e2e:release` | PASS; 1 Chromium test in 39.2 s against fresh database `gradex_playwright_e2e_mskvgmitxgqkatf8` |
+| S11 consolidated HTTPS | `./deploy/scripts/verify-s11-release-acceptance.sh` | PASS; selected HTTP API and identity integrations, then 2/2 deployed Chromium tests in 4.1 s |
+| HTTPS state/media | same command | PASS; state `1|1|1|1`, protected manifest and non-empty signed segment retrieved |
+| Production dependencies | `npm audit --omit=dev` | PASS; 0 vulnerabilities |
+| Full dependency audit | `npm audit` | FINDING; 2 High-severity advisories in ESLint-only transitive development dependencies |
+
+## Production-like environment
+
+- Origin: `https://gradex.localhost:18443`
+- Topology: existing S12 disposable Caddy HTTPS edge with separate frontend, Go API, worker, PostgreSQL, TLS-authenticated Redis, and private MinIO
+- Acceptance database: `gradex_playwright_e2e_s12smoke01`
+- Active application database: `gradex` (not reset or downgraded)
+- Schema: both databases reported `15|f` (`version=15`, `dirty=false`)
+- Deployed browser result: real HTTP login plus the complete Invitation-to-protected-learning journey passed
+- Boundary: positive registration ran only in the isolated development harness. Production mode correctly refuses registration until approved policy-set and compromised-password adapters are integrated.
+- Portability: Playwright retains the existing validated `GRADEX_E2E_EXTERNAL_ORIGIN` contract, external run-state/database variables, and CA/SPKI settings. A T047 origin can replace the disposable origin by configuration after the missing production registration capability and external infrastructure exist.
+
+## Reused S5/S6 evidence
+
+- S5 `authenticates real Student via Go API session and renders Course Home from real PostgreSQL` ran against the HTTPS deployment.
+- S6 `Complete 30-Step End-to-End Course Access Grant & Protected Learning Journey` ran against the HTTPS deployment.
+- S6 replay coverage was strengthened: a real Admin CSRF token is now required, the replay must return exactly `200`, and the Entitlement and Enrollment identities and cardinalities must remain unchanged.
+- Existing S4/S5 protected media, protected-learning denial, revalidation, and side-effect tests were selected/cited rather than copied.
+
+## Findings and fixes
+
+### Open
+
+| Severity | Finding | Launch effect |
+|---|---|---|
+| Critical | None | — |
+| High | Production registration cannot start because approved production policy-set and compromised-password adapters are not integrated. | Launch-blocking; the full public registration-to-learning journey cannot yet pass in production mode. |
+| Medium | None open | — |
+| Low | `npm audit` reports `brace-expansion` and `js-yaml` advisories through ESLint development tooling; `npm audit --omit=dev` reports zero production vulnerabilities. | Non-runtime dependency-maintenance follow-up. |
+
+### Fixed in S11
+
+| Severity | Defect | Fix |
+|---|---|---|
+| High evidence gap | Existing S6 replay accepted `403` as possible success, so it could pass without reaching idempotent grant logic. | Use the real Admin CSRF token, require `200`, and assert identical Entitlement/Enrollment identities and counts. |
+| Medium | Protected Course/Lesson server rendering synchronously accessed `headers()`, producing Next.js runtime errors. | Await `headers()` and retain a regression assertion. |
+| Medium evidence gap | The HTTPS verifier used unsupported `psql -c` variable substitution, so its final authoritative state query failed after the browser passed. | Use the fixed internal fixture value through safe shell interpolation; the rerun passed with `1|1|1|1`. |
+
+No commerce, S8 support/Entitlement-update, provider deployment, or product feature behavior was introduced. No migration or Hostinger provider file changed.
+
+## Disposition
+
+- Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
+- Launch-blocking defects: one unresolved High (production registration adapters).
+- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..PENDING_EVIDENCE_COMMIT`.
+- Ready for independent review: yes, as an exact acceptance implementation/evidence range.
+- Ready for independent closure: **no**. FR-022/SC-008 correctly prevent closure while the production-registration High remains open.
+- Recommended next launch-critical action: integrate and approve the production registration policy-set and compromised-password adapters, rerun the full S11 selection in production mode, then execute T047 when Hostinger/R2/DNS become available. Do not start S8 in this pass.

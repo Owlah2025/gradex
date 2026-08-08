@@ -1,5 +1,13 @@
 # Gradex Launch Status
 
+> **2026-08-09 S11 release-acceptance candidate:** S11 is the active launch-critical slice. All 29
+> implementation and evidence tasks are complete subject to the documentation-only freeze marker.
+> The full isolated registration-to-learning Chromium journey and the existing S12 disposable HTTPS
+> login-to-learning journey pass at schema 15. S11 is **not closed**: production registration still
+> lacks the approved policy-set and compromised-password adapters, an unresolved launch-blocking High.
+> Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
+> current statement supersedes lower historical text that calls S6 the active slice.
+>
 > **2026-08-08 S12 implementation authority:** Product Owner decision fixes
 > `dde093bc9f8e75b89cc96667c73a30fea5f8baee` as the S12 base, directs that S6 production behavior not
 > be reopened, and makes S12 staging infrastructure upstream of S11 deployed acceptance testing.
@@ -14,7 +22,7 @@
 > frozen and ready; the live R2 exact-version-provenance gate is ready but untested; Hostinger public
 > deployment has not started. T048 remains unchecked and has not started.
 
-> Current date: **2026-08-07 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-08-09 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
 > Last repository reconciliation: **2026-08-07, S6 documentation remediation pass against head `681f4a9`**; prior reconciliation 2026-08-06 at S6 pre-implementation reconciliation against S5 closure head `d5ce557`
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
@@ -38,7 +46,7 @@
 > implementation has started under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews) with Antigravity as builder and Claude as independent reviewer. 13 of 85 tasks are complete at current head. Initial implementation range `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected; the complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation. S6 remains open; no next subgroup is authorized yet.
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
-> Days remaining: **8**
+> Days remaining: **6**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is closed
