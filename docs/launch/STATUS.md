@@ -5,6 +5,14 @@
 > be reopened, and makes S12 staging infrastructure upstream of S11 deployed acceptance testing.
 > Remaining non-blocking S6 task bookkeeping stays backlog. This current authority supersedes lower
 > historical statements that describe S6 as the active implementation slice.
+>
+> **2026-08-08 S12 provider freeze:** Provider implementation is frozen at
+> `91ab1e352f47da3c0b0ec59b99bf098f89d4aefa`. S12 is **not closed**. T047 is unchecked and
+> `PAUSED/BLOCKED_EXTERNAL_INFRA` until a Hostinger KVM 2 VPS, a live private Cloudflare R2 bucket with
+> protected credentials, and a real Gradex domain in a Cloudflare DNS zone are available. This is an
+> external execution dependency, not an S12 implementation defect. The provider deployment package is
+> frozen and ready; the live R2 exact-version-provenance gate is ready but untested; Hostinger public
+> deployment has not started. T048 remains unchecked and has not started.
 
 > Current date: **2026-08-07 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
