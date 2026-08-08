@@ -55,11 +55,11 @@
 
 **Independent Test**: Known records survive backup/restore and Gradex becomes ready against only the restored target.
 
-- [ ] T021 [US3] Add source-safe backup and fresh-target restore commands with source/target identity refusal in `deploy/scripts/database-recovery.sh` (FR-015, FR-018)
-- [ ] T022 [US3] Add schema and identity/access record assertions in `deploy/scripts/verify-restored-database.sh` (FR-016)
-- [ ] T023 [US3] Run zero-to-15 migration tests and upgrade-path policy tests against disposable PostgreSQL (FR-007)
-- [ ] T024 [US3] Create known records, create/checksum a real backup, restore into a fresh database, verify schema/data, and start API against the restored database; record evidence in `docs/launch/evidence/s12/restore-drill.md` (SC-006, SC-007)
-- [ ] T025 [US3] Update `docs/launch/RUNBOOK.md` with only commands proven by T024 and commit Batch C
+- [x] T021 [US3] Add source-safe backup and fresh-target restore commands with source/target identity refusal in `deploy/scripts/database-recovery.sh` (FR-015, FR-018)
+- [x] T022 [US3] Add schema and identity/access record assertions in `deploy/scripts/verify-restored-database.sh` (FR-016)
+- [x] T023 [US3] Run zero-to-15 migration tests and upgrade-path policy tests against disposable PostgreSQL (FR-007)
+- [x] T024 [US3] Create known records, create/checksum a real backup, restore into a fresh database, verify schema/data, and start API against the restored database; record evidence in `docs/launch/evidence/s12/restore-drill.md` (SC-006, SC-007)
+- [x] T025 [US3] Update `docs/launch/RUNBOOK.md` with only commands proven by T024 and commit Batch C
 
 ## Phase 5 — Batch D / US4: HTTPS, proxy, cookie, and origin security (P1)
 

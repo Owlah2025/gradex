@@ -44,6 +44,23 @@ services:
       retries: 30
     restart: unless-stopped
 
+  restore-postgres:
+    profiles: [restore]
+    image: postgres:16.14-alpine
+    environment:
+      POSTGRES_USER: gradex_restore
+      POSTGRES_PASSWORD: ${RESTORE_POSTGRES_PASSWORD:?RESTORE_POSTGRES_PASSWORD is required}
+      POSTGRES_DB: gradex_restore
+    volumes:
+      - restore-data:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradex_restore -d gradex_restore"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: "no"
+
   redis:
     image: redis:7.4.9-alpine
     command: ["redis-server", "--appendonly", "no", "--save", ""]
@@ -128,6 +145,27 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  api-restore:
+    profiles: [restore]
+    image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+      DATABASE_URL: ${RESTORE_DATABASE_URL:?RESTORE_DATABASE_URL is required}
+    depends_on:
+      restore-postgres:
+        condition: service_healthy
+    networks: [app]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: "no"
+
   worker:
     image: ${GRADEX_BACKEND_IMAGE:-gradex-backend:s12-local}
     command: ["gradex-worker"]
@@ -180,6 +218,7 @@ networks:
 
 volumes:
   postgres-data:
+  restore-data:
   media-data:
   caddy-data:
   caddy-config:

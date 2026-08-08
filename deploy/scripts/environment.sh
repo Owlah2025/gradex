@@ -14,7 +14,7 @@ die() { note "$*"; exit 1; }
 
 require_tools() {
   local tool
-  for tool in curl docker openssl sed tar; do
+  for tool in curl docker grep openssl sed tar; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
@@ -22,9 +22,20 @@ require_tools() {
 
 prepare() {
   require_tools
+  local restore_postgres_password
   mkdir -p "$S12_STATE_DIR"
   chmod 700 "$S12_STATE_DIR"
   if [ -f "$S12_ENV_FILE" ]; then
+    if ! grep -q '^RESTORE_POSTGRES_PASSWORD=' "$S12_ENV_FILE"; then
+      umask 077
+      restore_postgres_password="$(openssl rand -hex 24)"
+      {
+        printf 'RESTORE_POSTGRES_PASSWORD=%s\n' "$restore_postgres_password"
+        printf 'RESTORE_DATABASE_URL=postgres://gradex_restore:%s@restore-postgres:5432/gradex_restore?sslmode=disable\n' \
+          "$restore_postgres_password"
+      } >>"$S12_ENV_FILE"
+      note "upgraded existing ignored environment state for isolated restore"
+    fi
     note "using existing ignored environment state"
     return
   fi
@@ -32,6 +43,7 @@ prepare() {
   umask 077
   local postgres_password s3_access_key s3_secret_key minio_root_user minio_root_password
   postgres_password="$(openssl rand -hex 24)"
+  restore_postgres_password="$(openssl rand -hex 24)"
   s3_access_key="s12$(openssl rand -hex 8)"
   s3_secret_key="$(openssl rand -hex 24)"
   minio_root_user="root$(openssl rand -hex 8)"
@@ -41,6 +53,9 @@ prepare() {
     printf 'PUBLIC_ORIGIN=https://gradex.localhost:18443\n'
     printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password"
     printf 'DATABASE_URL=postgres://gradex:%s@postgres:5432/gradex?sslmode=disable\n' "$postgres_password"
+    printf 'RESTORE_POSTGRES_PASSWORD=%s\n' "$restore_postgres_password"
+    printf 'RESTORE_DATABASE_URL=postgres://gradex_restore:%s@restore-postgres:5432/gradex_restore?sslmode=disable\n' \
+      "$restore_postgres_password"
     printf 'S3_ACCESS_KEY=%s\n' "$s3_access_key"
     printf 'S3_SECRET_KEY=%s\n' "$s3_secret_key"
     printf 'MINIO_ROOT_USER=%s\n' "$minio_root_user"

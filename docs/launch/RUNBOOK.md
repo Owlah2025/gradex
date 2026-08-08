@@ -83,7 +83,19 @@ Outbox delivery workers poll `outbox_events` and deliver acceptance link emails 
 ### Pre-Deployment Backup
 
 ```bash
-pg_dump -U gradex -h <HOST> -F c -b -v -f gradex_s6_pre_deploy.dump gradex
+pg_dump --format=custom --no-owner --no-acl -U gradex -h <HOST> -f gradex_pre_deploy.dump gradex
+sha256sum gradex_pre_deploy.dump > gradex_pre_deploy.dump.sha256
+```
+
+The proven disposable S12 drill creates known identity/access records, writes a checksum-protected
+backup into ignored local state, restores it into a new PostgreSQL container/database, and starts an
+isolated API against the restored target:
+
+```bash
+./deploy/scripts/database-recovery.sh seed
+./deploy/scripts/database-recovery.sh backup
+./deploy/scripts/database-recovery.sh restore
+./deploy/scripts/verify-restored-database.sh
 ```
 
 ### Emergency Rollback & Recovery Procedure
@@ -98,12 +110,15 @@ If a deployment fault occurs:
 
 ```bash
 createdb -U gradex -h <HOST> gradex_restore_<TIMESTAMP>
-pg_restore -U gradex -h <HOST> -d gradex_restore_<TIMESTAMP> gradex_s6_pre_deploy.dump
+sha256sum --check gradex_pre_deploy.dump.sha256
+pg_restore --exit-on-error --single-transaction --no-owner --no-acl \
+  -U gradex -h <HOST> -d gradex_restore_<TIMESTAMP> gradex_pre_deploy.dump
 ```
 
 Verify schema and identity/access-critical records in the restored target, then start an isolated
 Gradex instance whose `DATABASE_URL` points to that target. Database recovery and application rollback
-are separate operations.
+are separate operations. Do not add `--clean` or point the restore command at the active source
+database merely to demonstrate recovery.
 
 ---
 

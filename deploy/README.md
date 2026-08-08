@@ -45,6 +45,20 @@ frontend plus `/healthz` and `/readyz`. `data-plane` verifies schema 15, Redis, 
 object write/read/delete, and the bucket's private policy. Use `logs [service]`, `stop`, or `reset` for
 the corresponding lifecycle operation. `stop` preserves volumes; `reset` removes them.
 
+For the isolated database recovery drill after the environment is up:
+
+```bash
+./deploy/scripts/database-recovery.sh seed
+./deploy/scripts/database-recovery.sh backup
+./deploy/scripts/database-recovery.sh restore
+./deploy/scripts/verify-restored-database.sh
+```
+
+The restore command checksum-verifies the custom-format backup, removes only the prior disposable
+restore target, provisions a fresh `restore-postgres` container/database, and restores without
+`--clean`. The verifier asserts schema 15 plus fixed identity, invitation-provenance, Entitlement, and
+Enrollment records before starting `api-restore` against the restored database.
+
 ## Configuration
 
 - `env/production.env.example` lists the production contract.
