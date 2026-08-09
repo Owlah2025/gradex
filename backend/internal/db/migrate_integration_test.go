@@ -630,11 +630,17 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
-func TestMaxSchemaVersionTracksTransactionalEmailSchema(t *testing.T) {
+func TestMaxSchemaVersionTracksEmailActivationSchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
-	if MaxSchemaVersion != TransactionalEmailSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want TransactionalEmailSchemaVersion %d", MaxSchemaVersion, TransactionalEmailSchemaVersion)
+	if MaxSchemaVersion != EmailActivationSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want EmailActivationSchemaVersion %d", MaxSchemaVersion, EmailActivationSchemaVersion)
+	}
+	// The activation boundary is the migration directly after the delivery
+	// ledger it guards; nothing may be interposed between them.
+	if EmailActivationSchemaVersion != TransactionalEmailSchemaVersion+1 {
+		t.Fatalf("email activation schema = %d, want one past the delivery ledger %d",
+			EmailActivationSchemaVersion, TransactionalEmailSchemaVersion)
 	}
 }
 
