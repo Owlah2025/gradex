@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -178,6 +180,36 @@ func TestHIBPSourceRefusesRedirects(t *testing.T) {
 	}
 	if redirectedRequests.Load() != 0 {
 		t.Fatalf("redirect target received %d requests", redirectedRequests.Load())
+	}
+}
+
+func TestHIBPSourceFailsClosedWhenTLSCannotBeVerified(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, "%s:0\n", strings.Repeat("A", hibpSuffixLength))
+	}))
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	server.StartTLS()
+	defer server.Close()
+	source, err := newHIBPCompromisedSource(
+		server.URL+"/range",
+		&http.Client{Timeout: time.Second},
+	)
+	if err != nil {
+		t.Fatalf("constructing test HIBP source: %v", err)
+	}
+
+	_, err = source.Lookup(context.Background(), CompromisedRangeLookup{
+		Scheme: CompromisedSHA1V1,
+		Prefix: "ABCDE",
+	})
+	if err == nil {
+		t.Fatal("unverified TLS certificate was accepted")
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("HTTP handler received %d requests despite TLS verification failure", requests.Load())
 	}
 }
 
