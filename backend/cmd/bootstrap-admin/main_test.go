@@ -103,6 +103,13 @@ func TestProductionBootstrapCompositionSelectsHIBP(t *testing.T) {
 		"AUTH_FAKE_MODE":                        "false",
 		"PASSWORD_SCREEN_MODE":                  "adapter",
 		"COMPROMISED_PASSWORD_ADAPTER_APPROVED": "true",
+		"LEGAL_IDENTITY_MODE":                   "public",
+		"LEGAL_OPERATOR_NAME":                   "Gradex Courses",
+		"LEGAL_REGISTRATION_NUMBER":             "KWT-REAL-123",
+		"LEGAL_REGISTERED_ADDRESS":              "Kuwait City, Kuwait",
+		"PRIVACY_EMAIL":                         "privacy@gradex.example",
+		"SUPPORT_EMAIL":                         "support@gradex.example",
+		"SECURITY_EMAIL":                        "security@gradex.example",
 	}
 	secrets := config.MapSecretResolver{
 		"DATABASE_URL":                 "postgres://gradex:pw@db:5432/gradex",

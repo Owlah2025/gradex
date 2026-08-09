@@ -49,6 +49,20 @@ func admissionServiceWithCompromised(
 	compromised CompromisedRangeSource,
 ) *AdmissionService {
 	t.Helper()
+	return admissionServiceWithResolver(
+		t, pool, now, randomByte, compromised, testPolicyResolver(t),
+	)
+}
+
+func admissionServiceWithResolver(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	now time.Time,
+	randomByte byte,
+	compromised CompromisedRangeSource,
+	policies PolicySetResolver,
+) *AdmissionService {
+	t.Helper()
 	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x51}, 32))
 	if err != nil {
 		t.Fatalf("constructing outbox writer: %v", err)
@@ -59,7 +73,7 @@ func admissionServiceWithCompromised(
 	}
 	service, err := NewAdmissionService(AdmissionServiceOptions{
 		Pool:            pool,
-		Policies:        testPolicyResolver(t),
+		Policies:        policies,
 		Compromised:     compromised,
 		Outbox:          writer,
 		VerificationTTL: time.Hour,
@@ -216,6 +230,84 @@ func TestRegisterStudentCommitsCompletePendingIdentity(t *testing.T) {
 		"Student.Name@Example.com",
 		deterministicBearer(0x41),
 	)
+}
+
+func TestApprovedPolicyAcceptancesPersistExactVersionsAcrossResolverChanges(t *testing.T) {
+	pool := admissionPool(t)
+	approved, err := NewApprovedPolicySetResolver("https://gradex.example", ApprovedPolicySetID)
+	if err != nil {
+		t.Fatalf("constructing approved resolver: %v", err)
+	}
+	firstService := admissionServiceWithResolver(
+		t, pool, time.Now().UTC(), 0x61, clearCompromisedSource(), approved,
+	)
+	first := studentRegistration()
+	first.Email = "approved-policy@example.com"
+	first.Locale = LocaleEnglish
+	first.PolicySetID = ApprovedPolicySetID
+	first.RequestID = "approved-policy-registration"
+	if err := firstService.RegisterStudent(context.Background(), first); err != nil {
+		t.Fatalf("registering under approved policy: %v", err)
+	}
+
+	futureVersion := "2026-09-01-v2"
+	futureID := "gradex-legal-2026-09-01-v2"
+	futurePolicy := func(locale Locale, prefix string) RegistrationPolicySet {
+		return RegistrationPolicySet{
+			ID: futureID, Version: futureVersion, EffectiveDate: "2026-09-01",
+			MinimumAge: 18, PrimaryLocale: LocaleArabic, Locale: locale,
+			Policies: []RegistrationPolicy{
+				{Kind: PolicyPrivacyNotice, Version: futureVersion, Label: "Privacy", URL: prefix + "/privacy"},
+				{Kind: PolicyTermsOfService, Version: futureVersion, Label: "Terms", URL: prefix + "/terms"},
+			},
+		}
+	}
+	future, err := NewStaticPolicySetResolver(
+		futurePolicy(LocaleEnglish, "/en"),
+		futurePolicy(LocaleArabic, "/ar"),
+	)
+	if err != nil {
+		t.Fatalf("constructing future policy resolver: %v", err)
+	}
+	secondService := admissionServiceWithResolver(
+		t, pool, time.Now().UTC(), 0x71, clearCompromisedSource(), future,
+	)
+	second := studentRegistration()
+	second.Email = "future-policy@example.com"
+	second.PolicySetID = futureID
+	second.RequestID = "future-policy-registration"
+	if err := secondService.RegisterStudent(context.Background(), second); err != nil {
+		t.Fatalf("registering under future policy: %v", err)
+	}
+
+	rows, err := pool.Query(context.Background(), `
+		SELECT a.normalized_email, min(p.policy_set_id),
+		       string_agg(p.policy_version, ',' ORDER BY p.policy_kind)
+		FROM policy_acceptances p
+		JOIN accounts a ON a.id = p.account_id
+		GROUP BY a.normalized_email
+		ORDER BY a.normalized_email`)
+	if err != nil {
+		t.Fatalf("querying historical acceptances: %v", err)
+	}
+	defer rows.Close()
+	got := map[string][2]string{}
+	for rows.Next() {
+		var email, setID, versions string
+		if err := rows.Scan(&email, &setID, &versions); err != nil {
+			t.Fatalf("scanning historical acceptance: %v", err)
+		}
+		got[email] = [2]string{setID, versions}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("reading historical acceptances: %v", err)
+	}
+	if got["approved-policy@example.com"] != [2]string{ApprovedPolicySetID, ApprovedPolicySetVersion + "," + ApprovedPolicySetVersion} {
+		t.Fatalf("approved acceptance was rewritten: %v", got["approved-policy@example.com"])
+	}
+	if got["future-policy@example.com"] != [2]string{futureID, futureVersion + "," + futureVersion} {
+		t.Fatalf("future acceptance mismatch: %v", got["future-policy@example.com"])
+	}
 }
 
 // BR-001: an existing normalized email is a complete hidden no-op.

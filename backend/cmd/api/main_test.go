@@ -84,6 +84,28 @@ func TestBuildLearningFoundationRejectsMissingMedia(t *testing.T) {
 	}
 }
 
+func TestProductionRegistrationFoundationsStartWithHIBPAndApprovedPolicySet(t *testing.T) {
+	freshAPISchema(t)
+	pool, _ := apiPool(t)
+	cfg := productionAdmissionConfig(t)
+	redisConnection, err := queue.NewConnection(cfg.Redis())
+	if err != nil {
+		t.Fatalf("building production Redis configuration: %v", err)
+	}
+
+	foundations, err := buildProductionFoundations(cfg, pool, redisConnection)
+	if err != nil {
+		t.Fatalf("production registration composition did not start: %v", err)
+	}
+	defer foundations.Close()
+	if foundations.AdmissionRedis == nil {
+		t.Fatal("production Student admission foundation was not composed")
+	}
+	if foundations.StaffRedis != nil {
+		t.Fatal("unapproved production staff invitation foundation was mounted")
+	}
+}
+
 func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	freshAPISchema(t)
 	pool, _ := apiPool(t)

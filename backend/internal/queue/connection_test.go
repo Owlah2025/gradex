@@ -23,6 +23,10 @@ func loadRedisSettings(
 		"CORS_ALLOWED_ORIGINS": "https://gradex.example", "CORS_ALLOW_CREDENTIALS": "true",
 		"REDIS_ADDR": "redis.internal:6379", "REDIS_TLS_ENABLED": "true",
 		"S3_ENDPOINT": "https://storage.example", "S3_BUCKET": "gradex-media",
+		"LEGAL_IDENTITY_MODE": "public", "LEGAL_OPERATOR_NAME": "Gradex Courses",
+		"LEGAL_REGISTRATION_NUMBER": "KWT-REAL-123", "LEGAL_REGISTERED_ADDRESS": "Kuwait City, Kuwait",
+		"PRIVACY_EMAIL": "privacy@gradex.example", "SUPPORT_EMAIL": "support@gradex.example",
+		"SECURITY_EMAIL": "security@gradex.example",
 	}
 	secrets := config.MapSecretResolver{
 		"DATABASE_URL": "postgres://gradex:pw@db:5432/gradex", "REDIS_PASSWORD": "redis-password-canary",

@@ -108,7 +108,27 @@ main() {
   export REDIS_TLS_ENABLED=true REDIS_TLS_SERVER_NAME=redis REDIS_TLS_CA_CERT_FILE="$REDIS_TLS_CA_CERT_FILE_HOST"
   export S3_ENDPOINT=http://minio:9000 S3_BUCKET=gradex-private-media S3_REGION=us-east-1 S3_USE_PATH_STYLE=true
   export OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION=production-like-v1 MEDIA_OPERATING_MODE=ADMIN_CATALOGUE
-  export STUDENT_REGISTRATION_ENABLED=false PASSWORD_SCREEN_MODE=unavailable AUTH_FAKE_MODE=false
+  if [ "$S12_SMOKE_MODE" = "s11" ]; then
+    export GRADEX_E2E_REGISTRATION_PASSWORD="KuwaitStudy!2026"
+    export STUDENT_REGISTRATION_ENABLED=true
+    export REGISTRATION_POLICY_SET_ID=gradex-legal-2026-08-09-v1
+    export REGISTRATION_POLICY_APPROVED=true
+    export PASSWORD_SCREEN_MODE=adapter
+    export COMPROMISED_PASSWORD_ADAPTER_APPROVED=true
+    export LEGAL_IDENTITY_MODE=controlled-staging
+    export LEGAL_OPERATOR_NAME="Gradex Courses"
+    export LEGAL_REGISTRATION_NUMBER="STAGING-NOT-REGISTERED"
+    export LEGAL_REGISTERED_ADDRESS="STAGING ONLY — LEGAL ENTITY DETAILS PENDING"
+    export PRIVACY_EMAIL=ahmedhazemelmelegy11@gmail.com
+    export SUPPORT_EMAIL=ahmedhazemelmelegy11@gmail.com
+    export SECURITY_EMAIL=ahmedhazemelmelegy11@gmail.com
+  else
+    export STUDENT_REGISTRATION_ENABLED=false
+    export REGISTRATION_POLICY_APPROVED=false
+    export PASSWORD_SCREEN_MODE=unavailable
+    export COMPROMISED_PASSWORD_ADAPTER_APPROVED=false
+  fi
+  export AUTH_FAKE_MODE=false
   export GRADEX_E2E_ALLOW_DATABASE_RESET=1 GRADEX_E2E_ADMIN_DB_URL="$admin_url"
   export GRADEX_E2E_TARGET_DB_NAME="$S12_SMOKE_DB" GRADEX_E2E_TARGET_DB_URL="$target_url"
   export GRADEX_E2E_APPLICATION_DB_URL="$application_url"
@@ -152,14 +172,21 @@ main() {
     export GRADEX_E2E_TARGET_DB_URL="$target_url"
     export GRADEX_E2E_APPLICATION_DB_URL="$application_url"
     cd "$S12_ROOT/frontend"
-    npx playwright test \
-      e2e/s5-infrastructure-smoke.spec.ts e2e/s6-course-access-grant-launch.spec.ts \
-      --grep 'authenticates real Student via Go API session|Complete 30-Step End-to-End Course Access Grant' \
-      --workers=1
+    if [ "$S12_SMOKE_MODE" = "s11" ]; then
+      npx playwright test e2e/legal-policy-pages.spec.ts e2e/s11-release-acceptance.spec.ts --workers=1
+    else
+      npx playwright test \
+        e2e/s5-infrastructure-smoke.spec.ts e2e/s6-course-access-grant-launch.spec.ts \
+        --grep 'authenticates real Student via Go API session|Complete 30-Step End-to-End Course Access Grant' \
+        --workers=1
+    fi
   )
 
   local state_assertion
   local journey_student_email="student-unentitled@example.test"
+  if [ "$S12_SMOKE_MODE" = "s11" ]; then
+    journey_student_email="s11-release-student@example.test"
+  fi
   state_assertion="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$S12_SMOKE_DB" \
     --tuples-only --no-align --command "
       SELECT
@@ -182,9 +209,27 @@ main() {
   )"
   [ "$state_assertion" = "1|1|1|1" ] || die "deployed journey database assertion was $state_assertion"
 
+  if [ "$S12_SMOKE_MODE" = "s11" ]; then
+    local policy_assertion
+    policy_assertion="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$S12_SMOKE_DB" \
+      --tuples-only --no-align --command "
+        SELECT count(*) FROM policy_acceptances p
+        JOIN accounts a ON a.id = p.account_id
+        WHERE a.normalized_email = '$journey_student_email'
+          AND p.policy_set_id = 'gradex-legal-2026-08-09-v1'
+          AND p.policy_version = '2026-08-09-v1'
+          AND p.locale = 'en';"
+    )"
+    [ "$policy_assertion" = "2" ] || die "deployed registration policy assertion was $policy_assertion"
+  fi
+
   local session_json cookie_name cookie_value manifest_url segment_url
   export DATABASE_URL="$application_url"
-  session_json="$("$seed_binary" -issue-session -email "$journey_student_email")"
+  if [ "$S12_SMOKE_MODE" = "s11" ]; then
+    session_json="$("$seed_binary" -issue-session -use-registration-password -email "$journey_student_email")"
+  else
+    session_json="$("$seed_binary" -issue-session -email "$journey_student_email")"
+  fi
   cookie_name="$(printf '%s' "$session_json" | jq --raw-output '.cookie_name')"
   cookie_value="$(printf '%s' "$session_json" | jq --raw-output '.cookie_value')"
   curl --fail --silent --show-error --cacert "$S12_CA_FILE" \

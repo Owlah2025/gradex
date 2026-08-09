@@ -11,15 +11,22 @@ import (
 // Each test mutates one thing so a failure names exactly one cause.
 func validSettings() map[string]string {
 	return map[string]string{
-		"APP_ENV":                "production",
-		"PUBLIC_ORIGIN":          "https://gradex.example",
-		"CORS_ALLOWED_ORIGINS":   "https://gradex.example",
-		"CORS_ALLOW_CREDENTIALS": "true",
-		"REDIS_ADDR":             "redis:6379",
-		"REDIS_TLS_ENABLED":      "true",
-		"S3_ENDPOINT":            "https://storage.example",
-		"S3_BUCKET":              "gradex-media",
-		"AUTH_FAKE_MODE":         "false",
+		"APP_ENV":                   "production",
+		"PUBLIC_ORIGIN":             "https://gradex.example",
+		"CORS_ALLOWED_ORIGINS":      "https://gradex.example",
+		"CORS_ALLOW_CREDENTIALS":    "true",
+		"REDIS_ADDR":                "redis:6379",
+		"REDIS_TLS_ENABLED":         "true",
+		"S3_ENDPOINT":               "https://storage.example",
+		"S3_BUCKET":                 "gradex-media",
+		"AUTH_FAKE_MODE":            "false",
+		"LEGAL_IDENTITY_MODE":       "public",
+		"LEGAL_OPERATOR_NAME":       "Gradex Courses",
+		"LEGAL_REGISTRATION_NUMBER": "KWT-REAL-123",
+		"LEGAL_REGISTERED_ADDRESS":  "Kuwait City, Kuwait",
+		"PRIVACY_EMAIL":             "privacy@gradex.example",
+		"SUPPORT_EMAIL":             "support@gradex.example",
+		"SECURITY_EMAIL":            "security@gradex.example",
 	}
 }
 
@@ -645,5 +652,85 @@ func TestDefaultsApplyOutsideProduction(t *testing.T) {
 	}
 	if cfg.CORSAllowCredentials() {
 		t.Error("CORS credentials should default to false")
+	}
+}
+
+func TestPublicLegalIdentityConfigurationLoadsAndIsImmutable(t *testing.T) {
+	cfg := mustLoad(t, nil)
+	legal := cfg.Legal()
+	if legal.IdentityMode() != LegalIdentityPublic || legal.OperatorName() != "Gradex Courses" ||
+		legal.RegistrationNumber() != "KWT-REAL-123" || legal.RegisteredAddress() != "Kuwait City, Kuwait" ||
+		legal.PrivacyEmail() != "privacy@gradex.example" || legal.SupportEmail() != "support@gradex.example" ||
+		legal.SecurityEmail() != "security@gradex.example" {
+		t.Fatalf("unexpected legal configuration: %+v", legal)
+	}
+}
+
+func TestNonDevelopmentLegalIdentityRequiresEveryApprovedField(t *testing.T) {
+	for _, key := range []string{
+		"LEGAL_OPERATOR_NAME", "LEGAL_REGISTRATION_NUMBER", "LEGAL_REGISTERED_ADDRESS",
+		"PRIVACY_EMAIL", "SUPPORT_EMAIL", "SECURITY_EMAIL",
+	} {
+		t.Run(key, func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				delete(settings, key)
+			}, key+" is required outside development")
+		})
+	}
+	for _, key := range []string{"PRIVACY_EMAIL", "SUPPORT_EMAIL", "SECURITY_EMAIL"} {
+		t.Run(key+" invalid", func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings[key] = "not-an-email"
+			}, key+" must be a valid email address")
+		})
+	}
+}
+
+func TestPublicLegalIdentityRejectsEitherStagingSentinel(t *testing.T) {
+	for key, value := range map[string]string{
+		"LEGAL_REGISTRATION_NUMBER": StagingLegalRegistrationNumber,
+		"LEGAL_REGISTERED_ADDRESS":  StagingLegalRegisteredAddress,
+	} {
+		t.Run(key, func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings[key] = value
+			}, "public legal identity rejects controlled-staging sentinel values")
+		})
+	}
+}
+
+func TestControlledStagingLegalIdentityIsRestrictedToExactDisposableStack(t *testing.T) {
+	cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["PUBLIC_ORIGIN"] = ControlledStagingPublicOrigin
+		settings["CORS_ALLOWED_ORIGINS"] = ControlledStagingPublicOrigin
+		settings["LEGAL_IDENTITY_MODE"] = string(LegalIdentityControlledStaging)
+		settings["LEGAL_REGISTRATION_NUMBER"] = StagingLegalRegistrationNumber
+		settings["LEGAL_REGISTERED_ADDRESS"] = StagingLegalRegisteredAddress
+	})
+	if cfg.Legal().IdentityMode() != LegalIdentityControlledStaging {
+		t.Fatalf("legal identity mode = %q", cfg.Legal().IdentityMode())
+	}
+
+	for name, mutate := range map[string]func(map[string]string){
+		"wrong origin": func(settings map[string]string) {
+			settings["PUBLIC_ORIGIN"] = "https://public.gradex.example"
+		},
+		"staging app environment": func(settings map[string]string) {
+			settings["APP_ENV"] = "staging"
+		},
+		"non-sentinel registration": func(settings map[string]string) {
+			settings["LEGAL_REGISTRATION_NUMBER"] = "KWT-REAL-123"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["PUBLIC_ORIGIN"] = ControlledStagingPublicOrigin
+				settings["CORS_ALLOWED_ORIGINS"] = ControlledStagingPublicOrigin
+				settings["LEGAL_IDENTITY_MODE"] = string(LegalIdentityControlledStaging)
+				settings["LEGAL_REGISTRATION_NUMBER"] = StagingLegalRegistrationNumber
+				settings["LEGAL_REGISTERED_ADDRESS"] = StagingLegalRegisteredAddress
+				mutate(settings)
+			}, "controlled-staging legal identity requires the exact disposable S11 origin and sentinel values")
+		})
 	}
 }

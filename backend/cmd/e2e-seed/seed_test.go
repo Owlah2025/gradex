@@ -58,6 +58,7 @@ func TestMain(m *testing.M) {
 	var lessonIDParam string
 	var courseIDParam string
 	var issueSessionFlag bool
+	var useRegistrationPassword bool
 	var emailParam string
 	var accessMutationParam string
 	var queryInvitationToken bool
@@ -74,6 +75,7 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
 	flag.StringVar(&invitationIDParam, "invitation", "", "Invitation ID for query")
 	flag.BoolVar(&issueSessionFlag, "issue-session", false, "Issue a production-valid session for a seeded Student and emit its cookie and CSRF token")
+	flag.BoolVar(&useRegistrationPassword, "use-registration-password", false, "Authenticate session issuance with the run-scoped registration password")
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
 	flag.Parse()
@@ -177,7 +179,14 @@ func TestMain(m *testing.M) {
 		if emailParam == "" {
 			log.Fatalf("-issue-session requires -email")
 		}
-		session, err := issueSession(ctx, targetDSN, emailParam, testPassword)
+		sessionPassword := testPassword
+		if useRegistrationPassword {
+			sessionPassword = os.Getenv("GRADEX_E2E_REGISTRATION_PASSWORD")
+			if sessionPassword == "" {
+				log.Fatalf("-use-registration-password requires GRADEX_E2E_REGISTRATION_PASSWORD")
+			}
+		}
+		session, err := issueSession(ctx, targetDSN, emailParam, sessionPassword)
 		if err != nil {
 			log.Fatalf("issuing session: %v", err)
 		}

@@ -16,7 +16,7 @@ const UNRELATED_STUDENT = {
   accountID: "a0000000-0000-0000-0000-000000000099",
 };
 const STUDENT_EMAIL = "s11-release-student@example.test";
-const STUDENT_PASSWORD = "KuwaitStudy!2026";
+const STUDENT_PASSWORD = process.env.GRADEX_E2E_REGISTRATION_PASSWORD || "KuwaitStudy!2026";
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
 const LESSON_ID = "30000000-0000-0000-0000-000000000001";
 const ASSET_VERSION_ID = "60000000-0000-0000-0000-000000000001";
@@ -86,7 +86,27 @@ test.describe("S11 release acceptance", () => {
       let studentPage = await studentContext.newPage();
 
       // Student registration through the shipped form and policy contract.
+      const policyResponsePromise = studentPage.waitForResponse(
+        (response) => response.url().endsWith("/api/v1/registration-policy-set"),
+      );
       await studentPage.goto("/register");
+      const policyResponse = await policyResponsePromise;
+      expect(policyResponse.status()).toBe(200);
+      const policyBody = (await policyResponse.json()) as {
+        id: string;
+        version: string;
+        effective_date: string;
+        policies: Array<{ version: string; url: string }>;
+      };
+      if (process.env.GRADEX_E2E_EXTERNAL_ORIGIN) {
+        expect(policyBody.id).toBe("gradex-legal-2026-08-09-v1");
+        expect(policyBody.version).toBe("2026-08-09-v1");
+        expect(policyBody.effective_date).toBe("2026-08-09");
+        expect(policyBody.policies).toHaveLength(2);
+        expect(policyBody.policies.every((policy) => policy.version === "2026-08-09-v1")).toBe(true);
+        expect(policyBody.policies.every((policy) => policy.url.startsWith(frontendOrigin()))).toBe(true);
+        await expect(studentPage.getByTestId("registration-policy-version")).toContainText("2026-08-09-v1");
+      }
       await studentPage.locator("#display-name").fill("Release Student");
       await studentPage.locator("#email").fill(STUDENT_EMAIL);
       await studentPage.locator("#password").fill(STUDENT_PASSWORD);

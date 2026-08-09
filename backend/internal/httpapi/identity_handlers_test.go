@@ -110,11 +110,13 @@ func identityPolicySets() (identity.RegistrationPolicySet, identity.Registration
 		},
 	}
 	english := identity.RegistrationPolicySet{
-		ID: "registration-v1", Locale: identity.LocaleEnglish,
+		ID: "registration-v1", Version: "set-v1", EffectiveDate: "2026-08-09",
+		MinimumAge: 18, PrimaryLocale: identity.LocaleArabic, Locale: identity.LocaleEnglish,
 		Policies: append([]identity.RegistrationPolicy(nil), policies...),
 	}
 	arabic := identity.RegistrationPolicySet{
-		ID: "registration-v1", Locale: identity.LocaleArabic,
+		ID: "registration-v1", Version: "set-v1", EffectiveDate: "2026-08-09",
+		MinimumAge: 18, PrimaryLocale: identity.LocaleArabic, Locale: identity.LocaleArabic,
 		Policies: append([]identity.RegistrationPolicy(nil), policies...),
 	}
 	arabic.Policies[0].Label = "الخصوصية"
@@ -244,7 +246,9 @@ func TestCurrentPolicySetNegotiatesArabicAndRejectsUnsupportedLanguage(t *testin
 		response := httptest.NewRecorder()
 		admissionHandlerRouter(t, &fakeAdmissionService{}).ServeHTTP(response, request)
 		if response.Code != http.StatusOK || response.Header().Get("Content-Language") != "ar" ||
-			!strings.Contains(response.Body.String(), "الخصوصية") {
+			!strings.Contains(response.Body.String(), "الخصوصية") ||
+			!strings.Contains(response.Body.String(), `"version":"set-v1"`) ||
+			!strings.Contains(response.Body.String(), `"effective_date":"2026-08-09"`) {
 			t.Fatalf("Arabic policy response = %d %q", response.Code, response.Body.String())
 		}
 		if response.Header().Get("Cache-Control") != "no-store" ||

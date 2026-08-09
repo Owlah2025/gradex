@@ -56,9 +56,31 @@ func assertNoRegistrationFacts(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+func approvedRegistrationService(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	randomByte byte,
+	compromised CompromisedRangeSource,
+) *AdmissionService {
+	t.Helper()
+	resolver, err := NewApprovedPolicySetResolver("https://gradex.example", ApprovedPolicySetID)
+	if err != nil {
+		t.Fatalf("constructing approved policy resolver: %v", err)
+	}
+	return admissionServiceWithResolver(
+		t, pool, time.Now().UTC(), randomByte, compromised, resolver,
+	)
+}
+
+func approvedStudentRegistration() StudentRegistration {
+	registration := studentRegistration()
+	registration.PolicySetID = ApprovedPolicySetID
+	return registration
+}
+
 func TestProductionHIBPRegistrationAcceptsValidUncompromisedPassword(t *testing.T) {
 	pool := admissionPool(t)
-	registration := studentRegistration()
+	registration := approvedStudentRegistration()
 	password := registration.Password.Expose()
 	fullDigest := sha1.Sum([]byte(password)) // #nosec G505 -- provider protocol fixture
 	encoded := strings.ToUpper(hex.EncodeToString(fullDigest[:]))
@@ -70,7 +92,7 @@ func TestProductionHIBPRegistrationAcceptsValidUncompromisedPassword(t *testing.
 		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprintf(w, "%s:0\n%s:17\n", encoded[hibpPrefixLength:], strings.Repeat("F", hibpSuffixLength))
 	})
-	service := admissionServiceWithCompromised(t, pool, time.Now().UTC(), 0x61, source)
+	service := approvedRegistrationService(t, pool, 0x61, source)
 
 	if err := service.RegisterStudent(context.Background(), registration); err != nil {
 		t.Fatalf("production-boundary registration failed: %v", err)
@@ -140,8 +162,8 @@ func TestProductionHIBPRegistrationRejectionsCreateNoFacts(t *testing.T) {
 				requests.Add(1)
 				tt.respond(encoded[hibpPrefixLength:])(w, r)
 			})
-			service := admissionServiceWithCompromised(t, pool, time.Now().UTC(), 0x71, source)
-			registration := studentRegistration()
+			service := approvedRegistrationService(t, pool, 0x71, source)
+			registration := approvedStudentRegistration()
 			registration.Password = config.NewSecret(tt.password)
 
 			err := service.RegisterStudent(context.Background(), registration)

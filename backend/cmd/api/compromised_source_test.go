@@ -21,11 +21,18 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 		"S3_BUCKET":                             "gradex-media",
 		"AUTH_FAKE_MODE":                        "false",
 		"STUDENT_REGISTRATION_ENABLED":          "true",
-		"REGISTRATION_POLICY_SET_ID":            "approved-policy-set",
+		"REGISTRATION_POLICY_SET_ID":            identity.ApprovedPolicySetID,
 		"REGISTRATION_POLICY_APPROVED":          "true",
 		"PASSWORD_SCREEN_MODE":                  "adapter",
 		"COMPROMISED_PASSWORD_ADAPTER_APPROVED": "true",
 		"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION":  "prod-v1",
+		"LEGAL_IDENTITY_MODE":                   "public",
+		"LEGAL_OPERATOR_NAME":                   "Gradex Courses",
+		"LEGAL_REGISTRATION_NUMBER":             "KWT-REAL-123",
+		"LEGAL_REGISTERED_ADDRESS":              "Kuwait City, Kuwait",
+		"PRIVACY_EMAIL":                         "privacy@gradex.example",
+		"SUPPORT_EMAIL":                         "support@gradex.example",
+		"SECURITY_EMAIL":                        "security@gradex.example",
 	}
 	secrets := config.MapSecretResolver{
 		"DATABASE_URL":                 "postgres://gradex:pw@db:5432/gradex",
@@ -46,7 +53,7 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-func TestProductionCompositionSelectsHIBPAndStopsAtLG011(t *testing.T) {
+func TestProductionCompositionSelectsHIBPAndApprovedPolicySet(t *testing.T) {
 	cfg := productionAdmissionConfig(t)
 	source, err := buildCompromisedPasswordSource(cfg)
 	if err != nil {
@@ -56,8 +63,11 @@ func TestProductionCompositionSelectsHIBPAndStopsAtLG011(t *testing.T) {
 		t.Fatalf("production source = %s/%d, want HIBP SHA-1/5", source.Scheme(), source.PrefixLength())
 	}
 
-	_, _, err = buildAdmissionFoundation(cfg, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "LG-011") {
-		t.Fatalf("production admission error = %v, want remaining LG-011 fail-closed boundary", err)
+	resolver, err := buildPolicySetResolver(cfg)
+	if err != nil {
+		t.Fatalf("building production policy resolver: %v", err)
+	}
+	if _, ok := resolver.(*identity.ApprovedPolicySetResolver); !ok {
+		t.Fatalf("production policy resolver = %T, want approved resolver", resolver)
 	}
 }

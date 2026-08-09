@@ -90,6 +90,7 @@ export default defineConfig({
     reuseExistingServer: false,
     env: {
       GRADEX_API_ORIGIN: apiOrigin(),
+      PUBLIC_ORIGIN: frontendOrigin(),
       [FRONTEND_PORT_ENV]: String(frontendPort),
       [API_PORT_ENV]: String(apiPort),
       // Production mode only. Narrowly named and fully specified: the proxy takes no arbitrary
