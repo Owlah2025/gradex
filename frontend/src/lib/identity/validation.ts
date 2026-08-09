@@ -55,7 +55,8 @@ export function validEmail(value: string) {
 export type FragmentTokenPurpose =
   | "EMAIL_VERIFICATION"
   | "PASSWORD_RESET"
-  | "STAFF_INVITATION";
+  | "STAFF_INVITATION"
+  | "COURSE_ACCESS_INVITATION";
 
 type FragmentCapture = { token: string | null; spent: boolean };
 
@@ -85,16 +86,19 @@ const fragmentCaptures = new Map<FragmentTokenPurpose, FragmentCapture>();
  * their secrets this way, through separate slots.
  *
  * Capture is separate from scrubbing on purpose. Scrubbing is best-effort and
- * repeated; capture happens once and its result never changes. Coupling them
- * is what made a successful scrub look like a missing link.
+ * repeated; capture stays unchanged while a bearer is live. After a terminal
+ * outcome, a newly navigated link for the same purpose may establish a fresh
+ * capture. Coupling capture to every render is what made a successful scrub
+ * look like a missing link.
  */
 export function captureTokenFromFragment(
   purpose: FragmentTokenPurpose,
 ): string | null {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const fragmentToken = fragment.get("token");
   let capture = fragmentCaptures.get(purpose);
-  if (!capture) {
-    const fragment = new URLSearchParams(window.location.hash.slice(1));
-    capture = { token: fragment.get("token"), spent: false };
+  if (!capture || (capture.spent && fragmentToken)) {
+    capture = { token: fragmentToken, spent: false };
     fragmentCaptures.set(purpose, capture);
   }
   return capture.token;

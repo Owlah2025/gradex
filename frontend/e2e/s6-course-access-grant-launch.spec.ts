@@ -92,7 +92,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     const studentPage = await studentContext.newPage();
 
     // 8. Open invitation landing as anonymous browser
-    const invitationUrl = `/en/access?invitation_id=${invitationId}&token=${verificationToken}`;
+    const invitationUrl = `/en/access?invitation_id=${invitationId}#token=${verificationToken}`;
     await studentPage.goto(invitationUrl);
 
     // 9. Unauthenticated request triggers 401 & redirects to /login with validated returnTo

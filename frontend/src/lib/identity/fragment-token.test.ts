@@ -64,3 +64,19 @@ test("releasing one purpose does not settle or clear the other", () => {
   // EMAIL_VERIFICATION must not have settled it.
   assert.equal(isFragmentTokenSpent("PASSWORD_RESET"), false);
 });
+
+test("a newly navigated link replaces a settled bearer for the same purpose", () => {
+  installWindow("#token=expired-course-invitation");
+  assert.equal(
+    captureTokenFromFragment("COURSE_ACCESS_INVITATION"),
+    "expired-course-invitation",
+  );
+  releaseFragmentToken("COURSE_ACCESS_INVITATION");
+
+  installWindow("#token=fresh-course-invitation");
+  assert.equal(
+    captureTokenFromFragment("COURSE_ACCESS_INVITATION"),
+    "fresh-course-invitation",
+  );
+  assert.equal(isFragmentTokenSpent("COURSE_ACCESS_INVITATION"), false);
+});

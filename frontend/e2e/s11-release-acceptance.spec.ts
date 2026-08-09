@@ -192,7 +192,7 @@ test.describe("S11 release acceptance", () => {
 
       // Invalid acceptance is refused, then the valid link recovers without a premature grant.
       await studentPage.goto(
-        `/en/access?invitation_id=${invitationID}&token=invalid-s11-invitation-token`,
+        `/en/access?invitation_id=${invitationID}#token=invalid-s11-invitation-token`,
       );
       await studentPage.getByRole("button", { name: "Accept Invitation & Request Access" }).click();
       await expect(
@@ -201,7 +201,7 @@ test.describe("S11 release acceptance", () => {
       await expectZeroGrantState(verification.account_id);
 
       await studentPage.goto(
-        `/en/access?invitation_id=${invitationID}&token=${encodeURIComponent(invitationToken)}`,
+        `/en/access?invitation_id=${invitationID}#token=${encodeURIComponent(invitationToken)}`,
       );
       await studentPage.getByRole("button", { name: "Accept Invitation & Request Access" }).click();
       await expect(studentPage.locator("body")).toContainText("PENDING_ADMIN_APPROVAL");
