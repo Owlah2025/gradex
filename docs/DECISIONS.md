@@ -2426,3 +2426,33 @@ and does not independently approve or close S11.
 
 **Source:** Explicit Product Owner decision issued on 2026-08-09; authoritative package in
 [`docs/legal/lg011-approved-policy-package.md`](legal/lg011-approved-policy-package.md).
+
+## D-077 — Resend delivers launch transactional email behind a provider-neutral durable boundary
+
+**Date:** 2026-08-09
+**Status:** Active for S9. Repository implementation proceeds; real sender-domain proof may remain externally pending on T047.
+
+**Decision:** Resend is the approved initial production transactional-email provider. Gradex domain
+and application producers remain provider-neutral: they emit the existing encrypted PostgreSQL
+outbox contracts and never import Resend API/SDK concepts. The existing worker process consumes those
+immutable intents through a separate PostgreSQL delivery/attempt ledger, renders repository-owned
+Arabic/English text and HTML, and calls one bounded HTTPS provider adapter operation. Development and
+test may use a deterministic fake; production rejects fake or disabled delivery and requires Resend,
+a secret API key, an HTTPS public origin, and validated sender configuration.
+
+The immutable outbox event ID is the delivery identity and derives the stable Resend idempotency key.
+Transient failures retry asynchronously up to five total attempts; permanent recipient, payload,
+authentication, sender/domain, or configuration failures do not retry indefinitely. Provider
+acceptance is evidence of acceptance only, not inbox delivery or exactly-once delivery. Delivery
+logs and evidence exclude destinations, bodies, action links, raw credentials, and API keys.
+
+**Scope:** S9 delivers the six contracts already emitted by registration/recovery, staff invitation,
+Course Access Invitation, and Admin Approval, plus the rejection/cancellation notices already required
+by BR-122 and closed S6 FR-032. It adds no commerce, marketing, campaign, office-hours,
+or generic notification platform. Existing verification/reset/invitation credentials and S6 access
+semantics remain authoritative. Real SPF/DKIM/DMARC, sender-domain verification, and a controlled
+public-provider delivery remain LG-018/T047 external evidence when the domain or credentials are not
+available; their absence does not block repository engineering.
+
+**Source:** Explicit Product Owner decision issued on 2026-08-09 and the S9 repository authority
+reconciliation in [`specs/010-transactional-email/`](../specs/010-transactional-email/spec.md).

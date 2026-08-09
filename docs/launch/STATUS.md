@@ -1,5 +1,15 @@
 # Gradex Launch Status
 
+> **2026-08-09 S9 implementation authority:** S9 transactional email is the next launch-critical
+> slice on branch `s9-transactional-email-20260809`, starting from S11 closure record
+> `18fb7e033d0fad162caebe150fb641a00201e259`. The Product Owner selected Resend under
+> [D-077](../DECISIONS.md#d-077--resend-delivers-launch-transactional-email-behind-a-provider-neutral-durable-boundary).
+> Repository work proceeds through the provider-neutral adapter, bilingual templates, PostgreSQL
+> delivery ledger, worker dispatch, retry/idempotency, privacy, observability, and acceptance paths.
+> Real sender-domain/SPF/DKIM/DMARC and controlled public delivery proof remain external LG-018/T047
+> work if the real domain or safe credentials are unavailable. S11 remains closed and is reused, not
+> reopened. S9 requires independent review before closure.
+>
 > **2026-08-09 S11 closure:** **S11 is CLOSED** at the independently approved implementation head
 > `7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`. The independent reviewer inspected the complete frozen
 > range `6bf694daa7a8a823a849a4e2da9588988b6d2358..7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3` and returned
