@@ -1,5 +1,11 @@
 # Gradex Launch Status
 
+> **2026-08-09 S9 implementation delivered; independent closure review pending.** Planning is at
+> `c531fc5`, durable backend/Resend delivery at `1f0a043`, and frontend action-link consumption at
+> `5a66081`. All 30 repository tasks and required validation are complete. Live Resend sender-domain
+> acceptance remains external pending because this environment has neither an API key nor a verified
+> sender address; no public-delivery claim has been made. S9 is not closed by the implementation agent.
+>
 > **2026-08-09 S9 implementation authority:** S9 transactional email is the next launch-critical
 > slice on branch `s9-transactional-email-20260809`, starting from S11 closure record
 > `18fb7e033d0fad162caebe150fb641a00201e259`. The Product Owner selected Resend under
