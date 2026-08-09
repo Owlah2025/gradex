@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 )
 
@@ -30,10 +31,23 @@ type RegistrationPolicy struct {
 }
 
 type RegistrationPolicySet struct {
-	ID       string
-	Locale   Locale
-	Policies []RegistrationPolicy
+	ID            string
+	Version       string
+	EffectiveDate string
+	MinimumAge    int
+	PrimaryLocale Locale
+	Locale        Locale
+	Policies      []RegistrationPolicy
 }
+
+const (
+	ApprovedPolicySetID         = "gradex-legal-2026-08-09-v1"
+	ApprovedPolicySetVersion    = "2026-08-09-v1"
+	ApprovedPrivacyVersion      = "2026-08-09-v1"
+	ApprovedTermsVersion        = "2026-08-09-v1"
+	ApprovedPolicyEffectiveDate = "2026-08-09"
+	ApprovedPolicyMinimumAge    = 18
+)
 
 // PolicySetResolver supplies the exact currently required acceptance set. A
 // missing resolver is an unavailable admission dependency, never permission to
@@ -50,6 +64,79 @@ var (
 
 type StaticPolicySetResolver struct {
 	sets map[Locale]RegistrationPolicySet
+}
+
+// ApprovedPolicySetResolver is the production implementation authorized by
+// LG-011. It is a distinct composition type so the development fixture cannot
+// be selected accidentally in a non-development dependency graph.
+type ApprovedPolicySetResolver struct {
+	sets *StaticPolicySetResolver
+}
+
+// NewApprovedPolicySetResolver resolves the approved bilingual set and derives
+// every canonical URL from the validated public origin.
+func NewApprovedPolicySetResolver(
+	publicOrigin string,
+	configuredID string,
+) (*ApprovedPolicySetResolver, error) {
+	if configuredID != ApprovedPolicySetID {
+		return nil, errors.New("configured registration policy set is not the approved LG-011 set")
+	}
+	origin, err := url.Parse(publicOrigin)
+	if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.User != nil ||
+		origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+		return nil, errors.New("approved registration policy set requires an exact HTTPS public origin")
+	}
+	base := origin.Scheme + "://" + origin.Host
+	sets, err := NewStaticPolicySetResolver(
+		approvedPolicySet(base, approvedPolicyLocalization{
+			locale: LocaleEnglish, privacyPath: "/en/privacy", termsPath: "/en/terms",
+			privacyLabel: "Privacy Policy", termsLabel: "Terms of Use",
+		}),
+		approvedPolicySet(base, approvedPolicyLocalization{
+			locale: LocaleArabic, privacyPath: "/ar/privacy", termsPath: "/ar/terms",
+			privacyLabel: "سياسة الخصوصية", termsLabel: "شروط الاستخدام",
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &ApprovedPolicySetResolver{sets: sets}, nil
+}
+
+type approvedPolicyLocalization struct {
+	locale                                           Locale
+	privacyPath, termsPath, privacyLabel, termsLabel string
+}
+
+func approvedPolicySet(base string, localized approvedPolicyLocalization) RegistrationPolicySet {
+	return RegistrationPolicySet{
+		ID: ApprovedPolicySetID, Version: ApprovedPolicySetVersion,
+		EffectiveDate: ApprovedPolicyEffectiveDate, MinimumAge: ApprovedPolicyMinimumAge,
+		PrimaryLocale: LocaleArabic, Locale: Locale(localized.locale),
+		Policies: []RegistrationPolicy{
+			{Kind: PolicyPrivacyNotice, Version: ApprovedPrivacyVersion, Label: localized.privacyLabel, URL: base + localized.privacyPath},
+			{Kind: PolicyTermsOfService, Version: ApprovedTermsVersion, Label: localized.termsLabel, URL: base + localized.termsPath},
+		},
+	}
+}
+
+func (r *ApprovedPolicySetResolver) Current(ctx context.Context, locale Locale) (RegistrationPolicySet, error) {
+	if r == nil || r.sets == nil {
+		return RegistrationPolicySet{}, ErrPolicySetUnavailable
+	}
+	return r.sets.Current(ctx, locale)
+}
+
+func (r *ApprovedPolicySetResolver) Resolve(
+	ctx context.Context,
+	id string,
+	locale Locale,
+) (RegistrationPolicySet, error) {
+	if r == nil || r.sets == nil {
+		return RegistrationPolicySet{}, ErrPolicySetUnavailable
+	}
+	return r.sets.Resolve(ctx, id, locale)
 }
 
 // NewStaticPolicySetResolver is the explicit development/test fixture seam.
@@ -106,7 +193,9 @@ func (r *StaticPolicySetResolver) Resolve(
 }
 
 func policyVersionsMatch(first, second RegistrationPolicySet) bool {
-	if first.ID != second.ID || len(first.Policies) != len(second.Policies) {
+	if first.ID != second.ID || first.Version != second.Version ||
+		first.EffectiveDate != second.EffectiveDate || first.MinimumAge != second.MinimumAge ||
+		first.PrimaryLocale != second.PrimaryLocale || len(first.Policies) != len(second.Policies) {
 		return false
 	}
 	secondByKind := make(map[PolicyKind]RegistrationPolicy, len(second.Policies))
@@ -115,7 +204,7 @@ func policyVersionsMatch(first, second RegistrationPolicySet) bool {
 	}
 	for _, policy := range first.Policies {
 		other, ok := secondByKind[policy.Kind]
-		if !ok || policy.Version != other.Version || policy.URL != other.URL {
+		if !ok || policy.Version != other.Version {
 			return false
 		}
 	}
@@ -140,10 +229,18 @@ func validatePolicySet(set RegistrationPolicySet) error {
 		seen[policy.Kind] = struct{}{}
 		if strings.TrimSpace(policy.Version) == "" ||
 			strings.TrimSpace(policy.Label) == "" ||
-			!strings.HasPrefix(policy.URL, "/") ||
-			strings.HasPrefix(policy.URL, "//") {
+			!validPolicyURL(policy.URL) {
 			return errors.New("registration policy metadata is incomplete")
 		}
 	}
 	return nil
+}
+
+func validPolicyURL(raw string) bool {
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	return err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil &&
+		parsed.RawQuery == "" && parsed.Fragment == "" && strings.HasPrefix(parsed.Path, "/")
 }

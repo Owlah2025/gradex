@@ -11,18 +11,18 @@ import { siteConfig } from "@/config/site";
 import { navItems } from "./nav-items";
 
 export function Footer() {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
 
   const companyLinks = [
     { href: "/about", label: t.footer.links.about },
     { href: "/teach", label: t.footer.links.teach },
     { href: "/contact", label: t.footer.links.contact },
   ];
-  // Legal links required by the Kuwait Digital Commerce Law (see BUSINESS_RULES).
+  // LG-011 uses Terms §8 for the no-commerce launch disclosure; there is no
+  // separate Refund Policy artifact in the approved package.
   const legalLinks = [
-    { href: "/legal/terms", label: t.footer.links.terms },
-    { href: "/legal/privacy", label: t.footer.links.privacy },
-    { href: "/legal/refund", label: t.footer.links.refund },
+    { href: `/${locale}/terms`, label: t.footer.links.terms },
+    { href: `/${locale}/privacy`, label: t.footer.links.privacy },
   ];
   const socials = [
     { href: siteConfig.links.discord, label: t.footer.social.discord, Icon: MessageCircle },

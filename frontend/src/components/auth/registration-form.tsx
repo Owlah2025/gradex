@@ -189,6 +189,14 @@ export function RegistrationForm() {
         {policyError ? (
           <Alert tone="error" title={t.auth.register.policiesUnavailable} />
         ) : null}
+        {policySet?.version ? (
+          <p className="mb-3 text-xs text-muted-foreground" data-testid="registration-policy-version">
+            {locale === "ar" ? "مجموعة السياسات" : "Policy set"} {policySet.version}
+            {policySet.effective_date
+              ? ` · ${locale === "ar" ? "سارية من" : "effective"} ${policySet.effective_date}`
+              : ""}
+          </p>
+        ) : null}
         <div className="space-y-3">
           {policySet?.policies.map((policy, index) => (
             <label key={policy.kind} className="flex cursor-pointer items-start gap-3 text-sm">

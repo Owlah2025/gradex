@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"net/url"
 	"os"
 	"strconv"
@@ -125,6 +126,44 @@ func (m PasswordScreenMode) Valid() bool {
 	}
 	return false
 }
+
+// LegalIdentityMode distinguishes an actual public operator identity from the
+// exact non-public sentinel identity approved for the disposable S11 stack.
+// It is deliberately an enum, not a permissive boolean bypass.
+type LegalIdentityMode string
+
+const (
+	LegalIdentityPublic            LegalIdentityMode = "public"
+	LegalIdentityControlledStaging LegalIdentityMode = "controlled-staging"
+
+	StagingLegalRegistrationNumber = "STAGING-NOT-REGISTERED"
+	StagingLegalRegisteredAddress  = "STAGING ONLY — LEGAL ENTITY DETAILS PENDING"
+	ControlledStagingPublicOrigin  = "https://gradex.localhost:18443"
+)
+
+func (m LegalIdentityMode) Valid() bool {
+	return m == LegalIdentityPublic || m == LegalIdentityControlledStaging
+}
+
+// LegalSettings is the immutable identity/contact data rendered by the
+// approved bilingual policy set.
+type LegalSettings struct {
+	identityMode       LegalIdentityMode
+	operatorName       string
+	registrationNumber string
+	registeredAddress  string
+	privacyEmail       string
+	supportEmail       string
+	securityEmail      string
+}
+
+func (s LegalSettings) IdentityMode() LegalIdentityMode { return s.identityMode }
+func (s LegalSettings) OperatorName() string            { return s.operatorName }
+func (s LegalSettings) RegistrationNumber() string      { return s.registrationNumber }
+func (s LegalSettings) RegisteredAddress() string       { return s.registeredAddress }
+func (s LegalSettings) PrivacyEmail() string            { return s.privacyEmail }
+func (s LegalSettings) SupportEmail() string            { return s.supportEmail }
+func (s LegalSettings) SecurityEmail() string           { return s.securityEmail }
 
 // AdmissionSettings is the complete immutable configuration for public
 // Student admission. Returning it by value prevents runtime retuning after
@@ -284,6 +323,7 @@ type Config struct {
 	payments  Capability
 	email     Capability
 	admission AdmissionSettings
+	legal     LegalSettings
 }
 
 func (c *Config) Environment() Environment { return c.environment }
@@ -365,6 +405,7 @@ func (c *Config) AuthFakeMode() bool { return c.authFakeMode }
 func (c *Config) Payments() Capability         { return c.payments }
 func (c *Config) Email() Capability            { return c.email }
 func (c *Config) Admission() AdmissionSettings { return c.admission }
+func (c *Config) Legal() LegalSettings         { return c.legal }
 
 // Lookup reads one setting. os.LookupEnv satisfies it; tests supply a map so
 // they never mutate the process environment.
@@ -394,9 +435,10 @@ func Load() (*Config, error) {
 // fixes one deployment instead of discovering faults one restart at a time.
 func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	p := &parser{lookup: lookup}
+	environment := Environment(p.str("APP_ENV", string(EnvDevelopment)))
 
 	cfg := &Config{
-		environment: Environment(p.str("APP_ENV", string(EnvDevelopment))),
+		environment: environment,
 
 		port:                 p.str("PORT", "8080"),
 		publicOrigin:         p.str("PUBLIC_ORIGIN", ""),
@@ -456,6 +498,16 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		mediaOperatingMode:     MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
 
 		authFakeMode: p.boolean("AUTH_FAKE_MODE", false),
+
+		legal: LegalSettings{
+			identityMode:       LegalIdentityMode(p.str("LEGAL_IDENTITY_MODE", string(LegalIdentityPublic))),
+			operatorName:       p.str("LEGAL_OPERATOR_NAME", ""),
+			registrationNumber: p.str("LEGAL_REGISTRATION_NUMBER", ""),
+			registeredAddress:  p.str("LEGAL_REGISTERED_ADDRESS", ""),
+			privacyEmail:       p.str("PRIVACY_EMAIL", ""),
+			supportEmail:       p.str("SUPPORT_EMAIL", ""),
+			securityEmail:      p.str("SECURITY_EMAIL", ""),
+		},
 	}
 
 	// Provider gates are read as settings here and turned into capabilities in
@@ -715,6 +767,7 @@ func (c *Config) validate(p *parser) {
 			p.errf("PUBLIC_ORIGIN must be an exact HTTP origin when STUDENT_REGISTRATION_ENABLED=true")
 		}
 	}
+	c.validateLegalSettings(p)
 	if c.s3Endpoint == "" {
 		p.errf("S3_ENDPOINT is required")
 	}
@@ -830,6 +883,73 @@ func (c *Config) validate(p *parser) {
 	// non-empty string, so an emptiness check alone would accept it.
 	if strings.HasPrefix(c.playbackTokenSecret.Expose(), "changeme") {
 		p.errf("PLAYBACK_TOKEN_SECRET is still the example placeholder")
+	}
+}
+
+func (c *Config) validateLegalSettings(p *parser) {
+	if c.environment == EnvDevelopment {
+		return
+	}
+	if !c.legal.identityMode.Valid() {
+		p.errf("LEGAL_IDENTITY_MODE must be public or controlled-staging; got %q", c.legal.identityMode)
+	}
+	validateRequiredLegalSettings(c.legal, p)
+	validateLegalEmails(c.legal, p)
+	origin, err := CanonicalPublicOrigin(c.publicOrigin)
+	if err != nil || !strings.HasPrefix(origin, "https://") {
+		p.errf("PUBLIC_ORIGIN must be an exact HTTPS origin for legal policies")
+	}
+	c.validateLegalIdentityMode(origin, p)
+}
+
+func validateRequiredLegalSettings(legal LegalSettings, p *parser) {
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{"LEGAL_OPERATOR_NAME", legal.operatorName},
+		{"LEGAL_REGISTRATION_NUMBER", legal.registrationNumber},
+		{"LEGAL_REGISTERED_ADDRESS", legal.registeredAddress},
+		{"PRIVACY_EMAIL", legal.privacyEmail},
+		{"SUPPORT_EMAIL", legal.supportEmail},
+		{"SECURITY_EMAIL", legal.securityEmail},
+	} {
+		if strings.TrimSpace(required.value) == "" {
+			p.errf("%s is required outside development", required.name)
+		}
+	}
+}
+
+func validateLegalEmails(legal LegalSettings, p *parser) {
+	for _, contact := range []struct {
+		name  string
+		value string
+	}{
+		{"PRIVACY_EMAIL", legal.privacyEmail},
+		{"SUPPORT_EMAIL", legal.supportEmail},
+		{"SECURITY_EMAIL", legal.securityEmail},
+	} {
+		address, err := mail.ParseAddress(contact.value)
+		if err != nil || address.Address != contact.value {
+			p.errf("%s must be a valid email address", contact.name)
+		}
+	}
+}
+
+func (c *Config) validateLegalIdentityMode(origin string, p *parser) {
+	hasSentinel := c.legal.registrationNumber == StagingLegalRegistrationNumber ||
+		c.legal.registeredAddress == StagingLegalRegisteredAddress
+	switch c.legal.identityMode {
+	case LegalIdentityPublic:
+		if hasSentinel {
+			p.errf("public legal identity rejects controlled-staging sentinel values")
+		}
+	case LegalIdentityControlledStaging:
+		if c.environment != EnvProduction || origin != ControlledStagingPublicOrigin ||
+			c.legal.registrationNumber != StagingLegalRegistrationNumber ||
+			c.legal.registeredAddress != StagingLegalRegisteredAddress {
+			p.errf("controlled-staging legal identity requires the exact disposable S11 origin and sentinel values")
+		}
 	}
 }
 

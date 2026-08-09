@@ -99,7 +99,12 @@ func policySetResponse(set identity.RegistrationPolicySet) gin.H {
 			"label": policy.Label, "url": policy.URL,
 		})
 	}
-	return gin.H{"id": set.ID, "policies": policies}
+	return gin.H{
+		"id": set.ID, "version": set.Version,
+		"effective_date": set.EffectiveDate, "minimum_age": set.MinimumAge,
+		"primary_locale": set.PrimaryLocale, "locale": set.Locale,
+		"policies": policies,
+	}
 }
 
 func requestedLocale(header string) (identity.Locale, bool) {

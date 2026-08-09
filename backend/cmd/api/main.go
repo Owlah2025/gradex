@@ -373,13 +373,7 @@ func buildAdmissionFoundation(
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.Environment() != config.EnvDevelopment {
-		return nil, nil, errors.New(
-			"approved production registration policy-set adapter is not integrated (LG-011)",
-		)
-	}
-
-	policies, err := developmentPolicySets(admission.PolicySetID())
+	policies, err := buildPolicySetResolver(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -465,6 +459,23 @@ func buildAdmissionFoundation(
 	return foundation, redisClient, nil
 }
 
+func buildPolicySetResolver(cfg *config.Config) (identity.PolicySetResolver, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration is required for registration policy resolution")
+	}
+	if cfg.Environment() == config.EnvDevelopment {
+		return developmentPolicySets(cfg.Admission().PolicySetID())
+	}
+	resolver, err := identity.NewApprovedPolicySetResolver(
+		cfg.PublicOrigin(),
+		cfg.Admission().PolicySetID(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("building approved registration policy resolver: %w", err)
+	}
+	return resolver, nil
+}
+
 func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error) {
 	return identity.NewStaticPolicySetResolver(
 		identity.RegistrationPolicySet{
@@ -472,11 +483,11 @@ func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error)
 			Policies: []identity.RegistrationPolicy{
 				{
 					Kind: identity.PolicyPrivacyNotice, Version: "dev-privacy-v1",
-					Label: "Privacy notice", URL: "/legal/privacy",
+					Label: "Privacy notice", URL: "/en/privacy",
 				},
 				{
 					Kind: identity.PolicyTermsOfService, Version: "dev-terms-v1",
-					Label: "Terms of service", URL: "/legal/terms",
+					Label: "Terms of service", URL: "/en/terms",
 				},
 			},
 		},
@@ -485,11 +496,11 @@ func developmentPolicySets(id string) (*identity.StaticPolicySetResolver, error)
 			Policies: []identity.RegistrationPolicy{
 				{
 					Kind: identity.PolicyPrivacyNotice, Version: "dev-privacy-v1",
-					Label: "إشعار الخصوصية", URL: "/legal/privacy",
+					Label: "إشعار الخصوصية", URL: "/ar/privacy",
 				},
 				{
 					Kind: identity.PolicyTermsOfService, Version: "dev-terms-v1",
-					Label: "شروط الخدمة", URL: "/legal/terms",
+					Label: "شروط الخدمة", URL: "/ar/terms",
 				},
 			},
 		},
@@ -672,7 +683,7 @@ func buildProductionFoundations(
 		pf.Options = append(pf.Options, httpapi.WithAdmissionFoundation(foundation))
 	}
 
-	if cfg.Admission().Enabled() {
+	if cfg.Admission().Enabled() && cfg.Environment() == config.EnvDevelopment {
 		foundation, limiterClient, err := buildStaffFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()

@@ -10,6 +10,11 @@ export type Policy = {
 
 export type RegistrationPolicySet = {
   id: string;
+  version: string;
+  effective_date: string;
+  minimum_age: number;
+  primary_locale: "ar";
+  locale: "ar" | "en";
   policies: Policy[];
 };
 
