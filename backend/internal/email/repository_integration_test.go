@@ -255,3 +255,250 @@ func TestRepositoryExhaustsFinalStaleLease(t *testing.T) {
 		t.Fatalf("final stale lease = %s/%s, want EXHAUSTED/EXHAUSTED", status, finalOutcome)
 	}
 }
+
+// activationBoundary reads the durable boundary migration 0017 stamped.
+func activationBoundary(t *testing.T, pool *pgxpool.Pool) time.Time {
+	t.Helper()
+	var activatedAt time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT activated_at FROM transactional_email_activation WHERE id`).Scan(&activatedAt); err != nil {
+		t.Fatalf("reading activation boundary: %v", err)
+	}
+	return activatedAt.UTC()
+}
+
+// activateAfterEvent stamps the boundary immediately after a named outbox
+// event, modelling the production shape the reviewer was worried about: an
+// existing database whose outbox already holds historical intents when
+// delivery is switched on. The instant is computed by the database from the
+// event's own occurred_at, so the test cannot flake on clock skew between the
+// test process and PostgreSQL. Only a test writes this; workers never do.
+func activateAfterEvent(t *testing.T, pool *pgxpool.Pool, eventID string) time.Time {
+	t.Helper()
+	var boundary time.Time
+	if err := pool.QueryRow(context.Background(),
+		`UPDATE transactional_email_activation
+		    SET activated_at = (SELECT occurred_at + interval '1 microsecond'
+		                          FROM outbox_events WHERE id=$1)
+		  WHERE id
+		  RETURNING activated_at`, eventID).Scan(&boundary); err != nil {
+		t.Fatalf("setting activation boundary: %v", err)
+	}
+	return boundary.UTC()
+}
+
+// appendIntentAvailableAt writes a post-activation intent that is deliberately
+// not due yet, so a test can prove a deferred intent is not lost.
+func appendIntentAvailableAt(t *testing.T, pool *pgxpool.Pool, writer *outbox.Writer, availableAt time.Time) string {
+	t.Helper()
+	event := outbox.Event{
+		Type: "identity.email_verification_requested", SchemaVersion: 1,
+		SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "ACCOUNT",
+		AggregateID: uuid.NewString(), AggregateRevision: 1, CorrelationID: uuid.NewString(),
+		AvailableAt: &availableAt,
+		SafePayload: map[string]any{"purpose": "EMAIL_VERIFICATION", "locale": "en", "template_contract": TemplateVerifyEmail},
+	}
+	delivery := outbox.VerificationDelivery{
+		Destination: "student@example.com", Locale: "en", TemplateContract: TemplateVerifyEmail,
+		VerificationToken: "PRIVATE_CREDENTIAL_CANARY", ExpiresAt: availableAt.Add(time.Hour),
+	}
+	ctx := context.Background()
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	eventID, err := writer.Append(ctx, tx, event, delivery)
+	if err != nil {
+		t.Fatalf("appending deferred email intent: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("committing deferred email intent: %v", err)
+	}
+	return eventID
+}
+
+func deliveryExists(t *testing.T, pool *pgxpool.Pool, eventID string) bool {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM transactional_email_deliveries WHERE event_id=$1`, eventID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count > 0
+}
+
+// TestDiscoveryIgnoresPreActivationHistory covers M-1 cases A, B and C: an
+// intent that predates activation is never mailed, one created after it is,
+// and a worker restart changes neither answer.
+func TestDiscoveryIgnoresPreActivationHistory(t *testing.T) {
+	pool := freshEmailDatabase(t)
+	repository, writer, renderer := emailTestComponents(t, pool)
+	ctx := context.Background()
+
+	// A historical intent, written before delivery was ever switched on. Its
+	// credential may be long expired; mailing it would be the hazard.
+	historical := appendVerificationIntent(t, pool, writer, time.Now().UTC())
+
+	// Delivery is activated now. Everything above is history.
+	boundary := activateAfterEvent(t, pool, historical)
+
+	sender := NewFakeSender()
+	now := boundary.Add(time.Minute)
+	dispatcher, err := NewDispatcher(DispatcherOptions{Repository: repository, Outbox: writer, Renderer: renderer, Sender: sender, LeaseDuration: time.Minute, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A. the historical intent stays historical.
+	if count, err := dispatcher.DispatchPending(ctx, 10); err != nil || count != 0 {
+		t.Fatalf("historical dispatch = (%d, %v), want (0, nil)", count, err)
+	}
+	if deliveryExists(t, pool, historical) {
+		t.Fatal("pre-activation intent was enqueued for delivery")
+	}
+	if len(sender.Messages()) != 0 {
+		t.Fatal("pre-activation intent reached the provider")
+	}
+	var historicalStillThere int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM outbox_events WHERE id=$1`, historical).Scan(&historicalStillThere); err != nil {
+		t.Fatal(err)
+	}
+	if historicalStillThere != 1 {
+		t.Fatal("historical outbox evidence was destroyed")
+	}
+
+	// B. a genuinely new intent is delivered normally.
+	fresh := appendVerificationIntent(t, pool, writer, now)
+	if count, err := dispatcher.DispatchPending(ctx, 10); err != nil || count != 1 {
+		t.Fatalf("post-activation dispatch = (%d, %v), want (1, nil)", count, err)
+	}
+	if !deliveryExists(t, pool, fresh) {
+		t.Fatal("post-activation intent was not enqueued")
+	}
+	if messages := sender.Messages(); len(messages) != 1 || messages[0].IdempotencyKey != "gradex/"+fresh {
+		t.Fatalf("post-activation delivery did not reach the provider: %d messages", len(messages))
+	}
+
+	// C. restart: new repository and dispatcher, as a redeployed worker would
+	// build. The boundary must not have moved and history must stay unmailed.
+	restartedRepository, err := NewRepository(pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := activationBoundary(t, pool); !got.Equal(boundary) {
+		t.Fatalf("activation boundary moved on restart: %s want %s", got, boundary)
+	}
+	restarted, err := NewDispatcher(DispatcherOptions{Repository: restartedRepository, Outbox: writer, Renderer: renderer, Sender: sender, LeaseDuration: time.Minute, Now: func() time.Time { return now.Add(time.Minute) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := restarted.DispatchPending(ctx, 10); err != nil || count != 0 {
+		t.Fatalf("restart dispatch = (%d, %v), want (0, nil)", count, err)
+	}
+	if deliveryExists(t, pool, historical) {
+		t.Fatal("worker restart backfilled pre-activation history")
+	}
+	if got := activationBoundary(t, pool); !got.Equal(boundary) {
+		t.Fatal("activation boundary advanced after a dispatch cycle")
+	}
+}
+
+// TestDiscoveryKeepsUndiscoveredPostActivationIntentsEligible covers M-1 case
+// E. The boundary is a fixed creation-time cutoff, not a progress watermark,
+// so an intent that was not due during earlier polls is not skipped forever.
+func TestDiscoveryKeepsUndiscoveredPostActivationIntentsEligible(t *testing.T) {
+	pool := freshEmailDatabase(t)
+	repository, writer, renderer := emailTestComponents(t, pool)
+	ctx := context.Background()
+	// Created after the migration-stamped boundary, but deliberately not due.
+	created := time.Now().UTC()
+	deferred := appendIntentAvailableAt(t, pool, writer, created.Add(time.Hour))
+
+	sender := NewFakeSender()
+	early := created.Add(2 * time.Minute)
+	dispatcher, err := NewDispatcher(DispatcherOptions{Repository: repository, Outbox: writer, Renderer: renderer, Sender: sender, LeaseDuration: time.Minute, Now: func() time.Time { return early }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := dispatcher.DispatchPending(ctx, 10); err != nil || count != 0 {
+		t.Fatalf("early dispatch = (%d, %v), want (0, nil)", count, err)
+	}
+
+	// Later, once it is due, it is still eligible: nothing consumed it.
+	late := created.Add(2 * time.Hour)
+	dueDispatcher, err := NewDispatcher(DispatcherOptions{Repository: repository, Outbox: writer, Renderer: renderer, Sender: sender, LeaseDuration: time.Minute, Now: func() time.Time { return late }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := dueDispatcher.DispatchPending(ctx, 10); err != nil || count != 1 {
+		t.Fatalf("due dispatch = (%d, %v), want (1, nil)", count, err)
+	}
+	if !deliveryExists(t, pool, deferred) {
+		t.Fatal("post-activation intent was lost instead of deferred")
+	}
+}
+
+// TestConcurrentPollersShareOneActivationBoundary covers M-1 case D.
+func TestConcurrentPollersShareOneActivationBoundary(t *testing.T) {
+	pool := freshEmailDatabase(t)
+	repository, writer, renderer := emailTestComponents(t, pool)
+	ctx := context.Background()
+
+	historical := appendVerificationIntent(t, pool, writer, time.Now().UTC())
+	boundary := activateAfterEvent(t, pool, historical)
+
+	now := boundary.Add(time.Minute)
+	eligible := make([]string, 0, 4)
+	for range 4 {
+		eligible = append(eligible, appendVerificationIntent(t, pool, writer, now))
+	}
+
+	const pollers = 4
+	sender := NewFakeSender()
+	var group sync.WaitGroup
+	errs := make(chan error, pollers)
+	for range pollers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			dispatcher, err := NewDispatcher(DispatcherOptions{Repository: repository, Outbox: writer, Renderer: renderer, Sender: sender, LeaseDuration: time.Minute, Now: func() time.Time { return now }})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if _, err := dispatcher.DispatchPending(ctx, 10); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent poller: %v", err)
+	}
+
+	if got := activationBoundary(t, pool); !got.Equal(boundary) {
+		t.Fatalf("concurrent pollers moved the boundary: %s want %s", got, boundary)
+	}
+	if deliveryExists(t, pool, historical) {
+		t.Fatal("a concurrent poller backfilled pre-activation history")
+	}
+	var deliveries, boundaryRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM transactional_email_deliveries`).Scan(&deliveries); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != len(eligible) {
+		t.Fatalf("delivery rows = %d, want %d (one per eligible intent, no duplicates)", deliveries, len(eligible))
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM transactional_email_activation`).Scan(&boundaryRows); err != nil {
+		t.Fatal(err)
+	}
+	if boundaryRows != 1 {
+		t.Fatalf("activation rows = %d, want exactly 1", boundaryRows)
+	}
+	// Each intent is a distinct message; none was sent twice.
+	if messages := sender.Messages(); len(messages) != len(eligible) {
+		t.Fatalf("provider messages = %d, want %d", len(messages), len(eligible))
+	}
+}

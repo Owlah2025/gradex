@@ -101,10 +101,38 @@ func (b claimBatch) validate() error {
 	return nil
 }
 
+// requireActivation reads the durable activation boundary. Workers never write
+// it — migration 0017 stamps it once — so a poller cannot advance it by
+// restarting, and every concurrent poller reads the same instant.
+//
+// An absent boundary is an error rather than a default, because both defaults
+// are wrong: "beginning of time" mails the entire history, and "now" silently
+// drops live intents on every tick.
+func requireActivation(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	var activatedAt time.Time
+	err := tx.QueryRow(ctx,
+		`SELECT activated_at FROM transactional_email_activation WHERE id`).Scan(&activatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, errors.New("transactional email activation boundary is missing")
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("reading transactional email activation boundary: %w", err)
+	}
+	return activatedAt, nil
+}
+
 func discoverDeliveries(ctx context.Context, tx pgx.Tx, batch claimBatch) error {
 	contracts, err := json.Marshal(eventTemplates)
 	if err != nil {
 		return errors.New("transactional email contracts cannot be encoded")
+	}
+	// occurred_at, not available_at: the boundary asks when the domain intent
+	// was created, not when it became due. A deliberately delayed intent
+	// created after activation stays eligible.
+	//
+	activatedAt, err := requireActivation(ctx, tx)
+	if err != nil {
+		return err
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO transactional_email_deliveries
@@ -114,7 +142,8 @@ func discoverDeliveries(ctx context.Context, tx pgx.Tx, batch claimBatch) error 
 		  JOIN jsonb_each_text($3::jsonb) c(event_type, template_contract)
 		    ON c.event_type=e.event_type AND c.template_contract=e.safe_payload->>'template_contract'
 		 WHERE e.safe_payload->>'locale' IN ('ar', 'en')
-		ON CONFLICT (event_id) DO NOTHING`, batch.provider, batch.now, contracts)
+		   AND e.occurred_at >= $4
+		ON CONFLICT (event_id) DO NOTHING`, batch.provider, batch.now, contracts, activatedAt)
 	if err != nil {
 		return fmt.Errorf("discovering transactional email intents: %w", err)
 	}
