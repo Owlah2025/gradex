@@ -25,7 +25,9 @@ One row per supported outbox event.
 Invariants:
 
 - Exactly one delivery per event.
-- Only six event/template pairs are insertable by the dispatcher.
+- Only the eight approved event/template pairs are insertable by the dispatcher.
+- Only events that occurred at or after the durable activation boundary are
+  discoverable, so switching delivery on never mails historical credentials.
 - Terminal rows cannot return to queued/sending.
 - Only an unexpired matching lease may complete an attempt.
 - A stale `SENDING` lease becomes claimable without changing message identity.

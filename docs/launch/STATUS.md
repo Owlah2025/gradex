@@ -1,6 +1,18 @@
 # Gradex Launch Status
 
-> **2026-08-09 S9 implementation delivered; independent closure review pending.** Planning is at
+> **2026-08-09 S9 independently REJECTED at `9be0020`; remediated and awaiting re-review.** The
+> independent reviewer returned Critical 0, High 1: real `identity.staff_invitation_created` events
+> omitted `template_contract` from the safe payload that discovery joins on, so staff invitations
+> were never mailed. The reviewer also raised M-1, that discovery would backfill the entire
+> historical outbox on first boot against an existing database. Both are now fixed and covered by
+> real end-to-end acceptance tests; the Product Owner decision behind the activation boundary is
+> [D-078](../DECISIONS.md#d-078--transactional-email-never-sends-historical-intents-created-before-activation).
+> The Resend client additionally refuses redirects. M-2, M-3 and the cosmetic Low findings are
+> deferred to backlog. Evidence is in
+> [`evidence/s9/transactional-email.md`](evidence/s9/transactional-email.md). S9 remains open and
+> requires independent re-review of the cumulative range; the implementation agent does not close it.
+>
+> **2026-08-09 S9 implementation delivered; superseded by the rejection above.** Planning is at
 > `c531fc5`, durable backend/Resend delivery at `1f0a043`, and frontend action-link consumption at
 > `5a66081`. All 30 repository tasks and required validation are complete. Live Resend sender-domain
 > acceptance remains external pending because this environment has neither an API key nor a verified
