@@ -23,6 +23,9 @@ Branch: `s11-release-e2e-20260808`
 - Implementation: `710dbd3` — HIBP Range API adapter, shared runtime composition, bootstrap wiring, and three-second default
 - Regression tests: `d768dd8` — deterministic TLS/provider tests, production composition tests, and real-PostgreSQL registration evidence
 - TLS regression: `7936905` — explicit proof that an untrusted server certificate fails closed before an HTTP request is accepted
+- Documentation/evidence commit and frozen remediation candidate end: `2a572d932b3a022fe67eb16c630da5f736d15d95`
+- Frozen remediation range: `0e8f3ed0de858462f8bdd6fab42acc056ca703f0..2a572d932b3a022fe67eb16c630da5f736d15d95`
+- Cumulative S11 range for independent review: `6bf694daa7a8a823a849a4e2da9588988b6d2358..2a572d932b3a022fe67eb16c630da5f736d15d95`
 - Original High root cause: production composition had only development policy and deterministic compromised-password fixtures; non-development builders refused both missing dependencies as one combined error.
 - LG-021 result: **RESOLVED** under D-075. HIBP is composed for production credential screening and fails closed.
 - LG-011 result: **OPEN**. No approved bilingual policy content, versions, published URLs, or production `PolicySetResolver` exists, so production registration still refuses startup at that exact boundary.

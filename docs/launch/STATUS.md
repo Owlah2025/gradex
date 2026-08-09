@@ -7,7 +7,10 @@
 > is resolved. S11 is **not closed**: production registration still lacks approved bilingual policy
 > content and a production `PolicySetResolver` under `LG-011`, one unresolved launch-blocking High.
 > Frozen independent-review candidate:
-> the exact remediation and cumulative ranges are recorded in the S11 evidence and freeze marker.
+> remediation `0e8f3ed0de858462f8bdd6fab42acc056ca703f0..2a572d932b3a022fe67eb16c630da5f736d15d95`;
+> cumulative S11 `6bf694daa7a8a823a849a4e2da9588988b6d2358..2a572d932b3a022fe67eb16c630da5f736d15d95`.
+> This subsequent documentation-only marker records the immutable evidence commit and is outside the
+> reviewed range, matching the existing S11 freeze convention.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >
