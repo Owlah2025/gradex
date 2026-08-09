@@ -135,6 +135,7 @@ prepare() {
     printf 'ANONYMOUS_CSRF_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'ADMISSION_LIMITER_HMAC_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'OUTBOX_PROTECTED_PAYLOAD_KEY=%s\n' "$(openssl rand -hex 16)"
+    printf 'EMAIL_API_KEY=re_production_like_noncredential\n'
     printf 'GRADEX_BACKEND_IMAGE=gradex-backend:s12-local\n'
     printf 'GRADEX_FRONTEND_IMAGE=gradex-frontend:s12-local\n'
     printf 'GRADEX_EDGE_IMAGE=gradex-edge:s12-local\n'

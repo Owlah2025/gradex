@@ -619,6 +619,9 @@ func TestBatchB_CourseAccessGrant_RealPostgreSQL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateInvitation: %v", err)
 		}
+		dispatcher, sender := transactionalEmailHarness(t, pool, "key-v1", []byte("12345678901234567890123456789012"))
+		dispatchTransactionalEmail(t, dispatcher)
+		token = actionCredential(t, sender.Messages(), "/access?invitation_id="+inv.ID)
 
 		_, err = accessRepo.AcceptInvitation(ctx, access.AcceptInvitationParams{
 			InvitationID:    inv.ID,
@@ -723,6 +726,10 @@ func TestBatchB_CourseAccessGrant_RealPostgreSQL(t *testing.T) {
 		if rejectedInv.DecisionReason == nil || *rejectedInv.DecisionReason != "Ineligible academic record" {
 			t.Errorf("DecisionReason = %v, want Ineligible academic record", rejectedInv.DecisionReason)
 		}
+		assertCourseNoticeIntent(t, pool, courseNoticeExpectation{
+			eventType: "access.invitation_rejected", aggregateID: inv.ID,
+			template: "course-access-invitation-rejected-v1", locale: "ar",
+		})
 	})
 
 	t.Run("Cancellation from pending state (T056)", func(t *testing.T) {
@@ -749,6 +756,10 @@ func TestBatchB_CourseAccessGrant_RealPostgreSQL(t *testing.T) {
 		if cancelledInv.State != access.StateCancelled {
 			t.Errorf("Cancelled state = %s, want CANCELLED", cancelledInv.State)
 		}
+		assertCourseNoticeIntent(t, pool, courseNoticeExpectation{
+			eventType: "access.invitation_cancelled", aggregateID: inv.ID,
+			template: "course-access-invitation-cancelled-v1", locale: "ar",
+		})
 
 		// Repeat cancel returns 409
 		respRepeat := doPricingRequest(t, client, "POST", cancelURL, adminToken, validOrigin, adminToken, nil)
@@ -797,6 +808,26 @@ func TestBatchB_CourseAccessGrant_RealPostgreSQL(t *testing.T) {
 			t.Error("Student access history items is nil, want initialized slice")
 		}
 	})
+}
+
+type courseNoticeExpectation struct {
+	eventType   string
+	aggregateID string
+	template    string
+	locale      string
+}
+
+func assertCourseNoticeIntent(t *testing.T, pool *pgxpool.Pool, expected courseNoticeExpectation) {
+	t.Helper()
+	var template, locale string
+	err := pool.QueryRow(context.Background(), `SELECT safe_payload->>'template_contract',safe_payload->>'locale'
+		FROM outbox_events WHERE event_type=$1 AND aggregate_id=$2::uuid`, expected.eventType, expected.aggregateID).Scan(&template, &locale)
+	if err != nil {
+		t.Fatalf("reading %s notice intent: %v", expected.eventType, err)
+	}
+	if template != expected.template || locale != expected.locale {
+		t.Fatalf("%s notice contract = %s/%s, want %s/%s", expected.eventType, template, locale, expected.template, expected.locale)
+	}
 }
 
 func TestBatchB_S5ProtectedLearningGrantProof_RealPostgreSQL(t *testing.T) {

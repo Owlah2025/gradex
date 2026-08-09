@@ -108,6 +108,38 @@ func (c Capability) Reason() string {
 func enabled() Capability               { return Capability{enabled: true} }
 func disabled(reason string) Capability { return Capability{reason: reason} }
 
+// EmailProvider selects the narrow transactional delivery adapter. Domain
+// modules never see this value; only worker composition does.
+type EmailProvider string
+
+const (
+	EmailProviderFake   EmailProvider = "fake"
+	EmailProviderResend EmailProvider = "resend"
+)
+
+func (p EmailProvider) Valid() bool { return p == EmailProviderFake || p == EmailProviderResend }
+
+// EmailSettings is the immutable worker delivery configuration. API keys stay
+// wrapped until the Resend adapter is constructed.
+type EmailSettings struct {
+	capability  Capability
+	provider    EmailProvider
+	apiKey      Secret
+	fromAddress string
+	fromName    string
+	replyTo     string
+	timeout     time.Duration
+}
+
+func (s EmailSettings) Enabled() bool           { return s.capability.Enabled() }
+func (s EmailSettings) Reason() string          { return s.capability.Reason() }
+func (s EmailSettings) Provider() EmailProvider { return s.provider }
+func (s EmailSettings) APIKey() Secret          { return s.apiKey }
+func (s EmailSettings) FromAddress() string     { return s.fromAddress }
+func (s EmailSettings) FromName() string        { return s.fromName }
+func (s EmailSettings) ReplyTo() string         { return s.replyTo }
+func (s EmailSettings) Timeout() time.Duration  { return s.timeout }
+
 // PasswordScreenMode selects only the implementation boundary. The
 // deterministic source is a local test fixture; adapter mode selects the
 // approved production source.
@@ -321,7 +353,7 @@ type Config struct {
 	authFakeMode bool
 
 	payments  Capability
-	email     Capability
+	email     EmailSettings
 	admission AdmissionSettings
 	legal     LegalSettings
 }
@@ -403,7 +435,7 @@ func (c *Config) MediaOperatingMode() MediaOperatingMode { return c.mediaOperati
 func (c *Config) AuthFakeMode() bool { return c.authFakeMode }
 
 func (c *Config) Payments() Capability         { return c.payments }
-func (c *Config) Email() Capability            { return c.email }
+func (c *Config) Email() EmailSettings         { return c.email }
 func (c *Config) Admission() AdmissionSettings { return c.admission }
 func (c *Config) Legal() LegalSettings         { return c.legal }
 
@@ -516,6 +548,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	tapEnvironment := p.str("TAP_ENVIRONMENT", "test")
 	tapAdapterApproved := p.boolean("TAP_ADAPTER_APPROVED", false)
 	emailEnabled := p.boolean("EMAIL_ENABLED", false)
+	emailProvider := EmailProvider(p.str("EMAIL_PROVIDER", string(EmailProviderResend)))
 	registrationEnabled := p.boolean("STUDENT_REGISTRATION_ENABLED", false)
 	registrationPolicyApproved := p.boolean("REGISTRATION_POLICY_APPROVED", false)
 	passwordAdapterApproved := p.boolean("COMPROMISED_PASSWORD_ADAPTER_APPROVED", false)
@@ -556,7 +589,20 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	cfg.sessions.csrfKey = secrets["SESSION_CSRF_KEY"]
 
 	cfg.payments = tapCapability(cfg.environment, tapEnabled, tapEnvironment, tapAdapterApproved, secrets["TAP_SECRET"], p)
-	cfg.email = emailCapability(emailEnabled, secrets["EMAIL_API_KEY"])
+	cfg.email = emailSettings(emailSettingsInput{
+		environment:                cfg.environment,
+		serviceRole:                cfg.serviceRole,
+		enabled:                    emailEnabled,
+		provider:                   emailProvider,
+		apiKey:                     secrets["EMAIL_API_KEY"],
+		fromAddress:                p.str("EMAIL_FROM_ADDRESS", "no-reply@gradex.test"),
+		fromName:                   p.str("EMAIL_FROM_NAME", "Gradex"),
+		replyTo:                    p.str("EMAIL_REPLY_TO", ""),
+		timeout:                    p.duration("EMAIL_PROVIDER_TIMEOUT", 10*time.Second),
+		publicOrigin:               cfg.publicOrigin,
+		protectedPayloadKeyVersion: p.str("OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", ""),
+		protectedPayloadKey:        secrets["OUTBOX_PROTECTED_PAYLOAD_KEY"],
+	}, p)
 	cfg.admission = admissionCapability(admissionCapabilityInput{
 		environment:                cfg.environment,
 		enabled:                    registrationEnabled,
@@ -707,14 +753,92 @@ func tapCapability(env Environment, enabledFlag bool, tapEnv string, adapterAppr
 	return enabled()
 }
 
-func emailCapability(enabledFlag bool, secret Secret) Capability {
-	if !enabledFlag {
-		return disabled("EMAIL_ENABLED is false")
+type emailSettingsInput struct {
+	environment                Environment
+	serviceRole                ServiceRole
+	enabled                    bool
+	provider                   EmailProvider
+	apiKey                     Secret
+	fromAddress                string
+	fromName                   string
+	replyTo                    string
+	timeout                    time.Duration
+	publicOrigin               string
+	protectedPayloadKeyVersion string
+	protectedPayloadKey        Secret
+}
+
+func emailSettings(in emailSettingsInput, p *parser) EmailSettings {
+	settings := EmailSettings{
+		capability: disabled("EMAIL_ENABLED is false"), provider: in.provider,
+		apiKey: in.apiKey, fromAddress: strings.TrimSpace(in.fromAddress),
+		fromName: strings.TrimSpace(in.fromName), replyTo: strings.TrimSpace(in.replyTo), timeout: in.timeout,
 	}
-	if secret.IsEmpty() {
-		return disabled("EMAIL_API_KEY is absent")
+	if in.timeout < time.Second || in.timeout > 30*time.Second {
+		p.errf("EMAIL_PROVIDER_TIMEOUT must be between 1s and 30s")
 	}
-	return enabled()
+	if !in.enabled {
+		if in.environment.IsProduction() && in.serviceRole == RoleWorker {
+			p.errf("EMAIL_ENABLED must be true for the production worker")
+		}
+		return settings
+	}
+	if err := validateEnabledEmail(in, settings); err != nil {
+		p.errf("%s", err)
+		return settings
+	}
+	settings.capability = enabled()
+	return settings
+}
+
+func validateEnabledEmail(in emailSettingsInput, settings EmailSettings) error {
+	if !in.provider.Valid() {
+		return fmt.Errorf("EMAIL_PROVIDER must be fake or resend; got %q", in.provider)
+	}
+	if in.environment.IsProduction() && in.provider != EmailProviderResend {
+		return errors.New("production transactional email requires EMAIL_PROVIDER=resend")
+	}
+	if in.provider == EmailProviderResend && in.apiKey.IsEmpty() {
+		return errors.New("EMAIL_API_KEY is required for Resend delivery")
+	}
+	if err := validateEmailAddresses(settings); err != nil {
+		return err
+	}
+	if strings.TrimSpace(in.protectedPayloadKeyVersion) == "" || in.protectedPayloadKey.IsEmpty() {
+		return errors.New("transactional email requires the protected outbox key and version")
+	}
+	return validateProductionEmail(in, settings)
+}
+
+func validateEmailAddresses(settings EmailSettings) error {
+	if parsed, err := mail.ParseAddress(settings.fromAddress); err != nil || parsed.Address != settings.fromAddress {
+		return errors.New("EMAIL_FROM_ADDRESS must be a valid bare address")
+	}
+	if settings.fromName == "" || len(settings.fromName) > 100 || strings.ContainsAny(settings.fromName, "\r\n\x00") {
+		return errors.New("EMAIL_FROM_NAME must be present and safe")
+	}
+	if settings.replyTo != "" {
+		parsed, err := mail.ParseAddress(settings.replyTo)
+		if err != nil || parsed.Address != settings.replyTo {
+			return errors.New("EMAIL_REPLY_TO must be a valid bare address")
+		}
+	}
+	return nil
+}
+
+func validateProductionEmail(in emailSettingsInput, settings EmailSettings) error {
+	if !in.environment.IsProduction() {
+		return nil
+	}
+	address, _ := mail.ParseAddress(settings.fromAddress)
+	domain := strings.ToLower(strings.SplitN(address.Address, "@", 2)[1])
+	if domain == "localhost" || strings.HasSuffix(domain, ".test") || strings.HasSuffix(domain, ".example") {
+		return errors.New("EMAIL_FROM_ADDRESS must use a real sender domain in production")
+	}
+	if !strings.HasPrefix(in.publicOrigin, "https://") {
+		return errors.New("transactional email requires an HTTPS PUBLIC_ORIGIN in production")
+	}
+	return nil
 }
 
 func (c *Config) validate(p *parser) {

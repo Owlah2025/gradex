@@ -13,13 +13,17 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
+
+	transactionalemail "github.com/Owlah2025/gradex/backend/internal/email"
 )
 
 // maxFieldLength bounds any single string field. Oversized values are
@@ -359,6 +363,38 @@ func (l *Logger) WorkerFailed(ev WorkerFailureEvent) {
 		attrs = append(attrs, slog.Int("max_retry", ev.MaxRetry))
 	}
 	l.slog.Error("worker_failure", attrs...)
+}
+
+// ObserveTransactionalEmail records only safe lifecycle classifications. The
+// delivery package never supplies recipient, content, action URL, or provider
+// error text to this boundary.
+func (l *Logger) ObserveTransactionalEmail(ev transactionalemail.LifecycleEvent) {
+	if l == nil || l.slog == nil {
+		return
+	}
+	level := slog.LevelInfo
+	if ev.Phase == transactionalemail.PhaseTransientFailure || ev.Phase == transactionalemail.PhasePermanentFailure || ev.Phase == transactionalemail.PhaseExhausted {
+		level = slog.LevelWarn
+	}
+	attributes := []any{
+		"event", "transactional_email",
+		"phase", Sanitize(string(ev.Phase)),
+		"event_id", Sanitize(ev.EventID),
+		"template", Sanitize(ev.Template),
+		"locale", Sanitize(ev.Locale),
+		"provider", Sanitize(ev.Provider),
+		"attempt", ev.Attempt,
+	}
+	if ev.FailureClass != "" {
+		attributes = append(attributes, "failure_class", Sanitize(ev.FailureClass))
+	}
+	if ev.ProviderCode != "" {
+		attributes = append(attributes, "provider_code", Sanitize(ev.ProviderCode))
+	}
+	if ev.RetryAt != nil {
+		attributes = append(attributes, "retry_at", ev.RetryAt.UTC().Format(time.RFC3339))
+	}
+	l.slog.Log(context.Background(), level, "transactional_email", attributes...)
 }
 
 // ErrorClassOf names a panic value's type without rendering the value.

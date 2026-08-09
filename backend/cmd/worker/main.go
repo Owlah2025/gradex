@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
+	transactionalemail "github.com/Owlah2025/gradex/backend/internal/email"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
@@ -42,6 +45,15 @@ func main() {
 		return
 	}
 	defer pool.Close()
+	if cfg.Email().Enabled() {
+		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.TransactionalEmailSchemaVersion)
+		cancel()
+		if err != nil {
+			exitWorker(logger, "email_schema_check", logging.ErrorClassOf(err))
+			return
+		}
+	}
 
 	storageClient, err := storage.New(ctx, storage.Options{
 		Endpoint:     cfg.S3Endpoint(),
@@ -109,6 +121,14 @@ func main() {
 		return
 	}
 
+	emailDispatcher, err := buildTransactionalEmailDispatcher(transactionalEmailDependencies{
+		pool: pool, config: cfg, outbox: writer, observer: logger,
+	})
+	if err != nil {
+		exitWorker(logger, "email_dispatcher_build", logging.ErrorClassOf(err))
+		return
+	}
+
 	mux := asynq.NewServeMux()
 	if err := worker.Register(mux); err != nil {
 		exitWorker(logger, "worker_registration", logging.ErrorClassOf(err))
@@ -144,12 +164,80 @@ func main() {
 		defer close(dispatcherDone)
 		runMediaDispatcher(ctx, dispatcher, logger)
 	}()
+	emailDispatcherDone := make(chan struct{})
+	go func() {
+		defer close(emailDispatcherDone)
+		if emailDispatcher != nil {
+			runEmailDispatcher(ctx, emailDispatcher, logger)
+		}
+	}()
 
 	<-ctx.Done()
 	logger.WorkerLifecycle(logging.WorkerDraining)
 	server.Shutdown()
 	<-dispatcherDone
+	<-emailDispatcherDone
 	logger.WorkerLifecycle(logging.WorkerStopped)
+}
+
+type transactionalEmailDependencies struct {
+	pool     *pgxpool.Pool
+	config   *config.Config
+	outbox   *outbox.Writer
+	observer transactionalemail.Observer
+}
+
+func buildTransactionalEmailDispatcher(dependencies transactionalEmailDependencies) (*transactionalemail.Dispatcher, error) {
+	if !dependencies.config.Email().Enabled() {
+		return nil, nil
+	}
+	repository, err := transactionalemail.NewRepository(dependencies.pool)
+	if err != nil {
+		return nil, err
+	}
+	renderer, err := transactionalemail.NewRenderer(transactionalemail.RendererOptions{
+		PublicOrigin: dependencies.config.PublicOrigin(), FromAddress: dependencies.config.Email().FromAddress(),
+		FromName: dependencies.config.Email().FromName(), ReplyTo: dependencies.config.Email().ReplyTo(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	sender, err := transactionalEmailSender(dependencies.config.Email())
+	if err != nil {
+		return nil, err
+	}
+	return transactionalemail.NewDispatcher(transactionalemail.DispatcherOptions{
+		Repository: repository, Outbox: dependencies.outbox, Renderer: renderer, Sender: sender,
+		Observer: dependencies.observer, LeaseDuration: dependencies.config.Email().Timeout() + time.Minute,
+	})
+}
+
+func transactionalEmailSender(settings config.EmailSettings) (transactionalemail.Sender, error) {
+	switch settings.Provider() {
+	case config.EmailProviderFake:
+		return transactionalemail.NewFakeSender(), nil
+	case config.EmailProviderResend:
+		return transactionalemail.NewResendSender(transactionalemail.ResendOptions{APIKey: settings.APIKey(), Timeout: settings.Timeout()})
+	default:
+		return nil, errors.New("unsupported transactional email provider")
+	}
+}
+
+func runEmailDispatcher(ctx context.Context, dispatcher *transactionalemail.Dispatcher, logger *logging.Logger) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := dispatcher.DispatchPending(ctx, 25); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "transactional_email_dispatch", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func exitWorker(logger *logging.Logger, operation, errorClass string) {

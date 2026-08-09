@@ -156,3 +156,35 @@ func TestEventValidationRejectsSecretBearingSafePayload(t *testing.T) {
 		t.Fatalf("error = %v, want safe-payload rejection", err)
 	}
 }
+
+func TestOpenProtectedPayloadAuthenticatesEventAndDoesNotExposePlaintext(t *testing.T) {
+	writer, err := NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := Event{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Type: "identity.email_verification_requested", SchemaVersion: 1, SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "ACCOUNT", AggregateID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", AggregateRevision: 1, CorrelationID: "request-1"}
+	reservation, err := writer.ReserveProtectedPayload(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := writer.protect(context.Background(), event, VerificationDelivery{Destination: "student@example.com", Locale: "en", TemplateContract: "student-email-verification-v1", VerificationToken: "TOKEN_CANARY", ExpiresAt: time.Now().Add(time.Hour)}, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := StoredProtectedPayload{KeyVersion: sealed.KeyVersion, Nonce: sealed.Nonce, Ciphertext: sealed.Ciphertext}
+	var opened VerificationDelivery
+	if err := writer.OpenProtectedPayload(context.Background(), event, stored, &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.VerificationToken != "TOKEN_CANARY" || opened.Destination != "student@example.com" {
+		t.Fatalf("opened=%+v", opened)
+	}
+	event.AggregateRevision++
+	err = writer.OpenProtectedPayload(context.Background(), event, stored, &opened)
+	if err == nil {
+		t.Fatal("tampered associated data authenticated")
+	}
+	if strings.Contains(err.Error(), "TOKEN_CANARY") || strings.Contains(err.Error(), "student@example.com") {
+		t.Fatal("decryption error exposed protected plaintext")
+	}
+}

@@ -135,6 +135,7 @@ type CreateInvitationParams struct {
 	AdminAccountID    string
 	AdminNote         *string
 	ExternalReference *string
+	Locale            identity.Locale
 	Now               time.Time
 	TTL               time.Duration
 }
@@ -149,6 +150,13 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 	normalizedEmail, err := identity.NormalizeEmail(params.Email)
 	if err != nil {
 		return Invitation{}, "", fmt.Errorf("%w: %v", ErrInvalidEmail, err)
+	}
+	requestedLocale := params.Locale
+	if requestedLocale == "" {
+		requestedLocale = identity.LocaleArabic
+	}
+	if !requestedLocale.Valid() {
+		return Invitation{}, "", identity.ErrInvalidLocale
 	}
 
 	now := params.Now
@@ -179,7 +187,8 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 
 	// Authoritative recipient eligibility check inside transaction (FR-004, BR-082)
 	var role string
-	err = tx.QueryRow(ctx, "SELECT role FROM accounts WHERE normalized_email = $1", normalizedEmail).Scan(&role)
+	recipientLocale := requestedLocale
+	err = tx.QueryRow(ctx, "SELECT role, locale FROM accounts WHERE normalized_email = $1", normalizedEmail).Scan(&role, &recipientLocale)
 	if err == nil {
 		if role != "STUDENT" {
 			return Invitation{}, "", ErrIneligibleRecipient
@@ -278,11 +287,13 @@ func (r *Repository) CreateInvitation(ctx context.Context, params CreateInvitati
 			"purpose":           string(identity.ActionCourseAccessInvitation),
 			"course_id":         params.CourseID,
 			"secret_expires_at": expiresAt,
+			"locale":            string(recipientLocale),
+			"template_contract": "course-access-invitation-v1",
 		},
 	}
 	delivery := outbox.VerificationDelivery{
 		Destination:       normalizedEmail,
-		Locale:            "en",
+		Locale:            string(recipientLocale),
 		TemplateContract:  "course-access-invitation-v1",
 		VerificationToken: bearerToken,
 		ExpiresAt:         expiresAt,
@@ -783,7 +794,8 @@ func (r *Repository) ApproveInvitation(ctx context.Context, params ApproveInvita
 	}
 
 	var role, status string
-	err = tx.QueryRow(ctx, "SELECT role, status FROM accounts WHERE id = $1::uuid", studentAccountID).Scan(&role, &status)
+	var recipientLocale identity.Locale
+	err = tx.QueryRow(ctx, "SELECT role, status, locale FROM accounts WHERE id = $1::uuid", studentAccountID).Scan(&role, &status, &recipientLocale)
 	if err != nil || role != "STUDENT" {
 		return ApproveInvitationResult{}, ErrIneligibleRecipient
 	}
@@ -914,11 +926,13 @@ func (r *Repository) ApproveInvitation(ctx context.Context, params ApproveInvita
 			"course_id":            inv.CourseID,
 			"source_invitation_id": inv.ID,
 			"access_ends_at":       ent.AccessEndsAt.UTC().Format(time.RFC3339),
+			"locale":               string(recipientLocale),
+			"template_contract":    "course-access-granted-v1",
 		},
 	}
 	notice := outbox.NoticeDelivery{
 		Destination:      inv.NormalizedEmail,
-		Locale:           "en",
+		Locale:           string(recipientLocale),
 		TemplateContract: "course-access-granted-v1",
 	}
 	_, err = r.outboxWriter.Append(ctx, tx, outboxEvt, notice)
@@ -937,7 +951,7 @@ func (r *Repository) ApproveInvitation(ctx context.Context, params ApproveInvita
 }
 
 func (r *Repository) RejectInvitation(ctx context.Context, params RejectInvitationParams) (Invitation, error) {
-	if r == nil || r.pool == nil {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
 		return Invitation{}, errors.New("repository is not initialized")
 	}
 	invID := strings.TrimSpace(params.InvitationID)
@@ -1025,6 +1039,26 @@ func (r *Repository) RejectInvitation(ctx context.Context, params RejectInvitati
 		return Invitation{}, fmt.Errorf("writing audit event: %w", err)
 	}
 
+	var recipientLocale identity.Locale
+	if err := tx.QueryRow(ctx, `SELECT locale FROM accounts WHERE normalized_email=$1`, inv.NormalizedEmail).Scan(&recipientLocale); err != nil {
+		return Invitation{}, fmt.Errorf("resolving rejected invitation locale: %w", err)
+	}
+	rejectedEvent := outbox.Event{
+		ID: uuid.NewString(), Type: "access.invitation_rejected", SchemaVersion: 1,
+		SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "COURSE_ACCESS_INVITATION",
+		AggregateID: inv.ID, AggregateRevision: 2, CorrelationID: uuid.NewString(),
+		SafePayload: map[string]any{
+			"course_id": inv.CourseID, "locale": string(recipientLocale),
+			"template_contract": "course-access-invitation-rejected-v1",
+		},
+	}
+	if _, err := r.outboxWriter.Append(ctx, tx, rejectedEvent, outbox.NoticeDelivery{
+		Destination: inv.NormalizedEmail, Locale: string(recipientLocale),
+		TemplateContract: "course-access-invitation-rejected-v1",
+	}); err != nil {
+		return Invitation{}, fmt.Errorf("writing rejected invitation notification intent: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return Invitation{}, fmt.Errorf("committing transaction: %w", err)
 	}
@@ -1033,7 +1067,7 @@ func (r *Repository) RejectInvitation(ctx context.Context, params RejectInvitati
 }
 
 func (r *Repository) CancelInvitation(ctx context.Context, params CancelInvitationParams) (Invitation, error) {
-	if r == nil || r.pool == nil {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
 		return Invitation{}, errors.New("repository is not initialized")
 	}
 	invID := strings.TrimSpace(params.InvitationID)
@@ -1119,6 +1153,32 @@ func (r *Repository) CancelInvitation(ctx context.Context, params CancelInvitati
 	`, params.AdminAccountID, params.AdminAccountID, inv.ID, metadata)
 	if err != nil {
 		return Invitation{}, fmt.Errorf("writing audit event: %w", err)
+	}
+
+	recipientLocale := identity.LocaleArabic
+	localeErr := tx.QueryRow(ctx, `SELECT locale FROM accounts WHERE normalized_email=$1`, inv.NormalizedEmail).Scan(&recipientLocale)
+	if errors.Is(localeErr, pgx.ErrNoRows) {
+		localeErr = tx.QueryRow(ctx, `SELECT safe_payload->>'locale' FROM outbox_events
+			WHERE event_type='access.invitation_issued' AND aggregate_type='COURSE_ACCESS_INVITATION'
+			AND aggregate_id=$1::uuid ORDER BY occurred_at ASC LIMIT 1`, inv.ID).Scan(&recipientLocale)
+	}
+	if localeErr != nil && !errors.Is(localeErr, pgx.ErrNoRows) {
+		return Invitation{}, fmt.Errorf("resolving cancelled invitation locale: %w", localeErr)
+	}
+	cancelledEvent := outbox.Event{
+		ID: uuid.NewString(), Type: "access.invitation_cancelled", SchemaVersion: 1,
+		SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "COURSE_ACCESS_INVITATION",
+		AggregateID: inv.ID, AggregateRevision: 2, CorrelationID: uuid.NewString(),
+		SafePayload: map[string]any{
+			"course_id": inv.CourseID, "locale": string(recipientLocale),
+			"template_contract": "course-access-invitation-cancelled-v1",
+		},
+	}
+	if _, err := r.outboxWriter.Append(ctx, tx, cancelledEvent, outbox.NoticeDelivery{
+		Destination: inv.NormalizedEmail, Locale: string(recipientLocale),
+		TemplateContract: "course-access-invitation-cancelled-v1",
+	}); err != nil {
+		return Invitation{}, fmt.Errorf("writing cancelled invitation notification intent: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -1233,6 +1293,16 @@ func (r *Repository) ResendInvitation(ctx context.Context, params ResendInvitati
 	if err != nil {
 		return Invitation{}, "", fmt.Errorf("writing audit event: %w", err)
 	}
+	recipientLocale := identity.LocaleArabic
+	localeErr := tx.QueryRow(ctx, `SELECT locale FROM accounts WHERE normalized_email=$1`, inv.NormalizedEmail).Scan(&recipientLocale)
+	if errors.Is(localeErr, pgx.ErrNoRows) {
+		localeErr = tx.QueryRow(ctx, `SELECT safe_payload->>'locale' FROM outbox_events
+			WHERE event_type='access.invitation_issued' AND aggregate_id=$1::uuid
+			ORDER BY occurred_at ASC LIMIT 1`, inv.ID).Scan(&recipientLocale)
+	}
+	if localeErr != nil && !errors.Is(localeErr, pgx.ErrNoRows) {
+		return Invitation{}, "", fmt.Errorf("resolving invitation locale: %w", localeErr)
+	}
 
 	outboxEvt := outbox.Event{
 		ID:                uuid.NewString(),
@@ -1248,11 +1318,13 @@ func (r *Repository) ResendInvitation(ctx context.Context, params ResendInvitati
 			"purpose":           string(identity.ActionCourseAccessInvitation),
 			"course_id":         inv.CourseID,
 			"secret_expires_at": expiresAt,
+			"locale":            string(recipientLocale),
+			"template_contract": "course-access-invitation-v1",
 		},
 	}
 	delivery := outbox.VerificationDelivery{
 		Destination:       inv.NormalizedEmail,
-		Locale:            "en",
+		Locale:            string(recipientLocale),
 		TemplateContract:  "course-access-invitation-v1",
 		VerificationToken: bearerToken,
 		ExpiresAt:         expiresAt,

@@ -262,6 +262,11 @@ func (h *accessHandlers) createCourseAccessInvitation(c *gin.Context) {
 	if h != nil && h.clock != nil {
 		now = h.clock()
 	}
+	locale, ok := requestedLocale(c.GetHeader("Accept-Language"))
+	if !ok {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
 
 	inv, _, err := h.repo.CreateInvitation(c.Request.Context(), access.CreateInvitationParams{
 		CourseID:          body.CourseID,
@@ -269,6 +274,7 @@ func (h *accessHandlers) createCourseAccessInvitation(c *gin.Context) {
 		AdminAccountID:    adminAccountID,
 		AdminNote:         body.AdminNote,
 		ExternalReference: body.ExternalReference,
+		Locale:            locale,
 		Now:               now,
 	})
 	if err != nil {

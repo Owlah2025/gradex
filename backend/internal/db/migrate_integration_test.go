@@ -125,8 +125,9 @@ var (
 		"media_outbox_dispatches", "scan_attempts", "processing_attempts", "video_renditions",
 		"legacy_media_mappings", "entitlements", "entitlement_adjustments",
 	}
-	protectedLearningTables = []string{"enrollments", "content_reports"}
-	courseAccessGrantTables = []string{"course_access_invitations"}
+	protectedLearningTables  = []string{"enrollments", "content_reports"}
+	courseAccessGrantTables  = []string{"course_access_invitations"}
+	transactionalEmailTables = []string{"transactional_email_deliveries", "transactional_email_attempts"}
 )
 
 func allTables() []string {
@@ -139,7 +140,8 @@ func allTables() []string {
 	all = append(all, catalogTables...)
 	all = append(all, mediaTables...)
 	all = append(all, protectedLearningTables...)
-	return append(all, courseAccessGrantTables...)
+	all = append(all, courseAccessGrantTables...)
+	return append(all, transactionalEmailTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -628,11 +630,11 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
-func TestMaxSchemaVersionTracksCourseAccessGrantSchema(t *testing.T) {
+func TestMaxSchemaVersionTracksTransactionalEmailSchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
-	if MaxSchemaVersion != CourseAccessGrantSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want CourseAccessGrantSchemaVersion %d", MaxSchemaVersion, CourseAccessGrantSchemaVersion)
+	if MaxSchemaVersion != TransactionalEmailSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want TransactionalEmailSchemaVersion %d", MaxSchemaVersion, TransactionalEmailSchemaVersion)
 	}
 }
 

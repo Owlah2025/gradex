@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	transactionalemail "github.com/Owlah2025/gradex/backend/internal/email"
 )
 
 func decode(t *testing.T, line string) map[string]any {
@@ -115,6 +117,26 @@ func TestRequestCompletedEmitsAgreedFields(t *testing.T) {
 	}
 	if _, ok := rec["time"]; ok {
 		t.Error("slog's default time key should have been renamed")
+	}
+}
+
+func TestTransactionalEmailTelemetryHasOnlySafeOperationalFields(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "gradex-worker", "production", slog.LevelInfo).ObserveTransactionalEmail(transactionalemail.LifecycleEvent{
+		Phase: transactionalemail.PhasePermanentFailure, EventID: "3dc6865c-4cb6-4c92-b008-4803795a98f8",
+		Template: "student-email-verification-v1", Locale: "ar", Provider: "resend",
+		Attempt: 1, FailureClass: "provider_rejected", ProviderCode: "invalid_to",
+	})
+	record := decode(t, buf.String())
+	for _, required := range []string{"event_id", "template", "locale", "provider", "attempt", "failure_class", "provider_code"} {
+		if _, ok := record[required]; !ok {
+			t.Errorf("transactional email record lacks %s", required)
+		}
+	}
+	for _, forbidden := range []string{"recipient", "email", "subject", "text", "html", "url", "token", "body", "error"} {
+		if _, ok := record[forbidden]; ok {
+			t.Errorf("transactional email record exposed forbidden field %s", forbidden)
+		}
 	}
 }
 

@@ -5,7 +5,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -149,15 +148,6 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	return router
 }
 
-// journeyBearer reproduces a deterministic action-secret bearer.
-//
-// The services are seeded with repeating fixed bytes, so the nth secret is
-// predictable. That is what lets the journey follow an emailed link without a
-// mail transport in the loop.
-func journeyBearer(fill byte) string {
-	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32))
-}
-
 type journeyBrowser struct {
 	t       *testing.T
 	router  *gin.Engine
@@ -261,6 +251,7 @@ func journeyRegistration() string {
 func TestCompleteStudentAuthenticationJourney(t *testing.T) {
 	pool := freshHTTPAdmissionPool(t)
 	router := realJourneyRouter(t, pool)
+	dispatcher, sender := transactionalEmailHarness(t, pool, "test-v1", bytes.Repeat([]byte{0x42}, 32))
 	browser := newJourneyBrowser(t, router)
 	ctx := context.Background()
 
@@ -271,10 +262,12 @@ func TestCompleteStudentAuthenticationJourney(t *testing.T) {
 		t.Fatalf("registration = %d, want 202 (%s)", response.Code, response.Body)
 	}
 
-	// 2. Verify, following the first deterministic action secret.
+	// 2. Dispatch and follow the credential from the actual rendered email.
+	dispatchTransactionalEmail(t, dispatcher)
+	verificationToken := actionCredential(t, sender.Messages(), "/verify-email/result")
 	if response := browser.send(
 		http.MethodPost, "/api/v1/email-verifications",
-		`{"token":"`+journeyBearer(0x71)+`"}`,
+		`{"token":"`+verificationToken+`"}`,
 	); response.Code != http.StatusOK {
 		t.Fatalf("verification = %d, want 200 (%s)", response.Code, response.Body)
 	}
@@ -350,9 +343,11 @@ func TestCompleteStudentAuthenticationJourney(t *testing.T) {
 	); response.Code != http.StatusAccepted {
 		t.Fatalf("reset request = %d, want 202 (%s)", response.Code, response.Body)
 	}
+	dispatchTransactionalEmail(t, dispatcher)
+	resetToken := actionCredential(t, sender.Messages(), "/recover/reset")
 	completion := other.send(
 		http.MethodPost, "/api/v1/password-resets",
-		`{"token":"`+journeyBearer(0xA1)+`","password":"`+journeyNewPassword+`"}`,
+		`{"token":"`+resetToken+`","password":"`+journeyNewPassword+`"}`,
 	)
 	if completion.Code != http.StatusOK {
 		t.Fatalf("reset completion = %d, want 200 (%s)", completion.Code, completion.Body)

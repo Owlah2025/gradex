@@ -364,16 +364,70 @@ func TestDisabledGatedProviders(t *testing.T) {
 		}
 	})
 
-	t.Run("email disabled without credentials", func(t *testing.T) {
-		cfg := mustLoad(t, func(s map[string]string, _ MapSecretResolver) {
+	t.Run("production email enabled without credentials blocks startup", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
 			s["EMAIL_ENABLED"] = "true"
+		}, "EMAIL_API_KEY is required")
+	})
+}
+
+func TestTransactionalEmailConfiguration(t *testing.T) {
+	configureResend := func(s map[string]string, sec MapSecretResolver) {
+		s["EMAIL_ENABLED"] = "true"
+		s["EMAIL_PROVIDER"] = "resend"
+		s["EMAIL_FROM_ADDRESS"] = "notifications@gradex.kw"
+		s["EMAIL_FROM_NAME"] = "Gradex"
+		s["EMAIL_REPLY_TO"] = "support@gradex.kw"
+		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "email-v1"
+		sec["EMAIL_API_KEY"] = "resend-key-canary"
+		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("e", 32)
+	}
+
+	t.Run("production Resend loads typed settings", func(t *testing.T) {
+		cfg := mustLoad(t, configureResend)
+		if !cfg.Email().Enabled() || cfg.Email().Provider() != EmailProviderResend {
+			t.Fatalf("email settings = enabled %t provider %q reason %q", cfg.Email().Enabled(), cfg.Email().Provider(), cfg.Email().Reason())
+		}
+		if cfg.Email().FromAddress() != "notifications@gradex.kw" || cfg.Email().FromName() != "Gradex" || cfg.Email().ReplyTo() != "support@gradex.kw" {
+			t.Fatalf("unexpected sender settings: address %q name %q reply-to %q", cfg.Email().FromAddress(), cfg.Email().FromName(), cfg.Email().ReplyTo())
+		}
+		if cfg.Email().APIKey().Expose() != "resend-key-canary" || cfg.Email().Timeout() != 10*time.Second {
+			t.Fatal("Resend secret or timeout was not preserved")
+		}
+	})
+
+	t.Run("production rejects fake", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configureResend(s, sec)
+			s["EMAIL_PROVIDER"] = "fake"
+		}, "EMAIL_PROVIDER=resend")
+	})
+
+	t.Run("production worker rejects disabled email", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+			s["SERVICE_ROLE"] = "worker"
+		}, "EMAIL_ENABLED must be true")
+	})
+
+	t.Run("development fake remains deterministic mode", func(t *testing.T) {
+		cfg := mustLoad(t, func(s map[string]string, sec MapSecretResolver) {
+			s["APP_ENV"] = "development"
+			s["PUBLIC_ORIGIN"] = "http://localhost:3000"
+			s["EMAIL_ENABLED"] = "true"
+			s["EMAIL_PROVIDER"] = "fake"
+			s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
+			sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
 		})
-		if cfg.Email().Enabled() {
-			t.Error("email should be disabled when EMAIL_API_KEY is absent")
+		if !cfg.Email().Enabled() || cfg.Email().Provider() != EmailProviderFake {
+			t.Fatalf("development fake email not enabled: %q", cfg.Email().Reason())
 		}
-		if !strings.Contains(cfg.Email().Reason(), "EMAIL_API_KEY is absent") {
-			t.Errorf("unexpected reason %q", cfg.Email().Reason())
-		}
+	})
+
+	t.Run("malformed timeout fails closed", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configureResend(s, sec)
+			s["EMAIL_PROVIDER_TIMEOUT"] = "31s"
+		}, "between 1s and 30s")
 	})
 }
 

@@ -1,6 +1,6 @@
-# Course Access Grant — Private Beta Launch Runbook (August 15)
+# Gradex Private Beta Launch Runbook (August 15)
 
-**Feature**: S6 Course Access Grant | **Version**: 1.0.0 | **Target Date**: 2026-08-15
+**Scope**: launch runtime, transactional email, and Course access | **Target Date**: 2026-08-15
 
 ---
 
@@ -19,6 +19,13 @@ The application requires the following environment variables in production:
 | `REDIS_TLS_SERVER_NAME` | `<CERTIFICATE_HOSTNAME>` | Optional certificate name override |
 | `REDIS_TLS_CA_CERT_FILE` | blank or mounted PEM path | Optional private CA; blank uses system roots |
 | `PUBLIC_ORIGIN` | `https://gradex.example` | Production origin for CSRF and action secrets |
+| `EMAIL_ENABLED` | `true` | Required for the production worker; production refuses disabled delivery |
+| `EMAIL_PROVIDER` | `resend` | Approved production transactional provider; `fake` is development/test only |
+| `EMAIL_API_KEY` | secret | Resend API key; inject through the production secret facility |
+| `EMAIL_FROM_ADDRESS` | verified sender address | Bare address on the verified Resend sender domain |
+| `EMAIL_FROM_NAME` | `Gradex` | Safe display name shown to recipients |
+| `EMAIL_REPLY_TO` | optional bare address | Optional operational reply address |
+| `EMAIL_PROVIDER_TIMEOUT` | `10s` | Per-request bound; accepted range is 1–30 seconds |
 | `CORS_ALLOWED_ORIGINS` | `https://gradex.example` | CORS policy restriction |
 | `PLAYBACK_TOKEN_SECRET` | `<SECURE_RANDOM_SECRET>` | HMAC key for media playback tokens |
 
@@ -26,17 +33,17 @@ The application requires the following environment variables in production:
 
 ## 2. Database Migration & Schema Verification
 
-Deploy schema version 15 before starting API or worker instances:
+Deploy schema version 16 before starting API or worker instances:
 
 ```bash
-# 1. Run migrations to schema version 15
+# 1. Run migrations to schema version 16
 go run ./cmd/migrate up
 
-# 2. Verify schema version equals 15
+# 2. Verify schema version equals 16
 go run ./cmd/migrate version
 ```
 
-Expected output: `Current schema version: 15`.
+Expected output: `Current schema version: 16`.
 
 ---
 
@@ -79,7 +86,59 @@ SELECT id, event_type, aggregate_id, available_at
  ORDER BY available_at DESC;
 ```
 
-Outbox delivery workers poll `outbox_events` and deliver acceptance link emails containing the single-use bearer secret.
+The worker discovers supported intents into `transactional_email_deliveries`, decrypts protected
+payloads only in memory, renders the fixed locale template, and calls the configured delivery
+adapter. PostgreSQL remains authoritative if Redis or Resend is unavailable.
+
+### Diagnose a missing transactional email
+
+Start with the Account, Invitation, Entitlement, or other safe aggregate identifier from the domain
+record. Never paste a bearer token, action URL, email body, API key, or recipient address into a query,
+ticket, log search, or evidence file.
+
+```sql
+SELECT e.id AS message_id,
+       e.event_type,
+       d.template_contract,
+       d.locale,
+       d.provider,
+       d.status,
+       d.attempt_count,
+       d.next_attempt_at,
+       d.last_failure_class,
+       d.last_provider_code,
+       d.accepted_at,
+       d.terminal_at
+  FROM outbox_events e
+  LEFT JOIN transactional_email_deliveries d ON d.event_id = e.id
+ WHERE e.aggregate_id = '<SAFE_AGGREGATE_UUID>'::uuid
+ ORDER BY e.occurred_at DESC;
+```
+
+For one message, inspect the bounded attempt history:
+
+```sql
+SELECT attempt_number, outcome, failure_class, provider_code,
+       started_at, finished_at, retry_at
+  FROM transactional_email_attempts
+ WHERE event_id = '<SAFE_MESSAGE_UUID>'::uuid
+ ORDER BY attempt_number;
+```
+
+- No delivery row means the worker has not yet discovered the intent, the event is not a supported
+  transactional contract, or its safe locale/template metadata is malformed.
+- `QUEUED` means the first attempt or a bounded retry is pending. Compare `next_attempt_at` with the
+  worker clock and check worker health.
+- `SENDING` with an expired lease is recovered by another poll. Five expired attempts become
+  `EXHAUSTED`.
+- `PERMANENT_FAILED` is not retried. Correct recipient or configuration state through its owning
+  domain workflow and issue a new intent; do not mutate the immutable outbox row.
+- `ACCEPTED` means Resend accepted the request and returned an ID. It does not prove inbox placement.
+- `EXHAUSTED` needs operator review of the safe failure class/provider code and provider health.
+
+Retry timing is 30 seconds, 2 minutes, 10 minutes, then 30 minutes through the five-attempt limit.
+Provider `Retry-After` can lengthen, but never shorten, that schedule. The stable provider
+idempotency key is derived from the immutable message UUID and is never logged.
 
 ---
 
@@ -107,7 +166,7 @@ isolated API against the restored target:
 
 If a deployment fault occurs:
 1. Roll back frontend, API, and worker artifacts to the previous approved application release.
-2. Keep the forward-compatible database schema at version 15. After real S6 grants exist, do not run
+2. Keep the forward-compatible database schema at version 16. After real S6 grants exist, do not run
    migration `0015_course_access_grant.down.sql`: it clears `source_invitation_id` and destroys grant
    provenance.
 3. For recovery proof, create a fresh separate database and restore into it. Never use the active

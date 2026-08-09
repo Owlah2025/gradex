@@ -34,7 +34,8 @@ const (
 	EnrollmentSchemaVersion           = 13
 	ProtectedLearningSchemaVersion    = 14
 	CourseAccessGrantSchemaVersion    = 15
-	MaxSchemaVersion                  = CourseAccessGrantSchemaVersion
+	TransactionalEmailSchemaVersion   = 16
+	MaxSchemaVersion                  = TransactionalEmailSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
