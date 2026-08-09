@@ -38,6 +38,17 @@ func admissionService(
 	randomByte byte,
 ) *AdmissionService {
 	t.Helper()
+	return admissionServiceWithCompromised(t, pool, now, randomByte, clearCompromisedSource())
+}
+
+func admissionServiceWithCompromised(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	now time.Time,
+	randomByte byte,
+	compromised CompromisedRangeSource,
+) *AdmissionService {
+	t.Helper()
 	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x51}, 32))
 	if err != nil {
 		t.Fatalf("constructing outbox writer: %v", err)
@@ -49,7 +60,7 @@ func admissionService(
 	service, err := NewAdmissionService(AdmissionServiceOptions{
 		Pool:            pool,
 		Policies:        testPolicyResolver(t),
-		Compromised:     clearCompromisedSource(),
+		Compromised:     compromised,
 		Outbox:          writer,
 		VerificationTTL: time.Hour,
 		Now:             func() time.Time { return now },

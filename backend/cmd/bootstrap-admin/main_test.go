@@ -7,6 +7,9 @@ import (
 	"go/token"
 	"strings"
 	"testing"
+
+	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
 
 // Bootstrap close condition 2, argv half: "the plaintext bootstrap password is
@@ -84,5 +87,44 @@ func TestSourceNeverReadsAPasswordFromArgs(t *testing.T) {
 func TestParseFlagsRejectsPositionalArguments(t *testing.T) {
 	if _, err := parseFlags([]string{"unexpected"}, nil); err == nil {
 		t.Fatal("expected a positional argument to be rejected")
+	}
+}
+
+func TestProductionBootstrapCompositionSelectsHIBP(t *testing.T) {
+	settings := map[string]string{
+		"APP_ENV":                               "production",
+		"PUBLIC_ORIGIN":                         "https://gradex.example",
+		"CORS_ALLOWED_ORIGINS":                  "https://gradex.example",
+		"CORS_ALLOW_CREDENTIALS":                "true",
+		"REDIS_ADDR":                            "redis:6379",
+		"REDIS_TLS_ENABLED":                     "true",
+		"S3_ENDPOINT":                           "https://storage.example",
+		"S3_BUCKET":                             "gradex-media",
+		"AUTH_FAKE_MODE":                        "false",
+		"PASSWORD_SCREEN_MODE":                  "adapter",
+		"COMPROMISED_PASSWORD_ADAPTER_APPROVED": "true",
+	}
+	secrets := config.MapSecretResolver{
+		"DATABASE_URL":                 "postgres://gradex:pw@db:5432/gradex",
+		"REDIS_PASSWORD":               "redis-password",
+		"S3_ACCESS_KEY":                "access",
+		"S3_SECRET_KEY":                "secret",
+		"PLAYBACK_TOKEN_SECRET":        strings.Repeat("p", 32),
+		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
+		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
+		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
+	}
+	cfg, err := config.LoadFrom(config.MapLookup(settings), secrets)
+	if err != nil {
+		t.Fatalf("loading production bootstrap config: %v", err)
+	}
+
+	source, err := buildBootstrapCompromisedSource(cfg)
+	if err != nil {
+		t.Fatalf("building production bootstrap source: %v", err)
+	}
+	if source.Scheme() != identity.CompromisedSHA1V1 || source.PrefixLength() != 5 {
+		t.Fatalf("bootstrap source = %s/%d, want HIBP SHA-1/5", source.Scheme(), source.PrefixLength())
 	}
 }

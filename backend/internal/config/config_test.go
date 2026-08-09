@@ -436,8 +436,8 @@ func TestDevelopmentAdmissionConfigurationLoadsExplicitFixtures(t *testing.T) {
 	if admission.RateLimitTimeout() != 100*time.Millisecond {
 		t.Errorf("RateLimitTimeout = %s, want 100ms", admission.RateLimitTimeout())
 	}
-	if admission.CompromisedPasswordTimeout() != 2*time.Second {
-		t.Errorf("CompromisedPasswordTimeout = %s, want 2s", admission.CompromisedPasswordTimeout())
+	if admission.CompromisedPasswordTimeout() != 3*time.Second {
+		t.Errorf("CompromisedPasswordTimeout = %s, want 3s", admission.CompromisedPasswordTimeout())
 	}
 	for name, secret := range map[string]Secret{
 		"anonymous cookie":  admission.AnonymousCookieSigningKey(),
