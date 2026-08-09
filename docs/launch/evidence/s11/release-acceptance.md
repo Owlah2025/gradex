@@ -46,6 +46,16 @@ Branch: `s11-release-e2e-20260808`
 - Fail-closed configuration: missing/invalid identity or contact fields, non-HTTPS public origin, unsafe endpoint composition, or staging sentinels in public mode prevent startup/rendering. Controlled staging accepts both exact sentinels only at `https://gradex.localhost:18443`.
 - Result: **LG-011 software blocker resolved**. Real public production remains externally blocked until an actual legal registration number and registered address replace both staging sentinels.
 
+### Independent closure review
+
+- Approved S11 implementation head: `7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`
+- Independently reviewed range: `6bf694daa7a8a823a849a4e2da9588988b6d2358..7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`
+- Verdict: **APPROVED WITH NON-BLOCKING FINDINGS** — 0 Critical, 0 High; S11 technically ready to close: yes.
+- S11 status: **CLOSED**. This closure does not reopen `LG-011` or `LG-021`.
+- Known non-blocking follow-ups: reconcile operator/contact configuration authority and versioning before public T047; expose all legal settings in `production.env.example`; replace the old hard-coded `gradex.com` in global frontend site metadata; maintain development-only dependencies; and remove Markdown hard-break diff-check noise.
+- External requirements outside S11: Hostinger KVM 2; live private Cloudflare R2; real domain / Cloudflare DNS; actual legal registration number; actual registered address; and public T047 deployment with an acceptance-suite rerun.
+- A subsequent documentation-only closure record may record this verdict, but it is not the independently approved implementation head.
+
 ## Acceptance coverage
 
 The local isolated Chromium journey proves the complete critical path through real browser screens, the real Go API, real PostgreSQL, real sessions, and the existing media fixture:
@@ -164,10 +174,12 @@ No commerce, S8 support/Entitlement-update, provider deployment, or product feat
 
 ## Disposition
 
-- Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
-- Launch-blocking S11 software defects: none. LG-021 and the LG-011 software blocker are resolved.
-- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`.
-- Ready for independent review: yes, as an exact acceptance implementation/evidence range.
-- Ready for independent closure review: **yes, technically**. S11 is not independently approved or closed by this builder record.
-- Remaining external public-production requirement: replace `LEGAL_REGISTRATION_NUMBER` and `LEGAL_REGISTERED_ADDRESS` with actual legal identity values before public T047. The approved staging sentinels are not launch values.
-- Recommended next launch-critical action: freeze this remediation and request independent S11 closure review. Do not start S8 or T047/T048 in this pass.
+- Remaining S11 implementation/validation tasks: none.
+- Launch-blocking S11 software defects: none. `LG-021` and the `LG-011` software blocker remain resolved.
+- S11 is **CLOSED** at independently approved implementation head `7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`.
+- Independent verdict: **APPROVED WITH NON-BLOCKING FINDINGS** — 0 Critical, 0 High — for
+  `6bf694daa7a8a823a849a4e2da9588988b6d2358..7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`.
+- The closure record is documentation only and is not the independently approved implementation head.
+- Remaining public-production requirements are external to S11: Hostinger KVM 2, live private Cloudflare R2,
+  real domain / Cloudflare DNS, actual legal registration number, actual registered address, and public T047
+  deployment plus an acceptance-suite rerun.

@@ -1,19 +1,17 @@
 # Gradex Launch Status
 
-> **2026-08-09 S11 LG-011 remediation:** All 29 S11 tasks remain complete. The exact Product
-> Owner-approved bilingual policy package, production `ApprovedPolicySetResolver`, four legal routes,
-> strict public/staging identity validation, acceptance persistence, and combined HIBP composition
-> are implemented. Local Chromium and the disposable production-like HTTPS journey now begin with
-> real registration and pass through protected learning. `LG-011` software and the
-> production-registration High are resolved; Critical/High/Medium are zero and the existing
-> development-tooling audit item remains Low. S11 is **not closed**: it is technically ready for
-> independent closure review. Actual legal registration number and registered address remain
-> external requirements before public T047. Frozen independent-review candidate: remediation
-> `9212e637d152a79d2db82c44bebac3d60001bd7c..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`;
-> cumulative S11
-> `6bf694daa7a8a823a849a4e2da9588988b6d2358..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`.
-> This subsequent documentation-only marker records the immutable evidence commit and is outside the
-> reviewed range, matching the existing S11 freeze convention.
+> **2026-08-09 S11 closure:** **S11 is CLOSED** at the independently approved implementation head
+> `7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`. The independent reviewer inspected the complete frozen
+> range `6bf694daa7a8a823a849a4e2da9588988b6d2358..7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3` and returned
+> **`APPROVED WITH NON-BLOCKING FINDINGS`** (0 Critical, 0 High). This closure does not reopen `LG-011`
+> or `LG-021`. The non-blocking follow-ups are: reconcile operator/contact configuration authority and
+> versioning before public T047; expose all legal settings in `production.env.example`; replace the
+> old hard-coded `gradex.com` in global frontend site metadata; maintain development-only dependencies;
+> and remove Markdown hard-break diff-check noise. They are not S11 closure blockers. The remaining
+> external requirements are Hostinger KVM 2, live private Cloudflare R2, real domain/Cloudflare DNS,
+> actual legal registration number, actual registered address, and public T047 deployment plus an
+> acceptance-suite rerun. Any later documentation-only closure-marker commit records this verdict but
+> is not the independently approved implementation head.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >
