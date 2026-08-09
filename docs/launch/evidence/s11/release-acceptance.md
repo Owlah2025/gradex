@@ -36,6 +36,9 @@ Branch: `s11-release-e2e-20260808`
 - Approved authority/design: `54c529f2d0039cca871246818428239f2a00a33e` — exact Product Owner policy package and implementation design
 - Implementation: `037ac63c029bca9cfd78677fffe7f02ca1f2dfba` — production policy resolver, legal configuration, four public routes, acceptance metadata, and production composition
 - Regression/acceptance: `5ec8a50a964c0e38d8cc8f3661b0f603966a8faf` — configuration, resolver, persistence, HIBP composition, legal-page, and complete release-journey evidence
+- Documentation/evidence commit and frozen remediation candidate end: `042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`
+- Frozen LG-011 remediation range: `9212e637d152a79d2db82c44bebac3d60001bd7c..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`
+- Cumulative S11 range for independent review: `6bf694daa7a8a823a849a4e2da9588988b6d2358..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`
 - Approved policy set: `gradex-legal-2026-08-09-v1`; set, Privacy, and Terms version `2026-08-09-v1`; effective date `2026-08-09`; minimum age 18; Arabic primary.
 - Canonical routes: `/ar/privacy`, `/en/privacy`, `/ar/terms`, and `/en/terms`, derived from `PUBLIC_ORIGIN`.
 - Acceptance persistence: registration records the exact resolved version and locale; integration evidence proves a later policy version does not rewrite historical rows.
@@ -163,7 +166,7 @@ No commerce, S8 support/Entitlement-update, provider deployment, or product feat
 
 - Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
 - Launch-blocking S11 software defects: none. LG-021 and the LG-011 software blocker are resolved.
-- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
+- Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`.
 - Ready for independent review: yes, as an exact acceptance implementation/evidence range.
 - Ready for independent closure review: **yes, technically**. S11 is not independently approved or closed by this builder record.
 - Remaining external public-production requirement: replace `LEGAL_REGISTRATION_NUMBER` and `LEGAL_REGISTERED_ADDRESS` with actual legal identity values before public T047. The approved staging sentinels are not launch values.

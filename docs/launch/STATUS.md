@@ -8,8 +8,12 @@
 > production-registration High are resolved; Critical/High/Medium are zero and the existing
 > development-tooling audit item remains Low. S11 is **not closed**: it is technically ready for
 > independent closure review. Actual legal registration number and registered address remain
-> external requirements before public T047. The immutable evidence commit and frozen ranges are
-> recorded by the subsequent documentation-only marker, matching the existing S11 convention.
+> external requirements before public T047. Frozen independent-review candidate: remediation
+> `9212e637d152a79d2db82c44bebac3d60001bd7c..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`;
+> cumulative S11
+> `6bf694daa7a8a823a849a4e2da9588988b6d2358..042d6f7fcda1c1ad04ee56bdbf1ddb2fb73ce326`.
+> This subsequent documentation-only marker records the immutable evidence commit and is outside the
+> reviewed range, matching the existing S11 freeze convention.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >
