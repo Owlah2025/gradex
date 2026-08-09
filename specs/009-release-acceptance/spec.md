@@ -81,7 +81,7 @@ The release owner can run the deployed login-to-learning selection against the e
 - A repeat approval must prove an authorized `200` idempotent response; a `401`, `403`, or generic conflict is not acceptable replay evidence.
 - An existing Enrollment is reused and Progress remains single-homed.
 - A playback response that merely contains a non-empty URL is insufficient; the protected manifest and at least one non-empty signed media object must be retrieved.
-- Registration is disabled in production mode because the approved policy and compromised-password adapters are not integrated; positive registration is proven only by the real development harness and remains a launch blocker for public staging.
+- Registration remains disabled in production mode because approved bilingual policy content and a production policy-set adapter are absent under LG-011. The HIBP compromised-password adapter is integrated under D-075; positive registration remains proven only by the real development harness until LG-011 closes.
 - The suite must not reset, migrate down, or otherwise mutate the active application database.
 
 ## Requirements
@@ -137,7 +137,7 @@ The release owner can run the deployed login-to-learning selection against the e
 ## Assumptions
 
 - S1 identity, S4 protected delivery, S5 protected learning, S6 access granting, and S12 disposable staging behavior at the starting revision are inputs; S11 composes and strengthens their acceptance evidence rather than reopening their product scopes.
-- The disposable production-mode environment cannot safely enable registration at this revision: startup rejects the missing approved policy and compromised-password adapters. S11 does not bypass that gate.
+- The disposable production-mode environment cannot safely enable registration at this revision: startup rejects the missing approved LG-011 policy-set adapter after successfully composing HIBP screening. S11 does not bypass that gate.
 - T047 public infrastructure remains externally blocked and is not required to complete the local production-like S11 run.
 - Existing seeded Admin and unrelated Student fixtures remain test-only identities and are never production grant paths.
 - S8 and Entitlement correction/update behavior remain explicitly out of scope because migration 0015 provenance reconciliation is unresolved.

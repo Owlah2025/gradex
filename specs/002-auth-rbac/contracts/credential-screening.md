@@ -1,6 +1,6 @@
 # Contract: Compromised-Password Screening Boundary
 
-**Status**: Provider-neutral S1B1 contract; production adapter blocked by LG-021
+**Status**: Provider-neutral shared contract; HIBP production adapter approved by D-075
 **Rule**: BR-002
 
 ## Ownership
@@ -29,8 +29,8 @@ type RangeResult struct {
 }
 ```
 
-The exact approved scheme name and prefix size are adapter configuration, not caller-selected
-values. Requirements:
+The production adapter uses SHA-1 and a five-character uppercase hexadecimal prefix under D-075;
+scheme and prefix size remain adapter-owned rather than caller-selected. Requirements:
 
 - the lookup representation is derived inside `prepareCredential`;
 - the adapter receives only a bounded prefix, never plaintext or the complete derived digest;
@@ -56,9 +56,11 @@ The deterministic local source:
 - performs no network access;
 - is explicitly labeled development/test-only.
 
-Production configuration must not silently substitute this fixture. Until LG-021 supplies an
-approved source/license/privacy/failure/monitoring contract and staging vectors, production
-credential creation remains unavailable.
+Production configuration must not silently substitute this fixture. Adapter mode uses the fixed HIBP
+Range API source with verified HTTPS, `Add-Padding: true`, an accurate Gradex user agent, a
+three-second default total request bound, and no added retry. Positive counts are returned for local
+comparison; zero-count padding records are discarded. Provider failure remains a fail-closed
+dependency result.
 
 ## Verification
 
@@ -73,4 +75,4 @@ Tests prove:
    ordinary outbox JSON, or API output;
 7. the repository plaintext-exposure guard still recognizes one reviewed exposure function.
 
-The contract does not select or endorse a live provider.
+The production provider decision is [D-075](../../../docs/DECISIONS.md#d-075--hibp-pwned-passwords-range-api-is-the-production-compromised-password-source).

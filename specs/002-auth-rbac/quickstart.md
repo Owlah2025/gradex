@@ -1,7 +1,7 @@
 # S1B1 Student Admission Validation Quickstart
 
 This guide validates the implemented S1B1 slice. It does not prove production readiness or resolve
-LG-003, LG-004, LG-011, LG-015, LG-018, LG-019, or LG-021.
+LG-003, LG-004, LG-011, LG-015, LG-018, or LG-019. LG-021 was resolved later by D-075.
 
 ## Prerequisites
 

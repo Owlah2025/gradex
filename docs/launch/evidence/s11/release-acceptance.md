@@ -16,6 +16,17 @@ Branch: `s11-release-e2e-20260808`
 - S11 artifacts: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `quickstart.md`, `contracts/release-suite.md`, `contracts/traceability.md`, `checklists/requirements.md`, and `tasks.md` under `specs/009-release-acceptance/`
 - Task count: 29. Tasks T001–T028 are complete in the evidence candidate; T029 is completed by the subsequent documentation-only freeze marker.
 
+### Production registration remediation
+
+- Remediation starting HEAD: `0e8f3ed0de858462f8bdd6fab42acc056ca703f0`
+- Approved design: `bd7555e` — HIBP production adapter design and LG-011 scope boundary
+- Implementation: `710dbd3` — HIBP Range API adapter, shared runtime composition, bootstrap wiring, and three-second default
+- Regression tests: `d768dd8` — deterministic TLS/provider tests, production composition tests, and real-PostgreSQL registration evidence
+- TLS regression: `7936905` — explicit proof that an untrusted server certificate fails closed before an HTTP request is accepted
+- Original High root cause: production composition had only development policy and deterministic compromised-password fixtures; non-development builders refused both missing dependencies as one combined error.
+- LG-021 result: **RESOLVED** under D-075. HIBP is composed for production credential screening and fails closed.
+- LG-011 result: **OPEN**. No approved bilingual policy content, versions, published URLs, or production `PolicySetResolver` exists, so production registration still refuses startup at that exact boundary.
+
 ## Acceptance coverage
 
 The local isolated Chromium journey proves the complete critical path through real browser screens, the real Go API, real PostgreSQL, real sessions, and the existing media fixture:
@@ -53,6 +64,26 @@ All commands below ran from the candidate containing `182bfa5` plus no uncommitt
 | Production dependencies | `npm audit --omit=dev` | PASS; 0 vulnerabilities |
 | Full dependency audit | `npm audit` | FINDING; 2 High-severity advisories in ESLint-only transitive development dependencies |
 
+### Remediation validation on 2026-08-09
+
+| Gate | Command | Result |
+|---|---|---|
+| Backend build/static | `go build ./...`; `go vet ./...`; `go vet -tags=integration ./...` | PASS |
+| Backend unit | `go test ./...` | PASS across all packages |
+| HIBP unit/composition | `go test ./internal/identity ./internal/config ./cmd/api ./cmd/bootstrap-admin` | PASS |
+| Registration integration | `go test -tags=integration ./internal/identity -run 'TestProductionHIBPRegistration' -count=1` | PASS; valid, policy-invalid, compromised, and unavailable scenarios |
+| Complete affected integration | `go test -tags=integration ./internal/identity -count=1` | PASS in 74.223 s |
+| API composition integration | `go test -tags=integration ./cmd/api -count=1` | PASS in 1.068 s |
+| Race | `go test -race ./internal/identity -count=1`; focused tagged registration race | PASS in 2.439 s and 4.254 s |
+| Live provider compatibility | `go test -tags=provider ./internal/identity -run '^TestHIBPProviderCompatibility$' -count=1` | PASS using fixed prefix `00000`; no password or identity input |
+| Local S11 Chromium | `npm run test:e2e:release` | PASS; 1/1 in 40.3 s against isolated database `gradex_playwright_e2e_msl8a8amynq1ebgs` |
+| S11 disposable HTTPS | `./deploy/scripts/verify-s11-release-acceptance.sh` | PASS; selected integrations, 2/2 deployed Chromium tests in 4.2 s, schema 15, state `1|1|1|1` |
+| Production dependencies | `npm audit --omit=dev` | PASS; 0 vulnerabilities |
+| Secret exposure | `./scripts/expose-guard.sh` | PASS; 13 approved exposure call sites and the existing reviewed password boundary |
+
+No frontend source changed in this remediation, so the prior complete frontend lint, typecheck, unit,
+and production-build evidence remains applicable. Chromium and deployed HTTPS regressions were rerun.
+
 ## Production-like environment
 
 - Origin: `https://gradex.localhost:18443`
@@ -61,7 +92,7 @@ All commands below ran from the candidate containing `182bfa5` plus no uncommitt
 - Active application database: `gradex` (not reset or downgraded)
 - Schema: both databases reported `15|f` (`version=15`, `dirty=false`)
 - Deployed browser result: real HTTP login plus the complete Invitation-to-protected-learning journey passed
-- Boundary: positive registration ran only in the isolated development harness. Production mode correctly refuses registration until approved policy-set and compromised-password adapters are integrated.
+- Boundary: positive registration ran only in the isolated development harness. Production composes HIBP but correctly refuses registration until the approved LG-011 policy-set adapter is integrated.
 - Portability: Playwright retains the existing validated `GRADEX_E2E_EXTERNAL_ORIGIN` contract, external run-state/database variables, and CA/SPKI settings. A T047 origin can replace the disposable origin by configuration after the missing production registration capability and external infrastructure exist.
 
 ## Reused S5/S6 evidence
@@ -78,7 +109,7 @@ All commands below ran from the candidate containing `182bfa5` plus no uncommitt
 | Severity | Finding | Launch effect |
 |---|---|---|
 | Critical | None | — |
-| High | Production registration cannot start because approved production policy-set and compromised-password adapters are not integrated. | Launch-blocking; the full public registration-to-learning journey cannot yet pass in production mode. |
+| High | Production registration cannot start because approved bilingual policy content and a production `PolicySetResolver` are absent under LG-011. | Launch-blocking; the full public registration-to-learning journey cannot yet pass in production mode. |
 | Medium | None open | — |
 | Low | `npm audit` reports `brace-expansion` and `js-yaml` advisories through ESLint development tooling; `npm audit --omit=dev` reports zero production vulnerabilities. | Non-runtime dependency-maintenance follow-up. |
 
@@ -92,11 +123,17 @@ All commands below ran from the candidate containing `182bfa5` plus no uncommitt
 
 No commerce, S8 support/Entitlement-update, provider deployment, or product feature behavior was introduced. No migration or Hostinger provider file changed.
 
+### Fixed in the registration remediation
+
+| Severity | Defect | Fix |
+|---|---|---|
+| High component (LG-021) | Adapter mode had no production implementation; API and bootstrap could use only the deterministic development source and failed closed in production. | Integrate the approved HIBP prefix-5 Range API behind `CompromisedRangeSource`, share production composition, preserve a three-second bound/no retry, and prove privacy plus zero-side-effect failures. |
+
 ## Disposition
 
 - Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
-- Launch-blocking defects: one unresolved High (production registration adapters).
+- Launch-blocking defects: one unresolved High (LG-011 production policy content and resolver). LG-021 is resolved.
 - Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
 - Ready for independent review: yes, as an exact acceptance implementation/evidence range.
-- Ready for independent closure: **no**. FR-022/SC-008 correctly prevent closure while the production-registration High remains open.
-- Recommended next launch-critical action: integrate and approve the production registration policy-set and compromised-password adapters, rerun the full S11 selection in production mode, then execute T047 when Hostinger/R2/DNS become available. Do not start S8 in this pass.
+- Ready for independent closure: **no**. FR-022/SC-008 correctly prevent closure while the LG-011 production-registration High remains open.
+- Recommended next launch-critical action: obtain and publish the approved bilingual LG-011 policy artifacts, integrate the production policy-set resolver, rerun the full S11 selection beginning with production-mode registration, and then request independent closure review. Do not start S8 or T047/T048 in this pass.

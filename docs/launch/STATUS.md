@@ -1,12 +1,13 @@
 # Gradex Launch Status
 
-> **2026-08-09 S11 release-acceptance candidate:** S11 is the active launch-critical slice. All 29
-> implementation and evidence tasks are complete subject to the documentation-only freeze marker.
-> The full isolated registration-to-learning Chromium journey and the existing S12 disposable HTTPS
-> login-to-learning journey pass at schema 15. S11 is **not closed**: production registration still
-> lacks the approved policy-set and compromised-password adapters, an unresolved launch-blocking High.
+> **2026-08-09 S11 registration-blocker remediation:** All 29 S11 tasks remain complete. The Product
+> Owner approved HIBP Pwned Passwords Range API, and the production compromised-password adapter,
+> shared composition, fail-closed tests, live fixed-prefix compatibility check, complete identity
+> integration package, isolated Chromium journey, and disposable HTTPS regression now pass. `LG-021`
+> is resolved. S11 is **not closed**: production registration still lacks approved bilingual policy
+> content and a production `PolicySetResolver` under `LG-011`, one unresolved launch-blocking High.
 > Frozen independent-review candidate:
-> `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
+> the exact remediation and cumulative ranges are recorded in the S11 evidence and freeze marker.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >

@@ -1,7 +1,7 @@
 # Gradex Launch Gates
 
 > Status: Active
-> Last Updated: 2026-07-28
+> Last Updated: 2026-08-09
 
 This register separates unresolved production-readiness work from approved product scope. An open
 gate does not silently become a requirement or assumed answer. It blocks the named milestone and
@@ -52,7 +52,7 @@ accepted launch-schedule risk rather than resolution evidence.
 | LG-018 | Select and validate transactional email delivery | Engineering + operations | Engineering starts provider/domain validation on August 6 for completion by August 12 | Approved provider/data-processing boundary, production sender domain with SPF/DKIM/DMARC, verified templates/links, bounce/suppression handling, rate limits, monitoring, and deliverability test evidence | Auth/notification adapter acceptance and production | OPEN |
 | LG-019 | Approve production operating and recovery envelope | Founder + engineering | Founder supplies budget/load/availability/RPO/RTO inputs on August 6; design remains provisional until then | System design/deployment record covering expected launch load/storage/egress, budget, availability, RPO/RTO, managed secrets, monitoring/alerting, incident runbooks, restore test, security review, and representative load test | Production architecture sign-off and release | OPEN |
 | LG-020 | Approve Instructor agreement and content-rights process | Founder + Kuwaiti counsel + operations | Founder sends the agreement/content-rights brief on August 6 | Signed bilingual/appropriate agreement covering content ownership/license/permissions, revenue share/effective version, payout/tax treatment, warranties, takedown/moderation, termination, and Course asset handoff; launch Courses have evidence | Instructor onboarding and public Course launch | OPEN |
-| LG-021 | Select and validate compromised-password screening source | Engineering + security | Engineering shortlists a privacy-preserving provider or licensed offline dataset on August 6 for validation by August 12 | Approved source and license; full passwords never leave the credential boundary; privacy-preserving query/storage contract; outage and fail-closed policy; deterministic test vectors; latency/error monitoring; successful staging validation | Credential-creation adapter acceptance and production registration/invitation/recovery/password change | OPEN |
+| LG-021 | Select and validate compromised-password screening source | Engineering + security | Completed 2026-08-09 under [D-075](DECISIONS.md#d-075--hibp-pwned-passwords-range-api-is-the-production-compromised-password-source) | HIBP Range API approved; SHA-1 prefix-5 privacy contract, verified HTTPS, three-second bound, no retry, zero-count padding behavior, fail-closed outages, deterministic TLS tests, production composition tests, live fixed-prefix compatibility check, and registration zero-side-effect integration evidence | Credential-creation adapter acceptance; production registration remains separately blocked by LG-011 | **RESOLVED** |
 
 ### Deferred with in-platform payments
 

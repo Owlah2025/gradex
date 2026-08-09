@@ -58,18 +58,18 @@ the adapter, and compares returned candidates locally. A deterministic local sou
 an unconfigured or unavailable source returns an infrastructure error and fails credential creation
 closed.
 
-**Rationale**: BR-002 requires known-compromised rejection. LG-021 explicitly prohibits a
-production-provider claim and requires full passwords to remain inside the credential boundary.
-Prefix lookup keeps plaintext and the complete derived digest away from the adapter while allowing
-provider-neutral fixtures.
+**Rationale**: BR-002 requires known-compromised rejection. The provider-neutral boundary keeps
+plaintext and the complete derived digest away from adapters while allowing deterministic fixtures.
+On 2026-08-09, D-075 selected HIBP Pwned Passwords Range API for production using SHA-1 prefix-5
+queries and local suffix comparison.
 
 **Alternatives considered**:
 
 - Keep `IsCompromised(password string)`: rejected because plaintext crosses the boundary.
 - Allow `nil` to skip screening: rejected because public credential creation would silently weaken
   policy.
-- Select a vendor now: rejected because source, license, test vectors, and privacy approval are open
-  under LG-021.
+- Select a vendor during S1B1: deferred then because source, license, test vectors, and privacy
+  approval were open. D-075 later selected HIBP for production.
 
 ## R4. Current policy acceptance is an explicit fail-closed dependency
 
@@ -283,7 +283,7 @@ requires concurrency, rollback, privacy, and leak evidence on the frozen head, n
 - **LG-018**: claim durable notification intent only, never provider acceptance or delivery.
 - **LG-019**: use explicit development/test quota fixtures; make no production SLO, capacity, or
   numeric rate-limit claim.
-- **LG-021**: use the provider-neutral boundary and deterministic fixtures; production credential
-  creation remains blocked until the source/license/privacy/availability evidence is approved.
+- **LG-021**: resolved on 2026-08-09 by D-075 and the HIBP production adapter evidence. Production
+  registration remains independently blocked by LG-011.
 
 These are resolved planning boundaries, not unresolved implementation questions.

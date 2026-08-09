@@ -127,7 +127,7 @@ accounting gates did not move**, and engineering may not move them.
 | `LG-005`, `LG-006`, `LG-011` | Legal launch | Aug 12 | **No launch.** Publishing without the required registration or bilingual policies is a legal blocker. Moving payment off-platform does not answer whether a Kuwait course platform must register |
 | `LG-016` | Financial record-keeping for externally collected payment | Aug 12 | Unresolved treatment of how off-platform receipts must be recorded and retained. Off-platform collection may move this obligation rather than remove it |
 | `LG-018` | Transactional email | Aug 7 | Degraded: verification and reset links become an authorised Admin-issued manual path (category B), which does not scale past a soft launch |
-| `LG-021` | Compromised-password screening | Aug 7 | Fails closed at credential creation, which blocks registration. A licensed offline dataset is the fallback |
+| `LG-021` | Compromised-password screening | Resolved Aug 9 | HIBP Pwned Passwords Range API is integrated under D-075; an offline dataset is not selected for launch. Credential admission fails closed if HIBP is unavailable |
 | `LG-014` | Malware scanning | Aug 5 (S4) | Assets stay quarantined and unpublishable. Fallback: launch catalogue uploaded by the Admin only, scanned out of band, with public upload disabled |
 | `LG-012` | Launch prices | Aug 11 | Catalogue shows no price, so a Student cannot know what to pay externally. Blocks a sellable catalogue |
 | `LG-003`, `LG-004`, `LG-019`, `LG-020`, `LG-013` | Retention, privacy, operating envelope, Instructor agreement, support ownership | Aug 12 | Retention jobs stay disabled; the operating envelope is recorded as provisional; the launch catalogue ships only with signed Instructor evidence |

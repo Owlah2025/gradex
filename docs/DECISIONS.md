@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-08-02 (real calendar)
+> Last Updated: 2026-08-09 (real calendar)
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -2361,3 +2361,38 @@ owner rather than quietly absorbed into the estimate.
 **Reason:** Scopes seat authority explicitly to S6 under direct Product Owner authorization, enforcing strict independent review protocol and preventing seat carry-over.
 
 **Source:** Explicit Product Owner instruction issued by Ahmed Hazem on 2026-08-07.
+
+## D-075 — HIBP Pwned Passwords Range API is the production compromised-password source
+
+**Date:** 2026-08-09
+**Status:** Active. Resolves the provider-selection and operating-contract decision in `LG-021`.
+
+**Decision:** Production credential admission uses Have I Been Pwned (HIBP) Pwned Passwords Range API
+at `https://api.pwnedpasswords.com/range/{prefix}`. Gradex hashes the exact submitted UTF-8 password
+with SHA-1, encodes the digest as uppercase hexadecimal, sends only the first five characters with
+`Add-Padding: true` and a Gradex user agent, and compares the remaining 35 characters locally through
+the existing `CompromisedRangeSource` boundary. Positive counts are compromised; zero-count padding
+records are ignored.
+
+The lookup is server-side and occurs only after a complete credential is submitted for an operation
+that requires screening. Gradex sends no plaintext, complete digest, suffix, email, username, or
+Student identity. It does not persist unrelated returned suffixes or place credential-derived values
+in logs, errors, evidence, metrics labels, or traces.
+
+The request uses verified HTTPS, a three-second total default timeout, one synchronous request, and no
+added retry. Timeout, invalid response, TLS failure, or provider unavailability fails credential
+admission closed through the existing dependency-unavailable contract. No HIBP API key or paid
+subscription is part of this integration. The endpoint is fixed in production; deterministic tests
+may inject a trusted HTTPS test server at the adapter's internal construction seam.
+
+**Alternatives rejected:** Allow-on-provider-failure; plaintext or full-digest lookup; incremental
+queries; client-side lookup; selecting the downloadable corpus for the August 15 launch; adding a
+dataset synchronization system in this remediation.
+
+**Boundary:** This decision resolves `LG-021` only. It does not approve or supply the bilingual policy
+content, versions, or published URLs required by `LG-011`, so production registration remains
+fail-closed at that separate policy-set composition boundary.
+
+**Source:** Explicit Product Owner decision issued on 2026-08-09; implementation design in
+[2026-08-09-hibp-production-adapter-design.md](superpowers/specs/2026-08-09-hibp-production-adapter-design.md);
+[HIBP Pwned Passwords API contract](https://haveibeenpwned.com/API/v3#PwnedPasswords).
