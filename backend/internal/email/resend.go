@@ -54,6 +54,12 @@ func NewResendSender(options ResendOptions) (*ResendSender, error) {
 	}
 	copyClient := *client
 	copyClient.Timeout = options.Timeout
+	// The Resend submission endpoint is fixed, so a redirect is never
+	// legitimate here. Following one would replay the Authorization header and
+	// the recipient body to whatever host the response named.
+	copyClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
 	return &ResendSender{apiKey: options.APIKey, client: &copyClient, endpoint: endpoint}, nil
 }
 
@@ -118,6 +124,12 @@ func readResendResponse(resp *http.Response) (SendResult, error) {
 			return SendResult{}, permanent("malformed_response", "malformed_response")
 		}
 		return SendResult{ProviderMessageID: accepted.ID}, nil
+	}
+	// The client refuses to follow redirects, so a 3xx arrives here intact.
+	// Named explicitly rather than left to the generic rejection path so the
+	// ledger records why it was refused instead of a bare status code.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return SendResult{}, permanent("redirect_refused", "redirect_refused")
 	}
 	return SendResult{}, classifyResendRejection(resp, responseBody)
 }

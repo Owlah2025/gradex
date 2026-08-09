@@ -2,6 +2,7 @@ package email
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,5 +138,46 @@ func TestResendSenderRejectsHeaderInjectionBeforeNetwork(t *testing.T) {
 	failure, ok := AsSendFailure(err)
 	if !ok || failure.Kind != FailurePermanent || failure.Class != "invalid_message" {
 		t.Fatalf("header injection failure = %#v", err)
+	}
+}
+
+func TestResendSenderRefusesRedirect(t *testing.T) {
+	const apiCanary = "RESEND_API_KEY_CANARY"
+	var submissions, redirectTargets int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/emails":
+			submissions++
+			w.Header().Set("Location", "/relocated")
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		default:
+			// Reaching here at all means the client followed the redirect and
+			// replayed the Authorization header and the recipient body.
+			redirectTargets++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794"}`))
+		}
+	}))
+	defer server.Close()
+	sender, err := NewResendSender(ResendOptions{APIKey: config.NewSecret(apiCanary), Timeout: time.Second, HTTPClient: server.Client(), Endpoint: server.URL + "/emails"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := sender.Send(t.Context(), validTestMessage(), "gradex/11111111-1111-4111-8111-111111111111")
+	if err == nil {
+		t.Fatalf("redirect was accepted as delivery: %+v", result)
+	}
+	var failure *SendFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("failure type=%T", err)
+	}
+	if failure.Kind != FailurePermanent || failure.Class != "redirect_refused" {
+		t.Fatalf("failure=%+v", failure)
+	}
+	if submissions != 1 || redirectTargets != 0 {
+		t.Fatalf("submissions=%d redirectTargets=%d", submissions, redirectTargets)
+	}
+	if result.ProviderMessageID != "" {
+		t.Fatalf("redirect produced a provider message id: %q", result.ProviderMessageID)
 	}
 }
