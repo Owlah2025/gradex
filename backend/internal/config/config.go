@@ -107,9 +107,9 @@ func (c Capability) Reason() string {
 func enabled() Capability               { return Capability{enabled: true} }
 func disabled(reason string) Capability { return Capability{reason: reason} }
 
-// PasswordScreenMode selects only the implementation boundary, never a
-// provider. The deterministic source is a local test fixture; adapter mode
-// remains unusable in production until LG-021 approval is recorded.
+// PasswordScreenMode selects only the implementation boundary. The
+// deterministic source is a local test fixture; adapter mode selects the
+// approved production source.
 type PasswordScreenMode string
 
 const (
@@ -520,7 +520,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		// mailbox is worth less time.
 		passwordResetTokenTTL:      p.duration("PASSWORD_RESET_TOKEN_TTL", time.Hour),
 		rateLimitTimeout:           p.duration("ADMISSION_RATE_LIMIT_TIMEOUT", 100*time.Millisecond),
-		compromisedPasswordTimeout: p.duration("COMPROMISED_PASSWORD_TIMEOUT", 2*time.Second),
+		compromisedPasswordTimeout: p.duration("COMPROMISED_PASSWORD_TIMEOUT", 3*time.Second),
 		anonymousCookieSigningKey:  secrets["ANONYMOUS_COOKIE_SIGNING_KEY"],
 		anonymousCSRFKey:           secrets["ANONYMOUS_CSRF_KEY"],
 		limiterHMACKey:             secrets["ADMISSION_LIMITER_HMAC_KEY"],

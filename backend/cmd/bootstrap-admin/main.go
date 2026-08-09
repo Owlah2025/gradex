@@ -166,23 +166,9 @@ func run(args []string, stdout *os.File) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
-	var compromised identity.CompromisedRangeSource
-	switch cfg.Admission().PasswordScreenMode() {
-	case config.PasswordScreenDeterministic:
-		compromised, err = identity.NewDeterministicCompromisedSource()
-		if err != nil {
-			return fmt.Errorf("constructing deterministic compromised-password source: %w", err)
-		}
-	case config.PasswordScreenAdapter:
-		return errors.New("the approved compromised-password adapter is not wired; bootstrap fails closed")
-	default:
-		return errors.New("compromised-password screening is not configured; bootstrap fails closed")
-	}
-	compromised, err = identity.NewTimeoutCompromisedSource(
-		compromised, cfg.Admission().CompromisedPasswordTimeout(),
-	)
+	compromised, err := buildBootstrapCompromisedSource(cfg)
 	if err != nil {
-		return fmt.Errorf("configuring compromised-password timeout: %w", err)
+		return err
 	}
 
 	// A single connection rather than a pool: this is one transaction that must
@@ -219,4 +205,15 @@ func run(args []string, stdout *os.File) error {
 		result.Email, result.AccountID, result.CompletedAt.UTC().Format(time.RFC3339))
 	fmt.Fprintln(stdout, "bootstrap-admin: the credential is CHANGE_REQUIRED; the first sign-in must change it")
 	return nil
+}
+
+func buildBootstrapCompromisedSource(cfg *config.Config) (identity.CompromisedRangeSource, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration is required for compromised-password screening")
+	}
+	source, err := identity.NewRuntimeCompromisedSource(cfg.Environment(), cfg.Admission())
+	if err != nil {
+		return nil, fmt.Errorf("building compromised-password source: %w", err)
+	}
+	return source, nil
 }

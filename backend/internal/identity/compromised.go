@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Owlah2025/gradex/backend/internal/config"
 )
 
 // CompromisedLookupScheme is the versioned one-way representation derived
@@ -53,6 +55,31 @@ type CompromisedRangeSource interface {
 type timeoutCompromisedSource struct {
 	source  CompromisedRangeSource
 	timeout time.Duration
+}
+
+// NewRuntimeCompromisedSource keeps environment-specific source selection in
+// one place for every credential-admission composition root.
+func NewRuntimeCompromisedSource(
+	environment config.Environment,
+	settings config.AdmissionSettings,
+) (CompromisedRangeSource, error) {
+	var source CompromisedRangeSource
+	var err error
+	switch settings.PasswordScreenMode() {
+	case config.PasswordScreenDeterministic:
+		if environment != config.EnvDevelopment {
+			return nil, errors.New("deterministic compromised-password source is permitted only in development")
+		}
+		source, err = NewDeterministicCompromisedSource()
+	case config.PasswordScreenAdapter:
+		source, err = NewHIBPCompromisedSource()
+	default:
+		return nil, errors.New("compromised-password screening is not configured")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("constructing compromised-password source: %w", err)
+	}
+	return NewTimeoutCompromisedSource(source, settings.CompromisedPasswordTimeout())
 }
 
 // NewTimeoutCompromisedSource applies the configured whole-lookup deadline to

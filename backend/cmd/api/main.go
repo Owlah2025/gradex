@@ -369,22 +369,16 @@ func buildAdmissionFoundation(
 	redisConnection *queue.Connection,
 ) (*httpapi.AdmissionFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
+	compromisedSource, err := buildCompromisedPasswordSource(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 	if cfg.Environment() != config.EnvDevelopment {
 		return nil, nil, errors.New(
-			"approved production policy and compromised-password adapters are not integrated",
+			"approved production registration policy-set adapter is not integrated (LG-011)",
 		)
 	}
 
-	compromised, err := identity.NewDeterministicCompromisedSource()
-	if err != nil {
-		return nil, nil, err
-	}
-	compromisedSource, err := identity.NewTimeoutCompromisedSource(
-		compromised, admission.CompromisedPasswordTimeout(),
-	)
-	if err != nil {
-		return nil, nil, err
-	}
 	policies, err := developmentPolicySets(admission.PolicySetID())
 	if err != nil {
 		return nil, nil, err
@@ -508,21 +502,14 @@ func buildStaffFoundation(
 	redisConnection *queue.Connection,
 ) (*httpapi.StaffFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
+	compromisedSource, err := buildCompromisedPasswordSource(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
 	if cfg.Environment() != config.EnvDevelopment {
 		return nil, nil, errors.New(
-			"approved production policy and compromised-password adapters are not integrated",
+			"production staff admission composition remains unavailable pending launch approval",
 		)
-	}
-
-	compromised, err := identity.NewDeterministicCompromisedSource()
-	if err != nil {
-		return nil, nil, err
-	}
-	compromisedSource, err := identity.NewTimeoutCompromisedSource(
-		compromised, admission.CompromisedPasswordTimeout(),
-	)
-	if err != nil {
-		return nil, nil, err
 	}
 
 	writer, err := outbox.NewWriter(
@@ -567,6 +554,17 @@ func buildStaffFoundation(
 		return nil, nil, err
 	}
 	return foundation, redisClient, nil
+}
+
+func buildCompromisedPasswordSource(cfg *config.Config) (identity.CompromisedRangeSource, error) {
+	if cfg == nil {
+		return nil, errors.New("configuration is required for compromised-password screening")
+	}
+	source, err := identity.NewRuntimeCompromisedSource(cfg.Environment(), cfg.Admission())
+	if err != nil {
+		return nil, fmt.Errorf("building compromised-password source: %w", err)
+	}
+	return source, nil
 }
 
 func buildCatalogFoundation(
