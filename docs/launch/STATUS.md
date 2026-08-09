@@ -1,16 +1,15 @@
 # Gradex Launch Status
 
-> **2026-08-09 S11 registration-blocker remediation:** All 29 S11 tasks remain complete. The Product
-> Owner approved HIBP Pwned Passwords Range API, and the production compromised-password adapter,
-> shared composition, fail-closed tests, live fixed-prefix compatibility check, complete identity
-> integration package, isolated Chromium journey, and disposable HTTPS regression now pass. `LG-021`
-> is resolved. S11 is **not closed**: production registration still lacks approved bilingual policy
-> content and a production `PolicySetResolver` under `LG-011`, one unresolved launch-blocking High.
-> Frozen independent-review candidate:
-> remediation `0e8f3ed0de858462f8bdd6fab42acc056ca703f0..2a572d932b3a022fe67eb16c630da5f736d15d95`;
-> cumulative S11 `6bf694daa7a8a823a849a4e2da9588988b6d2358..2a572d932b3a022fe67eb16c630da5f736d15d95`.
-> This subsequent documentation-only marker records the immutable evidence commit and is outside the
-> reviewed range, matching the existing S11 freeze convention.
+> **2026-08-09 S11 LG-011 remediation:** All 29 S11 tasks remain complete. The exact Product
+> Owner-approved bilingual policy package, production `ApprovedPolicySetResolver`, four legal routes,
+> strict public/staging identity validation, acceptance persistence, and combined HIBP composition
+> are implemented. Local Chromium and the disposable production-like HTTPS journey now begin with
+> real registration and pass through protected learning. `LG-011` software and the
+> production-registration High are resolved; Critical/High/Medium are zero and the existing
+> development-tooling audit item remains Low. S11 is **not closed**: it is technically ready for
+> independent closure review. Actual legal registration number and registered address remain
+> external requirements before public T047. The immutable evidence commit and frozen ranges are
+> recorded by the subsequent documentation-only marker, matching the existing S11 convention.
 > Exact evidence is in [`evidence/s11/release-acceptance.md`](evidence/s11/release-acceptance.md). This
 > current statement supersedes lower historical text that calls S6 the active slice.
 >

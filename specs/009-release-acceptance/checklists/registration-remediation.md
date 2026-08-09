@@ -14,10 +14,16 @@ Date: 2026-08-09
 - [x] Plaintext password, complete digest, suffix, identity, and provider response details are absent from requests, errors, and persistence evidence.
 - [x] Deterministic tests, complete identity integration, race tests, live fixed-prefix compatibility, local Chromium, and disposable HTTPS regression pass.
 
-## Remaining closure boundary
+## LG-011 — production policy set
 
-- [ ] LG-011 supplies published Arabic/English Privacy Notice, Terms, Refund Policy, and course-access disclosures with approved version identifiers and URLs.
-- [ ] A production `PolicySetResolver` composes those approved artifacts without development fixtures.
-- [ ] The full production-mode registration-to-learning journey passes after LG-011 closes.
+- [x] The Product Owner supplied authoritative Arabic/English Privacy and Terms bodies, exact versions, canonical routes, and identity configuration in `docs/legal/lg011-approved-policy-package.md`.
+- [x] Terms §8 is the approved no-commerce payment/consumer-rights disclosure; the current MVP requires no separate Refund Policy. Privacy §4 and Terms §4 own course-access disclosure.
+- [x] Production `ApprovedPolicySetResolver` composes the approved artifacts without development fixtures.
+- [x] Registration persists the exact resolved policy/version/locale and later policy changes do not rewrite historical acceptance.
+- [x] Missing/invalid public configuration and staging sentinels in public mode fail closed.
+- [x] Controlled non-public staging accepts both exact sentinels only for the disposable HTTPS origin.
+- [x] The full production-mode registration-to-learning journey passes with HIBP and the approved policy resolver composed together.
 
-S11 remains open with one High. This checklist records remediation evidence; it is not independent approval or closure.
+LG-011 software and the production-registration High are resolved. Actual legal registration number
+and registered address remain external requirements before public T047. S11 remains open pending
+independent closure review; this checklist is not approval or closure.

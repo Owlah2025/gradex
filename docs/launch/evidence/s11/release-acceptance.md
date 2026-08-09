@@ -28,7 +28,20 @@ Branch: `s11-release-e2e-20260808`
 - Cumulative S11 range for independent review: `6bf694daa7a8a823a849a4e2da9588988b6d2358..2a572d932b3a022fe67eb16c630da5f736d15d95`
 - Original High root cause: production composition had only development policy and deterministic compromised-password fixtures; non-development builders refused both missing dependencies as one combined error.
 - LG-021 result: **RESOLVED** under D-075. HIBP is composed for production credential screening and fails closed.
-- LG-011 result: **OPEN**. No approved bilingual policy content, versions, published URLs, or production `PolicySetResolver` exists, so production registration still refuses startup at that exact boundary.
+- LG-011 result at the HIBP freeze: **OPEN**. This historical boundary is closed by the subsequent LG-011 remediation below.
+
+### LG-011 policy remediation
+
+- Remediation starting HEAD: `9212e637d152a79d2db82c44bebac3d60001bd7c`
+- Approved authority/design: `54c529f2d0039cca871246818428239f2a00a33e` — exact Product Owner policy package and implementation design
+- Implementation: `037ac63c029bca9cfd78677fffe7f02ca1f2dfba` — production policy resolver, legal configuration, four public routes, acceptance metadata, and production composition
+- Regression/acceptance: `5ec8a50a964c0e38d8cc8f3661b0f603966a8faf` — configuration, resolver, persistence, HIBP composition, legal-page, and complete release-journey evidence
+- Approved policy set: `gradex-legal-2026-08-09-v1`; set, Privacy, and Terms version `2026-08-09-v1`; effective date `2026-08-09`; minimum age 18; Arabic primary.
+- Canonical routes: `/ar/privacy`, `/en/privacy`, `/ar/terms`, and `/en/terms`, derived from `PUBLIC_ORIGIN`.
+- Acceptance persistence: registration records the exact resolved version and locale; integration evidence proves a later policy version does not rewrite historical rows.
+- Composition: non-development registration uses `ApprovedPolicySetResolver` and the HIBP Range API source through the one shared `AdmissionService`; development retains only its controlled fixtures.
+- Fail-closed configuration: missing/invalid identity or contact fields, non-HTTPS public origin, unsafe endpoint composition, or staging sentinels in public mode prevent startup/rendering. Controlled staging accepts both exact sentinels only at `https://gradex.localhost:18443`.
+- Result: **LG-011 software blocker resolved**. Real public production remains externally blocked until an actual legal registration number and registered address replace both staging sentinels.
 
 ## Acceptance coverage
 
@@ -87,6 +100,19 @@ All commands below ran from the candidate containing `182bfa5` plus no uncommitt
 No frontend source changed in this remediation, so the prior complete frontend lint, typecheck, unit,
 and production-build evidence remains applicable. Chromium and deployed HTTPS regressions were rerun.
 
+### LG-011 validation on 2026-08-09
+
+| Gate | Command | Result |
+|---|---|---|
+| Backend build/static/unit | `go build ./...`; `go vet ./...`; `go vet -tags=integration ./...`; `go test ./...` | PASS across all packages |
+| Complete affected integration | `go test -tags=integration ./internal/identity ./internal/httpapi ./cmd/api -count=1` | PASS; identity 91.225 s, HTTP API 185.814 s, API composition 2.273 s |
+| Race | `go test -race ./internal/config ./internal/identity ./cmd/api -count=1`; focused tagged admission race | PASS |
+| Frontend clean/static/unit/build | `npm ci`; `npm run lint`; `npm run typecheck`; `npm test`; `npm run build` | PASS; 171/171 unit tests, no lint/type errors, production build complete |
+| Local Chromium | legal routes plus S11 journey; production-build S11 journey | PASS; 5/5 in 51.2 s and 1/1 in 11.0 s |
+| S11 disposable HTTPS | `./deploy/scripts/verify-s11-release-acceptance.sh` | PASS; 5/5 deployed Chromium tests in 10.9 s, schema 15, state `1|1|1|1` |
+| Production dependencies | `npm audit --omit=dev --audit-level=high` | PASS; 0 vulnerabilities |
+| Secret exposure | `./scripts/expose-guard.sh` plus deployed API log scan | PASS; no changed exposure boundary and zero plaintext-password/full-digest/provider-detail log hits |
+
 ## Production-like environment
 
 - Origin: `https://gradex.localhost:18443`
@@ -94,9 +120,9 @@ and production-build evidence remains applicable. Chromium and deployed HTTPS re
 - Acceptance database: `gradex_playwright_e2e_s12smoke01`
 - Active application database: `gradex` (not reset or downgraded)
 - Schema: both databases reported `15|f` (`version=15`, `dirty=false`)
-- Deployed browser result: real HTTP login plus the complete Invitation-to-protected-learning journey passed
-- Boundary: positive registration ran only in the isolated development harness. Production composes HIBP but correctly refuses registration until the approved LG-011 policy-set adapter is integrated.
-- Portability: Playwright retains the existing validated `GRADEX_E2E_EXTERNAL_ORIGIN` contract, external run-state/database variables, and CA/SPKI settings. A T047 origin can replace the disposable origin by configuration after the missing production registration capability and external infrastructure exist.
+- Deployed browser result: real production-mode registration, policy acceptance, verification, login, and the complete Invitation-to-protected-learning journey passed.
+- Boundary: controlled non-public staging used the two explicit staging legal-identity sentinels. Public mode rejects them and still requires actual legal registration and registered-address values.
+- Portability: Playwright retains the existing validated `GRADEX_E2E_EXTERNAL_ORIGIN` contract, external run-state/database variables, and CA/SPKI settings. A T047 origin can replace the disposable origin by configuration after real legal identity and external infrastructure exist.
 
 ## Reused S5/S6 evidence
 
@@ -112,7 +138,7 @@ and production-build evidence remains applicable. Chromium and deployed HTTPS re
 | Severity | Finding | Launch effect |
 |---|---|---|
 | Critical | None | — |
-| High | Production registration cannot start because approved bilingual policy content and a production `PolicySetResolver` are absent under LG-011. | Launch-blocking; the full public registration-to-learning journey cannot yet pass in production mode. |
+| High | None open after LG-011 software remediation. | — |
 | Medium | None open | — |
 | Low | `npm audit` reports `brace-expansion` and `js-yaml` advisories through ESLint development tooling; `npm audit --omit=dev` reports zero production vulnerabilities. | Non-runtime dependency-maintenance follow-up. |
 
@@ -131,12 +157,14 @@ No commerce, S8 support/Entitlement-update, provider deployment, or product feat
 | Severity | Defect | Fix |
 |---|---|---|
 | High component (LG-021) | Adapter mode had no production implementation; API and bootstrap could use only the deterministic development source and failed closed in production. | Integrate the approved HIBP prefix-5 Range API behind `CompromisedRangeSource`, share production composition, preserve a three-second bound/no retry, and prove privacy plus zero-side-effect failures. |
+| High component (LG-011) | Production registration had no approved policy content or non-development `PolicySetResolver`, so composition refused startup. | Generate exact bilingual bodies from the approved package, compose the approved resolver, expose four public routes, persist exact acceptance versions, enforce public/staging identity modes, and prove the full HTTPS journey. |
 
 ## Disposition
 
 - Remaining S11 implementation/validation tasks: none after the documentation-only freeze marker.
-- Launch-blocking defects: one unresolved High (LG-011 production policy content and resolver). LG-021 is resolved.
+- Launch-blocking S11 software defects: none. LG-021 and the LG-011 software blocker are resolved.
 - Independent review candidate: `6bf694daa7a8a823a849a4e2da9588988b6d2358..aff4fd7feddb9436d14244ca377c3235ead47046`.
 - Ready for independent review: yes, as an exact acceptance implementation/evidence range.
-- Ready for independent closure: **no**. FR-022/SC-008 correctly prevent closure while the LG-011 production-registration High remains open.
-- Recommended next launch-critical action: obtain and publish the approved bilingual LG-011 policy artifacts, integrate the production policy-set resolver, rerun the full S11 selection beginning with production-mode registration, and then request independent closure review. Do not start S8 or T047/T048 in this pass.
+- Ready for independent closure review: **yes, technically**. S11 is not independently approved or closed by this builder record.
+- Remaining external public-production requirement: replace `LEGAL_REGISTRATION_NUMBER` and `LEGAL_REGISTERED_ADDRESS` with actual legal identity values before public T047. The approved staging sentinels are not launch values.
+- Recommended next launch-critical action: freeze this remediation and request independent S11 closure review. Do not start S8 or T047/T048 in this pass.

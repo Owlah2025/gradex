@@ -73,8 +73,9 @@ Business rules state *what must always be true*; they intentionally omit tunable
 > **BR-040 through BR-047 are deferred out of MVP** on 2026-07-28 by
 > [D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
 > Gradex processes no refunds; money returned to a Student is an External Payment matter handled
-> outside the platform. Two obligations are **not** deferred: the bilingual Refund Policy remains
-> required under BR-153/`LG-011`, and ending a Student's access after an out-of-band refund uses the
+> outside the platform. Terms §8 is the authoritative no-commerce payment/consumer-rights
+> disclosure under BR-153/`LG-011`; no standalone Refund Policy is required for this MVP. Ending a
+> Student's access after an out-of-band refund uses the
 > audited Entitlement adjustment in BR-026 or Entitlement revocation — never an unrecorded deletion.
 
 - **BR-040** — *(Deferred, outside MVP.)* Only admins can initiate a refund. *(PRD §11 Purchase & Payment)*
@@ -239,7 +240,7 @@ These are structural invariants — they translate directly into database constr
 ## 18. Privacy & Legal-Readiness Rules
 
 - **BR-152** — Gradex collects only personal data required for identity, learning, commerce, support, security, and legal operations. Full card/PAN data is never collected, transmitted, or stored by Gradex. *(D-020; BR-030)*
-- **BR-153** — Bilingual Privacy Notice, Terms, Refund Policy, and checkout disclosures must be approved before production; the version accepted by a user is recorded wherever acceptance is required. *(D-017, D-020)*
+- **BR-153** — Bilingual Privacy and Terms must be approved before production, and the exact version accepted by a user is recorded wherever acceptance is required. For the no-commerce MVP, Terms §8 is the payment/consumer-rights disclosure, Privacy §4 and Terms §4 disclose course-access processing, and no standalone Refund Policy is required. *(D-017, D-020; LG-011 approved package 2026-08-09)*
 - **BR-154** — Users can request access, correction, deactivation, or deletion of personal data. Eligible personal data is anonymized where practical. Financial ledger entries, Statements, payout evidence, and privileged-action Audit records remain append-only and are never rewritten or hard-deleted; approved policy may restrict access, archive storage, minimize separable payloads, or anonymize eligible personal references without destroying financial provenance or action evidence. *(D-020)*
 - **BR-155** — Exact retention periods and the applicability/wording of Kuwaiti privacy, consumer, digital-commerce, and education-sector obligations are launch gates requiring counsel/accounting approval; they are not invented as business rules. *(D-020; [LAUNCH_GATES.md](LAUNCH_GATES.md))*
 - **BR-156** — Secrets remain outside the repository. Credentials, tokens, and personal data are excluded from logs; sensitive data is encrypted in transit and at rest according to its classification. *(D-020)*

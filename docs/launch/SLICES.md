@@ -348,7 +348,7 @@ Every PRD MVP bullet mapped to its one owning slice. This is the completeness ch
 | Responsive website across phone, tablet, laptop, desktop | S3 shell; each later slice for its own screens |
 | Arabic/English for every role, Arabic default, persistent preference, full RTL/LTR | S3 shell; each later slice for its own screens |
 | WCAG 2.2 AA for platform-owned UI and player controls | S13 audit; each slice for its own screens |
-| Bilingual Privacy Notice, Terms, Refund Policy, course-access disclosures | S10 |
+| Bilingual Privacy and Terms, including Terms §8 consumer-rights and Privacy §4/Terms §4 course-access disclosures | S10 |
 
 No MVP bullet is unassigned, and no bullet is owned by two slices — where a capability spans slices,
 the split is stated explicitly above and follows a module boundary.

@@ -344,7 +344,7 @@ Proposed launch-gate reclassification — **engineering may not apply the legal 
 | Gate | Proposed | Basis |
 |---|---|---|
 | `LG-007`, `LG-008`, `LG-009`, `LG-010` | `DEFERRED` (fast-follow) | No gateway integration ships. Purely a payments-integration dependency |
-| `LG-002` refund eligibility | `DEFERRED` for platform mechanics; **counsel input still required** for the published Refund Policy under `LG-011` | Refunds happen outside Gradex but consumers still have rights |
+| `LG-002` refund eligibility | `DEFERRED` for platform mechanics; subsequently Terms §8 became the approved no-commerce consumer-rights disclosure under `LG-011` | Refunds happen outside Gradex but consumers still have rights |
 | `LG-001` revenue share, `LG-017` disputes | `DEFERRED` | No in-platform earnings calculation or dispute handling |
 | `LG-016` tax/invoice/accounting | **STAYS OPEN** | Off-platform collection changes *where* records live, not whether they are required |
 | `LG-005`, `LG-006`, `LG-011` | **STAY OPEN, UNCHANGED** | Counsel decision. Selling course access commercially is unchanged by where payment is captured |
@@ -391,7 +391,7 @@ added.**
 | S3 scope table, FR-009/FR-010 | Repoint; price display pending §9 U1 |
 | S8-reduced "manual refund initiation", "order lookup" | Remove; replace with invitation queue administration |
 | S9 "purchase confirmation" email | Rename to access-granted |
-| S10-reduced "checkout disclosures" | Becomes access-terms disclosure; Refund Policy still required under `LG-011` |
+| S10-reduced "checkout disclosures" | Becomes access-terms disclosure; Terms §8 later became the approved no-commerce consumer-rights authority under `LG-011` |
 | S11 end-to-end journey | Critical journey becomes register → invitation → accept → approve → play |
 
 ### 7.4 Add — one new slice

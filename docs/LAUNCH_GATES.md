@@ -29,11 +29,18 @@ accepted launch-schedule risk rather than resolution evidence.
 > neither adviser is engaged, so they currently have no owner in practice.
 >
 > Gate count moves from 21 required to **15 required, 6 deferred**. No gate was resolved.
+>
+> **Subsequent Product Owner resolution on 2026-08-09.** `LG-011` is resolved by the exact bilingual
+> package in [`docs/legal/lg011-approved-policy-package.md`](legal/lg011-approved-policy-package.md).
+> For the no-commerce MVP, Terms §8 is the authoritative payment/consumer-rights disclosure and no
+> standalone Refund Policy is required; Privacy §4 and Terms §4 are the course-access disclosures.
+> This does not resolve `LG-005` or `LG-006`, and actual legal registration/address values remain a
+> public-production requirement.
 
 | ID | Gate | Owner | Next action / due | Exit evidence | Blocking point | Status |
 |---|---|---|---|---|---|---|
 | LG-001 | Choose Instructor revenue-share percentage | Founder + finance/accounting | Deferred with Instructor payout processing (D-045). No in-platform revenue record exists to calculate a share from. The percentage remains a required Instructor-agreement term under LG-020 | Approved numeric global percentage and effective date; configured with no code default | Payout configuration and production | **DEFERRED** |
-| LG-002 | Approve full/partial refund eligibility | Founder + Kuwaiti counsel | Deferred as a refund *mechanic* (D-045); Gradex processes no refunds. The bilingual Refund Policy itself remains required under LG-011 | Bilingual policy defining eligibility, request process, exceptions, timing, entitlement effect, and version | Refund-policy rules/acceptance sign-off and production | **DEFERRED** |
+| LG-002 | Approve full/partial refund eligibility | Founder + Kuwaiti counsel | Deferred as a refund *mechanic* (D-045); Gradex processes no refunds. Terms §8 supplies the approved no-commerce launch disclosure without a standalone Refund Policy | Future approved eligibility, request process, exceptions, timing, entitlement effect, and version if refund mechanics enter scope | Future refund-policy rules/acceptance sign-off and production | **DEFERRED** |
 | LG-003 | Approve data-retention schedule | Counsel + accounting + engineering | Engineering prepares the data-class inventory for August 6 review | Per-data-class retention/deletion/anonymization schedule for identity, learning, commerce, security, media, and audit | Retention/deletion job design sign-off and production | OPEN |
 | LG-004 | Confirm privacy-regulation applicability and data-subject process | Kuwaiti counsel | Founder sends the data-flow summary and privacy questions on August 6 | Written applicability analysis, controller/provider obligations, cross-border treatment, rights workflow, and notice wording | Privacy/data-flow design sign-off and production | OPEN |
 | LG-005 | Confirm Digital Commerce Law operative date/registration | Founder + Kuwaiti counsel/MOCI | Founder requests Gazette/implementing-regulation and registration guidance on August 6 | Gazette/implementing-regulation evidence and completed required registration/disclosures | Public commerce launch | OPEN |
@@ -42,7 +49,7 @@ accepted launch-schedule risk rather than resolution evidence.
 | LG-008 | Confirm Tap approval for digital Courses and MVP methods | Founder + engineering + Tap | Deferred with in-platform payments (D-045). No gateway is integrated | Written production approval for merchant category and enabled card/KNET sources | Final checkout configuration and production | **DEFERRED** |
 | LG-009 | Verify Tap refund capability per enabled method | Engineering + Tap | Deferred with in-platform payments (D-045). No refund adapter is built | Sandbox/contract evidence for full/partial refunds, asynchronous status, reconciliation, and unsupported behavior | Refund adapter acceptance and production | **DEFERRED** |
 | LG-010 | Verify Tap webhook authenticity contract | Engineering + Tap | Deferred with in-platform payments (D-045). No payment callback is received | Official verification procedure, replay handling, test vectors, and successful end-to-end verification | Payment/refund adapter acceptance and production | **DEFERRED** |
-| LG-011 | Approve bilingual customer policies | Founder + counsel | Founder commissions Arabic/English Privacy, Terms, Refund, and course-access disclosure drafts on August 6 | Published Arabic/English Privacy Notice, Terms, Refund Policy, and course-access disclosures with version identifiers. The Refund Policy is still required even though Gradex processes no refunds | Public registration and course-access production | OPEN |
+| LG-011 | Approve bilingual customer policies | Founder + counsel | Completed 2026-08-09 from the Product Owner-approved package | Arabic/English Privacy and Terms bodies, version `2026-08-09-v1`, canonical routes, Terms §8 no-commerce disclosure, and Privacy §4/Terms §4 course-access disclosures | Public registration and course-access production; real legal identity remains under LG-005/LG-006 | **RESOLVED** |
 | LG-012 | Set launch Course catalog prices | Founder + Admin operations | Founder prepares the launch catalog and price sheet by August 3. Still required under D-045: prices are displayed so a Student knows what to pay externally. Section prices are retained but not displayed | Approved prices entered through audited Admin process | Catalog display and course-access activation | OPEN |
 | LG-013 | Assign community/support ownership | Founder + operations | Founder names the owner and drafts support/moderation expectations on August 6 | Named owner, moderation/escalation rules, response expectation, support route, and active community links | Student support/community launch | OPEN |
 | LG-014 | Select and validate upload malware scanning | Engineering | Engineering shortlists a scanner on August 6 for validation by August 12 | Selected scanner/service, fail-closed quarantine workflow, supported file limits, alerting, and validation evidence | Downloadable/public asset pipeline acceptance | OPEN |
@@ -64,8 +71,8 @@ moment in-platform checkout enters scope, and the deferral is not evidence about
 
 Two obligations explicitly survive their gate's deferral:
 
-- The bilingual **Refund Policy** stays required under `LG-011` even though `LG-002`'s refund
-  mechanics are deferred and Gradex processes no refunds.
+- The approved Terms §8 disclosure governs the current no-commerce MVP. A separate Refund Policy is
+  not required unless later product/legal authority brings refund mechanics into scope.
 - The **revenue-share percentage** stays a required Instructor-agreement term under `LG-020` even
   though `LG-001`'s payout configuration is deferred.
 

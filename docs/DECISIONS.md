@@ -2389,10 +2389,40 @@ may inject a trusted HTTPS test server at the adapter's internal construction se
 queries; client-side lookup; selecting the downloadable corpus for the August 15 launch; adding a
 dataset synchronization system in this remediation.
 
-**Boundary:** This decision resolves `LG-021` only. It does not approve or supply the bilingual policy
-content, versions, or published URLs required by `LG-011`, so production registration remains
-fail-closed at that separate policy-set composition boundary.
+**Boundary:** This decision resolves `LG-021` only. At the time it was recorded, production
+registration remained fail-closed at the separate `LG-011` policy-set composition boundary;
+[D-076](#d-076--lg-011-uses-the-approved-bilingual-policy-package-and-strict-legal-identity-modes)
+subsequently resolves that software boundary.
 
 **Source:** Explicit Product Owner decision issued on 2026-08-09; implementation design in
 [2026-08-09-hibp-production-adapter-design.md](superpowers/specs/2026-08-09-hibp-production-adapter-design.md);
 [HIBP Pwned Passwords API contract](https://haveibeenpwned.com/API/v3#PwnedPasswords).
+
+## D-076 — LG-011 uses the approved bilingual policy package and strict legal-identity modes
+
+**Date:** 2026-08-09
+**Status:** Active. Resolves the `LG-011` policy-content and production-resolver software boundary.
+
+**Decision:** Policy set `gradex-legal-2026-08-09-v1`, version `2026-08-09-v1`, effective
+2026-08-09, is authoritative. Arabic is primary; English is corresponding. The canonical public
+routes are `/ar/privacy`, `/en/privacy`, `/ar/terms`, and `/en/terms`, resolved from `PUBLIC_ORIGIN`.
+Registration records the exact resolved acceptance through the shared `AdmissionService` and
+production `PolicySetResolver`.
+
+For the no-commerce MVP, Terms §8 is the authoritative payment/consumer-rights disclosure; a
+standalone Refund Policy is not required. Privacy §4 and Terms §4 are the authoritative course-access
+disclosures. No commerce behavior enters scope.
+
+The operator is Gradex Courses and the approved privacy, support, and security address is
+`ahmedhazemelmelegy11@gmail.com`. Controlled non-public staging may use only
+`STAGING-NOT-REGISTERED` and `STAGING ONLY — LEGAL ENTITY DETAILS PENDING`, and only at the exact
+disposable origin. Public mode rejects either sentinel and requires a real registration number and
+registered address. Those two real values remain external prerequisites before public T047; their
+absence does not leave an implementation decision open.
+
+**Boundary:** The authoritative legal wording is copied/generated without material rewrite from the
+approved package. This decision does not resolve `LG-005`, `LG-006`, or any provider/deployment gate,
+and does not independently approve or close S11.
+
+**Source:** Explicit Product Owner decision issued on 2026-08-09; authoritative package in
+[`docs/legal/lg011-approved-policy-package.md`](legal/lg011-approved-policy-package.md).

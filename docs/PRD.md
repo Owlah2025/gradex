@@ -140,9 +140,9 @@ between columns without updating this section and [DECISIONS.md](DECISIONS.md).
   laptops, and desktops.
 - Arabic and English UI for every role; Arabic default, persistent preference, full RTL/LTR.
 - Platform-owned UI/player controls target WCAG 2.2 AA within the boundary in §6.
-- Bilingual Privacy Notice, Terms, Refund Policy, and course-access terms disclosed before a Student
-  accepts an invitation, all approved before production. The Refund Policy remains required even
-  though Gradex processes no refunds.
+- Bilingual Privacy and Terms disclosed before a Student accepts an invitation, all approved before
+  production. Terms §8 is the authoritative no-commerce payment/consumer-rights disclosure and
+  Privacy §4/Terms §4 supply the course-access disclosures; no standalone Refund Policy is required.
 
 ## Fast-Follow
 

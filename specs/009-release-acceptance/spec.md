@@ -61,7 +61,7 @@ Students and Admins can retry safe actions after an invalid secret or repeated r
 
 ### User Story 4 - Run one acceptance contract in disposable and public staging (Priority: P2)
 
-The release owner can run the deployed login-to-learning selection against the existing disposable HTTPS deployment now, and the full acceptance selection is structured to target a future public T047 staging URL by configuration once production registration adapters are available.
+The release owner can run the full deployed registration-to-learning selection against the existing disposable HTTPS deployment, and the same selection targets a future public T047 staging URL by configuration.
 
 **Why this priority**: Acceptance evidence must describe the deployed topology and remain reusable when the externally blocked provider environment becomes available.
 
@@ -81,15 +81,15 @@ The release owner can run the deployed login-to-learning selection against the e
 - A repeat approval must prove an authorized `200` idempotent response; a `401`, `403`, or generic conflict is not acceptable replay evidence.
 - An existing Enrollment is reused and Progress remains single-homed.
 - A playback response that merely contains a non-empty URL is insufficient; the protected manifest and at least one non-empty signed media object must be retrieved.
-- Registration remains disabled in production mode because approved bilingual policy content and a production policy-set adapter are absent under LG-011. The HIBP compromised-password adapter is integrated under D-075; positive registration remains proven only by the real development harness until LG-011 closes.
+- Public production registration fails closed without real legal identity configuration. The disposable production-mode run may use the two exact Product Owner-approved staging sentinels only through its controlled non-public staging mode.
 - The suite must not reset, migrate down, or otherwise mutate the active application database.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: The release suite MUST prove Student registration, email verification, and password login through real API routes and user-facing screens in the isolated development harness while production registration remains unavailable.
-- **FR-002**: The suite MUST prove real HTTP login against the deployed origin even when a prelaunch environment intentionally disables new registration.
+- **FR-001**: The release suite MUST prove Student registration, exact policy acceptance, email verification, and password login through real API routes and user-facing screens in both the isolated harness and the configured production-like HTTPS environment.
+- **FR-002**: The suite MUST preserve the default S12 registration-disabled mode while the explicit S11 mode proves real production registration and login against the deployed origin.
 - **FR-003**: The suite MUST prove that only an Admin can configure the Course default access end and create a Course Access Invitation (BR-025, BR-165).
 - **FR-004**: The suite MUST prove identity-bound Student acceptance and refusal of a mismatched or invalid acceptance secret (BR-166, BR-169).
 - **FR-005**: The suite MUST observe exactly zero Entitlements and zero Enrollments after acceptance and before approval (BR-029).
@@ -130,14 +130,14 @@ The release owner can run the deployed login-to-learning selection against the e
 - **SC-004**: The intended Student retrieves protected Course, Lesson, manifest, and a non-empty signed media object, while the unrelated Student succeeds at none of those protected operations.
 - **SC-005**: The persisted Progress row reaches at least the position submitted by the acceptance journey and remains attached to the unique Enrollment.
 - **SC-006**: Invalid-secret recovery and authorized repeated approval both complete without partial or duplicate access state.
-- **SC-007**: The deployed selection runs against the disposable HTTPS environment; the full selection accepts a future public staging origin solely through configuration after the production registration capability is integrated.
+- **SC-007**: The full deployed selection runs against the disposable HTTPS environment and accepts a future public staging origin solely through configuration.
 - **SC-008**: All selected browser, integration, type, lint, build, schema, and safety checks pass at one clean exact HEAD with zero unresolved Critical or High finding.
 - **SC-009**: The acceptance package adds zero schema migrations and zero commerce, S8, Entitlement-update, or provider-deployment behavior.
 
 ## Assumptions
 
 - S1 identity, S4 protected delivery, S5 protected learning, S6 access granting, and S12 disposable staging behavior at the starting revision are inputs; S11 composes and strengthens their acceptance evidence rather than reopening their product scopes.
-- The disposable production-mode environment cannot safely enable registration at this revision: startup rejects the missing approved LG-011 policy-set adapter after successfully composing HIBP screening. S11 does not bypass that gate.
+- The disposable production-mode environment enables registration only in explicit S11 mode, with the approved policy resolver, live HIBP source, exact disposable origin, and both approved staging sentinels. Default S12 mode remains registration-disabled; public mode rejects both sentinels.
 - T047 public infrastructure remains externally blocked and is not required to complete the local production-like S11 run.
 - Existing seeded Admin and unrelated Student fixtures remain test-only identities and are never production grant paths.
 - S8 and Entitlement correction/update behavior remain explicitly out of scope because migration 0015 provenance reconciliation is unresolved.

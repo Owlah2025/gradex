@@ -152,8 +152,9 @@ an Admin out of band ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platfo
 
 - **Goal:** Resolve a payment question when Gradex holds no payment record.
 - **Actions:** Contact the support route; the founder handles the refund entirely outside Gradex.
-- **Rules:** The bilingual Refund Policy still governs eligibility and is still required
-  (BR-153/`LG-011`) even though Gradex processes no refunds (BR-040–047 deferred). If access must
+- **Rules:** Terms §8 is the approved no-commerce payment/consumer-rights disclosure
+(BR-153/`LG-011`); the MVP requires no standalone Refund Policy while Gradex processes no refunds
+(BR-040–047 deferred). If access must
   end as a result, an Admin uses the audited Entitlement adjustment or revocation (BR-026) — never
   an unrecorded deletion.
 - **Edge cases:** Student paid but was never invited; Student invited but never paid; access granted

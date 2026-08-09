@@ -8,11 +8,11 @@ No external origin is set. The existing Playwright setup allocates run-owned por
 
 ### Disposable production-like HTTPS run
 
-The S11 verifier reuses the existing S12 topology and safety-gated database tunnel. It selects the deployed real-login-to-learning journey while preserving the production registration safety gate and the default S12 behavior.
+The S11 verifier reuses the existing S12 topology and safety-gated database tunnel. It selects the full deployed production-registration-to-learning journey while preserving the default registration-disabled S12 behavior.
 
 ### Future T047 public staging run
 
-Once production registration capability exists, the full Playwright selection is supplied a public credential-free HTTPS origin, certificate trust appropriate to that host, and explicit safety-gated database query settings. Test source is unchanged.
+The full Playwright selection is supplied a public credential-free HTTPS origin, certificate trust appropriate to that host, and explicit safety-gated database query settings. Test source is unchanged; real public legal identity configuration replaces the disposable sentinels.
 
 ## Configuration
 
@@ -32,7 +32,7 @@ Once production registration capability exists, the full Playwright selection is
 
 - Unsafe external origins fail before browser startup.
 - Missing run state, seed utility, CA/SPKI requirement, or database setting fails the run.
-- Positive registration runs in the real isolated development harness; production-mode registration remains a recorded launch blocker rather than being silently bypassed.
+- Production registration requires the approved HIBP and policy-set adapters. Public mode rejects the two staging sentinels; only the exact controlled disposable mode may use them.
 - Replay must return the idempotent success contract through an authorized request.
 - A missing database row is failure, never a zero-valued default.
 - Active application databases are never reset, dropped, or migrated down.

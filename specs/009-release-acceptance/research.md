@@ -16,13 +16,13 @@
 
 **Alternatives considered**: A T047-specific config file would require source changes at provider availability. A bare command-line base URL would bypass the existing validation and server-ownership guarantees.
 
-## R3. Preserve the production registration safety gate
+## R3. Preserve and then satisfy the production registration safety gate
 
-**Decision**: Prove positive registration, email verification, and password login in the real isolated development harness. Keep registration disabled in the disposable production-mode environment and prove real deployed login through the existing S5/S6 selection.
+**Decision**: Keep the default disposable production-mode environment registration-disabled. In explicit S11 mode, compose the approved HIBP source and production policy resolver, authorize only the exact disposable legal-identity sentinels, and prove registration, email verification, password login, and the full learning journey.
 
-**Rationale**: Production startup explicitly refuses enabled registration until approved policy and compromised-password adapters are integrated. Bypassing that fail-closed boundary in an acceptance slice would create false launch evidence. The split exposes the missing production capability as a launch finding while still proving the rest of the deployed journey.
+**Rationale**: Production startup still refuses missing/unsafe security and legal configuration. The Product Owner-approved adapters and policy package now satisfy that boundary without permitting staging sentinels in public mode.
 
-**Alternatives considered**: Enabling development adapters in production mode would weaken the shipped safety contract. Skipping positive registration entirely would leave the first critical step unproven.
+**Alternatives considered**: Enabling development adapters or a general staging bypass would weaken the shipped safety contract. Skipping positive production registration would leave the first critical step unproven.
 
 ## R4. Query protected action secrets through the safety-gated test utility
 
