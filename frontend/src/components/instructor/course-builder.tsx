@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ServerPricingPanel } from "./server-pricing-panel";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
@@ -38,6 +38,15 @@ export function CourseBuilder() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // A submission rejection is reported twice: once in the page-level error
+  // region, and once beside the Submit control itself. The founder's manual
+  // test clicked Submit near the bottom of a long page, saw nothing change,
+  // and read the click as a no-op — the server's reason was rendered far
+  // above the viewport. The second region is focused on failure so the reason
+  // is where the click was.
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const submitErrorRef = useRef<HTMLParagraphElement | null>(null);
 
   const [isCreating, setIsCreating] = useState(false);
   const [newTitleAr, setNewTitleAr] = useState("");
@@ -126,7 +135,10 @@ export function CourseBuilder() {
   };
 
   /** Runs one authoring command with a single busy flag, so a double click cannot issue it twice. */
-  const command = async (action: (csrf: string) => Promise<void>) => {
+  const command = async (
+    action: (csrf: string) => Promise<void>,
+    options?: { onFailure?: (message: string) => void },
+  ) => {
     const csrf = requireCSRF();
     if (!csrf || busy) return;
     setBusy(true);
@@ -135,7 +147,11 @@ export function CourseBuilder() {
     try {
       await action(csrf);
     } catch (cause) {
-      setError(describeApiError(cause, locale));
+      // The server's own reason, verbatim from `describeApiError`, including
+      // every submission violation code. Nothing is suppressed or reworded.
+      const message = describeApiError(cause, locale);
+      setError(message);
+      options?.onFailure?.(message);
     } finally {
       setBusy(false);
     }
@@ -253,17 +269,32 @@ export function CourseBuilder() {
 
   const handleSubmit = () => {
     if (!selectedCourse || !revision?.id) return;
-    void command(async (csrf) => {
-      await submitCourseRevision({
-        courseID: selectedCourse.id,
-        revisionID: revision.id!,
-        locale,
-        csrf,
-      });
-      await loadCourses(selectedCourse.id);
-      await refreshSelectedCourse();
-      setNotice(isAr ? "تم إرسال الدورة إلى مراجعة الإدارة." : "Course submitted for Admin review.");
-    });
+    setSubmitError(null);
+    void command(
+      async (csrf) => {
+        await submitCourseRevision({
+          courseID: selectedCourse.id,
+          revisionID: revision.id!,
+          locale,
+          csrf,
+        });
+        await loadCourses(selectedCourse.id);
+        await refreshSelectedCourse();
+        setNotice(isAr ? "تم إرسال الدورة إلى مراجعة الإدارة." : "Course submitted for Admin review.");
+      },
+      {
+        onFailure: (message) => {
+          setSubmitError(message);
+          // The rejection is brought to the click, not left at the top of the
+          // page: the region beside Submit is scrolled into view and focused,
+          // so a keyboard or screen-reader user lands on it too.
+          window.requestAnimationFrame(() => {
+            submitErrorRef.current?.scrollIntoView({ block: "center" });
+            submitErrorRef.current?.focus();
+          });
+        },
+      },
+    );
   };
 
   const courseTitle = (course: CourseWire) => {
@@ -673,6 +704,17 @@ export function CourseBuilder() {
                   >
                     {isAr ? "إرسال للمراجعة" : "Submit for Review"}
                   </button>
+                  {submitError && (
+                    <p
+                      ref={submitErrorRef}
+                      role="alert"
+                      tabIndex={-1}
+                      data-testid="submit-error"
+                      className="mt-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+                    >
+                      {submitError}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-slate-500">
                     {isAr
                       ? "يتحقق الخادم من اكتمال الدورة، ويعرض سبب الرفض كما هو."
