@@ -2576,3 +2576,140 @@ not close a slice; the range remains subject to independent review.
 
 **Source:** Product Owner instruction of 2026-08-10; evidence in
 [`docs/launch/evidence/s13/mandatory-password-change-remediation.md`](launch/evidence/s13/mandatory-password-change-remediation.md).
+
+## D-081 — Staff lifecycle composition is decoupled from Student registration, and production staff onboarding stays unapproved
+
+**Date:** 2026-08-10
+**Status:** Active. Records an already-landed development remediation and holds the production
+boundary closed.
+
+**Finding:** `buildProductionFoundations` composed the staff foundation only when
+`cfg.Admission().Enabled()` was true. With `STUDENT_REGISTRATION_ENABLED=false` — the intended
+founder posture — no staff foundation was built, so every `/api/v1/staff-invitations` route answered
+`404` with `route_template="unmatched"`. Staff invitation is an Admin capability and was never a
+function of public Student admission; the coupling was accidental.
+
+**Decision:** The development composition landed at `1afe40f` and recorded at `5d0a933` is accepted
+as the intended remediation. Staff lifecycle composition depends on the environment gate and on the
+session foundation — staff mutations carry the S1B2 session and CSRF boundary, and
+`httpapi.NewRouter` refuses to build a staff surface without one — and on nothing else. Student
+registration is not a dependency. A staff dependency that is configured wrongly now fails startup
+with a named error rather than silently dropping the Admin surface.
+
+**Production remains explicitly NOT approved.** `buildStaffFoundation` still refuses to compose
+outside development with `"production staff admission composition remains unavailable pending launch
+approval"`, and `buildProductionFoundations` still gates the whole foundation on
+`APP_ENV=development`. Both stops stand. **This decision does not authorize removing either one.**
+
+The consequence is recorded rather than smoothed over: **in production today no Instructor can be
+invited, onboarded, suspended, or reinstated**, so the production Instructor authoring and Admin
+review journeys have no way to acquire an Instructor. That is a launch blocker, it is a software
+blocker rather than an external one, and it is not resolved here. Removing the production hard stop
+requires its own dated Product Owner decision plus the spec amendment named in
+[`docs/launch/STATUS.md`](launch/STATUS.md) under recorded SpecKit gaps.
+
+**Boundary:** No authorization rule changed. Capability gating, recent-auth, CSRF, rate limiting, and
+the invitation credential contract in `specs/002-auth-rbac/s1c/spec.md` §7 are untouched. This closes
+no launch gate, closes no slice, and does not independently approve the range that contains it.
+
+**Source:** Product Owner instruction of 2026-08-10; evidence in
+[`docs/launch/evidence/s13/staff-invitation-composition-remediation.md`](launch/evidence/s13/staff-invitation-composition-remediation.md).
+
+## D-082 — The Admin Catalog review surface is backed by the real review API, and submitted-revision inspection remains unbuilt
+
+**Date:** 2026-08-10
+**Status:** Active. Records an already-landed remediation and names what is still missing.
+
+**Finding:** Founder manual acceptance on 2026-08-10 found three defects on `/en/admin/catalog`.
+The review queue was component state initialised from a `demo-course-1` literal, so the screen showed
+a Course that does not exist while a real submitted Course sat in the database, and **Approve &
+Publish** and **Request Changes** mutated that local array and called no API. Taxonomy and lifecycle
+administration were gated on `pricingCourseID`, a single state variable carrying both *which Course
+is administered* and *is the pricing dialog open*, so closing the dialog removed taxonomy
+administration from the screen. On the Instructor side a `SUBMISSION_INCOMPLETE` refusal rendered
+only in a page-level region far above the Submit control, so a founder clicking Submit saw nothing.
+
+**Decision:** The remediation landed at `049cfb2`, `23e35bb`, `a00a97a` and recorded at `afe1624` is
+accepted as the intended shape, and these three rules are now binding on the Admin Catalog surface:
+
+1. The review queue is server state read from `GET /api/v1/admin/review/queue`. No Course literal,
+   fixture, or fallback content may appear on the Admin surface. An empty response renders the honest
+   empty state; a `204`/null body fails closed so "nothing pending" and "the server said nothing"
+   stay distinguishable. Review commands address the server's own `course_id` and `revision_id`.
+2. Which Course is under administration is modelled separately from whether the pricing dialog is
+   open. Closing the dialog closes only the dialog. Taxonomy and lifecycle visibility follow the
+   administered Course.
+3. A submission refusal is reported at the control that produced it, carrying the server's own
+   detail and violation codes verbatim, scrolled into view and focused. Nothing is suppressed or
+   reworded.
+
+**Not approved.** Implementation through `afe1624` is acknowledged as landed and is **not**
+independently approved. Claude authored it and is ineligible to review it. No backend route, handler,
+or domain rule was changed by the remediation.
+
+**Still incomplete, and not authorized by this decision.** Two capabilities the review journey needs
+do not exist:
+
+- **Admin submitted-revision inspection.** `GET /api/v1/admin/review/courses/:id/revisions/:revisionId`
+  is served and a client exists, but no component calls it. An Admin approves a revision today
+  without seeing its bilingual titles, bilingual descriptions, study year, Major, Subject, Sections,
+  Lessons, or attached media state.
+- **Admin Lesson video preview.** `POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId`
+  is served and no frontend client exists for it at all.
+
+Both require explicit task authority under `specs/003-course-authoring/` **before** implementation.
+Neither is authorized by this decision, and browser-discovered behaviour is not implementation
+authority.
+
+**Boundary:** No authorization, CSRF, recent-auth, audit, revision-binding, or concurrency behaviour
+was weakened. S6 access semantics, transactional email, and Instructor authoring/media semantics are
+untouched. This closes no launch gate and closes no slice.
+
+**Source:** Product Owner instruction of 2026-08-10; evidence in
+[`docs/launch/evidence/s12/admin-catalog-review-remediation.md`](launch/evidence/s12/admin-catalog-review-remediation.md).
+
+## D-083 — Production implementation is frozen at afe1624 for authority reconciliation and one independent review
+
+**Date:** 2026-08-10
+**Status:** Active. Governs the current phase and expires when the review it authorizes returns.
+
+**Finding:** A read-only reality audit of the repository at
+`afe1624d4cdb117c57aed3fc86594e5ebdb4074b` returned
+`REPOSITORY REQUIRES AUTHORITY RECONCILIATION BEFORE MORE IMPLEMENTATION`. All 24 commits on
+`launch-integration-20260810` are unreviewed; the branch changed production router composition,
+mounted a route that installs a long-lived credential, introduced a scanner seam, and merged a slice
+whose only recorded verdict is `REJECT`. The current-authority documents named a slice that closed
+on 2026-08-01. The audit is retained verbatim at
+[`docs/launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md`](launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md).
+
+**Decision:** Production implementation is **frozen** at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b`.
+Backend, frontend, migrations, tests, deploy scripts, and runtime configuration are closed to change.
+
+Exactly two activities are authorized, in this order:
+
+1. **Authority reconciliation, documentation and evidence only.** Correct the current-authority
+   statements in `AGENTS.md`, `CLAUDE.md`, `docs/launch/STATUS.md`, and `docs/launch/SLICES.md`;
+   record the decisions describing work that already landed; and add the audit as evidence. Historical
+   records are marked, not rewritten.
+2. **One independent review** of the integrated production tree together with the reconciled
+   authority, from base `18fb7e0` to the authority-reconciliation head, dispatched through
+   `scripts/agy-review.sh`.
+
+**Seats.** Claude authored the launch-integration implementation and the reconciliation, and is
+therefore ineligible to review either. `agy` holds the independent reviewer seat for this range.
+The reviewer works read-only in a disposable detached worktree and edits neither it nor the live
+repository. The builder never approves its own work; a review producing no retrievable verdict is
+`UNAVAILABLE`, not approval.
+
+**This decision grants no implementation authority.** It authorizes no feature, no remediation, and
+no task closure. A successful review does not authorize the next feature either: the next
+implementation pass requires its own existing or amended task authority under SpecKit, selected
+after the verdict exists and after every Critical and High finding is resolved. No retrospective
+authority is created for work already landed — the decisions above document what happened and the
+Product Owner's current disposition, not a permission granted before the fact.
+
+**Boundary:** Freezing changes no production behaviour and approves none. It closes no launch gate,
+closes no slice, and does not make `afe1624` a reviewed head. External launch gates are unaffected
+and remain tracked in [`docs/LAUNCH_GATES.md`](LAUNCH_GATES.md).
+
+**Source:** Product Owner instruction of 2026-08-10 following the read-only reality audit.

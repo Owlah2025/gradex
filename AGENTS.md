@@ -16,14 +16,46 @@ Inspect repository evidence instead of relying on conversation memory. Preserve 
 user-owned working-tree changes. Do not mark work complete without the evidence required by the
 current daily record.
 
-Under the current launch workflow
-([D-036](docs/DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews)), Claude is the builder and
-planner for the active S1B3 slice and `agy` is the independent read-only reviewer, because Codex
-quota has not returned. D-036 is scoped to S1B3 alone and expires when that slice closes; seats never
-renew implicitly. The standing assignment
-([D-033](docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)) is Codex
-builder and Claude reviewer, and the developer restores it explicitly when Codex quota returns.
+## Current phase — production code is FROZEN
+
+The repository is in a **frozen launch-integration reconciliation and review phase**, not feature
+implementation. This is the current authority
+([D-083](docs/DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)):
+
+- **Production code is frozen at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b`** pending one independent
+  review. Backend, frontend, migrations, tests, deploy scripts, and runtime configuration are closed
+  to change.
+- **No new production implementation is authorized** until that review is complete and every Critical
+  and High finding is resolved. A successful review does not by itself authorize the next feature —
+  that still requires its own existing or amended SpecKit task authority.
+- **Claude authored the launch-integration implementation and is ineligible to review it.** That is a
+  self-check, not a review, and it cannot close anything.
+- **`agy` is the independent reviewer** for the frozen integrated range, dispatched through
+  `scripts/agy-review.sh <base>..<head>`.
+
+The range is **not approved**. No verdict exists yet. Current delivery state, the exact review range,
+and the open P0 gaps are in [`docs/launch/STATUS.md`](docs/launch/STATUS.md).
+
+## Seats
 
 Whoever holds the reviewer seat, the rules do not change: review one frozen exact commit range from
 a disposable detached worktree, and the builder never approves its own slice. Claude must not review
-a Claude-authored range. The user may explicitly reassign these roles.
+a Claude-authored range. A review that produces no retrievable verdict is `UNAVAILABLE`, not
+approval. The user may explicitly reassign these roles.
+
+Seats never renew implicitly. Each per-slice assignment expires when its slice closes, and the next
+slice requires its own dated assignment.
+
+**Historical, spent seat authority — do not act on these:**
+[D-032](docs/DECISIONS.md#d-032--claude-builds-agy-reviews),
+[D-035](docs/DECISIONS.md#d-035--claude-builds-s1b2-and-agy-reviews),
+[D-036](docs/DECISIONS.md#d-036--claude-builds-s1b3-and-agy-reviews) (S1B3 — **closed 2026-08-01**),
+[D-037](docs/DECISIONS.md#d-037--claude-builds-s1c-and-agy-reviews),
+[D-042](docs/DECISIONS.md#d-042--codex-plans-antigravity-implements-and-claude-independently-reviews),
+[D-043](docs/DECISIONS.md#d-043--codex-implements-s2-d5-and-claude-independently-reviews),
+[D-044](docs/DECISIONS.md#d-044--antigravity-completes-s2-and-claude-reviews-the-whole-feature-once),
+[D-074](docs/DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews).
+The dormant standing assignment
+([D-033](docs/DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)) is Codex builder
+and Claude reviewer; the developer restores it explicitly when Codex quota returns. It is not in force
+during the current frozen phase.
