@@ -39,6 +39,20 @@ test("exposes the session without its CSRF token", () => {
   assert.equal(JSON.stringify(view).includes("memory-only-token"), false);
 });
 
+test("carries the restriction into the rendering view", () => {
+  // The redirect guard reads this from the view, so it has to survive the
+  // secret-stripping boundary rather than being dropped with the token.
+  setSession({ ...sample, password_change_required: true });
+  assert.equal(getSessionView()?.password_change_required, true);
+});
+
+test("treats a response without the restriction field as unrestricted", () => {
+  // `sample` omits the field entirely. It must normalize to false, not
+  // undefined, so no consumer has to distinguish absent from negative.
+  setSession(sample);
+  assert.equal(getSessionView()?.password_change_required, false);
+});
+
 test("hands the CSRF token only to explicit callers", () => {
   setSession(sample);
   assert.equal(currentCSRFToken(), "memory-only-token");

@@ -165,6 +165,34 @@ export const en = {
       missingToken: "This page needs a reset link. Request one to continue.",
       requestNew: "Request a new link",
     },
+    passwordChange: {
+      title: "Change your password",
+      intro:
+        "Your account needs a new password before you can continue. This takes one step.",
+      requiredTitle: "A password change is required",
+      requiredBody:
+        "This account was created with a temporary password. Choose your own to unlock the rest of Gradex.",
+      current: "Current password",
+      next: "New password",
+      confirm: "Confirm new password",
+      submit: "Change password",
+      submitting: "Changing password…",
+      signedInAs: "Signed in as",
+      mismatch: "Both new password fields must match.",
+      weak: "Choose a longer password. Use at least 15 characters.",
+      sameAsCurrent: "The new password must be different from the current one.",
+      wrongCurrent: "The current password is incorrect.",
+      // One message for too short, too long, already in use on this account,
+      // and found in a known breach. The server does not say which rule
+      // matched and this must not guess.
+      rejected:
+        "That password cannot be used. Choose a different one of at least 15 characters.",
+      reauthenticate:
+        "For your security, sign in again before changing your password.",
+      signedOut: "Your session ended. Sign in again to change your password.",
+      limited: "Too many attempts. Wait a little before trying again.",
+      failed: "The password could not be changed. Try again shortly.",
+    },
     session: {
       expiredTitle: "Your session ended",
       expiredBody: "Sign in again to pick up where you left off.",

@@ -6,9 +6,28 @@ const maximumLength = 512;
 // escapes this origin without hand-rolling scheme detection.
 const opaqueBase = "https://return-to.invalid";
 
+/**
+ * The mandatory password-change screen.
+ *
+ * A restricted principal is sent here after signing in and may go nowhere else
+ * until its credential is ACTIVE.
+ */
+export const passwordChangePath = "/password-change";
+
 // Sending a signed-in browser back to an admission screen loops the journey,
 // and /api is the server surface rather than a page.
-const blockedRoots = ["/api", "/login", "/register", "/verify-email"];
+//
+// The password-change screen is blocked for the same reason as the rest: it is
+// a step the application decides to show, never a destination a link may ask
+// for. Allowing it would let a crafted returnTo park an unrestricted visitor on
+// a form they cannot complete.
+const blockedRoots = [
+  "/api",
+  "/login",
+  "/register",
+  "/verify-email",
+  passwordChangePath,
+];
 
 /**
  * Validates a caller-supplied post-login destination.
@@ -68,6 +87,58 @@ export function postLoginDestination(
   requested: unknown,
 ): string {
   return safeReturnTo(requested) ?? roleRoot(role);
+}
+
+/**
+ * Where a browser goes immediately after signing in.
+ *
+ * A restricted principal goes to the mandatory password-change screen and
+ * nowhere else — not even to a destination it legitimately asked for. That
+ * destination is not discarded: it is carried across the change as `returnTo`,
+ * so a visitor who followed a link, was made to change their password, and
+ * finished still lands where they were going.
+ *
+ * This is the fix for the founder's finding. Before it, a bootstrap
+ * Administrator signed in successfully and was routed into an application
+ * surface that answered 403 to every request it made.
+ */
+export function postAuthenticationDestination(
+  role: SessionRole,
+  requested: unknown,
+  passwordChangeRequired: boolean,
+): string {
+  if (passwordChangeRequired) {
+    return withReturnTo(passwordChangePath, requested);
+  }
+  return postLoginDestination(role, requested);
+}
+
+/**
+ * Where a principal goes once its password change has committed.
+ *
+ * A requested destination still wins when it is safe, because the visitor was
+ * interrupted rather than redirected. Otherwise the role decides, and unlike
+ * `roleRoot` these are the real authenticated surfaces: the point of the change
+ * is that the principal now holds its full authority, so landing it on the
+ * public home page would hide exactly what it just unlocked.
+ */
+export function postPasswordChangeDestination(
+  role: SessionRole,
+  requested: unknown,
+  locale: "ar" | "en",
+): string {
+  const requestedDestination = safeReturnTo(requested);
+  if (requestedDestination) return requestedDestination;
+  switch (role) {
+    case "INSTRUCTOR":
+      return `/${locale}/instructor/courses`;
+    case "ADMIN":
+      // Staff management is where an Administrator's first task after the
+      // bootstrap change lives: inviting the first Instructor.
+      return "/staff";
+    default:
+      return roleRoot(role);
+  }
 }
 
 /**

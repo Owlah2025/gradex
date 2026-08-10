@@ -10,7 +10,10 @@ import { Alert } from "@/components/ui/alert";
 import { createSession } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import { validEmail } from "@/lib/identity/validation";
-import { postLoginDestination, withReturnTo } from "@/lib/identity/return-to";
+import {
+  postAuthenticationDestination,
+  withReturnTo,
+} from "@/lib/identity/return-to";
 import { setSession } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
@@ -79,8 +82,15 @@ export function LoginForm() {
       // not sit in memory behind the next screen.
       setFields({ email: fields.email, password: "" });
       setSession(session);
+      // A restricted principal is routed to the mandatory password-change
+      // screen rather than into the application. Signing in successfully and
+      // then being refused every screen is the defect this replaces.
       router.push(
-        postLoginDestination(session.role, searchParams.get("returnTo")),
+        postAuthenticationDestination(
+          session.role,
+          searchParams.get("returnTo"),
+          session.password_change_required === true,
+        ),
       );
     } catch (error) {
       // Every hidden Account state shares one message. Only rate limiting and

@@ -107,6 +107,31 @@ export function deleteSession(csrf: string, locale: "ar" | "en") {
 }
 
 /**
+ * Changes the signed-in account's own password.
+ *
+ * This is the only authenticated route a principal whose credential is
+ * CHANGE_REQUIRED may reach, and completing it is what clears that state. The
+ * server rotates the session in the same transaction, so the response carries a
+ * fresh CSRF token and installs a fresh `__Host-` cookie — the caller must
+ * store the returned session, because the one it authenticated with is
+ * superseded the moment this resolves.
+ */
+export function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  csrf: string,
+  locale: "ar" | "en",
+) {
+  return authenticatedRequest<AuthenticatedSession>(
+    "/password-changes",
+    "POST",
+    locale,
+    csrf,
+    { current_password: currentPassword, new_password: newPassword },
+  ) as Promise<AuthenticatedSession>;
+}
+
+/**
  * Requests a password reset link.
  *
  * The response is deliberately uninformative: the server answers identically
