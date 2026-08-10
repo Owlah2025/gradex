@@ -66,6 +66,56 @@ SCRATCH_BASE="${AGY_REVIEW_SCRATCH:-${TMPDIR:-/tmp}}"
 
 die() { printf 'agy-review: %s\n' "$*" >&2; exit "${2:-2}"; }
 
+# --- the verdict sentinel ------------------------------------------------------------------------
+# The verdict is read from one exact line, never inferred. "I approve this change", "0 findings",
+# "VERDICT: APPROVED" and "### VERDICT: APPROVE" are all unparseable, and unparseable is UNAVAILABLE
+# — which is a failed review, not a passed one. Widening this to accept what a model happened to emit
+# would make the sentinel describe the model instead of binding it.
+#
+# Three literals, nothing else:
+VERDICT_GRAMMAR='^VERDICT: (APPROVE|APPROVE WITH FINDINGS|REJECT)$'
+# Anything that merely looks like a verdict line — decorated with Markdown, indented, or repeated.
+# More than one of these means the report does not say one thing, so it says nothing usable.
+VERDICT_LOOKALIKE='^[[:space:]]*[*_>#`[:space:]-]*VERDICT[[:space:]]*:'
+
+# Prints OK|<verdict line> or BAD|<reason> on stdout. Never guesses.
+read_verdict() {
+  local file="$1" last exact lookalike
+
+  [ -s "$file" ] || { printf 'BAD|the report is missing or empty\n'; return 0; }
+
+  exact="$(grep -cE "$VERDICT_GRAMMAR" "$file" || true)"
+  lookalike="$(grep -cE "$VERDICT_LOOKALIKE" "$file" || true)"
+  last="$(grep -vE '^[[:space:]]*$' "$file" | tail -1)"
+
+  if [ "$exact" -eq 0 ]; then
+    printf 'BAD|no line matches the exact verdict grammar (VERDICT: APPROVE | APPROVE WITH FINDINGS | REJECT)\n'
+    return 0
+  fi
+  if [ "$exact" -gt 1 ]; then
+    printf 'BAD|%s lines match the verdict grammar; a report must state exactly one verdict\n' "$exact"
+    return 0
+  fi
+  if [ "$lookalike" -gt 1 ]; then
+    printf 'BAD|the report contains %s verdict-like lines; only the single exact sentinel is allowed\n' "$lookalike"
+    return 0
+  fi
+  if ! printf '%s\n' "$last" | grep -qE "$VERDICT_GRAMMAR"; then
+    printf 'BAD|the verdict is not the last non-empty line of the report\n'
+    return 0
+  fi
+
+  printf 'OK|%s\n' "$last"
+}
+
+# Deterministic parser check, used by scripts/review-containment-check.sh. No worktree, no model.
+if [ "${1:-}" = "--parse-verdict" ]; then
+  [ $# -eq 2 ] || die "usage: scripts/agy-review.sh --parse-verdict <report-file>"
+  PARSED="$(read_verdict "$2")"
+  printf '%s\n' "$PARSED"
+  case "$PARSED" in OK\|*) exit 0 ;; *) exit 5 ;; esac
+fi
+
 # --- locate the relay from the installed agy-delegate skill (never a vendored copy) -------------
 RELAY=""
 for candidate in \
@@ -316,13 +366,16 @@ if [ "$RELAY_STATUS" -ne 0 ]; then
 fi
 
 # --- assert the verdict is actually retrievable ---------------------------------------------------
-if [ ! -s "$FINAL" ] || ! grep -qE '^VERDICT: (APPROVE|APPROVE WITH FINDINGS|REJECT)$' "$FINAL"; then
-  printf 'agy-review: UNAVAILABLE — no parseable VERDICT line in %s\n' "$FINAL" >&2
-  printf 'agy-review: record this as review UNAVAILABLE. It is not an approval.\n' >&2
+PARSED="$(read_verdict "$FINAL")"
+if [ "${PARSED%%|*}" != OK ]; then
+  printf 'agy-review: UNAVAILABLE — %s\n' "${PARSED#BAD|}" >&2
+  printf 'agy-review: report: %s\n' "$FINAL" >&2
+  printf 'agy-review: record this as review UNAVAILABLE. It is not an approval, whatever the\n' >&2
+  printf 'agy-review: report says in prose. Re-run the review; do not transcribe a verdict by hand.\n' >&2
   exit 5
 fi
 
-VERDICT="$(grep -E '^VERDICT: ' "$FINAL" | tail -1)"
+VERDICT="${PARSED#OK|}"
 
 if [ -n "$DRIFTED" ] && [ -z "${AGY_REVIEW_ALLOW_CONCURRENT_EDITS:-}" ]; then
   printf 'agy-review: INCONCLUSIVE — the reviewer workspace was clean, but the live repo changed\n' >&2

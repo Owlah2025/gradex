@@ -20,6 +20,7 @@
 #   9. the live repository is byte-for-byte unchanged and the temporaries are gone
 #  10. a real review with bwrap unavailable exits UNAVAILABLE without invoking the model
 #  11. the permission-only fallback is unreachable for a real review, so it cannot yield a verdict
+#  12. the verdict sentinel parses exactly three literals and rejects everything else
 #
 # Usage: scripts/review-containment-check.sh [<base>..<head>]
 # Defaults to HEAD~1..HEAD; any small range works, since nothing is actually reviewed.
@@ -275,6 +276,86 @@ if [ "$BEFORE" = "$FINAL_STATE" ]; then
   pass 'live repository is still unchanged after every refusal path'
 else
   fail 'live repository changed during the ineffective-bwrap run'
+fi
+
+# --- the verdict sentinel -------------------------------------------------------------------------
+# A clean, contained, genuinely-completed review still produced no usable result on 2026-08-10
+# because the report ended "### VERDICT: APPROVED (0 Critical, 0 High, 0 Medium, 0 Low)". The right
+# fix is a brief that binds the model, not a parser that guesses at it — so these cases pin the
+# grammar down, deterministically and without calling any model.
+echo
+echo 'review-containment-check: verdict sentinel'
+
+VERDICT_TMP="$(mktemp -d)"
+ARTIFACTS_BEFORE="$(ls -1 "$REPO_ROOT/docs/launch/review/artifacts" 2>/dev/null | sort)"
+
+parse_case() {
+  # parse_case <name> <expect: OK|BAD> <expected verdict, or -> <report body...>
+  local name="$1" expect="$2" want="$3"; shift 3
+  local file="$VERDICT_TMP/report.txt" out="" status=0
+  printf '%s\n' "$@" > "$file"
+  out="$("$REPO_ROOT/scripts/agy-review.sh" --parse-verdict "$file")" || status=$?
+
+  if [ "$expect" = OK ]; then
+    if [ "$status" -eq 0 ] && [ "$out" = "OK|$want" ]; then
+      pass "$name parses as \"$want\""
+    else
+      fail "$name: expected OK|$want (exit 0), got \"$out\" (exit $status)"
+    fi
+  else
+    if [ "$status" -eq 5 ] && [ "${out%%|*}" = BAD ]; then
+      pass "$name is rejected as UNAVAILABLE"
+    else
+      fail "$name: expected a BAD parse and exit 5, got \"$out\" (exit $status)"
+    fi
+  fi
+}
+
+parse_case 'VERDICT: APPROVE'               OK 'VERDICT: APPROVE' \
+  'FINDINGS: none' '' 'VERDICT: APPROVE'
+parse_case 'VERDICT: APPROVE WITH FINDINGS' OK 'VERDICT: APPROVE WITH FINDINGS' \
+  'FINDINGS' 'LOW | a.md:1 | nit | cosmetic' '' 'VERDICT: APPROVE WITH FINDINGS'
+parse_case 'VERDICT: REJECT'                OK 'VERDICT: REJECT' \
+  'FINDINGS' 'HIGH | a.md:1 | wrong | blocks' '' 'VERDICT: REJECT'
+
+parse_case 'a verdict after prose and counts' OK 'VERDICT: APPROVE' \
+  'I read the whole range and checked every dimension.' \
+  'The change matches docs/PRD.md and I could verify each claim.' '' \
+  'COUNTS' '  CRITICAL: 0' '  HIGH: 0' '  MEDIUM: 0' '  LOW: 0' '' 'VERDICT: APPROVE'
+parse_case 'a verdict followed by blank lines' OK 'VERDICT: APPROVE' \
+  'FINDINGS: none' '' 'VERDICT: APPROVE' '' ''
+
+parse_case 'VERDICT: APPROVED'              BAD - 'FINDINGS: none' '' 'VERDICT: APPROVED'
+parse_case 'VERDICT: PASS'                  BAD - 'FINDINGS: none' '' 'VERDICT: PASS'
+parse_case 'a Markdown-headed verdict'      BAD - 'FINDINGS: none' '' '### VERDICT: APPROVE'
+parse_case 'an emphasised verdict'          BAD - 'FINDINGS: none' '' '**VERDICT: APPROVE**'
+parse_case 'a verdict with trailing counts' BAD - 'FINDINGS: none' '' 'VERDICT: APPROVE (0 findings)'
+parse_case 'a verdict with trailing punctuation' BAD - 'FINDINGS: none' '' 'VERDICT: APPROVE.'
+parse_case 'an indented verdict'            BAD - 'FINDINGS: none' '' '  VERDICT: APPROVE'
+parse_case 'the exact 2026-08-10 report ending' BAD - \
+  'FINDINGS: none' '' '### VERDICT: APPROVED (0 Critical, 0 High, 0 Medium, 0 Low)'
+
+parse_case 'a missing verdict'              BAD - 'FINDINGS: none' '' 'Everything looks fine to me.'
+parse_case 'an approval asserted only in prose' BAD - \
+  'FINDINGS: none' '' 'I approve this change. 0 findings.'
+parse_case 'an empty report'                BAD - ''
+parse_case 'two conflicting verdicts'       BAD - \
+  'VERDICT: REJECT' '' 'On reflection:' '' 'VERDICT: APPROVE'
+parse_case 'a repeated identical verdict'   BAD - 'VERDICT: APPROVE' '' 'VERDICT: APPROVE'
+parse_case 'a decorated verdict alongside the sentinel' BAD - \
+  '### VERDICT: APPROVE' '' 'VERDICT: APPROVE'
+parse_case 'a verdict that is not the last line' BAD - \
+  'VERDICT: APPROVE' '' 'One more thought: I did not check the migrations.'
+
+rm -rf "$VERDICT_TMP"
+
+# The parser path must not touch the review machinery at all: no worktree, no relay, no model, and
+# therefore no new artifacts directory.
+ARTIFACTS_AFTER="$(ls -1 "$REPO_ROOT/docs/launch/review/artifacts" 2>/dev/null | sort)"
+if [ "$ARTIFACTS_BEFORE" = "$ARTIFACTS_AFTER" ]; then
+  pass 'the parser cases created no review artifact and called no model'
+else
+  fail 'the parser cases created review artifacts'
 fi
 
 echo

@@ -137,14 +137,48 @@ COUNTS
   MEDIUM: <n>
   LOW: <n>
 
-The final line of your entire response must be exactly one of:
+VERDICT
+The last non-empty line of your entire response must be the verdict sentinel, and it must be
+exactly one of these three literals, character for character:
 
-  VERDICT: APPROVE
-  VERDICT: APPROVE WITH FINDINGS
-  VERDICT: REJECT
+VERDICT: APPROVE
+VERDICT: APPROVE WITH FINDINGS
+VERDICT: REJECT
 
 Use APPROVE only when CRITICAL and HIGH are both 0 and no dimension was left unchecked.
 Use APPROVE WITH FINDINGS when CRITICAL and HIGH are both 0 but MEDIUM or LOW findings exist.
 Use REJECT when any CRITICAL or HIGH finding exists.
+
+The sentinel is read by a program, not by a person. It must start at the beginning of the line, be
+the only verdict-like line anywhere in your response, and carry nothing else: no Markdown heading or
+emphasis, no bullet, no leading or trailing spaces, no counts, no parentheses, no trailing period,
+no explanation, and no synonym. Write findings, counts, and as much reasoning as you like *before*
+it; write nothing after it.
+
+Every one of these is INVALID and causes the review to be discarded as UNAVAILABLE, which is a
+failed review — not an approval:
+
+  ### VERDICT: APPROVE          (Markdown heading)
+  **VERDICT: APPROVE**          (emphasis)
+  VERDICT: APPROVED             (not one of the three literals)
+  VERDICT: PASS                 (synonym)
+  VERDICT: APPROVE (0 findings) (trailing content)
+  VERDICT: APPROVE.             (trailing punctuation)
+  Final verdict: APPROVE        (prose, not the sentinel)
+
+Prose cannot substitute for the sentinel. "I approve this change", "no issues found" and "0
+findings" carry no verdict; only the literal line does. If your response would end with anything
+other than that line, fix your response — do not expect the dispatcher to interpret you.
+
+A correct ending looks exactly like this, with the sentinel flush against the left margin and
+nothing whatsoever after it:
+
+COUNTS
+  CRITICAL: 0
+  HIGH: 0
+  MEDIUM: 0
+  LOW: 0
+
+VERDICT: APPROVE
 </structured_output_contract>
 <!-- BRIEF:END -->
