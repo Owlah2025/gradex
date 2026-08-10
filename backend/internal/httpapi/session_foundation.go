@@ -16,6 +16,7 @@ var requiredSessionPolicyEndpoints = [...]string{
 	"session-resolution",
 	"session-renewals",
 	"session-logout",
+	"password-changes",
 }
 
 type sessionCommands interface {
@@ -28,6 +29,7 @@ type sessionCommands interface {
 	) (identity.SessionView, error)
 	Renew(context.Context, identity.SessionMutation) (identity.SessionGrant, error)
 	Logout(context.Context, identity.SessionMutation) error
+	ChangePassword(context.Context, identity.PasswordChangeCommand) (identity.SessionGrant, error)
 }
 
 // SessionFoundation is the validated dependency set for the four
@@ -36,6 +38,7 @@ type SessionFoundation struct {
 	security         *anonymousSecurity
 	repository       sessionCommands
 	authenticator    *auth.SessionAuthenticator
+	compromised      identity.CompromisedRangeSource
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
 }
@@ -46,8 +49,13 @@ type SessionFoundationOptions struct {
 	AnonymousCSRFKey    []byte
 	AnonymousSessionTTL time.Duration
 	Repository          sessionCommands
-	Limiter             *ratelimit.Limiter
-	EndpointPolicies    map[string]ratelimit.Policy
+	// Compromised screens every replacement password. It is required rather
+	// than optional so a deployment cannot mount the password-change route with
+	// screening quietly absent — the one route whose whole purpose is to
+	// install a credential that will not be changed again.
+	Compromised      identity.CompromisedRangeSource
+	Limiter          *ratelimit.Limiter
+	EndpointPolicies map[string]ratelimit.Policy
 }
 
 func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation, error) {
@@ -62,6 +70,9 @@ func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation,
 	}
 	if options.Repository == nil || options.Limiter == nil {
 		return nil, errors.New("session foundation dependencies are required")
+	}
+	if options.Compromised == nil {
+		return nil, errors.New("session foundation compromised-password source is required")
 	}
 	endpointPolicies := make(map[string]ratelimit.Policy, len(options.EndpointPolicies))
 	for endpoint, policy := range options.EndpointPolicies {
@@ -86,6 +97,7 @@ func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation,
 		security:         security,
 		repository:       options.Repository,
 		authenticator:    authenticator,
+		compromised:      options.Compromised,
 		limiter:          options.Limiter,
 		endpointPolicies: endpointPolicies,
 	}, nil

@@ -88,13 +88,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		t.Fatalf("constructing staff foundation: %v", err)
 	}
 
-	sessionPolicies := map[string]ratelimit.Policy{
-		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-		"sessions":           ratelimit.DevelopmentLoginPolicy(),
-		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
-		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
-		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
-	}
+	sessionPolicies := testSessionEndpointPolicies()
 	sessionRepo := &fakeSessionRepository{
 		view: identity.SessionView{
 			Session: identity.AuthenticatedSession{
@@ -115,6 +109,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		AnonymousCSRFKey:    bytes.Repeat([]byte{0x32}, 32),
 		AnonymousSessionTTL: 24 * time.Hour,
 		Repository:          sessionRepo,
+		Compromised:         testCompromisedSource(t),
 		Limiter:             limiter,
 		EndpointPolicies:    sessionPolicies,
 	})
@@ -312,6 +307,20 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/session":           {Method: http.MethodGet, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 	"POST /api/v1/session-renewals": {Method: http.MethodPost, Path: "/api/v1/session-renewals", Class: ClassAuthenticatedSessionLifecycle},
 	"DELETE /api/v1/session":        {Method: http.MethodDelete, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
+
+	// The authenticated password change is session lifecycle, not a product
+	// capability: it rotates the caller's own session and is one of the two
+	// things §4.5 permits a restricted principal to do.
+	//
+	// The class matters here, and it is not bookkeeping. Every route classified
+	// as capability- or ownership-protected is swept by
+	// TestRestrictedBootstrapAdminIsDeniedOnRealProtectedRoutes, which asserts a
+	// CHANGE_REQUIRED principal is refused. This route must NOT be refused —
+	// refusing it is the launch defect — so it belongs with the other lifecycle
+	// routes. That it is genuinely reachable in that state is asserted directly
+	// by TestRestrictedPrincipalReachesOnlyThePasswordChangeRoute below, so
+	// nothing about this classification removes the route from proof.
+	"POST /api/v1/password-changes": {Method: http.MethodPost, Path: "/api/v1/password-changes", Class: ClassAuthenticatedSessionLifecycle},
 
 	"GET /api/v1/staff-invitations": {Method: http.MethodGet, Path: "/api/v1/staff-invitations", Class: ClassCapabilityProtected},
 
@@ -556,6 +565,61 @@ func TestRestrictedBootstrapAdminIsDeniedOnRealProtectedRoutes(t *testing.T) {
 
 			assertDenyLogged(t, buf, "PASSWORD_CHANGE_REQUIRED")
 		})
+	}
+}
+
+// TestRestrictedPrincipalReachesOnlyThePasswordChangeRoute is the other half of
+// the test above, and the one the launch defect needed.
+//
+// Proving that a CHANGE_REQUIRED Administrator is refused everywhere is only
+// half a policy. §4.5 grants it PASSWORD_CHANGE precisely so the restriction is
+// escapable, and before this route existed it was not: the bootstrap
+// Administrator authenticated, was refused every screen, and had nowhere to go.
+// So the same principal, on the same router, must reach this one route.
+func TestRestrictedPrincipalReachesOnlyThePasswordChangeRoute(t *testing.T) {
+	bootstrapAdmin := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleAdmin,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialChangeRequired,
+	}
+
+	r, buf := authzRouter(t, fixedPrincipals{principal: bootstrapAdmin})
+	rec := do(r, newAuthenticatedRequest(
+		http.MethodPost, "/api/v1/password-changes",
+		[]byte(`{"current_password":"the temporary one","new_password":"a replacement passphrase 9"}`),
+	))
+
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("the one route that clears CHANGE_REQUIRED was refused to a "+
+			"CHANGE_REQUIRED principal, which makes the state terminal: %s", rec.Body.String())
+	}
+	if strings.Contains(buf.String(), string(identity.DenyPasswordChangeRequired)) {
+		t.Errorf("the password-change route logged a PASSWORD_CHANGE_REQUIRED denial: %s", buf.String())
+	}
+
+	// And the grant is specific, not a hole: the same principal on the same
+	// router is still refused an ordinary Admin route.
+	adminRec := do(r, newAuthenticatedRequest(http.MethodGet, "/api/v1/staff-invitations", nil))
+	if adminRec.Code != http.StatusForbidden {
+		t.Fatalf("restricted Admin reached an ADMIN_OPERATIONS route: status %d", adminRec.Code)
+	}
+}
+
+// The route must not become an unauthenticated password-reset surface. It
+// changes a credential, so a caller that cannot prove a session gets nothing —
+// checked before any principal is resolved or any body is trusted.
+func TestPasswordChangeRouteRefusesAnUnauthenticatedCaller(t *testing.T) {
+	r, _ := authzRouter(t, fixedPrincipals{err: identity.ErrPrincipalNotFound})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/password-changes",
+		bytes.NewReader([]byte(`{"current_password":"a","new_password":"b"}`)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://gradex.example")
+
+	rec := do(r, request)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 for a request carrying no session", rec.Code)
 	}
 }
 

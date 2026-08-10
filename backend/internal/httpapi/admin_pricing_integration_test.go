@@ -43,6 +43,10 @@ func (r *tokenSessionRepo) RenewSession(_ context.Context, _, _ string, _, _, _ 
 func (r *tokenSessionRepo) Renew(_ context.Context, _ identity.SessionMutation) (identity.SessionGrant, error) {
 	return identity.SessionGrant{}, nil
 }
+func (r *tokenSessionRepo) ChangePassword(_ context.Context, _ identity.PasswordChangeCommand) (identity.SessionGrant, error) {
+	return identity.SessionGrant{}, errors.New("not implemented")
+}
+
 func (r *tokenSessionRepo) Logout(_ context.Context, _ identity.SessionMutation) error {
 	return nil
 }
@@ -174,13 +178,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 	}
 
 	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
-	sessionPolicies := map[string]ratelimit.Policy{
-		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-		"sessions":           ratelimit.DevelopmentLoginPolicy(),
-		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
-		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
-		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
-	}
+	sessionPolicies := testSessionEndpointPolicies()
 
 	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",
@@ -188,6 +186,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 		AnonymousCSRFKey:    bytes.Repeat([]byte{0x32}, 32),
 		AnonymousSessionTTL: 24 * time.Hour,
 		Repository:          sessionRepo,
+		Compromised:         testCompromisedSource(t),
 		Limiter:             limiter,
 		EndpointPolicies:    sessionPolicies,
 	})

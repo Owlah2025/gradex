@@ -73,7 +73,7 @@ func NewRouter(
 
 	v1 := r.Group("/api/v1")
 	if routerConfig.sessions != nil {
-		mountSessionRoutes(v1, routerConfig.sessions)
+		mountSessionRoutes(v1, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.admission != nil {
 		mountAdmissionRoutesWithBootstrap(
@@ -233,9 +233,16 @@ func WithSessionFoundation(foundation *SessionFoundation) RouterOption {
 	}
 }
 
-func mountSessionRoutes(v1 *gin.RouterGroup, foundation *SessionFoundation) {
+func mountSessionRoutes(
+	v1 *gin.RouterGroup,
+	foundation *SessionFoundation,
+	authenticator auth.Authenticator,
+	principals identity.PrincipalResolver,
+	logger *logging.Logger,
+) {
 	handlers := &sessionHandlers{
 		repository: foundation.repository, authenticator: foundation.authenticator,
+		compromised: foundation.compromised,
 	}
 	v1.GET(
 		"/session/bootstrap",
@@ -265,6 +272,28 @@ func mountSessionRoutes(v1 *gin.RouterGroup, foundation *SessionFoundation) {
 		foundation.requireSessionMutationSecurity(),
 		foundation.requireSessionRateDecision("session-logout", sessionRateIdentifier),
 		handlers.logout,
+	)
+
+	// The authenticated password change.
+	//
+	// PASSWORD_CHANGE is the capability §4.5 grants a restricted principal and
+	// SESSION_TERMINATE is the other; every other capability is refused while
+	// the credential is CHANGE_REQUIRED. Gating this route on PASSWORD_CHANGE
+	// is therefore the ordinary capability decision, not an exemption from it —
+	// the same middleware runs, and it is the policy that says yes. Mounting it
+	// behind ADMIN_OPERATIONS or any product capability instead would make the
+	// restricted state unescapable, which is the defect this route closes.
+	//
+	// requireAuth still runs first, so an unauthenticated caller is refused
+	// before any principal is resolved.
+	v1.POST(
+		"/password-changes",
+		strictJSONMiddleware(func() any { return &passwordChangeRequest{} }, passwordChangeBodyLimit),
+		foundation.requireSessionMutationSecurity(),
+		foundation.requireSessionRateDecision("password-changes", sessionRateIdentifier),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapPasswordChange),
+		handlers.changePassword,
 	)
 }
 

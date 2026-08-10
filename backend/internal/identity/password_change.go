@@ -74,6 +74,19 @@ type PasswordChangePolicy struct {
 	RecentAuthWindow time.Duration
 	IdleExpiry       time.Duration
 	AbsoluteExpiry   time.Duration
+
+	// SessionCSRFKey is the server key the session authority derives every
+	// generation's CSRF token from.
+	//
+	// It is not optional. A password change rotates the session generation, and
+	// SessionRepository.Resolve rebuilds the browser's CSRF token by re-deriving
+	// it from (key, session, generation, credential digest) and refusing the
+	// session when the stored digest does not match. A replacement minted with
+	// an independent random token would therefore commit a password change that
+	// makes the very session it just re-established unresolvable on the next
+	// page load. The replacement is minted the same way login and renewal mint
+	// theirs, so all three agree.
+	SessionCSRFKey []byte
 }
 
 // PasswordChangeResult contains the only plaintext values produced by a
@@ -163,14 +176,17 @@ func newPasswordChangeCommit(
 	policy PasswordChangePolicy,
 	now time.Time,
 ) (passwordChangeCommit, error) {
-	replacement, err := NewSessionCredential()
+	nextGeneration := prepared.CurrentGeneration + 1
+	replacement, err := NewSessionCredentialForGeneration(
+		policy.SessionCSRFKey, prepared.SessionID, nextGeneration,
+	)
 	if err != nil {
 		return passwordChangeCommit{}, fmt.Errorf("minting replacement session credential: %w", err)
 	}
 	return passwordChangeCommit{
 		prepared:          prepared,
 		replacement:       replacement,
-		nextGeneration:    prepared.CurrentGeneration + 1,
+		nextGeneration:    nextGeneration,
 		now:               now,
 		idleExpiresAt:     now.Add(policy.IdleExpiry),
 		absoluteExpiresAt: now.Add(policy.AbsoluteExpiry),
@@ -189,6 +205,9 @@ func validatePasswordChangePolicy(policy PasswordChangePolicy) error {
 	}
 	if policy.RecentAuthWindow <= 0 || policy.RecentAuthWindow >= policy.IdleExpiry {
 		return errors.New("recent-authentication window must be positive and shorter than idle expiry")
+	}
+	if len(policy.SessionCSRFKey) < sessionCredentialBytes {
+		return errors.New("password change requires the session CSRF key")
 	}
 	return nil
 }

@@ -222,12 +222,19 @@ func buildSessionFoundation(
 		return nil, nil, nil, err
 	}
 
+	compromisedSource, err := buildCompromisedPasswordSource(cfg)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+
 	endpointPolicies := map[string]ratelimit.Policy{
 		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
 		"sessions":           ratelimit.DevelopmentLoginPolicy(),
 		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
 		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
 		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
+		"password-changes":   ratelimit.DevelopmentSessionPolicy("password-changes"),
 	}
 	foundation, err := httpapi.NewSessionFoundation(httpapi.SessionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
@@ -235,6 +242,7 @@ func buildSessionFoundation(
 		AnonymousCSRFKey:    []byte(admission.AnonymousCSRFKey().Expose()),
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Repository:          repository,
+		Compromised:         compromisedSource,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})

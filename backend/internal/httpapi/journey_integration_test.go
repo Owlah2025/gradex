@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
@@ -125,14 +127,9 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 		AnonymousCSRFKey:    bytes.Repeat([]byte("b"), 32),
 		AnonymousSessionTTL: time.Hour,
 		Repository:          repository,
+		Compromised:         compromised,
 		Limiter:             limiter,
-		EndpointPolicies: map[string]ratelimit.Policy{
-			"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-			"sessions":           ratelimit.DevelopmentLoginPolicy(),
-			"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
-			"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
-			"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
-		},
+		EndpointPolicies:    testSessionEndpointPolicies(),
 	})
 	if err != nil {
 		t.Fatalf("constructing session foundation: %v", err)
@@ -144,7 +141,11 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	// Session routes first, then admission without its own bootstrap route, so
 	// the anonymous bootstrap is registered exactly once — the same ordering
 	// NewRouter applies when both boundaries are enabled.
-	mountSessionRoutes(v1, sessionFoundation)
+	mountSessionRoutes(
+		v1, sessionFoundation,
+		sessionFoundation.authenticator, identity.NewDBPrincipalResolver(pool),
+		logging.New(io.Discard, "gradex-api-test", "development", logging.LevelFromString("info")),
+	)
 	mountAdmissionRoutesWithBootstrap(v1, admissionFoundation, false)
 	return router
 }

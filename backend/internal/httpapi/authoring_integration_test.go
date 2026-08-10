@@ -134,13 +134,7 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 	reporter.MarkStarted()
 
 	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
-	sessionPolicies := map[string]ratelimit.Policy{
-		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-		"sessions":           ratelimit.DevelopmentLoginPolicy(),
-		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
-		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
-		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
-	}
+	sessionPolicies := testSessionEndpointPolicies()
 
 	now := time.Now().UTC()
 	sessionRepo := &fakeSessionRepository{
@@ -163,6 +157,7 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 		AnonymousCSRFKey:    bytes.Repeat([]byte{0x32}, 32),
 		AnonymousSessionTTL: 24 * time.Hour,
 		Repository:          sessionRepo,
+		Compromised:         testCompromisedSource(t),
 		Limiter:             limiter,
 		EndpointPolicies:    sessionPolicies,
 	})

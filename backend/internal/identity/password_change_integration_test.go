@@ -15,10 +15,16 @@ import (
 
 const recentAuthWindow = 15 * time.Minute
 
+// passwordChangeCSRFKey stands in for the deployed SESSION_CSRF_KEY. The
+// replacement generation's CSRF token is derived from it, exactly as login and
+// renewal derive theirs, so a rotated session stays resolvable afterwards.
+var passwordChangeCSRFKey = []byte("password-change-test-csrf-key-32b")
+
 var adminPasswordChangePolicy = PasswordChangePolicy{
 	RecentAuthWindow: recentAuthWindow,
 	IdleExpiry:       30 * time.Minute,
 	AbsoluteExpiry:   12 * time.Hour,
+	SessionCSRFKey:   passwordChangeCSRFKey,
 }
 
 // bootstrapWithSession creates the bootstrap Admin and an authenticated session

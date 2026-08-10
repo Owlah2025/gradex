@@ -5,7 +5,10 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -20,15 +23,25 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 const httpSessionPassword = "correct session login passphrase 9"
 
-func realSessionRouter(
+func realSessionRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
+	t.Helper()
+	return realSessionRouterWithScreening(t, pool, testCompromisedSource(t))
+}
+
+// realSessionRouterWithScreening takes the compromised-password source
+// explicitly, so a test can prove that screening actually runs on the
+// replacement password rather than inferring it from a policy refusal.
+func realSessionRouterWithScreening(
 	t *testing.T,
 	pool *pgxpool.Pool,
+	compromised identity.CompromisedRangeSource,
 ) *gin.Engine {
 	t.Helper()
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
@@ -56,28 +69,30 @@ func realSessionRouter(
 	if err != nil {
 		t.Fatalf("constructing limiter: %v", err)
 	}
-	endpointPolicies := map[string]ratelimit.Policy{
-		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-		"sessions":           ratelimit.DevelopmentLoginPolicy(),
-		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
-		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
-		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
-	}
 	foundation, err := NewSessionFoundation(SessionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",
 		CookieSigningKey:    bytes.Repeat([]byte("a"), 32),
 		AnonymousCSRFKey:    bytes.Repeat([]byte("b"), 32),
 		AnonymousSessionTTL: time.Hour,
 		Repository:          repository,
+		Compromised:         compromised,
 		Limiter:             limiter,
-		EndpointPolicies:    endpointPolicies,
+		EndpointPolicies:    testSessionEndpointPolicies(),
 	})
 	if err != nil {
 		t.Fatalf("constructing session foundation: %v", err)
 	}
 	router := gin.New()
 	router.Use(requestIDMiddleware())
-	mountSessionRoutes(router.Group("/api/v1"), foundation)
+	// The real cookie authenticator and the real database principal resolver.
+	// The password-change route is only meaningful against them: it is the
+	// resolver that reports CHANGE_REQUIRED and the policy that decides what a
+	// principal in that state may reach.
+	mountSessionRoutes(
+		router.Group("/api/v1"), foundation,
+		foundation.authenticator, identity.NewDBPrincipalResolver(pool),
+		logging.New(io.Discard, "gradex-api-test", "development", logging.LevelFromString("info")),
+	)
 	return router
 }
 
@@ -334,6 +349,343 @@ func TestSessionLogoutRevokesBeforeCookieClear(t *testing.T) {
 	))
 	if after.Code != http.StatusUnauthorized {
 		t.Fatalf("logged-out credential resolved with %d", after.Code)
+	}
+}
+
+// insertRestrictedHTTPAccount creates an Account in exactly the state
+// cmd/bootstrap-admin leaves behind: verified, ACTIVE, and holding a
+// CHANGE_REQUIRED credential.
+func insertRestrictedHTTPAccount(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	email string,
+	role identity.Role,
+) string {
+	t.Helper()
+	hash, err := identity.HashPassword(httpSessionPassword)
+	if err != nil {
+		t.Fatalf("hashing restricted fixture: %v", err)
+	}
+	now := time.Now().UTC()
+	var accountID string
+	err = pool.QueryRow(context.Background(),
+		`WITH account AS (
+		   INSERT INTO accounts
+		     (normalized_email, email, role, status, display_name, email_verified_at)
+		   VALUES ($1, $1, $2, 'ACTIVE', 'Restricted Principal', $3)
+		   RETURNING id
+		 ), credential AS (
+		   INSERT INTO password_credentials (account_id, password_hash, state)
+		   SELECT id, $4, 'CHANGE_REQUIRED' FROM account
+		 )
+		 SELECT id::text FROM account`,
+		email, string(role), now, hash.Expose(),
+	).Scan(&accountID)
+	if err != nil {
+		t.Fatalf("creating restricted Account: %v", err)
+	}
+	return accountID
+}
+
+func credentialStateOf(t *testing.T, pool *pgxpool.Pool, accountID string) string {
+	t.Helper()
+	var state string
+	if err := pool.QueryRow(context.Background(),
+		`SELECT state::text FROM password_credentials WHERE account_id = $1::uuid`,
+		accountID,
+	).Scan(&state); err != nil {
+		t.Fatalf("reading credential state: %v", err)
+	}
+	return state
+}
+
+func postPasswordChange(
+	router *gin.Engine,
+	cookie *http.Cookie,
+	csrf string,
+	current string,
+	next string,
+) *httptest.ResponseRecorder {
+	body := `{"current_password":` + quotedJSON(current) +
+		`,"new_password":` + quotedJSON(next) + `}`
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/v1/password-changes", strings.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://gradex.example")
+	request.Header.Set(csrfHeaderName, csrf)
+	request.AddCookie(cookie)
+	return serveSessionRequest(router, request)
+}
+
+// The launch defect, end to end against a real database.
+//
+// A bootstrap Administrator could sign in and then do nothing: every privileged
+// request answered 403 PASSWORD_CHANGE_REQUIRED and no route existed to clear
+// the state. This walks the whole recovery — sign in, observe the restriction
+// in the session representation, change the password, observe it cleared — and
+// asserts the credential really reached ACTIVE in PostgreSQL rather than the
+// response merely claiming so.
+func TestRestrictedAdminChangesItsPasswordAndBecomesActive(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	accountID := insertRestrictedHTTPAccount(t, pool, "bootstrap-admin@example.com", identity.RoleAdmin)
+	router := realSessionRouter(t, pool)
+
+	login := postSessionLogin(t, router, "bootstrap-admin@example.com", httpSessionPassword)
+	if login.status != http.StatusCreated {
+		t.Fatalf("the bootstrap Administrator could not sign in: %d %s", login.status, login.body)
+	}
+	// The browser learns it is restricted from the login response itself, which
+	// is what lets it redirect instead of walking into repeated 403s.
+	if !strings.Contains(string(login.body), `"password_change_required":true`) {
+		t.Fatalf("login did not report the restriction: %s", login.body)
+	}
+	credential := authenticatedCookie(t, login.setCookie)
+	csrf := csrfFromSessionResponse(t, login.body)
+
+	// The session read reports the same fact, so a page reload cannot lose it.
+	resolved := serveSessionRequest(router, sessionRequest(
+		http.MethodGet, "/api/v1/session", credential, "",
+	))
+	if !strings.Contains(resolved.Body.String(), `"password_change_required":true`) {
+		t.Fatalf("session resolution did not report the restriction: %s", resolved.Body.String())
+	}
+
+	changed := postPasswordChange(
+		router, credential, csrf, httpSessionPassword, "a brand new launch passphrase 9",
+	)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("password change = %d: %s", changed.Code, changed.Body.String())
+	}
+	if !strings.Contains(changed.Body.String(), `"password_change_required":false`) {
+		t.Fatalf("the completed change still reports the restriction: %s", changed.Body.String())
+	}
+	if state := credentialStateOf(t, pool, accountID); state != "ACTIVE" {
+		t.Fatalf("credential state = %q, want ACTIVE", state)
+	}
+
+	// The change rotated the family, exactly as a password change must: the
+	// browser holds new credentials and the old ones are superseded.
+	replacement := authenticatedCookie(t, changed.Header().Values("Set-Cookie"))
+	replacementCSRF := csrfFromSessionResponse(t, changed.Body.Bytes())
+	if replacement.Value == credential.Value || replacementCSRF == csrf {
+		t.Fatal("the password change did not rotate the browser credentials")
+	}
+
+	// The rotated session is immediately usable — including its derived CSRF
+	// token, which a replacement minted outside the session authority's own
+	// derivation would have broken on the very next read.
+	afterChange := serveSessionRequest(router, sessionRequest(
+		http.MethodGet, "/api/v1/session", replacement, "",
+	))
+	if afterChange.Code != http.StatusOK {
+		t.Fatalf("the rotated session did not resolve: %d %s", afterChange.Code, afterChange.Body.String())
+	}
+	if csrfFromSessionResponse(t, afterChange.Body.Bytes()) != replacementCSRF {
+		t.Fatal("the rotated session's CSRF token could not be re-derived")
+	}
+
+	// The superseded credential is refused rather than silently accepted.
+	stale := serveSessionRequest(router, sessionRequest(
+		http.MethodGet, "/api/v1/session", credential, "",
+	))
+	if stale.Code != http.StatusUnauthorized {
+		t.Fatalf("the pre-change credential still resolved: %d", stale.Code)
+	}
+
+	// The old password stops authenticating and the new one starts.
+	oldPassword := postSessionLogin(t, router, "bootstrap-admin@example.com", httpSessionPassword)
+	if oldPassword.status != http.StatusUnauthorized {
+		t.Fatalf("the replaced password still authenticates: %d", oldPassword.status)
+	}
+	newPassword := postSessionLogin(
+		t, router, "bootstrap-admin@example.com", "a brand new launch passphrase 9",
+	)
+	if newPassword.status != http.StatusCreated {
+		t.Fatalf("the new password does not authenticate: %d %s", newPassword.status, newPassword.body)
+	}
+	if !strings.Contains(string(newPassword.body), `"password_change_required":false`) {
+		t.Fatalf("a re-login after the change is still restricted: %s", newPassword.body)
+	}
+}
+
+// The same lifecycle applies to an Instructor, so a staff account created in a
+// restricted state is not stranded either.
+func TestRestrictedInstructorFollowsTheSamePasswordChangeLifecycle(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	accountID := insertRestrictedHTTPAccount(t, pool, "restricted-instructor@example.com", identity.RoleInstructor)
+	router := realSessionRouter(t, pool)
+
+	login := postSessionLogin(t, router, "restricted-instructor@example.com", httpSessionPassword)
+	if login.status != http.StatusCreated ||
+		!strings.Contains(string(login.body), `"password_change_required":true`) {
+		t.Fatalf("restricted Instructor login = %d: %s", login.status, login.body)
+	}
+	changed := postPasswordChange(
+		router,
+		authenticatedCookie(t, login.setCookie),
+		csrfFromSessionResponse(t, login.body),
+		httpSessionPassword,
+		"an instructor replacement passphrase 4",
+	)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("Instructor password change = %d: %s", changed.Code, changed.Body.String())
+	}
+	if state := credentialStateOf(t, pool, accountID); state != "ACTIVE" {
+		t.Fatalf("Instructor credential state = %q, want ACTIVE", state)
+	}
+	if !strings.Contains(changed.Body.String(), `"role":"INSTRUCTOR"`) {
+		t.Fatalf("the rotated session lost its role: %s", changed.Body.String())
+	}
+}
+
+// Every refusal must leave the credential, the restriction, and the session
+// exactly as they were. A password change that half-fails is worse than one
+// that fails.
+func TestRefusedPasswordChangeLeavesTheAccountUntouched(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	accountID := insertRestrictedHTTPAccount(t, pool, "refusals@example.com", identity.RoleAdmin)
+	router := realSessionRouter(t, pool)
+	login := postSessionLogin(t, router, "refusals@example.com", httpSessionPassword)
+	credential := authenticatedCookie(t, login.setCookie)
+	csrf := csrfFromSessionResponse(t, login.body)
+
+	for name, tc := range map[string]struct {
+		current string
+		next    string
+		status  int
+		code    string
+	}{
+		"wrong current password": {
+			"not the current password", "a brand new launch passphrase 9",
+			http.StatusUnauthorized, "AUTHENTICATION_FAILED",
+		},
+		"new password fails policy": {
+			httpSessionPassword, "short",
+			http.StatusUnprocessableEntity, "VALIDATION_FAILED",
+		},
+		// Reuse is refused by the domain even though the caller proved the
+		// value: re-entering the temporary password would satisfy the workflow
+		// while changing nothing.
+		"new password repeats the current one": {
+			httpSessionPassword, httpSessionPassword,
+			http.StatusUnprocessableEntity, "VALIDATION_FAILED",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := postPasswordChange(router, credential, csrf, tc.current, tc.next)
+			if response.Code != tc.status {
+				t.Fatalf("status = %d, want %d: %s", response.Code, tc.status, response.Body.String())
+			}
+			if !strings.Contains(response.Body.String(), `"code":"`+tc.code+`"`) {
+				t.Fatalf("body lacks %s: %s", tc.code, response.Body.String())
+			}
+			for _, secret := range []string{httpSessionPassword, tc.current, tc.next} {
+				if strings.Contains(response.Body.String(), secret) {
+					t.Fatalf("the refusal echoed a password: %s", response.Body.String())
+				}
+			}
+			if state := credentialStateOf(t, pool, accountID); state != "CHANGE_REQUIRED" {
+				t.Fatalf("a refused change moved the credential to %q", state)
+			}
+			// The session was not rotated, so the browser can retry with the
+			// credentials it already holds.
+			if len(response.Result().Cookies()) != 0 {
+				t.Fatal("a refused change rotated the browser cookie")
+			}
+			retry := serveSessionRequest(router, sessionRequest(
+				http.MethodGet, "/api/v1/session", credential, "",
+			))
+			if retry.Code != http.StatusOK {
+				t.Fatalf("a refused change invalidated the caller's session: %d", retry.Code)
+			}
+		})
+	}
+
+	// After all of that the original password still works.
+	if login := postSessionLogin(t, router, "refusals@example.com", httpSessionPassword); login.status != http.StatusCreated {
+		t.Fatalf("the original password stopped working after refused changes: %d", login.status)
+	}
+}
+
+// A compromised replacement is refused by the screening source, not merely by
+// the length and shape rules.
+func TestCompromisedReplacementPasswordIsRefused(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	accountID := insertRestrictedHTTPAccount(t, pool, "screened@example.com", identity.RoleAdmin)
+
+	const breached = "a widely breached launch passphrase 3"
+	digest := sha256.Sum256([]byte(breached))
+	source, err := identity.NewDeterministicCompromisedSource(
+		strings.ToUpper(hex.EncodeToString(digest[:])),
+	)
+	if err != nil {
+		t.Fatalf("constructing breached fixture: %v", err)
+	}
+	router := realSessionRouterWithScreening(t, pool, source)
+
+	login := postSessionLogin(t, router, "screened@example.com", httpSessionPassword)
+	response := postPasswordChange(
+		router,
+		authenticatedCookie(t, login.setCookie),
+		csrfFromSessionResponse(t, login.body),
+		httpSessionPassword,
+		breached,
+	)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a breached replacement was accepted: %d %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), breached) {
+		t.Fatalf("the refusal echoed the rejected password: %s", response.Body.String())
+	}
+	if state := credentialStateOf(t, pool, accountID); state != "CHANGE_REQUIRED" {
+		t.Fatalf("a screened-out password still changed the credential to %q", state)
+	}
+
+	// The same password with screening satisfied is accepted, so the refusal
+	// above is the screening source and not an unrelated policy rule.
+	permissive := realSessionRouter(t, pool)
+	permissiveLogin := postSessionLogin(t, permissive, "screened@example.com", httpSessionPassword)
+	accepted := postPasswordChange(
+		permissive,
+		authenticatedCookie(t, permissiveLogin.setCookie),
+		csrfFromSessionResponse(t, permissiveLogin.body),
+		httpSessionPassword,
+		breached,
+	)
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("the same password was refused without screening too: %d %s",
+			accepted.Code, accepted.Body.String())
+	}
+}
+
+// A password change revokes every other family the Account holds, so a stolen
+// session elsewhere does not survive the recovery.
+func TestPasswordChangeRevokesTheAccountsOtherSessions(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	insertRestrictedHTTPAccount(t, pool, "multi-session@example.com", identity.RoleAdmin)
+	router := realSessionRouter(t, pool)
+
+	elsewhere := postSessionLogin(t, router, "multi-session@example.com", httpSessionPassword)
+	elsewhereCookie := authenticatedCookie(t, elsewhere.setCookie)
+
+	here := postSessionLogin(t, router, "multi-session@example.com", httpSessionPassword)
+	changed := postPasswordChange(
+		router,
+		authenticatedCookie(t, here.setCookie),
+		csrfFromSessionResponse(t, here.body),
+		httpSessionPassword,
+		"a brand new launch passphrase 9",
+	)
+	if changed.Code != http.StatusOK {
+		t.Fatalf("password change = %d: %s", changed.Code, changed.Body.String())
+	}
+
+	survivor := serveSessionRequest(router, sessionRequest(
+		http.MethodGet, "/api/v1/session", elsewhereCookie, "",
+	))
+	if survivor.Code != http.StatusUnauthorized {
+		t.Fatalf("another session family survived the password change: %d", survivor.Code)
 	}
 }
 

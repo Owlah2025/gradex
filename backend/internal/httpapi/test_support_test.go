@@ -10,6 +10,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
 )
 
@@ -25,6 +26,34 @@ func (f fakeAuth) UserFromRequest(c *gin.Context) (string, error) {
 	// not modelling an authenticated request.
 	c.Set("authenticated_session", identity.Session{ID: "test-session-user-1", AccountID: "user-1", State: identity.SessionActive})
 	return "user-1", nil
+}
+
+// testSessionEndpointPolicies is the complete set of session rate-limit
+// policies. NewSessionFoundation refuses to build when one is missing, so it
+// lives here rather than being re-listed in every router setup — a route added
+// with a new policy then fails in one place instead of five.
+func testSessionEndpointPolicies() map[string]ratelimit.Policy {
+	return map[string]ratelimit.Policy{
+		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
+		"sessions":           ratelimit.DevelopmentLoginPolicy(),
+		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
+		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
+		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
+		"password-changes":   ratelimit.DevelopmentSessionPolicy("password-changes"),
+	}
+}
+
+// testCompromisedSource is the network-free screening source. Constructed with
+// no fixture digests it treats every password as unbreached, which is what a
+// router test that is not about screening wants; a test that is about screening
+// builds its own with the digests it needs.
+func testCompromisedSource(t *testing.T) identity.CompromisedRangeSource {
+	t.Helper()
+	source, err := identity.NewDeterministicCompromisedSource()
+	if err != nil {
+		t.Fatalf("constructing compromised-password source: %v", err)
+	}
+	return source
 }
 
 // assertProblemEnvelope checks the repository-wide public error contract
