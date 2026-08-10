@@ -521,6 +521,13 @@ func buildStaffFoundation(
 	redisConnection *queue.Connection,
 ) (*httpapi.StaffFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
+	// The settings read below are shared with Student admission but are not
+	// conditional on it: staff onboarding writes protected outbox rows, rate
+	// limits its invitation endpoints, and screens the password chosen at
+	// completion. Enabled sessions already require ADMISSION_LIMITER_HMAC_KEY
+	// and the outbox key is required for every composition, so the only setting
+	// a Student-registration-disabled environment can still be missing is
+	// PASSWORD_SCREEN_MODE, which fails here by name rather than silently.
 	compromisedSource, err := buildCompromisedPasswordSource(cfg)
 	if err != nil {
 		return nil, nil, err
@@ -691,11 +698,26 @@ func buildProductionFoundations(
 		pf.Options = append(pf.Options, httpapi.WithAdmissionFoundation(foundation))
 	}
 
-	if cfg.Admission().Enabled() && cfg.Environment() == config.EnvDevelopment {
+	// Staff invitation and onboarding is an Admin capability, not part of public
+	// Student admission. Gating it on cfg.Admission().Enabled() coupled the two:
+	// with STUDENT_REGISTRATION_ENABLED=false — the intended founder posture —
+	// no staff foundation was composed and every /api/v1/staff-invitations route
+	// answered 404 with route_template="unmatched". Only the environment gate
+	// belongs here; the production hard-stop lives in buildStaffFoundation.
+	//
+	// Sessions remain a genuine dependency — staff mutations carry the session
+	// and CSRF boundary, and httpapi.NewRouter refuses to build a staff surface
+	// without a session foundation — so that gate stays. Student registration is
+	// not a dependency and no longer appears here.
+	//
+	// A staff dependency that is configured wrongly now fails startup with a
+	// named error instead of silently dropping the Admin surface, so a
+	// misconfigured environment is diagnosable rather than a mystery 404.
+	if cfg.Environment() == config.EnvDevelopment && cfg.Sessions().Enabled() {
 		foundation, limiterClient, err := buildStaffFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()
-			return nil, err
+			return nil, fmt.Errorf("composing staff lifecycle: %w", err)
 		}
 		pf.StaffRedis = limiterClient
 		pf.Options = append(pf.Options, httpapi.WithStaffFoundation(foundation))

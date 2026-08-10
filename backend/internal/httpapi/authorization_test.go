@@ -738,6 +738,46 @@ func TestFreshAdminSucceedsAndStaleAdminIsRefusedOnStaffEndpoints(t *testing.T) 
 	}
 }
 
+// TestStaffInvitationRoutesDenyInstructorAndStudent proves the staff invitation
+// surface stays an ADMIN_OPERATIONS capability for every role that is not Admin.
+// It is asserted separately from the catalog sweep because these routes are now
+// composed in development on the environment alone, independently of Student
+// registration, so nothing about the Student admission gate limits who reaches
+// them.
+func TestStaffInvitationRoutesDenyInstructorAndStudent(t *testing.T) {
+	routes := []struct {
+		name   string
+		method string
+		path   string
+		body   []byte
+	}{
+		{"list-invitations", http.MethodGet, "/api/v1/staff-invitations", nil},
+		{
+			"create-invitation", http.MethodPost, "/api/v1/staff-invitations",
+			[]byte(`{"email":"staff@example.com","role":"INSTRUCTOR"}`),
+		},
+		{"revoke-invitation", http.MethodDelete, "/api/v1/staff-invitations/inv-99", nil},
+	}
+
+	for _, role := range []identity.Role{identity.RoleInstructor, identity.RoleStudent} {
+		principal := identity.Principal{
+			AccountID:       "11111111-1111-1111-1111-111111111111",
+			Role:            role,
+			Status:          identity.StatusActive,
+			CredentialState: identity.CredentialActive,
+		}
+		for _, route := range routes {
+			t.Run(string(role)+"_"+route.name, func(t *testing.T) {
+				r, _ := authzRouter(t, fixedPrincipals{principal: principal})
+				rec := do(r, newAuthenticatedRequest(route.method, route.path, route.body))
+				if rec.Code != http.StatusForbidden {
+					t.Fatalf("%s status = %d, want 403 (body %s)", role, rec.Code, rec.Body.String())
+				}
+			})
+		}
+	}
+}
+
 func TestUnknownPrincipalIsDenied(t *testing.T) {
 	r, buf := authzRouter(t, fixedPrincipals{err: identity.ErrPrincipalNotFound})
 
