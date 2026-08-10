@@ -2426,3 +2426,51 @@ and does not independently approve or close S11.
 
 **Source:** Explicit Product Owner decision issued on 2026-08-09; authoritative package in
 [`docs/legal/lg011-approved-policy-package.md`](legal/lg011-approved-policy-package.md).
+
+## D-077 — The Instructor authoring UI is wired to the existing authoring and media APIs, and a development-only scanner mode makes the whole path testable
+
+**Date:** 2026-08-10
+**Status:** Active. Product Owner-authorized launch remediation of a founder manual-test finding.
+
+**Finding:** A founder manual browser test on 2026-08-10 showed that the Instructor could
+authenticate and reach `/en/instructor/courses`, that server-backed reads on that page worked, and
+that creating a Course appeared to succeed — but the Course disappeared on refresh, and the page
+presented a "Local Demo Drafts" list. The Course Authoring Studio held component state only and
+called no authoring API. The backend authoring, media-upload, worker, and review APIs already
+existed and were already proved by integration tests.
+
+**Decision:** The remediation connects the existing UI to the existing APIs rather than redesigning
+either. The studio reads Instructor-owned Courses from `GET /api/v1/courses`, writes through the
+existing Course/revision/Section/Lesson/video/submit routes, and drives the browser upload through
+the existing `POST /api/v1/media/uploads` intent, a direct PUT to private object storage, and
+`POST /api/v1/media/uploads/:id/completions`. No demo Course fixture remains in the production
+Instructor journey.
+
+Two backend defects blocked that path and are fixed rather than worked around:
+
+1. `catalog.DBAssetVersionValidator` validated Asset Versions against the legacy `videos` table
+   only, so no Asset Version the S4 media pipeline produced could ever be attached to a Lesson.
+   `media_asset_versions` is now authoritative — only `READY` passes — and the legacy table is
+   consulted only for identifiers with no media row, preserving migration 0012's fail-closed
+   treatment of historical bytes.
+2. The upload intent response did not name the quarantine object key the completion callback is
+   required to echo. It now returns `storage_object_key`, which the presigned upload URL already
+   contained and which is not signing material.
+
+**`MEDIA_SCANNER_MODE`:** `LG-014` has selected no malware scanner, so every deployment builds
+`UnavailableScanner` and no upload can reach `READY`. `MEDIA_SCANNER_MODE=DEVELOPMENT_NO_OP` builds a
+stand-in that inspects nothing, so the complete upload → scan → transcode → `READY` path can be
+exercised by a developer and by the automated acceptance run. It is refused unless
+`APP_ENV=development`, both in configuration validation and in its constructor, and its scan
+evidence records the scanner identity `development-no-op-scanner`. It is not a scanner and does not
+satisfy or weaken `LG-014`: production and staging remain fail-closed, and the production-like stack
+keeps `MEDIA_OPERATING_MODE=ADMIN_CATALOGUE`.
+
+**Boundary:** This decision changes no authorization rule. Course ownership, role capability, CSRF,
+same-origin policy, signed-upload expiry, server-side size/type/hash verification, object-storage
+privacy, and immutable media provenance are unchanged, and the acceptance suite proves another
+Instructor and a Student are still refused. It closes no launch gate and does not close a slice; the
+range remains subject to independent review.
+
+**Source:** Product Owner instruction of 2026-08-10; evidence in
+[`docs/launch/evidence/s12/instructor-authoring-remediation.md`](launch/evidence/s12/instructor-authoring-remediation.md).
