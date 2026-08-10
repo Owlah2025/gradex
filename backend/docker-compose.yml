@@ -53,6 +53,8 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 gradexminio gradexminio &&
       mc mb -p local/gradex-video &&
+      mc anonymous set none local/gradex-video &&
+      mc version enable local/gradex-video &&
       exit 0
       "
 

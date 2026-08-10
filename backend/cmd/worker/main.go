@@ -83,12 +83,12 @@ func main() {
 		exitWorker(logger, "outbox_build", logging.ErrorClassOf(err))
 		return
 	}
-	unavailable, err := media.NewUnavailableScanner("LG-014 scanner is not configured")
+	configuredScanner, err := media.NewConfiguredScanner(string(cfg.MediaScannerMode()), string(cfg.Environment()))
 	if err != nil {
 		exitWorker(logger, "scanner_build", logging.ErrorClassOf(err))
 		return
 	}
-	scanner, err := media.NewScannerAdapter(unavailable)
+	scanner, err := media.NewScannerAdapter(configuredScanner)
 	if err != nil {
 		exitWorker(logger, "scanner_adapter_build", logging.ErrorClassOf(err))
 		return

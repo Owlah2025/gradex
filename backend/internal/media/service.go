@@ -149,7 +149,12 @@ func (s *Service) beginUploadForOwner(ctx context.Context, request UploadRequest
 	if err != nil {
 		return UploadTicket{}, fmt.Errorf("%w: presigning quarantine upload: %v", ErrUnavailable, err)
 	}
-	return UploadTicket{AssetVersionID: record.assetVersionID, UploadURL: uploadURL, ExpiresAt: record.expiresAt}, nil
+	return UploadTicket{
+		AssetVersionID:   record.assetVersionID,
+		UploadURL:        uploadURL,
+		StorageObjectKey: record.objectKey,
+		ExpiresAt:        record.expiresAt,
+	}, nil
 }
 
 // BeginCatalogueLoad is the explicit LG-014 operating path. It still creates

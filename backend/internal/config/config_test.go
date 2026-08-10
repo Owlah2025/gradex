@@ -201,6 +201,26 @@ func TestMediaOperatingModeIsExplicitAndValidated(t *testing.T) {
 	}, "MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE")
 }
 
+// The no-op scanner inspects nothing, so the only environment allowed to build
+// it is development. Staging and production must refuse it outright rather than
+// start with an unscanned media pipeline.
+func TestDevelopmentNoOpScannerIsDevelopmentOnly(t *testing.T) {
+	if cfg := mustLoad(t, func(map[string]string, MapSecretResolver) {}); cfg.MediaScannerMode() != MediaScannerModeUnavailable {
+		t.Fatalf("default scanner mode = %q, want UNAVAILABLE", cfg.MediaScannerMode())
+	}
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment, func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+				s["APP_ENV"] = environment
+				s["MEDIA_SCANNER_MODE"] = "DEVELOPMENT_NO_OP"
+			}, "MEDIA_SCANNER_MODE=DEVELOPMENT_NO_OP is refused")
+		})
+	}
+	wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+		s["MEDIA_SCANNER_MODE"] = "PERMISSIVE"
+	}, "MEDIA_SCANNER_MODE must be UNAVAILABLE or DEVELOPMENT_NO_OP")
+}
+
 // Production origin rules. There is no environment in which an http production
 // origin or a credentialed wildcard is the intended configuration, so neither
 // may fall back to a permissive default.

@@ -80,9 +80,15 @@ type UploadRequest struct {
 }
 
 type UploadTicket struct {
-	AssetVersionID string    `json:"asset_version_id"`
-	UploadURL      string    `json:"upload_url"`
-	ExpiresAt      time.Time `json:"expires_at"`
+	AssetVersionID string `json:"asset_version_id"`
+	UploadURL      string `json:"upload_url"`
+	// StorageObjectKey is the quarantine key this ticket authorizes, and the
+	// exact key the completion callback must echo back. It is not a secret and
+	// carries no signing material: the presigned upload URL already contains
+	// it, and the server re-derives the intent from the Asset Version rather
+	// than trusting the caller's copy.
+	StorageObjectKey string    `json:"storage_object_key"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 type CompleteUploadRequest struct {

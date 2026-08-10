@@ -117,9 +117,10 @@ func (h *mediaHandlers) beginUpload(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, gin.H{
-		"asset_version_id": ticket.AssetVersionID,
-		"upload_url":       ticket.UploadURL,
-		"expires_at":       ticket.ExpiresAt,
+		"asset_version_id":   ticket.AssetVersionID,
+		"upload_url":         ticket.UploadURL,
+		"storage_object_key": ticket.StorageObjectKey,
+		"expires_at":         ticket.ExpiresAt,
 	})
 }
 
@@ -134,7 +135,7 @@ func (h *mediaHandlers) beginCatalogueLoad(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusCreated, gin.H{"asset_version_id": ticket.AssetVersionID, "upload_url": ticket.UploadURL, "expires_at": ticket.ExpiresAt})
+	c.JSON(http.StatusCreated, gin.H{"asset_version_id": ticket.AssetVersionID, "upload_url": ticket.UploadURL, "storage_object_key": ticket.StorageObjectKey, "expires_at": ticket.ExpiresAt})
 }
 
 func (h *mediaHandlers) completeUpload(c *gin.Context) {

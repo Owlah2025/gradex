@@ -329,11 +329,11 @@ func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient 
 	if err != nil {
 		return nil, fmt.Errorf("building media outbox writer: %w", err)
 	}
-	unavailable, err := media.NewUnavailableScanner("LG-014 scanner is not configured")
+	configuredScanner, err := media.NewConfiguredScanner(string(cfg.MediaScannerMode()), string(cfg.Environment()))
 	if err != nil {
 		return nil, err
 	}
-	scanner, err := media.NewScannerAdapter(unavailable)
+	scanner, err := media.NewScannerAdapter(configuredScanner)
 	if err != nil {
 		return nil, err
 	}

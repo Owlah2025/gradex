@@ -85,6 +85,25 @@ func (m MediaOperatingMode) Valid() bool {
 	return m == MediaOperatingModeScanner || m == MediaOperatingModeAdminCatalogue
 }
 
+// MediaScannerMode names which malware-scanning boundary this process builds.
+//
+// LG-014 has selected no production scanner, so `UNAVAILABLE` remains the
+// default and every scan errors, leaving the Asset Version non-deliverable.
+// `DEVELOPMENT_NO_OP` exists so a developer or an automated acceptance run can
+// exercise the complete upload -> scan -> transcode -> READY path on a
+// throwaway environment. It inspects nothing, so validate refuses it outside
+// APP_ENV=development; it is not a scanner and never satisfies LG-014.
+type MediaScannerMode string
+
+const (
+	MediaScannerModeUnavailable     MediaScannerMode = "UNAVAILABLE"
+	MediaScannerModeDevelopmentNoOp MediaScannerMode = "DEVELOPMENT_NO_OP"
+)
+
+func (m MediaScannerMode) Valid() bool {
+	return m == MediaScannerModeUnavailable || m == MediaScannerModeDevelopmentNoOp
+}
+
 // Capability records whether a gated provider surface is available, and when
 // it is not, a safe reason suitable for logs and readiness output.
 //
@@ -317,6 +336,7 @@ type Config struct {
 	ffprobeBinaryPath      string
 	mediaProcessingTimeout time.Duration
 	mediaOperatingMode     MediaOperatingMode
+	mediaScannerMode       MediaScannerMode
 
 	authFakeMode bool
 
@@ -397,6 +417,7 @@ func (c *Config) FFmpegBinaryPath() string               { return c.ffmpegBinary
 func (c *Config) FFprobeBinaryPath() string              { return c.ffprobeBinaryPath }
 func (c *Config) MediaProcessingTimeout() time.Duration  { return c.mediaProcessingTimeout }
 func (c *Config) MediaOperatingMode() MediaOperatingMode { return c.mediaOperatingMode }
+func (c *Config) MediaScannerMode() MediaScannerMode     { return c.mediaScannerMode }
 
 // AuthFakeMode reports the development-only identity seam. Validation refuses
 // to let it be true in production; see validate.
@@ -496,6 +517,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		ffprobeBinaryPath:      p.str("FFPROBE_BINARY_PATH", "ffprobe"),
 		mediaProcessingTimeout: p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
 		mediaOperatingMode:     MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
+		mediaScannerMode:       MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
 
 		authFakeMode: p.boolean("AUTH_FAKE_MODE", false),
 
@@ -835,6 +857,14 @@ func (c *Config) validate(p *parser) {
 	}
 	if !c.mediaOperatingMode.Valid() {
 		p.errf("MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE, got %q", c.mediaOperatingMode)
+	}
+	if !c.mediaScannerMode.Valid() {
+		p.errf("MEDIA_SCANNER_MODE must be UNAVAILABLE or DEVELOPMENT_NO_OP, got %q", c.mediaScannerMode)
+	}
+	// The no-op scanner inspects nothing, so it is refused anywhere real content
+	// could exist. Only a development environment may build it.
+	if c.mediaScannerMode == MediaScannerModeDevelopmentNoOp && c.environment != EnvDevelopment {
+		p.errf("MEDIA_SCANNER_MODE=DEVELOPMENT_NO_OP is refused when APP_ENV=%s", c.environment)
 	}
 
 	switch c.logLevel {
