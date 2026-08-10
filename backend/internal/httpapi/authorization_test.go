@@ -483,6 +483,45 @@ func TestCatalogAdminMutationRoutesDenyInstructor(t *testing.T) {
 	}
 }
 
+// TestCatalogAdminReadRoutesDenyInstructor is the read half of the sweep above.
+//
+// The Admin Catalog surface now loads its review queue and its submitted
+// revision graphs from the server rather than from component state, so those
+// GET routes carry real Course data and an Instructor must not reach them —
+// not the queue of everyone else's submissions, and not another Instructor's
+// revision graph. The set is derived from the mounted router, so a future
+// Admin read route is covered the moment it is mounted.
+func TestCatalogAdminReadRoutesDenyInstructor(t *testing.T) {
+	instructor := identity.Principal{
+		AccountID:       "11111111-1111-1111-1111-111111111111",
+		Role:            identity.RoleInstructor,
+		Status:          identity.StatusActive,
+		CredentialState: identity.CredentialActive,
+	}
+	r, _ := authzRouter(t, fixedPrincipals{principal: instructor})
+
+	var routes []gin.RouteInfo
+	for _, route := range r.Routes() {
+		if route.Method != http.MethodGet || !strings.HasPrefix(route.Path, "/api/v1/admin/") {
+			continue
+		}
+		routes = append(routes, route)
+	}
+	if len(routes) == 0 {
+		t.Fatal("no Admin catalog read routes were derived from the router")
+	}
+
+	for _, route := range routes {
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			req := newAuthenticatedRequest(route.Method, materializeAuthorizationRoute(route.Path), nil)
+			rec := do(r, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("Instructor status = %d, want 403 (body %s)", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func materializeAuthorizationRoute(path string) string {
 	return materializeRouteParameters(path, "route-99")
 }

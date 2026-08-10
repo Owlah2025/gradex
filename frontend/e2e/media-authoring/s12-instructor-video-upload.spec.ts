@@ -173,6 +173,52 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     `submitted Course ${courseID} must appear in the Admin review queue`,
   ).toBe(true);
 
+  // 8. And the Admin *screen* sees it too, not only the API. The Admin Catalog
+  // reads the same queue, so a real submission is what appears there — this is
+  // the founder journey that previously showed a demo Course instead.
+  const adminSession = issueRotatingSession(ADMIN);
+  const adminContext = await browser.newContext({ locale: "en-US" });
+  await adminContext.addInitScript(() => {
+    window.localStorage.setItem("gradex.locale", "en");
+  });
+  await adminContext.addCookies([
+    {
+      name: adminSession.cookie_name,
+      value: adminSession.cookie_value,
+      domain: origin.hostname,
+      path: "/",
+      httpOnly: true,
+      secure: true,
+      sameSite: "Strict",
+    },
+  ]);
+  const adminPage = await adminContext.newPage();
+  await adminPage.goto("/en/admin/catalog");
+  await expect(adminPage.locator("h1")).toContainText("Course Review & Pricing Admin");
+
+  const row = adminPage.getByTestId(`review-item-${courseID}`);
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(courseTitleEn);
+  await expect(adminPage.locator("body")).not.toContainText("Introduction to Programming");
+
+  // 9. Approve and publish through the real Admin route, against the
+  // authoritative Course and revision IDs the queue reported.
+  await adminPage.getByTestId(`approve-review-item-${courseID}`).click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await expect(adminPage.getByTestId(`review-item-${courseID}`)).toHaveCount(0);
+
+  const afterApproval = await admin.get("/api/v1/admin/review/queue");
+  expect(afterApproval.status()).toBe(200);
+  const remaining = (await afterApproval.json()) as Array<{ course_id?: string }>;
+  expect(
+    remaining.some((item) => item.course_id === courseID),
+    "an approved Course must leave the server's review queue",
+  ).toBe(false);
+
+  const published = await admin.get(`/api/v1/admin/courses/${courseID}/price-history`);
+  expect(published.status(), "the approved Course must still be addressable by the Admin routes").toBe(200);
+
+  await adminContext.close();
   await instructorAPI.dispose();
   await admin.dispose();
   await context.close();
