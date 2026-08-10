@@ -2474,3 +2474,48 @@ range remains subject to independent review.
 
 **Source:** Product Owner instruction of 2026-08-10; evidence in
 [`docs/launch/evidence/s12/instructor-authoring-remediation.md`](launch/evidence/s12/instructor-authoring-remediation.md).
+
+## D-078 — The mandatory password change is mounted, so CHANGE_REQUIRED stops being terminal
+
+**Date:** 2026-08-10
+**Status:** Active. Product Owner-authorized launch remediation of a founder manual-test finding.
+
+**Finding:** A founder manual test on 2026-08-10 showed the bootstrap Administrator could
+authenticate (`POST /api/v1/sessions` → `201`, `GET /api/v1/session` → `200`) and then do nothing:
+every privileged request was refused with `deny_reason = PASSWORD_CHANGE_REQUIRED`. The
+password-change domain logic existed and was fully tested in
+`internal/identity/password_change.go`, but nothing called it — no mounted route, no session field
+reporting the restriction, and no frontend screen. The state `cmd/bootstrap-admin` instructs the
+operator to leave was therefore unreachable, and the platform had no usable Administrator.
+
+**Decision:** Mount the smallest complete path rather than relax the restriction.
+`POST /api/v1/password-changes` is gated on `CapPasswordChange` — the capability §4.5 already grants
+a restricted principal — and calls the existing `CompletePasswordChange` once. The session response
+gains a derived `password_change_required` boolean, and the browser gains a `/password-change`
+screen that login redirects to and that a guard keeps a restricted principal on.
+
+The HTTP boundary always requests `VoluntaryChange`, so the current password is always proven. The
+domain explicitly permits a voluntary change on a `CHANGE_REQUIRED` credential, and that is strictly
+stronger than `BootstrapMandatoryChange`, whose weaker precondition exists for callers that cannot
+ask for the old password. An attacker at an unattended restricted session therefore still cannot
+take the Account over.
+
+Two defects behind the finding are fixed rather than worked around:
+
+1. `CompletePasswordChange` minted the replacement session credential with a random CSRF token,
+   while `SessionRepository.Resolve` re-derives each generation's token from server key material and
+   refuses a mismatch. A committed password change would have made its own re-established session
+   unresolvable on the next read. The replacement is now derived the same way login and renewal
+   derive theirs, and `PasswordChangePolicy` requires the session CSRF key.
+2. `NewSessionFoundation` accepted no compromised-password source. It is now required, so the one
+   route that installs a long-lived credential cannot be mounted with screening absent.
+
+**Boundary:** `CHANGE_REQUIRED` is not disabled, bypassed, or set directly; it is cleared only
+through the existing domain operation, and no second password-change implementation exists. No
+authorization rule changed — the restricted principal is still refused every other capability, which
+the existing route sweep continues to prove. Identity was not redesigned, S6 semantics are
+unchanged, and no profile, settings, or MFA feature was added. This closes no launch gate and does
+not close a slice; the range remains subject to independent review.
+
+**Source:** Product Owner instruction of 2026-08-10; evidence in
+[`docs/launch/evidence/s13/mandatory-password-change-remediation.md`](launch/evidence/s13/mandatory-password-change-remediation.md).
