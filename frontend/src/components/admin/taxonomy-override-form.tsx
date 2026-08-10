@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TaxonomyTermSelect } from "@/components/catalog/taxonomy-term-select";
 import { assignAdminTaxonomy, type TaxonomyTerm } from "@/lib/api/catalog";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -9,12 +9,25 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 type TaxonomyOverrideFormProps = {
   courseID: string;
   terms: TaxonomyTerm[];
+  /**
+   * The revision the administrator already named elsewhere on the page, used
+   * as the starting value. The field stays editable, because the override
+   * still binds to whichever revision is typed here and nothing else.
+   */
+  defaultRevisionID?: string;
 };
 
-export function TaxonomyOverrideForm({ courseID, terms }: TaxonomyOverrideFormProps) {
+export function TaxonomyOverrideForm({ courseID, terms, defaultRevisionID }: TaxonomyOverrideFormProps) {
   const { locale } = useLocale();
   const isAr = locale === "ar";
-  const [revisionID, setRevisionID] = useState("");
+  const [revisionID, setRevisionID] = useState(defaultRevisionID ?? "");
+
+  // Selecting a different Course or revision resets the bound revision, so an
+  // override can never be applied to the revision left over from the last one.
+  useEffect(() => {
+    setRevisionID(defaultRevisionID ?? "");
+  }, [courseID, defaultRevisionID]);
+
   const [majorTermID, setMajorTermID] = useState("");
   const [subjectTermID, setSubjectTermID] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -49,12 +62,12 @@ export function TaxonomyOverrideForm({ courseID, terms }: TaxonomyOverrideFormPr
       <div className="mt-3 grid gap-3 md:grid-cols-3">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
           revision_id
-          <input value={revisionID} onChange={(event) => setRevisionID(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900" placeholder="UUID" />
+          <input value={revisionID} onChange={(event) => setRevisionID(event.target.value)} data-testid="taxonomy-override-revision" className="mt-1 w-full rounded border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900" placeholder="UUID" />
         </label>
         <TaxonomyTermSelect kind="MAJOR" locale={locale} terms={terms} value={majorTermID} onChange={setMajorTermID} disabled={busy} />
         <TaxonomyTermSelect kind="SUBJECT" locale={locale} terms={terms} value={subjectTermID} onChange={setSubjectTermID} disabled={busy} />
       </div>
-      <button type="button" disabled={busy} onClick={save} className="mt-3 rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50">
+      <button type="button" disabled={busy} onClick={save} data-testid="taxonomy-override-apply" className="mt-3 rounded bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 disabled:opacity-50">
         {busy ? (isAr ? "جارٍ التطبيق..." : "Applying...") : (isAr ? "تطبيق التجاوز" : "Apply Override")}
       </button>
       {message && <p role="status" className="mt-3 text-xs text-slate-700 dark:text-slate-300">{message}</p>}
