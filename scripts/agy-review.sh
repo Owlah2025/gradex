@@ -17,6 +17,8 @@
 #     never in its workspace.
 #   * That worktree is mounted read-only for the reviewer's process tree, and a writable scratch
 #     directory is supplied outside it. A stray write fails with EROFS instead of tainting the run.
+#     This is required, not best-effort: if read-only containment cannot be established and proven,
+#     the run ends UNAVAILABLE before the model is invoked rather than degrading to something weaker.
 #   * That worktree starts clean, so the relay's `touchedFiles` becomes a meaningful assertion.
 #     Asserted against the main repo it would be permanently non-empty and prove nothing. It is
 #     retained as defence in depth behind the read-only mount, not replaced by it.
@@ -43,7 +45,8 @@
 #
 # Exit codes: 0 review completed and parseable · 2 usage error · 3 relay/agy failure
 #             4 TAINTED (the reviewer modified its workspace) · 5 UNAVAILABLE (no retrievable
-#             verdict) · 6 INCONCLUSIVE (the live repo changed during the run)
+#             verdict, or containment could not be established) · 6 INCONCLUSIVE (the live repo
+#             changed during the run)
 #
 # 4 and 6 are different failures. TAINTED means the reviewer definitively broke read-only and the
 # review is void. INCONCLUSIVE means the reviewer's own workspace was clean but the live repo moved
@@ -178,8 +181,18 @@ export TMPDIR="$SCRATCH" TMP="$SCRATCH" TEMP="$SCRATCH"
 
 GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 
+#
+# A real review FAILS CLOSED. If bwrap is missing, cannot start, or does not actually produce a
+# read-only checkout, the run ends UNAVAILABLE *before the model is invoked*. It does not degrade to
+# a weaker mechanism, because a verdict produced under weaker containment is a verdict nobody can
+# rely on — and an unusable harness must never be able to look like a completed review.
+#
+# The permission-only fallback below is reachable only from the AGY_REVIEW_SELFTEST harness path,
+# which produces no report and therefore cannot yield a verdict at all.
 CONTAIN=()
 PERM_LOCKED=""
+CONTAINED=""
+
 if command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / true >/dev/null 2>&1; then
   CONTAIN=(bwrap
     --dev-bind / /
@@ -190,16 +203,39 @@ if command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / true >/dev/null 2>&1
     --bind "$SCRATCH" "$SCRATCH"
     --die-with-parent
     --chdir "$WORKTREE")
-  printf 'agy-review: contained via bwrap — checkout read-only, writes land in the scratch dir\n'
+
+  # Assert the boundary rather than assume it: bwrap can start and still leave the checkout
+  # writable if a bind was ignored. The probe must fail to write and must succeed to read.
+  if "${CONTAIN[@]}" bash -c '
+        [ -e .git ] || exit 3
+        touch .agy-containment-probe 2>/dev/null && exit 4
+        [ -w "$AGY_SCRATCH" ] || exit 5
+        exit 0
+      ' >/dev/null 2>&1; then
+    CONTAINED=bwrap
+    printf 'agy-review: contained via bwrap — checkout read-only, writes land in the scratch dir\n'
+  else
+    printf 'agy-review: containment probe failed — the checkout is not verifiably read-only\n' >&2
+  fi
 else
-  # Weaker in two ways: the same user can chmod it back, and it protects only the checkout — the
-  # live repository keeps its normal permissions, so the before/after porcelain snapshot is the
-  # only thing watching it. Still turns an accidental write into an error, and the post-run taint
-  # check below is unchanged either way.
+  printf 'agy-review: bwrap is unavailable or cannot start on this host\n' >&2
+fi
+
+if [ -z "$CONTAINED" ]; then
+  if [ -z "${AGY_REVIEW_SELFTEST:-}" ]; then
+    printf 'agy-review: UNAVAILABLE — read-only containment could not be established, so no\n' >&2
+    printf 'agy-review: review was dispatched and no model was invoked. This is not an approval,\n' >&2
+    printf 'agy-review: and it is not a reason to relax containment: install bubblewrap (bwrap)\n' >&2
+    printf 'agy-review: and re-run. Artifacts: %s\n' "$ARTIFACTS" >&2
+    exit 5
+  fi
+  # Harness self-test only, and only ever reached with AGY_REVIEW_SELFTEST set. Weaker in two ways:
+  # the same user can chmod it back, and it protects only the checkout — the live repository keeps
+  # its normal permissions. No verdict can come out of this path: the self-test seam writes no
+  # report, so the run still ends UNAVAILABLE.
   chmod -R a-w "$WORKTREE" || die "could not make the review worktree read-only" 3
   PERM_LOCKED=1
-  printf 'agy-review: warning — bwrap unusable; falling back to read-only permissions on the\n' >&2
-  printf 'agy-review: checkout only. The live repository is not mount-protected on this path.\n' >&2
+  printf 'agy-review: self-test only — permission-based fallback containment (no model is called)\n' >&2
 fi
 
 # --- dispatch ------------------------------------------------------------------------------------

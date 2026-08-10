@@ -18,6 +18,8 @@
 #   7. writing into the live repository fails
 #   8. the post-run touched-files guard reports a clean worktree
 #   9. the live repository is byte-for-byte unchanged and the temporaries are gone
+#  10. a real review with bwrap unavailable exits UNAVAILABLE without invoking the model
+#  11. the permission-only fallback is unreachable for a real review, so it cannot yield a verdict
 #
 # Usage: scripts/review-containment-check.sh [<base>..<head>]
 # Defaults to HEAD~1..HEAD; any small range works, since nothing is actually reviewed.
@@ -144,6 +146,136 @@ SCRATCH_DIR="$(printf '%s\n' "$OUT" | sed -n 's/^agy-review: scratch //p')"
   || fail "review worktree not cleaned up: $LEFTOVER"
 [ -n "$SCRATCH_DIR" ] && [ ! -e "$SCRATCH_DIR" ] && pass 'scratch directory removed on exit' \
   || fail "scratch directory not cleaned up: $SCRATCH_DIR"
+
+# --- fail-closed: no strong containment means no review, and no model call ------------------------
+# The dispatcher must refuse rather than degrade. Proven by shadowing bwrap with a stub that always
+# fails and dispatching a *real* review path (no AGY_REVIEW_SELFTEST), then showing that the run
+# stopped before the relay: agy writes agy.log, and the relay writes result.json and final.txt, so
+# the absence of all three is the absence of a model invocation.
+echo
+echo 'review-containment-check: fail-closed assertions (bwrap deliberately unavailable)'
+
+# Run ids are second-granular, so a fast pair of runs can share an artifacts directory and the
+# self-test's own result.json would masquerade as evidence that the model ran. These artifacts are
+# disposable and gitignored; drop them so the next assertion measures only the fail-closed run.
+RUN_ARTIFACTS="$(printf '%s\n' "$OUT" | sed -n 's/^agy-review: output  //p')"
+case "$RUN_ARTIFACTS" in
+  "$REPO_ROOT/docs/launch/review/artifacts/"?*) rm -rf "$RUN_ARTIFACTS" ;;
+esac
+
+STUB_BIN="$(mktemp -d)/bin"
+mkdir -p "$STUB_BIN"
+printf '#!/bin/sh\nexit 1\n' > "$STUB_BIN/bwrap"
+chmod +x "$STUB_BIN/bwrap"
+
+FC_OUT=""
+FC_STATUS=0
+FC_OUT="$(PATH="$STUB_BIN:$PATH" "$REPO_ROOT/scripts/agy-review.sh" "$RANGE_ARG" 2>&1)" || FC_STATUS=$?
+printf '%s\n' "$FC_OUT" | sed 's/^/  | /'
+rm -rf "$(dirname "$STUB_BIN")"
+
+if [ "$FC_STATUS" -eq 5 ]; then
+  pass 'a real review without bwrap exits 5 UNAVAILABLE'
+else
+  fail "a real review without bwrap exited $FC_STATUS, expected 5 UNAVAILABLE"
+fi
+
+if printf '%s\n' "$FC_OUT" | grep -q 'UNAVAILABLE — read-only containment could not be established'; then
+  pass 'the refusal names containment, not a missing verdict'
+else
+  fail 'the refusal did not name containment as the reason'
+fi
+
+if printf '%s\n' "$FC_OUT" | grep -qi 'fallback\|permission-based'; then
+  fail 'a real review fell back to permission-only containment'
+else
+  pass 'no permission-only fallback was used on the real review path'
+fi
+
+FC_ARTIFACTS="$(printf '%s\n' "$FC_OUT" | sed -n 's/^agy-review: output  //p')"
+if [ -n "$FC_ARTIFACTS" ] && [ ! -e "$FC_ARTIFACTS/agy.log" ] \
+   && [ ! -e "$FC_ARTIFACTS/result.json" ] && [ ! -e "$FC_ARTIFACTS/final.txt" ]; then
+  pass 'the model was never invoked (no agy.log, result.json or final.txt)'
+else
+  fail "model-invocation artifacts exist under $FC_ARTIFACTS"
+fi
+
+if printf '%s\n' "$FC_OUT" | grep -qE '^VERDICT: '; then
+  fail 'a verdict was produced without strong containment'
+else
+  pass 'no verdict can be produced without strong containment'
+fi
+
+FC_TREE="$(printf '%s\n' "$FC_OUT" | sed -n 's/^agy-review: tree    //p')"
+FC_SCRATCH="$(printf '%s\n' "$FC_OUT" | sed -n 's/^agy-review: scratch //p')"
+[ -n "$FC_TREE" ] && [ ! -e "$FC_TREE" ] && pass 'refused run cleaned up its worktree' \
+  || fail "refused run left a worktree: $FC_TREE"
+[ -n "$FC_SCRATCH" ] && [ ! -e "$FC_SCRATCH" ] && pass 'refused run cleaned up its scratch' \
+  || fail "refused run left a scratch directory: $FC_SCRATCH"
+
+FINAL_STATE="$(git -C "$REPO_ROOT" status --porcelain)"
+if [ "$BEFORE" = "$FINAL_STATE" ]; then
+  pass 'live repository is still unchanged after the fail-closed run'
+else
+  fail 'live repository changed during the fail-closed run'
+fi
+
+# --- fail-closed: bwrap runs but the read-only bind is not established -----------------------------
+# "bwrap exists and starts" is not the property that matters. This stub accepts and ignores the bind
+# flags, honours --chdir, and execs the command unsandboxed — exactly the shape of a bwrap that
+# silently dropped a bind. The dispatcher's own containment probe must catch that and refuse.
+echo
+echo 'review-containment-check: fail-closed assertions (bwrap starts, binds not established)'
+
+STUB2_DIR="$(mktemp -d)"
+cat > "$STUB2_DIR/bwrap" <<'STUB'
+#!/bin/sh
+d=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --chdir) d="$2"; shift 2 ;;
+    --dev-bind|--ro-bind|--bind) shift 3 ;;
+    --die-with-parent) shift ;;
+    *) break ;;
+  esac
+done
+[ -n "$d" ] && cd "$d"
+exec "$@"
+STUB
+chmod +x "$STUB2_DIR/bwrap"
+
+NB_OUT=""
+NB_STATUS=0
+NB_OUT="$(PATH="$STUB2_DIR:$PATH" "$REPO_ROOT/scripts/agy-review.sh" "$RANGE_ARG" 2>&1)" || NB_STATUS=$?
+printf '%s\n' "$NB_OUT" | sed 's/^/  | /'
+rm -rf "$STUB2_DIR"
+
+if [ "$NB_STATUS" -eq 5 ]; then
+  pass 'a bwrap that does not actually bind read-only exits 5 UNAVAILABLE'
+else
+  fail "expected 5 UNAVAILABLE from an ineffective bwrap, got $NB_STATUS"
+fi
+
+if printf '%s\n' "$NB_OUT" | grep -q 'containment probe failed'; then
+  pass 'the containment probe, not the bwrap presence check, caught it'
+else
+  fail 'the containment probe did not catch an ineffective bwrap'
+fi
+
+NB_ARTIFACTS="$(printf '%s\n' "$NB_OUT" | sed -n 's/^agy-review: output  //p')"
+if [ -n "$NB_ARTIFACTS" ] && [ ! -e "$NB_ARTIFACTS/agy.log" ] \
+   && [ ! -e "$NB_ARTIFACTS/result.json" ] && [ ! -e "$NB_ARTIFACTS/final.txt" ]; then
+  pass 'the model was never invoked on the ineffective-bwrap path'
+else
+  fail "model-invocation artifacts exist under $NB_ARTIFACTS"
+fi
+
+FINAL_STATE="$(git -C "$REPO_ROOT" status --porcelain)"
+if [ "$BEFORE" = "$FINAL_STATE" ]; then
+  pass 'live repository is still unchanged after every refusal path'
+else
+  fail 'live repository changed during the ineffective-bwrap run'
+fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
