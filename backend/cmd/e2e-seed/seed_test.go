@@ -63,6 +63,7 @@ func TestMain(m *testing.M) {
 	var accessMutationParam string
 	var queryInvitationToken bool
 	var queryEmailVerificationToken bool
+	var queryCredentialState bool
 	var invitationIDParam string
 	flag.StringVar(&dbName, "dbname", "", "Target database name")
 	flag.BoolVar(&dropOnly, "drop", false, "Drop target database and exit")
@@ -70,6 +71,7 @@ func TestMain(m *testing.M) {
 	flag.BoolVar(&queryLearningState, "query-learning-state", false, "Emit the Entitlement, Enrollment, Progress, and material snapshot for a student and course")
 	flag.BoolVar(&queryInvitationToken, "query-invitation-token", false, "Emit the verification token for an invitation from outbox")
 	flag.BoolVar(&queryEmailVerificationToken, "query-email-verification-token", false, "Emit the email verification token and Account ID for a registered Student")
+	flag.BoolVar(&queryCredentialState, "query-credential-state", false, "Emit the password credential state for an Account, so a browser journey can assert CHANGE_REQUIRED cleared without writing SQL")
 	flag.StringVar(&studentIDParam, "student", "", "Student ID for query")
 	flag.StringVar(&lessonIDParam, "lesson", "", "Lesson ID for query")
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
@@ -170,6 +172,38 @@ func TestMain(m *testing.M) {
 		encoded, err := encodeAccessMutation(result)
 		if err != nil {
 			log.Fatalf("encoding access mutation: %v", err)
+		}
+		fmt.Printf("%s", encoded)
+		os.Exit(0)
+	}
+
+	// Read-only, and the credential state only. This is deliberately not a
+	// mutation verb: the mandatory password-change journey must reach ACTIVE by
+	// driving the real browser flow, so the tool can observe that state but
+	// never set it.
+	if queryCredentialState {
+		if emailParam == "" {
+			log.Fatalf("-query-credential-state requires -email")
+		}
+		targetPool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for credential state: %v", err)
+		}
+		var state string
+		err = targetPool.QueryRow(ctx,
+			`SELECT c.state::text
+			   FROM password_credentials c
+			   JOIN accounts a ON a.id = c.account_id
+			  WHERE a.normalized_email = $1`,
+			emailParam,
+		).Scan(&state)
+		targetPool.Close()
+		if err != nil {
+			log.Fatalf("reading credential state: %v", err)
+		}
+		encoded, err := json.Marshal(map[string]string{"credential_state": state})
+		if err != nil {
+			log.Fatalf("encoding credential state: %v", err)
 		}
 		fmt.Printf("%s", encoded)
 		os.Exit(0)
@@ -521,6 +555,44 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	`, adminAccountID, passwordHash.Expose())
 	if err != nil {
 		return fmt.Errorf("insert admin creds: %w", err)
+	}
+
+	// Accounts in the state cmd/bootstrap-admin leaves behind: verified and
+	// ACTIVE, holding a CHANGE_REQUIRED credential. They exist so the mandatory
+	// password-change journey can be driven through the real browser login form
+	// rather than by writing SQL mid-test. Both use the same throwaway fixture
+	// password as every other seeded Account, which is the temporary value the
+	// journey then replaces.
+	restrictedAdminID := "a0000000-0000-0000-0000-000000000010"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'bootstrap-admin@example.test', 'bootstrap-admin@example.test', 'ADMIN', 'ACTIVE', 'Bootstrap Administrator', $2)
+	`, restrictedAdminID, now)
+	if err != nil {
+		return fmt.Errorf("insert restricted admin account: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'CHANGE_REQUIRED')
+	`, restrictedAdminID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert restricted admin creds: %w", err)
+	}
+
+	restrictedInstructorID := "a0000000-0000-0000-0000-000000000011"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'instructor-restricted@example.test', 'instructor-restricted@example.test', 'INSTRUCTOR', 'ACTIVE', 'Restricted Instructor', $2)
+	`, restrictedInstructorID, now)
+	if err != nil {
+		return fmt.Errorf("insert restricted instructor account: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'CHANGE_REQUIRED')
+	`, restrictedInstructorID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert restricted instructor creds: %w", err)
 	}
 
 	// Create Student 1 (Active)

@@ -106,6 +106,7 @@ func TestGoTestOwnFlagsAreNotToolFlags(t *testing.T) {
 		"issue-session",
 		"query-progress",
 		"query-email-verification-token",
+		"query-credential-state",
 		"access-mutation",
 		"email",
 	} {
