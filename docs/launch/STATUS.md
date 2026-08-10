@@ -1,5 +1,33 @@
 # Gradex Launch Status
 
+> **2026-08-09 S9 independently REJECTED at `9be0020`; remediated and awaiting re-review.** The
+> independent reviewer returned Critical 0, High 1: real `identity.staff_invitation_created` events
+> omitted `template_contract` from the safe payload that discovery joins on, so staff invitations
+> were never mailed. The reviewer also raised M-1, that discovery would backfill the entire
+> historical outbox on first boot against an existing database. Both are now fixed and covered by
+> real end-to-end acceptance tests; the Product Owner decision behind the activation boundary is
+> [D-078](../DECISIONS.md#d-078--transactional-email-never-sends-historical-intents-created-before-activation).
+> The Resend client additionally refuses redirects. M-2, M-3 and the cosmetic Low findings are
+> deferred to backlog. Evidence is in
+> [`evidence/s9/transactional-email.md`](evidence/s9/transactional-email.md). S9 remains open and
+> requires independent re-review of the cumulative range; the implementation agent does not close it.
+>
+> **2026-08-09 S9 implementation delivered; superseded by the rejection above.** Planning is at
+> `c531fc5`, durable backend/Resend delivery at `1f0a043`, and frontend action-link consumption at
+> `5a66081`. All 30 repository tasks and required validation are complete. Live Resend sender-domain
+> acceptance remains external pending because this environment has neither an API key nor a verified
+> sender address; no public-delivery claim has been made. S9 is not closed by the implementation agent.
+>
+> **2026-08-09 S9 implementation authority:** S9 transactional email is the next launch-critical
+> slice on branch `s9-transactional-email-20260809`, starting from S11 closure record
+> `18fb7e033d0fad162caebe150fb641a00201e259`. The Product Owner selected Resend under
+> [D-077](../DECISIONS.md#d-077--resend-delivers-launch-transactional-email-behind-a-provider-neutral-durable-boundary).
+> Repository work proceeds through the provider-neutral adapter, bilingual templates, PostgreSQL
+> delivery ledger, worker dispatch, retry/idempotency, privacy, observability, and acceptance paths.
+> Real sender-domain/SPF/DKIM/DMARC and controlled public delivery proof remain external LG-018/T047
+> work if the real domain or safe credentials are unavailable. S11 remains closed and is reused, not
+> reopened. S9 requires independent review before closure.
+>
 > **2026-08-09 S11 closure:** **S11 is CLOSED** at the independently approved implementation head
 > `7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3`. The independent reviewer inspected the complete frozen
 > range `6bf694daa7a8a823a849a4e2da9588988b6d2358..7cf0fa1e0633231043de1d5c7b8cc62c7afa00c3` and returned

@@ -22,8 +22,8 @@ type Event struct {
 	SafePayload       any
 }
 
-// VerificationDelivery is the minimum plaintext that the future email
-// consumer needs. It is marshalled only into authenticated ciphertext.
+// VerificationDelivery is the minimum plaintext that the email dispatcher
+// needs. It is marshalled only into authenticated ciphertext.
 type VerificationDelivery struct {
 	Destination       string    `json:"destination"`
 	Locale            string    `json:"locale"`
@@ -46,6 +46,15 @@ type NoticeDelivery struct {
 }
 
 type protectedPayload struct {
+	KeyVersion string
+	Nonce      []byte
+	Ciphertext []byte
+}
+
+// StoredProtectedPayload is the encrypted half of an immutable outbox event.
+// It is safe to move between repository and decryption code but never to log:
+// ciphertext and nonce are intentionally byte slices rather than strings.
+type StoredProtectedPayload struct {
 	KeyVersion string
 	Nonce      []byte
 	Ciphertext []byte

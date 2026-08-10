@@ -15,6 +15,11 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
+// staffInvitationTemplateContract is the immutable safe-payload contract that
+// email discovery joins on. It must stay in the safe payload: the protected
+// delivery payload is ciphertext, so a dispatcher cannot route on it.
+const staffInvitationTemplateContract = "staff-invitation-v1"
+
 var (
 	ErrInvitationNotFound    = errors.New("staff invitation not found")
 	ErrInvitationInvalid     = errors.New("staff invitation is invalid")
@@ -249,12 +254,13 @@ func CreateStaffInvitation(
 			"purpose":           string(ActionStaffInvitation),
 			"invited_role":      string(req.Role),
 			"locale":            string(locale),
+			"template_contract": staffInvitationTemplateContract,
 			"secret_expires_at": issuedSecret.ExpiresAt,
 		},
 	}, outbox.VerificationDelivery{
 		Destination:       normalizedEmail,
 		Locale:            string(locale),
-		TemplateContract:  "staff-invitation-v1",
+		TemplateContract:  staffInvitationTemplateContract,
 		VerificationToken: issuedSecret.Bearer.Expose(),
 		ExpiresAt:         issuedSecret.ExpiresAt,
 	})

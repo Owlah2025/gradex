@@ -1,4 +1,4 @@
-import { authenticatedRequest, getJSON, postJSON } from "./http";
+import { authenticatedRequest, getJSON, postJSON, readJSONResponse } from "./http";
 import type { AuthenticatedSession } from "@/lib/identity/session";
 
 export type Policy = {
@@ -177,6 +177,46 @@ export function createStaffInvitation(
     bearer: string;
     created_at: string;
   }>("/staff-invitations", "POST", locale, csrf, { email, role });
+}
+
+export type StaffInvitationPreview = {
+  invited_role: "INSTRUCTOR" | "ADMIN";
+  state: "PENDING";
+};
+
+export function previewStaffInvitation(
+  bearer: string,
+  locale: "ar" | "en",
+) {
+  return fetch("/api/v1/staff-invitations/preview", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json, application/problem+json",
+      "Accept-Language": locale,
+      "X-Gradex-Invitation-Bearer": bearer,
+    },
+  }).then(readJSONResponse<StaffInvitationPreview>);
+}
+
+export function completeStaffInvitation(
+  bearer: string,
+  displayName: string,
+  password: string,
+  locale: "ar" | "en",
+) {
+  return fetch("/api/v1/staff-invitation-completions", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json, application/problem+json",
+      "Accept-Language": locale,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ bearer, display_name: displayName, password }),
+  }).then(readJSONResponse<{ account_id: string; invited_role: "INSTRUCTOR" | "ADMIN" }>);
 }
 
 export function suspendStaffAccount(

@@ -2427,7 +2427,64 @@ and does not independently approve or close S11.
 **Source:** Explicit Product Owner decision issued on 2026-08-09; authoritative package in
 [`docs/legal/lg011-approved-policy-package.md`](legal/lg011-approved-policy-package.md).
 
-## D-077 — The Instructor authoring UI is wired to the existing authoring and media APIs, and a development-only scanner mode makes the whole path testable
+## D-077 — Resend delivers launch transactional email behind a provider-neutral durable boundary
+
+**Date:** 2026-08-09
+**Status:** Active for S9. Repository implementation proceeds; real sender-domain proof may remain externally pending on T047.
+
+**Decision:** Resend is the approved initial production transactional-email provider. Gradex domain
+and application producers remain provider-neutral: they emit the existing encrypted PostgreSQL
+outbox contracts and never import Resend API/SDK concepts. The existing worker process consumes those
+immutable intents through a separate PostgreSQL delivery/attempt ledger, renders repository-owned
+Arabic/English text and HTML, and calls one bounded HTTPS provider adapter operation. Development and
+test may use a deterministic fake; production rejects fake or disabled delivery and requires Resend,
+a secret API key, an HTTPS public origin, and validated sender configuration.
+
+The immutable outbox event ID is the delivery identity and derives the stable Resend idempotency key.
+Transient failures retry asynchronously up to five total attempts; permanent recipient, payload,
+authentication, sender/domain, or configuration failures do not retry indefinitely. Provider
+acceptance is evidence of acceptance only, not inbox delivery or exactly-once delivery. Delivery
+logs and evidence exclude destinations, bodies, action links, raw credentials, and API keys.
+
+**Scope:** S9 delivers exactly eight contracts: the six already emitted by registration/recovery
+(verification, password reset, password changed), staff invitation, Course Access Invitation, and
+Admin Approval, plus the two rejection/cancellation notices already required by BR-122 and closed S6
+FR-032 — eight in total. It adds no commerce, marketing, campaign, office-hours,
+or generic notification platform. Existing verification/reset/invitation credentials and S6 access
+semantics remain authoritative. Real SPF/DKIM/DMARC, sender-domain verification, and a controlled
+public-provider delivery remain LG-018/T047 external evidence when the domain or credentials are not
+available; their absence does not block repository engineering.
+
+**Source:** Explicit Product Owner decision issued on 2026-08-09 and the S9 repository authority
+reconciliation in [`specs/010-transactional-email/`](../specs/010-transactional-email/spec.md).
+
+## D-078 — Transactional email never sends historical intents created before activation
+
+**Date:** 2026-08-09
+**Status:** Active for S9 and every later slice that adds a delivered email contract.
+
+**Decision:** Gradex must not automatically send transactional email for intents created before
+production email delivery was activated. The outbox is an immutable historical record that predates
+delivery, so discovery is bounded by a durable activation boundary: only intents that occurred at or
+after it are eligible for automatic delivery. Intents before it remain in the outbox as historical
+evidence and are never automatically emailed.
+
+A historical user who needs an action is served by issuing a fresh one through the authoritative
+domain workflow — a new verification, a new password reset, or a re-issued invitation — never by
+delivering an old credential that may be stale, expired, or superseded.
+
+The boundary is stamped once, by the migration that introduces delivery, and is only ever read
+afterwards. It therefore survives worker restart and Redis loss, does not depend on process memory,
+does not advance when a worker restarts, and is observed identically by concurrent pollers. It is a
+creation-time cutoff rather than a progress watermark, so an intent created after activation that has
+not been discovered yet stays eligible instead of being silently skipped. Historical outbox records
+are never deleted and historical domain events are never mutated to make them undiscoverable.
+
+**Source:** Explicit Product Owner decision issued on 2026-08-09 in response to the independent S9
+review finding M-1, recorded in
+[`docs/launch/evidence/s9/transactional-email.md`](launch/evidence/s9/transactional-email.md).
+
+## D-079 — The Instructor authoring UI is wired to the existing authoring and media APIs, and a development-only scanner mode makes the whole path testable
 
 **Date:** 2026-08-10
 **Status:** Active. Product Owner-authorized launch remediation of a founder manual-test finding.
@@ -2475,7 +2532,7 @@ range remains subject to independent review.
 **Source:** Product Owner instruction of 2026-08-10; evidence in
 [`docs/launch/evidence/s12/instructor-authoring-remediation.md`](launch/evidence/s12/instructor-authoring-remediation.md).
 
-## D-078 — The mandatory password change is mounted, so CHANGE_REQUIRED stops being terminal
+## D-080 — The mandatory password change is mounted, so CHANGE_REQUIRED stops being terminal
 
 **Date:** 2026-08-10
 **Status:** Active. Product Owner-authorized launch remediation of a founder manual-test finding.

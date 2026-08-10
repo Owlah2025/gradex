@@ -45,6 +45,10 @@ ALLOWLIST=(
   # Redis username/password cross directly into go-redis/asynq options. The
   # dedicated boundary check below pins the exact plaintext reads.
   "internal/queue/connection.go"
+  # Resend requires the API key in the HTTPS Authorization header. The adapter
+  # reads it only while constructing that request; response/error paths expose
+  # neither the header nor raw provider content.
+  "internal/email/resend.go"
   # The encoded Argon2id hash goes to the database driver. No password plaintext
   # is read here — that happens only in credential.go, which check 4 enforces.
   "internal/identity/bootstrap.go"

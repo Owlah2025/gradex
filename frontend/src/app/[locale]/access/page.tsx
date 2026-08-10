@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { safeReturnTo } from "@/lib/identity/return-to";
+import { captureTokenFromFragment, releaseFragmentToken, scrubTokenFragment } from "@/lib/identity/validation";
 import {
   StudentCourseAccessInvitation,
   StudentCourseAccessHistoryItem,
@@ -20,7 +21,7 @@ export default function StudentCourseAccessPage() {
   const router = useRouter();
 
   const invitationId = searchParams.get("invitation_id") || searchParams.get("id");
-  const token = searchParams.get("token") || searchParams.get("acceptance_token");
+  const token = useRef<string | null>(null);
 
   const [activeInvitation, setActiveInvitation] = useState<StudentCourseAccessInvitation | null>(null);
   const [historyItems, setHistoryItems] = useState<StudentCourseAccessHistoryItem[]>([]);
@@ -28,6 +29,17 @@ export default function StudentCourseAccessPage() {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!invitationId) return;
+    const captureInvitationToken = () => {
+      token.current = captureTokenFromFragment("COURSE_ACCESS_INVITATION");
+      scrubTokenFragment();
+    };
+    captureInvitationToken();
+    window.addEventListener("hashchange", captureInvitationToken);
+    return () => window.removeEventListener("hashchange", captureInvitationToken);
+  }, [invitationId]);
 
   const fetchStudentData = useCallback(async () => {
     setLoading(true);
@@ -73,7 +85,7 @@ export default function StudentCourseAccessPage() {
   }, [fetchStudentData]);
 
   const handleAccept = async () => {
-    if (!invitationId || !token) {
+    if (!invitationId || !token.current) {
       setError("Acceptance link is missing a valid single-use token.");
       return;
     }
@@ -83,13 +95,17 @@ export default function StudentCourseAccessPage() {
     setSuccess(null);
 
     try {
-      const updated = await acceptStudentCourseAccessInvitation(invitationId, token, locale);
+      const updated = await acceptStudentCourseAccessInvitation(invitationId, token.current, locale);
+      token.current = null;
+      releaseFragmentToken("COURSE_ACCESS_INVITATION");
       setActiveInvitation(updated);
       setSuccess("Invitation accepted successfully! Your request is now pending admin approval.");
       fetchStudentData();
     } catch (err: unknown) {
       if (err instanceof ProblemError) {
         if (err.problem.status === 410) {
+          token.current = null;
+          releaseFragmentToken("COURSE_ACCESS_INVITATION");
           setError("This acceptance link has expired, been consumed, or superseded. Please request a new link.");
         } else if (err.problem.status === 409) {
           setError("This invitation is not in an acceptable state.");

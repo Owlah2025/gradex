@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-10
 **Authority:** Product Owner launch remediation instruction; recorded as
-[D-077](../../../DECISIONS.md#d-077--the-instructor-authoring-ui-is-wired-to-the-existing-authoring-and-media-apis-and-a-development-only-scanner-mode-makes-the-whole-path-testable).
+[D-079](../../../DECISIONS.md#d-079--the-instructor-authoring-ui-is-wired-to-the-existing-authoring-and-media-apis-and-a-development-only-scanner-mode-makes-the-whole-path-testable).
 **Status:** Implemented and locally proved. **Not reviewed, not closed.** The range this record
 describes has had no independent reviewer verdict.
 

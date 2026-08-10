@@ -84,6 +84,42 @@ func (w *Writer) protect(
 	}, nil
 }
 
+// OpenProtectedPayload authenticates and decodes one stored delivery payload.
+// The caller must supply the exact immutable Event fields used when it was
+// sealed; those fields are authenticated as associated data.
+func (w *Writer) OpenProtectedPayload(
+	ctx context.Context,
+	event Event,
+	payload StoredProtectedPayload,
+	destination any,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if destination == nil {
+		return errors.New("protected outbox destination is required")
+	}
+	if payload.KeyVersion != w.keyVersion {
+		return errors.New("protected outbox key version is unavailable")
+	}
+	if len(payload.Nonce) != w.aead.NonceSize() || len(payload.Ciphertext) == 0 {
+		return errors.New("protected outbox payload is invalid")
+	}
+	aad, err := eventAssociatedData(event)
+	if err != nil {
+		return err
+	}
+	plaintext, err := w.aead.Open(nil, payload.Nonce, payload.Ciphertext, aad)
+	if err != nil {
+		return errors.New("protected outbox payload authentication failed")
+	}
+	defer clear(plaintext)
+	if err := json.Unmarshal(plaintext, destination); err != nil {
+		return errors.New("protected outbox payload is malformed")
+	}
+	return nil
+}
+
 // ReserveProtectedPayload performs the only fallible entropy read before a
 // caller resolves hidden Account state.
 func (w *Writer) ReserveProtectedPayload(
