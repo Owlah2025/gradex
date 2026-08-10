@@ -3,11 +3,12 @@
 This template is the **fixed contract** given to the independent reviewer. It is checked in
 deliberately.
 
-Under the current delivery roles
-([D-033](../../DECISIONS.md#d-033--codex-resumes-building-and-claude-resumes-review)), Codex is the
-builder and Claude is the independent reviewer. A brief composed freshly for each review would let
-the builder quietly steer what gets scrutinised. Keeping the brief fixed removes that lever: only
-the commit range varies.
+Which agent builds and which reviews is decided per slice by a recorded decision in
+[docs/DECISIONS.md](../../DECISIONS.md), not by this template. A brief composed freshly for each
+review would let the builder quietly steer what gets scrutinised. Keeping the brief fixed removes
+that lever: only the run parameters below vary. In particular the brief never names the builder,
+because a hard-coded name goes stale the moment the seats change and then tells the reviewer
+something untrue about the range in front of it.
 
 Do not edit this template to soften a review, to steer it toward a conclusion, or to skip a
 dimension. Widening it (a new standing review dimension) is a deliberate, reviewable change; narrowing
@@ -20,6 +21,7 @@ it for one slice is not.
 | `{{RANGE}}` | the exact reviewed range, e.g. `1a388cb..6862db5` |
 | `{{BASE}}` | resolved base commit SHA |
 | `{{HEAD}}` | resolved head commit SHA |
+| `{{SCRATCH}}` | the writable scratch directory supplied outside the read-only checkout |
 
 Everything between the `<!-- BRIEF:BEGIN -->` and `<!-- BRIEF:END -->` markers is sent verbatim.
 
@@ -28,9 +30,9 @@ Everything between the `<!-- BRIEF:BEGIN -->` and `<!-- BRIEF:END -->` markers i
 You are the independent read-only reviewer for the Gradex MVP launch workflow. Review exactly the
 commit range {{RANGE}} (base {{BASE}}, head {{HEAD}}) in this workspace.
 
-The builder is Codex. You are an independent reviewer, and that separation is the entire reason you
-were given this job: do not assume the change is correct, do not defer to the confidence of its
-prose, and do not approve something you could not verify in the repository.
+You did not write this change: the builder is a different agent, and that separation is the entire
+reason you were given this job. Do not assume the change is correct, do not defer to the confidence
+of its prose, and do not approve something you could not verify in the repository.
 
 Start with:
   git log --oneline {{RANGE}}
@@ -90,8 +92,18 @@ that mutates the repository or working tree.
 Do NOT attempt to fix anything you find, however small or obvious the fix looks.
 Do NOT run the project's build, test, or install commands. The builder re-runs the gates.
 
-Read-only inspection commands (git log, git diff, git show, git grep, reading files) are the whole
-job. Your only output is the report below.
+Read-only inspection commands (git log, git diff, git show, git grep, git ls-tree, git status,
+reading files) are the whole job. Your only output is the report below.
+
+If you want to stage a diff, a note, or any other intermediate file, write it under the scratch
+directory supplied for this run:
+
+  {{SCRATCH}}
+
+The same path is exported as $AGY_SCRATCH and as $TMPDIR. That directory is writable and is
+discarded when the run ends. This workspace itself is mounted read-only, so a write into it fails
+with a read-only-filesystem error; that is the harness working as intended, not a problem to route
+around. Continue the review in the scratch directory.
 
 The dispatcher asserts afterwards that the working tree is byte-for-byte unchanged. Any modification
 invalidates the entire review and it is discarded as tainted, not merely corrected.

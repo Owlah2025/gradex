@@ -6,16 +6,20 @@
 #   scripts/agy-review.sh <base>..<head>
 #   scripts/agy-review.sh <commit>          # reviews <commit>^..<commit>
 #
-# Under D-033 Codex is the builder and Claude is the default independent reviewer. When Claude is
-# unavailable, agy remains the D-032 fallback. The agy-delegate skill is built for delegating
+# Which agent holds the builder seat and which holds the reviewer seat is decided per slice by a
+# recorded decision, never by this script; the only invariant it enforces is that the reviewer's
+# workspace is not the builder's. The agy-delegate skill is built for delegating
 # *implementation* and offers no CLI-enforced read-only mode, so read-only is enforced structurally
 # here instead of by trusting a flag or a prompt instruction:
 #
 #   * agy is pointed at a detached git worktree checked out at the exact reviewed commit, under the
 #     scratch directory. The real repository — including the user-owned untracked spreadsheet — is
 #     never in its workspace.
+#   * That worktree is mounted read-only for the reviewer's process tree, and a writable scratch
+#     directory is supplied outside it. A stray write fails with EROFS instead of tainting the run.
 #   * That worktree starts clean, so the relay's `touchedFiles` becomes a meaningful assertion.
-#     Asserted against the main repo it would be permanently non-empty and prove nothing.
+#     Asserted against the main repo it would be permanently non-empty and prove nothing. It is
+#     retained as defence in depth behind the read-only mount, not replaced by it.
 #   * The main repo's porcelain status is snapshotted before and after and must match exactly.
 #
 # PERMISSIONS. agy's headless mode cannot prompt, so it auto-denies every tool — including the reads
@@ -101,8 +105,9 @@ RUN_ID="${RANGE//../-}-$STAMP"
 BEFORE="$(git -C "$REPO_ROOT" status --porcelain)"
 
 WORKTREE="$SCRATCH_BASE/gradex-review-$RUN_ID"
+SCRATCH="$SCRATCH_BASE/gradex-review-scratch-$RUN_ID"
 ARTIFACTS="$ARTIFACTS_ROOT/$RUN_ID"
-mkdir -p "$ARTIFACTS"
+mkdir -p "$ARTIFACTS" "$SCRATCH"
 
 AGY_SETTINGS="${AGY_SETTINGS:-$HOME/.gemini/antigravity-cli/settings.json}"
 SETTINGS_BACKUP="$ARTIFACTS/settings.json.orig"
@@ -112,14 +117,20 @@ cleanup() {
   if [ -f "$SETTINGS_BACKUP" ]; then
     cp -f "$SETTINGS_BACKUP" "$AGY_SETTINGS" && rm -f "$SETTINGS_BACKUP"
   fi
+  # Undo the fallback permission lock before git is asked to delete the worktree, or the removal
+  # fails and leaves a read-only checkout behind.
+  if [ -n "${PERM_LOCKED:-}" ]; then chmod -R u+w "$WORKTREE" >/dev/null 2>&1 || true; fi
   git -C "$REPO_ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
   git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+  # The reviewer's scratch is disposable by construction; nothing in it is evidence.
+  rm -rf "$SCRATCH"
 }
 trap cleanup EXIT
 
 printf 'agy-review: range   %s\n' "$RANGE"
 printf 'agy-review: model   %s\n' "$MODEL"
 printf 'agy-review: tree    %s\n' "$WORKTREE"
+printf 'agy-review: scratch %s\n' "$SCRATCH"
 printf 'agy-review: output  %s\n' "$ARTIFACTS"
 
 git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" "$HEAD" >/dev/null
@@ -128,6 +139,7 @@ git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" "$HEAD" >/dev/null
 BRIEF="$ARTIFACTS/brief.txt"
 awk '/<!-- BRIEF:BEGIN -->/{f=1;next} /<!-- BRIEF:END -->/{f=0} f' "$TEMPLATE" \
   | sed -e "s|{{RANGE}}|$RANGE|g" -e "s|{{BASE}}|$BASE|g" -e "s|{{HEAD}}|$HEAD|g" \
+        -e "s|{{SCRATCH}}|$SCRATCH|g" \
   > "$BRIEF"
 
 [ -s "$BRIEF" ] || die "rendered brief is empty; check the BRIEF:BEGIN/END markers in $TEMPLATE"
@@ -147,21 +159,80 @@ else
   printf 'agy-review: warning — %s not found; agy may relocate its shell out of the worktree\n' "$AGY_SETTINGS" >&2
 fi
 
+# --- contain the reviewer: read-only checkout, writable scratch elsewhere -------------------------
+# Detection after the fact is not containment. Two independent attempts on 2026-08-10 wrote
+# REVIEW.md, patch.diff and scratch/ into their disposable worktree; both were correctly discarded
+# as TAINTED, which costs an entire review run each time. The brief already forbade writes, so
+# instruction alone is not enough. The reviewer now gets a real writable scratch directory outside
+# the checkout, and the checkout is mounted read-only so a stray write fails at the OS boundary
+# (EROFS) rather than silently tainting the run.
+#
+# The git index is not inside the worktree: a linked worktree's .git is a file pointing at the
+# repository's common git dir, which is left writable. That is why git status/diff/log/show/grep
+# still work against a read-only tree — the one thing a naive `chmod -R a-w` would break.
+#
+# The live repository is bound read-only too (its git dir and this run's artifacts directory
+# excepted), so the reviewer cannot reach around the checkout into the working repo.
+export AGY_SCRATCH="$SCRATCH"
+export TMPDIR="$SCRATCH" TMP="$SCRATCH" TEMP="$SCRATCH"
+
+GIT_COMMON_DIR="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+
+CONTAIN=()
+PERM_LOCKED=""
+if command -v bwrap >/dev/null 2>&1 && bwrap --dev-bind / / true >/dev/null 2>&1; then
+  CONTAIN=(bwrap
+    --dev-bind / /
+    --ro-bind "$REPO_ROOT" "$REPO_ROOT"
+    --bind "$GIT_COMMON_DIR" "$GIT_COMMON_DIR"
+    --bind "$ARTIFACTS" "$ARTIFACTS"
+    --ro-bind "$WORKTREE" "$WORKTREE"
+    --bind "$SCRATCH" "$SCRATCH"
+    --die-with-parent
+    --chdir "$WORKTREE")
+  printf 'agy-review: contained via bwrap — checkout read-only, writes land in the scratch dir\n'
+else
+  # Weaker in two ways: the same user can chmod it back, and it protects only the checkout — the
+  # live repository keeps its normal permissions, so the before/after porcelain snapshot is the
+  # only thing watching it. Still turns an accidental write into an error, and the post-run taint
+  # check below is unchanged either way.
+  chmod -R a-w "$WORKTREE" || die "could not make the review worktree read-only" 3
+  PERM_LOCKED=1
+  printf 'agy-review: warning — bwrap unusable; falling back to read-only permissions on the\n' >&2
+  printf 'agy-review: checkout only. The live repository is not mount-protected on this path.\n' >&2
+fi
+
 # --- dispatch ------------------------------------------------------------------------------------
 # --dangerously-skip-permissions is required because agy's headless mode auto-denies every tool and
 # returns an empty report. Developer-authorised for review runs; see the header. The grant applies to
 # a disposable checkout, and the assertions below are what actually hold the line.
-RELAY_STATUS=0
-node "$RELAY" \
-  --brief "$BRIEF" \
-  --cd "$WORKTREE" \
-  --model "$MODEL" \
-  --print-timeout "$PRINT_TIMEOUT" \
-  --dangerously-skip-permissions \
-  --out-dir "$ARTIFACTS" || RELAY_STATUS=$?
-
 RESULT="$ARTIFACTS/result.json"
 FINAL="$ARTIFACTS/final.txt"
+
+RELAY_STATUS=0
+if [ -n "${AGY_REVIEW_SELFTEST:-}" ]; then
+  # Self-test seam for scripts/review-containment-check.sh: run an arbitrary command under exactly
+  # the containment a reviewer would get, so the boundary can be proven without spending a review.
+  # It cannot manufacture an approval — no final.txt is produced, so the run ends UNAVAILABLE.
+  export AGY_REVIEW_BASE="$BASE" AGY_REVIEW_HEAD="$HEAD"
+  export AGY_REVIEW_WORKTREE="$WORKTREE" AGY_REVIEW_REPO_ROOT="$REPO_ROOT"
+  # cd first: this mirrors the --cd the relay hands agy, and it is the only thing that pins the
+  # probe's cwd on the fallback path, where there is no bwrap --chdir.
+  ( cd "$WORKTREE" && ${CONTAIN[@]+"${CONTAIN[@]}"} bash -c "$AGY_REVIEW_SELFTEST" ) || RELAY_STATUS=$?
+  # Stand in for the relay's own measurement so the taint check below is exercised unchanged.
+  git -C "$WORKTREE" status --porcelain \
+    | awk 'BEGIN { printf "{\"status\":\"selftest\",\"touchedFiles\":[" }
+           { gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); printf "%s\"%s\"", (NR > 1 ? "," : ""), $0 }
+           END { print "]}" }' > "$RESULT"
+else
+  ${CONTAIN[@]+"${CONTAIN[@]}"} node "$RELAY" \
+    --brief "$BRIEF" \
+    --cd "$WORKTREE" \
+    --model "$MODEL" \
+    --print-timeout "$PRINT_TIMEOUT" \
+    --dangerously-skip-permissions \
+    --out-dir "$ARTIFACTS" || RELAY_STATUS=$?
+fi
 
 # --- assert read-only, before reading any verdict ------------------------------------------------
 # Order matters: a tainted run is discarded whatever it concluded.
