@@ -74,7 +74,7 @@ export function TaxonomyAssignmentPanel() {
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
           {isAr ? "الدورة" : "Course"}
-          <select value={courseID} onChange={(event) => selectCourse(event.target.value)} className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900">
+          <select value={courseID} onChange={(event) => selectCourse(event.target.value)} data-testid="taxonomy-course" className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900">
             <option value="">{isAr ? "اختر دورة" : "Select a Course"}</option>
             {courses.filter((course) => course.editable_revision?.id).map((course) => (
               <option key={course.id} value={course.id}>{isAr ? course.editable_revision?.title_ar : course.editable_revision?.title_en}</option>

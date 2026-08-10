@@ -28,21 +28,46 @@ export type SetSectionPriceInput = {
   csrf: string;
 };
 
+export type LessonFileWire = {
+  id: string;
+  kind: "RESOURCE" | "LAB_MATERIAL";
+  asset_version_id: string;
+  display_name_ar: string;
+  display_name_en: string;
+  position: number;
+};
+
+export type LessonWire = {
+  id: string;
+  section_id?: string;
+  title_ar: string;
+  title_en: string;
+  position: number;
+  video_asset_version_id?: string;
+  files?: LessonFileWire[];
+};
+
 export type SectionWire = {
   id: string;
   title_ar: string;
   title_en: string;
   position: number;
   price_minor_units?: number | null;
+  lessons?: LessonWire[];
 };
 
 export type CourseRevisionWire = {
 	id?: string;
+	course_id?: string;
 	state?: string;
+	revision_number?: number;
 	title_ar: string;
 	title_en: string;
+	description_ar?: string;
+	description_en?: string;
 	major_term_id?: string;
 	subject_term_id?: string;
+	study_year?: string;
 	sections: SectionWire[];
 };
 
@@ -59,6 +84,8 @@ export type TaxonomyTerm = {
 
 export type OwnedCourseSummary = {
   id: string;
+  owner_account_id?: string;
+  lifecycle?: string;
   editable_revision?: CourseRevisionWire;
   live_revision?: CourseRevisionWire;
   price_minor_units?: number | null;

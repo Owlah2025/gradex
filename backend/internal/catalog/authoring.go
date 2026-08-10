@@ -65,8 +65,30 @@ func (v *DBAssetVersionValidator) ValidateAssetVersion(ctx context.Context, asse
 		return errors.New("asset version validator database queryer is required")
 	}
 
+	// `media_asset_versions` is the authority for every Asset Version the S4
+	// pipeline produces, which is every Asset Version an Instructor can create
+	// today. Only READY means the bytes were uploaded, scanned, and processed;
+	// nothing else in the state machine is readiness evidence.
+	//
+	// The legacy `videos` table is consulted only when the identifier has no
+	// media row at all, so pre-S4 references keep resolving. It is deliberately
+	// not a fallback for an unready media row: migration 0012 imports legacy
+	// bytes as QUARANTINED precisely so a historical status can never stand in
+	// for a scan.
+	var state string
+	err := v.queryer.QueryRow(ctx, `SELECT state::text FROM media_asset_versions WHERE id = $1::uuid`, assetVersionID).Scan(&state)
+	if err == nil {
+		if state != "READY" {
+			return ErrAssetVersionNotReady
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("checking media asset version: %w", err)
+	}
+
 	var status string
-	err := v.queryer.QueryRow(ctx, `SELECT status FROM videos WHERE id = $1::uuid`, assetVersionID).Scan(&status)
+	err = v.queryer.QueryRow(ctx, `SELECT status FROM videos WHERE id = $1::uuid`, assetVersionID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrAssetVersionInvalid
 	}
