@@ -63,7 +63,9 @@ const frontendCommand = productionFrontend
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: "**/s3-public-catalogue-performance.spec.ts",
+  // The media authoring journey needs real object storage, a running worker,
+  // and ffmpeg, so it has its own config and environment.
+  testIgnore: ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**"],
   fullyParallel: false,
   globalSetup: externalDeployment ? undefined : "./e2e/global-setup.ts",
   globalTeardown: externalDeployment ? undefined : "./e2e/global-teardown.ts",

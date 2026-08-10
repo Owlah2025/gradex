@@ -583,6 +583,37 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("insert instructor: %w", err)
 	}
+	// The Instructor gets the same real credential as the Admin and the
+	// Students. Without it `-issue-session` cannot authenticate this account,
+	// which is why Instructor journeys previously needed a hand-written SQL
+	// workaround. This is the throwaway E2E fixture password, never a
+	// production default.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'ACTIVE')
+	`, instructorID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert instructor creds: %w", err)
+	}
+
+	// A second, unrelated Instructor. Course ownership is only provable with an
+	// authenticated Instructor who owns nothing in the fixture: without one, an
+	// authorization test can only observe that an anonymous caller is refused.
+	otherInstructorID := "a0000000-0000-0000-0000-000000000004"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'instructor-other@example.test', 'instructor-other@example.test', 'INSTRUCTOR', 'ACTIVE', 'Dr. Other Instructor', $2)
+	`, otherInstructorID, now)
+	if err != nil {
+		return fmt.Errorf("insert other instructor: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'ACTIVE')
+	`, otherInstructorID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert other instructor creds: %w", err)
+	}
 
 	// Create Course & Revision
 	courseID := "c0000000-0000-0000-0000-000000000001"
