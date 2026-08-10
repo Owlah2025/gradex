@@ -1,5 +1,124 @@
 # Gradex Launch Status
 
+> **2026-08-10 — CURRENT AUTHORITY. Production code is FROZEN at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b`
+> on branch `launch-integration-20260810`, pending one independent review.** Every statement below this
+> block is older and is superseded wherever the two disagree.
+>
+> This is a **launch-integration reconciliation and review phase**, not feature implementation, under
+> [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review).
+> Backend, frontend, migrations, tests, deploy scripts, and runtime configuration are closed to change.
+> **No new production implementation is authorized** until the review returns and every Critical and
+> High finding is resolved, and a successful review does not by itself authorize the next feature.
+> Claude authored the launch-integration implementation and is ineligible to review it; **`agy` holds
+> the independent reviewer seat**. The range is **not approved** — no verdict exists.
+>
+> The read-only reality audit behind this phase is
+> [`evidence/launch-integration/2026-08-10-reality-audit-afe1624.md`](evidence/launch-integration/2026-08-10-reality-audit-afe1624.md).
+> Its verdict was `REPOSITORY REQUIRES AUTHORITY RECONCILIATION BEFORE MORE IMPLEMENTATION`. The
+> review range it proposed (`18fb7e0..afe1624`) predates this reconciliation and is superseded by the
+> range below, so the reviewer sees the reconciled authority alongside the integrated production tree.
+>
+> **Frozen independent review range:** `18fb7e0` .. the authority-reconciliation head recorded in the
+> commit that closes this pass. `afe1624` is the production-code freeze point; it is **not** the review
+> head and is not a reviewed head.
+>
+> ### Launch-integration remediations — all IMPLEMENTED_UNREVIEWED
+>
+> | Remediation | Commits | Decision | State |
+> |---|---|---|---|
+> | Instructor authoring wired to the real authoring/media APIs | `b68ede6`, `0e43410`, `4fb29b1`, `2a4008c` | [D-079](../DECISIONS.md#d-079--the-instructor-authoring-ui-is-wired-to-the-existing-authoring-and-media-apis-and-a-development-only-scanner-mode-makes-the-whole-path-testable) | IMPLEMENTED_UNREVIEWED |
+> | Mandatory password change mounted | `5d605c2`, `2818bf1`, `a6d6070`, `5f21c61` | [D-080](../DECISIONS.md#d-080--the-mandatory-password-change-is-mounted-so-changerequired-stops-being-terminal) | IMPLEMENTED_UNREVIEWED |
+> | Staff lifecycle development composition decoupled from Student registration | `1afe40f`, `5d0a933` | [D-081](../DECISIONS.md#d-081--staff-lifecycle-composition-is-decoupled-from-student-registration-and-production-staff-onboarding-stays-unapproved) | IMPLEMENTED_UNREVIEWED — **production staff onboarding stays unapproved and is a launch blocker** |
+> | S9 transactional email merged into the launch branch | `6e016b6` (merge) | [D-077](../DECISIONS.md#d-077--resend-delivers-launch-transactional-email-behind-a-provider-neutral-durable-boundary), [D-078](../DECISIONS.md#d-078--transactional-email-never-sends-historical-intents-created-before-activation) | IMPLEMENTED_UNREVIEWED — the merge itself has never been reviewed |
+> | Admin Catalog backed by the real review API | `049cfb2`, `23e35bb`, `a00a97a`, `afe1624` | [D-082](../DECISIONS.md#d-082--the-admin-catalog-review-surface-is-backed-by-the-real-review-api-and-submitted-revision-inspection-remains-unbuilt) | IMPLEMENTED_UNREVIEWED |
+>
+> ### Slice reality corrections carried by this block
+>
+> - **S6 is `IMPLEMENTED_UNREVIEWED`, not 13/85 and not closed.** `specs/006-course-access-grant/tasks.md`
+>   shows **80 of 85 tasks complete**. The five unchecked are `T013`, `T016`, `T024`, `T032`, `T075`;
+>   `T013` (Enrollment create-or-reuse) is implemented in `internal/access/repository.go` and its
+>   checkbox is stale bookkeeping. The last recorded verdict on an S6 range is `REJECT`, so **S6 has no
+>   approving final verdict and is not called CLOSED here.**
+> - **S9 is `IMPLEMENTED_UNREVIEWED`.** All 30 tasks are complete, but the recorded verdict is `REJECT`
+>   at `9be0020`; the remediation `9be0020..381bd40` and the merge `6e016b6` are both unreviewed.
+> - **S12 remains `BLOCKED_EXTERNAL`** at 46/48 with `T047` and `T048` unchecked. Unchanged.
+>
+> ### Known P0 gaps at the freeze
+>
+> 1. **Admin submitted-revision inspector is absent.** `GET /api/v1/admin/review/courses/:id/revisions/:revisionId`
+>    is served and a client exists, but no component calls it — an Admin approves without seeing the
+>    submitted Course content ([D-082](../DECISIONS.md#d-082--the-admin-catalog-review-surface-is-backed-by-the-real-review-api-and-submitted-revision-inspection-remains-unbuilt)).
+> 2. **Admin Lesson video preview is absent.** `POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId`
+>    is served; no frontend client exists for it at all.
+> 3. **Production staff composition is a blocking Product Owner decision, not an engineering task.**
+>    Production refuses to compose the staff foundation, so no Instructor can be invited, onboarded,
+>    suspended, or reinstated in production ([D-081](../DECISIONS.md#d-081--staff-lifecycle-composition-is-decoupled-from-student-registration-and-production-staff-onboarding-stays-unapproved)).
+> 4. **Merged-tree media E2E requires diagnosis.** `npm run test:e2e:media-authoring` does not pass on
+>    the merged tree — the Asset Version never leaves `Processing`. The cause is not isolated; the
+>    minimum proof is one run capturing the API and worker processes' resolved `MEDIA_SCANNER_MODE` and
+>    `MEDIA_OPERATING_MODE`.
+>
+> These four are software gaps. **External launch gates are separate** and are unchanged by this
+> block — they remain tracked in [`../LAUNCH_GATES.md`](../LAUNCH_GATES.md) and summarised under
+> external blockers in the audit. Freezing resolves none of them.
+>
+> ### Recorded SpecKit authority gaps — RECORD ONLY, no task was amended in this pass
+>
+> The audit found implementation the repository requires but no task or spec currently owns. **Nothing
+> below was added to any `tasks.md` or `spec.md` in this reconciliation.** The next implementation pass
+> amends only the task or spec required for the one feature selected after the independent review
+> returns.
+>
+> `TASK_AMENDMENT_REQUIRED`:
+>
+> | Gap | Owning spec |
+> |---|---|
+> | S2 Admin submitted-revision inspector | [`specs/003-course-authoring/`](../../specs/003-course-authoring/spec.md) |
+> | S2 Admin Lesson video preview | [`specs/003-course-authoring/`](../../specs/003-course-authoring/spec.md) |
+> | S3 / public landing bound to the real catalogue API | [`specs/004-public-catalogue/`](../../specs/004-public-catalogue/spec.md) |
+> | Navigation and link integrity across the public surface | [`specs/004-public-catalogue/`](../../specs/004-public-catalogue/spec.md) |
+> | Public copy sweep for [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) and [D-046](../DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch) | [`specs/004-public-catalogue/`](../../specs/004-public-catalogue/spec.md) |
+> | `DeleteCourse` real-access guard (it reads the legacy `fake_entitlements` table) | [`specs/003-course-authoring/`](../../specs/003-course-authoring/spec.md) |
+>
+> `SPEC_AMENDMENT_REQUIRED`:
+>
+> | Gap | Owning spec |
+> |---|---|
+> | Production staff composition — the production precondition is not stated in any spec | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) |
+>
+> ### `.specify/feature.json` — left unchanged, with a recorded blocker
+>
+> `.specify/feature.json` still selects `specs/010-transactional-email`, which is complete and merged.
+> It was **deliberately not changed**, and it does not represent the current phase.
+>
+> The selector structurally cannot. `get_feature_paths` in `.specify/scripts/bash/common.sh` resolves
+> a feature from `SPECIFY_FEATURE_DIRECTORY`, then from `feature.json`'s `feature_directory` key, and
+> otherwise fails with `ERROR: Feature directory not found`. An empty value, a missing key, and a
+> missing file are all treated identically as that error — **there is no neutral, review, or
+> cross-slice state in the schema**, and a frozen launch-integration review phase has no feature
+> directory to point at.
+>
+> The two honest options were to clear it and break every SpecKit script, or to invent a feature
+> directory for a phase that is not a feature. Both were rejected: the first is a silent tooling
+> breakage, the second is fabricated authority. It is therefore left pinned at the last real feature
+> and this blocker stands in its place. **Do not read `feature.json` as a statement of the active
+> slice** — this document is the authority for that. Repointing it is a decision for the pass that
+> selects the next feature after the independent review returns.
+>
+> ### Live external evidence — exactly what exists
+>
+> One live transactional-email delivery is proven: a real Gradex **Staff Invitation** was produced by
+> the application, written through the durable email pipeline, accepted by live Resend using the test
+> sender `onboarding@resend.dev`, and reached a Product Owner-controlled Gmail inbox. **That proves
+> live test-provider delivery only.** It is **not** a verified production sender domain, and no
+> SPF/DKIM/DMARC, production API key, or public-delivery claim is made. `LG-018` stays `OPEN`.
+>
+> ---
+>
+> **Everything below this line predates 2026-08-10 and is retained as the historical record.** Where a
+> statement below conflicts with this block — in particular any text calling S6 the active slice, any
+> S6 task count, or any current-date or days-remaining figure — this block is authoritative.
+
 > **2026-08-09 S9 independently REJECTED at `9be0020`; remediated and awaiting re-review.** The
 > independent reviewer returned Critical 0, High 1: real `identity.staff_invitation_created` events
 > omitted `template_contract` from the safe payload that discovery joins on, so staff invitations
@@ -57,9 +176,9 @@
 > frozen and ready; the live R2 exact-version-provenance gate is ready but untested; Hostinger public
 > deployment has not started. T048 remains unchecked and has not started.
 
-> Current date: **2026-08-09 (real calendar).** The schedule-day numbering ended at Day 11; from now on
+> Current date: **2026-08-10 (real calendar).** The schedule-day numbering ended at Day 11; from now on
 > there is one calendar and it is the real one — see [the execution plan §1](AUGUST_15_EXECUTION_PLAN.md#1-calendar-reconciliation)
-> Last repository reconciliation: **2026-08-07, S6 documentation remediation pass against head `681f4a9`**; prior reconciliation 2026-08-06 at S6 pre-implementation reconciliation against S5 closure head `d5ce557`
+> Last repository reconciliation: **2026-08-10, launch-integration authority reconciliation against the production-code freeze `afe1624`**; prior reconciliation 2026-08-07 at the S6 documentation remediation pass against head `681f4a9`
 > Scope: **D-045 (2026-07-28) — MVP ships no in-platform payments.** Course access is granted by an
 > Admin-approved Course Access Invitation. S7 removed; S6 is now the grant slice. See the section
 > below and [MVP_SCOPE_RECONCILIATION.md](MVP_SCOPE_RECONCILIATION.md)
@@ -76,12 +195,13 @@
 > `T001`–`T078` complete, reviewed frozen candidate `41373a8`, independent Tier 3 verdict `APPROVE`
 > with 0 critical and 0 high. Its non-blocking follow-ups stay open and tracked; closure does not
 > assert they are fixed
-> **S6 — Course Access Invitation and Entitlement Grant is the ACTIVE slice**, unblocked as of
-> 2026-08-06 because S2, S4, and S5 are all closed. Planning is independently approved and frozen;
-> implementation has started under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews) with Antigravity as builder and Claude as independent reviewer. 13 of 85 tasks are complete at current head. Initial implementation range `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected; the complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation. S6 remains open; no next subgroup is authorized yet.
+> **S6 — Course Access Invitation and Entitlement Grant is `IMPLEMENTED_UNREVIEWED`**, at **80 of 85
+> tasks** in `specs/006-course-access-grant/tasks.md`. It is **not** the active slice and it is **not**
+> closed: the last recorded verdict on an S6 range is `REJECT`, and no approving final verdict exists.
+> Planning is independently approved and frozen. See the current-authority block above
 > Plan-day note: **D3 runs one day early** — the execution plan dates it July 29, and D2's work ran on the evening of July 27. The `-dN` suffix tracks the plan day, not the date
 > Target public go-live: **2026-08-15 — hard product-owner decision**, restored under [D-040](../DECISIONS.md#d-040--august-15-restored-as-the-hard-mvp-launch-date-claude-plans-antigravity-implements-claude-reviews). Supersedes [D-039](../DECISIONS.md#d-039--remedy-a-adopted-scope-preserved-public-target-moves-to-september) on the date only
-> Days remaining: **6**
+> Days remaining: **5**
 > Launch confidence: **RED** — reverted from Amber on 2026-07-28
 
 ## S4 — Media Pipeline, Protected Delivery, and Entitlement Evaluation is closed
@@ -153,12 +273,31 @@ The full register — `F-3` through `F-6` and the three previously disclosed Low
 [`review/S5-TIER3-REREVIEW-2026-08-06.md`](review/S5-TIER3-REREVIEW-2026-08-06.md), which is the
 authoritative list. Carrying two items forward here does not close the others.
 
-## S6 — Course Access Invitation and Entitlement Grant is the active slice
+## S6 — Course Access Invitation and Entitlement Grant is implemented and unreviewed
+
+**Current state (2026-08-10): `IMPLEMENTED_UNREVIEWED`.** `specs/006-course-access-grant/tasks.md`
+shows **80 of 85 tasks complete**. The five unchecked are `T013`, `T016`, `T024`, `T032`, and `T075`;
+`T013` (Enrollment create-or-reuse) is implemented in `internal/access/repository.go` inside the
+Admin Approval transaction and its checkbox is stale bookkeeping, while `T016`/`T024`/`T032` are
+mutation checks and `T075` is the bilingual/RTL sweep.
+
+**S6 is not closed.** The last recorded verdict on an S6 range is `REJECT`, and no approving final
+verdict exists. Closure requires a recorded reviewer verdict against one exact commit range, which
+the frozen launch-integration review is expected to supply for the code as integrated. S6 code is
+inside the production freeze at `afe1624` and is not reopened for implementation.
 
 **Unblocked 2026-08-06**: S2, S4, and S5 are all closed on independent verdicts. Planning is
 independently approved and frozen under
 [D-048](../DECISIONS.md#d-048--claude-plans-s5-and-s6-and-agy-re-reviews-the-expanded-planning-range).
-**Implementation has started.** Implementation seats are assigned under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews) with Antigravity (`agy`) as implementation builder and Claude as independent reviewer. **13 of 85 tasks are complete at current head** (`T001`, `T001a`, `T002`, `T003`, `T003a`, `T004`, `T004a`, `T005`, `T006`, `T007`, `T007a`, `T008`, `T009`). Initial implementation range `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected (`VERDICT: REJECT`); the complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation. S6 remains active and open; no next subgroup is authorized yet.
+
+> **HISTORICAL — superseded by the state above.** Implementation seats were assigned under
+> [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews)
+> with Antigravity (`agy`) as implementation builder and Claude as independent reviewer. That record
+> read **13 of 85 tasks complete at current head** (`T001`, `T001a`, `T002`, `T003`, `T003a`, `T004`,
+> `T004a`, `T005`, `T006`, `T007`, `T007a`, `T008`, `T009`). Initial implementation range
+> `d9e483f..a5a2748` and remediation range `a5a2748..681f4a9` were independently reviewed and rejected
+> (`VERDICT: REJECT`); the complete state `d9e483f..681f4a9` remains unapproved. The 13/85 figure is
+> the stale count the 2026-08-10 audit corrected; the D-074 seat assignment is spent.
 
 S6 owns the Course Access Invitation lifecycle, every production Enrollment write, and the single
 transaction that creates an Entitlement. It **consumes** S4's Entitlement evaluator and S5's
@@ -175,12 +314,12 @@ instrument field on any entity (BR-020, FR-005, SC-012). The struck S7 row in
 | Started from | S5 closure head `d5ce557c67befacaef85fef2d1516e97fd57aee4` |
 | Branch | `s6-course-access-grant-20260806` |
 | Reconciliation reviewed | `d5ce557..9b66a24` and `9b66a24..ed3fb65`, both **`APPROVE`** — 0 critical, 0 high, 0 medium, 0 low, findings none. Reviewer independent of the builder and made no edit. See [`review/S6-PLANNING-RECONCILIATION-2026-08-06.md`](review/S6-PLANNING-RECONCILIATION-2026-08-06.md) |
-| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a` (**13 complete**) |
+| Tasks | 85 — `T001`–`T079` plus `T001a`, `T003a`, `T004a`, `T007a`, `T014a`, `T079a` (**80 complete** as of 2026-08-10; unchecked: `T013`, `T016`, `T024`, `T032`, `T075`) |
 | Initial Subgroup Review | `d9e483f..a5a2748` returned **`REJECT`** (C1, H2, H3, H4, H5, M1, M2, M3, M4, M5). Range not approved. |
 | Remediation Subgroup Review | `a5a2748..681f4a9` returned **`REJECT`** (R8/N1, R9/N2, R10/N3 documentation blockers). Complete state `d9e483f..681f4a9` remains unapproved pending documentation remediation; S6 remains active and open. |
 | Traceability | 42/42 functional requirements cited; 12/13 success criteria covered, `SC-010` deferred by decision |
 | Migration | `0015_course_access_grant`, raising `MaxSchemaVersion` to **15** |
-| Implementation seats | **Antigravity (`agy`)** as implementation builder; **Claude** as independent reviewer (under [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews)). |
+| Implementation seats | **Historical.** Antigravity (`agy`) as implementation builder; Claude as independent reviewer, under the now-spent [D-074](../DECISIONS.md#d-074--antigravity-builds-s6-course-access-grant-and-claude-independently-reviews). Seats do not renew implicitly; the current phase is the frozen launch-integration review under [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review), where `agy` reviews. |
 
 **D-073 explicitly acknowledged.** Product Owner Ahmed Hazem explicitly acknowledged D-073 and its effort and schedule consequences on August 7, 2026 through direct instruction, establishing D-073 provenance. S6 owns `courses.default_access_ends_at TIMESTAMPTZ`, Admin configuration route, Kuwait-local date conversion, audit, and UI surface.
 

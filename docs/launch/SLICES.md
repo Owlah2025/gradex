@@ -35,7 +35,7 @@ rather than absorbed as improvisation during implementation.
 | S6 | **Course Access Invitation and Entitlement grant** | **Aug 8** | Course Access, Entitlements, Audit | S2, S4, **S5** |
 | ~~S7~~ | ~~Payments, entitlement grants, and refunds~~ — **removed from the MVP runway** | — | — | — |
 | S8 | Admin support operations (reduced; moderation deferred) + **Instructor roster** | **Aug 12** | Reporting, Moderation, Audit | S5, S6 |
-| S9 | Transactional notifications only; **office hours deferred post-launch** | folded into S4/S6 | Office Hours, Notifications | S4, S5 |
+| S9 | **Transactional email delivery** — office hours remain deferred post-launch | **Aug 9** | Notifications | S4, S5, S6 |
 | S10 | Bilingual legal/support pages (reduced; no revenue/payout screens) | **Aug 12** | Support | S6, S8 |
 | S11 | End-to-end integration | **Aug 13** | all | S1A–S10, **S12 staging** |
 | S12 | Production infrastructure and observability | **Aug 7** | operational | S6 implementation base `dde093b`; **does not depend on S11** |
@@ -45,6 +45,32 @@ rather than absorbed as improvisation during implementation.
 | S16 | Public go/no-go | **Aug 15** | — | S15 |
 
 Every `Depends on` entry points backwards. No forward dependency remains.
+
+> **Correction, 2026-08-10 — S9 is a slice, not a fold.** The row above previously read
+> *"folded into S4/S6"*. That is no longer true: S9 shipped as its own slice with its own authoritative
+> directory [`specs/010-transactional-email/`](../../specs/010-transactional-email/spec.md), **30 tasks,
+> all complete**, under
+> [D-077](../DECISIONS.md#d-077--resend-delivers-launch-transactional-email-behind-a-provider-neutral-durable-boundary)
+> and [D-078](../DECISIONS.md#d-078--transactional-email-never-sends-historical-intents-created-before-activation).
+> It is `IMPLEMENTED_UNREVIEWED` — the recorded verdict is `REJECT`, and the remediation and the merge
+> into the launch branch are both unreviewed. Office hours remain deferred post-launch, unchanged.
+>
+> **The `Day` column is historical and is not a dependency statement.** Several entries record dates
+> that conflict with the dependency order the same table asserts — most visibly S1C at *Jul 27–28* and
+> S2 at *Jul 29–31*, both earlier than S1B3's actual close on **2026-08-01**. Those dates are the
+> planning record as written at the time; where a date and a `Depends on` entry disagree, **the
+> dependency order is authoritative** (rule 2), and the actual closure heads are recorded in
+> [STATUS.md](STATUS.md). No date in this table is a current commitment.
+>
+> **Launch integration is a phase, not a slice.** The 2026-08-10 remediation and review work —
+> Instructor authoring, the mandatory password change, staff development composition, the S9 merge, and
+> the Admin Catalog review surface — spans S1C, S2, and S9 and creates no new numbered feature slice.
+> Production code is frozen at `afe1624` under
+> [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
+> pending one independent review of the integrated range. **S13 and S14 in the table below remain
+> unstarted**; evidence filenames that reuse those numbers are filing artifacts and do not create a
+> spec, a task set, or an implementation claim for either slice. See
+> [STATUS.md](STATUS.md) for the current phase and the frozen review range.
 
 **S6 and S7 were replaced by a single smaller slice on 2026-07-28 under
 [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).**
