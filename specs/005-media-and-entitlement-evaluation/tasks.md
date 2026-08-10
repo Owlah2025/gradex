@@ -180,3 +180,44 @@ remediation window absorbs it, or the slice splits again.
 
 Every task is required. T030 is required **because** `LG-014` may be unresolved — it is the mechanism
 that makes an unresolved gate survivable, so it is not optional polish.
+
+---
+
+## Amendment — 2026-08-11, post-independent-review remediation (T033–T035)
+
+**These tasks did not exist during the original S4 review and are not part of its completion record.**
+The 32 tasks above closed on their own evidence; nothing above is reopened, reinterpreted or
+unchecked by this amendment. These three were added on 2026-08-11 after the **first valid independent
+review** of the integrated launch range `18fb7e0..48e1f3f` returned `VERDICT: REJECT`, whose Critical
+finding C1 is that the merged-tree media E2E stalls at `Processing` and Instructor uploads never reach
+`READY`. Authority:
+[D-084](../../docs/DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized).
+
+**Diagnostic first.** The cause is `UNKNOWN_NEEDS_EVIDENCE`. The media pipeline is **not** assumed
+defective: dispatcher, worker and ffmpeg processor are all present, and environment configuration is
+the strongest hypothesis. No production media code changes under T033, and no media redesign is
+authorized at all.
+
+- [ ] T033 Capture the **effective** media configuration of the running processes during one real
+      `npm run test:e2e:media-authoring` run — not the values a config file appears to set. Record,
+      separately for the API process and the worker process: `MEDIA_SCANNER_MODE`,
+      `MEDIA_OPERATING_MODE`, `APP_ENV`, `REDIS_ADDR`, and the object-storage endpoint and bucket as
+      each process resolved them. Record where the Asset Version stops. Write the capture to
+      `docs/launch/evidence/launch-integration/` as the C1 diagnosis. No production code changes in
+      this task.
+- [ ] T034 **Branch A only** — if T033 shows the effective configuration is wrong (for example a
+      scanner resolved to `UNAVAILABLE`, an operating mode resolved to `ADMIN_CATALOGUE`, or the
+      worker and API resolved different Redis or bucket targets), apply the **narrow** E2E/runtime
+      harness configuration fix in `frontend/playwright.media-authoring.config.ts` and the E2E
+      environment/runtime wiring it starts, and prove one green `npm run test:e2e:media-authoring` on
+      the merged tree. Scope is the harness/runtime configuration only.
+- [ ] T035 **Branch B only** — if T033 shows the effective configuration is correct, stop. Diagnose
+      the worker/outbox/dispatcher path read-only, record the finding as evidence, and obtain a
+      further task amendment before any production media code is modified. This task closes by
+      producing that diagnosis and that amendment request, not by changing the pipeline.
+
+Exactly one of T034 and T035 applies; which one is decided by T033's evidence, never in advance. The
+task not taken is closed as `NOT_APPLICABLE` with the diagnosis cited.
+
+**Amended task count:** 35 tasks — the original 32, complete, plus 3 post-review remediation tasks,
+all open.

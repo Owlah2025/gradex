@@ -2713,3 +2713,77 @@ closes no slice, and does not make `afe1624` a reviewed head. External launch ga
 and remain tracked in [`docs/LAUNCH_GATES.md`](LAUNCH_GATES.md).
 
 **Source:** Product Owner instruction of 2026-08-10 following the read-only reality audit.
+
+## D-084 — The independent review of the integrated launch range returned REJECT and bounded remediation of its seven findings is authorized
+
+**Date:** 2026-08-11
+**Status:** Active. Supersedes the implementation-freeze consequence of
+[D-083](#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
+to the minimum degree stated below, and expires when the remediation head returns an approving
+independent verdict.
+
+**Finding:** The independent review that D-083 authorized has returned. It is the **first valid
+verdict** for the integrated range
+`18fb7e033d0fad162caebe150fb641a00201e259..48e1f3ff40d0a8f5cddbea82d5e97d26a755e5f8`: `agy` running
+`gemini-3.1-pro-high` under bwrap read-only containment, relay exit 0, `touchedFiles: []`, clean
+reviewer worktree, machine-readable sentinel. The run artifacts are at
+`docs/launch/review/artifacts/18fb7e0-48e1f3f-20260810T233209Z/`, which is gitignored local run
+output; the report is therefore transcribed verbatim into
+[the remediation plan](launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md),
+which is the committed evidence.
+
+**The verdict is `VERDICT: REJECT`** — 4 Critical and 3 High defects:
+
+| # | Severity | Finding |
+|---|---|---|
+| C1 | CRITICAL | Merged-tree media E2E stalls at `Processing`; uploads never reach `READY` |
+| C2 | CRITICAL | Admin submitted-revision inspector is absent — approval happens blind |
+| C3 | CRITICAL | Admin Lesson video preview is absent; the backend route has no frontend client |
+| C4 | CRITICAL | Production staff onboarding is blocked by the `EnvDevelopment` composition gate |
+| H1 | HIGH | Landing renders fabricated Courses, fabricated prices and fabricated testimonials |
+| H2 | HIGH | Public navigation contains dead routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` |
+| H3 | HIGH | FAQ copy claims Tap hosted checkout exists, contradicting [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) |
+
+The earlier runs against the same range are **not** verdict evidence and keep their existing
+classification: `20260810T204913Z` and `20260810T205549Z` are `TAINTED` (the reviewer wrote inside its
+worktree), and `20260810T231855Z` is `UNAVAILABLE` (the report used an unsupported verdict form).
+`TAINTED`, `UNAVAILABLE` and `REJECT` are three different outcomes and none of them is an approval.
+
+**Decision:**
+
+1. The reviewed range is **rejected**. It is not approved, not closed, and no gate opens on it.
+2. The seven Critical and High findings above are accepted as **launch-blocking** and as the
+   **complete bounded remediation scope**. Nothing else is in scope.
+3. Production implementation is authorized **only** for remediating those seven findings and for the
+   tests and evidence they directly require. The D-083 freeze is lifted exactly this far and no
+   further; every other part of D-083 — including that a successful review does not by itself
+   authorize the next feature — stays in force.
+4. **No unrelated work is authorized**: no new feature, no refactor of untouched code, no
+   architecture redesign, no commerce, payment, checkout or refund capability, and no backlog item.
+   Removing a false commerce *claim* from public copy is in scope; adding commerce *function* is not,
+   and remains excluded under
+   [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).
+5. **Authority precedes code.** Each finding's owning SpecKit task or spec amendment must exist and be
+   committed before the code that satisfies it is written. Where a spec is silent — production staff
+   composition — the spec is amended first, not worked around.
+6. The remediation head requires **another independent review of the complete integrated tree** before
+   approval, because the rejection was against the complete tree and only the complete tree can show
+   the findings resolved without regression.
+7. **The implementation agent cannot review its own work.** Whoever builds the remediation does not
+   hold the reviewer seat for it, and no builder self-assessment closes anything.
+8. The review-harness commits after `48e1f3f` (`8bfd4c0`, `6891d17`, `440f48e`) are **tooling authority
+   only**. They are not Gradex product implementation, they are not part of the reviewed substantive
+   range, and they are never counted as remediation.
+
+**Media is diagnostic-first.** C1's cause is `UNKNOWN_NEEDS_EVIDENCE`. This decision authorizes
+diagnosis, then either a narrow harness/runtime configuration fix, or — if the effective configuration
+proves correct — a stop and a further task amendment before any production media code changes. It
+authorizes no media redesign.
+
+**Boundary:** This decision approves no implementation, closes no slice, opens no launch gate, and
+creates no retrospective authority for anything already landed. External launch gates are unaffected
+and remain tracked in [`docs/LAUNCH_GATES.md`](LAUNCH_GATES.md). The bounded remediation plan,
+batches, validation matrix and founder acceptance journey are recorded in
+[`docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
+
+**Source:** Product Owner instruction of 2026-08-11 on the valid independent REJECT.

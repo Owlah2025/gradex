@@ -1,8 +1,91 @@
 # Gradex Launch Status
 
-> **2026-08-10 — CURRENT AUTHORITY. Production code is FROZEN at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b`
-> on branch `launch-integration-20260810`, pending one independent review.** Every statement below this
-> block is older and is superseded wherever the two disagree.
+> **2026-08-11 — CURRENT AUTHORITY. The independent review returned `VERDICT: REJECT`. The integrated
+> range is NOT approved, and bounded remediation of exactly seven findings is authorized.** Every
+> statement below this block is older and is superseded wherever the two disagree — in particular any
+> text saying the review is still pending or that no verdict exists.
+>
+> ### The valid independent review
+>
+> | | |
+> |---|---|
+> | Reviewed range | `18fb7e033d0fad162caebe150fb641a00201e259..48e1f3ff40d0a8f5cddbea82d5e97d26a755e5f8` |
+> | Artifacts | `docs/launch/review/artifacts/18fb7e0-48e1f3f-20260810T233209Z/` (gitignored run output; the report is transcribed in the remediation plan below) |
+> | Reviewer / model | `agy` · `gemini-3.1-pro-high` |
+> | Containment | bwrap read-only checkout, external scratch |
+> | Relay | exit 0, `status: completed` |
+> | Touched files | `[]` — the reviewer worktree stayed clean |
+> | **Verdict** | **`VERDICT: REJECT`** |
+> | Critical | **4** |
+> | High | **3** |
+>
+> This is the **first valid verdict** for this range. **The implementation is not approved**, no slice
+> closes on it, and remediation is required before launch. Authority:
+> [D-084](../DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized).
+>
+> ### The three earlier runs are not verdict evidence
+>
+> | Run | Classification | Why |
+> |---|---|---|
+> | `20260810T204913Z` | `TAINTED` | the reviewer created `REVIEW.md` inside its worktree; discarded, not corrected |
+> | `20260810T205549Z` | `TAINTED` | the reviewer created `patch.diff` and `scratch/`; discarded, not corrected |
+> | `20260810T231855Z` | `UNAVAILABLE` | contained and clean, but the report used an unsupported verdict form, so no verdict was retrievable |
+>
+> `TAINTED`, `UNAVAILABLE` and `REJECT` are three different outcomes. **None of them is an approval**,
+> and the two TAINTED runs remain discarded whatever they concluded. These records are preserved, not
+> rewritten.
+>
+> ### The seven launch-blocking findings and who owns each
+>
+> | # | Severity | Finding | Owning spec | Authority | State |
+> |---|---|---|---|---|---|
+> | C1 | CRITICAL | Merged-tree media E2E stalls at `Processing` | [`specs/005-…`](../../specs/005-media-and-entitlement-evaluation/tasks.md) | `T033`–`T035`, diagnostic-first | OPEN |
+> | C2 | CRITICAL | Admin submitted-revision inspector absent — approval is blind | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T067`, `T069`, `T071` | OPEN |
+> | C3 | CRITICAL | Admin Lesson video preview absent | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T068`, `T070`, `T071`, `T072` | OPEN |
+> | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
+> | H1 | HIGH | Landing renders fabricated Courses, prices and testimonials | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T040`, `T041`, `T044` | OPEN |
+> | H2 | HIGH | Dead public routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T042`, `T045` | OPEN |
+> | H3 | HIGH | FAQ claims Tap hosted checkout exists, against [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T043` | OPEN |
+>
+> Every Critical and High has exactly one owner and committed task or spec authority. **No remediation
+> task is complete.** The SpecKit authority gaps recorded as `TASK_AMENDMENT_REQUIRED` and
+> `SPEC_AMENDMENT_REQUIRED` in the 2026-08-10 block below are now resolved **for these seven findings
+> only**; the gaps that block nothing in this rejection — the `DeleteCourse` real-access guard among
+> them — remain recorded and unowned.
+>
+> ### What is authorized now
+>
+> Production implementation is open **only** for these seven findings and the tests and evidence they
+> directly require, under D-084. The [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
+> freeze is lifted exactly that far; everything else in D-083 stands. No unrelated feature, refactor,
+> redesign, commerce, payment or backlog item is authorized. Removing a false commerce **claim** from
+> public copy is in scope; adding commerce **function** is not.
+>
+> The bounded plan — four dependency-ordered batches, the media diagnostic decision tree, the
+> validation matrix, the founder acceptance journey and the final re-review strategy — is
+> [`evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
+>
+> **The next single action is Batch A step 1** (`T033`): capture the effective media configuration of
+> the running API and worker processes during one `npm run test:e2e:media-authoring` run. Nothing else
+> starts first.
+>
+> ### Review harness — tooling authority only
+>
+> The commits after `48e1f3f` on this branch — `8bfd4c0`, `6891d17`, `440f48e` — harden
+> `scripts/agy-review.sh`: a read-only bwrap checkout with external scratch, fail-closed refusal when
+> containment cannot be proven, and a machine-readable verdict sentinel. They are **tooling authority,
+> not Gradex product implementation**, they are not part of the reviewed substantive range, and they
+> are never counted as remediation. `afe1624` remains the production-code freeze point.
+>
+> ---
+>
+> **2026-08-10 — SUPERSEDED on 2026-08-11 by the block above, which carries the review's verdict.
+> Retained unchanged below as the record of the freeze-and-review phase.** Production code was FROZEN
+> at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b` on branch `launch-integration-20260810`, pending one
+> independent review. That review has returned `VERDICT: REJECT`, so this block's statements that no
+> verdict exists and that no implementation is authorized are **spent**; `afe1624` remains the
+> production-code freeze point. Every statement below this block is older still and is superseded
+> wherever they disagree.
 >
 > This is a **launch-integration reconciliation and review phase**, not feature implementation, under
 > [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review).

@@ -276,3 +276,79 @@ Neither gate blocks building this slice. Both block declaring it production-read
    test 3 full-surface rerun.
 6. Bilingual screens.
 7. Full local gates, clean frontend build, push, hosted CI on the exact head, evidence package.
+
+---
+
+## 19. Amendment — 2026-08-11: production staff onboarding is a launch requirement
+
+**Added after S1C closed**, on the **first valid independent review** of the integrated launch range
+`18fb7e0..48e1f3f`, which returned `VERDICT: REJECT` with Critical finding C4: production staff
+onboarding is blocked, because the staff foundation composes only under `EnvDevelopment`. Sections 1–18
+are the original slice and are not rewritten. Authority:
+[D-084](../../../docs/DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized);
+the development-only composition it supersedes was recorded in
+[D-081](../../../docs/DECISIONS.md#d-081--staff-lifecycle-composition-is-decoupled-from-student-registration-and-production-staff-onboarding-stays-unapproved).
+
+### 19.1 Requirement
+
+**Production Gradex MUST support Admin-controlled Instructor and staff onboarding at launch.** A
+launch in which no Instructor can be brought into existence in production is not a launch: every
+Course, every submission and every approval in the founder journey begins with an invited Instructor.
+
+The requirement is that production **composes the staff foundation when it is safe to do so** — not
+that the environment check is deleted. Removing the gate without preconditions would compose staff
+identity on top of whatever happens to be configured, which is the failure mode the gate was
+protecting against.
+
+### 19.2 Production composition preconditions
+
+The staff lifecycle routes mount in production **only** when all of the following hold. Each is an
+existing capability of this architecture; none is new machinery.
+
+1. **Real session foundation** — the S1B2 session core, unchanged and fully configured.
+2. **Capability gating** — `CapAdminOperations` for invitation operations and `CapSecurityOperations`
+   for suspension and reinstatement, enforced at the policy boundary, never by a handler-local role
+   string, with the recent-authentication window of §7 and §8.
+3. **Production origin and CSRF enforcement** — production values, not development admission policy.
+4. **Production-safe password screening** — compromised-password screening configured and failing
+   closed, per `LG-021` (§17).
+5. **Production-safe rate limiting** — the invitation and completion limiters configured with real
+   keys, non-enumerating as FR-014 requires.
+6. **Audit evidence** — the §13 audit events committed for every invitation, completion, suspension
+   and reinstatement.
+7. **Durable Staff Invitation** — digest-only, expiring, single-use, supersedable secrets in
+   `identity_action_secrets` under the `STAFF_INVITATION` purpose. No secret is stored or logged in
+   plaintext, and the invitation bearer never appears in logs, argv, telemetry, DOM, storage or the
+   address bar.
+8. **Transactional email outbox** — the durable intent boundary present and writable.
+9. **Production email provider** — a configured provider under the provider-neutral adapter of
+   [D-077](../../../docs/DECISIONS.md#d-077--resend-delivers-launch-transactional-email-behind-a-provider-neutral-durable-boundary).
+   §16's manual out-of-band delivery path remains the fallback and is unchanged.
+10. **No fake authentication** — no development bootstrap identity, no test-only login, no fixture
+    Account participates in production composition.
+11. **No development-only seams in identity composition** — the development scanner mode of
+    [D-079](../../../docs/DECISIONS.md#d-079--the-instructor-authoring-ui-is-wired-to-the-existing-authoring-and-media-apis-and-a-development-only-scanner-mode-makes-the-whole-path-testable)
+    and the development admission policy must not be reachable from the production staff path.
+12. **Existing suspension and reinstatement authorization** — §6 and §8 unchanged, including immediate
+    session-family death on suspension.
+
+**Fail closed.** If any precondition is unmet, production **refuses to compose** the staff routes and
+says which precondition failed, in the existing startup-validation style. It does not mount a degraded
+variant, and it does not fall back to the development composition.
+
+**Student registration is not a prerequisite.** Staff onboarding composes independently of the Student
+admission path, as decoupled in D-081.
+
+### 19.3 Acceptance criteria for this amendment
+
+1. With `APP_ENV=production` and a valid production-safe configuration, the staff invitation and
+   lifecycle routes are mounted.
+2. An Admin holding the required capability and a fresh recent-authentication window can create an
+   invitation; the invitee can complete it and log in normally afterwards.
+3. Instructor, Student and unauthenticated callers are refused on the staff routes exactly as §8's
+   matrix requires.
+4. Suspension and reinstatement work in production composition under the existing policy, including
+   immediate session revocation.
+5. With any precondition unmet, startup fails closed and the routes are not mounted.
+6. Router composition is provable **without live email delivery**. Live provider sending remains an
+   external production step tracked by `LG-018`; it is not a prerequisite for testing composition.

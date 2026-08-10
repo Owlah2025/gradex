@@ -448,3 +448,64 @@ security property.
 ## Task count
 
 64 tasks — 4 setup, 7 foundational, 43 across six user stories, 3 carryover, 7 polish.
+
+---
+
+## Amendment — 2026-08-11, post-independent-review remediation (T067–T072)
+
+**These tasks did not exist during the original S2 review and are not part of its completion record.**
+Everything above closed on its own evidence and is neither reopened nor unchecked here. These six were
+added on 2026-08-11 after the **first valid independent review** of the integrated launch range
+`18fb7e0..48e1f3f` returned `VERDICT: REJECT`. Two of its Critical findings are owned by this spec:
+
+- **C2 — the Admin submitted-revision inspector is absent.** The review queue is real
+  ([D-082](../../docs/DECISIONS.md#d-082--the-admin-catalog-review-surface-is-backed-by-the-real-review-api-and-submitted-revision-inspection-remains-unbuilt)),
+  but no component renders the submitted revision, so an Admin approves blind.
+- **C3 — the Admin Lesson video preview is absent.** The backend preview route is served; no frontend
+  client or UI reaches it.
+
+Authority:
+[D-084](../../docs/DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized).
+These two are implemented as one Admin journey: an Admin cannot responsibly approve what they cannot
+read and cannot watch.
+
+**The backend is not redesigned.** Both routes already exist:
+
+```text
+GET  /api/v1/admin/review/courses/:id/revisions/:revisionId
+POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId
+```
+
+A backend change is authorized only if inspection proves an existing contract is genuinely
+insufficient for the workflow below, and that proof is recorded before the change. No parallel preview
+architecture is authorized.
+
+- [ ] T067 Add the frontend Admin review-detail client call for
+      `GET /api/v1/admin/review/courses/:id/revisions/:revisionId`, keyed on the exact `course_id` and
+      `revision_id` carried from the queue row, with typed errors and **no demo, local or fixture
+      fallback**. A detail load failure surfaces as a failure, never as empty or placeholder content.
+- [ ] T068 Add the frontend Admin preview client call for
+      `POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId`, bound to the
+      inspected revision and the selected Lesson. The client must not expose storage object keys,
+      bucket names, permanent S3/R2 URLs, credentials, internal signatures or upload URLs to the
+      browser surface, and must not persist the returned playback material beyond the view.
+- [ ] T069 Build the Admin submitted-revision inspector screen, opened from the queue with exactly
+      `course_id` + `revision_id`, rendering the authoritative submitted data: Arabic Course title,
+      English Course title, Arabic description, English description, study year, Major, Subject,
+      revision ID and revision state, ordered Sections, ordered Lessons within each Section, and each
+      Lesson's attached media and version state. Bilingual RTL/LTR as the surrounding Admin surface.
+- [ ] T070 Add the protected Lesson video player to the inspector, playing the **submitted** Lesson
+      media for the inspected revision through T068. It renders the media state honestly when a Lesson
+      has no attached, ready media, rather than implying playable content.
+- [ ] T071 Bind the decision controls to the exact inspected revision: Approve & Publish and its
+      reject/return counterpart act on the `revision_id` that was inspected, and **fail closed** when
+      the review detail cannot be loaded, or when the loaded detail's Course or revision does not match
+      the one opened. An Admin cannot approve a revision the screen did not successfully render.
+- [ ] T072 Prove the journey end to end: an Instructor creates and submits a real Course; the Admin
+      queue shows it; the Admin opens it; the submitted metadata, taxonomy, Sections, Lessons and
+      attached media state render; the submitted Lesson video plays; Approve & Publish publishes
+      **that exact revision**. In the same suite, prove Instructor and Student roles cannot reach the
+      Admin review detail or the Admin preview route.
+
+**Amended task count:** 70 tasks — the 64 recorded above, complete, plus 6 post-review remediation
+tasks, all open.

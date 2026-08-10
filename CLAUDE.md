@@ -16,28 +16,36 @@ Inspect repository evidence instead of relying on conversation memory. Preserve 
 user-owned working-tree changes. Do not mark work complete without the evidence required by the
 current daily record.
 
-## Current phase — production code is FROZEN
+## Current phase — the integrated range was REJECTED; bounded remediation only
 
-The repository is in a **frozen launch-integration reconciliation and review phase**, not feature
-implementation. **S1B3 is not the active slice** — it closed on 2026-08-01, and any statement naming
-it as current is spent. The current authority is
-[D-083](docs/DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review):
+The repository is in a **post-review remediation phase**. **S1B3 is not the active slice** — it closed
+on 2026-08-01, and any statement naming it as current is spent. The current authority is
+[D-084](docs/DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized),
+which supersedes the freeze consequence of
+[D-083](docs/DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
+exactly as far as stated and no further:
 
-- **Production code is frozen at `afe1624d4cdb117c57aed3fc86594e5ebdb4074b`** pending one independent
-  review. Do not change backend, frontend, migrations, tests, deploy scripts, or runtime
-  configuration.
-- **No new production implementation is authorized** until that review is complete and every Critical
-  and High finding is resolved. A successful review does not by itself authorize the next feature —
-  that still requires its own existing or amended SpecKit task authority, selected after the verdict
-  exists.
+- **The independent review of `18fb7e0..48e1f3f` returned `VERDICT: REJECT`** — 4 Critical, 3 High.
+  `agy` · `gemini-3.1-pro-high`, contained, clean worktree. The report is transcribed in the
+  remediation plan below; the raw run output under `docs/launch/review/artifacts/` is gitignored.
+  **The range is not approved.**
+- **Production implementation is authorized only for those seven findings** and the tests and evidence
+  they directly require, each under its committed task or spec authority. No unrelated feature,
+  refactor, redesign, commerce, payment or backlog item. Removing a false commerce *claim* from public
+  copy is in scope; adding commerce *function* is not.
+- **Authority precedes code.** The owning task or spec amendment is committed before the code that
+  satisfies it. Media remediation is **diagnostic-first**: capture the effective configuration before
+  changing anything.
 - **Claude authored the launch-integration implementation and is ineligible to review it.** Reviewing
   a Claude-authored range is a self-check, not a review, and it cannot close anything.
-- **`agy` holds the independent reviewer seat** for the frozen integrated range, dispatched through
-  `scripts/agy-review.sh <base>..<head>` and routed through the `agy-delegate` skill.
+- **`agy` holds the independent reviewer seat**, dispatched through `scripts/agy-review.sh <base>..<head>`
+  and routed through the `agy-delegate` skill. The remediation head needs a fresh independent review of
+  the complete integrated tree before approval.
 
-The range is **not approved**. No verdict exists yet. Current delivery state, the exact frozen review
-range, the recorded SpecKit task/spec gaps, and the open P0 items are in
-[`docs/launch/STATUS.md`](docs/launch/STATUS.md); the read-only audit behind this phase is in
+The seven findings, their owners, the four execution batches and the next single action are in
+[`docs/launch/STATUS.md`](docs/launch/STATUS.md) and
+[`docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
+The read-only audit behind the preceding freeze phase is in
 [`docs/launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md`](docs/launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md).
 
 ## Seats
