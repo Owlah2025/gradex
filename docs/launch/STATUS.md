@@ -45,12 +45,12 @@
 > | C2 | CRITICAL | Admin submitted-revision inspector absent — approval is blind | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T067`, `T069`, `T071` | IMPLEMENTED — pending independent re-review |
 > | C3 | CRITICAL | Admin Lesson video preview absent | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T068`, `T070`, `T071`, `T072` | IMPLEMENTED — pending independent re-review |
 > | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
-> | H1 | HIGH | Landing renders fabricated Courses, prices and testimonials | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T040`, `T041`, `T044` | OPEN |
-> | H2 | HIGH | Dead public routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T042`, `T045` | OPEN |
-> | H3 | HIGH | FAQ claims Tap hosted checkout exists, against [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T043` | OPEN |
+> | H1 | HIGH | Landing renders fabricated Courses, prices and testimonials | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T040`, `T041`, `T044` | IMPLEMENTED — pending independent re-review |
+> | H2 | HIGH | Dead public routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T042`, `T045` | IMPLEMENTED — pending independent re-review |
+> | H3 | HIGH | FAQ claims Tap hosted checkout exists, against [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T043` | IMPLEMENTED — pending independent re-review |
 >
-> Every Critical and High has exactly one owner and committed task or spec authority. **No remediation
-> task is complete.** The SpecKit authority gaps recorded as `TASK_AMENDMENT_REQUIRED` and
+> Every Critical and High has exactly one owner and committed task or spec authority. C2, C3 and H1–H3
+> are implemented and await the complete integrated-tree independent re-review. The SpecKit authority gaps recorded as `TASK_AMENDMENT_REQUIRED` and
 > `SPEC_AMENDMENT_REQUIRED` in the 2026-08-10 block below are now resolved **for these seven findings
 > only**; the gaps that block nothing in this rejection — the `DeleteCourse` real-access guard among
 > them — remain recorded and unowned.
@@ -67,10 +67,10 @@
 > validation matrix, the founder acceptance journey and the final re-review strategy — is
 > [`evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
 >
-> **Batch B is implemented and pending the required independent re-review.** C1 remains
+> **Batches B and D are implemented and pending the required independent re-review.** C1 remains
 > `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a captures recurrence evidence without blocking
-> local MVP work. The next unblocked authorized completion batch is Batch D — public-surface
-> truthfulness (H1–H3). Batch C remains blocked until its S1C spec amendment lands.
+> local MVP work. Batch C remains blocked until its S1C spec amendment lands; no further completion
+> batch is unblocked by this status record.
 >
 > ### Review harness — tooling authority only
 >

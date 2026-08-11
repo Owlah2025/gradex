@@ -720,14 +720,14 @@ This is a truthfulness remediation, not a marketing redesign. It adds no commerc
 payments, no refund flow, no KNET or Apple Pay. Removing a false claim is in scope; building the thing
 it claimed is not.
 
-- [ ] T040 Bind the landing page's Featured Courses to the authoritative published public catalogue
+- [x] T040 Bind the landing page's Featured Courses to the authoritative published public catalogue
       API used by `/[locale]/catalog`. Remove `frontend/src/data/courses.ts` and every other
       fixture, demo or fabricated Course source from production UI, including the fabricated prices.
       Nothing on a production surface may render a Course the catalogue does not publish.
-- [ ] T041 Render an honest empty state when the published catalogue is empty, and a real error state
+- [x] T041 Render an honest empty state when the published catalogue is empty, and a real error state
       when it cannot be read. An empty catalogue never falls back to sample Courses, and a failed load
       never renders as "no Courses".
-- [ ] T042 Reconcile every production-visible link against the real App Router routes, covering at
+- [x] T042 Reconcile every production-visible link against the real App Router routes, covering at
       minimum `/courses`, `/dashboard`, `/about`, `/teach` and `/contact` in landing CTAs, header and
       footer. Each one either points at the authoritative existing locale-aware route — such as
       `/[locale]/catalog` or `/[locale]/learn/dashboard` — or the link is removed because the
@@ -735,19 +735,29 @@ it claimed is not.
       and the result must agree with [`docs/NAVIGATION_MAP.md`](../../docs/NAVIGATION_MAP.md),
       [`docs/NAVIGATION_RULES.md`](../../docs/NAVIGATION_RULES.md) and
       [`docs/SCREENS.md`](../../docs/SCREENS.md).
-- [ ] T043 Rewrite or remove the FAQ copy that claims Tap hosted checkout exists so that public copy
+- [x] T043 Rewrite or remove the FAQ copy that claims Tap hosted checkout exists so that public copy
       describes only the external/manual sales and Admin-approved Course Access model the repository
       actually authorizes under D-045. In the same narrow sweep, correct any directly related
       surviving D-045 or
       [D-046](../../docs/DECISIONS.md#d-046--the-external-course-community-link-is-deferred-to-post-launch)
       claim the sweep surfaces — deferred-commerce and deferred-community wording only. Do not extend
       this into a general copy rewrite.
-- [ ] T044 Remove or hide the Testimonials surface until Product Owner-approved testimonials from real,
+- [x] T044 Remove or hide the Testimonials surface until Product Owner-approved testimonials from real,
       consenting people exist. Fabricated testimonials must not ship, and no replacement quotes,
       names, photographs or institutions may be invented to fill the space.
-- [ ] T045 Add link-integrity and deferred-commerce regression evidence: an automated check that every
+- [x] T045 Add link-integrity and deferred-commerce regression evidence: an automated check that every
       production-visible public link resolves to a real route, and an assertion that public copy makes
       no in-platform checkout, payment or refund claim. Both must fail if the H2 or H3 defect returns.
 
 **Amended task count:** 54 tasks — the 48 recorded above, complete, plus 6 post-review remediation
-tasks, all open.
+tasks, implemented on 2026-08-12 and pending the complete integrated-tree independent re-review.
+
+**Completion evidence (2026-08-12):** the landing's Featured Courses uses the existing
+published-only public catalogue client and has distinct loading, empty and error states; fixtures and
+fabricated testimonials were removed. Landing/catalogue links use the locale-aware catalogue route,
+the authenticated dashboard link uses the locale-aware learning dashboard, and unavailable company
+and social destinations were removed. The FAQ now describes only D-045's external/manual payment and
+Admin-approved Course Access Invitation flow. `npm run typecheck`, `npm run lint`, `npm run test`,
+`npm run build:clean`, and `npm run test:e2e -- e2e/s3-public-catalogue.spec.ts --workers=1` passed;
+the latter exercises anonymous Arabic and English landing rendering from an authoritative catalogue
+response, local catalogue links, and separate empty/error states.

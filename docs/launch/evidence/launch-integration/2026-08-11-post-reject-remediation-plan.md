@@ -64,9 +64,9 @@ no wording is changed.
 | C2 | Admin submitted-revision inspector absent | [`specs/003-course-authoring/`](../../../../specs/003-course-authoring/spec.md) | `T067`, `T069`, `T071` | IMPLEMENTED — pending independent re-review |
 | C3 | Admin Lesson video preview absent | [`specs/003-course-authoring/`](../../../../specs/003-course-authoring/spec.md) | `T068`, `T070`, `T071`, `T072` | IMPLEMENTED — pending independent re-review |
 | C4 | Production staff onboarding blocked | [`specs/002-auth-rbac/s1c/`](../../../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
-| H1 | Fabricated Courses, prices and testimonials on the landing page | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T040`, `T041`, `T044` | OPEN |
-| H2 | Dead public routes | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T042`, `T045` | OPEN |
-| H3 | FAQ claims Tap hosted checkout exists | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T043` | OPEN |
+| H1 | Fabricated Courses, prices and testimonials on the landing page | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T040`, `T041`, `T044` | IMPLEMENTED — pending independent re-review |
+| H2 | Dead public routes | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T042`, `T045` | IMPLEMENTED — pending independent re-review |
+| H3 | FAQ claims Tap hosted checkout exists | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T043` | IMPLEMENTED — pending independent re-review |
 
 Every Critical and High has exactly one owner. No finding is owned by "the launch branch".
 
