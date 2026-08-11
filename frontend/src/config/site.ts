@@ -4,7 +4,7 @@ export const siteConfig = {
   url: "https://gradex.com",
   ogImage: "/og.png",
   description:
-    "University courses for GCC students. Real lectures, notes, and labs — with instructors who stay with you after you enroll. Fully bilingual, fair KWD pricing.",
+    "Published university Course details and authorized learning access for GCC students. Fully bilingual, with KWD prices when configured.",
   keywords: [
     "Gradex",
     "university courses",
@@ -16,11 +16,6 @@ export const siteConfig = {
     "programming labs",
   ],
   locale: "en_US",
-  links: {
-    discord: "#",
-    x: "#",
-    instagram: "#",
-  },
 } as const;
 
 export type SiteConfig = typeof siteConfig;

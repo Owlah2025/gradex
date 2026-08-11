@@ -69,7 +69,7 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
           </Button>
         )}
         <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
-          <Link href={routes.dashboard}>{t.nav.dashboard}</Link>
+          <Link href={routes.dashboard(locale)}>{t.nav.dashboard}</Link>
         </Button>
         <Button
           variant="outline"
@@ -119,7 +119,7 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
         size={stacked ? "default" : "sm"}
         className={cn(stacked && "w-full")}
       >
-        <Link href={routes.courses}>{t.nav.browse}</Link>
+        <Link href={routes.catalogue(locale)}>{t.nav.browse}</Link>
       </Button>
     </div>
   );

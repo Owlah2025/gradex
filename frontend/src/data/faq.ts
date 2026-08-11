@@ -2,14 +2,14 @@ import type { FaqItem } from "@/lib/types";
 
 export const faqItems: FaqItem[] = [
   {
-    id: "what-you-get",
+    id: "course-access",
     question: {
-      en: "What do I actually get when I buy a course?",
-      ar: "ماذا أحصل فعلاً عند شراء المقرر؟",
+      en: "How do I get access to a course?",
+      ar: "كيف أحصل على الوصول إلى مقرر؟",
     },
     answer: {
-      en: "A Course purchase covers all of its Sections; a Section purchase covers that Section only. Access lasts 150 days from purchase and includes the protected videos plus any Resources and Lab Materials available in the purchased scope.",
-      ar: "شراء المقرر يمنحك الوصول إلى جميع أقسامه، بينما شراء قسم يمنحك الوصول إلى ذلك القسم فقط. يستمر الوصول 150 يوماً من تاريخ الشراء ويشمل الفيديوهات المحمية وأي مصادر ومواد معملية متاحة ضمن ما اشتريته.",
+      en: "Course access is granted through a Course Access Invitation for your email. After you accept it, an Admin reviews and approves the invitation. Only that approval creates access to the invited course.",
+      ar: "يُمنح الوصول إلى المقرر عبر دعوة وصول للمقرر مرتبطة ببريدك. بعد قبولها، يراجع المسؤول الدعوة ويوافق عليها. هذه الموافقة وحدها تنشئ الوصول إلى المقرر المدعو إليه.",
     },
   },
   {
@@ -19,8 +19,8 @@ export const faqItems: FaqItem[] = [
       ar: "كيف أدفع؟",
     },
     answer: {
-      en: "Course and Section prices are shown in KWD. Payment is completed on Tap's hosted checkout, so Gradex does not collect or store your card details.",
-      ar: "تظهر أسعار المقررات والأقسام بالدينار الكويتي. يتم الدفع عبر صفحة الدفع المستضافة من Tap، لذلك لا تجمع Gradex بيانات بطاقتك ولا تخزنها.",
+      en: "Any payment arrangement is handled outside Gradex. Once it is confirmed through the applicable external process, an Admin can create the Course Access Invitation for the intended student.",
+      ar: "يُرتّب أي دفع خارج Gradex. بعد تأكيده عبر الإجراء الخارجي المناسب، يمكن للمسؤول إنشاء دعوة وصول المقرر للطالب المقصود.",
     },
   },
   {
@@ -41,8 +41,8 @@ export const faqItems: FaqItem[] = [
       ar: "ماذا يحدث بعد إنهاء المقرر؟",
     },
     answer: {
-      en: "Your Course or Section access remains active through the end of day 150 in Kuwait time. Your learning progress remains recorded after access expires, and you can purchase access again through the normal checkout.",
-      ar: "يبقى وصولك إلى المقرر أو القسم فعالاً حتى نهاية اليوم 150 بتوقيت الكويت. يظل تقدمك الدراسي محفوظاً بعد انتهاء الوصول، ويمكنك شراء الوصول مجدداً عبر الدفع المعتاد.",
+      en: "Your access period is shown with your authorised course access. If it ends, contact the Gradex team through the applicable access process; Gradex does not take payments or renew access automatically on the platform.",
+      ar: "تظهر مدة وصولك مع وصول المقرر المصرّح به. إذا انتهت، تواصل مع فريق Gradex عبر إجراء الوصول المناسب؛ لا يتلقى Gradex المدفوعات أو يجدّد الوصول تلقائياً داخل المنصة.",
     },
   },
   {

@@ -4,8 +4,6 @@ import { Hero } from "@/components/sections/hero";
 import { FeaturedCourses } from "@/components/sections/featured-courses";
 import { WhyGradex } from "@/components/sections/why-gradex";
 import { LearningExperience } from "@/components/sections/learning-experience";
-import { InstructorSpotlight } from "@/components/sections/instructor-spotlight";
-import { Testimonials } from "@/components/sections/testimonials";
 import { Faq } from "@/components/sections/faq";
 import { FinalCta } from "@/components/sections/final-cta";
 
@@ -24,8 +22,6 @@ export default function LandingPage() {
         <FeaturedCourses />
         <WhyGradex />
         <LearningExperience />
-        <InstructorSpotlight />
-        <Testimonials />
         <Faq />
         <FinalCta />
       </main>

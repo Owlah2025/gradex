@@ -172,6 +172,42 @@ test("catalogue shows loading and follows a stable slug", async ({ page }) => {
   await expect(page.getByRole("heading", { name: localized.en.title, level: 1 })).toBeVisible();
 });
 
+for (const locale of ["ar", "en"] as const) {
+  test(`${locale} landing renders published Courses from the authoritative catalogue and links locally`, async ({ page }) => {
+    await mockPublicCatalogue(page, locale);
+    await page.addInitScript((selectedLocale) => window.localStorage.setItem("gradex.locale", selectedLocale), locale);
+    await page.goto("/");
+
+    await expect(page.getByTestId("featured-courses-list")).toBeVisible();
+    const courseLink = page.getByRole("link", { name: localized[locale].title });
+    await expect(courseLink).toHaveAttribute("href", `/${locale}/catalog/${course.slug}`);
+    await expect(page.getByText(localized[locale].instructor, { exact: false })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("Introduction to Programming");
+    await expect(page.locator("body")).not.toContainText("Dr. Sara Al-Mutairi");
+    await expect(page.locator("body")).not.toContainText("Fahd A.");
+
+    await courseLink.click();
+    await expect(page).toHaveURL(new RegExp(`/${locale}/catalog/${course.slug}$`));
+    await expect(page.getByRole("heading", { name: localized[locale].title, level: 1 })).toBeVisible();
+  });
+}
+
+test("landing keeps published-catalogue empty and failure states distinct", async ({ page }) => {
+  await page.route("**/api/v1/catalog/courses", (route) => route.fulfill({
+    json: { items: [], page: 1, page_size: 20, total: 0 },
+  }));
+  await page.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
+  await page.goto("/");
+  await expect(page.getByText("No published courses yet", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("featured-courses-list")).toHaveCount(0);
+
+  await page.unroute("**/api/v1/catalog/courses");
+  await page.route("**/api/v1/catalog/courses", (route) => route.fulfill({ status: 500, json: { status: 500 } }));
+  await page.reload();
+  await expect(page.getByTestId("featured-courses-error")).toHaveText("Published courses could not be loaded. Try again.");
+  await expect(page.getByText("No published courses yet", { exact: true })).toHaveCount(0);
+});
+
 test("catalogue language choice persists on its language-addressed route", async ({ page }) => {
   await mockPublicCatalogue(page, "ar");
   await page.goto("/ar/catalog");

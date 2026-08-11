@@ -1,17 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { ListChecks, MonitorPlay, FileText, Users } from "lucide-react";
+import { ListChecks, MonitorPlay, FileText } from "lucide-react";
 import { Section, SectionHeader } from "@/components/layout/section";
 import { Reveal } from "@/components/common/reveal";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { cn } from "@/lib/utils";
 
-const STEP_ICONS = [MonitorPlay, FileText, ListChecks, Users];
+const STEP_ICONS = [MonitorPlay, FileText, ListChecks];
 
 /**
- * The only numbered section — the steps are a genuine sequence, so 01–04 carry
- * real meaning. Step 4 (community follow-up) tints orange to land the payoff.
+ * The numbered section follows the three supported learning steps without
+ * advertising a deferred community feature.
  */
 export function LearningExperience() {
   const { t } = useLocale();
@@ -25,10 +25,9 @@ export function LearningExperience() {
         headingId="learn-title"
       />
 
-      <ol className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <ol className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {t.learn.steps.map((step, i) => {
           const Icon = STEP_ICONS[i] ?? MonitorPlay;
-          const isLast = i === t.learn.steps.length - 1;
           return (
             <Reveal as="li" key={step.title} delay={(i % 3) as 0 | 1 | 2}>
               <div className="relative">
@@ -41,9 +40,7 @@ export function LearningExperience() {
                 <span
                   className={cn(
                     "mb-4 mt-3.5 flex size-12 items-center justify-center rounded-md",
-                    isLast
-                      ? "bg-gx-orange-50 text-gx-orange-700"
-                      : "bg-gx-blue-50 text-gx-blue-600",
+                    "bg-gx-blue-50 text-gx-blue-600",
                   )}
                 >
                   <Icon className="size-6" aria-hidden />

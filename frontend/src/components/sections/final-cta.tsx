@@ -9,7 +9,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 import { routes } from "@/components/layout/nav-items";
 
 export function FinalCta() {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
 
   return (
     <section
@@ -33,7 +33,7 @@ export function FinalCta() {
           </p>
           <div className="mt-8 flex flex-col justify-center gap-3.5 sm:flex-row">
             <Button asChild variant="accent" size="lg" className="max-sm:w-full">
-              <Link href={routes.courses}>{t.finalCta.browse}</Link>
+              <Link href={routes.catalogue(locale)}>{t.finalCta.browse}</Link>
             </Button>
             <Button asChild variant="onDark" size="lg" className="max-sm:w-full">
               <Link href={routes.register}>{t.finalCta.register}</Link>

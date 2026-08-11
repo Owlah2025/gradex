@@ -10,13 +10,12 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { href: "#courses", label: (t) => t.nav.courses },
   { href: "#why", label: (t) => t.nav.why },
-  { href: "#instructors", label: (t) => t.nav.instructors },
   { href: "#faq", label: (t) => t.nav.faq },
 ];
 
 export const routes = {
-  courses: "/courses",
+  catalogue: (locale: "ar" | "en") => `/${locale}/catalog`,
   login: "/login",
   register: "/register",
-  dashboard: "/dashboard",
+  dashboard: (locale: "ar" | "en") => `/${locale}/learn/dashboard`,
 } as const;

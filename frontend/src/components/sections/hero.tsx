@@ -14,7 +14,7 @@ import { routes } from "@/components/layout/nav-items";
 const TRUST_ICONS = [Languages, CheckSquare, Wallet, Check];
 
 export function Hero() {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
 
   return (
     <section
@@ -42,7 +42,7 @@ export function Hero() {
 
           <div className="mt-8 flex flex-col gap-3.5 sm:flex-row">
             <Button asChild variant="accent" size="lg" className="max-sm:w-full">
-              <Link href={routes.courses}>{t.nav.browse}</Link>
+              <Link href={routes.catalogue(locale)}>{t.nav.browse}</Link>
             </Button>
             <Button asChild variant="onDark" size="lg" className="max-sm:w-full">
               <Link href={routes.register}>{t.nav.register}</Link>
@@ -66,34 +66,21 @@ export function Hero() {
         </div>
 
         {/* Visual: course-card mock + code island + ascending bird (no photos). */}
-        <HeroVisual cardTitle={t.hero.cardTitle} cardMeta={t.hero.cardMeta} />
+        <HeroVisual />
       </Container>
     </section>
   );
 }
 
-function HeroVisual({
-  cardTitle,
-  cardMeta,
-}: {
-  cardTitle: string;
-  cardMeta: string;
-}) {
+function HeroVisual() {
   return (
     <div aria-hidden className="relative hidden h-[440px] sm:block">
       <div className="absolute start-0 top-6 w-[270px] rounded-lg bg-white p-4 text-gx-navy shadow-lg">
         <div className="flex h-[110px] items-end rounded-md bg-gradient-brand p-2.5">
-          <span dir="ltr" className="rounded-sm bg-gx-navy/35 px-2 py-0.5 font-mono text-xs font-semibold text-white">
-            CS 101
-          </span>
+          <BirdMark className="size-12 text-white/90" />
         </div>
-        <h4 className="mt-3 text-base font-bold">{cardTitle}</h4>
-        <p className="mt-1 text-[13px] text-gx-ink-500" dir="auto">
-          {cardMeta}
-        </p>
-        <p dir="ltr" className="mt-3 font-mono font-semibold text-gx-navy">
-          38.000 KWD
-        </p>
+        <div className="mt-4 h-3 w-4/5 rounded bg-gx-ink-100" />
+        <div className="mt-2 h-3 w-3/5 rounded bg-gx-ink-100" />
       </div>
 
       <div

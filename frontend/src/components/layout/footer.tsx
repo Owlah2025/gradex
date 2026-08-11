@@ -2,38 +2,25 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Instagram, MessageCircle, Twitter } from "lucide-react";
 import { Container } from "./container";
 import { BirdMark } from "@/components/brand/bird-mark";
 import { Wordmark } from "@/components/brand/wordmark";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { siteConfig } from "@/config/site";
 import { navItems } from "./nav-items";
 
 export function Footer() {
   const { locale, t } = useLocale();
 
-  const companyLinks = [
-    { href: "/about", label: t.footer.links.about },
-    { href: "/teach", label: t.footer.links.teach },
-    { href: "/contact", label: t.footer.links.contact },
-  ];
   // LG-011 uses Terms §8 for the no-commerce launch disclosure; there is no
   // separate Refund Policy artifact in the approved package.
   const legalLinks = [
     { href: `/${locale}/terms`, label: t.footer.links.terms },
     { href: `/${locale}/privacy`, label: t.footer.links.privacy },
   ];
-  const socials = [
-    { href: siteConfig.links.discord, label: t.footer.social.discord, Icon: MessageCircle },
-    { href: siteConfig.links.x, label: t.footer.social.x, Icon: Twitter },
-    { href: siteConfig.links.instagram, label: t.footer.social.instagram, Icon: Instagram },
-  ];
-
   return (
     <footer className="bg-gx-navy text-white/70">
       <Container className="py-16">
-        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr]">
+        <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr]">
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2.5">
@@ -43,33 +30,12 @@ export function Footer() {
             <p className="mt-3.5 max-w-sm leading-relaxed text-white/60">
               {t.footer.tagline}
             </p>
-            <ul className="mt-5 flex gap-2.5">
-              {socials.map(({ href, label, Icon }) => (
-                <li key={label}>
-                  <Link
-                    href={href}
-                    aria-label={label}
-                    className="flex size-10 items-center justify-center rounded-pill border border-white/15 bg-white/5 text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                  >
-                    <Icon className="size-5" aria-hidden />
-                  </Link>
-                </li>
-              ))}
-            </ul>
           </div>
 
           <FooterColumn title={t.footer.explore}>
             {navItems.map((item) => (
               <FooterLink key={item.href} href={item.href}>
                 {item.label(t)}
-              </FooterLink>
-            ))}
-          </FooterColumn>
-
-          <FooterColumn title={t.footer.company}>
-            {companyLinks.map((l) => (
-              <FooterLink key={l.href} href={l.href}>
-                {l.label}
               </FooterLink>
             ))}
           </FooterColumn>
