@@ -5,6 +5,7 @@ import path from "path";
 import { test, expect, request as playwrightRequest, type APIRequestContext } from "@playwright/test";
 import { issueRotatingSession } from "../rotating-students";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
+import { captureFailureDiagnostic, recordMediaAssetVersionID } from "./diagnostics";
 
 /**
  * Real Instructor video journey.
@@ -57,6 +58,16 @@ function makeSampleMP4(): string {
   return file;
 }
 
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  try {
+    const artifact = captureFailureDiagnostic();
+    if (artifact) console.error(`[Media E2E Failure] sanitized diagnostic artifact: ${artifact}`);
+  } catch {
+    console.error("[Media E2E Failure] diagnostic collector could not complete");
+  }
+});
+
 test("C an Instructor uploads a real MP4, the worker makes it READY, and the attachment survives a reload", async ({
   browser,
 }) => {
@@ -93,6 +104,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   ]);
 
   const page = await context.newPage();
+  page.on("response", async (response) => {
+    if (response.request().method() !== "POST" || new URL(response.url()).pathname !== "/api/v1/media/uploads" || response.status() !== 201) return;
+    try {
+      const body = await response.json() as { asset_version_id?: unknown };
+      if (typeof body.asset_version_id === "string") recordMediaAssetVersionID(body.asset_version_id);
+    } catch {}
+  });
   await page.goto("/en/instructor/courses");
   await expect(page.locator("h1")).toContainText("Course Authoring Studio");
 

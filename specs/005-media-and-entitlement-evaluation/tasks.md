@@ -230,7 +230,7 @@ This amendment authorizes only a non-production, failure-only media-authoring E2
 does not authorize a media behavior change, a scanner change, an authorization change, or any other
 production implementation.
 
-- [ ] T035a When the media-authoring E2E fails or times out before proving `READY`, capture a
+- [x] T035a When the media-authoring E2E fails or times out before proving `READY`, capture a
       sanitized, machine-readable artifact **before** normal teardown drops the isolated database and
       stops the worker. The artifact may contain only the current run's safe upload, Asset and Asset
       Version identifiers; authoritative media state and timestamp fields; related media outbox and

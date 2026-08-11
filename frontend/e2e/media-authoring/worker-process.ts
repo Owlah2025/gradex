@@ -3,6 +3,8 @@ import { E2E_TMP_DIR, verifyProcessOwnership } from "../../src/lib/api/e2e-infra
 
 export const WORKER_BINARY_PATH = `${E2E_TMP_DIR}/gradex-media-e2e-worker`;
 export const WORKER_STATE_FILE_PATH = `${E2E_TMP_DIR}/gradex-media-e2e-worker-state.json`;
+export const MEDIA_DIAGNOSTIC_BINARY_PATH = `${E2E_TMP_DIR}/gradex-media-e2e-diagnostic`;
+export const MEDIA_DIAGNOSTIC_STATE_PATH = `${E2E_TMP_DIR}/gradex-media-e2e-diagnostic-state.json`;
 
 /**
  * The complete backend environment for the media authoring run.

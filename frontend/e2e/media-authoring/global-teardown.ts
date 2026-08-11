@@ -7,6 +7,7 @@ import {
   RunState,
 } from "../../src/lib/api/e2e-infrastructure";
 import { terminateWorker } from "./worker-process";
+import { clearDiagnosticState } from "./diagnostics";
 
 export default async function globalTeardown() {
   // The worker is stopped first: it holds the same database this teardown is
@@ -14,6 +15,7 @@ export default async function globalTeardown() {
   terminateWorker();
 
   if (!fs.existsSync(RUN_STATE_FILE_PATH)) {
+    clearDiagnosticState();
     console.log("[Media E2E Teardown] No run state file found; skipping teardown.");
     return;
   }
@@ -28,6 +30,7 @@ export default async function globalTeardown() {
     try {
       fs.unlinkSync(RUN_STATE_FILE_PATH);
     } catch {}
+    clearDiagnosticState();
     return;
   }
 
@@ -38,4 +41,5 @@ export default async function globalTeardown() {
   if (outcome.errors.length > 0) {
     console.warn("[Media E2E Teardown] Cleanup encountered warnings:", outcome.errors);
   }
+  clearDiagnosticState();
 }

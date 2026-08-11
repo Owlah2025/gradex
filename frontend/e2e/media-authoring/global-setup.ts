@@ -17,7 +17,7 @@ import {
   RunState,
 } from "../../src/lib/api/e2e-infrastructure";
 import { apiOrigin, assertPortIsFree, frontendOrigin, runPort, API_PORT_ENV, FRONTEND_PORT_ENV } from "../../src/lib/api/e2e-ports";
-import { WORKER_BINARY_PATH, WORKER_STATE_FILE_PATH, mediaStackEnvironment, terminateWorker } from "./worker-process";
+import { MEDIA_DIAGNOSTIC_BINARY_PATH, MEDIA_DIAGNOSTIC_STATE_PATH, WORKER_BINARY_PATH, WORKER_STATE_FILE_PATH, mediaStackEnvironment, terminateWorker } from "./worker-process";
 
 /**
  * Environment for the real media authoring journey.
@@ -45,7 +45,7 @@ const runtimeMediaConfigurationKeys = new Set([
   "S3_BUCKET",
 ]);
 
-function logEffectiveMediaConfiguration(role: "api" | "worker", pid: number): void {
+function logEffectiveMediaConfiguration(role: "api" | "worker", pid: number): Record<string, string> {
   const environment = fs.readFileSync(`/proc/${pid}/environ`, "utf8");
   const resolved = Object.fromEntries(
     environment
@@ -59,6 +59,7 @@ function logEffectiveMediaConfiguration(role: "api" | "worker", pid: number): vo
     throw new Error(`[Media E2E Setup] ${role} runtime configuration omitted ${missing.join(", ")}`);
   }
   console.log(`[Media E2E Runtime] ${role} ${JSON.stringify(resolved)}`);
+  return resolved;
 }
 
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
@@ -95,10 +96,11 @@ export default async function globalSetup() {
     const frontendPort = runPort(FRONTEND_PORT_ENV);
     await assertPortIsFree(port, "The run-owned Go API");
 
-    console.log("[Media E2E Setup] Compiling Go API, worker, and seeder binaries...");
+    console.log("[Media E2E Setup] Compiling Go API, worker, seeder, and diagnostic binaries...");
     execSync(`go build -o ${API_BINARY_PATH} ./cmd/api`, { cwd: backendDir, stdio: "inherit" });
     execSync(`go build -o ${WORKER_BINARY_PATH} ./cmd/worker`, { cwd: backendDir, stdio: "inherit" });
     execSync(`go test -c -o ${SEED_BINARY_PATH} ./cmd/e2e-seed`, { cwd: backendDir, stdio: "inherit" });
+    execSync(`go build -o ${MEDIA_DIAGNOSTIC_BINARY_PATH} ./cmd/e2e-media-diagnostic`, { cwd: backendDir, stdio: "inherit" });
 
     dbCreated = true;
     console.log(`[Media E2E Setup] Seeding ${dbName}...`);
@@ -122,7 +124,6 @@ export default async function globalSetup() {
     // memory, are never written to the run-state file, and never reach browser
     // JavaScript.
     for (const [key, value] of Object.entries(backendEnvironment)) {
-      if (key === "DATABASE_URL") continue;
       process.env[key] = value;
     }
 
@@ -131,7 +132,7 @@ export default async function globalSetup() {
     );
     apiProcess = spawn(API_BINARY_PATH, [], { env, stdio: "pipe" });
     if (!apiProcess.pid) throw new Error("[Media E2E Setup] Failed to spawn Go API process");
-    logEffectiveMediaConfiguration("api", apiProcess.pid);
+    const apiRuntime = logEffectiveMediaConfiguration("api", apiProcess.pid);
     const apiLogPath = startApiLogDrain(apiProcess, runId);
     console.log(`[Media E2E Setup] Draining Go API output to ${apiLogPath}`);
 
@@ -141,11 +142,20 @@ export default async function globalSetup() {
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (!workerProcess.pid) throw new Error("[Media E2E Setup] Failed to spawn media worker process");
-    logEffectiveMediaConfiguration("worker", workerProcess.pid);
+    const workerRuntime = logEffectiveMediaConfiguration("worker", workerProcess.pid);
     const workerLog = fs.createWriteStream(`${E2E_TMP_DIR}/gradex-media-e2e-worker-${runId}.log`, { mode: 0o600 });
     workerProcess.stdout?.pipe(workerLog, { end: false });
     workerProcess.stderr?.pipe(workerLog, { end: false });
+    const workerLogPath = `${E2E_TMP_DIR}/gradex-media-e2e-worker-${runId}.log`;
     fs.writeFileSync(WORKER_STATE_FILE_PATH, JSON.stringify({ runId, pid: workerProcess.pid }), { mode: 0o600 });
+
+    fs.writeFileSync(MEDIA_DIAGNOSTIC_STATE_PATH, JSON.stringify({
+      run_id: runId,
+      asset_version_id: "",
+      runtime: { api: apiRuntime, worker: workerRuntime },
+      api_log_path: apiLogPath,
+      worker_log_path: workerLogPath,
+    }), { mode: 0o600 });
 
     const runState: RunState = {
       runId,

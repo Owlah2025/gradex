@@ -70,3 +70,30 @@ captured, so its cause cannot be identified from this green reproduction. The co
 
 Do not modify production media code. A task amendment is required before a new diagnostic that
 retains/polls the failing run's database and asynq state, or before any production pipeline change.
+
+## T035a failure-only retention — 2026-08-11
+
+The Product Owner authorized and the repository now contains T035a, the narrow failure-only
+follow-up. Before normal teardown destroys the isolated PostgreSQL and Redis state, a failed or
+timed-out media-authoring test invokes `cmd/e2e-media-diagnostic`. It writes a `0600`, machine-readable
+artifact containing only the current Asset Version's safe identifiers and state, related upload and
+media-work timestamps, media outbox/dispatch metadata, scan/processing/rendition summaries, and the
+matching existing Asynq media task states. It also includes the already captured allowlisted runtime
+configuration and bounded structured API/worker log fields. It deliberately excludes object keys,
+payloads, ciphertext, error text, task payloads, headers, credentials, tokens, cookies, and all
+unrelated rows.
+
+The collector is invoked only from the failing Playwright test's `afterEach`, before global teardown.
+Successful runs do not create a failure artifact and retain the existing worker/API/database cleanup.
+Its sanitizer has focused deterministic coverage.
+
+The real command was re-run after installation:
+
+```text
+cd frontend && npm run test:e2e:media-authoring
+```
+
+Result: `1 passed (25.4s)`. The real MP4 path again reached `READY`. No failure artifact was emitted.
+The historical `Processing` stall remains not reproduced and its root cause remains
+`NOT_YET_ISOLATED`; T035a makes any future recurrence self-contained without altering the production
+media path.
