@@ -219,5 +219,33 @@ authorized at all.
 Exactly one of T034 and T035 applies; which one is decided by T033's evidence, never in advance. The
 task not taken is closed as `NOT_APPLICABLE` with the diagnosis cited.
 
-**Amended task count:** 35 tasks — the original 32, complete, plus 3 post-review remediation tasks,
-all open.
+---
+
+## Amendment — 2026-08-11, Product Owner-authorized failure-only diagnostic retention (T035a)
+
+**Authority:** Product Owner authorization following the T033 C1 diagnosis recorded at
+[`docs/launch/evidence/launch-integration/2026-08-11-t033-media-authoring-diagnosis.md`](../../docs/launch/evidence/launch-integration/2026-08-11-t033-media-authoring-diagnosis.md).
+
+This amendment authorizes only a non-production, failure-only media-authoring E2E diagnostic. It
+does not authorize a media behavior change, a scanner change, an authorization change, or any other
+production implementation.
+
+- [ ] T035a When the media-authoring E2E fails or times out before proving `READY`, capture a
+      sanitized, machine-readable artifact **before** normal teardown drops the isolated database and
+      stops the worker. The artifact may contain only the current run's safe upload, Asset and Asset
+      Version identifiers; authoritative media state and timestamp fields; related media outbox and
+      dispatch receipt metadata; related scan, processing and rendition metadata; and Asynq state for
+      the existing media task types. It must retain the separately captured non-secret API/worker
+      runtime configuration and bounded, correlation-relevant API/worker log excerpts or paths.
+      It must exclude credentials, cookies, CSRF values, tokens, API/signing keys, passwords,
+      presigned URLs and query parameters, encrypted payloads/ciphertext, raw protected payloads,
+      and unrelated database or queue rows. Successful runs retain normal automatic cleanup and emit
+      no failure artifact. Prefer a dedicated Go helper using the existing configuration, queue,
+      Asynq and database abstractions; add focused deterministic coverage for artifact sanitization
+      or collection behavior where practical. No production media code changes are authorized.
+
+T035a is diagnostic support for T035; it does not close T035 or classify the original intermittent
+failure. T033's completion remains governed by its own evidence and the post-reject remediation
+plan.
+
+**Amended task count:** 36 tasks — the original 32, complete, plus 4 post-review remediation tasks.
