@@ -36,6 +36,31 @@ import { WORKER_BINARY_PATH, WORKER_STATE_FILE_PATH, mediaStackEnvironment, term
 
 const backendDir = path.resolve(__dirname, "../../../backend");
 
+const runtimeMediaConfigurationKeys = new Set([
+  "MEDIA_SCANNER_MODE",
+  "MEDIA_OPERATING_MODE",
+  "APP_ENV",
+  "REDIS_ADDR",
+  "S3_ENDPOINT",
+  "S3_BUCKET",
+]);
+
+function logEffectiveMediaConfiguration(role: "api" | "worker", pid: number): void {
+  const environment = fs.readFileSync(`/proc/${pid}/environ`, "utf8");
+  const resolved = Object.fromEntries(
+    environment
+      .split("\0")
+      .filter((entry) => entry !== "")
+      .map((entry) => entry.split(/=(.*)/s, 2))
+      .filter(([key]) => runtimeMediaConfigurationKeys.has(key)),
+  );
+  const missing = [...runtimeMediaConfigurationKeys].filter((key) => resolved[key] === undefined);
+  if (missing.length > 0) {
+    throw new Error(`[Media E2E Setup] ${role} runtime configuration omitted ${missing.join(", ")}`);
+  }
+  console.log(`[Media E2E Runtime] ${role} ${JSON.stringify(resolved)}`);
+}
+
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -106,6 +131,7 @@ export default async function globalSetup() {
     );
     apiProcess = spawn(API_BINARY_PATH, [], { env, stdio: "pipe" });
     if (!apiProcess.pid) throw new Error("[Media E2E Setup] Failed to spawn Go API process");
+    logEffectiveMediaConfiguration("api", apiProcess.pid);
     const apiLogPath = startApiLogDrain(apiProcess, runId);
     console.log(`[Media E2E Setup] Draining Go API output to ${apiLogPath}`);
 
@@ -115,6 +141,7 @@ export default async function globalSetup() {
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (!workerProcess.pid) throw new Error("[Media E2E Setup] Failed to spawn media worker process");
+    logEffectiveMediaConfiguration("worker", workerProcess.pid);
     const workerLog = fs.createWriteStream(`${E2E_TMP_DIR}/gradex-media-e2e-worker-${runId}.log`, { mode: 0o600 });
     workerProcess.stdout?.pipe(workerLog, { end: false });
     workerProcess.stderr?.pipe(workerLog, { end: false });
