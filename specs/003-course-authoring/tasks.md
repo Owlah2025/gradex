@@ -469,6 +469,12 @@ Authority:
 These two are implemented as one Admin journey: an Admin cannot responsibly approve what they cannot
 read and cannot watch.
 
+**D-085 execution authorization:**
+[D-085](../../docs/DECISIONS.md#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
+removes only the obsolete C1 wait-for-recurrence sequencing prerequisite. It authorizes T067–T073
+without resolving C1 or changing any production media behavior. T035a remains the failure-only media
+recurrence-evidence mechanism; these tasks neither remove nor modify it.
+
 **The backend is not redesigned.** Both routes already exist:
 
 ```text
@@ -506,6 +512,11 @@ architecture is authorized.
       attached media state render; the submitted Lesson video plays; Approve & Publish publishes
       **that exact revision**. In the same suite, prove Instructor and Student roles cannot reach the
       Admin review detail or the Admin preview route.
+- [ ] T073 Add focused frontend component coverage using a server-returned submitted graph. The
+      assertions must include bilingual Course titles and descriptions, study year, Major, Subject,
+      ordered Sections and Lessons, media state, the exact-revision Approve and Request Changes
+      actions, preview invocation, and processing/unavailable/authorization-error presentation. The
+      coverage must fail if the inspector stops rendering those real response fields.
 
-**Amended task count:** 70 tasks — the 64 recorded above, complete, plus 6 post-review remediation
+**Amended task count:** 71 tasks — the 64 recorded above, complete, plus 7 post-review remediation
 tasks, all open.
