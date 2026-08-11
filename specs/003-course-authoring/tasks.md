@@ -486,6 +486,23 @@ A backend change is authorized only if inspection proves an existing contract is
 insufficient for the workflow below, and that proof is recorded before the change. No parallel preview
 architecture is authorized.
 
+### Preview-contract evidence — 2026-08-11
+
+The real media-authoring E2E exercised a submitted Lesson whose authoritative Asset Version reached
+`READY` (one successful scan, one successful transcode, and one persisted rendition). Its Admin
+review-preview `POST` returned `200`, but the response's `playback_url` was
+`/api/v1/videos/:assetVersionID/manifest/index.m3u8`. Production route-composition tests explicitly
+refuse to mount any `/api/v1/videos/` legacy route. The browser therefore rendered the protected
+preview as unavailable despite the ready submitted media. This proves the existing response contract
+is insufficient for T068/T070; it is not a media processing, scanner, worker, storage, or
+authorization failure.
+
+Under the preceding authority, the smallest backend correction is authorized only to replace that
+retired path with an existing-style, short-lived, Admin-capability-protected playback authorization
+and manifest route for the exact reviewed Course/revision/Lesson/Asset Version. It must reuse the
+existing media delivery signing boundary, preserve the existing preview audit event, disclose no raw
+object-storage URL, and add no alternate video-delivery system.
+
 - [ ] T067 Add the frontend Admin review-detail client call for
       `GET /api/v1/admin/review/courses/:id/revisions/:revisionId`, keyed on the exact `course_id` and
       `revision_id` carried from the queue row, with typed errors and **no demo, local or fixture
