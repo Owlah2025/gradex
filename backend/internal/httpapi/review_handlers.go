@@ -9,12 +9,14 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
 type reviewHandlers struct {
 	repo           *catalog.Repository
 	assetValidator catalog.AssetVersionValidator
+	playback       adminReviewPlaybackIssuer
 	logger         *logging.Logger
 }
 
@@ -145,11 +147,42 @@ func (h *reviewHandlers) previewLesson(c *gin.Context) {
 		h.handleReviewError(c, err)
 		return
 	}
+	if h.playback == nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	issued, err := h.playback.IssueAdminReviewPlayback(c.Request.Context(), media.AdminReviewPlaybackRequest{
+		AdminAccountID: adminAccountID, CourseID: courseID, RevisionID: revisionID,
+		LessonID: lessonID, AssetVersionID: videoAssetVersionID,
+	})
+	if err != nil {
+		writeProtectedUnavailable(c)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"course_id":              courseID,
 		"revision_id":            revisionID,
 		"lesson_id":              lessonID,
 		"video_asset_version_id": videoAssetVersionID,
-		"playback_url":           "/api/v1/videos/" + videoAssetVersionID + "/manifest/index.m3u8",
+		"playback_url":           issued.ManifestURL,
 	})
+}
+
+func (h *reviewHandlers) playbackManifest(c *gin.Context) {
+	if h.playback == nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	manifest, err := h.playback.IssueAdminReviewPlaybackManifest(
+		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("playbackSession"),
+	)
+	if err != nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", manifest.Contents)
 }

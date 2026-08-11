@@ -204,6 +204,43 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 	}
 }
 
+func TestAdminReviewDeliveryUsesExactPendingRevisionAndAdminBoundSession(t *testing.T) {
+	f := newDeliveryFixture(t)
+	admin := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE course_id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("making revision reviewable: %v", err)
+	}
+
+	issued, err := f.delivery.IssueAdminReviewPlayback(f.ctx, AdminReviewPlaybackRequest{
+		AdminAccountID: admin, CourseID: f.courseID, RevisionID: mustRevisionID(t, f), LessonID: f.lesson, AssetVersionID: f.video,
+	})
+	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/admin/review/playback-manifests/") {
+		t.Fatalf("admin review playback issuance=%+v err=%v", issued, err)
+	}
+	manifest, err := f.delivery.IssueAdminReviewPlaybackManifest(f.ctx, admin, issued.PlaybackSession)
+	if err != nil || !strings.Contains(string(manifest.Contents), "https://storage.test/signed/video/hls/segment000.ts") {
+		t.Fatalf("admin review manifest=%q err=%v", manifest.Contents, err)
+	}
+	if _, err := f.delivery.IssueAdminReviewPlaybackManifest(f.ctx, uuid.NewString(), issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("cross-Admin session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'APPROVED' WHERE course_id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("approving revision after issuance: %v", err)
+	}
+	if _, err := f.delivery.IssueAdminReviewPlaybackManifest(f.ctx, admin, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("approved revision retained review playback: %v", err)
+	}
+}
+
+func mustRevisionID(t *testing.T, f *deliveryFixture) string {
+	t.Helper()
+	var revisionID string
+	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM course_revisions WHERE course_id = $1::uuid`, f.courseID).Scan(&revisionID); err != nil {
+		t.Fatalf("finding review revision: %v", err)
+	}
+	return revisionID
+}
+
 func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{

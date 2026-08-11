@@ -356,6 +356,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 
 	"GET /api/v1/admin/review/queue":                                                {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/review/courses/:id/revisions/:revisionId":                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/review/playback-manifests/:playbackSession/index.m3u8":       {Method: http.MethodGet, Path: "/api/v1/admin/review/playback-manifests/:playbackSession/index.m3u8", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/approve":           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/approve", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes":   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId": {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId", Class: ClassCapabilityProtected},

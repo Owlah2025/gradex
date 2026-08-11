@@ -20,6 +20,11 @@ type mediaDeliveryIssuer interface {
 	IssuePreview(context.Context, string) (media.PreviewAuthorization, error)
 }
 
+type adminReviewPlaybackIssuer interface {
+	IssueAdminReviewPlayback(context.Context, media.AdminReviewPlaybackRequest) (media.PlaybackAuthorization, error)
+	IssueAdminReviewPlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
+}
+
 // LearningMedia returns the same already-composed S4 delivery boundary used by
 // media routes. Learning therefore cannot construct a second signer.
 func (f *MediaFoundation) LearningMedia() LearningMedia {
@@ -27,6 +32,17 @@ func (f *MediaFoundation) LearningMedia() LearningMedia {
 		return nil
 	}
 	service, ok := f.delivery.(LearningMedia)
+	if !ok {
+		return nil
+	}
+	return service
+}
+
+func (f *MediaFoundation) AdminReviewMedia() adminReviewPlaybackIssuer {
+	if f == nil {
+		return nil
+	}
+	service, ok := f.delivery.(adminReviewPlaybackIssuer)
 	if !ok {
 		return nil
 	}

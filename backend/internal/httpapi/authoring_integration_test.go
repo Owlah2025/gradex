@@ -114,7 +114,7 @@ func (r dbSessionRepo) Resolve(ctx context.Context, sessionToken string, kind id
 	return identity.SessionView{}, errors.New("not implemented")
 }
 
-func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID string, role identity.Role, status identity.AccountStatus) *httptest.Server {
+func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID string, role identity.Role, status identity.AccountStatus, options ...RouterOption) *httptest.Server {
 	t.Helper()
 
 	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
@@ -183,10 +183,12 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 
 	principals := dbPrincipalResolver{pool: pool}
 
-	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
+	routerOptions := []RouterOption{
 		WithSessionFoundation(sessionFoundation),
 		WithCatalogFoundation(catalogFoundation),
-	)
+	}
+	routerOptions = append(routerOptions, options...)
+	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals, routerOptions...)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

@@ -3,13 +3,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import {
-  approveCourseRevision,
   listReviewQueue,
-  requestCourseRevisionChanges,
   type ReviewQueueItem,
 } from "@/lib/api/review";
 import { describeApiError } from "@/lib/api/api-error";
-import { currentCSRFToken } from "@/lib/identity/session";
 import {
   administerCourse,
   administeredCourseID,
@@ -26,6 +23,7 @@ import {
 import { PricingModal } from "./pricing-modal";
 import { LifecycleControls } from "./lifecycle-controls";
 import { TaxonomyControls } from "./taxonomy-controls";
+import { SubmittedRevisionInspector } from "./submitted-revision-inspector";
 
 export type { ReviewQueueItem } from "@/lib/api/review";
 
@@ -53,13 +51,7 @@ export function ReviewQueue() {
   const courseUnderAdministration = administeredCourseID(catalogState);
   const revisionUnderAdministration = administeredRevisionID(catalogState);
 
-  const [pendingItem, setPendingItem] = useState<ReviewQueueItem | null>(null);
-  const [requestReason, setRequestReason] = useState("");
-  const [showRejectModal, setShowRejectModal] = useState(false);
-  const [reasonError, setReasonError] = useState("");
-  const [actionError, setActionError] = useState("");
-  const [actionSuccess, setActionSuccess] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [inspectedItem, setInspectedItem] = useState<ReviewQueueItem | null>(null);
 
   const [launcherCourseID, setLauncherCourseID] = useState("");
   const [launcherError, setLauncherError] = useState("");
@@ -85,33 +77,6 @@ export function ReviewQueue() {
     };
   }, [loadQueue]);
 
-  const requireCSRF = (): string | null => {
-    const csrf = currentCSRFToken();
-    if (!csrf) {
-      setActionError(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
-      return null;
-    }
-    return csrf;
-  };
-
-  /** Runs one review command against authoritative IDs, then re-reads the server queue. */
-  const command = async (action: (csrf: string) => Promise<void>, success: string) => {
-    const csrf = requireCSRF();
-    if (!csrf || busy) return;
-    setBusy(true);
-    setActionError("");
-    setActionSuccess("");
-    try {
-      await action(csrf);
-      await loadQueue();
-      setActionSuccess(success);
-    } catch (cause) {
-      setActionError(describeApiError(cause, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleAdminister = (item: ReviewQueueItem) => {
     setCatalogState((current) =>
       administerCourse(current, {
@@ -120,50 +85,6 @@ export function ReviewQueue() {
         titleAr: item.title_ar,
         titleEn: item.title_en,
       }),
-    );
-  };
-
-  const handleApprove = (item: ReviewQueueItem) => {
-    void command(
-      (csrf) =>
-        approveCourseRevision({
-          courseID: item.course_id,
-          revisionID: item.revision_id,
-          locale,
-          csrf,
-        }).then(() => undefined),
-      isAr ? "تم نشر الدورة بنجاح" : "Course published successfully",
-    );
-  };
-
-  const handleOpenRequestChanges = (item: ReviewQueueItem) => {
-    setPendingItem(item);
-    setRequestReason("");
-    setReasonError("");
-    setShowRejectModal(true);
-  };
-
-  const handleSubmitRequestChanges = () => {
-    if (!pendingItem) return;
-    if (!requestReason.trim()) {
-      setReasonError(isAr ? "سبب طلب التعديلات إجباري" : "Reason for change request is mandatory");
-      return;
-    }
-    const item = pendingItem;
-    void command(
-      (csrf) =>
-        requestCourseRevisionChanges({
-          courseID: item.course_id,
-          revisionID: item.revision_id,
-          reason: requestReason,
-          locale,
-          csrf,
-        }).then(() => {
-          setShowRejectModal(false);
-          setPendingItem(null);
-          setRequestReason("");
-        }),
-      isAr ? "تم إرسال طلب التعديلات إلى المحاضر" : "Change request sent to instructor",
     );
   };
 
@@ -245,26 +166,6 @@ export function ReviewQueue() {
         </form>
       </div>
 
-      {actionSuccess && (
-        <div
-          role="status"
-          data-testid="review-action-success"
-          className="p-4 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg"
-        >
-          {actionSuccess}
-        </div>
-      )}
-
-      {actionError && (
-        <p
-          role="alert"
-          data-testid="review-action-error"
-          className="p-4 bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300 border border-rose-200 dark:border-rose-900 rounded-lg text-sm"
-        >
-          {actionError}
-        </p>
-      )}
-
       {queueError && (
         <p
           role="alert"
@@ -333,29 +234,19 @@ export function ReviewQueue() {
                     <div className="flex justify-center items-center gap-2">
                       <button
                         type="button"
+                        onClick={() => setInspectedItem(item)}
+                        data-testid={`inspect-review-item-${item.course_id}`}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
+                      >
+                        {isAr ? "فحص المراجعة" : "Inspect submission"}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleAdminister(item)}
                         data-testid={`administer-review-item-${item.course_id}`}
                         className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-medium transition"
                       >
-                        {isAr ? "فتح للإدارة" : "Open"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => handleApprove(item)}
-                        data-testid={`approve-review-item-${item.course_id}`}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition disabled:opacity-50"
-                      >
-                        {isAr ? "موافقة ونشر" : "Approve & Publish"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => handleOpenRequestChanges(item)}
-                        data-testid={`request-changes-review-item-${item.course_id}`}
-                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition disabled:opacity-50"
-                      >
-                        {isAr ? "طلب تعديلات" : "Request Changes"}
+                        {isAr ? "فتح الإدارة" : "Administer"}
                       </button>
                     </div>
                   </td>
@@ -364,6 +255,16 @@ export function ReviewQueue() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {inspectedItem && (
+        <SubmittedRevisionInspector
+          item={inspectedItem}
+          onClose={() => setInspectedItem(null)}
+          onReviewed={async () => {
+            await loadQueue();
+          }}
+        />
       )}
 
       {courseUnderAdministration && (
@@ -395,56 +296,6 @@ export function ReviewQueue() {
             >
               {isAr ? "إنهاء الإدارة" : "Close Course"}
             </button>
-          </div>
-        </div>
-      )}
-
-      {showRejectModal && pendingItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white dark:bg-slate-900 rounded-xl p-6 max-w-lg w-full space-y-4 shadow-xl border">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 border-b pb-2">
-              {isAr ? "طلب تعديلات على الدورة" : "Request Changes for Course"}
-            </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              {isAr ? pendingItem.title_ar : pendingItem.title_en}
-            </p>
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                {isAr ? "سبب طلب التعديلات (إجباري):" : "Reason for Change Request (Mandatory):"}
-              </label>
-              <textarea
-                value={requestReason}
-                onChange={(e) => {
-                  setRequestReason(e.target.value);
-                  setReasonError("");
-                }}
-                rows={4}
-                data-testid="request-changes-reason"
-                className="w-full p-2.5 border rounded-lg text-sm bg-slate-50 dark:bg-slate-800 dark:border-slate-700 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-rose-500"
-                placeholder={
-                  isAr ? "يرجى ذكر الملاحظات التفصيلية للمحاضر..." : "Provide detailed feedback for the instructor..."
-                }
-              />
-              {reasonError && <p className="text-xs text-rose-600 font-medium">{reasonError}</p>}
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button
-                type="button"
-                onClick={() => setShowRejectModal(false)}
-                className="px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 rounded-lg text-sm font-medium"
-              >
-                {isAr ? "إلغاء" : "Cancel"}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleSubmitRequestChanges}
-                data-testid="submit-request-changes"
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
-              >
-                {isAr ? "إرسال التعديلات" : "Submit Request"}
-              </button>
-            </div>
           </div>
         </div>
       )}

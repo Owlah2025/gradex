@@ -28,6 +28,18 @@ export type ReviewQueueItem = {
   is_first_publish: boolean;
 };
 
+/**
+ * A same-origin protected manifest route issued for an Admin's review of one
+ * submitted Lesson. It is deliberately not an object-storage URL.
+ */
+export type AdminLessonPreview = {
+  course_id: string;
+  revision_id: string;
+  lesson_id: string;
+  video_asset_version_id: string;
+  playback_url: string;
+};
+
 export type ReviewedCourse = OwnedCourseSummary & {
   live_revision_id?: string | null;
   editable_revision?: CourseRevisionWire;
@@ -119,4 +131,22 @@ export async function requestCourseRevisionChanges(
     { reason: input.reason.trim() },
   );
   return requireResult(course, input.locale);
+}
+
+/**
+ * Issues the existing audited Admin-review preview for one Lesson in the
+ * inspected revision. The returned URL is an application-owned protected
+ * playback route and is held by the caller only for the active view.
+ */
+export async function previewAdminLesson(
+  input: ReviewInput & { courseID: string; revisionID: string; lessonID: string },
+): Promise<AdminLessonPreview> {
+  requireCSRF(input);
+  const preview = await authenticatedRequest<AdminLessonPreview>(
+    `${revisionPath(input.courseID, input.revisionID)}/preview/${encodeURIComponent(input.lessonID)}`,
+    "POST",
+    input.locale,
+    input.csrf,
+  );
+  return requireResult(preview, input.locale);
 }

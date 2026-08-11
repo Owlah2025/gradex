@@ -11,11 +11,57 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/media"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
+
+type reviewDelivery struct{ refusingDelivery }
+
+func (*reviewDelivery) IssueAdminReviewPlayback(_ context.Context, request media.AdminReviewPlaybackRequest) (media.PlaybackAuthorization, error) {
+	return media.PlaybackAuthorization{
+		AssetVersionID:  request.AssetVersionID,
+		PlaybackSession: "review-test-session",
+		ManifestURL:     "/api/v1/admin/review/playback-manifests/review-test-session/index.m3u8",
+		ExpiresAt:       time.Now().Add(time.Minute),
+	}, nil
+}
+
+func (*reviewDelivery) IssueAdminReviewPlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error) {
+	return media.PlaybackManifest{Contents: []byte("#EXTM3U\n#EXT-X-ENDLIST\n")}, nil
+}
+
+func reviewMediaFoundation(t *testing.T, pool *pgxpool.Pool) *MediaFoundation {
+	t.Helper()
+	writer, err := outbox.NewWriter("review-test", []byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatalf("creating review outbox writer: %v", err)
+	}
+	unavailable, err := media.NewUnavailableScanner("review route fixture")
+	if err != nil {
+		t.Fatalf("creating review scanner: %v", err)
+	}
+	scanner, err := media.NewScannerAdapter(unavailable)
+	if err != nil {
+		t.Fatalf("creating review scanner adapter: %v", err)
+	}
+	service, err := media.NewService(media.ServiceOptions{
+		DB: pool, Store: &mediaRouterStore{}, Outbox: writer, Scanner: scanner,
+		UploadURLExpiry: time.Minute, MaxUploadBytes: 1024,
+	})
+	if err != nil {
+		t.Fatalf("creating review media service: %v", err)
+	}
+	foundation, err := NewMediaFoundation(MediaFoundationOptions{Service: service, Delivery: &reviewDelivery{}})
+	if err != nil {
+		t.Fatalf("creating review media foundation: %v", err)
+	}
+	return foundation
+}
 
 func seedReviewDatabase(t *testing.T, pool interface{}, ctx context.Context) (adminID, instructorID, videoAssetID, majorTermID, subjectTermID string) {
 	t.Helper()
@@ -287,8 +333,9 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	p, ctx := pool(t)
 	adminID, instructorID, videoAssetID, majorTermID, subjectTermID := seedReviewDatabase(t, p, ctx)
 
-	instructorTS := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive)
-	adminTS := buildTestRouterWithAccount(t, p, adminID, identity.RoleAdmin, identity.StatusActive)
+	mediaFoundation := reviewMediaFoundation(t, p)
+	instructorTS := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive, WithMediaFoundation(mediaFoundation))
+	adminTS := buildTestRouterWithAccount(t, p, adminID, identity.RoleAdmin, identity.StatusActive, WithMediaFoundation(mediaFoundation))
 
 	// 1. Create and submit course as Instructor
 	resp, body := doAuthReq(instructorTS, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة مراجعة أدمن","title_en":"Admin Review Course"}`))
@@ -317,6 +364,9 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	}
 	if prevRes["video_asset_version_id"] != videoAssetID {
 		t.Errorf("preview returned video %v, want %s", prevRes["video_asset_version_id"], videoAssetID)
+	}
+	if previewURL, _ := prevRes["playback_url"].(string); previewURL != "/api/v1/admin/review/playback-manifests/review-test-session/index.m3u8" {
+		t.Errorf("preview returned protected manifest %q", previewURL)
 	}
 
 	// Assert ADMIN_CONTENT_PREVIEWED audit row exists in DB
@@ -409,6 +459,7 @@ func TestInstructorCannotPublishThroughReviewRoutes(t *testing.T) {
 	}{
 		{"GET", "/api/v1/admin/review/queue", nil},
 		{"GET", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID, nil},
+		{"GET", "/api/v1/admin/review/playback-manifests/not-a-review-session/index.m3u8", nil},
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/approve", nil},
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/request-changes", []byte(`{"reason":"unauthorized"}`)},
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/preview/" + lesID, nil},

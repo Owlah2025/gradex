@@ -102,6 +102,17 @@ type PlaybackRequest struct {
 	AssetVersionID string
 }
 
+// AdminReviewPlaybackRequest is the exact submitted Lesson target that an
+// already-authorized Admin is reviewing. Capability enforcement stays at the
+// HTTP boundary; this service binds the signed playback session to that Admin.
+type AdminReviewPlaybackRequest struct {
+	AdminAccountID string
+	CourseID       string
+	RevisionID     string
+	LessonID       string
+	AssetVersionID string
+}
+
 type DownloadRequest struct {
 	StudentID      string
 	LessonID       string
@@ -138,6 +149,15 @@ type PlaybackAuthorization struct {
 // URLs and never pass through the API process.
 type PlaybackManifest struct {
 	Contents []byte
+}
+
+type adminReviewPlaybackClaims struct {
+	AdminAccountID string `json:"admin_account_id"`
+	CourseID       string `json:"course_id"`
+	RevisionID     string `json:"revision_id"`
+	LessonID       string `json:"lesson_id"`
+	AssetVersionID string `json:"asset_version_id"`
+	ExpiresAt      int64  `json:"expires_at"`
 }
 
 type DownloadAuthorization struct {
@@ -227,6 +247,53 @@ func (s *DeliveryService) IssuePlaybackManifest(ctx context.Context, studentID, 
 	decision := s.evaluator.EvaluateTarget(ctx, studentID, claims.LessonID, target.retiredAt, now)
 	if !decision.Allowed {
 		return PlaybackManifest{}, denyProtected(decision.Reason)
+	}
+	contents, err := s.store.DownloadObject(ctx, target.storageKey)
+	if err != nil || len(contents) == 0 || len(contents) > maxPlaybackManifestBytes {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	rewritten, err := s.rewritePlaybackManifest(ctx, target.storageKey, contents, time.Unix(claims.ExpiresAt, 0).Sub(now))
+	if err != nil {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	return PlaybackManifest{Contents: rewritten}, nil
+}
+
+// IssueAdminReviewPlayback creates a short-lived manifest session for the
+// exact submitted Lesson that an Admin review route has already authorized.
+func (s *DeliveryService) IssueAdminReviewPlayback(ctx context.Context, request AdminReviewPlaybackRequest) (PlaybackAuthorization, error) {
+	if request.AdminAccountID == "" || request.CourseID == "" || request.RevisionID == "" || request.LessonID == "" || request.AssetVersionID == "" {
+		return PlaybackAuthorization{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadAdminReviewTarget(ctx, request)
+	if err != nil || target.state != StateReady || target.storageKey == "" {
+		return PlaybackAuthorization{}, ErrProtectedUnavailable
+	}
+	now := s.now().UTC()
+	expiresAt := now.Add(s.signatureLifetime)
+	playbackSession := s.adminReviewPlaybackSession(request, expiresAt)
+	return PlaybackAuthorization{
+		PlaybackSession: playbackSession,
+		ManifestURL:     "/api/v1/admin/review/playback-manifests/" + playbackSession + "/index.m3u8",
+		AssetVersionID:  target.assetVersionID,
+		ExpiresAt:       expiresAt,
+	}, nil
+}
+
+// IssueAdminReviewPlaybackManifest revalidates the Admin-bound submitted
+// revision target before signing the manifest's private storage references.
+func (s *DeliveryService) IssueAdminReviewPlaybackManifest(ctx context.Context, adminAccountID, token string) (PlaybackManifest, error) {
+	now := s.now().UTC()
+	claims, err := s.verifyAdminReviewPlaybackSession(token, adminAccountID, now)
+	if err != nil {
+		return PlaybackManifest{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadAdminReviewTarget(ctx, AdminReviewPlaybackRequest{
+		AdminAccountID: adminAccountID, CourseID: claims.CourseID, RevisionID: claims.RevisionID,
+		LessonID: claims.LessonID, AssetVersionID: claims.AssetVersionID,
+	})
+	if err != nil || target.state != StateReady || target.storageKey == "" {
+		return PlaybackManifest{}, ErrProtectedUnavailable
 	}
 	contents, err := s.store.DownloadObject(ctx, target.storageKey)
 	if err != nil || len(contents) == 0 || len(contents) > maxPlaybackManifestBytes {
@@ -498,6 +565,38 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	return target, nil
 }
 
+func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request AdminReviewPlaybackRequest) (deliveryTarget, error) {
+	var target deliveryTarget
+	err := s.db.QueryRow(ctx, `
+		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, vr.storage_object_key,
+		       COALESCE(mav.trusted_duration_ms, 0)
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = $2::uuid AND cr.course_id = c.id AND cr.state = 'PENDING_REVIEW'
+		JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
+		JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+		JOIN media_asset_versions mav ON mav.id = $4::uuid AND mav.id = cl.video_asset_version_id
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = c.id AND ma.retired_at IS NULL
+		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
+			AND scan.asset_version_id = mav.id AND scan.storage_object_version = mav.storage_object_version
+			AND scan.outcome = 'PASSED'
+		JOIN LATERAL (
+			SELECT storage_object_key FROM video_renditions WHERE asset_version_id = mav.id ORDER BY name LIMIT 1
+		) vr ON true
+		WHERE c.id = $1::uuid AND cl.lesson_identity_id = $3::uuid
+		  AND mav.kind = 'VIDEO' AND mav.state = 'READY'
+		  AND mav.successful_processing_attempt_id IS NOT NULL AND mav.trusted_duration_ms IS NOT NULL
+	`, request.CourseID, request.RevisionID, request.LessonID, request.AssetVersionID).Scan(
+		&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return deliveryTarget{}, ErrProtectedUnavailable
+	}
+	if err != nil {
+		return deliveryTarget{}, fmt.Errorf("loading submitted review delivery target: %w", err)
+	}
+	return target, nil
+}
+
 func (s *DeliveryService) loadCurrentMaterialTarget(ctx context.Context, lessonID string, kind AssetKind) (deliveryTarget, error) {
 	var target deliveryTarget
 	var assetRetiredAt *time.Time
@@ -541,6 +640,17 @@ func (s *DeliveryService) playbackSession(studentID, lessonID, assetVersionID st
 	return base64.RawURLEncoding.EncodeToString(append(payload, signature...))
 }
 
+func (s *DeliveryService) adminReviewPlaybackSession(request AdminReviewPlaybackRequest, expiresAt time.Time) string {
+	payload, _ := json.Marshal(adminReviewPlaybackClaims{
+		AdminAccountID: request.AdminAccountID, CourseID: request.CourseID, RevisionID: request.RevisionID,
+		LessonID: request.LessonID, AssetVersionID: request.AssetVersionID, ExpiresAt: expiresAt.Unix(),
+	})
+	mac := hmac.New(sha256.New, s.buyerTagKey)
+	_, _ = mac.Write([]byte("gradex:s2:admin-review-playback:v1\x00"))
+	_, _ = mac.Write(payload)
+	return base64.RawURLEncoding.EncodeToString(append(payload, mac.Sum(nil)...))
+}
+
 func (s *DeliveryService) verifyPlaybackSession(token, studentID string, now time.Time) (playbackSessionClaims, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil || len(raw) <= sha256.Size {
@@ -558,6 +668,27 @@ func (s *DeliveryService) verifyPlaybackSession(token, studentID string, now tim
 		claims.LessonID == "" || claims.AssetVersionID == "" || claims.ExpiresAt <= 0 ||
 		claims.StudentID != studentID || !now.Before(time.Unix(claims.ExpiresAt, 0)) {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	return claims, nil
+}
+
+func (s *DeliveryService) verifyAdminReviewPlaybackSession(token, adminAccountID string, now time.Time) (adminReviewPlaybackClaims, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) <= sha256.Size {
+		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
+	}
+	payload, signature := raw[:len(raw)-sha256.Size], raw[len(raw)-sha256.Size:]
+	mac := hmac.New(sha256.New, s.buyerTagKey)
+	_, _ = mac.Write([]byte("gradex:s2:admin-review-playback:v1\x00"))
+	_, _ = mac.Write(payload)
+	if !hmac.Equal(signature, mac.Sum(nil)) {
+		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
+	}
+	var claims adminReviewPlaybackClaims
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.AdminAccountID == "" || claims.CourseID == "" ||
+		claims.RevisionID == "" || claims.LessonID == "" || claims.AssetVersionID == "" || claims.ExpiresAt <= 0 ||
+		claims.AdminAccountID != adminAccountID || !now.Before(time.Unix(claims.ExpiresAt, 0)) {
+		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
 	}
 	return claims, nil
 }

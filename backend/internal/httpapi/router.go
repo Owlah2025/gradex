@@ -84,7 +84,7 @@ func NewRouter(
 		mountStaffRoutes(v1, routerConfig.staff, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.catalog != nil {
-		if err := mountCatalogRoutes(v1, routerConfig.catalog, routerConfig.sessions, authenticator, principals, logger); err != nil {
+		if err := mountCatalogRoutes(v1, routerConfig.catalog, routerConfig.media, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting catalog routes: %w", err)
 		}
 	}

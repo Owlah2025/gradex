@@ -14,6 +14,7 @@ import (
 func mountCatalogRoutes(
 	v1 *gin.RouterGroup,
 	foundation *CatalogFoundation,
+	mediaFoundation *MediaFoundation,
 	sessionFoundation *SessionFoundation,
 	authenticator auth.Authenticator,
 	principals identity.PrincipalResolver,
@@ -39,6 +40,9 @@ func mountCatalogRoutes(
 		repo:           foundation.repository,
 		assetValidator: foundation.assetValidator,
 		logger:         logger,
+	}
+	if mediaFoundation != nil {
+		reviewH.playback = mediaFoundation.AdminReviewMedia()
 	}
 
 	ownershipMw, err := RequireCourseOwnership(foundation.ownership, logger)
@@ -113,6 +117,7 @@ func mountCatalogRoutes(
 	{
 		adminReviewGetGroup.GET("/queue", reviewH.listQueue)
 		adminReviewGetGroup.GET("/courses/:id/revisions/:revisionId", reviewH.getCourseRevisionGraph)
+		adminReviewGetGroup.GET("/playback-manifests/:playbackSession/index.m3u8", reviewH.playbackManifest)
 	}
 
 	// Admin review mutation routes under /admin/review

@@ -4,6 +4,7 @@ import {
   approveCourseRevision,
   getReviewCourseRevision,
   listReviewQueue,
+  previewAdminLesson,
   requestCourseRevisionChanges,
 } from "./review";
 
@@ -66,7 +67,7 @@ test("a bodyless review-queue response fails closed rather than reading as an em
   }
 });
 
-test("approve and request-changes address the authoritative Course and revision IDs", async () => {
+test("review decisions and protected previews address the authoritative Course, revision, and Lesson IDs", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: string; method?: string; csrf: string | null; body: unknown }> = [];
   globalThis.fetch = async (url, init) => {
@@ -88,6 +89,13 @@ test("approve and request-changes address the authoritative Course and revision 
       locale: "en",
       csrf: "csrf-1",
     });
+    await previewAdminLesson({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      lessonID: "lesson / id",
+      locale: "en",
+      csrf: "csrf-1",
+    });
     await getReviewCourseRevision(COURSE_ID, REVISION_ID, "en");
 
     assert.deepEqual(requests, [
@@ -103,6 +111,12 @@ test("approve and request-changes address the authoritative Course and revision 
         csrf: "csrf-1",
         // The reason is trimmed, and nothing else about it is rewritten.
         body: JSON.stringify({ reason: "Add a Lesson video" }),
+      },
+      {
+        url: `/api/v1/admin/review/courses/${COURSE_ID}/revisions/${REVISION_ID}/preview/lesson%20%2F%20id`,
+        method: "POST",
+        csrf: "csrf-1",
+        body: undefined,
       },
       {
         url: `/api/v1/admin/review/courses/${COURSE_ID}/revisions/${REVISION_ID}`,
@@ -127,6 +141,10 @@ test("review mutations fail closed before fetch without a session CSRF token", a
   try {
     await assert.rejects(
       () => approveCourseRevision({ courseID: COURSE_ID, revisionID: REVISION_ID, locale: "en", csrf: "" }),
+      /Session CSRF token is missing/,
+    );
+    await assert.rejects(
+      () => previewAdminLesson({ courseID: COURSE_ID, revisionID: REVISION_ID, lessonID: "lesson-1", locale: "en", csrf: "" }),
       /Session CSRF token is missing/,
     );
     await assert.rejects(

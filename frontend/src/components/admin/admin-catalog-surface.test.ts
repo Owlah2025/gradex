@@ -149,9 +149,8 @@ test("the review queue is server state, not component state", () => {
     /from "@\/lib\/api\/review"/,
     "the queue must be read through the Admin review API client",
   );
-  for (const call of ["listReviewQueue", "approveCourseRevision", "requestCourseRevisionChanges"]) {
-    assert.ok(source.includes(call), `the Admin surface must call the real ${call} endpoint wrapper`);
-  }
+  assert.ok(source.includes("listReviewQueue"), "the Admin surface must call the real queue endpoint wrapper");
+  assert.ok(source.includes("SubmittedRevisionInspector"), "a queue row must open the submitted-revision inspector");
 
   // No seeded array: the only initial queue is the empty one, replaced by the
   // server's response.
@@ -165,12 +164,34 @@ test("the review queue is server state, not component state", () => {
     "the queue must not be initialised from a literal Course",
   );
 
-  // Approval and change requests must address the row's own server IDs.
-  assert.match(source, /courseID: item\.course_id/, "actions must use the server Course ID");
-  assert.match(source, /revisionID: item\.revision_id/, "actions must use the server revision ID");
+  assert.match(source, /setInspectedItem\(item\)/, "the selected queue row must provide its real IDs to inspection");
 
   // An empty server response renders an empty state, and says so.
   assert.match(source, /review-queue-empty/, "an empty queue must render an honest empty state");
+});
+
+test("the submitted-revision inspector renders only the returned graph and keeps review controls fail-closed", () => {
+  const source = readSource("src/components/admin/submitted-revision-inspector.tsx");
+
+  for (const call of ["getReviewCourseRevision", "getTaxonomyTerms", "getMediaAssetStatus", "previewAdminLesson"]) {
+    assert.ok(source.includes(call), `the inspector must use the real ${call} client`);
+  }
+  for (const field of [
+    "submitted-title-ar", "submitted-title-en", "submitted-description-ar", "submitted-description-en",
+    "submitted-study-year", "submitted-major", "submitted-subject", "submitted-revision-state",
+    "submitted-section-", "submitted-lesson-", "submitted-lesson-media-state-", "submitted-lesson-materials-",
+    "approve-inspected-revision", "request-changes-inspected-revision", "preview-submitted-lesson-",
+  ]) {
+    assert.ok(source.includes(field), `the submitted graph must render ${field}`);
+  }
+  assert.match(source, /course\.id !== item\.course_id/, "a mismatched Course detail must fail closed");
+  assert.match(source, /revision\.id !== item\.revision_id/, "a mismatched revision detail must fail closed");
+  assert.match(source, /mediaStates\[assetVersionID\] !== "READY"/, "non-ready media must not request a preview");
+  for (const state of ["PROCESSING", "SCAN_PASSED", "FAILED", "QUARANTINED", "UNAVAILABLE", "NO_VIDEO"]) {
+    assert.ok(source.includes(state), `the inspector must describe ${state} instead of attempting protected playback`);
+  }
+  assert.ok(!source.includes("storage_object_key"), "the inspector must not expose object-storage keys");
+  assert.ok(!source.includes("presigned"), "the inspector must not expose presigned upload material");
 });
 
 test("taxonomy and lifecycle administration are not gated on the pricing modal", () => {

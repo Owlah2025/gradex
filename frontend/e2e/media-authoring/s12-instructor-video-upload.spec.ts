@@ -185,11 +185,14 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 7. The Admin review surface sees the submitted revision.
   const queue = await admin.get("/api/v1/admin/review/queue");
   expect(queue.status()).toBe(200);
-  const queued = (await queue.json()) as Array<{ course_id?: string; id?: string; state?: string }>;
+  const queued = (await queue.json()) as Array<{ course_id?: string; id?: string; revision_id?: string; state?: string }>;
+  const submittedQueueItem = queued.find((item) => item.course_id === courseID || item.id === courseID);
   expect(
-    queued.some((item) => item.course_id === courseID || item.id === courseID),
+    submittedQueueItem,
     `submitted Course ${courseID} must appear in the Admin review queue`,
-  ).toBe(true);
+  ).toBeTruthy();
+  expect(submittedQueueItem?.revision_id, "the queue must carry the submitted revision ID").toBeTruthy();
+  const submittedRevisionID = submittedQueueItem!.revision_id!;
 
   // 8. And the Admin *screen* sees it too, not only the API. The Admin Catalog
   // reads the same queue, so a real submission is what appears there — this is
@@ -219,9 +222,61 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(row).toContainText(courseTitleEn);
   await expect(adminPage.locator("body")).not.toContainText("Introduction to Programming");
 
-  // 9. Approve and publish through the real Admin route, against the
-  // authoritative Course and revision IDs the queue reported.
-  await adminPage.getByTestId(`approve-review-item-${courseID}`).click();
+  // 9. The Admin opens the exact submitted revision and reads the immutable
+  // graph before making a review decision. These assertions use the Course
+  // authored above, never a fixture or mutable Instructor draft.
+  await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
+  const inspector = adminPage.getByTestId("submitted-revision-inspector");
+  await expect(inspector).toBeVisible();
+  await expect(inspector.getByTestId("submitted-course-id")).toContainText(courseID);
+  await expect(inspector.getByTestId("submitted-title-ar")).toContainText("دورة الفيديو الحقيقية");
+  await expect(inspector.getByTestId("submitted-title-en")).toContainText(courseTitleEn);
+  await expect(inspector.getByTestId("submitted-description-ar")).toContainText("وصف");
+  await expect(inspector.getByTestId("submitted-description-en")).toContainText("Real media journey");
+  await expect(inspector.getByTestId("submitted-study-year")).toContainText("YEAR_1");
+  await expect(inspector.getByTestId("submitted-major")).toContainText("Engineering");
+  await expect(inspector.getByTestId("submitted-subject")).toContainText("Programming");
+  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
+  await expect(inspector.getByTestId(`submitted-section-${sectionID}`)).toContainText("Media Section");
+  await expect(inspector.getByTestId(`submitted-lesson-${lessonID}`)).toContainText("Media Lesson");
+  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("READY");
+
+  // Preview is issued through the reviewed Lesson endpoint and receives the
+  // application-owned protected manifest route. The browser never receives a
+  // private object-storage URL from this UI.
+  const previewResponse = adminPage.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/preview/${lessonID}`,
+  );
+  await inspector.getByTestId(`preview-submitted-lesson-${lessonID}`).click();
+  expect((await previewResponse).status()).toBe(200);
+  await expect(inspector.getByTestId("review-preview-player")).toBeVisible();
+  await expect(inspector.getByTestId("review-protected-video")).toBeVisible();
+
+  // 10. Request changes through the inspector with an explicit Instructor
+  // reason. The Instructor resubmits the exact revision, then the Admin
+  // reopens it and approves from that same submitted-only surface.
+  const requestChangesResponse = adminPage.waitForResponse((response) =>
+    response.request().method() === "POST" &&
+    new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/request-changes`,
+  );
+  await inspector.getByTestId("request-changes-inspected-revision").click();
+  await inspector.getByTestId("request-changes-reason").fill("Please expand the Arabic lesson detail.");
+  await inspector.getByTestId("submit-request-changes").click();
+  expect((await requestChangesResponse).status()).toBe(200);
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("Change request sent to instructor");
+
+  const resubmission = await instructorAPI.post(`/api/v1/courses/${courseID}/revisions/${submittedRevisionID}/submit`);
+  expect(resubmission.status(), await resubmission.text()).toBe(200);
+  await adminPage.reload();
+  await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
+  await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
+  const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
+  await expect(resubmittedInspector.getByTestId("submitted-revision-id")).toContainText(submittedRevisionID);
+
+  // 11. Approve through the inspector, against the exact revision that was
+  // successfully rendered and previewed above.
+  await resubmittedInspector.getByTestId("approve-inspected-revision").click();
   await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toHaveCount(0);
 
