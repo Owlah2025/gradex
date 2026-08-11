@@ -57,5 +57,8 @@ test("the landing removes fabricated testimonials, unavailable company links, an
   for (const prohibitedClaim of ["Tap", "hosted checkout", "refund", "community"]) {
     assert.ok(!faq.includes(prohibitedClaim), `FAQ must not claim ${prohibitedClaim}`);
   }
+  assert.match(faq, /outside Gradex/, "FAQ must state that payments are external to Gradex");
+  assert.match(faq, /Course Access Invitation/, "FAQ must describe the authoritative access invitation");
+  assert.match(faq, /Admin reviews and approves/, "FAQ must preserve the Admin approval requirement");
   assert.ok(!learning.includes("Users"), "the learning steps must not advertise a community step");
 });
