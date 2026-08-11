@@ -238,3 +238,15 @@ those findings without regression, not merely that a diff since the rejection lo
 Batch A, step 1: capture the effective `MEDIA_SCANNER_MODE`, `MEDIA_OPERATING_MODE`, `APP_ENV`,
 `REDIS_ADDR` and storage endpoint/bucket of the running API and worker processes during one
 `npm run test:e2e:media-authoring` run, under `T033`. Nothing else starts first.
+
+## 11. D-085 C1 sequencing supersession — 2026-08-11
+
+[D-085](../../../DECISIONS.md#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
+supersedes only the Batch A → Batch B sequencing statement in §§2, 6, and 10. The historical C1
+failure is `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`, not resolved: repeated real-MP4 E2E runs reached
+`READY` under matching effective API/worker development configuration, while the original stop did
+not reproduce. T035a remains the failure-only sanitized recurrence-evidence mechanism.
+
+Batch B is now the next authorized implementation action. The original Batch A evidence and its
+diagnostic-first production-media boundary remain unchanged; this decision authorizes no media
+behavior change and does not close C1.

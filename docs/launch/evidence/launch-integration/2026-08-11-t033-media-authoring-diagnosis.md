@@ -97,3 +97,11 @@ Result: `1 passed (25.4s)`. The real MP4 path again reached `READY`. No failure 
 The historical `Processing` stall remains not reproduced and its root cause remains
 `NOT_YET_ISOLATED`; T035a makes any future recurrence self-contained without altering the production
 media path.
+
+## D-085 disposition — 2026-08-11
+
+[D-085](../../../DECISIONS.md#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
+records the current C1 disposition as `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`. This supplements the
+T033 run classification above without rewriting it: the historical cause remains unknown, current
+media execution is green, and T035a retains evidence if the failure returns. The Product Owner has
+removed waiting for recurrence as the sequencing prerequisite for Batch B only.

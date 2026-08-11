@@ -3,7 +3,9 @@
 > **2026-08-11 — CURRENT AUTHORITY. The independent review returned `VERDICT: REJECT`. The integrated
 > range is NOT approved, and bounded remediation of exactly seven findings is authorized.** Every
 > statement below this block is older and is superseded wherever the two disagree — in particular any
-> text saying the review is still pending or that no verdict exists.
+> text saying the review is still pending or that no verdict exists. [D-085](../DECISIONS.md#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
+> additionally supersedes D-084's obsolete C1-only wait-for-recurrence sequencing rule; it does not
+> resolve C1 or weaken any media security boundary.
 >
 > ### The valid independent review
 >
@@ -39,7 +41,7 @@
 >
 > | # | Severity | Finding | Owning spec | Authority | State |
 > |---|---|---|---|---|---|
-> | C1 | CRITICAL | Merged-tree media E2E stalls at `Processing` | [`specs/005-…`](../../specs/005-media-and-entitlement-evaluation/tasks.md) | `T033`–`T035`, diagnostic-first | OPEN |
+> | C1 | CRITICAL | Historical merged-tree media E2E stall at `Processing` | [`specs/005-…`](../../specs/005-media-and-entitlement-evaluation/tasks.md) | `T033`–`T035a`, recurrence diagnostics | `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE` |
 > | C2 | CRITICAL | Admin submitted-revision inspector absent — approval is blind | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T067`, `T069`, `T071` | OPEN |
 > | C3 | CRITICAL | Admin Lesson video preview absent | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T068`, `T070`, `T071`, `T072` | OPEN |
 > | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
@@ -65,9 +67,10 @@
 > validation matrix, the founder acceptance journey and the final re-review strategy — is
 > [`evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
 >
-> **The next single action is Batch A step 1** (`T033`): capture the effective media configuration of
-> the running API and worker processes during one `npm run test:e2e:media-authoring` run. Nothing else
-> starts first.
+> **The next authorized implementation action is Batch B**: amend and then complete S2 `T067`–`T072`
+> for the Admin submitted-revision inspector and protected Lesson preview. C1 remains
+> `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a captures recurrence evidence without blocking this
+> local MVP work.
 >
 > ### Review harness — tooling authority only
 >

@@ -2787,3 +2787,36 @@ batches, validation matrix and founder acceptance journey are recorded in
 [`docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
 
 **Source:** Product Owner instruction of 2026-08-11 on the valid independent REJECT.
+
+## D-085 — C1 remains an unresolved intermittent non-reproducible defect; Batch B is authorized to proceed
+
+**Date:** 2026-08-11
+**Status:** Active. Narrows and supersedes D-084's C1 sequencing prerequisite only: it does not
+supersede any production media, scanner, storage, worker, authorization, or fail-closed rule in
+D-084 or elsewhere.
+
+**Finding:** C1 was historically observed as a media-authoring E2E stall at `Processing`, but the
+captured, independently observed runtime configuration for both the API and worker is
+`APP_ENV=development`, `MEDIA_SCANNER_MODE=DEVELOPMENT_NO_OP`, and
+`MEDIA_OPERATING_MODE=SCANNER`. Repeated real-MP4 media-authoring E2E runs reached upload completion,
+worker processing, `READY`, Lesson attachment, Course submission, and the Admin review queue. No
+configuration, dispatcher, queue, processing, or persistence defect has reproduced. T035a is now
+installed as a failure-only, sanitized recurrence-evidence mechanism before isolated-test teardown.
+
+**Decision:**
+
+1. C1 is classified `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`: the historical failure was observed,
+   its exact root cause remains unknown, current automated execution is green, and recurrence remains
+   a tracked defect investigation.
+2. T035a remains installed. It is the evidence mechanism for any recurrence and neither fixes nor
+   identifies C1's historical cause.
+3. Waiting indefinitely for recurrence or a proven historical root cause is no longer a prerequisite
+   for local MVP feature implementation.
+4. Batch B, the S2 Admin submitted-revision inspector and protected Lesson preview under T067–T072,
+   is authorized to begin once its existing SpecKit tasks are amended and committed for this decision.
+
+**Boundary:** This is a sequencing decision only. It authorizes no production media behavior change,
+scanner change, storage change, authorization change, or any scope outside C2/C3. It does not close
+C1, any slice, or any launch gate; D-084's independent-review requirement remains unchanged.
+
+**Source:** Product Owner instruction of 2026-08-11.
