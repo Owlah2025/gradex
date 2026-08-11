@@ -503,37 +503,48 @@ and manifest route for the exact reviewed Course/revision/Lesson/Asset Version. 
 existing media delivery signing boundary, preserve the existing preview audit event, disclose no raw
 object-storage URL, and add no alternate video-delivery system.
 
-- [ ] T067 Add the frontend Admin review-detail client call for
+- [x] T067 Add the frontend Admin review-detail client call for
       `GET /api/v1/admin/review/courses/:id/revisions/:revisionId`, keyed on the exact `course_id` and
       `revision_id` carried from the queue row, with typed errors and **no demo, local or fixture
       fallback**. A detail load failure surfaces as a failure, never as empty or placeholder content.
-- [ ] T068 Add the frontend Admin preview client call for
+- [x] T068 Add the frontend Admin preview client call for
       `POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId`, bound to the
       inspected revision and the selected Lesson. The client must not expose storage object keys,
       bucket names, permanent S3/R2 URLs, credentials, internal signatures or upload URLs to the
       browser surface, and must not persist the returned playback material beyond the view.
-- [ ] T069 Build the Admin submitted-revision inspector screen, opened from the queue with exactly
+- [x] T069 Build the Admin submitted-revision inspector screen, opened from the queue with exactly
       `course_id` + `revision_id`, rendering the authoritative submitted data: Arabic Course title,
       English Course title, Arabic description, English description, study year, Major, Subject,
       revision ID and revision state, ordered Sections, ordered Lessons within each Section, and each
       Lesson's attached media and version state. Bilingual RTL/LTR as the surrounding Admin surface.
-- [ ] T070 Add the protected Lesson video player to the inspector, playing the **submitted** Lesson
+- [x] T070 Add the protected Lesson video player to the inspector, playing the **submitted** Lesson
       media for the inspected revision through T068. It renders the media state honestly when a Lesson
       has no attached, ready media, rather than implying playable content.
-- [ ] T071 Bind the decision controls to the exact inspected revision: Approve & Publish and its
+- [x] T071 Bind the decision controls to the exact inspected revision: Approve & Publish and its
       reject/return counterpart act on the `revision_id` that was inspected, and **fail closed** when
       the review detail cannot be loaded, or when the loaded detail's Course or revision does not match
       the one opened. An Admin cannot approve a revision the screen did not successfully render.
-- [ ] T072 Prove the journey end to end: an Instructor creates and submits a real Course; the Admin
+- [x] T072 Prove the journey end to end: an Instructor creates and submits a real Course; the Admin
       queue shows it; the Admin opens it; the submitted metadata, taxonomy, Sections, Lessons and
       attached media state render; the submitted Lesson video plays; Approve & Publish publishes
       **that exact revision**. In the same suite, prove Instructor and Student roles cannot reach the
       Admin review detail or the Admin preview route.
-- [ ] T073 Add focused frontend component coverage using a server-returned submitted graph. The
+- [x] T073 Add focused frontend component coverage using a server-returned submitted graph. The
       assertions must include bilingual Course titles and descriptions, study year, Major, Subject,
       ordered Sections and Lessons, media state, the exact-revision Approve and Request Changes
       actions, preview invocation, and processing/unavailable/authorization-error presentation. The
       coverage must fail if the inspector stops rendering those real response fields.
 
+### Completion evidence — 2026-08-11
+
+The real media-authoring E2E now creates an Instructor-authored Course and real MP4, waits for the
+authoritative Asset Version to reach `READY`, submits it, opens its queue-provided revision as Admin,
+renders its bilingual graph and taxonomy, plays the application-owned protected manifest, requests
+changes with a reason, resubmits the same revision, and approves it. It passes under the existing
+failure-only T035a diagnostics. Focused API/client and Admin-surface tests cover exact-ID routing,
+CSRF refusal, submitted-detail mismatch refusal, non-ready media rendering, and role/capability
+denial; the Go delivery integration test binds the manifest session to the Admin and invalidates it
+when the revision leaves review.
+
 **Amended task count:** 71 tasks — the 64 recorded above, complete, plus 7 post-review remediation
-tasks, all open.
+tasks, complete and awaiting the required independent review of the integrated range.
