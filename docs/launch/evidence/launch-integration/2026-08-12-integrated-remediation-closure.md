@@ -60,3 +60,35 @@ historical root cause was identified or fixed.
 
 This record closes the integrated-remediation software review only. It does not resolve open launch
 gates, complete S13–S16, perform manual acceptance, or authorize another implementation batch.
+
+## Post-review test-fixture correction
+
+After the software closure head, the independently confirmed fixture defect was corrected by adding
+the existing `reviewMediaFoundation(t, p)` dependency to `setupAdminPricingAPIServer`. This changes
+only `backend/internal/httpapi/admin_pricing_integration_test.go`. The production handler, router,
+authorization, CSRF, protected playback, media-state, audit and entity-binding implementations are
+unchanged.
+
+The existing privileged-audit scenario remains non-vacuous: it creates a real PostgreSQL Course,
+submitted `PENDING_REVIEW` revision, Lesson and attached READY Asset Version; sends the authenticated
+Admin HTTP request through the mounted router; expects HTTP 200; and verifies the durable
+`ADMIN_CONTENT_PREVIEWED` row and attached Asset Version.
+
+Verification on 2026-08-12:
+
+| Command | Result |
+|---|---|
+| `cd backend && go test -tags=integration -v -run TestProductionPrivilegedMutationRoutesCommitAuditEvidence ./internal/httpapi` | PASS; the previous Admin preview 404 is gone and the audit assertion passes |
+| `cd backend && go test -tags=integration ./internal/httpapi -count=1` | PASS (`175.520s`) |
+| `cd backend && go test ./...` | PASS |
+| `cd backend && go vet ./...` | PASS |
+| `cd backend && go vet -tags=integration ./internal/httpapi` | PASS |
+| `scripts/docs-guard.sh` | PASS |
+| `git diff --check` | PASS |
+| `scripts/expose-guard.sh` | FAILS on the pre-existing `Secret.Expose()` call in `backend/cmd/e2e-media-diagnostic/main.go` |
+
+The exposure-guard finding predates this post-review correction: `git log -1` attributes the relevant
+diagnostic/guard path to `ddada44667b78fe102f0be2238d93ad72f651841` (`test(media): retain failure
+pipeline evidence`), which is inside the already reviewed software history. This fixture correction
+does not touch or allowlist that call. Resolving or accepting it remains separate automated
+release-gate work outside D-086's test-only authority.

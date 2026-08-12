@@ -41,11 +41,12 @@
 >
 > ### Current authorization
 >
-> D-086 separately authorizes only the confirmed test-fixture correction for
-> `TestProductionPrivilegedMutationRoutesCommitAuditEvidence`: compose its existing legitimate Media
-> foundation so the valid Admin preview audit scenario reaches protected playback. Production behavior
-> is closed to change under that authority. No new MVP feature, unowned implementation gap, deployment,
-> or manual acceptance work starts without its own current authority.
+> D-086's one post-review test-fixture correction is complete: the existing legitimate Media
+> foundation is composed in `TestProductionPrivilegedMutationRoutesCommitAuditEvidence`, the formerly
+> failing Admin preview case returns 200, its audit assertion passes, and the complete HTTP integration
+> package is green. This later test-harness change is not part of the reviewed software range.
+> Production behavior is closed to change under D-086. No new MVP feature, unowned implementation gap,
+> deployment, or manual acceptance work starts without its own current authority.
 >
 > The earlier REJECT, its seven findings, and the discarded TAINTED/UNAVAILABLE review runs remain
 > preserved below as history; they are not the current delivery state.

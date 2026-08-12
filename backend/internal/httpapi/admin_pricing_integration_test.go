@@ -199,6 +199,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
 		WithCatalogFoundation(catalogFoundation),
+		WithMediaFoundation(reviewMediaFoundation(t, p)),
 	)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

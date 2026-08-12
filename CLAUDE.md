@@ -29,8 +29,8 @@ approval under
 - The independently approved software head is exactly `2c43b90fcf7a5c5913f42412fad5369911f781aa`.
 - Later closure-documentation and test-fixture commits are not part of that reviewed software range.
 - C1 remains `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a stays installed.
-- D-086 authorizes only the minimum post-review Admin preview test-fixture correction. It authorizes
-  no production behavior change or new implementation batch.
+- D-086's minimum post-review Admin preview test-fixture correction is complete. It changed no
+  production behavior and authorizes no new implementation batch.
 - Release-gate, external-provider/infrastructure, and manual-acceptance work remain separate and must
   follow their current authority.
 
