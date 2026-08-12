@@ -62,15 +62,15 @@ Every `Depends on` entry points backwards. No forward dependency remains.
 > dependency order is authoritative** (rule 2), and the actual closure heads are recorded in
 > [STATUS.md](STATUS.md). No date in this table is a current commitment.
 >
-> **Launch integration is a phase, not a slice.** The 2026-08-10 remediation and review work —
+> **Launch integration is a phase, not a slice.** The 2026-08-10 through 2026-08-12 remediation and review work —
 > Instructor authoring, the mandatory password change, staff development composition, the S9 merge, and
 > the Admin Catalog review surface — spans S1C, S2, and S9 and creates no new numbered feature slice.
-> Production code is frozen at `afe1624` under
-> [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
-> pending one independent review of the integrated range. **S13 and S14 in the table below remain
+> The integrated remediation software is independently approved at frozen head `2c43b90` under
+> [D-086](../DECISIONS.md#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized).
+> Later closure and test-fixture commits are not part of that reviewed software range. **S13 and S14 remain
 > unstarted**; evidence filenames that reuse those numbers are filing artifacts and do not create a
 > spec, a task set, or an implementation claim for either slice. See
-> [STATUS.md](STATUS.md) for the current phase and the frozen review range.
+> [STATUS.md](STATUS.md) for the current phase and approved review range.
 
 **S6 and S7 were replaced by a single smaller slice on 2026-07-28 under
 [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation).**

@@ -249,3 +249,24 @@ not reproduce. T035a remains the failure-only sanitized recurrence-evidence mech
 Batch B is now the next authorized implementation action. The original Batch A evidence and its
 diagnostic-first production-media boundary remain unchanged; this decision authorizes no media
 behavior change and does not close C1.
+
+## 12. Integrated remediation closure — 2026-08-12
+
+[D-086](../../../DECISIONS.md#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized)
+records the Product Owner's acceptance of the independent review of
+`18fb7e033d0fad162caebe150fb641a00201e259..2c43b90fcf7a5c5913f42412fad5369911f781aa`.
+The frozen software head is `2c43b90fcf7a5c5913f42412fad5369911f781aa`; the original review
+returned `VERDICT: APPROVE` with Critical 0, High 0, Medium 0 and Low 0.
+
+The targeted independent supplement returned `VERDICT: APPROVE` and classified the Admin preview
+audit-test 404 as `B — DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT`, because the test router
+omitted the existing Media foundation required by the current protected-preview contract. Its closure
+recommendation was `ACCEPT EXISTING APPROVAL`. The minimum test-only fixture correction is authorized
+after the software closure head. Neither that correction nor closure documentation is represented as
+part of the reviewed 53-commit software range.
+
+The committed evidence is
+[`2026-08-12-integrated-remediation-closure.md`](2026-08-12-integrated-remediation-closure.md).
+C1 remains `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`, with T035a installed for recurrence evidence.
+The integrated remediation is closed; production release, external launch gates, later slices and
+manual acceptance remain separate.

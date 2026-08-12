@@ -1,76 +1,54 @@
 # Gradex Launch Status
 
-> **2026-08-11 — CURRENT AUTHORITY. The independent review returned `VERDICT: REJECT`. The integrated
-> range is NOT approved, and bounded remediation of exactly seven findings is authorized.** Every
-> statement below this block is older and is superseded wherever the two disagree — in particular any
-> text saying the review is still pending or that no verdict exists. [D-085](../DECISIONS.md#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
-> additionally supersedes D-084's obsolete C1-only wait-for-recurrence sequencing rule; it does not
-> resolve C1 or weaken any media security boundary.
+> **2026-08-12 — CURRENT AUTHORITY. The integrated remediation software is independently approved at
+> frozen head `2c43b90fcf7a5c5913f42412fad5369911f781aa`.** [D-086](../DECISIONS.md#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized)
+> closes D-084's bounded remediation and review requirement. It does not close production release,
+> resolve C1's historical cause, or authorize another implementation batch.
 >
-> ### The valid independent review
+> ### Integrated independent approval
 >
 > | | |
 > |---|---|
-> | Reviewed range | `18fb7e033d0fad162caebe150fb641a00201e259..48e1f3ff40d0a8f5cddbea82d5e97d26a755e5f8` |
-> | Artifacts | `docs/launch/review/artifacts/18fb7e0-48e1f3f-20260810T233209Z/` (gitignored run output; the report is transcribed in the remediation plan below) |
+> | Reviewed base | `18fb7e033d0fad162caebe150fb641a00201e259` |
+> | Reviewed software head | `2c43b90fcf7a5c5913f42412fad5369911f781aa` |
+> | Exact range | `18fb7e033d0fad162caebe150fb641a00201e259..2c43b90fcf7a5c5913f42412fad5369911f781aa` |
 > | Reviewer / model | `agy` · `gemini-3.1-pro-high` |
-> | Containment | bwrap read-only checkout, external scratch |
-> | Relay | exit 0, `status: completed` |
-> | Touched files | `[]` — the reviewer worktree stayed clean |
-> | **Verdict** | **`VERDICT: REJECT`** |
-> | Critical | **4** |
-> | High | **3** |
+> | Containment | bwrap read-only detached worktree, external scratch |
+> | Touched files | `[]` |
+> | Original verdict | **`VERDICT: APPROVE`** |
+> | Findings | Critical 0 · High 0 · Medium 0 · Low 0 |
+> | Original artifacts | `docs/launch/review/artifacts/18fb7e0-2c43b90-20260812T012106Z/` (gitignored local run output) |
+> | Supplement verdict | **`VERDICT: APPROVE`** |
+> | Supplement classification | **`B — DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT`** |
+> | Closure recommendation | **`ACCEPT EXISTING APPROVAL`** |
+> | Supplement artifacts | `docs/launch/review/artifacts/18fb7e0-2c43b90-20260812T013145Z/` (gitignored local run output) |
 >
-> This is the **first valid verdict** for this range. **The implementation is not approved**, no slice
-> closes on it, and remediation is required before launch. Authority:
-> [D-084](../DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized).
+> The committed closure transcript is
+> [`evidence/launch-integration/2026-08-12-integrated-remediation-closure.md`](evidence/launch-integration/2026-08-12-integrated-remediation-closure.md).
+> Approval applies to the frozen software head above. This closure record and the separately
+> authorized test-fixture correction are later bookkeeping/test-harness commits and are not
+> represented as part of the independently reviewed 53-commit software range.
 >
-> ### The three earlier runs are not verdict evidence
+> ### Seven-finding disposition
 >
-> | Run | Classification | Why |
-> |---|---|---|
-> | `20260810T204913Z` | `TAINTED` | the reviewer created `REVIEW.md` inside its worktree; discarded, not corrected |
-> | `20260810T205549Z` | `TAINTED` | the reviewer created `patch.diff` and `scratch/`; discarded, not corrected |
-> | `20260810T231855Z` | `UNAVAILABLE` | contained and clean, but the report used an unsupported verdict form, so no verdict was retrievable |
+> | Finding | Disposition at reviewed software head |
+> |---|---|
+> | C1 | `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; current real-media path green; T035a retained for sanitized failure-only recurrence evidence |
+> | C2 | Admin submitted immutable revision inspection implemented and independently accepted |
+> | C3 | Protected Admin Lesson preview implemented and independently accepted |
+> | C4 | Production-safe staff lifecycle composition implemented and independently accepted; T101–T108 complete |
+> | H1–H3 | Public catalogue truthfulness, fabricated-content removal, route repair, and current manual-access copy independently accepted |
 >
-> `TAINTED`, `UNAVAILABLE` and `REJECT` are three different outcomes. **None of them is an approval**,
-> and the two TAINTED runs remain discarded whatever they concluded. These records are preserved, not
-> rewritten.
+> ### Current authorization
 >
-> ### The seven launch-blocking findings and who owns each
+> D-086 separately authorizes only the confirmed test-fixture correction for
+> `TestProductionPrivilegedMutationRoutesCommitAuditEvidence`: compose its existing legitimate Media
+> foundation so the valid Admin preview audit scenario reaches protected playback. Production behavior
+> is closed to change under that authority. No new MVP feature, unowned implementation gap, deployment,
+> or manual acceptance work starts without its own current authority.
 >
-> | # | Severity | Finding | Owning spec | Authority | State |
-> |---|---|---|---|---|---|
-> | C1 | CRITICAL | Historical merged-tree media E2E stall at `Processing` | [`specs/005-…`](../../specs/005-media-and-entitlement-evaluation/tasks.md) | `T033`–`T035a`, recurrence diagnostics | `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE` |
-> | C2 | CRITICAL | Admin submitted-revision inspector absent — approval is blind | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T067`, `T069`, `T071` | IMPLEMENTED — pending independent re-review |
-> | C3 | CRITICAL | Admin Lesson video preview absent | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T068`, `T070`, `T071`, `T072` | IMPLEMENTED — pending independent re-review |
-> | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T108` | IMPLEMENTED — pending independent re-review |
-> | H1 | HIGH | Landing renders fabricated Courses, prices and testimonials | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T040`, `T041`, `T044` | IMPLEMENTED — pending independent re-review |
-> | H2 | HIGH | Dead public routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T042`, `T045` | IMPLEMENTED — pending independent re-review |
-> | H3 | HIGH | FAQ claims Tap hosted checkout exists, against [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T043` | IMPLEMENTED — pending independent re-review |
->
-> Every Critical and High has exactly one owner and committed task or spec authority. C2, C3 and H1–H3
-> are implemented and await the complete integrated-tree independent re-review. The SpecKit authority gaps recorded as `TASK_AMENDMENT_REQUIRED` and
-> `SPEC_AMENDMENT_REQUIRED` in the 2026-08-10 block below are now resolved **for these seven findings
-> only**; the gaps that block nothing in this rejection — the `DeleteCourse` real-access guard among
-> them — remain recorded and unowned.
->
-> ### What is authorized now
->
-> Production implementation is open **only** for these seven findings and the tests and evidence they
-> directly require, under D-084. The [D-083](../DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
-> freeze is lifted exactly that far; everything else in D-083 stands. No unrelated feature, refactor,
-> redesign, commerce, payment or backlog item is authorized. Removing a false commerce **claim** from
-> public copy is in scope; adding commerce **function** is not.
->
-> The bounded plan — four dependency-ordered batches, the media diagnostic decision tree, the
-> validation matrix, the founder acceptance journey and the final re-review strategy — is
-> [`evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
->
-> **Batches B, C and D are implemented and pending the required independent re-review.** C1 remains
-> `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a captures recurrence evidence without blocking
-> local MVP work. Batch C C4 is authorized under S1C §19.4 and now has its required production-composed
-> T108 evidence; no unrelated completion batch is unblocked by this status record.
+> The earlier REJECT, its seven findings, and the discarded TAINTED/UNAVAILABLE review runs remain
+> preserved below as history; they are not the current delivery state.
 >
 > ### Review harness — tooling authority only
 >

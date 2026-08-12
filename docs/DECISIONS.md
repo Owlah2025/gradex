@@ -2820,3 +2820,55 @@ scanner change, storage change, authorization change, or any scope outside C2/C3
 C1, any slice, or any launch gate; D-084's independent-review requirement remains unchanged.
 
 **Source:** Product Owner instruction of 2026-08-11.
+
+## D-086 — The integrated remediation tree is independently approved; one post-review test-fixture correction is authorized
+
+**Date:** 2026-08-12
+**Status:** Active. Closes the bounded remediation and review requirement in
+[D-084](#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized).
+[D-085](#d-085--c1-remains-an-unresolved-intermittent-non-reproducible-defect-batch-b-is-authorized-to-proceed)
+remains active for C1 exactly as written.
+
+**Finding:** The complete integrated remediation tree at frozen software head
+`2c43b90fcf7a5c5913f42412fad5369911f781aa` received an independent review of the exact range
+`18fb7e033d0fad162caebe150fb641a00201e259..2c43b90fcf7a5c5913f42412fad5369911f781aa`.
+`agy` using `gemini-3.1-pro-high` under bwrap read-only containment returned
+`VERDICT: APPROVE`, with Critical 0, High 0, Medium 0, Low 0, and `touchedFiles: []`. The local,
+gitignored run artifacts are at
+`docs/launch/review/artifacts/18fb7e0-2c43b90-20260812T012106Z/`.
+
+A targeted independent read-only supplement then investigated the one omitted regression question:
+the Admin review-preview case in `TestProductionPrivilegedMutationRoutesCommitAuditEvidence` returned
+HTTP 404 instead of 200. The supplement returned `VERDICT: APPROVE` and classified the failure
+`B — DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT`: `setupAdminPricingAPIServer` supplied the
+Catalog foundation but omitted the Media foundation, leaving the test router's protected-playback
+dependency nil. A correctly composed current preview path returned 200, committed
+`ADMIN_CONTENT_PREVIEWED`, and passed protected-manifest binding checks. The supplement artifacts are
+at `docs/launch/review/artifacts/18fb7e0-2c43b90-20260812T013145Z/` and its closure recommendation was
+`ACCEPT EXISTING APPROVAL`.
+
+**Decision:**
+
+1. The Product Owner accepts the existing independent approval. The independently approved Gradex
+   software closure head is exactly `2c43b90fcf7a5c5913f42412fad5369911f781aa`.
+2. The seven-finding bounded remediation is closed at that software head. C1 remains truthfully
+   classified `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE` with T035a recurrence diagnostics; accepting
+   the integrated tree does not claim that C1's historical cause was found or fixed.
+3. The Admin preview 404 is a test-fixture defect, not a production defect. The minimum test-only
+   correction is authorized: compose the existing legitimate Media foundation in the affected
+   integration fixture and verify the current HTTP 200 and durable audit contract.
+4. That test-fixture correction and this closure bookkeeping occur **after** the reviewed software
+   head. They must not be represented as members of, or as independently reviewed by, the approved
+   53-commit software range.
+5. No production handler, router, authorization, CSRF, playback, media-state, audit, or binding
+   behavior may change under this test-fixture authority.
+6. This decision authorizes no new MVP feature or unrelated remediation. Any remaining software
+   implementation requires its own current authority; external, automated release-gate, and manual
+   acceptance work remain separate.
+
+**Boundary:** This closes the integrated-remediation software review, not production release. Open
+launch gates remain governed by [`docs/LAUNCH_GATES.md`](LAUNCH_GATES.md), and S13–S16/manual
+acceptance do not become complete through this decision.
+
+**Source:** Product Owner instruction of 2026-08-12 accepting the independent integrated review and
+targeted supplement, and authorizing the minimum confirmed test-fixture correction.

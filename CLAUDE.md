@@ -16,37 +16,26 @@ Inspect repository evidence instead of relying on conversation memory. Preserve 
 user-owned working-tree changes. Do not mark work complete without the evidence required by the
 current daily record.
 
-## Current phase — the integrated range was REJECTED; bounded remediation only
+## Current phase — integrated remediation approved; release gates remain
 
-The repository is in a **post-review remediation phase**. **S1B3 is not the active slice** — it closed
-on 2026-08-01, and any statement naming it as current is spent. The current authority is
-[D-084](docs/DECISIONS.md#d-084--the-independent-review-of-the-integrated-launch-range-returned-reject-and-bounded-remediation-of-its-seven-findings-is-authorized),
-which supersedes the freeze consequence of
-[D-083](docs/DECISIONS.md#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
-exactly as far as stated and no further:
+The complete integrated remediation range
+`18fb7e033d0fad162caebe150fb641a00201e259..2c43b90fcf7a5c5913f42412fad5369911f781aa`
+received an independent `VERDICT: APPROVE` with no findings. A targeted independent supplement also
+returned `VERDICT: APPROVE` and classified the Admin preview audit-test 404 as
+`B — DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT`. The Product Owner accepted the existing
+approval under
+[D-086](docs/DECISIONS.md#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized).
 
-- **The independent review of `18fb7e0..48e1f3f` returned `VERDICT: REJECT`** — 4 Critical, 3 High.
-  `agy` · `gemini-3.1-pro-high`, contained, clean worktree. The report is transcribed in the
-  remediation plan below; the raw run output under `docs/launch/review/artifacts/` is gitignored.
-  **The range is not approved.**
-- **Production implementation is authorized only for those seven findings** and the tests and evidence
-  they directly require, each under its committed task or spec authority. No unrelated feature,
-  refactor, redesign, commerce, payment or backlog item. Removing a false commerce *claim* from public
-  copy is in scope; adding commerce *function* is not.
-- **Authority precedes code.** The owning task or spec amendment is committed before the code that
-  satisfies it. Media remediation is **diagnostic-first**: capture the effective configuration before
-  changing anything.
-- **Claude authored the launch-integration implementation and is ineligible to review it.** Reviewing
-  a Claude-authored range is a self-check, not a review, and it cannot close anything.
-- **`agy` holds the independent reviewer seat**, dispatched through `scripts/agy-review.sh <base>..<head>`
-  and routed through the `agy-delegate` skill. The remediation head needs a fresh independent review of
-  the complete integrated tree before approval.
+- The independently approved software head is exactly `2c43b90fcf7a5c5913f42412fad5369911f781aa`.
+- Later closure-documentation and test-fixture commits are not part of that reviewed software range.
+- C1 remains `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a stays installed.
+- D-086 authorizes only the minimum post-review Admin preview test-fixture correction. It authorizes
+  no production behavior change or new implementation batch.
+- Release-gate, external-provider/infrastructure, and manual-acceptance work remain separate and must
+  follow their current authority.
 
-The seven findings, their owners, the four execution batches and the next single action are in
-[`docs/launch/STATUS.md`](docs/launch/STATUS.md) and
-[`docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](docs/launch/evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
-The read-only audit behind the preceding freeze phase is in
-[`docs/launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md`](docs/launch/evidence/launch-integration/2026-08-10-reality-audit-afe1624.md).
+Current delivery state and committed closure evidence are in [`docs/launch/STATUS.md`](docs/launch/STATUS.md)
+and [`docs/launch/evidence/launch-integration/2026-08-12-integrated-remediation-closure.md`](docs/launch/evidence/launch-integration/2026-08-12-integrated-remediation-closure.md).
 
 ## Seats
 
