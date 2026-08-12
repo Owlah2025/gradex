@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/mail"
 	"net/url"
 	"os"
@@ -132,11 +133,14 @@ func disabled(reason string) Capability { return Capability{reason: reason} }
 type EmailProvider string
 
 const (
-	EmailProviderFake   EmailProvider = "fake"
-	EmailProviderResend EmailProvider = "resend"
+	EmailProviderFake    EmailProvider = "fake"
+	EmailProviderMailpit EmailProvider = "mailpit"
+	EmailProviderResend  EmailProvider = "resend"
 )
 
-func (p EmailProvider) Valid() bool { return p == EmailProviderFake || p == EmailProviderResend }
+func (p EmailProvider) Valid() bool {
+	return p == EmailProviderFake || p == EmailProviderMailpit || p == EmailProviderResend
+}
 
 // EmailSettings is the immutable worker delivery configuration. API keys stay
 // wrapped until the Resend adapter is constructed.
@@ -144,6 +148,7 @@ type EmailSettings struct {
 	capability  Capability
 	provider    EmailProvider
 	apiKey      Secret
+	smtpAddr    string
 	fromAddress string
 	fromName    string
 	replyTo     string
@@ -154,6 +159,7 @@ func (s EmailSettings) Enabled() bool           { return s.capability.Enabled() 
 func (s EmailSettings) Reason() string          { return s.capability.Reason() }
 func (s EmailSettings) Provider() EmailProvider { return s.provider }
 func (s EmailSettings) APIKey() Secret          { return s.apiKey }
+func (s EmailSettings) SMTPAddress() string     { return s.smtpAddr }
 func (s EmailSettings) FromAddress() string     { return s.fromAddress }
 func (s EmailSettings) FromName() string        { return s.fromName }
 func (s EmailSettings) ReplyTo() string         { return s.replyTo }
@@ -617,6 +623,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		enabled:                    emailEnabled,
 		provider:                   emailProvider,
 		apiKey:                     secrets["EMAIL_API_KEY"],
+		smtpAddr:                   p.str("EMAIL_SMTP_ADDR", ""),
 		fromAddress:                p.str("EMAIL_FROM_ADDRESS", "no-reply@gradex.test"),
 		fromName:                   p.str("EMAIL_FROM_NAME", "Gradex"),
 		replyTo:                    p.str("EMAIL_REPLY_TO", ""),
@@ -781,6 +788,7 @@ type emailSettingsInput struct {
 	enabled                    bool
 	provider                   EmailProvider
 	apiKey                     Secret
+	smtpAddr                   string
 	fromAddress                string
 	fromName                   string
 	replyTo                    string
@@ -793,11 +801,15 @@ type emailSettingsInput struct {
 func emailSettings(in emailSettingsInput, p *parser) EmailSettings {
 	settings := EmailSettings{
 		capability: disabled("EMAIL_ENABLED is false"), provider: in.provider,
-		apiKey: in.apiKey, fromAddress: strings.TrimSpace(in.fromAddress),
+		apiKey: in.apiKey, smtpAddr: strings.TrimSpace(in.smtpAddr), fromAddress: strings.TrimSpace(in.fromAddress),
 		fromName: strings.TrimSpace(in.fromName), replyTo: strings.TrimSpace(in.replyTo), timeout: in.timeout,
 	}
 	if in.timeout < time.Second || in.timeout > 30*time.Second {
 		p.errf("EMAIL_PROVIDER_TIMEOUT must be between 1s and 30s")
+	}
+	if in.provider == EmailProviderMailpit && in.environment != EnvDevelopment {
+		p.errf("EMAIL_PROVIDER=mailpit is only allowed when APP_ENV=development")
+		return settings
 	}
 	if !in.enabled {
 		if in.environment.IsProduction() && in.serviceRole == RoleWorker {
@@ -815,7 +827,12 @@ func emailSettings(in emailSettingsInput, p *parser) EmailSettings {
 
 func validateEnabledEmail(in emailSettingsInput, settings EmailSettings) error {
 	if !in.provider.Valid() {
-		return fmt.Errorf("EMAIL_PROVIDER must be fake or resend; got %q", in.provider)
+		return fmt.Errorf("EMAIL_PROVIDER must be fake, mailpit, or resend; got %q", in.provider)
+	}
+	if in.provider == EmailProviderMailpit {
+		if err := validateMailpitSMTPAddress(settings.smtpAddr); err != nil {
+			return err
+		}
 	}
 	if in.environment.IsProduction() && in.provider != EmailProviderResend {
 		return errors.New("production transactional email requires EMAIL_PROVIDER=resend")
@@ -830,6 +847,22 @@ func validateEnabledEmail(in emailSettingsInput, settings EmailSettings) error {
 		return errors.New("transactional email requires the protected outbox key and version")
 	}
 	return validateProductionEmail(in, settings)
+}
+
+func validateMailpitSMTPAddress(address string) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || port == "" {
+		return errors.New("EMAIL_SMTP_ADDR must be a loopback host:port for Mailpit delivery")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("EMAIL_SMTP_ADDR must use a loopback IP address for Mailpit delivery")
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return errors.New("EMAIL_SMTP_ADDR must contain a valid port for Mailpit delivery")
+	}
+	return nil
 }
 
 func validateEmailAddresses(settings EmailSettings) error {

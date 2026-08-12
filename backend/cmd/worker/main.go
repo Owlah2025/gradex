@@ -216,6 +216,8 @@ func transactionalEmailSender(settings config.EmailSettings) (transactionalemail
 	switch settings.Provider() {
 	case config.EmailProviderFake:
 		return transactionalemail.NewFakeSender(), nil
+	case config.EmailProviderMailpit:
+		return transactionalemail.NewMailpitSender(transactionalemail.MailpitOptions{Address: settings.SMTPAddress(), Timeout: settings.Timeout()})
 	case config.EmailProviderResend:
 		return transactionalemail.NewResendSender(transactionalemail.ResendOptions{APIKey: settings.APIKey(), Timeout: settings.Timeout()})
 	default:

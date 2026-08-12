@@ -402,6 +402,15 @@ func TestTransactionalEmailConfiguration(t *testing.T) {
 		sec["EMAIL_API_KEY"] = "resend-key-canary"
 		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("e", 32)
 	}
+	configureMailpit := func(s map[string]string, sec MapSecretResolver) {
+		s["APP_ENV"] = "development"
+		s["PUBLIC_ORIGIN"] = "http://localhost:3000"
+		s["EMAIL_ENABLED"] = "true"
+		s["EMAIL_PROVIDER"] = "mailpit"
+		s["EMAIL_SMTP_ADDR"] = "127.0.0.1:1025"
+		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
+		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("m", 32)
+	}
 
 	t.Run("production Resend loads typed settings", func(t *testing.T) {
 		cfg := mustLoad(t, configureResend)
@@ -441,6 +450,35 @@ func TestTransactionalEmailConfiguration(t *testing.T) {
 		if !cfg.Email().Enabled() || cfg.Email().Provider() != EmailProviderFake {
 			t.Fatalf("development fake email not enabled: %q", cfg.Email().Reason())
 		}
+	})
+
+	t.Run("development Mailpit loads a loopback SMTP address", func(t *testing.T) {
+		cfg := mustLoad(t, configureMailpit)
+		if !cfg.Email().Enabled() || cfg.Email().Provider() != EmailProviderMailpit || cfg.Email().SMTPAddress() != "127.0.0.1:1025" {
+			t.Fatalf("development Mailpit email = enabled %t provider %q address %q reason %q", cfg.Email().Enabled(), cfg.Email().Provider(), cfg.Email().SMTPAddress(), cfg.Email().Reason())
+		}
+	})
+
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment+" rejects Mailpit", func(t *testing.T) {
+			wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+				configureMailpit(s, sec)
+				s["APP_ENV"] = environment
+			}, "EMAIL_PROVIDER=mailpit is only allowed when APP_ENV=development")
+		})
+	}
+
+	t.Run("production rejects disabled Mailpit", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
+			s["EMAIL_PROVIDER"] = "mailpit"
+		}, "EMAIL_PROVIDER=mailpit is only allowed when APP_ENV=development")
+	})
+
+	t.Run("Mailpit refuses a non-loopback SMTP address", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configureMailpit(s, sec)
+			s["EMAIL_SMTP_ADDR"] = "192.0.2.7:1025"
+		}, "loopback IP address")
 	})
 
 	t.Run("malformed timeout fails closed", func(t *testing.T) {

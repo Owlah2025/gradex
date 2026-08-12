@@ -17,7 +17,7 @@ One row per supported outbox event.
 | `attempt_count` | Completed/started attempt count, constrained to 0–5 |
 | `next_attempt_at` | PostgreSQL schedule for queued retry |
 | `lease_token`, `lease_expires_at` | Opaque concurrent-worker claim; no provider credential |
-| `provider` | `fake` or `resend` |
+| `provider` | `fake`, development-only `mailpit`, or `resend` |
 | `provider_message_id` | Optional provider acceptance identifier, infrastructure evidence only |
 | `last_failure_class`, `last_provider_code` | Safe bounded classifications; never raw provider message/body |
 | timestamps | queued, accepted/terminal, created, updated |

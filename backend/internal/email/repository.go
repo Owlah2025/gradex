@@ -89,7 +89,7 @@ func (r *Repository) Claim(ctx context.Context, options ClaimOptions) ([]Claim, 
 }
 
 func (b claimBatch) validate() error {
-	if b.provider != "fake" && b.provider != "resend" {
+	if b.provider != "fake" && b.provider != "mailpit" && b.provider != "resend" {
 		return errors.New("transactional email provider is unsupported")
 	}
 	if b.lease <= 0 {

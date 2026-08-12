@@ -10,13 +10,16 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
-func workerConfig(t *testing.T, emailEnabled bool) *config.Config {
+func workerConfig(t *testing.T, emailEnabled bool, emailProvider string) *config.Config {
 	t.Helper()
 	values := map[string]string{
 		"APP_ENV": "development", "SERVICE_ROLE": "worker", "REDIS_ADDR": "localhost:6379",
 		"PUBLIC_ORIGIN": "http://localhost:3000",
 		"S3_ENDPOINT":   "http://localhost:9000", "S3_BUCKET": "gradex-test",
-		"EMAIL_PROVIDER": "fake", "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "test-v1",
+		"EMAIL_PROVIDER": emailProvider, "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "test-v1",
+	}
+	if emailProvider == string(config.EmailProviderMailpit) {
+		values["EMAIL_SMTP_ADDR"] = "127.0.0.1:1025"
 	}
 	if emailEnabled {
 		values["EMAIL_ENABLED"] = "true"
@@ -32,7 +35,7 @@ func workerConfig(t *testing.T, emailEnabled bool) *config.Config {
 }
 
 func TestWorkerBuildsConfiguredFakeTransactionalEmailDispatcher(t *testing.T) {
-	settings := workerConfig(t, true)
+	settings := workerConfig(t, true, string(config.EmailProviderFake))
 	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -49,11 +52,21 @@ func TestWorkerBuildsConfiguredFakeTransactionalEmailDispatcher(t *testing.T) {
 }
 
 func TestWorkerOmitsTransactionalEmailDispatcherWhenDisabledOutsideProduction(t *testing.T) {
-	dispatcher, err := buildTransactionalEmailDispatcher(transactionalEmailDependencies{config: workerConfig(t, false)})
+	dispatcher, err := buildTransactionalEmailDispatcher(transactionalEmailDependencies{config: workerConfig(t, false, string(config.EmailProviderFake))})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if dispatcher != nil {
 		t.Fatal("disabled development email produced a dispatcher")
+	}
+}
+
+func TestWorkerBuildsConfiguredMailpitTransactionalEmailSender(t *testing.T) {
+	sender, err := transactionalEmailSender(workerConfig(t, true, string(config.EmailProviderMailpit)).Email())
+	if err != nil {
+		t.Fatalf("building Mailpit sender: %v", err)
+	}
+	if sender.Provider() != string(config.EmailProviderMailpit) {
+		t.Fatalf("provider = %q", sender.Provider())
 	}
 }
