@@ -78,6 +78,13 @@ the container, certificates, keys, credentials, and temporary directory through 
 cleanup. This permits no production Redis configuration or security-policy change and no shared
 development-harness redesign.
 
+**2026-08-12 T108 password-screening amendment:** T108 may pass an explicit Go-level
+`CompromisedRangeSource` factory into a test-only production-composition constructor. The normal
+production constructor must continue to call `identity.NewRuntimeCompromisedSource`; no environment
+value, global switch, no-op source, or public Internet request may activate the injected source. The
+test source must deterministically accept a strong password and reject a compromised canary through
+the existing identity validation path.
+
 **2026-08-12 implementation amendment:** T101–T108 are authorized only by spec §19.4. They are the
 bounded C4 remediation: production composition of the existing staff lifecycle, its smallest
 Instructor/status operational read/UI surface, and the directly required verification. They do not
