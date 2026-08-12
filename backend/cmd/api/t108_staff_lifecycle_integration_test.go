@@ -300,6 +300,10 @@ func TestT108ProductionStaffLifecycle(t *testing.T) {
 	t108Denied(t, instructor.call("GET", "/api/v1/staff-invitations/instructors", nil, false), "Instructor Instructor list")
 	list := admin.call("GET", "/api/v1/staff-invitations/instructors", nil, false)
 	t108Status(t, list, http.StatusOK, "Admin Instructor list")
+	lowerList := strings.ToLower(list.Body.String())
+	if strings.Contains(lowerList, "password") || strings.Contains(lowerList, "token") || strings.Contains(lowerList, "secret") {
+		t.Fatal("Instructor operational list exposed credential or action-secret fields")
+	}
 	var instructors struct {
 		Instructors []struct {
 			ID          string    `json:"id"`
@@ -347,6 +351,24 @@ func TestT108ProductionStaffLifecycle(t *testing.T) {
 	}
 	if role != string(identity.RoleInstructor) || status != string(identity.StatusActive) {
 		t.Fatalf("reinstated account = %s/%s, want INSTRUCTOR/ACTIVE", role, status)
+	}
+	var credentialState string
+	if err := p.QueryRow(t.Context(), `SELECT state::text FROM password_credentials WHERE account_id=$1::uuid`, accountID).Scan(&credentialState); err != nil {
+		t.Fatal(err)
+	}
+	if credentialState != string(identity.CredentialActive) {
+		t.Fatalf("onboarded Instructor credential state = %s, want ACTIVE", credentialState)
+	}
+	var safeEvidence string
+	if err := p.QueryRow(t.Context(), `SELECT coalesce(string_agg(payload, ''), '') FROM (
+		SELECT safe_payload::text AS payload FROM outbox_events
+		UNION ALL
+		SELECT evidence::text AS payload FROM identity_security_events
+	) evidence`).Scan(&safeEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(safeEvidence, t108Pass) || strings.Contains(safeEvidence, t108CompromisedPass) {
+		t.Fatal("password plaintext appeared in durable safe evidence")
 	}
 	if !strings.Contains(logs.String(), `"limiter_outcome":"ALLOW"`) {
 		t.Fatal("production staff journey did not emit Redis-backed rate-limit decisions")

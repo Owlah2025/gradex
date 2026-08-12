@@ -44,7 +44,7 @@
 > | C1 | CRITICAL | Historical merged-tree media E2E stall at `Processing` | [`specs/005-…`](../../specs/005-media-and-entitlement-evaluation/tasks.md) | `T033`–`T035a`, recurrence diagnostics | `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE` |
 > | C2 | CRITICAL | Admin submitted-revision inspector absent — approval is blind | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T067`, `T069`, `T071` | IMPLEMENTED — pending independent re-review |
 > | C3 | CRITICAL | Admin Lesson video preview absent | [`specs/003-…`](../../specs/003-course-authoring/tasks.md) | `T068`, `T070`, `T071`, `T072` | IMPLEMENTED — pending independent re-review |
-> | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
+> | C4 | CRITICAL | Production staff onboarding blocked by the `EnvDevelopment` gate | [`specs/002-auth-rbac/s1c/`](../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T108` | IMPLEMENTED — pending independent re-review |
 > | H1 | HIGH | Landing renders fabricated Courses, prices and testimonials | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T040`, `T041`, `T044` | IMPLEMENTED — pending independent re-review |
 > | H2 | HIGH | Dead public routes: `/courses`, `/dashboard`, `/about`, `/teach`, `/contact` | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T042`, `T045` | IMPLEMENTED — pending independent re-review |
 > | H3 | HIGH | FAQ claims Tap hosted checkout exists, against [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation) | [`specs/004-…`](../../specs/004-public-catalogue/tasks.md) | `T043` | IMPLEMENTED — pending independent re-review |
@@ -67,10 +67,10 @@
 > validation matrix, the founder acceptance journey and the final re-review strategy — is
 > [`evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md`](evidence/launch-integration/2026-08-11-post-reject-remediation-plan.md).
 >
-> **Batches B and D are implemented and pending the required independent re-review.** C1 remains
+> **Batches B, C and D are implemented and pending the required independent re-review.** C1 remains
 > `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a captures recurrence evidence without blocking
-> local MVP work. Batch C C4 is authorized under S1C §19.4 and is the active bounded remediation;
-> no unrelated completion batch is unblocked by this status record.
+> local MVP work. Batch C C4 is authorized under S1C §19.4 and now has its required production-composed
+> T108 evidence; no unrelated completion batch is unblocked by this status record.
 >
 > ### Review harness — tooling authority only
 >

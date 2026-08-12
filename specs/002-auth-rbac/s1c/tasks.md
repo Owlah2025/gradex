@@ -31,41 +31,41 @@ existing Account, and no MFA enter this scope. §4's exclusions still hold.
 
 ## Tasks
 
-- [ ] T101 Add typed production-composition preconditions for the staff foundation covering every item
+- [X] T101 Add typed production-composition preconditions for the staff foundation covering every item
       in §19.2 — real session foundation, `CapAdminOperations` / `CapSecurityOperations` policy
       gating, production origin/CSRF enforcement, production-safe compromised-password screening,
       production-safe rate limiting, audit sink, durable Staff Invitation storage, transactional email
       outbox, and a configured production email provider — evaluated at startup and reported
       individually. Development-only admission policy and the development scanner seam must be
       structurally unreachable from this path.
-- [ ] T102 Replace the `EnvDevelopment` hard gate on staff lifecycle composition in
+- [X] T102 Replace the `EnvDevelopment` hard gate on staff lifecycle composition in
       `backend/cmd/api/main.go` with the T101 precondition evaluation: mount the staff routes when all
       preconditions hold, and **fail closed** — refusing to start with a message naming the unmet
       precondition — when any does not. No degraded variant, and no fallback to the development
       composition. Staff composition stays independent of Student registration.
-- [ ] T103 Prove the production path with `APP_ENV=production` and a valid production-safe
+- [X] T103 Prove the production path with `APP_ENV=production` and a valid production-safe
       configuration: the staff invitation and lifecycle routes are mounted; an Admin with the required
       capability and a fresh recent-authentication window creates an invitation; the invitee completes
       it and logs in normally afterwards; suspension and reinstatement behave under the existing
       policy, including immediate session-family death. The test must not require live email delivery
       — the durable outbox intent is the boundary it asserts.
-- [ ] T104 Prove the denial matrix under production composition: Instructor, Student and
+- [X] T104 Prove the denial matrix under production composition: Instructor, Student and
       unauthenticated callers are refused on every staff route exactly as §8 requires, by capability
       rather than by a handler-local role string, and a stale-recent-auth Admin is refused at the
       backend policy boundary.
-- [ ] T105 Prove fail-closed startup: for each §19.2 precondition, an otherwise-valid production
+- [X] T105 Prove fail-closed startup: for each §19.2 precondition, an otherwise-valid production
       configuration with that one precondition unmet refuses to compose the staff routes and names the
       failure. Include the invitation-secret confidentiality assertion — no bearer in logs, argv,
       telemetry, DOM, storage or the address bar.
 
-- [ ] T106 Add the smallest Admin-only Instructor operational-status read surface. It may return only
+- [X] T106 Add the smallest Admin-only Instructor operational-status read surface. It may return only
       Instructor invitation/account identifiers and status needed to operate the lifecycle; it must not
       become generic Account search, Student administration, or role editing. The existing capability,
       recent-auth, session, CSRF/origin, audit, and non-enumeration rules remain authoritative.
-- [ ] T107 Replace the manual account-ID Admin staff controls with a localized Instructor/status list
+- [X] T107 Replace the manual account-ID Admin staff controls with a localized Instructor/status list
       and per-row invite, suspend, and reinstate actions backed by T106 and the existing secured
       mutation routes. Do not add role-editing controls or a generic user-management surface.
-- [ ] T108 Extend the authorized automated staff journey to use the durable outbox testing seam for an
+- [X] T108 Extend the authorized automated staff journey to use the durable outbox testing seam for an
       Admin invitation, Instructor preview/completion/login/authorized access, suspension denial, and
       reinstatement under production composition. It must also prove Instructor, Student, anonymous,
       and stale-recent-auth denials without manual browser operation.
@@ -92,8 +92,8 @@ reopen S1C or authorize unrelated Identity work.
 
 ## Task count
 
-8 tasks, all open. None is complete, and none may be marked complete in the authority pass that
-created this file.
+8 tasks, all complete. T101–T107 were implemented in the preceding Batch C commits; T108 supplies the
+2026-08-12 production-composed lifecycle evidence required to close the batch.
 
 ## Out of scope
 
