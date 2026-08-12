@@ -14,7 +14,15 @@ import {
   setCourseDefaultAccessExpiry,
   getAdminEntitlementDetail,
 } from "@/lib/api/access";
+import { getPublicCourses } from "@/lib/api/public-catalog";
 import { ProblemError } from "@/lib/api/problem";
+import { PublishedCourseSelector } from "@/components/admin/published-course-selector";
+import {
+  buildPublishedCourseOptions,
+  findPublishedCourse,
+  invitationCourseLabel,
+  type PublishedCourseOption,
+} from "@/components/admin/published-courses";
 
 function getProblemErrorMessage(e: unknown, fallback: string): string {
   if (e instanceof ProblemError) {
@@ -33,14 +41,19 @@ export default function AdminCourseAccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // The one Course context both Admin operations act on. The Admin picks a
+  // published Course by title; the identifier below is never typed by hand.
+  const [courseOptions, setCourseOptions] = useState<PublishedCourseOption[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState<boolean>(true);
+  const [coursesError, setCoursesError] = useState<string | null>(null);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+
   // Form states: Expiry Configuration
-  const [expiryCourseId, setExpiryCourseId] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<string>("");
   const [expiryReason, setExpiryReason] = useState<string>("");
   const [expirySubmitting, setExpirySubmitting] = useState<boolean>(false);
 
   // Form states: Create Invitation
-  const [createCourseId, setCreateCourseId] = useState<string>("");
   const [createEmail, setCreateEmail] = useState<string>("");
   const [createNote, setCreateNote] = useState<string>("");
   const [createRef, setCreateRef] = useState<string>("");
@@ -70,20 +83,59 @@ export default function AdminCourseAccessPage() {
     }
   }, [locale]);
 
+  /**
+   * The published catalogue is the authoritative list of Courses a launch
+   * grant can target: published, not emergency-suspended, not retired, live
+   * revision. The second read only supplies the other-locale title, so its
+   * failure narrows the label rather than the Course list.
+   */
+  const fetchCourses = useCallback(async () => {
+    setCoursesLoading(true);
+    setCoursesError(null);
+    try {
+      const alternateLocale = locale === "ar" ? "en" : "ar";
+      const [primary, alternate] = await Promise.all([
+        getPublicCourses(locale),
+        getPublicCourses(alternateLocale).catch(() => null),
+      ]);
+      const options = buildPublishedCourseOptions(primary.items ?? [], alternate?.items ?? []);
+      setCourseOptions(options);
+      // A Course that left the published catalogue must not stay silently
+      // selected under a stale label.
+      setSelectedCourseId((current) =>
+        current && options.some((option) => option.id === current) ? current : "",
+      );
+    } catch (e: unknown) {
+      setCourseOptions([]);
+      setSelectedCourseId("");
+      setCoursesError(getProblemErrorMessage(e, "Failed to load published Courses"));
+    } finally {
+      setCoursesLoading(false);
+    }
+  }, [locale]);
+
   useEffect(() => {
     fetchInvitations();
   }, [fetchInvitations]);
 
+  useEffect(() => {
+    fetchCourses();
+  }, [fetchCourses]);
+
+  const selectedCourse = findPublishedCourse(courseOptions, selectedCourseId);
+  const courseLabel = (courseID: string): string => invitationCourseLabel(courseOptions, courseID);
+
   const handleSetExpiry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!expiryCourseId || !expiryDate || !expiryReason) return;
+    if (!selectedCourseId || !expiryDate || !expiryReason) return;
     setExpirySubmitting(true);
     setError(null);
     setSuccess(null);
     try {
-      await setCourseDefaultAccessExpiry(expiryCourseId, expiryDate, expiryReason, locale);
-      setSuccess(`Default access expiry configured for course ${expiryCourseId}`);
-      setExpiryCourseId("");
+      await setCourseDefaultAccessExpiry(selectedCourseId, expiryDate, expiryReason, locale);
+      setSuccess(
+        `Default access expiry configured for ${selectedCourse?.title ?? courseLabel(selectedCourseId)}`,
+      );
       setExpiryDate("");
       setExpiryReason("");
     } catch (err: unknown) {
@@ -95,20 +147,23 @@ export default function AdminCourseAccessPage() {
 
   const handleCreateInvitation = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!createCourseId || !createEmail) return;
+    if (!selectedCourseId || !createEmail) return;
     setCreateSubmitting(true);
     setError(null);
     setSuccess(null);
     try {
       const created = await createCourseAccessInvitation(
-        createCourseId,
+        selectedCourseId,
         createEmail,
         createNote || undefined,
         createRef || undefined,
         locale,
       );
-      setSuccess(`Course access invitation created for ${created?.email || createEmail}`);
-      setCreateCourseId("");
+      setSuccess(
+        `Course access invitation created for ${created?.email || createEmail} on ${
+          selectedCourse?.title ?? courseLabel(selectedCourseId)
+        }`,
+      );
       setCreateEmail("");
       setCreateNote("");
       setCreateRef("");
@@ -210,22 +265,25 @@ export default function AdminCourseAccessPage() {
         </div>
       )}
 
+      <PublishedCourseSelector
+        options={courseOptions}
+        loading={coursesLoading}
+        error={coursesError}
+        selectedCourseID={selectedCourseId}
+        onSelect={setSelectedCourseId}
+        onRetry={fetchCourses}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Course Default Access Expiry Config */}
         <section className="bg-white p-6 rounded-lg border shadow-sm">
           <h2 className="text-xl font-semibold mb-4 text-gray-800">1. Configure Course Access Expiry</h2>
+          <p className="text-sm text-gray-600 mb-4" data-testid="expiry-course-context">
+            {selectedCourse
+              ? `Applies to ${selectedCourse.title}.`
+              : "Select a published Course above to configure its default access expiry."}
+          </p>
           <form onSubmit={handleSetExpiry} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Course ID (UUID)</label>
-              <input
-                type="text"
-                required
-                value={expiryCourseId}
-                onChange={(e) => setExpiryCourseId(e.target.value)}
-                placeholder="20000000-0000-0000-0000-000000000001"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Default Access Expiry Date (YYYY-MM-DD)</label>
               <input
@@ -249,7 +307,7 @@ export default function AdminCourseAccessPage() {
             </div>
             <button
               type="submit"
-              disabled={expirySubmitting}
+              disabled={expirySubmitting || !selectedCourseId}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm text-sm disabled:opacity-50"
             >
               {expirySubmitting ? "Saving..." : "Save Default Expiry"}
@@ -260,18 +318,12 @@ export default function AdminCourseAccessPage() {
         {/* Create Invitation */}
         <section className="bg-white p-6 rounded-lg border shadow-sm">
           <h2 className="text-xl font-semibold mb-4 text-gray-800">2. Issue Course Access Invitation</h2>
+          <p className="text-sm text-gray-600 mb-4" data-testid="invitation-course-context">
+            {selectedCourse
+              ? `Grants access to ${selectedCourse.title}.`
+              : "Select a published Course above to issue an invitation."}
+          </p>
           <form onSubmit={handleCreateInvitation} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Course ID (UUID)</label>
-              <input
-                type="text"
-                required
-                value={createCourseId}
-                onChange={(e) => setCreateCourseId(e.target.value)}
-                placeholder="20000000-0000-0000-0000-000000000001"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-              />
-            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Student Email Address</label>
               <input
@@ -305,7 +357,7 @@ export default function AdminCourseAccessPage() {
             </div>
             <button
               type="submit"
-              disabled={createSubmitting}
+              disabled={createSubmitting || !selectedCourseId}
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-md shadow-sm text-sm disabled:opacity-50"
             >
               {createSubmitting ? "Creating..." : "Create Invitation"}
@@ -337,7 +389,7 @@ export default function AdminCourseAccessPage() {
               <thead>
                 <tr className="bg-gray-100 border-b text-gray-700">
                   <th className="p-3">ID / Recipient</th>
-                  <th className="p-3">Course ID</th>
+                  <th className="p-3">Course</th>
                   <th className="p-3">State</th>
                   <th className="p-3">Timestamps</th>
                   <th className="p-3 text-right">Actions</th>
@@ -350,7 +402,9 @@ export default function AdminCourseAccessPage() {
                       <div className="font-semibold text-gray-900">{inv.email}</div>
                       <div className="text-gray-400">{inv.id}</div>
                     </td>
-                    <td className="p-3 font-mono text-xs text-gray-600">{inv.course_id}</td>
+                    <td className="p-3 text-xs text-gray-700" data-testid={`invitation-course-${inv.id}`}>
+                      {courseLabel(inv.course_id)}
+                    </td>
                     <td className="p-3">
                       <span
                         className={`inline-block px-2 py-1 text-xs font-semibold rounded ${

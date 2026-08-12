@@ -51,12 +51,18 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await adminPage.goto("/en/admin/course-access");
     await expect(adminPage.locator("h1")).toContainText("Course Access Management");
 
-    // 3. Admin configures future Course access-expiry date
-    const expiryCourseInput = adminPage.locator('input[placeholder="20000000-0000-0000-0000-000000000001"]').first();
+    // 3. Admin selects the published Course by title, then configures its
+    // future access-expiry date. No Course identifier is ever typed.
+    const courseSelect = adminPage.getByTestId("course-access-course-select");
+    await expect(courseSelect).toBeVisible();
+    await expect(courseSelect).toContainText("CS101");
+    await expect(adminPage.locator("body")).not.toContainText("Course ID (UUID)");
+    await courseSelect.selectOption(COURSE_ID);
+    await expect(adminPage.getByTestId("course-access-selected-course")).toContainText("CS101");
+
     const expiryDateInput = adminPage.locator('input[type="date"]').first();
     const expiryReasonInput = adminPage.locator('input[placeholder="Standard cohort 30-day access grant"]').first();
 
-    await expiryCourseInput.fill(COURSE_ID);
     await expiryDateInput.fill("2026-12-31");
     await expiryReasonInput.fill("August 15 Launch Cohort");
 
@@ -65,17 +71,18 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     // 4. Assert successful UI result
     await expect(adminPage.locator('[role="status"]')).toContainText("Default access expiry configured");
 
-    // 5. Admin creates an invitation for Student A (unentitled student)
-    const createCourseInput = adminPage.locator('input[placeholder="20000000-0000-0000-0000-000000000001"]').nth(1);
+    // 5. Admin creates an invitation for Student A (unentitled student) on the
+    // same selected Course.
     const createEmailInput = adminPage.locator('input[type="email"]').first();
 
-    await createCourseInput.fill(COURSE_ID);
     await createEmailInput.fill(STUDENT_A_EMAIL);
     await adminPage.click('button:has-text("Create Invitation")');
 
-    // 6. Assert invitation appears in queue as PENDING_STUDENT_ACCEPTANCE
+    // 6. Assert invitation appears in queue as PENDING_STUDENT_ACCEPTANCE,
+    // named by the Course the Admin selected.
     await expect(adminPage.locator("table")).toContainText(STUDENT_A_EMAIL);
     await expect(adminPage.locator("table")).toContainText("PENDING_STUDENT_ACCEPTANCE");
+    await expect(adminPage.locator("table")).toContainText("CS101");
 
     // Extract invitation ID from queue table cell
     const invitationIdText = await adminPage.locator(`td:has-text("${STUDENT_A_EMAIL}")`).first().innerText();
@@ -270,11 +277,10 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     // Admin creates invitation for Rejection test
     await adminPage.goto("/en/admin/course-access");
-    const courseInput = adminPage.locator('input[placeholder="20000000-0000-0000-0000-000000000001"]').nth(1);
     const emailInput = adminPage.locator('input[type="email"]').first();
     const rejectTargetEmail = "student-reject@example.test";
 
-    await courseInput.fill(COURSE_ID);
+    await adminPage.getByTestId("course-access-course-select").selectOption(COURSE_ID);
     await emailInput.fill(rejectTargetEmail);
     await adminPage.click('button:has-text("Create Invitation")');
 

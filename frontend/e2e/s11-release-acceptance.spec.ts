@@ -162,10 +162,12 @@ test.describe("S11 release acceptance", () => {
       await adminPage.goto("/en/admin/course-access");
       await expect(adminPage.locator("h1")).toContainText("Course Access Management");
 
-      await adminPage
-        .locator('input[placeholder="20000000-0000-0000-0000-000000000001"]')
-        .first()
-        .fill(COURSE_ID);
+      // The launch Course is chosen by title; no Course identifier is typed.
+      const courseSelect = adminPage.getByTestId("course-access-course-select");
+      await expect(courseSelect).toBeVisible();
+      await expect(adminPage.locator("body")).not.toContainText("Course ID (UUID)");
+      await courseSelect.selectOption(COURSE_ID);
+      await expect(adminPage.getByTestId("course-access-selected-course")).toBeVisible();
       await adminPage.locator('input[type="date"]').first().fill("2026-12-31");
       await adminPage
         .locator('input[placeholder="Standard cohort 30-day access grant"]')
@@ -174,10 +176,6 @@ test.describe("S11 release acceptance", () => {
       await adminPage.getByRole("button", { name: "Save Default Expiry" }).click();
       await expect(adminPage.locator('[role="status"]')).toContainText("Default access expiry configured");
 
-      await adminPage
-        .locator('input[placeholder="20000000-0000-0000-0000-000000000001"]')
-        .nth(1)
-        .fill(COURSE_ID);
       await adminPage.locator('input[type="email"]').first().fill(STUDENT_EMAIL);
       await adminPage.getByRole("button", { name: "Create Invitation" }).click();
       await expect(adminPage.locator("table")).toContainText(STUDENT_EMAIL);
