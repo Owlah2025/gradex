@@ -61,12 +61,24 @@ test("does not treat a lookalike prefix as blocked", () => {
 });
 
 test("prefers a safe destination and falls back to the role root", () => {
-  assert.equal(postLoginDestination("STUDENT", "/courses"), "/courses");
+  assert.equal(postLoginDestination("STUDENT", "/courses", "en"), "/courses");
   assert.equal(
-    postLoginDestination("STUDENT", "https://evil.example"),
-    roleRoot("STUDENT"),
+    postLoginDestination("STUDENT", "https://evil.example", "en"),
+    roleRoot("STUDENT", "en"),
   );
-  assert.equal(postLoginDestination("ADMIN", null), roleRoot("ADMIN"));
+  assert.equal(
+    postLoginDestination("ADMIN", null, "ar"),
+    roleRoot("ADMIN", "ar"),
+  );
+});
+
+test("maps every role to its existing localized home", () => {
+  assert.equal(roleRoot("STUDENT", "en"), "/en/learn/dashboard");
+  assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
+  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
+  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
+  assert.equal(roleRoot("ADMIN", "en"), "/en/admin/catalog");
+  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin/catalog");
 });
 
 test("carries a validated destination across an admission hop", () => {
@@ -129,23 +141,28 @@ test("a restricted principal goes to the password change, whatever it asked for"
   // The founder's finding: signing in successfully and then being refused every
   // screen. A restricted principal must reach the one screen it can act on.
   assert.equal(
-    postAuthenticationDestination("ADMIN", null, true),
+    postAuthenticationDestination("ADMIN", null, "en", true),
     passwordChangePath,
   );
   assert.equal(
-    postAuthenticationDestination("INSTRUCTOR", "/en/instructor/courses", true),
+    postAuthenticationDestination(
+      "INSTRUCTOR",
+      "/en/instructor/courses",
+      "en",
+      true,
+    ),
     `${passwordChangePath}?returnTo=%2Fen%2Finstructor%2Fcourses`,
   );
 });
 
 test("an unrestricted principal is routed normally", () => {
   assert.equal(
-    postAuthenticationDestination("STUDENT", "/courses", false),
+    postAuthenticationDestination("STUDENT", "/courses", "en", false),
     "/courses",
   );
   assert.equal(
-    postAuthenticationDestination("ADMIN", null, false),
-    roleRoot("ADMIN"),
+    postAuthenticationDestination("ADMIN", null, "ar", false),
+    roleRoot("ADMIN", "ar"),
   );
 });
 
@@ -166,10 +183,13 @@ test("a completed change lands each role on its own authorized surface", () => {
     postPasswordChangeDestination("INSTRUCTOR", null, "ar"),
     "/ar/instructor/courses",
   );
-  assert.equal(postPasswordChangeDestination("ADMIN", null, "en"), "/staff");
+  assert.equal(
+    postPasswordChangeDestination("ADMIN", null, "en"),
+    "/en/admin/catalog",
+  );
   assert.equal(
     postPasswordChangeDestination("STUDENT", null, "en"),
-    roleRoot("STUDENT"),
+    roleRoot("STUDENT", "en"),
   );
 });
 
@@ -181,6 +201,6 @@ test("a completed change still honours the destination the visitor was interrupt
   // But not a hostile one, revalidated here like at every other hop.
   assert.equal(
     postPasswordChangeDestination("ADMIN", "https://evil.example", "en"),
-    "/staff",
+    "/en/admin/catalog",
   );
 });

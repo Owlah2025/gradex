@@ -89,6 +89,7 @@ export function LoginForm() {
         postAuthenticationDestination(
           session.role,
           searchParams.get("returnTo"),
+          locale,
           session.password_change_required === true,
         ),
       );

@@ -17,6 +17,13 @@ export const ar: Dictionary = {
     register: "إنشاء حساب",
     browse: "تصفّح المقررات",
     dashboard: "لوحتي",
+    instructorStudio: "استوديو المحاضر",
+    adminWorkspace: "مساحة الإدارة",
+    workspaceNavigation: "التنقل في مساحة العمل",
+    courseReview: "مراجعة المقررات وإدارتها",
+    courseAccess: "الوصول إلى المقررات",
+    staffOperations: "إدارة فريق العمل",
+    courseBuilder: "منشئ المقررات",
     notifications: "الإشعارات",
   },
   auth: {

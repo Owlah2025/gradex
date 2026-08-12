@@ -10,6 +10,6 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/lib/identity/**/*.ts", "src/lib/formatters/**/*.ts", "src/lib/i18n/**/*.ts", "src/lib/admin/**/*.ts", "src/lib/api/**/*.ts", "src/lib/legal/**/*.ts", "src/components/learning/**/*.test.ts", "src/components/admin/**/*.test.ts", "src/components/sections/**/*.test.ts"],
+  "include": ["src/lib/identity/**/*.ts", "src/lib/formatters/**/*.ts", "src/lib/i18n/**/*.ts", "src/lib/admin/**/*.ts", "src/lib/api/**/*.ts", "src/lib/legal/**/*.ts", "src/components/learning/**/*.test.ts", "src/components/admin/**/*.test.ts", "src/components/layout/**/*.test.ts", "src/components/sections/**/*.test.ts"],
   "exclude": ["node_modules"]
 }

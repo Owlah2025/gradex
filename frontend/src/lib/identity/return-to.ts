@@ -69,24 +69,28 @@ export function safeReturnTo(value: unknown): string | null {
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
-/**
- * The stable landing route for a role.
- *
- * Every role currently resolves to the catalog root because no authenticated
- * shell exists yet: the Student, Instructor, and Admin dashboards described in
- * NAVIGATION_RULES.md are built in later slices. Update this map when those
- * routes land, rather than inventing destinations that would 404 today.
- */
-export function roleRoot(_role: SessionRole): string {
-  return "/";
+/** The stable existing application surface for a role and locale. */
+export function roleRoot(
+  role: SessionRole,
+  locale: "ar" | "en",
+): string {
+  switch (role) {
+    case "STUDENT":
+      return `/${locale}/learn/dashboard`;
+    case "INSTRUCTOR":
+      return `/${locale}/instructor/courses`;
+    case "ADMIN":
+      return `/${locale}/admin/catalog`;
+  }
 }
 
 /** Prefers a validated caller destination, else the role root. */
 export function postLoginDestination(
   role: SessionRole,
   requested: unknown,
+  locale: "ar" | "en",
 ): string {
-  return safeReturnTo(requested) ?? roleRoot(role);
+  return safeReturnTo(requested) ?? roleRoot(role, locale);
 }
 
 /**
@@ -105,40 +109,28 @@ export function postLoginDestination(
 export function postAuthenticationDestination(
   role: SessionRole,
   requested: unknown,
+  locale: "ar" | "en",
   passwordChangeRequired: boolean,
 ): string {
   if (passwordChangeRequired) {
     return withReturnTo(passwordChangePath, requested);
   }
-  return postLoginDestination(role, requested);
+  return postLoginDestination(role, requested, locale);
 }
 
 /**
  * Where a principal goes once its password change has committed.
  *
  * A requested destination still wins when it is safe, because the visitor was
- * interrupted rather than redirected. Otherwise the role decides, and unlike
- * `roleRoot` these are the real authenticated surfaces: the point of the change
- * is that the principal now holds its full authority, so landing it on the
- * public home page would hide exactly what it just unlocked.
+ * interrupted rather than redirected. Otherwise the same role root used by an
+ * ordinary login applies now that the principal holds its full authority.
  */
 export function postPasswordChangeDestination(
   role: SessionRole,
   requested: unknown,
   locale: "ar" | "en",
 ): string {
-  const requestedDestination = safeReturnTo(requested);
-  if (requestedDestination) return requestedDestination;
-  switch (role) {
-    case "INSTRUCTOR":
-      return `/${locale}/instructor/courses`;
-    case "ADMIN":
-      // Staff management is where an Administrator's first task after the
-      // bootstrap change lives: inviting the first Instructor.
-      return "/staff";
-    default:
-      return roleRoot(role);
-  }
+  return postLoginDestination(role, requested, locale);
 }
 
 /**

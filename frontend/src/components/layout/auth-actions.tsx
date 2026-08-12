@@ -10,6 +10,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 import { deleteSession } from "@/lib/api/identity";
 import { clearSession, currentCSRFToken } from "@/lib/identity/session";
 import { useSessionView } from "@/lib/identity/use-session";
+import { roleHomeNavigation } from "./role-workspace-navigation";
 import { routes } from "./nav-items";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +38,9 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
   const session = useSessionView();
   const [signingOut, setSigningOut] = React.useState(false);
   const resolved: AuthState = state ?? (session ? "authenticated" : "guest");
+  const authenticatedHome = session
+    ? roleHomeNavigation(session.role, locale)
+    : { key: "dashboard" as const, href: routes.dashboard(locale) };
 
   async function signOut() {
     const csrf = currentCSRFToken();
@@ -69,7 +73,7 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
           </Button>
         )}
         <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
-          <Link href={routes.dashboard(locale)}>{t.nav.dashboard}</Link>
+          <Link href={authenticatedHome.href}>{t.nav[authenticatedHome.key]}</Link>
         </Button>
         <Button
           variant="outline"

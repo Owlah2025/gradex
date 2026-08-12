@@ -15,6 +15,13 @@ export const en = {
     register: "Create account",
     browse: "Browse courses",
     dashboard: "Go to dashboard",
+    instructorStudio: "Instructor Studio",
+    adminWorkspace: "Admin workspace",
+    workspaceNavigation: "Workspace navigation",
+    courseReview: "Course review & administration",
+    courseAccess: "Course Access",
+    staffOperations: "Staff operations",
+    courseBuilder: "Course Builder",
     notifications: "Notifications",
   },
   auth: {
