@@ -228,7 +228,6 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const inspector = adminPage.getByTestId("submitted-revision-inspector");
   await expect(inspector).toBeVisible();
-  await expect(inspector.getByTestId("submitted-course-id")).toContainText(courseID);
   await expect(inspector.getByTestId("submitted-title-ar")).toContainText("دورة الفيديو الحقيقية");
   await expect(inspector.getByTestId("submitted-title-en")).toContainText(courseTitleEn);
   await expect(inspector.getByTestId("submitted-description-ar")).toContainText("وصف");
@@ -253,6 +252,32 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(inspector.getByTestId("review-preview-player")).toBeVisible();
   await expect(inspector.getByTestId("review-protected-video")).toBeVisible();
 
+  // Pricing shares this exact submitted-revision context. The Admin chooses
+  // the human titles while the stable Section identity stays inside the UI.
+  await inspector.getByTestId("pricing-amount").fill("25000");
+  await inspector.getByTestId("pricing-reason").fill("Founder acceptance Course pricing");
+  const coursePriceResponse = adminPage.waitForResponse((response) =>
+    response.request().method() === "PUT" &&
+    new URL(response.url()).pathname === `/api/v1/admin/courses/${courseID}/price`,
+  );
+  await inspector.getByTestId("pricing-submit").click();
+  expect((await coursePriceResponse).status()).toBe(200);
+  await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
+
+  await inspector.getByTestId("pricing-scope-select").selectOption("SECTION");
+  const sectionOption = inspector.getByTestId("pricing-section-select");
+  await expect(sectionOption.getByRole("option", { name: /Media Section.*القسم/ })).toHaveCount(1);
+  await sectionOption.selectOption(sectionID);
+  await inspector.getByTestId("pricing-amount").fill("10000");
+  await inspector.getByTestId("pricing-reason").fill("Founder acceptance Section pricing");
+  const sectionPriceResponse = adminPage.waitForResponse((response) =>
+    response.request().method() === "PUT" &&
+    new URL(response.url()).pathname === `/api/v1/admin/courses/${courseID}/sections/${sectionID}/price`,
+  );
+  await inspector.getByTestId("pricing-submit").click();
+  expect((await sectionPriceResponse).status()).toBe(200);
+  await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Section price");
+
   // 10. Request changes through the inspector with an explicit Instructor
   // reason. The Instructor resubmits the exact revision, then the Admin
   // reopens it and approves from that same submitted-only surface.
@@ -272,7 +297,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
-  await expect(resubmittedInspector.getByTestId("submitted-revision-id")).toContainText(submittedRevisionID);
+  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
 
   // 11. Approve through the inspector, against the exact revision that was
   // successfully rendered and previewed above.

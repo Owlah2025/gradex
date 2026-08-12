@@ -16,15 +16,16 @@ import {
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ReviewLessonPreview } from "./review-lesson-preview";
+import { PricingPanel } from "./pricing-panel";
+import { TaxonomyOverrideForm } from "./taxonomy-override-form";
 
 type SubmittedRevisionInspectorProps = {
   item: ReviewQueueItem;
   onClose: () => void;
-  onReviewed: () => Promise<void>;
+  onReviewed: (notice: string) => Promise<void>;
 };
 
 type LoadedRevision = {
-  course: ReviewedCourse;
   revision: CourseRevisionWire;
   terms: TaxonomyTerm[];
 };
@@ -43,8 +44,8 @@ function taxonomyLabel(
 ): string {
   if (!termID) return locale === "ar" ? "غير محدد" : "Not specified";
   const term = terms.find((candidate) => candidate.id === termID && candidate.kind === kind);
-  if (!term) return termID;
-  return `${locale === "ar" ? term.label_ar : term.label_en} (${termID})`;
+  if (!term) return locale === "ar" ? "مصطلح غير متاح" : "Unavailable term";
+  return locale === "ar" ? term.label_ar : term.label_en;
 }
 
 function mediaStateLabel(state: string, locale: "ar" | "en"): string {
@@ -72,6 +73,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
   const isAr = locale === "ar";
   const [loaded, setLoaded] = useState<LoadedRevision | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [taxonomyError, setTaxonomyError] = useState("");
   const [loading, setLoading] = useState(true);
   const [mediaStates, setMediaStates] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<AdminLessonPreview | null>(null);
@@ -86,16 +88,14 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError("");
+    setTaxonomyError("");
     setLoaded(null);
     setMediaStates({});
     setPreview(null);
     setPreviewError("");
     setReviewed(false);
     try {
-      const [course, terms] = await Promise.all([
-        getReviewCourseRevision(item.course_id, item.revision_id, locale),
-        getTaxonomyTerms(locale),
-      ]);
+      const course = await getReviewCourseRevision(item.course_id, item.revision_id, locale);
       const revision = course.editable_revision;
       if (
         course.id !== item.course_id ||
@@ -105,7 +105,13 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
       ) {
         throw new Error(isAr ? "لم تطابق تفاصيل المراجعة الدورة أو المراجعة المحددة." : "Review detail did not match the selected Course or revision.");
       }
-      setLoaded({ course, revision, terms });
+      let terms: TaxonomyTerm[] = [];
+      try {
+        terms = await getTaxonomyTerms(locale);
+      } catch (cause) {
+        setTaxonomyError(describeApiError(cause, locale));
+      }
+      setLoaded({ revision, terms });
       const assetVersionIDs = videoIDs(revision);
       if (assetVersionIDs.length > 0) {
         const states = await Promise.all(
@@ -152,8 +158,8 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
     try {
       await operation(token);
       setReviewed(true);
-      await onReviewed();
       setActionSuccess(success);
+      await onReviewed(success);
     } catch (cause) {
       setActionError(describeApiError(cause, locale));
     } finally {
@@ -199,8 +205,6 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
             {isAr ? "المحتوى أدناه هو المراجعة المُرسلة فقط." : "The content below is the submitted revision only."}
           </p>
-          <p className="mt-2 font-mono text-xs text-slate-600 dark:text-slate-300" data-testid="submitted-course-id">{item.course_id}</p>
-          <p className="font-mono text-xs text-slate-600 dark:text-slate-300" data-testid="submitted-revision-id">{item.revision_id}</p>
         </div>
         <button type="button" onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">
           {isAr ? "إغلاق الفحص" : "Close inspector"}
@@ -242,7 +246,6 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
                         <p dir="rtl" className="mt-1 text-slate-900 dark:text-slate-100">{lesson.title_ar}</p>
                         <p dir="ltr" className="text-sm text-slate-700 dark:text-slate-300">{lesson.title_en}</p>
                         <p data-testid={`submitted-lesson-media-state-${lesson.id}`} className="mt-2 text-xs text-slate-600 dark:text-slate-300">{isAr ? "حالة الوسائط: " : "Media state: "}{mediaStateLabel(mediaState, locale)}</p>
-                        {lesson.video_asset_version_id && <p className="font-mono text-xs text-slate-500">{lesson.video_asset_version_id}</p>}
                         {lesson.files && lesson.files.length > 0 && (
                           <ul data-testid={`submitted-lesson-materials-${lesson.id}`} className="mt-2 list-inside list-disc text-xs text-slate-600 dark:text-slate-300">
                             {lesson.files.map((file) => <li key={file.id}>{file.kind}: {isAr ? file.display_name_ar : file.display_name_en}</li>)}
@@ -267,6 +270,15 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
 
           {previewError && <p role="alert" data-testid="review-preview-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{previewError}</p>}
           {preview && <section data-testid="review-preview-player" className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="mb-3 font-semibold text-slate-900 dark:text-slate-100">{isAr ? "معاينة الدرس المُرسل" : "Submitted Lesson Preview"}</h3><ReviewLessonPreview playbackURL={preview.playback_url} locale={locale} /></section>}
+
+          <section className="grid gap-5 lg:grid-cols-2">
+            {taxonomyError ? (
+              <p role="alert" data-testid="review-taxonomy-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{taxonomyError}</p>
+            ) : (
+              <TaxonomyOverrideForm courseID={item.course_id} revisionID={item.revision_id} terms={terms} />
+            )}
+            <PricingPanel courseID={item.course_id} sections={revision.sections} />
+          </section>
 
           {actionSuccess && <p role="status" data-testid="review-action-success" className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{actionSuccess}</p>}
           {actionError && <p role="alert" data-testid="review-action-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{actionError}</p>}

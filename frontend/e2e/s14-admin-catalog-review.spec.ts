@@ -7,10 +7,10 @@ import { frontendOrigin } from "../src/lib/api/e2e-ports";
  *
  * Founder manual acceptance found `/en/admin/catalog` showing a Course that
  * does not exist ("Introduction to Programming" / `demo-course-1`) out of
- * component state, and taxonomy administration vanishing the moment the
- * pricing modal was closed. These cases prove the opposite properties: the
- * queue is the server's `PENDING_REVIEW` set and nothing else, and the Course
- * under administration outlives the pricing dialog.
+ * component state, then required a pasted Course UUID to bridge review into
+ * taxonomy and pricing. These cases prove the opposite properties: the queue
+ * is the server's `PENDING_REVIEW` set and normal operation exposes no UUID
+ * launcher or split Inspect/Administer workflow.
  *
  * The successful submission and its Admin approval need a READY Lesson video,
  * so that half of the journey is proved in `e2e/media-authoring`, which has
@@ -20,8 +20,7 @@ import { frontendOrigin } from "../src/lib/api/e2e-ports";
 const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
 const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000-0000-0000-000000000003" };
 
-/** A seeded Course, used only as a real identifier to administer. */
-const SEEDED_COURSE_ID = "c0000000-0000-0000-0000-000000000001";
+const AUTHORIZATION_CANARY_ID = "c0000000-0000-0000-0000-000000000001";
 
 // The founder's own vocabulary, entered exactly as the manual journey does.
 const MAJOR_AR = "علوم الحاسب";
@@ -71,12 +70,6 @@ async function openAdminCatalog(page: Page): Promise<void> {
   await expect(page.getByTestId("review-queue-loading")).toHaveCount(0);
 }
 
-async function administerSeededCourse(page: Page): Promise<void> {
-  await page.getByTestId("administer-course-id").fill(SEEDED_COURSE_ID);
-  await page.getByTestId("administer-course").click();
-  await expect(page.getByTestId("administered-course-id")).toContainText(SEEDED_COURSE_ID);
-}
-
 test.describe("S14 Admin Catalog review surface", () => {
   test("A the queue is the server's review queue, and carries no demo Course", async ({ browser }) => {
     const context = await browser.newContext({ locale: "en-US" });
@@ -97,8 +90,10 @@ test.describe("S14 Admin Catalog review surface", () => {
       await expect(page.getByTestId("review-queue-empty")).toBeVisible();
     }
     for (const item of serverQueue) {
-      await expect(page.getByTestId(`review-item-${item.course_id}`)).toBeVisible();
-      await expect(page.getByTestId(`review-item-revision-id-${item.course_id}`)).toContainText(item.revision_id);
+      const row = page.getByTestId(`review-item-${item.course_id}`);
+      await expect(row).toBeVisible();
+      await expect(row).not.toContainText(item.course_id);
+      await expect(row).not.toContainText(item.revision_id);
     }
 
     // The removed fixture must not reappear anywhere in production UI.
@@ -109,27 +104,15 @@ test.describe("S14 Admin Catalog review surface", () => {
     await context.close();
   });
 
-  test("B taxonomy administration survives closing the pricing modal", async ({ browser }) => {
+  test("B the UUID launcher and split administration workflow are absent", async ({ browser }) => {
     const context = await browser.newContext({ locale: "en-US" });
     await signIn(context, ADMIN);
     const page = await context.newPage();
 
     await openAdminCatalog(page);
-    await administerSeededCourse(page);
-
-    const taxonomy = page.getByRole("heading", { name: "Course Taxonomy Administration" });
-    await expect(taxonomy).toBeVisible();
-
-    // Exactly the founder's sequence: open pricing, then close it.
-    await page.getByTestId("open-pricing-modal").click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
-    await expect(page.getByRole("dialog")).toHaveCount(0);
-
-    await expect(taxonomy, "taxonomy administration must outlive the pricing dialog").toBeVisible();
-    await expect(page.getByRole("heading", { name: "Course Lifecycle & Emergency Controls" })).toBeVisible();
-    await expect(page.getByTestId("administered-course-id")).toContainText(SEEDED_COURSE_ID);
+    await expect(page.getByTestId("administer-course-id")).toHaveCount(0);
+    await expect(page.locator('[data-testid^="administer-review-item-"]')).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Taxonomy Vocabulary Administration" })).toBeVisible();
 
     await context.close();
   });
@@ -140,7 +123,6 @@ test.describe("S14 Admin Catalog review surface", () => {
     const page = await adminContext.newPage();
 
     await openAdminCatalog(page);
-    await administerSeededCourse(page);
 
     await page.getByTestId("taxonomy-term-kind").selectOption("MAJOR");
     await page.getByTestId("taxonomy-term-label-ar").fill(MAJOR_AR);
@@ -158,7 +140,6 @@ test.describe("S14 Admin Catalog review surface", () => {
     // Persisted, not merely rendered: a reload re-reads the vocabulary.
     await page.reload();
     await expect(page.getByTestId("review-queue-loading")).toHaveCount(0);
-    await administerSeededCourse(page);
     await expect(page.getByRole("option", { name: `${MAJOR_EN} — MAJOR` })).toHaveCount(1);
     await expect(page.getByRole("option", { name: `${SUBJECT_EN} — SUBJECT` })).toHaveCount(1);
 
@@ -182,8 +163,8 @@ test.describe("S14 Admin Catalog review surface", () => {
     });
     expect(termCreation.status(), "an Instructor must not create taxonomy vocabulary").toBeGreaterThanOrEqual(400);
 
-    const override = await instructorAPI.put(`/api/v1/admin/courses/${SEEDED_COURSE_ID}/taxonomy`, {
-      data: { revision_id: SEEDED_COURSE_ID, major_term_id: SEEDED_COURSE_ID, subject_term_id: SEEDED_COURSE_ID },
+    const override = await instructorAPI.put(`/api/v1/admin/courses/${AUTHORIZATION_CANARY_ID}/taxonomy`, {
+      data: { revision_id: AUTHORIZATION_CANARY_ID, major_term_id: AUTHORIZATION_CANARY_ID, subject_term_id: AUTHORIZATION_CANARY_ID },
     });
     expect(override.status(), "an Instructor must not override Course taxonomy").toBeGreaterThanOrEqual(400);
 

@@ -164,7 +164,23 @@ test("the review queue is server state, not component state", () => {
     "the queue must not be initialised from a literal Course",
   );
 
-  assert.match(source, /setInspectedItem\(item\)/, "the selected queue row must provide its real IDs to inspection");
+  assert.match(source, /setInspectedItem\(item\)/, "the selected queue row must establish the workspace context");
+  assert.match(
+    source,
+    /key=\{inspectedItem\.revision_id\}/,
+    "a newly selected revision must receive a fresh workspace state",
+  );
+
+  for (const removedBridge of [
+    "administer-course-id",
+    "administer-review-item-",
+    "Administer a Course by UUID",
+    "catalog-administration",
+    "PricingModal",
+    "LifecycleControls",
+  ]) {
+    assert.ok(!source.includes(removedBridge), `the pending-review journey must not expose ${removedBridge}`);
+  }
 
   // An empty server response renders an empty state, and says so.
   assert.match(source, /review-queue-empty/, "an empty queue must render an honest empty state");
@@ -194,38 +210,49 @@ test("the submitted-revision inspector renders only the returned graph and keeps
   assert.ok(!source.includes("presigned"), "the inspector must not expose presigned upload material");
 });
 
-test("taxonomy and lifecycle administration are not gated on the pricing modal", () => {
-  const source = readSource("src/components/admin/review-queue.tsx");
+test("one selected revision carries every pending-review administration identity", () => {
+  const source = readSource("src/components/admin/submitted-revision-inspector.tsx");
+  const taxonomy = readSource("src/components/admin/taxonomy-override-form.tsx");
+  const pricing = readSource("src/components/admin/pricing-form.tsx");
 
-  // The exact defective rendering, and every near variant of it.
-  assert.ok(
-    !/pricing\w*\s*&&\s*<\s*TaxonomyControls/i.test(source),
-    "taxonomy administration must not be conditioned on pricing state",
-  );
-  assert.ok(
-    !/pricing\w*\s*&&\s*<\s*LifecycleControls/i.test(source),
-    "lifecycle administration must not be conditioned on pricing state",
-  );
+  assert.match(source, /<TaxonomyOverrideForm[\s\S]{0,240}courseID=\{item\.course_id\}/);
+  assert.match(source, /<TaxonomyOverrideForm[\s\S]{0,240}revisionID=\{item\.revision_id\}/);
+  assert.match(source, /<PricingPanel[\s\S]{0,180}courseID=\{item\.course_id\}/);
+  assert.match(source, /<PricingPanel[\s\S]{0,180}sections=\{revision\.sections\}/);
+  assert.match(source, /review-taxonomy-error/, "a taxonomy load failure must stay inside its panel");
+  assert.ok(!taxonomy.includes("taxonomy-override-revision"), "revision identity must not be editable");
+  assert.ok(!taxonomy.includes("defaultRevisionID"), "the override must not retain a second revision selector");
+  assert.match(pricing, /data-testid="pricing-section-select"/, "Section pricing must use a human selector");
+  assert.ok(!pricing.includes("Section Identity ID"), "Section identity must not be a text input");
+  assert.ok(!source.includes("submitted-course-id"), "Course identity must not be primary interface content");
+  assert.ok(!source.includes("submitted-revision-id"), "revision identity must not be primary interface content");
+});
 
+// Founder acceptance found taxonomy administration disappearing with the pricing dialog.
+// The replacement makes both operations siblings in the selected-revision workspace.
+test("the founder pricing/taxonomy regression stays unified without dialog state", () => {
+  const source = readSource("src/components/admin/submitted-revision-inspector.tsx");
+  const taxonomyAt = source.indexOf("<TaxonomyOverrideForm");
+  const pricingAt = source.indexOf("<PricingPanel");
+
+  assert.ok(taxonomyAt > 0, "the selected revision must expose optional taxonomy override");
+  assert.ok(pricingAt > taxonomyAt, "pricing must share the selected revision workspace");
+  assert.ok(!source.includes("pricingModal"), "pricing visibility must not control taxonomy visibility");
+});
+
+test("a completed review locks before queue refresh and clears its workspace", () => {
+  const inspector = readSource("src/components/admin/submitted-revision-inspector.tsx");
+  const queue = readSource("src/components/admin/review-queue.tsx");
+  const lockedAt = inspector.indexOf("setReviewed(true)");
+  const refreshedAt = inspector.indexOf("await onReviewed(success)", lockedAt);
+
+  assert.ok(lockedAt > 0, "successful review must lock the decision controls");
+  assert.ok(refreshedAt > lockedAt, "the decision must lock before the queue refresh callback");
+  assert.match(inspector, /const canAct = canReview && !reviewed/);
   assert.match(
-    source,
-    /taxonomyControlsVisible\(catalogState\)[^\n]*&&[\s\S]{0,120}<TaxonomyControls/,
-    "taxonomy administration must follow the administered Course",
-  );
-  assert.match(
-    source,
-    /lifecycleControlsVisible\(catalogState\)[^\n]*&&[\s\S]{0,120}<LifecycleControls/,
-    "lifecycle administration must follow the administered Course",
-  );
-  assert.match(
-    source,
-    /pricingModalVisible\(catalogState\)/,
-    "the pricing dialog must be driven by its own open/closed state",
-  );
-  assert.match(
-    source,
-    /onClose=\{\(\) => setCatalogState\(closePricingModal\)\}/,
-    "closing the dialog must close only the dialog",
+    queue,
+    /onReviewed=\{async \(notice\) => \{\s*await loadQueue\(\);\s*setReviewNotice\(notice\);\s*setInspectedItem\(null\);\s*\}\}/,
+    "the queue must refresh before clearing the completed workspace",
   );
 });
 

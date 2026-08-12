@@ -16,11 +16,7 @@ async function mockCatalogAPI(page: Page) {
   await page.route("**/api/v1/session", (route) => route.fulfill({ status: 401, json: { type: "https://api.gradex.com/problems/authentication-required" } }));
   await page.route("**/api/v1/courses", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/taxonomy/terms", (route) => route.fulfill({ json: [] }));
-}
-
-async function openAdminTaxonomyControls(page: Page, locale: "ar" | "en") {
-  await page.getByPlaceholder(locale === "ar" ? "أدخل معرف الدورة (مثال: 00000000-0000-0000-0000-000000000000)" : "Enter Course UUID (e.g. 00000000-0000-0000-0000-000000000000)").fill("demo-course-1");
-  await page.getByRole("button", { name: locale === "ar" ? "فتح إدارة التسعير" : "Manage Pricing" }).click();
+  await page.route("**/api/v1/admin/review/queue", (route) => route.fulfill({ json: [] }));
 }
 
 function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | "en") {
@@ -30,8 +26,8 @@ function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | 
       : ["Course Authoring Studio", "Official Server Prices (Read-only Server State)", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["قائمة مراجعة وتسعير الدورات", "إدارة التسعير وسجل التغييرات", "حالة الدورة وإجراءات الطوارئ", "إدارة تصنيف الدورة"]
-    : ["Course Review & Pricing Admin", "Pricing Management & Audit Log", "Course Lifecycle & Emergency Controls", "Course Taxonomy Administration"];
+    ? ["قائمة مراجعة وتسعير الدورات", "إدارة قاموس التصنيف", "قاموس التصنيف"]
+    : ["Course Review & Pricing Admin", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
 }
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
@@ -44,9 +40,6 @@ for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
         await page.goto(path);
 
         await expect(page.locator("html")).toHaveAttribute("dir", direction);
-        if (surfaceName === "admin") {
-          await openAdminTaxonomyControls(page, locale);
-        }
         for (const heading of expectedScreenHeadings(surfaceName, locale)) {
           await expect(page.getByText(heading, { exact: true })).toBeVisible();
         }

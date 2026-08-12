@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { TaxonomyTermSelect } from "@/components/catalog/taxonomy-term-select";
 import { assignAdminTaxonomy, type TaxonomyTerm } from "@/lib/api/catalog";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -8,34 +8,21 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 
 type TaxonomyOverrideFormProps = {
   courseID: string;
+  revisionID: string;
   terms: TaxonomyTerm[];
-  /**
-   * The revision the administrator already named elsewhere on the page, used
-   * as the starting value. The field stays editable, because the override
-   * still binds to whichever revision is typed here and nothing else.
-   */
-  defaultRevisionID?: string;
 };
 
-export function TaxonomyOverrideForm({ courseID, terms, defaultRevisionID }: TaxonomyOverrideFormProps) {
+export function TaxonomyOverrideForm({ courseID, revisionID, terms }: TaxonomyOverrideFormProps) {
   const { locale } = useLocale();
   const isAr = locale === "ar";
-  const [revisionID, setRevisionID] = useState(defaultRevisionID ?? "");
-
-  // Selecting a different Course or revision resets the bound revision, so an
-  // override can never be applied to the revision left over from the last one.
-  useEffect(() => {
-    setRevisionID(defaultRevisionID ?? "");
-  }, [courseID, defaultRevisionID]);
-
   const [majorTermID, setMajorTermID] = useState("");
   const [subjectTermID, setSubjectTermID] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
-    if (!revisionID.trim() || !majorTermID || !subjectTermID) {
-      setMessage(isAr ? "معرف المراجعة والتخصص والمادة إجبارية" : "Revision ID, major, and subject are required");
+    if (!majorTermID || !subjectTermID) {
+      setMessage(isAr ? "التخصص والمادة إجباريان" : "Major and subject are required");
       return;
     }
     const csrf = currentCSRFToken();
@@ -46,7 +33,7 @@ export function TaxonomyOverrideForm({ courseID, terms, defaultRevisionID }: Tax
     setBusy(true);
     setMessage(null);
     try {
-      await assignAdminTaxonomy({ courseID, revisionID: revisionID.trim(), majorTermID, subjectTermID, locale, csrf });
+      await assignAdminTaxonomy({ courseID, revisionID, majorTermID, subjectTermID, locale, csrf });
       setMessage(isAr ? "تم تطبيق التصنيف على المراجعة المحددة" : "Taxonomy applied to the named revision");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : isAr ? "تعذر تطبيق التصنيف" : "Unable to apply taxonomy");
@@ -58,12 +45,8 @@ export function TaxonomyOverrideForm({ courseID, terms, defaultRevisionID }: Tax
   return (
     <section className="rounded-lg border border-blue-200 bg-blue-50/60 p-4 dark:border-blue-900 dark:bg-blue-950/20">
       <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{isAr ? "تجاوز تصنيف الدورة" : "Course Taxonomy Override"}</h3>
-      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{isAr ? "يتطلب هذا الإجراء معرف مراجعة صريحاً للدورة المحددة." : "This override requires an explicit revision ID for this Course."}</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-          revision_id
-          <input value={revisionID} onChange={(event) => setRevisionID(event.target.value)} data-testid="taxonomy-override-revision" className="mt-1 w-full rounded border border-slate-300 bg-white p-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-900" placeholder="UUID" />
-        </label>
+      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{isAr ? "اختياري؛ يُطبق على المراجعة المُرسلة المفتوحة فقط." : "Optional; applies only to the open submitted revision."}</p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
         <TaxonomyTermSelect kind="MAJOR" locale={locale} terms={terms} value={majorTermID} onChange={setMajorTermID} disabled={busy} />
         <TaxonomyTermSelect kind="SUBJECT" locale={locale} terms={terms} value={subjectTermID} onChange={setSubjectTermID} disabled={busy} />
       </div>

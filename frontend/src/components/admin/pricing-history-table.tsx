@@ -1,14 +1,15 @@
 "use client";
 
-import React from "react";
 import { formatFils } from "@/lib/formatters/currency";
-import { type PriceChangeRecord } from "@/lib/api/catalog";
+import { type PriceChangeRecord, type SectionWire } from "@/lib/api/catalog";
+import { pricingScopeLabel } from "./pricing-sections";
 
 export interface PricingHistoryTableProps {
   history: PriceChangeRecord[];
   isLoading: boolean;
   error: string | null;
   locale: "ar" | "en";
+  sections: SectionWire[];
 }
 
 export function PricingHistoryTable({
@@ -16,6 +17,7 @@ export function PricingHistoryTable({
   isLoading,
   error,
   locale,
+  sections,
 }: PricingHistoryTableProps) {
   const isAr = locale === "ar";
 
@@ -52,9 +54,7 @@ export function PricingHistoryTable({
                 <tr key={rec.id} className="font-mono text-[11px]">
                   <td className="p-2 border-e font-sans">
                     {rec.section_id
-                      ? isAr
-                        ? `قسم: ${rec.section_id}`
-                        : `Section: ${rec.section_id}`
+                      ? pricingScopeLabel(rec.section_id, sections, locale)
                       : isAr
                         ? "الدورة"
                         : "Course"}

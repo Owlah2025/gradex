@@ -2,20 +2,22 @@
 
 import React, { useState } from "react";
 import { formatFils } from "@/lib/formatters/currency";
-import { setCoursePrice, setSectionPrice } from "@/lib/api/catalog";
+import { setCoursePrice, setSectionPrice, type SectionWire } from "@/lib/api/catalog";
 import { currentCSRFToken } from "@/lib/identity/session";
+import { submittedSectionLabel } from "./pricing-sections";
 
 export interface PricingFormProps {
   courseID: string;
   locale: "ar" | "en";
+  sections: SectionWire[];
   onSuccess: () => Promise<void>;
 }
 
-export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
+export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFormProps) {
   const isAr = locale === "ar";
 
   const [targetType, setTargetType] = useState<"COURSE" | "SECTION">("COURSE");
-  const [sectionIDInput, setSectionIDInput] = useState("");
+  const [selectedSectionID, setSelectedSectionID] = useState("");
   const [priceFilsInput, setPriceFilsInput] = useState<number | "">(25000);
   const [reasonInput, setReasonInput] = useState("");
 
@@ -44,9 +46,9 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
       );
       return;
     }
-    if (targetType === "SECTION" && !sectionIDInput.trim()) {
+    if (targetType === "SECTION" && !selectedSectionID) {
       setFormError(
-        isAr ? "معرف القسم المستقر إجباري" : "Stable Section Identity ID is required"
+        isAr ? "اختر قسماً من المراجعة المُرسلة" : "Select a Section from the submitted revision"
       );
       return;
     }
@@ -77,7 +79,7 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
       } else {
         await setSectionPrice({
           courseID,
-          sectionID: sectionIDInput.trim(),
+          sectionID: selectedSectionID,
           priceMinorUnits: fils,
           reason,
           locale,
@@ -108,7 +110,7 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
   return (
     <div className="space-y-4">
       {successMsg && (
-        <div className="p-3 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-medium">
+        <div data-testid="pricing-success" className="p-3 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-medium">
           {successMsg}
         </div>
       )}
@@ -125,26 +127,35 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
             </label>
             <select
               value={targetType}
-              onChange={(e) => setTargetType(e.target.value as "COURSE" | "SECTION")}
+              data-testid="pricing-scope-select"
+              onChange={(e) => {
+                const nextTarget = e.target.value as "COURSE" | "SECTION";
+                setTargetType(nextTarget);
+                if (nextTarget === "COURSE") setSelectedSectionID("");
+              }}
               className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
             >
               <option value="COURSE">{isAr ? "الدورة كاملة (Course)" : "Course Level"}</option>
-              <option value="SECTION">{isAr ? "قسم كورس (Section)" : "Section Level"}</option>
+              <option value="SECTION" disabled={sections.length === 0}>{isAr ? "قسم كورس (Section)" : "Section Level"}</option>
             </select>
           </div>
 
           {targetType === "SECTION" && (
             <div>
               <label className="block text-xs font-semibold mb-1">
-                {isAr ? "معرف القسم المستقر (Section Identity ID):" : "Section Identity ID:"}
+                {isAr ? "القسم المُرسل:" : "Submitted Section:"}
               </label>
-              <input
-                type="text"
-                value={sectionIDInput}
-                onChange={(e) => setSectionIDInput(e.target.value)}
-                placeholder="e.g. sec-id-123"
+              <select
+                value={selectedSectionID}
+                onChange={(e) => setSelectedSectionID(e.target.value)}
+                data-testid="pricing-section-select"
                 className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
-              />
+              >
+                <option value="">{isAr ? "اختر قسماً" : "Select a Section"}</option>
+                {sections.map((section) => (
+                  <option key={section.id} value={section.id}>{submittedSectionLabel(section, locale)}</option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -157,6 +168,7 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
               min={0}
               step={1}
               value={priceFilsInput}
+              data-testid="pricing-amount"
               onChange={(e) => setPriceFilsInput(e.target.value === "" ? "" : Number(e.target.value))}
               className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 font-mono"
             />
@@ -174,6 +186,7 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
             <input
               type="text"
               value={reasonInput}
+              data-testid="pricing-reason"
               onChange={(e) => setReasonInput(e.target.value)}
               placeholder={isAr ? "مثال: تحديث تسعير الفصل الدراسي" : "e.g., Semester pricing adjustment"}
               className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
@@ -185,6 +198,7 @@ export function PricingForm({ courseID, locale, onSuccess }: PricingFormProps) {
 
         <button
           type="submit"
+          data-testid="pricing-submit"
           disabled={isSubmitting}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded text-xs font-semibold transition"
         >
