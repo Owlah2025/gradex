@@ -48,6 +48,12 @@
 > Production behavior is closed to change under D-086. No new MVP feature, unowned implementation gap,
 > deployment, or manual acceptance work starts without its own current authority.
 >
+> [D-087](../DECISIONS.md#d-087--t035a-may-cross-one-bounded-database-driver-secret-boundary-for-failure-evidence)
+> authorizes only the release-gate correction for T035a's failure-only diagnostic: the run-owned
+> PostgreSQL DSN may cross directly into the existing `db.Connect`/pgx boundary, with an explicit
+> exposure-guard entry and sanitization regression proof. It authorizes no production behavior or
+> new MVP batch.
+>
 > The earlier REJECT, its seven findings, and the discarded TAINTED/UNAVAILABLE review runs remain
 > preserved below as history; they are not the current delivery state.
 >

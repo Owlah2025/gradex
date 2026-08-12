@@ -2872,3 +2872,38 @@ acceptance do not become complete through this decision.
 
 **Source:** Product Owner instruction of 2026-08-12 accepting the independent integrated review and
 targeted supplement, and authorizing the minimum confirmed test-fixture correction.
+
+## D-087 — T035a may cross one bounded database-driver secret boundary for failure evidence
+
+**Date:** 2026-08-12
+**Status:** Active. Supplements T035a only; it does not reopen the independently accepted software
+range or authorize another product implementation batch.
+
+**Finding:** `scripts/expose-guard.sh` correctly identified the unreviewed
+`config.Secret.Expose()` call in `backend/cmd/e2e-media-diagnostic/main.go`. The value is the
+run-owned media E2E PostgreSQL `DATABASE_URL`. The failure-only diagnostic needs that plaintext to
+construct the existing pgx pool and query authoritative state before teardown. No current database
+connector accepts `config.Secret`; relocating the exposure would not remove the plaintext boundary.
+The executable passes the value directly to `db.Connect`, discards connection-error details, and
+does not put it in stdout/stderr, retained JSON, structured logs, command arguments, filenames, or
+another subprocess.
+
+**Decision:**
+
+1. Classify the call as `B — NECESSARY_BOUNDED_EXPOSURE`.
+2. Authorize exactly this diagnostic executable's `DATABASE_URL` handoff to the existing
+   `db.Connect`/pgx driver boundary in the exposure-guard allowlist, with an inline rationale.
+3. Retain or strengthen non-vacuous tests proving that the T035a artifact excludes database and
+   Redis passwords, email/provider and object-storage credentials, session and CSRF secrets,
+   upload/playback credentials, encrypted payload plaintext, and unrelated arbitrary log fields.
+4. Successful media-authoring runs must still invoke no collector and emit no diagnostic artifact;
+   failure artifacts remain sanitized and restrictive-permission.
+5. This authority changes no production media, scanner, database, authentication, authorization,
+   storage, email, or secret-handling behavior and creates no general exposure exception.
+
+**Boundary:** The allowlist entry is valid only while the DSN travels directly into the existing
+database driver and no further. Any retained/logged DSN, error detail containing it, second
+plaintext use, or wider diagnostic projection requires new review and authority.
+
+**Source:** Product Owner instruction of 2026-08-12 to diagnose and resolve the sole remaining
+automated exposure gate while preserving T035a sanitization and production behavior.

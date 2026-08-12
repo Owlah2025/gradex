@@ -248,4 +248,16 @@ T035a is diagnostic support for T035; it does not close T035 or classify the ori
 failure. T033's completion remains governed by its own evidence and the post-reject remediation
 plan.
 
+### T035a database-driver boundary clarification — 2026-08-12
+
+The Product Owner authorizes the failure-only diagnostic executable's single bounded
+`config.Secret.Expose()` call for `DATABASE_URL` solely to pass the resolved DSN directly to the
+existing `db.Connect`/pgx driver boundary. The plaintext must not be logged, retained in the
+diagnostic JSON, placed in command arguments or filenames, forwarded to another subprocess, or
+used for any purpose beyond opening the run-owned PostgreSQL pool before teardown. The executable
+must continue to discard connection-error details and retain only T035a's explicitly sanitized
+evidence projection. This clarification authorizes the corresponding reviewed exposure-guard
+allowlist entry and stronger artifact-sanitization regression coverage; it authorizes no production
+media, scanner, storage, database, authorization, or secret-handling behavior change.
+
 **Amended task count:** 36 tasks — the original 32, complete, plus 4 post-review remediation tasks.
