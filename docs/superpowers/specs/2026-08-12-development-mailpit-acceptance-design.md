@@ -1,6 +1,6 @@
 # Development-only Mailpit acceptance design
 
-**Date:** 2026-08-12  
+**Date:** 2026-08-12
 **Scope:** local founder acceptance only
 
 ## Goal
