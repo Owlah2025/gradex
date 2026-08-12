@@ -166,7 +166,6 @@ export function completePasswordReset(
 
 export function createStaffInvitation(
   email: string,
-  role: "INSTRUCTOR" | "ADMIN",
   locale: "ar" | "en",
   csrf?: string,
 ) {
@@ -174,9 +173,24 @@ export function createStaffInvitation(
     id: string;
     email: string;
     invited_role: string;
-    bearer: string;
     created_at: string;
-  }>("/staff-invitations", "POST", locale, csrf, { email, role });
+  }>("/staff-invitations", "POST", locale, csrf, { email, role: "INSTRUCTOR" });
+}
+
+export type InstructorStaffAccount = {
+  id: string;
+  email: string;
+  display_name: string;
+  status: "ACTIVE" | "SUSPENDED";
+  created_at: string;
+};
+
+export function listInstructorStaffAccounts(locale: "ar" | "en") {
+  return authenticatedRequest<{ instructors: InstructorStaffAccount[] }>(
+    "/staff-invitations/instructors",
+    "GET",
+    locale,
+  ) as Promise<{ instructors: InstructorStaffAccount[] }>;
 }
 
 export type StaffInvitationPreview = {

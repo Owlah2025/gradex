@@ -8,202 +8,122 @@ import { Input } from "@/components/ui/input";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import {
   createStaffInvitation,
-  suspendStaffAccount,
+  listInstructorStaffAccounts,
   reinstateStaffAccount,
+  suspendStaffAccount,
+  type InstructorStaffAccount,
 } from "@/lib/api/identity";
 import { currentCSRFToken } from "@/lib/identity/session";
 
+type LoadState = "loading" | "ready" | "error";
+type StatusChange = (account: InstructorStaffAccount) => Promise<void>;
+
+function InstructorAccountRow({ account, reason, busy, onReasonChange, onStatusChange, t }: {
+  account: InstructorStaffAccount;
+  reason: string;
+  busy: boolean;
+  onReasonChange: (reason: string) => void;
+  onStatusChange: StatusChange;
+  t: ReturnType<typeof useLocale>["t"];
+}) {
+  const suspended = account.status === "SUSPENDED";
+  return <article className="space-y-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
+    <div className="flex flex-wrap justify-between gap-2">
+      <div><p className="font-medium">{account.display_name || account.email}</p><p className="text-sm text-muted-foreground">{account.email}</p></div>
+      <p className="text-sm"><span className="text-muted-foreground">{t.auth.staff.accountStatus}: </span>{suspended ? t.auth.staff.suspended : t.auth.staff.active}</p>
+    </div>
+    <div className="flex flex-col gap-3 sm:flex-row">
+      <Input aria-label={suspended ? t.auth.staff.reinstateReason : t.auth.staff.suspendReason} value={reason} onChange={(event) => onReasonChange(event.target.value)} placeholder={suspended ? t.auth.staff.reinstateReason : t.auth.staff.suspendReason} disabled={busy} />
+      <Button type="button" variant={suspended ? "accent" : "destructive"} disabled={busy || !reason.trim()} onClick={() => void onStatusChange(account)}>
+        {busy ? (suspended ? t.auth.staff.reinstating : t.auth.staff.suspending) : (suspended ? t.auth.staff.reinstateAction : t.auth.staff.suspendAction)}
+      </Button>
+    </div>
+  </article>;
+}
+
 export function StaffManagement() {
   const { t, locale } = useLocale();
-
-  // Invite state
+  const [accounts, setAccounts] = React.useState<InstructorStaffAccount[]>([]);
+  const [loadState, setLoadState] = React.useState<LoadState>("loading");
   const [inviteEmail, setInviteEmail] = React.useState("");
-  const [inviteRole, setInviteRole] = React.useState<"INSTRUCTOR" | "ADMIN">("INSTRUCTOR");
-  const [inviteStatus, setInviteStatus] = React.useState<"idle" | "sending" | "success" | "error">("idle");
-  const [inviteMsg, setInviteMsg] = React.useState<string | null>(null);
+  const [inviteState, setInviteState] = React.useState<"idle" | "sending" | "success" | "error">("idle");
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [reasonByID, setReasonByID] = React.useState<Record<string, string>>({});
+  const [mutatingID, setMutatingID] = React.useState<string | null>(null);
 
-  // Suspend state
-  const [suspendID, setSuspendID] = React.useState("");
-  const [suspendReason, setSuspendReason] = React.useState("");
-  const [suspendStatus, setSuspendStatus] = React.useState<"idle" | "submitting" | "success" | "error">("idle");
-  const [suspendMsg, setSuspendMsg] = React.useState<string | null>(null);
-
-  // Reinstate state
-  const [reinstateID, setReinstateID] = React.useState("");
-  const [reinstateReason, setReinstateReason] = React.useState("");
-  const [reinstateStatus, setReinstateStatus] = React.useState<"idle" | "submitting" | "success" | "error">("idle");
-  const [reinstateMsg, setReinstateMsg] = React.useState<string | null>(null);
-
-  const handleCreateInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setInviteStatus("sending");
-    setInviteMsg(null);
-
+  const loadAccounts = React.useCallback(async () => {
+    setLoadState("loading");
     try {
-      const csrf = currentCSRFToken() ?? undefined;
-      await createStaffInvitation(inviteEmail, inviteRole, locale, csrf);
+      const response = await listInstructorStaffAccounts(locale);
+      setAccounts(response.instructors);
+      setLoadState("ready");
+    } catch {
+      setLoadState("error");
+    }
+  }, [locale]);
 
-      setInviteStatus("success");
-      setInviteMsg(t.auth.staff.inviteSuccess);
+  React.useEffect(() => { void loadAccounts(); }, [loadAccounts]);
+
+  const handleInvite = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setInviteState("sending");
+    setMessage(null);
+    try {
+      await createStaffInvitation(inviteEmail, locale, currentCSRFToken() ?? undefined);
       setInviteEmail("");
+      setInviteState("success");
+      setMessage(t.auth.staff.inviteSuccess);
     } catch {
-      setInviteStatus("error");
-      setInviteMsg(t.auth.register.failed);
+      setInviteState("error");
+      setMessage(t.auth.register.failed);
     }
   };
 
-  const handleSuspend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSuspendStatus("submitting");
-    setSuspendMsg(null);
-
+  const changeStatus = async (account: InstructorStaffAccount) => {
+    const reason = reasonByID[account.id]?.trim();
+    if (!reason) return;
+    setMutatingID(account.id);
+    setMessage(null);
     try {
       const csrf = currentCSRFToken() ?? undefined;
-      await suspendStaffAccount(suspendID, suspendReason, locale, csrf);
-
-      setSuspendStatus("success");
-      setSuspendMsg(t.auth.staff.suspendSuccess);
-      setSuspendID("");
-      setSuspendReason("");
+      if (account.status === "ACTIVE") {
+        await suspendStaffAccount(account.id, reason, locale, csrf);
+        setMessage(t.auth.staff.suspendSuccess);
+      } else {
+        await reinstateStaffAccount(account.id, reason, locale, csrf);
+        setMessage(t.auth.staff.reinstateSuccess);
+      }
+      setReasonByID((current) => ({ ...current, [account.id]: "" }));
+      await loadAccounts();
     } catch {
-      setSuspendStatus("error");
-      setSuspendMsg(t.auth.register.failed);
-    }
-  };
-
-  const handleReinstate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setReinstateStatus("submitting");
-    setReinstateMsg(null);
-
-    try {
-      const csrf = currentCSRFToken() ?? undefined;
-      await reinstateStaffAccount(reinstateID, reinstateReason, locale, csrf);
-
-      setReinstateStatus("success");
-      setReinstateMsg(t.auth.staff.reinstateSuccess);
-      setReinstateID("");
-      setReinstateReason("");
-    } catch {
-      setReinstateStatus("error");
-      setReinstateMsg(t.auth.register.failed);
+      setMessage(t.auth.register.failed);
+    } finally {
+      setMutatingID(null);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      {/* Create Invitation Section */}
-      <section className="bg-surface p-6 rounded-lg shadow-sm border border-border space-y-4">
+    <div className="mx-auto max-w-4xl space-y-8">
+      <section className="space-y-4 rounded-lg border border-border bg-surface p-6 shadow-sm">
         <h2 className="text-xl font-bold">{t.auth.staff.createTitle}</h2>
         <p className="text-sm text-muted-foreground">{t.auth.staff.createIntro}</p>
-
-        {inviteMsg && <Alert tone={inviteStatus === "error" ? "error" : "success"} title={inviteMsg} />}
-
-        <form onSubmit={handleCreateInvite} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field htmlFor="staff-invite-email" label={t.auth.staff.email}>
-              <Input
-                id="staff-invite-email"
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                required
-                disabled={inviteStatus === "sending"}
-              />
-            </Field>
-
-            <Field htmlFor="staff-invite-role" label={t.auth.staff.role}>
-              <select
-                id="staff-invite-role"
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as "INSTRUCTOR" | "ADMIN")}
-                className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
-                disabled={inviteStatus === "sending"}
-              >
-                <option value="INSTRUCTOR">{t.auth.staff.roleInstructor}</option>
-                <option value="ADMIN">{t.auth.staff.roleAdmin}</option>
-              </select>
-            </Field>
-          </div>
-
-          <Button type="submit" variant="accent" disabled={inviteStatus === "sending"}>
-            {inviteStatus === "sending" ? t.auth.staff.sendingInvite : t.auth.staff.sendInvite}
+        {message && <Alert tone={inviteState === "error" ? "error" : "success"} title={message} />}
+        <form onSubmit={handleInvite} className="flex flex-col gap-4 sm:flex-row sm:items-end">
+          <Field htmlFor="staff-invite-email" label={t.auth.staff.email} className="flex-1">
+            <Input id="staff-invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required disabled={inviteState === "sending"} />
+          </Field>
+          <Button type="submit" variant="accent" disabled={inviteState === "sending"}>
+            {inviteState === "sending" ? t.auth.staff.sendingInvite : t.auth.staff.sendInvite}
           </Button>
         </form>
       </section>
 
-      {/* Account Suspension Section */}
-      <section className="bg-surface p-6 rounded-lg shadow-sm border border-border space-y-4">
-        <h2 className="text-xl font-bold text-destructive">{t.auth.staff.suspendTitle}</h2>
-
-        {suspendMsg && <Alert tone={suspendStatus === "error" ? "error" : "success"} title={suspendMsg} />}
-
-        <form onSubmit={handleSuspend} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field htmlFor="suspend-account-id" label={t.auth.staff.accountId}>
-              <Input
-                id="suspend-account-id"
-                type="text"
-                value={suspendID}
-                onChange={(e) => setSuspendID(e.target.value)}
-                required
-                disabled={suspendStatus === "submitting"}
-              />
-            </Field>
-
-            <Field htmlFor="suspend-reason" label={t.auth.staff.suspendReason}>
-              <Input
-                id="suspend-reason"
-                type="text"
-                value={suspendReason}
-                onChange={(e) => setSuspendReason(e.target.value)}
-                required
-                disabled={suspendStatus === "submitting"}
-              />
-            </Field>
-          </div>
-
-          <Button type="submit" variant="destructive" disabled={suspendStatus === "submitting"}>
-            {suspendStatus === "submitting" ? t.auth.staff.suspending : t.auth.staff.suspendAction}
-          </Button>
-        </form>
-      </section>
-
-      {/* Account Reinstatement Section */}
-      <section className="bg-surface p-6 rounded-lg shadow-sm border border-border space-y-4">
-        <h2 className="text-xl font-bold">{t.auth.staff.reinstateTitle}</h2>
-
-        {reinstateMsg && <Alert tone={reinstateStatus === "error" ? "error" : "success"} title={reinstateMsg} />}
-
-        <form onSubmit={handleReinstate} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field htmlFor="reinstate-account-id" label={t.auth.staff.accountId}>
-              <Input
-                id="reinstate-account-id"
-                type="text"
-                value={reinstateID}
-                onChange={(e) => setReinstateID(e.target.value)}
-                required
-                disabled={reinstateStatus === "submitting"}
-              />
-            </Field>
-
-            <Field htmlFor="reinstate-reason" label={t.auth.staff.reinstateReason}>
-              <Input
-                id="reinstate-reason"
-                type="text"
-                value={reinstateReason}
-                onChange={(e) => setReinstateReason(e.target.value)}
-                required
-                disabled={reinstateStatus === "submitting"}
-              />
-            </Field>
-          </div>
-
-          <Button type="submit" variant="accent" disabled={reinstateStatus === "submitting"}>
-            {reinstateStatus === "submitting" ? t.auth.staff.reinstating : t.auth.staff.reinstateAction}
-          </Button>
-        </form>
+      <section className="space-y-4 rounded-lg border border-border bg-surface p-6 shadow-sm">
+        <h2 className="text-xl font-bold">{t.auth.staff.instructorsTitle}</h2>
+        {loadState === "loading" && <p className="text-sm text-muted-foreground">{t.auth.staff.loading}</p>}
+        {loadState === "error" && <Alert tone="error" title={t.auth.staff.loadingFailed} />}
+        {loadState === "ready" && accounts.length === 0 && <p className="text-sm text-muted-foreground">{t.auth.staff.noInstructors}</p>}
+        {loadState === "ready" && accounts.map((account) => <InstructorAccountRow key={account.id} account={account} reason={reasonByID[account.id] ?? ""} busy={mutatingID === account.id} onReasonChange={(reason) => setReasonByID((current) => ({ ...current, [account.id]: reason }))} onStatusChange={changeStatus} t={t} />)}
       </section>
     </div>
   );
