@@ -520,6 +520,17 @@ func buildStaffFoundation(
 	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
 ) (*httpapi.StaffFoundation, *redis.Client, error) {
+	return buildStaffFoundationWithSource(cfg, pool, redisConnection, buildCompromisedPasswordSource)
+}
+
+type compromisedSourceFactory func(*config.Config) (identity.CompromisedRangeSource, error)
+
+func buildStaffFoundationWithSource(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
+	newSource compromisedSourceFactory,
+) (*httpapi.StaffFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
 	// The settings read below are shared with Student admission but are not
 	// conditional on it: staff onboarding writes protected outbox rows, rate
@@ -528,7 +539,7 @@ func buildStaffFoundation(
 	// and the outbox key is required for every composition, so the only setting
 	// a Student-registration-disabled environment can still be missing is
 	// PASSWORD_SCREEN_MODE, which fails here by name rather than silently.
-	compromisedSource, err := buildCompromisedPasswordSource(cfg)
+	compromisedSource, err := newSource(cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -704,6 +715,18 @@ func buildProductionFoundations(
 	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
 ) (*ProductionFoundations, error) {
+	return buildProductionFoundationsWithStaffSource(cfg, pool, redisConnection, buildCompromisedPasswordSource)
+}
+
+// buildProductionFoundationsWithStaffSource is a test-only composition seam.
+// Runtime startup always uses buildProductionFoundations and the real HIBP
+// factory; no configuration can select this injected dependency.
+func buildProductionFoundationsWithStaffSource(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
+	newStaffSource compromisedSourceFactory,
+) (*ProductionFoundations, error) {
 	pf := &ProductionFoundations{}
 
 	if cfg.Sessions().Enabled() {
@@ -744,7 +767,7 @@ func buildProductionFoundations(
 	// named error instead of silently dropping the Admin surface, so a
 	// misconfigured environment is diagnosable rather than a mystery 404.
 	if (cfg.Environment() == config.EnvDevelopment && cfg.Sessions().Enabled()) || cfg.Environment().IsProduction() {
-		foundation, limiterClient, err := buildStaffFoundation(cfg, pool, redisConnection)
+		foundation, limiterClient, err := buildStaffFoundationWithSource(cfg, pool, redisConnection, newStaffSource)
 		if err != nil {
 			pf.Close()
 			return nil, fmt.Errorf("composing staff lifecycle: %w", err)
