@@ -394,6 +394,8 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/course-access-invitations/:id/cancel":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/cancel", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/course-access-invitations/:id/resend":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/resend", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/entitlements/:id":                       {Method: http.MethodGet, Path: "/api/v1/admin/entitlements/:id", Class: ClassCapabilityProtected},
+	"PUT /api/v1/admin/entitlements/:id/expiry":                {Method: http.MethodPut, Path: "/api/v1/admin/entitlements/:id/expiry", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/entitlements/:id/revocation":           {Method: http.MethodPost, Path: "/api/v1/admin/entitlements/:id/revocation", Class: ClassCapabilityProtected},
 	"GET /api/v1/me/course-access-invitations":                 {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations", Class: ClassCapabilityProtected},
 	"GET /api/v1/me/course-access-invitations/:id":             {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/me/course-access-invitations/:id/accept":     {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},

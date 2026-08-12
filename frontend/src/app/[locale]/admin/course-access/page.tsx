@@ -13,6 +13,8 @@ import {
   resendCourseAccessInvitation,
   setCourseDefaultAccessExpiry,
   getAdminEntitlementDetail,
+  adjustEntitlementExpiry,
+  revokeEntitlement,
 } from "@/lib/api/access";
 import { getPublicCourses } from "@/lib/api/public-catalog";
 import { ProblemError } from "@/lib/api/problem";
@@ -64,9 +66,20 @@ export default function AdminCourseAccessPage() {
   const [rejectReason, setRejectReason] = useState<string>("");
   const [rejectSubmitting, setRejectSubmitting] = useState<boolean>(false);
 
-  // Modal state: Entitlement Detail
+  // Modal state: Entitlement Detail — the AD07 surface. It is where an
+  // existing grant is inspected and, under BR-026, extended, shortened, or
+  // revoked. The Admin reaches it from a queue row, never by identifier.
   const [detailModal, setDetailModal] = useState<AdminEntitlementDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailNotice, setDetailNotice] = useState<string | null>(null);
+  const [detailBusy, setDetailBusy] = useState<boolean>(false);
+  const [adjustDate, setAdjustDate] = useState<string>("");
+  const [adjustReason, setAdjustReason] = useState<string>("");
+  const [adjustSupportRef, setAdjustSupportRef] = useState<string>("");
+  const [revokeReason, setRevokeReason] = useState<string>("");
+  const [revokeSupportRef, setRevokeSupportRef] = useState<string>("");
+  const [revokeConfirming, setRevokeConfirming] = useState<boolean>(false);
 
   const fetchInvitations = useCallback(async () => {
     setLoading(true);
@@ -180,7 +193,15 @@ export default function AdminCourseAccessPage() {
     setSuccess(null);
     try {
       const res = await approveCourseAccessInvitation(id, locale);
-      setSuccess(`Invitation approved! Entitlement ID: ${res?.entitlement?.id}`);
+      // The grant is now reachable from its queue row; the Admin never needs
+      // the identifier it was previously shown here.
+      setSuccess(
+        `Invitation approved! Course access is active until ${
+          res?.entitlement?.access_ends_at
+            ? new Date(res.entitlement.access_ends_at).toLocaleString()
+            : "the configured expiry"
+        }. Use "Manage access" on the row to change or revoke it.`,
+      );
       fetchInvitations();
     } catch (err: unknown) {
       setError(getProblemErrorMessage(err, "Approval failed"));
@@ -230,8 +251,20 @@ export default function AdminCourseAccessPage() {
     }
   };
 
+  const resetEntitlementForms = () => {
+    setDetailError(null);
+    setDetailNotice(null);
+    setAdjustDate("");
+    setAdjustReason("");
+    setAdjustSupportRef("");
+    setRevokeReason("");
+    setRevokeSupportRef("");
+    setRevokeConfirming(false);
+  };
+
   const handleViewEntitlement = async (entitlementId: string) => {
     setDetailLoading(true);
+    resetEntitlementForms();
     try {
       const detail = await getAdminEntitlementDetail(entitlementId, locale);
       if (detail) {
@@ -241,6 +274,77 @@ export default function AdminCourseAccessPage() {
       setError(getProblemErrorMessage(err, "Failed to load entitlement details"));
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const closeEntitlementDetail = () => {
+    setDetailModal(null);
+    resetEntitlementForms();
+  };
+
+  /**
+   * One expiry adjustment. The direction is the server's business: a later
+   * date extends access, an earlier one shortens it, and a past date ends it
+   * immediately. The Admin supplies the date and the required reason.
+   */
+  const handleAdjustExpiry = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailModal || !adjustDate || !adjustReason.trim() || detailBusy) return;
+    setDetailBusy(true);
+    setDetailError(null);
+    setDetailNotice(null);
+    try {
+      const updated = await adjustEntitlementExpiry(
+        detailModal.entitlement.id,
+        adjustDate,
+        adjustReason.trim(),
+        {
+          supportReference: adjustSupportRef.trim() || undefined,
+          // The revision the Admin is looking at. A grant changed by someone
+          // else in the meantime is refused, not silently overwritten.
+          expectedRevision: detailModal.entitlement.revision,
+        },
+        locale,
+      );
+      if (updated) setDetailModal(updated);
+      setDetailNotice("Access expiry updated.");
+      setAdjustDate("");
+      setAdjustReason("");
+      setAdjustSupportRef("");
+      fetchInvitations();
+    } catch (err: unknown) {
+      setDetailError(getProblemErrorMessage(err, "Failed to update access expiry"));
+    } finally {
+      setDetailBusy(false);
+    }
+  };
+
+  const handleRevokeEntitlement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detailModal || !revokeReason.trim() || !revokeConfirming || detailBusy) return;
+    setDetailBusy(true);
+    setDetailError(null);
+    setDetailNotice(null);
+    try {
+      const updated = await revokeEntitlement(
+        detailModal.entitlement.id,
+        revokeReason.trim(),
+        {
+          supportReference: revokeSupportRef.trim() || undefined,
+          expectedRevision: detailModal.entitlement.revision,
+        },
+        locale,
+      );
+      if (updated) setDetailModal(updated);
+      setDetailNotice("Course access revoked. Enrollment and progress records are retained.");
+      setRevokeReason("");
+      setRevokeSupportRef("");
+      setRevokeConfirming(false);
+      fetchInvitations();
+    } catch (err: unknown) {
+      setDetailError(getProblemErrorMessage(err, "Failed to revoke access"));
+    } finally {
+      setDetailBusy(false);
     }
   };
 
@@ -451,6 +555,17 @@ export default function AdminCourseAccessPage() {
                         </>
                       )}
 
+                      {inv.entitlement_id && (
+                        <button
+                          onClick={() => handleViewEntitlement(inv.entitlement_id as string)}
+                          disabled={detailLoading}
+                          data-testid={`manage-access-${inv.id}`}
+                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 text-xs font-semibold rounded disabled:opacity-50"
+                        >
+                          {detailLoading ? "Opening..." : "Manage access"}
+                        </button>
+                      )}
+
                       {inv.state === "PENDING_STUDENT_ACCEPTANCE" && (
                         <>
                           <button
@@ -517,28 +632,174 @@ export default function AdminCourseAccessPage() {
         </div>
       )}
 
-      {/* Entitlement Detail Modal */}
+      {/* Entitlement Detail Modal (AD07) */}
       {detailModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-xl w-full shadow-xl space-y-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-lg p-6 max-w-xl w-full shadow-xl space-y-4 my-8" data-testid="entitlement-detail">
             <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-lg font-bold text-gray-900">Entitlement Record Detail</h3>
+              <h3 className="text-lg font-bold text-gray-900">Course Access Record</h3>
               <button
-                onClick={() => setDetailModal(null)}
+                onClick={closeEntitlementDetail}
                 className="text-gray-500 hover:text-gray-700 font-bold text-lg"
               >
                 &times;
               </button>
             </div>
-            <div className="space-y-2 text-sm font-mono bg-gray-50 p-4 rounded border">
-              <div><strong>ID:</strong> {detailModal.entitlement.id}</div>
-              <div><strong>Student ID:</strong> {detailModal.entitlement.student_account_id}</div>
-              <div><strong>Course ID:</strong> {detailModal.entitlement.course_id}</div>
-              <div><strong>State:</strong> <span className="font-bold text-green-700">{detailModal.entitlement.state}</span></div>
-              <div><strong>Grant Source:</strong> {detailModal.entitlement.grant_source}</div>
-              <div><strong>Source Inv ID:</strong> {detailModal.entitlement.source_invitation_id || "N/A"}</div>
-              <div><strong>Access Ends At:</strong> {new Date(detailModal.entitlement.access_ends_at).toLocaleString()}</div>
+            <div className="space-y-2 text-sm bg-gray-50 p-4 rounded border">
+              <div><strong>Course:</strong> {courseLabel(detailModal.entitlement.course_id)}</div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span
+                  data-testid="entitlement-state"
+                  className={`font-bold ${detailModal.entitlement.state === "ACTIVE" ? "text-green-700" : "text-red-700"}`}
+                >
+                  {detailModal.entitlement.state}
+                </span>
+              </div>
+              <div data-testid="entitlement-access-ends-at">
+                <strong>Access ends:</strong> {new Date(detailModal.entitlement.access_ends_at).toLocaleString()}
+              </div>
+              <div className="text-xs text-gray-600">
+                Originally granted until {new Date(detailModal.entitlement.original_access_ends_at).toLocaleString()}
+              </div>
+              {detailModal.entitlement.revoked_at && (
+                <div className="text-xs text-red-700" data-testid="entitlement-revoked-at">
+                  Revoked on {new Date(detailModal.entitlement.revoked_at).toLocaleString()}
+                </div>
+              )}
+              <div className="text-xs text-gray-600">Grant source: {detailModal.entitlement.grant_source}</div>
             </div>
+
+            {detailNotice && (
+              <p role="status" data-testid="entitlement-notice" className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+                {detailNotice}
+              </p>
+            )}
+            {detailError && (
+              <p role="alert" data-testid="entitlement-error" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {detailError}
+              </p>
+            )}
+
+            {detailModal.entitlement.state === "ACTIVE" ? (
+              <div className="space-y-5">
+                <form onSubmit={handleAdjustExpiry} className="space-y-3 border rounded-md p-4" data-testid="entitlement-expiry-form">
+                  <h4 className="font-semibold text-sm text-gray-800">Change access expiry</h4>
+                  <p className="text-xs text-gray-600">
+                    A later date extends access; an earlier date shortens it. A date already past ends access
+                    immediately and keeps enrollment and progress.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-date">
+                      New access expiry date (YYYY-MM-DD)
+                    </label>
+                    <input
+                      id="entitlement-expiry-date"
+                      type="date"
+                      required
+                      value={adjustDate}
+                      onChange={(e) => setAdjustDate(e.target.value)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-reason">
+                      Reason
+                    </label>
+                    <input
+                      id="entitlement-expiry-reason"
+                      type="text"
+                      required
+                      value={adjustReason}
+                      onChange={(e) => setAdjustReason(e.target.value)}
+                      placeholder="Semester extended for the whole cohort"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-reference">
+                      Support reference (optional)
+                    </label>
+                    <input
+                      id="entitlement-expiry-reference"
+                      type="text"
+                      value={adjustSupportRef}
+                      onChange={(e) => setAdjustSupportRef(e.target.value)}
+                      placeholder="SUPPORT-2026-08"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={detailBusy || !adjustDate || !adjustReason.trim()}
+                    data-testid="save-entitlement-expiry"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md text-sm disabled:opacity-50"
+                  >
+                    {detailBusy ? "Saving..." : "Save new expiry"}
+                  </button>
+                </form>
+
+                <form onSubmit={handleRevokeEntitlement} className="space-y-3 border border-red-200 rounded-md p-4 bg-red-50/40" data-testid="entitlement-revoke-form">
+                  <h4 className="font-semibold text-sm text-red-800">Revoke access</h4>
+                  <p className="text-xs text-gray-700">
+                    Revoking ends this Student&apos;s access to the Course immediately. The enrollment record,
+                    learning progress and access history are kept.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-revoke-reason">
+                      Reason
+                    </label>
+                    <input
+                      id="entitlement-revoke-reason"
+                      type="text"
+                      required
+                      value={revokeReason}
+                      onChange={(e) => setRevokeReason(e.target.value)}
+                      placeholder="Access ended after out-of-band refund"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-revoke-reference">
+                      Support reference (optional)
+                    </label>
+                    <input
+                      id="entitlement-revoke-reference"
+                      type="text"
+                      value={revokeSupportRef}
+                      onChange={(e) => setRevokeSupportRef(e.target.value)}
+                      placeholder="SUPPORT-2026-08"
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                    />
+                  </div>
+                  <label className="flex items-start gap-2 text-xs text-gray-800">
+                    <input
+                      type="checkbox"
+                      checked={revokeConfirming}
+                      onChange={(e) => setRevokeConfirming(e.target.checked)}
+                      data-testid="confirm-revoke-entitlement"
+                      className="mt-0.5"
+                    />
+                    <span>
+                      I confirm this Student should lose access to {courseLabel(detailModal.entitlement.course_id)} now.
+                    </span>
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={detailBusy || !revokeConfirming || !revokeReason.trim()}
+                    data-testid="revoke-entitlement"
+                    className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md text-sm disabled:opacity-50"
+                  >
+                    {detailBusy ? "Revoking..." : "Revoke access"}
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-700 border rounded-md p-4 bg-gray-50" data-testid="entitlement-terminal">
+                This access grant is revoked. It is kept as history and can no longer be extended, shortened, or
+                revoked again.
+              </p>
+            )}
             <div>
               <h4 className="font-semibold text-sm mb-2 text-gray-800">Adjustment History</h4>
               {detailModal.adjustments.length === 0 ? (

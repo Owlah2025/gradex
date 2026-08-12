@@ -22,6 +22,8 @@ const (
 	TemplateAccessGranted    = "course-access-granted-v1"
 	TemplateInviteRejected   = "course-access-invitation-rejected-v1"
 	TemplateInviteCancelled  = "course-access-invitation-cancelled-v1"
+	TemplateAccessAdjusted   = "course-access-adjusted-v1"
+	TemplateAccessRevoked    = "course-access-revoked-v1"
 )
 
 var eventTemplates = map[string]string{
@@ -33,6 +35,8 @@ var eventTemplates = map[string]string{
 	"access.granted":                        TemplateAccessGranted,
 	"access.invitation_rejected":            TemplateInviteRejected,
 	"access.invitation_cancelled":           TemplateInviteCancelled,
+	"access.entitlement_adjusted":           TemplateAccessAdjusted,
+	"access.entitlement_revoked":            TemplateAccessRevoked,
 }
 
 type DeliveryPayload struct {
@@ -123,6 +127,14 @@ var localizedTemplates = map[string]map[string]localizedTemplate{
 	TemplateInviteCancelled: {
 		"en": {"Your Gradex Course invitation was cancelled", "Course invitation cancelled", "The Course Access Invitation is no longer available. It did not grant Course access.", "View access status", "Contact Gradex support if you need help."},
 		"ar": {"تم إلغاء دعوة دورة Gradex", "تم إلغاء دعوة الدورة", "لم تعد دعوة الوصول إلى الدورة متاحة. لم تمنح الدعوة وصولًا إلى الدورة.", "عرض حالة الوصول", "تواصل مع دعم Gradex إذا احتجت إلى مساعدة."},
+	},
+	TemplateAccessAdjusted: {
+		"en": {"Your Gradex Course access period changed", "Course access period updated", "An authorized Admin changed the end date of your Course access. Your current access period is shown on your access page.", "View access", "Contact Gradex support if you believe this needs review."},
+		"ar": {"تم تغيير فترة وصولك إلى دورة Gradex", "تم تحديث فترة الوصول إلى الدورة", "غيّر مسؤول مخوّل تاريخ انتهاء وصولك إلى الدورة. تظهر فترة وصولك الحالية في صفحة الوصول.", "عرض الوصول", "تواصل مع دعم Gradex إذا كنت تعتقد أن الأمر يحتاج إلى مراجعة."},
+	},
+	TemplateAccessRevoked: {
+		"en": {"Your Gradex Course access was ended", "Course access revoked", "An authorized Admin ended your access to this Course. Your enrollment record and learning progress are retained.", "View access status", "Contact Gradex support if you believe this needs review."},
+		"ar": {"تم إنهاء وصولك إلى دورة Gradex", "تم إلغاء الوصول إلى الدورة", "أنهى مسؤول مخوّل وصولك إلى هذه الدورة. يظل سجل تسجيلك وتقدمك الدراسي محفوظًا.", "عرض حالة الوصول", "تواصل مع دعم Gradex إذا كنت تعتقد أن الأمر يحتاج إلى مراجعة."},
 	},
 }
 
@@ -219,7 +231,8 @@ func (r *Renderer) actionURL(request RenderRequest) (string, bool, error) {
 		return fmt.Sprintf("%s/%s/access?invitation_id=%s#token=%s", r.publicOrigin, request.Locale, url.QueryEscape(request.Event.AggregateID), credential), true, nil
 	case TemplatePasswordChanged:
 		return r.publicOrigin + "/login", false, nil
-	case TemplateAccessGranted, TemplateInviteRejected, TemplateInviteCancelled:
+	case TemplateAccessGranted, TemplateInviteRejected, TemplateInviteCancelled,
+		TemplateAccessAdjusted, TemplateAccessRevoked:
 		return r.publicOrigin + "/" + request.Locale + "/access", false, nil
 	default:
 		return "", false, errors.New("transactional email template is unsupported")

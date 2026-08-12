@@ -251,6 +251,55 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     expect(recheckSnapshot.enrollment.count).toBe(1);
     expect(recheckSnapshot.enrollment.id).toBe(stateSnapshot.enrollment.id);
 
+    // 27. AD07: the Admin manages the resulting grant from its queue row.
+    // No entitlement, enrollment, Course or Student identifier is typed.
+    await adminPage.reload();
+    const manageAccess = adminPage.locator(`tr:has-text("${STUDENT_A_EMAIL}") button:has-text("Manage access")`);
+    await expect(manageAccess).toBeVisible();
+    await manageAccess.click();
+    const accessRecord = adminPage.getByTestId("entitlement-detail");
+    await expect(accessRecord).toBeVisible();
+    await expect(accessRecord).toContainText("CS101");
+    await expect(adminPage.getByTestId("entitlement-state")).toContainText("ACTIVE");
+
+    // Protected learning is exercised through the same production progress
+    // route the journey already used, so each access answer is comparable.
+    const protectedProgressStatus = async (position: number): Promise<number> =>
+      studentPage.evaluate(async (args) => {
+        const response = await fetch(`/api/v1/learn/lessons/${args.lessonID}/progress`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            position_seconds: args.position,
+            asset_version_id: "60000000-0000-0000-0000-000000000001",
+          }),
+        });
+        return response.status;
+      }, { lessonID: LESSON_ID, position });
+
+    // 28. Extend the grant: a later expiry keeps protected learning working.
+    await adminPage.locator("#entitlement-expiry-date").fill("2027-06-30");
+    await adminPage.locator("#entitlement-expiry-reason").fill("Semester extended for the launch cohort");
+    await adminPage.getByTestId("save-entitlement-expiry").click();
+    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("Access expiry updated");
+    expect([200, 204]).toContain(await protectedProgressStatus(20));
+
+    // 29. Shorten the grant to a still-open period: access continues.
+    await adminPage.locator("#entitlement-expiry-date").fill("2026-12-31");
+    await adminPage.locator("#entitlement-expiry-reason").fill("Cohort finishes earlier than planned");
+    await adminPage.getByTestId("save-entitlement-expiry").click();
+    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("Access expiry updated");
+    expect([200, 204]).toContain(await protectedProgressStatus(25));
+
+    // 30. Revoke the grant: protected learning is refused afterwards, and the
+    // record stays as history rather than disappearing.
+    await adminPage.locator("#entitlement-revoke-reason").fill("Access ended after out-of-band refund");
+    await adminPage.getByTestId("confirm-revoke-entitlement").check();
+    await adminPage.getByTestId("revoke-entitlement").click();
+    await expect(adminPage.getByTestId("entitlement-state")).toContainText("REVOKED");
+    await expect(adminPage.getByTestId("entitlement-terminal")).toBeVisible();
+    expect([401, 403, 404, 410]).toContain(await protectedProgressStatus(30));
+
     await adminContext.close();
     await studentContext.close();
     await studentBContext.close();

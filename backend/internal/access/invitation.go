@@ -60,6 +60,11 @@ type Invitation struct {
 	AcceptedAt          *time.Time `json:"accepted_at,omitempty"`
 	DecidedAt           *time.Time `json:"decided_at,omitempty"`
 	CancelledAt         *time.Time `json:"cancelled_at,omitempty"`
+	// EntitlementID is the grant this Invitation produced, present only on the
+	// Admin listing. It is how the Admin reaches the Entitlement Detail surface
+	// from the queue row instead of knowing an identifier. It is never an access
+	// decision: authorization reads the Entitlement itself (BR-029).
+	EntitlementID *string `json:"entitlement_id,omitempty"`
 }
 
 // StudentInvitation is the recipient-facing projection for ST04 / ST10 (FR-036).

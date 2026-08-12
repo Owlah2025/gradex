@@ -516,32 +516,35 @@ func (r *Repository) ListAdminInvitations(ctx context.Context, filter ListAdminI
 	argIdx := 1
 
 	if filter.State != nil && filter.State.Valid() {
-		whereClauses = append(whereClauses, fmt.Sprintf("state = $%d", argIdx))
+		whereClauses = append(whereClauses, fmt.Sprintf("i.state = $%d", argIdx))
 		args = append(args, string(*filter.State))
 		argIdx++
 	}
 	if filter.CourseID != nil && strings.TrimSpace(*filter.CourseID) != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("course_id = $%d::uuid", argIdx))
+		whereClauses = append(whereClauses, fmt.Sprintf("i.course_id = $%d::uuid", argIdx))
 		args = append(args, *filter.CourseID)
 		argIdx++
 	}
 
 	whereStmt := strings.Join(whereClauses, " AND ")
 
-	countQuery := fmt.Sprintf("SELECT count(*) FROM course_access_invitations WHERE %s", whereStmt)
+	countQuery := fmt.Sprintf("SELECT count(*) FROM course_access_invitations i WHERE %s", whereStmt)
 	var total int
 	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting invitations: %w", err)
 	}
 
+	// The entitlement join carries the grant this Invitation produced, so the
+	// Admin queue can open Entitlement Detail without anyone handling an ID.
 	query := fmt.Sprintf(`
-		SELECT id::text, normalized_email, email, course_id::text, created_by_account_id::text,
-		       decided_by_account_id::text, accepted_by_account_id::text, state, decision_reason,
-		       admin_note, external_reference, action_secret_id::text, created_at, accepted_at,
-		       decided_at, cancelled_at
-		  FROM course_access_invitations
+		SELECT i.id::text, i.normalized_email, i.email, i.course_id::text, i.created_by_account_id::text,
+		       i.decided_by_account_id::text, i.accepted_by_account_id::text, i.state, i.decision_reason,
+		       i.admin_note, i.external_reference, i.action_secret_id::text, i.created_at, i.accepted_at,
+		       i.decided_at, i.cancelled_at, e.id::text
+		  FROM course_access_invitations i
+		  LEFT JOIN entitlements e ON e.source_invitation_id = i.id
 		 WHERE %s
-		 ORDER BY created_at DESC
+		 ORDER BY i.created_at DESC
 		 LIMIT $%d OFFSET $%d
 	`, whereStmt, argIdx, argIdx+1)
 
@@ -557,15 +560,17 @@ func (r *Repository) ListAdminInvitations(ctx context.Context, filter ListAdminI
 	for rows.Next() {
 		var inv Invitation
 		var actionSecretID *string
+		var entitlementID *string
 		if err := rows.Scan(
 			&inv.ID, &inv.NormalizedEmail, &inv.Email, &inv.CourseID, &inv.CreatedByAccountID,
 			&inv.DecidedByAccountID, &inv.AcceptedByAccountID, &inv.State, &inv.DecisionReason,
 			&inv.AdminNote, &inv.ExternalReference, &actionSecretID, &inv.CreatedAt, &inv.AcceptedAt,
-			&inv.DecidedAt, &inv.CancelledAt,
+			&inv.DecidedAt, &inv.CancelledAt, &entitlementID,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning invitation: %w", err)
 		}
 		inv.ActionSecretID = actionSecretID
+		inv.EntitlementID = entitlementID
 		result = append(result, inv)
 	}
 	if err := rows.Err(); err != nil {
@@ -1416,6 +1421,317 @@ func (r *Repository) GetStudentAccessHistory(ctx context.Context, callerAccountI
 	}
 
 	return StudentCourseAccessHistoryResponse{Items: items}, nil
+}
+
+// lockedEntitlement is the shared precondition of both elevated-Admin
+// mutations: the row is locked for update, exists, is not already revoked,
+// and matches the revision the Admin was looking at.
+func lockEntitlementForAdjustment(
+	ctx context.Context,
+	tx pgx.Tx,
+	entitlementID string,
+	expectedRevision int64,
+) (Entitlement, error) {
+	var ent Entitlement
+	var sourceInvID *string
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, student_account_id::text, scope_kind, scope_id::text, course_id::text,
+		       grant_source, source_invitation_id::text, original_access_ends_at, access_ends_at,
+		       revoked_at, retirement_eligibility_at, state, revision, created_at, updated_at
+		  FROM entitlements
+		 WHERE id = $1::uuid
+		 FOR UPDATE
+	`, entitlementID).Scan(
+		&ent.ID, &ent.StudentAccountID, &ent.ScopeKind, &ent.ScopeID, &ent.CourseID,
+		&ent.GrantSource, &sourceInvID, &ent.OriginalAccessEndsAt, &ent.AccessEndsAt,
+		&ent.RevokedAt, &ent.RetirementEligibilityAt, &ent.State, &ent.Revision,
+		&ent.CreatedAt, &ent.UpdatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Entitlement{}, ErrEntitlementNotFound
+	}
+	if err != nil {
+		return Entitlement{}, fmt.Errorf("locking entitlement: %w", err)
+	}
+	ent.SourceInvitationID = sourceInvID
+	if ent.State == "REVOKED" || ent.RevokedAt != nil {
+		return Entitlement{}, ErrEntitlementRevoked
+	}
+	if expectedRevision > 0 && ent.Revision != expectedRevision {
+		return Entitlement{}, ErrEntitlementStale
+	}
+	return ent, nil
+}
+
+// entitlementActorDescriptor keeps the audit actor descriptor present, which
+// the audit table requires, without letting a caller omission turn into a
+// constraint failure mid-transaction.
+func entitlementActorDescriptor(descriptor, adminAccountID string) string {
+	if trimmed := strings.TrimSpace(descriptor); trimmed != "" {
+		return trimmed
+	}
+	return adminAccountID
+}
+
+// entitlementRecipient reads the Student identity the notification event is
+// addressed to. The Student is notified of a change to their own access.
+func entitlementRecipient(ctx context.Context, tx pgx.Tx, studentAccountID string) (string, identity.Locale, error) {
+	var email string
+	var locale identity.Locale
+	err := tx.QueryRow(ctx,
+		`SELECT normalized_email, locale FROM accounts WHERE id = $1::uuid`, studentAccountID,
+	).Scan(&email, &locale)
+	if err != nil {
+		return "", "", fmt.Errorf("loading entitlement recipient: %w", err)
+	}
+	if !locale.Valid() {
+		locale = identity.LocaleArabic
+	}
+	return email, locale, nil
+}
+
+// AdjustEntitlementExpiry moves the effective `access_ends_at` of an existing
+// entitlement later (extend) or earlier (shorten) in one transaction.
+//
+// BR-026: the effective instant changes only through an adjustment that
+// atomically records old expiry, new expiry, reason, actor, timestamp and any
+// support reference, with immutable Audit evidence and a transactional
+// Student-notification event. `original_access_ends_at` is never touched, and
+// a new instant in the past ends access immediately without deleting
+// Enrollment, Progress, Invitation, or adjustment history.
+func (r *Repository) AdjustEntitlementExpiry(
+	ctx context.Context,
+	params AdjustEntitlementExpiryParams,
+) (AdminEntitlementDetail, error) {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
+		return AdminEntitlementDetail{}, errors.New("repository is not initialized")
+	}
+	if strings.TrimSpace(params.EntitlementID) == "" {
+		return AdminEntitlementDetail{}, ErrEntitlementNotFound
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(params.EntitlementID)); err != nil {
+		return AdminEntitlementDetail{}, ErrEntitlementNotFound
+	}
+	if strings.TrimSpace(params.AdminAccountID) == "" {
+		return AdminEntitlementDetail{}, errors.New("admin account ID is required")
+	}
+	if strings.TrimSpace(params.Reason) == "" {
+		return AdminEntitlementDetail{}, ErrReasonRequired
+	}
+	if params.NewAccessEndsAt.IsZero() {
+		return AdminEntitlementDetail{}, ErrExpiryRequired
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.UTC()
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("beginning adjustment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	ent, err := lockEntitlementForAdjustment(ctx, tx, params.EntitlementID, params.ExpectedRevision)
+	if err != nil {
+		return AdminEntitlementDetail{}, err
+	}
+	oldAccessEndsAt := ent.AccessEndsAt
+
+	if err := tx.QueryRow(ctx, `
+		UPDATE entitlements
+		   SET access_ends_at = $1, revision = revision + 1, updated_at = $2
+		 WHERE id = $3::uuid
+		 RETURNING access_ends_at, revision, updated_at
+	`, params.NewAccessEndsAt.UTC(), now, ent.ID).Scan(&ent.AccessEndsAt, &ent.Revision, &ent.UpdatedAt); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("updating entitlement expiry: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO entitlement_adjustments (
+			entitlement_id, old_access_ends_at, new_access_ends_at,
+			reason, actor_account_id, support_reference, adjusted_at
+		) VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7)
+	`, ent.ID, oldAccessEndsAt, ent.AccessEndsAt, params.Reason,
+		params.AdminAccountID, params.SupportReference, now); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("recording entitlement adjustment: %w", err)
+	}
+
+	auditMeta, err := json.Marshal(map[string]any{
+		"course_id":             ent.CourseID,
+		"student_account_id":    ent.StudentAccountID,
+		"old_access_ends_at":    oldAccessEndsAt.UTC().Format(time.RFC3339),
+		"new_access_ends_at":    ent.AccessEndsAt.UTC().Format(time.RFC3339),
+		"support_reference":     params.SupportReference,
+		"entitlement_revision":  ent.Revision,
+		"original_access_ends":  ent.OriginalAccessEndsAt.UTC().Format(time.RFC3339),
+		"ends_access_immediate": !now.Before(ent.AccessEndsAt.UTC()),
+	})
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("marshaling adjustment audit metadata: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES (
+			$1::uuid, 'ADMIN', $2,
+			'ENTITLEMENT_EXPIRY_ADJUSTED', 'IDENTITY_AND_ACCESS', 'ENTITLEMENT', $3,
+			$4, $5
+		)
+	`, params.AdminAccountID, entitlementActorDescriptor(params.ActorDescriptor, params.AdminAccountID),
+		ent.ID, params.Reason, auditMeta); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("writing adjustment audit event: %w", err)
+	}
+
+	recipient, locale, err := entitlementRecipient(ctx, tx, ent.StudentAccountID)
+	if err != nil {
+		return AdminEntitlementDetail{}, err
+	}
+	if _, err := r.outboxWriter.Append(ctx, tx, outbox.Event{
+		ID:                uuid.NewString(),
+		Type:              "access.entitlement_adjusted",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "ENTITLEMENT",
+		AggregateID:       ent.ID,
+		AggregateRevision: int(ent.Revision),
+		CorrelationID:     uuid.NewString(),
+		SafePayload: map[string]any{
+			"entitlement_id":     ent.ID,
+			"student_account_id": ent.StudentAccountID,
+			"course_id":          ent.CourseID,
+			"access_ends_at":     ent.AccessEndsAt.UTC().Format(time.RFC3339),
+			"locale":             string(locale),
+			"template_contract":  "course-access-adjusted-v1",
+		},
+	}, outbox.NoticeDelivery{
+		Destination:      recipient,
+		Locale:           string(locale),
+		TemplateContract: "course-access-adjusted-v1",
+	}); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("writing adjustment outbox event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("committing adjustment transaction: %w", err)
+	}
+
+	return r.GetAdminEntitlementByID(ctx, ent.ID)
+}
+
+// RevokeEntitlement ends an active grant explicitly.
+//
+// Revocation is a lifecycle transition, never a deletion: the entitlement row
+// keeps its history and becomes REVOKED with a revocation instant, which the
+// entitlement evaluator already treats as no applicable grant. Enrollment,
+// Progress, the originating Invitation and adjustment history are untouched
+// (BR-026, AD07).
+func (r *Repository) RevokeEntitlement(
+	ctx context.Context,
+	params RevokeEntitlementParams,
+) (AdminEntitlementDetail, error) {
+	if r == nil || r.pool == nil || r.outboxWriter == nil {
+		return AdminEntitlementDetail{}, errors.New("repository is not initialized")
+	}
+	if strings.TrimSpace(params.EntitlementID) == "" {
+		return AdminEntitlementDetail{}, ErrEntitlementNotFound
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(params.EntitlementID)); err != nil {
+		return AdminEntitlementDetail{}, ErrEntitlementNotFound
+	}
+	if strings.TrimSpace(params.AdminAccountID) == "" {
+		return AdminEntitlementDetail{}, errors.New("admin account ID is required")
+	}
+	if strings.TrimSpace(params.Reason) == "" {
+		return AdminEntitlementDetail{}, ErrReasonRequired
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.UTC()
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("beginning revocation transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	ent, err := lockEntitlementForAdjustment(ctx, tx, params.EntitlementID, params.ExpectedRevision)
+	if err != nil {
+		return AdminEntitlementDetail{}, err
+	}
+
+	if err := tx.QueryRow(ctx, `
+		UPDATE entitlements
+		   SET state = 'REVOKED', revoked_at = $1, revision = revision + 1, updated_at = $1
+		 WHERE id = $2::uuid
+		 RETURNING state, revoked_at, revision, updated_at
+	`, now, ent.ID).Scan(&ent.State, &ent.RevokedAt, &ent.Revision, &ent.UpdatedAt); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("revoking entitlement: %w", err)
+	}
+
+	auditMeta, err := json.Marshal(map[string]any{
+		"course_id":            ent.CourseID,
+		"student_account_id":   ent.StudentAccountID,
+		"access_ends_at":       ent.AccessEndsAt.UTC().Format(time.RFC3339),
+		"revoked_at":           now.Format(time.RFC3339),
+		"support_reference":    params.SupportReference,
+		"entitlement_revision": ent.Revision,
+	})
+	if err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("marshaling revocation audit metadata: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor,
+			action, module, target_type, target_id, reason, metadata
+		) VALUES (
+			$1::uuid, 'ADMIN', $2,
+			'ENTITLEMENT_REVOKED', 'IDENTITY_AND_ACCESS', 'ENTITLEMENT', $3,
+			$4, $5
+		)
+	`, params.AdminAccountID, entitlementActorDescriptor(params.ActorDescriptor, params.AdminAccountID),
+		ent.ID, params.Reason, auditMeta); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("writing revocation audit event: %w", err)
+	}
+
+	recipient, locale, err := entitlementRecipient(ctx, tx, ent.StudentAccountID)
+	if err != nil {
+		return AdminEntitlementDetail{}, err
+	}
+	if _, err := r.outboxWriter.Append(ctx, tx, outbox.Event{
+		ID:                uuid.NewString(),
+		Type:              "access.entitlement_revoked",
+		SchemaVersion:     1,
+		SourceModule:      "IDENTITY_AND_ACCESS",
+		AggregateType:     "ENTITLEMENT",
+		AggregateID:       ent.ID,
+		AggregateRevision: int(ent.Revision),
+		CorrelationID:     uuid.NewString(),
+		SafePayload: map[string]any{
+			"entitlement_id":     ent.ID,
+			"student_account_id": ent.StudentAccountID,
+			"course_id":          ent.CourseID,
+			"revoked_at":         now.Format(time.RFC3339),
+			"locale":             string(locale),
+			"template_contract":  "course-access-revoked-v1",
+		},
+	}, outbox.NoticeDelivery{
+		Destination:      recipient,
+		Locale:           string(locale),
+		TemplateContract: "course-access-revoked-v1",
+	}); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("writing revocation outbox event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return AdminEntitlementDetail{}, fmt.Errorf("committing revocation transaction: %w", err)
+	}
+
+	return r.GetAdminEntitlementByID(ctx, ent.ID)
 }
 
 func (r *Repository) GetAdminEntitlementByID(ctx context.Context, entitlementID string) (AdminEntitlementDetail, error) {

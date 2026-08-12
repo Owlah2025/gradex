@@ -46,6 +46,19 @@ type acceptInvitationBody struct {
 	AcceptanceToken string `json:"acceptance_token"`
 }
 
+type adjustEntitlementExpiryBody struct {
+	Date             string `json:"date"`
+	Reason           string `json:"reason"`
+	SupportReference string `json:"support_reference"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
+type revokeEntitlementBody struct {
+	Reason           string `json:"reason"`
+	SupportReference string `json:"support_reference"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
 type rejectInvitationBody struct {
 	Reason string `json:"reason"`
 }
@@ -108,6 +121,17 @@ func mountAccessRoutes(
 		)
 		adminAccessGroup.POST("/course-access-invitations/:id/resend",
 			h.resendCourseAccessInvitation,
+		)
+		// AD07 elevated-Admin entitlement operations (BR-026). Neither route can
+		// mint an Entitlement: both address one that Admin Approval already
+		// created.
+		adminAccessGroup.PUT("/entitlements/:id/expiry",
+			strictJSONMiddleware(func() any { return &adjustEntitlementExpiryBody{} }, accessMutationBodyLimit),
+			h.adjustEntitlementExpiry,
+		)
+		adminAccessGroup.POST("/entitlements/:id/revocation",
+			strictJSONMiddleware(func() any { return &revokeEntitlementBody{} }, accessMutationBodyLimit),
+			h.revokeEntitlement,
 		)
 	}
 
@@ -652,6 +676,183 @@ func (h *accessHandlers) getAdminEntitlement(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, ent)
+}
+
+// requireRecentAdminAuthentication mirrors the approval guard: an elevated
+// operation on existing access is refused, not degraded, when the session is
+// no longer recently authenticated.
+func requireRecentAdminAuthentication(c *gin.Context, now time.Time) bool {
+	var session identity.Session
+	if val, ok := c.Get("authenticated_session"); ok {
+		if s, ok := val.(identity.Session); ok {
+			session = s
+		}
+	}
+	if session.AuthenticatedAt.IsZero() {
+		return true
+	}
+	if err := identity.CheckRecentAuthentication(session, 15*time.Minute, now); err != nil {
+		writeProblem(c, problem.New(http.StatusForbidden, "recent-authentication-required",
+			"Recent authentication required", "This operation requires recent authentication"))
+		return false
+	}
+	return true
+}
+
+// writeEntitlementMutationProblem maps the elevated-Admin entitlement errors
+// onto the existing problem classes. No new error architecture is introduced.
+func writeEntitlementMutationProblem(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, access.ErrEntitlementNotFound):
+		writeProblem(c, problem.NotFound())
+	case errors.Is(err, access.ErrEntitlementRevoked):
+		writeProblem(c, problem.New(http.StatusConflict, "entitlement-revoked",
+			"Entitlement already revoked", "This access grant is already revoked and cannot be changed"))
+	case errors.Is(err, access.ErrEntitlementStale):
+		writeProblem(c, problem.New(http.StatusConflict, "entitlement-stale",
+			"Entitlement changed", "This access grant changed since it was loaded; reload it and try again"))
+	case errors.Is(err, access.ErrReasonRequired):
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "REASON_REQUIRED",
+			Detail:    "Reason is required",
+			Location:  problem.LocationBody,
+			Parameter: "reason",
+		}))
+	case errors.Is(err, access.ErrExpiryRequired):
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "DATE_REQUIRED",
+			Detail:    "Expiry date (YYYY-MM-DD) is required",
+			Location:  problem.LocationBody,
+			Parameter: "date",
+		}))
+	default:
+		writeProblem(c, problem.Internal(""))
+	}
+}
+
+func optionalReference(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+// adjustEntitlementExpiry extends or shortens one existing grant. Both
+// directions are the same audited adjustment: a later instant extends access,
+// an earlier one shortens it, and an instant already past ends it immediately
+// (BR-026).
+func (h *accessHandlers) adjustEntitlementExpiry(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	body := c.MustGet(strictJSONBodyContextKey).(*adjustEntitlementExpiryBody)
+
+	if strings.TrimSpace(body.Date) == "" {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "DATE_REQUIRED",
+			Detail:    "Expiry date (YYYY-MM-DD) is required",
+			Location:  problem.LocationBody,
+			Parameter: "date",
+		}))
+		return
+	}
+	if strings.TrimSpace(body.Reason) == "" {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "REASON_REQUIRED",
+			Detail:    "Reason is required",
+			Location:  problem.LocationBody,
+			Parameter: "reason",
+		}))
+		return
+	}
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+	if !requireRecentAdminAuthentication(c, now) {
+		return
+	}
+
+	newExpiry, err := access.ConvertKuwaitDateToUTCBoundary(body.Date)
+	if err != nil {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "INVALID_DATE_FORMAT",
+			Detail:    "Date must be a valid Kuwait local date in YYYY-MM-DD format",
+			Location:  problem.LocationBody,
+			Parameter: "date",
+		}))
+		return
+	}
+
+	detail, err := h.repo.AdjustEntitlementExpiry(c.Request.Context(), access.AdjustEntitlementExpiryParams{
+		EntitlementID:    id,
+		AdminAccountID:   adminAccountID,
+		ActorDescriptor:  adminAccountID,
+		NewAccessEndsAt:  newExpiry,
+		Reason:           body.Reason,
+		SupportReference: optionalReference(body.SupportReference),
+		ExpectedRevision: body.ExpectedRevision,
+		Now:              now,
+	})
+	if err != nil {
+		writeEntitlementMutationProblem(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, detail)
+}
+
+func (h *accessHandlers) revokeEntitlement(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	id := c.Param("id")
+
+	if _, err := uuid.Parse(id); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+
+	body := c.MustGet(strictJSONBodyContextKey).(*revokeEntitlementBody)
+
+	if strings.TrimSpace(body.Reason) == "" {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code:      "REASON_REQUIRED",
+			Detail:    "Reason is required",
+			Location:  problem.LocationBody,
+			Parameter: "reason",
+		}))
+		return
+	}
+
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+	if !requireRecentAdminAuthentication(c, now) {
+		return
+	}
+
+	detail, err := h.repo.RevokeEntitlement(c.Request.Context(), access.RevokeEntitlementParams{
+		EntitlementID:    id,
+		AdminAccountID:   adminAccountID,
+		ActorDescriptor:  adminAccountID,
+		Reason:           body.Reason,
+		SupportReference: optionalReference(body.SupportReference),
+		ExpectedRevision: body.ExpectedRevision,
+		Now:              now,
+	})
+	if err != nil {
+		writeEntitlementMutationProblem(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, detail)
 }
 
 func (h *accessHandlers) getStudentCourseAccessHistory(c *gin.Context) {

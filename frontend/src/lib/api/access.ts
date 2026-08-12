@@ -6,6 +6,8 @@ export interface CourseAccessInvitation {
   normalized_email: string;
   email: string;
   course_id: string;
+  /** The grant this invitation produced, once an Admin approved it. */
+  entitlement_id?: string | null;
   created_by_account_id: string;
   decided_by_account_id?: string | null;
   accepted_by_account_id?: string | null;
@@ -203,6 +205,55 @@ export async function resendCourseAccessInvitation(
     "POST",
     lang,
     token,
+  );
+}
+
+/**
+ * Moves an existing grant's effective expiry. A later Kuwait-local date
+ * extends access, an earlier one shortens it; the server is authoritative for
+ * both (BR-026).
+ */
+export async function adjustEntitlementExpiry(
+  entitlementId: string,
+  date: string,
+  reason: string,
+  options: { supportReference?: string; expectedRevision?: number } = {},
+  lang: "ar" | "en" = "en",
+  csrf?: string,
+) {
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<AdminEntitlementDetail>(
+    `/admin/entitlements/${entitlementId}/expiry`,
+    "PUT",
+    lang,
+    token,
+    {
+      date,
+      reason,
+      support_reference: options.supportReference || undefined,
+      expected_revision: options.expectedRevision,
+    },
+  );
+}
+
+export async function revokeEntitlement(
+  entitlementId: string,
+  reason: string,
+  options: { supportReference?: string; expectedRevision?: number } = {},
+  lang: "ar" | "en" = "en",
+  csrf?: string,
+) {
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<AdminEntitlementDetail>(
+    `/admin/entitlements/${entitlementId}/revocation`,
+    "POST",
+    lang,
+    token,
+    {
+      reason,
+      support_reference: options.supportReference || undefined,
+      expected_revision: options.expectedRevision,
+    },
   );
 }
 

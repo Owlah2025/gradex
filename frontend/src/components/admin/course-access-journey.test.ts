@@ -176,6 +176,82 @@ test("a Course that leaves the published catalogue cannot stay silently selected
   assert.match(page, /setCourseOptions\(\[\]\);[\s\S]{0,80}setCoursesError/, "a failed load must not keep stale options");
 });
 
+// AD07: the Admin reaches an existing grant from the queue row it came from,
+// and manages it there. No entitlement, enrollment, Course, or Student
+// identifier is ever typed.
+test("an existing grant is reached from its queue row, not by identifier", () => {
+  const page = readSource(PAGE);
+
+  assert.match(page, /inv\.entitlement_id && \(/, "a granted invitation must offer its access record");
+  assert.match(page, /handleViewEntitlement\(inv\.entitlement_id as string\)/);
+  assert.match(page, /data-testid=\{`manage-access-\$\{inv\.id\}`\}/);
+  // No operator form that asks for an identifier.
+  for (const operatorInput of ["Entitlement ID", "Enrollment ID", "Student account ID", "Student ID (UUID)"]) {
+    assert.ok(!page.includes(operatorInput), `the journey must not ask for ${operatorInput}`);
+  }
+});
+
+test("the access record is inspected in human terms before it is changed", () => {
+  const page = readSource(PAGE);
+
+  assert.match(page, /courseLabel\(detailModal\.entitlement\.course_id\)/, "the record must name its Course");
+  assert.match(page, /data-testid="entitlement-state"/, "current status must be visible");
+  assert.match(page, /data-testid="entitlement-access-ends-at"/, "current expiry must be visible");
+  assert.match(page, /Originally granted until/, "the original grant instant stays visible and read-only");
+  assert.match(page, /Adjustment History/, "adjustment history must stay on the record");
+  // `original_access_ends_at` is never editable by any actor in any slice.
+  assert.ok(
+    !/original_access_ends_at["']?\s*[:=]\s*(adjust|new|input)/i.test(page),
+    "original_access_ends_at must never be an input",
+  );
+});
+
+test("expiry adjustment and revocation are server calls carrying a reason and the observed revision", () => {
+  const page = readSource(PAGE);
+
+  assert.match(page, /adjustEntitlementExpiry\(/, "expiry changes must go to the server");
+  assert.match(page, /revokeEntitlement\(/, "revocation must go to the server");
+  assert.match(
+    page,
+    /expectedRevision: detailModal\.entitlement\.revision/,
+    "both mutations must send the revision the Admin was looking at",
+  );
+  // Neither operation may be simulated in component state.
+  assert.ok(
+    !/setDetailModal\(\{[\s\S]{0,200}state: ["']REVOKED["']/.test(page),
+    "revocation must not be faked client-side",
+  );
+  assert.match(page, /if \(updated\) setDetailModal\(updated\)/, "the server response is the new record");
+
+  assert.match(page, /!adjustReason\.trim\(\)/, "an expiry change requires a reason");
+  assert.match(page, /!revokeReason\.trim\(\)/, "a revocation requires a reason");
+});
+
+test("revocation is confirmed explicitly and reports what it does not delete", () => {
+  const page = readSource(PAGE);
+
+  assert.match(page, /data-testid="confirm-revoke-entitlement"/, "revoke needs an explicit confirmation");
+  assert.match(
+    page,
+    /disabled=\{detailBusy \|\| !revokeConfirming \|\| !revokeReason\.trim\(\)\}/,
+    "the revoke control stays disabled until confirmed with a reason",
+  );
+  assert.match(page, /learning progress and access history are kept/i, "the Admin must be told what survives");
+  assert.match(page, /Enrollment and progress records are retained/, "the result must say the same");
+});
+
+test("a revoked grant offers no further mutation", () => {
+  const page = readSource(PAGE);
+  assert.match(
+    page,
+    /detailModal\.entitlement\.state === "ACTIVE" \? \(/,
+    "the mutation forms must render only for an active grant",
+  );
+  assert.match(page, /data-testid="entitlement-terminal"/, "a revoked grant must explain its terminal state");
+  assert.match(page, /data-testid="entitlement-error"/, "a refused mutation must be reported in place");
+  assert.match(page, /role="alert"/, "a refused mutation must be announced");
+});
+
 test("the selector states every outcome the Admin can encounter", () => {
   const selector = readSource(SELECTOR);
 

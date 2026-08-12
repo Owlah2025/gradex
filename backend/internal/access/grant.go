@@ -14,6 +14,9 @@ var (
 	ErrAlreadyHasActiveAccess = errors.New("already has active access")
 	ErrCourseNotGrantable     = errors.New("course is not grantable")
 	ErrInvalidDateFormat      = errors.New("date must be in YYYY-MM-DD format")
+	ErrEntitlementNotFound    = errors.New("entitlement not found")
+	ErrEntitlementRevoked     = errors.New("entitlement is already revoked")
+	ErrEntitlementStale       = errors.New("entitlement was changed by another operation")
 )
 
 var KuwaitLocation = time.FixedZone("Asia/Kuwait", 3*3600)
@@ -89,15 +92,66 @@ type EntitlementAdjustment struct {
 	AdjustedAt       time.Time `json:"adjusted_at"`
 }
 
+// AdminEntitlementDetail is the AD07 read model. `Entitlement` is a named
+// field rather than an embedded one: embedding flattened the entitlement into
+// the response object, which is not the shape the Admin surface reads.
 type AdminEntitlementDetail struct {
-	Entitlement
+	Entitlement Entitlement             `json:"entitlement"`
 	Adjustments []EntitlementAdjustment `json:"adjustments"`
+}
+
+// AdjustEntitlementExpiryParams carries one audited elevated-Admin expiry
+// adjustment under BR-026. `original_access_ends_at` is never an input: it is
+// the snapshot taken at Admin Approval and is not editable by any actor.
+type AdjustEntitlementExpiryParams struct {
+	EntitlementID    string
+	AdminAccountID   string
+	ActorDescriptor  string
+	NewAccessEndsAt  time.Time
+	Reason           string
+	SupportReference *string
+	// ExpectedRevision, when non-zero, requires the stored entitlement revision
+	// to match. It is how a stale Admin view is refused rather than applied.
+	ExpectedRevision int64
+	Now              time.Time
+}
+
+// RevokeEntitlementParams carries one audited elevated-Admin revocation.
+// Revocation ends access; it deletes no Enrollment, Progress, Invitation, or
+// adjustment history (BR-026).
+type RevokeEntitlementParams struct {
+	EntitlementID    string
+	AdminAccountID   string
+	ActorDescriptor  string
+	Reason           string
+	SupportReference *string
+	ExpectedRevision int64
+	Now              time.Time
 }
 
 // ConvertKuwaitDateToUTCExpiry converts a Kuwait-local calendar date string (YYYY-MM-DD)
 // to an exclusive UTC expiry instant representing the first instant of the following local day in UTC,
 // and validates that the resulting instant is strictly after now.
 func ConvertKuwaitDateToUTCExpiry(dateStr string, now time.Time) (time.Time, error) {
+	boundary, err := ConvertKuwaitDateToUTCBoundary(dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !boundary.After(now.UTC()) {
+		return time.Time{}, ErrExpiryInPast
+	}
+	return boundary, nil
+}
+
+// ConvertKuwaitDateToUTCBoundary is the same Kuwait-local boundary conversion
+// without the future-instant requirement.
+//
+// A Course default expiry must be in the future before an Invitation can be
+// approved (BR-025), but an entitlement adjustment may deliberately move the
+// effective instant into the past: "moving expiry into the past ends access
+// immediately" (BR-026). The two callers therefore need the same calendar
+// arithmetic under different preconditions, not two different conversions.
+func ConvertKuwaitDateToUTCBoundary(dateStr string) (time.Time, error) {
 	if dateStr == "" {
 		return time.Time{}, ErrExpiryRequired
 	}
@@ -105,9 +159,5 @@ func ConvertKuwaitDateToUTCExpiry(dateStr string, now time.Time) (time.Time, err
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: %v", ErrInvalidDateFormat, err)
 	}
-	followingDay := time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, KuwaitLocation).UTC()
-	if !followingDay.After(now.UTC()) {
-		return time.Time{}, ErrExpiryInPast
-	}
-	return followingDay, nil
+	return time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, KuwaitLocation).UTC(), nil
 }
