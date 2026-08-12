@@ -63,7 +63,7 @@ no wording is changed.
 | C1 | Merged-tree media E2E stalls at `Processing` | [`specs/005-media-and-entitlement-evaluation/`](../../../../specs/005-media-and-entitlement-evaluation/spec.md) | `T033`–`T035a` (diagnostic-first) | UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE |
 | C2 | Admin submitted-revision inspector absent | [`specs/003-course-authoring/`](../../../../specs/003-course-authoring/spec.md) | `T067`, `T069`, `T071` | IMPLEMENTED — pending independent re-review |
 | C3 | Admin Lesson video preview absent | [`specs/003-course-authoring/`](../../../../specs/003-course-authoring/spec.md) | `T068`, `T070`, `T071`, `T072` | IMPLEMENTED — pending independent re-review |
-| C4 | Production staff onboarding blocked | [`specs/002-auth-rbac/s1c/`](../../../../specs/002-auth-rbac/s1c/spec.md) | spec §19 + `T101`–`T105` | OPEN |
+| C4 | Production staff onboarding blocked | [`specs/002-auth-rbac/s1c/`](../../../../specs/002-auth-rbac/s1c/spec.md) | spec §19.4 + `T101`–`T108` | AUTHORIZED — implementation in progress |
 | H1 | Fabricated Courses, prices and testimonials on the landing page | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T040`, `T041`, `T044` | IMPLEMENTED — pending independent re-review |
 | H2 | Dead public routes | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T042`, `T045` | IMPLEMENTED — pending independent re-review |
 | H3 | FAQ claims Tap hosted checkout exists | [`specs/004-public-catalogue/`](../../../../specs/004-public-catalogue/spec.md) | `T043` | IMPLEMENTED — pending independent re-review |
@@ -128,10 +128,9 @@ content, plays the submitted Lesson video, and approves *that* revision.
 
 ## 4. Batch C — production staff composition (C4)
 
-**Blocked on the S1C spec amendment landing first** — §19 of
-[`specs/002-auth-rbac/s1c/spec.md`](../../../../specs/002-auth-rbac/s1c/spec.md). Implementation
-tasks `T101`–`T105` in [`specs/002-auth-rbac/s1c/tasks.md`](../../../../specs/002-auth-rbac/s1c/tasks.md)
-are not authorized to start before that amendment is committed.
+**Authorized by the S1C §19.4 amendment** — implementation remains bounded to C4 under
+[`specs/002-auth-rbac/s1c/spec.md`](../../../../specs/002-auth-rbac/s1c/spec.md). The prior
+sequence required the amendment to land before code; it is now the authority for this batch.
 
 The remediation is **not** deleting the environment check. It is defining the production composition
 preconditions and failing closed when they are not met.

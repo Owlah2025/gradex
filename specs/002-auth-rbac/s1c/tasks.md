@@ -58,9 +58,26 @@ existing Account, and no MFA enter this scope. §4's exclusions still hold.
       failure. Include the invitation-secret confidentiality assertion — no bearer in logs, argv,
       telemetry, DOM, storage or the address bar.
 
+- [ ] T106 Add the smallest Admin-only Instructor operational-status read surface. It may return only
+      Instructor invitation/account identifiers and status needed to operate the lifecycle; it must not
+      become generic Account search, Student administration, or role editing. The existing capability,
+      recent-auth, session, CSRF/origin, audit, and non-enumeration rules remain authoritative.
+- [ ] T107 Replace the manual account-ID Admin staff controls with a localized Instructor/status list
+      and per-row invite, suspend, and reinstate actions backed by T106 and the existing secured
+      mutation routes. Do not add role-editing controls or a generic user-management surface.
+- [ ] T108 Extend the authorized automated staff journey to use the durable outbox testing seam for an
+      Admin invitation, Instructor preview/completion/login/authorized access, suspension denial, and
+      reinstatement under production composition. It must also prove Instructor, Student, anonymous,
+      and stale-recent-auth denials without manual browser operation.
+
+**2026-08-12 implementation amendment:** T101–T108 are authorized only by spec §19.4. They are the
+bounded C4 remediation: production composition of the existing staff lifecycle, its smallest
+Instructor/status operational read/UI surface, and the directly required verification. They do not
+reopen S1C or authorize unrelated Identity work.
+
 ## Task count
 
-5 tasks, all open. None is complete, and none may be marked complete in the authority pass that
+8 tasks, all open. None is complete, and none may be marked complete in the authority pass that
 created this file.
 
 ## Out of scope

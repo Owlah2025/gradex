@@ -69,8 +69,8 @@
 >
 > **Batches B and D are implemented and pending the required independent re-review.** C1 remains
 > `UNRESOLVED_INTERMITTENT_NONREPRODUCIBLE`; T035a captures recurrence evidence without blocking
-> local MVP work. Batch C remains blocked until its S1C spec amendment lands; no further completion
-> batch is unblocked by this status record.
+> local MVP work. Batch C C4 is authorized under S1C §19.4 and is the active bounded remediation;
+> no unrelated completion batch is unblocked by this status record.
 >
 > ### Review harness — tooling authority only
 >

@@ -352,3 +352,23 @@ admission path, as decoupled in D-081.
 5. With any precondition unmet, startup fails closed and the routes are not mounted.
 6. Router composition is provable **without live email delivery**. Live provider sending remains an
    external production step tracked by `LG-018`; it is not a prerequisite for testing composition.
+
+### 19.4 Implementation authorization — 2026-08-12
+
+The Product Owner authorizes completion of C4 under this section. The implementation may:
+
+1. replace the development-only staff composition gate with an explicit prerequisite evaluator and
+   production-safe composition of the existing staff foundation;
+2. mount the existing invitation preview, completion, suspension, and reinstatement routes when that
+   evaluator succeeds;
+3. add the smallest Admin-only read model required to show Instructor invitation/account operational
+   status, and the corresponding Admin UI; and
+4. add backend, frontend, and automated journey coverage proving production composition, capability
+   denials, suspension enforcement, reinstatement, durable outbox intent, and fail-closed startup.
+
+This authorization does **not** permit role editing, arbitrary role assignment, generic user-management
+CRUD, Student administration, account deletion, a new authentication/session system, a bypass of
+mandatory password change or invitation verification, fake authentication, fake email delivery, or an
+in-memory production substitute. The existing action-secret, capability, recent-auth, CSRF/origin,
+audit, session-revocation, PostgreSQL, transactional-outbox, and provider-neutral Resend boundaries
+remain mandatory.
