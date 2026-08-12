@@ -49,10 +49,13 @@
 > deployment, or manual acceptance work starts without its own current authority.
 >
 > [D-087](../DECISIONS.md#d-087--t035a-may-cross-one-bounded-database-driver-secret-boundary-for-failure-evidence)
-> authorizes only the release-gate correction for T035a's failure-only diagnostic: the run-owned
-> PostgreSQL DSN may cross directly into the existing `db.Connect`/pgx boundary, with an explicit
-> exposure-guard entry and sanitization regression proof. It authorizes no production behavior or
-> new MVP batch.
+> closes the release-gate correction for T035a's failure-only diagnostic. The run-owned PostgreSQL
+> DSN crosses directly into the existing `db.Connect`/pgx boundary under one reviewed allowlist
+> entry; stronger artifact tests exclude credential/token/ciphertext canaries and prove the retained
+> JSON remains useful and mode `0600`. `scripts/expose-guard.sh`, the focused diagnostic tests, full
+> backend tests/vet, documentation guard, and diff check pass. No production behavior or new MVP
+> batch was authorized or changed. Evidence:
+> [`evidence/launch-integration/2026-08-12-exposure-guard-closeout.md`](evidence/launch-integration/2026-08-12-exposure-guard-closeout.md).
 >
 > The earlier REJECT, its seven findings, and the discarded TAINTED/UNAVAILABLE review runs remain
 > preserved below as history; they are not the current delivery state.
