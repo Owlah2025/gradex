@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,21 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 )
+
+func TestInvitationCreateDoesNotReturnActionBearer(t *testing.T) {
+	r, _ := authzRouter(t, fixedPrincipals{principal: adminPrincipal()})
+	rec := do(r, newAuthenticatedRequest(http.MethodPost, "/api/v1/staff-invitations", []byte(`{"email":"instructor@example.com","role":"INSTRUCTOR"}`)))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if _, found := response["bearer"]; found {
+		t.Fatal("invitation creation response exposed the one-time action bearer")
+	}
+}
 
 func adminPrincipal() identity.Principal {
 	return identity.Principal{

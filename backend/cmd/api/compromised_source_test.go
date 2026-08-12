@@ -26,6 +26,10 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 		"PASSWORD_SCREEN_MODE":                  "adapter",
 		"COMPROMISED_PASSWORD_ADAPTER_APPROVED": "true",
 		"OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION":  "prod-v1",
+		"EMAIL_ENABLED":                         "true",
+		"EMAIL_PROVIDER":                        "resend",
+		"EMAIL_FROM_ADDRESS":                    "notifications@gradex.kw",
+		"EMAIL_FROM_NAME":                       "Gradex",
 		"LEGAL_IDENTITY_MODE":                   "public",
 		"LEGAL_OPERATOR_NAME":                   "Gradex Courses",
 		"LEGAL_REGISTRATION_NUMBER":             "KWT-REAL-123",
@@ -45,6 +49,7 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
 		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 		"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
+		"EMAIL_API_KEY":                "resend-key-canary",
 	}
 	cfg, err := config.LoadFrom(config.MapLookup(settings), secrets)
 	if err != nil {

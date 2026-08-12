@@ -81,6 +81,17 @@ type StaffInvitationPreview struct {
 	State       StaffInvitationState
 }
 
+// InstructorAccount is the narrow operational projection an authorized Admin
+// needs to suspend or reinstate an Instructor. It deliberately excludes
+// Students, credentials, sessions, and role mutation data.
+type InstructorAccount struct {
+	ID          string
+	Email       string
+	DisplayName string
+	Status      AccountStatus
+	CreatedAt   time.Time
+}
+
 type CompleteStaffInvitationRequest struct {
 	Bearer      string
 	DisplayName string
@@ -608,4 +619,32 @@ func ListPendingInvitations(
 		return nil, fmt.Errorf("iterating invitation rows: %w", err)
 	}
 	return invitations, nil
+}
+
+// ListInstructorAccounts returns the operational Instructor projection only.
+func ListInstructorAccounts(ctx context.Context, tx pgx.Tx, actor Principal) ([]InstructorAccount, error) {
+	decision := Authorize(actor, CapAdminOperations)
+	if !decision.Allowed {
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, decision.Reason)
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text, email, display_name, status, created_at
+		FROM accounts WHERE role = 'INSTRUCTOR' ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing Instructor accounts: %w", err)
+	}
+	defer rows.Close()
+	accounts := make([]InstructorAccount, 0)
+	for rows.Next() {
+		var account InstructorAccount
+		var status string
+		if err := rows.Scan(&account.ID, &account.Email, &account.DisplayName, &status, &account.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning Instructor account: %w", err)
+		}
+		account.Status = AccountStatus(status)
+		accounts = append(accounts, account)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating Instructor accounts: %w", err)
+	}
+	return accounts, nil
 }

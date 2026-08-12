@@ -201,3 +201,19 @@ func (s *StaffService) ListPendingInvitations(
 
 	return res, nil
 }
+
+func (s *StaffService) ListInstructorAccounts(ctx context.Context, principal Principal) ([]InstructorAccount, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning list Instructor accounts transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	accounts, err := ListInstructorAccounts(ctx, tx, principal)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing list Instructor accounts transaction: %w", err)
+	}
+	return accounts, nil
+}

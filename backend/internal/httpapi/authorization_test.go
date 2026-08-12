@@ -74,9 +74,9 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 
 	limiter, _ := ratelimit.New(fakeRateStore{}, bytes.Repeat([]byte{0x31}, 32), time.Second)
 	staffPolicies := map[string]ratelimit.Policy{
-		"staff-invitations-create":   ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-create"),
-		"staff-invitations-preview":  ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-preview"),
-		"staff-invitations-complete": ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-complete"),
+		"staff-invitations-create":   ratelimit.StaffInvitationPolicy("staff-invitations-create"),
+		"staff-invitations-preview":  ratelimit.StaffInvitationPolicy("staff-invitations-preview"),
+		"staff-invitations-complete": ratelimit.StaffInvitationPolicy("staff-invitations-complete"),
 	}
 	staffFoundation, err := NewStaffFoundation(StaffFoundationOptions{
 		Service:          fakeStaffService{},
@@ -241,7 +241,10 @@ func (fakeStaffService) CreateStaffInvitation(_ context.Context, req identity.Cr
 	if err := identity.CheckRecentAuthentication(req.ActorSession, req.RecentAuthWindow, req.Now); err != nil {
 		return identity.IssuedStaffInvitation{}, err
 	}
-	return identity.IssuedStaffInvitation{}, nil
+	return identity.IssuedStaffInvitation{
+		Invitation:  identity.StaffInvitation{ID: "invite-1", Email: req.Email, InvitedRole: req.Role, CreatedAt: req.Now},
+		BearerToken: "never-returned-to-admin-client",
+	}, nil
 }
 
 func (fakeStaffService) PreviewStaffInvitation(context.Context, string, time.Time) (identity.StaffInvitationPreview, error) {
@@ -271,6 +274,10 @@ func (fakeStaffService) ReinstateAccount(_ context.Context, req identity.Reinsta
 }
 
 func (fakeStaffService) ListPendingInvitations(context.Context, identity.Principal) ([]identity.StaffInvitation, error) {
+	return nil, nil
+}
+
+func (fakeStaffService) ListInstructorAccounts(context.Context, identity.Principal) ([]identity.InstructorAccount, error) {
 	return nil, nil
 }
 
@@ -322,7 +329,8 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	// nothing about this classification removes the route from proof.
 	"POST /api/v1/password-changes": {Method: http.MethodPost, Path: "/api/v1/password-changes", Class: ClassAuthenticatedSessionLifecycle},
 
-	"GET /api/v1/staff-invitations": {Method: http.MethodGet, Path: "/api/v1/staff-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/staff-invitations":             {Method: http.MethodGet, Path: "/api/v1/staff-invitations", Class: ClassCapabilityProtected},
+	"GET /api/v1/staff-invitations/instructors": {Method: http.MethodGet, Path: "/api/v1/staff-invitations/instructors", Class: ClassCapabilityProtected},
 
 	"POST /api/v1/staff-invitations":         {Method: http.MethodPost, Path: "/api/v1/staff-invitations", Class: ClassRecentAuthRequired},
 	"DELETE /api/v1/staff-invitations/:id":   {Method: http.MethodDelete, Path: "/api/v1/staff-invitations/:id", Class: ClassRecentAuthRequired},
@@ -792,6 +800,7 @@ func TestStaffInvitationRoutesDenyInstructorAndStudent(t *testing.T) {
 		body   []byte
 	}{
 		{"list-invitations", http.MethodGet, "/api/v1/staff-invitations", nil},
+		{"list-instructors", http.MethodGet, "/api/v1/staff-invitations/instructors", nil},
 		{
 			"create-invitation", http.MethodPost, "/api/v1/staff-invitations",
 			[]byte(`{"email":"staff@example.com","role":"INSTRUCTOR"}`),

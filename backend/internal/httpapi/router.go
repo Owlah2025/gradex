@@ -339,6 +339,7 @@ func mountStaffRoutes(
 	)
 	{
 		staffReadGroup.GET("", staffH.listInvitations)
+		staffReadGroup.GET("/instructors", staffH.listInstructors)
 	}
 
 	// Invitation mutations carry S1B2 session mutation security, requireAuth,

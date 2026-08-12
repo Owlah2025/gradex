@@ -532,12 +532,9 @@ func buildStaffFoundation(
 	if err != nil {
 		return nil, nil, err
 	}
-	if cfg.Environment() != config.EnvDevelopment {
-		return nil, nil, errors.New(
-			"production staff admission composition remains unavailable pending launch approval",
-		)
+	if err := validateStaffComposition(cfg, pool, redisConnection); err != nil {
+		return nil, nil, err
 	}
-
 	writer, err := outbox.NewWriter(
 		admission.ProtectedPayloadKeyVersion(),
 		[]byte(admission.ProtectedPayloadKey().Expose()),
@@ -563,9 +560,9 @@ func buildStaffFoundation(
 	}
 
 	endpointPolicies := map[string]ratelimit.Policy{
-		"staff-invitations-create":   ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-create"),
-		"staff-invitations-preview":  ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-preview"),
-		"staff-invitations-complete": ratelimit.DevelopmentStaffInvitationPolicy("staff-invitations-complete"),
+		"staff-invitations-create":   ratelimit.StaffInvitationPolicy("staff-invitations-create"),
+		"staff-invitations-preview":  ratelimit.StaffInvitationPolicy("staff-invitations-preview"),
+		"staff-invitations-complete": ratelimit.StaffInvitationPolicy("staff-invitations-complete"),
 	}
 
 	foundation, err := httpapi.NewStaffFoundation(httpapi.StaffFoundationOptions{
@@ -580,6 +577,38 @@ func buildStaffFoundation(
 		return nil, nil, err
 	}
 	return foundation, redisClient, nil
+}
+
+func validateStaffComposition(cfg *config.Config, pool *pgxpool.Pool, redisConnection *queue.Connection) error {
+	if cfg == nil {
+		return errors.New("staff composition precondition failed: configuration is required")
+	}
+	if cfg.Environment() == config.EnvDevelopment {
+		return nil
+	}
+	if !cfg.Sessions().Enabled() {
+		return errors.New("staff composition precondition failed: real session foundation is required")
+	}
+	if cfg.AuthFakeMode() {
+		return errors.New("staff composition precondition failed: fake authentication is not permitted")
+	}
+	if pool == nil {
+		return errors.New("staff composition precondition failed: PostgreSQL staff invitation storage is required")
+	}
+	if redisConnection == nil {
+		return errors.New("staff composition precondition failed: Redis rate limiting is required")
+	}
+	if cfg.Admission().PasswordScreenMode() != config.PasswordScreenAdapter {
+		return errors.New("staff composition precondition failed: production password screening adapter is required")
+	}
+	email := cfg.Email()
+	if !email.Enabled() {
+		return errors.New("staff composition precondition failed: transactional email provider is required")
+	}
+	if email.Provider() != config.EmailProviderResend {
+		return errors.New("staff composition precondition failed: EMAIL_PROVIDER=resend is required")
+	}
+	return nil
 }
 
 func buildCompromisedPasswordSource(cfg *config.Config) (identity.CompromisedRangeSource, error) {
@@ -702,8 +731,9 @@ func buildProductionFoundations(
 	// Student admission. Gating it on cfg.Admission().Enabled() coupled the two:
 	// with STUDENT_REGISTRATION_ENABLED=false — the intended founder posture —
 	// no staff foundation was composed and every /api/v1/staff-invitations route
-	// answered 404 with route_template="unmatched". Only the environment gate
-	// belongs here; the production hard-stop lives in buildStaffFoundation.
+	// answered 404 with route_template="unmatched". Production now evaluates its
+	// explicit prerequisites in buildStaffFoundation rather than silently omitting
+	// the staff surface.
 	//
 	// Sessions remain a genuine dependency — staff mutations carry the session
 	// and CSRF boundary, and httpapi.NewRouter refuses to build a staff surface
@@ -713,7 +743,7 @@ func buildProductionFoundations(
 	// A staff dependency that is configured wrongly now fails startup with a
 	// named error instead of silently dropping the Admin surface, so a
 	// misconfigured environment is diagnosable rather than a mystery 404.
-	if cfg.Environment() == config.EnvDevelopment && cfg.Sessions().Enabled() {
+	if (cfg.Environment() == config.EnvDevelopment && cfg.Sessions().Enabled()) || cfg.Environment().IsProduction() {
 		foundation, limiterClient, err := buildStaffFoundation(cfg, pool, redisConnection)
 		if err != nil {
 			pf.Close()

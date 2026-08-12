@@ -101,8 +101,8 @@ func TestProductionRegistrationFoundationsStartWithHIBPAndApprovedPolicySet(t *t
 	if foundations.AdmissionRedis == nil {
 		t.Fatal("production Student admission foundation was not composed")
 	}
-	if foundations.StaffRedis != nil {
-		t.Fatal("unapproved production staff invitation foundation was mounted")
+	if foundations.StaffRedis == nil {
+		t.Fatal("production staff invitation foundation was not composed")
 	}
 }
 
@@ -179,6 +179,7 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 
 	requiredStaffRoutes := []string{
 		"GET /api/v1/staff-invitations",
+		"GET /api/v1/staff-invitations/instructors",
 		"POST /api/v1/staff-invitations",
 		"DELETE /api/v1/staff-invitations/:id",
 		"GET /api/v1/staff-invitations/preview",
@@ -277,6 +278,25 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 				}
 			})
 		}
+	}
+}
+
+func TestProductionStaffCompositionFailsClosedOnNamedPrerequisites(t *testing.T) {
+	cfg := productionAdmissionConfig(t)
+	for _, testCase := range []struct {
+		name  string
+		pool  *pgxpool.Pool
+		redis *queue.Connection
+		want  string
+	}{
+		{name: "postgres", want: "PostgreSQL staff invitation storage"},
+		{name: "redis", pool: &pgxpool.Pool{}, want: "Redis rate limiting"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := validateStaffComposition(cfg, testCase.pool, testCase.redis); err == nil || !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("staff prerequisite error = %v, want %q", err, testCase.want)
+			}
+		})
 	}
 }
 

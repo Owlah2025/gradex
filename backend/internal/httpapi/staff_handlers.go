@@ -32,6 +32,7 @@ type staffService interface {
 	SuspendAccount(ctx context.Context, req identity.SuspendAccountRequest) (identity.SuspendAccountResult, error)
 	ReinstateAccount(ctx context.Context, req identity.ReinstateAccountRequest) (identity.ReinstateAccountResult, error)
 	ListPendingInvitations(ctx context.Context, principal identity.Principal) ([]identity.StaffInvitation, error)
+	ListInstructorAccounts(ctx context.Context, principal identity.Principal) ([]identity.InstructorAccount, error)
 }
 
 type StaffFoundation struct {
@@ -194,7 +195,6 @@ func (h *staffHandlers) createInvitation(c *gin.Context) {
 		"id":           issued.Invitation.ID,
 		"email":        issued.Invitation.Email,
 		"invited_role": issued.Invitation.InvitedRole,
-		"bearer":       issued.BearerToken,
 		"created_at":   issued.Invitation.CreatedAt,
 	})
 }
@@ -228,6 +228,31 @@ func (h *staffHandlers) listInvitations(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"invitations": items})
+}
+
+func (h *staffHandlers) listInstructors(c *gin.Context) {
+	principal, ok := principalFrom(c)
+	if !ok {
+		writeProblem(c, problem.NotAuthorized())
+		return
+	}
+	accounts, err := h.service.ListInstructorAccounts(c.Request.Context(), principal)
+	if err != nil {
+		if errors.Is(err, identity.ErrUnauthorized) {
+			writeProblem(c, problem.NotAuthorized())
+			return
+		}
+		writeProblem(c, problem.Internal(requestid.FromContext(c.Request.Context())))
+		return
+	}
+	items := make([]gin.H, 0, len(accounts))
+	for _, account := range accounts {
+		items = append(items, gin.H{
+			"id": account.ID, "email": account.Email, "display_name": account.DisplayName,
+			"status": account.Status, "created_at": account.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"instructors": items})
 }
 
 func (h *staffHandlers) previewInvitation(c *gin.Context) {

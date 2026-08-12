@@ -219,11 +219,10 @@ func DevelopmentLoginPolicy() Policy {
 	}
 }
 
-// DevelopmentStaffInvitationPolicy is a conservative fixture for staff
-// invitation endpoints. Creation is admin-only so the limit is generous;
-// preview and completion are anonymous and must be tighter to prevent
-// bearer brute-forcing.
-func DevelopmentStaffInvitationPolicy(endpoint string) Policy {
+// StaffInvitationPolicy protects the shared staff invitation boundary. Creation
+// is admin-only; preview and completion are anonymous and need the tighter
+// identifier and network limits that prevent bearer brute-forcing.
+func StaffInvitationPolicy(endpoint string) Policy {
 	return Policy{
 		ID:       endpoint + "-v1",
 		Category: "STAFF_LIFECYCLE",

@@ -257,6 +257,23 @@ func TestStaffInvitationEmailReachesTheInviteeAndCompletes(t *testing.T) {
 		t.Fatalf("committing acceptance: %v", err)
 	}
 
+	// The Admin operational read model exposes only the newly active Instructor,
+	// which is enough to select the account for the existing suspension action.
+	listTx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructors, err := ListInstructorAccounts(ctx, listTx, adminPrincipal)
+	if err != nil {
+		t.Fatalf("listing Instructor accounts: %v", err)
+	}
+	if err := listTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(instructors) != 1 || instructors[0].ID != result.AccountID || instructors[0].Status != StatusActive {
+		t.Fatalf("Instructor status list = %+v, want active completed invitation account %s", instructors, result.AccountID)
+	}
+
 	// 9. The emailed credential is single-use: a replay is refused.
 	replayTx, err := conn.Begin(ctx)
 	if err != nil {
