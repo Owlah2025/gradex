@@ -36,6 +36,10 @@ ALLOWLIST=(
   "cmd/api/main.go"          # database, storage client construction
   "cmd/worker/main.go"       # database, storage client construction
   "cmd/migrate/main.go"      # database connection for schema migration
+  # T035a failure-only diagnostic: the run-owned PostgreSQL DSN crosses
+  # directly into db.Connect/pgx. Connection errors are discarded and the
+  # sanitized artifact never receives configuration secrets. D-087.
+  "cmd/e2e-media-diagnostic/main.go"
   # DSN only, for pgx.Connect, which cannot accept the wrapper. The bootstrap
   # password is NOT exposed here: it is resolved, checked with IsEmpty(), and
   # passed to Identity as a Secret. Adding a password Expose() to this file
