@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getTaxonomyTerms, type CourseRevisionWire, type TaxonomyKind, type TaxonomyTerm } from "@/lib/api/catalog";
 import { describeApiError } from "@/lib/api/api-error";
+import { ProblemError } from "@/lib/api/problem";
 import { getMediaAssetStatus } from "@/lib/api/media-upload";
 import {
   approveCourseRevision,
@@ -46,6 +47,19 @@ function taxonomyLabel(
   const term = terms.find((candidate) => candidate.id === termID && candidate.kind === kind);
   if (!term) return locale === "ar" ? "مصطلح غير متاح" : "Unavailable term";
   return locale === "ar" ? term.label_ar : term.label_en;
+}
+
+/**
+ * The server refuses publication of a Course with no Admin-set launch price
+ * (`COURSE_PRICE_REQUIRED`). The backend stays authoritative; this only names
+ * the remedy, because the raw violation code is not an instruction.
+ */
+function isCoursePriceRequired(cause: unknown): boolean {
+  if (!(cause instanceof ProblemError)) return false;
+  const problem = cause.problem as typeof cause.problem & {
+    violations?: Array<{ code?: string }>;
+  };
+  return (problem.violations ?? []).some((violation) => violation.code === "COURSE_PRICE_REQUIRED");
 }
 
 function mediaStateLabel(state: string, locale: "ar" | "en"): string {
@@ -161,7 +175,12 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
       setActionSuccess(success);
       await onReviewed(success);
     } catch (cause) {
-      setActionError(describeApiError(cause, locale));
+      const message = describeApiError(cause, locale);
+      setActionError(
+        isCoursePriceRequired(cause)
+          ? `${isAr ? "يجب ضبط سعر الدورة في لوحة التسعير أدناه قبل الموافقة والنشر." : "Set the Course price in the pricing panel below before approving and publishing."} ${message}`
+          : message,
+      );
     } finally {
       setBusy(false);
     }

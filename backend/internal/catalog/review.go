@@ -354,6 +354,23 @@ func (r *Repository) revalidateApproval(
 	if err != nil {
 		return err
 	}
+	// Publication, unlike Instructor submission, additionally requires the
+	// Admin-owned launch price (BR-019). It is checked here rather than in
+	// validateCourseForSubmission because an Instructor can never satisfy it:
+	// only Admins set prices, so submission must not demand one.
+	priced, err := courseHasLaunchPrice(ctx, tx, approval.request.CourseID)
+	if err != nil {
+		return err
+	}
+	if !priced {
+		if validation == nil {
+			validation = &SubmissionValidationError{}
+		}
+		validation.Violations = append(validation.Violations, SubmissionViolation{
+			Code:   "COURSE_PRICE_REQUIRED",
+			Target: "course:" + approval.request.CourseID,
+		})
+	}
 	if validation != nil {
 		return validation
 	}

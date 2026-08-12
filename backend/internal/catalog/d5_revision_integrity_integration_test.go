@@ -215,6 +215,13 @@ func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SubmitCourse initial revision: %v", err)
 	}
+	// Publication requires the Admin-owned Course launch price.
+	if _, err := f.repo.SetCoursePrice(f.ctx, SetCoursePriceRequest{
+		CourseID: f.courseID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+		PriceMinorUnits: 25000, Reason: "Launch price",
+	}); err != nil {
+		t.Fatalf("SetCoursePrice initial revision: %v", err)
+	}
 	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
 		CourseID: f.courseID, RevisionID: revisionID,
 		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,

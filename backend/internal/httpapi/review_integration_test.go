@@ -138,6 +138,19 @@ func doAuthReq(ts *httptest.Server, method, path string, body []byte) (*http.Res
 	return resp, res
 }
 
+// hasSubmissionViolation reads the frozen `violations` array of a
+// submission-incomplete problem response.
+func hasSubmissionViolation(res map[string]any, code string) bool {
+	violations, _ := res["violations"].([]any)
+	for _, raw := range violations {
+		violation, _ := raw.(map[string]any)
+		if violation["code"] == code {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSubmissionValidationReportsAllDefectsInOneResponse(t *testing.T) {
 	freshSchema(t)
 	p, ctx := pool(t)
@@ -397,7 +410,32 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	// Resubmit course
 	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
 
-	// 5. Admin approves course (T027)
+	// 5. Approval is refused over the wire until the Course carries a launch
+	// price. The route is the only publication entry point, so this is the
+	// direct-API proof that the invariant is not a frontend courtesy.
+	resp, unpricedRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/approve", nil)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("unpriced approve returned status %d, want 422: %v", resp.StatusCode, unpricedRes)
+	}
+	if !hasSubmissionViolation(unpricedRes, "COURSE_PRICE_REQUIRED") {
+		t.Fatalf("unpriced approve response lacks COURSE_PRICE_REQUIRED: %v", unpricedRes)
+	}
+	_ = p.QueryRow(ctx, `SELECT lifecycle FROM courses WHERE id = $1::uuid`, courseID).Scan(&lifecycle)
+	if lifecycle == "PUBLISHED" {
+		t.Fatalf("refused approve published the course anyway")
+	}
+	var refusedPublishAudits int
+	_ = p.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'COURSE_PUBLISHED' AND target_id = $1`, courseID).Scan(&refusedPublishAudits)
+	if refusedPublishAudits != 0 {
+		t.Fatalf("refused approve wrote %d COURSE_PUBLISHED audit events", refusedPublishAudits)
+	}
+
+	// 6. Admin sets the Course launch price, then approves (T027)
+	resp, priceRes := doAuthReq(adminTS, "PUT", "/api/v1/admin/courses/"+courseID+"/price", []byte(`{"price_minor_units":25000,"reason":"Launch price"}`))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("setting course price returned status %d: %v", resp.StatusCode, priceRes)
+	}
+
 	resp, approveRes := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/approve", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("admin approve returned status %d: %v", resp.StatusCode, approveRes)

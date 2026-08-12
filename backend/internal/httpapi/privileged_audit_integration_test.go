@@ -391,9 +391,23 @@ func (f *privilegedAuditFixture) preparePendingReview(t *testing.T) {
 	}
 }
 
+// ensureLaunchPrice satisfies the Course price precondition on publication.
+// Approval is refused without it, so every fixture that needs a live Course
+// must set one first.
+func (f *privilegedAuditFixture) ensureLaunchPrice(t *testing.T) {
+	t.Helper()
+	if _, err := f.repo.SetCoursePrice(f.ctx, catalog.SetCoursePriceRequest{
+		CourseID: f.courseID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+		PriceMinorUnits: 25000, Reason: "Fixture launch price",
+	}); err != nil {
+		t.Fatalf("setting fixture launch price: %v", err)
+	}
+}
+
 func (f *privilegedAuditFixture) preparePublished(t *testing.T) {
 	t.Helper()
 	f.preparePendingReview(t)
+	f.ensureLaunchPrice(t)
 	if _, err := f.repo.ApproveCourse(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.ApproveCourseRequest{
 		CourseID: f.courseID, RevisionID: f.revisionID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
 	}); err != nil {
@@ -413,6 +427,7 @@ func (f *privilegedAuditFixture) execute(t *testing.T, route gin.RouteInfo, body
 
 func approveAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
 	f.preparePendingReview(t)
+	f.ensureLaunchPrice(t)
 	return f.execute(t, route, "", privilegedAuditExpectation{status: http.StatusOK, action: "COURSE_PUBLISHED", targetType: "COURSE", targetID: f.courseID, committed: func(t *testing.T, f *privilegedAuditFixture) {
 		assertCourseValue(t, f, `SELECT lifecycle::text FROM courses WHERE id = $1::uuid`, "PUBLISHED")
 	}})

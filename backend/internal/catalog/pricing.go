@@ -129,6 +129,33 @@ func (r *Repository) SetCoursePrice(ctx context.Context, req SetCoursePriceReque
 	return &pc, nil
 }
 
+// courseHasLaunchPrice reports whether an Admin has set a Course-level catalog
+// price. The current price is the newest `course_price_changes` row with a NULL
+// section_id, exactly as the public read model resolves it, so the existence of
+// any such row is the existence of a price. A Section price is never a
+// substitute: Section is not an acquirable scope and its price is not displayed
+// (D-045 resolved question 2).
+//
+// Amount is deliberately not constrained beyond the authoritative rule that a
+// price is a non-negative integer amount in fils (ErrInvalidPrice, BR-019). No
+// repository authority establishes a positive minimum, so zero is a price.
+//
+// The caller must already hold the course row lock. SetCoursePrice takes the
+// same lock before appending, so price writes and approval serialize.
+func courseHasLaunchPrice(ctx context.Context, tx pgx.Tx, courseID string) (bool, error) {
+	var priced bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM course_price_changes
+			WHERE course_id = $1::uuid AND section_id IS NULL
+		)
+	`, courseID).Scan(&priced)
+	if err != nil {
+		return false, fmt.Errorf("checking course launch price: %w", err)
+	}
+	return priced, nil
+}
+
 // SetSectionPrice appends a stable section price change record atomically with audit logging inside a transaction.
 func (r *Repository) SetSectionPrice(ctx context.Context, req SetSectionPriceRequest) (*PriceChange, error) {
 	if req.CourseID == "" || req.SectionIdentityID == "" {

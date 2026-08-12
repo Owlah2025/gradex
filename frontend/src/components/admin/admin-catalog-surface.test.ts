@@ -256,6 +256,31 @@ test("a completed review locks before queue refresh and clears its workspace", (
   );
 });
 
+// The price-before-publication invariant is enforced by the server. The
+// workspace's only job is to make the refusal actionable, in both locales,
+// without re-implementing the rule client-side.
+test("an approval refused for a missing Course price names the remedy", () => {
+  const source = readSource("src/components/admin/submitted-revision-inspector.tsx");
+
+  assert.match(source, /COURSE_PRICE_REQUIRED/, "the inspector must recognise the server's pricing violation");
+  assert.match(
+    source,
+    /isCoursePriceRequired\(cause\)/,
+    "the pricing remedy must be chosen from the failure, not from local readiness state",
+  );
+  assert.match(source, /Set the Course price/, "the English refusal must name the remedy");
+  assert.match(source, /سعر الدورة/, "the Arabic refusal must name the remedy");
+  // The server's own reason is still shown; the remedy is added, not substituted.
+  assert.match(source, /const message = describeApiError\(cause, locale\)/);
+
+  // No client-side gate may stand in for the server: approval stays enabled
+  // and the server decides.
+  assert.ok(
+    !/disabled=\{[^}]*price/i.test(source),
+    "the Approve control must not be gated on client-side pricing state",
+  );
+});
+
 test("the Instructor surface calls no Admin taxonomy mutation", () => {
   // Admin taxonomy vocabulary and override are capability-gated server-side
   // (`CATALOG_TAXONOMY`), and the Instructor studio must not reach for them:
