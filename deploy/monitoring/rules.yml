@@ -22,6 +22,14 @@ log_alerts:
   - id: worker_failure
     event: worker_failure
     condition: operation in [job_process, media_outbox_dispatch, redis_health, queue_runtime]
+  # LG-018 monitoring. A transactional message the provider refused outright,
+  # or that used its whole retry budget, is a launch-critical journey the
+  # recipient never received: verification, password reset, or an invitation.
+  # The durable in-app record and the source action both survive, so this is an
+  # operator alert rather than an incident in the domain.
+  - id: transactional_email_undelivered
+    event: transactional_email
+    condition: phase in [permanent_failure, exhausted]
 delivery:
   type: webhook
   required_secret: GRADEX_ALERT_WEBHOOK_TOKEN

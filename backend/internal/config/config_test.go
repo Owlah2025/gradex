@@ -432,6 +432,37 @@ func TestTransactionalEmailConfiguration(t *testing.T) {
 		}, "EMAIL_PROVIDER=resend")
 	})
 
+	// A provider sandbox sender delivers, which is why it has to be refused
+	// rather than merely discouraged: production mail would leave under the
+	// provider's identity instead of the Gradex sending domain LG-018 requires.
+	t.Run("production rejects a provider sandbox sender", func(t *testing.T) {
+		for _, sender := range []string{"onboarding@resend.dev", "no-reply@mail.resend.dev", "no-reply@RESEND.DEV"} {
+			wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+				configureResend(s, sec)
+				s["EMAIL_FROM_ADDRESS"] = sender
+			}, "provider sandbox domain")
+		}
+	})
+
+	t.Run("development may still use a provider sandbox sender", func(t *testing.T) {
+		cfg := mustLoad(t, func(s map[string]string, sec MapSecretResolver) {
+			configureResend(s, sec)
+			s["APP_ENV"] = "development"
+			s["PUBLIC_ORIGIN"] = "http://localhost:3000"
+			s["EMAIL_FROM_ADDRESS"] = "onboarding@resend.dev"
+		})
+		if !cfg.Email().Enabled() {
+			t.Fatalf("development sandbox sender was refused: %q", cfg.Email().Reason())
+		}
+	})
+
+	t.Run("production requires an HTTPS public origin for links", func(t *testing.T) {
+		wantErrContaining(t, func(s map[string]string, sec MapSecretResolver) {
+			configureResend(s, sec)
+			s["PUBLIC_ORIGIN"] = "http://gradex.kw"
+		}, "HTTPS PUBLIC_ORIGIN")
+	})
+
 	t.Run("production worker rejects disabled email", func(t *testing.T) {
 		wantErrContaining(t, func(s map[string]string, _ MapSecretResolver) {
 			s["SERVICE_ROLE"] = "worker"

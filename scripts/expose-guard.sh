@@ -53,6 +53,12 @@ ALLOWLIST=(
   # reads it only while constructing that request; response/error paths expose
   # neither the header nor raw provider content.
   "internal/email/resend.go"
+  # Same boundary as resend.go, read-only: the LG-018 launch preflight asks
+  # Resend whether the Gradex sending domain is verified. The key is read once
+  # to build the GET Authorization header and goes no further; the response
+  # body is parsed for domain name/status/region only, and every failure path
+  # returns a fixed message rather than provider text.
+  "internal/email/preflight.go"
   # The encoded Argon2id hash goes to the database driver. No password plaintext
   # is read here — that happens only in credential.go, which check 4 enforces.
   "internal/identity/bootstrap.go"

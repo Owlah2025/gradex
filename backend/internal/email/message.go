@@ -13,6 +13,28 @@ import (
 
 const MaxAttempts = 5
 
+// ProviderIdempotencyWindow is how long the production provider honours a
+// repeated Idempotency-Key. Resend documents that a key is unique per request,
+// is at most 256 characters, and expires after 24 hours; a repeat inside that
+// window returns the original send instead of delivering a second message.
+//
+// The dispatcher derives its key from the immutable outbox event identity, so
+// duplicate suppression is only as strong as this window is long relative to
+// the retry budget below. TestRetryBudgetStaysInsideProviderIdempotencyWindow
+// keeps that relationship true if either side is ever changed.
+const ProviderIdempotencyWindow = 24 * time.Hour
+
+// RetryBudget is the worst-case span from the first attempt to the last, the
+// window inside which the same message identity can reach the provider more
+// than once.
+func RetryBudget() time.Duration {
+	var total time.Duration
+	for attempt := 1; attempt < MaxAttempts; attempt++ {
+		total += retryDelay(attempt)
+	}
+	return total
+}
+
 // Message is the launch-sized provider-neutral delivery contract.
 type Message struct {
 	From      string

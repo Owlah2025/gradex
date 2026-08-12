@@ -881,6 +881,14 @@ func validateEmailAddresses(settings EmailSettings) error {
 	return nil
 }
 
+// providerSandboxSenderDomains are provider-owned domains that exist so an
+// integration can send before it owns a verified domain. They deliver, which
+// is exactly why they must never reach production: mail would leave under the
+// provider's identity rather than a Gradex-controlled, SPF/DKIM/DMARC-aligned
+// sending domain, and the address is not one a recipient can reply to or
+// report against Gradex.
+var providerSandboxSenderDomains = []string{"resend.dev"}
+
 func validateProductionEmail(in emailSettingsInput, settings EmailSettings) error {
 	if !in.environment.IsProduction() {
 		return nil
@@ -889,6 +897,14 @@ func validateProductionEmail(in emailSettingsInput, settings EmailSettings) erro
 	domain := strings.ToLower(strings.SplitN(address.Address, "@", 2)[1])
 	if domain == "localhost" || strings.HasSuffix(domain, ".test") || strings.HasSuffix(domain, ".example") {
 		return errors.New("EMAIL_FROM_ADDRESS must use a real sender domain in production")
+	}
+	for _, sandbox := range providerSandboxSenderDomains {
+		if domain == sandbox || strings.HasSuffix(domain, "."+sandbox) {
+			return fmt.Errorf(
+				"EMAIL_FROM_ADDRESS must use a Gradex-verified sending domain in production; %q is a provider sandbox domain",
+				sandbox,
+			)
+		}
 	}
 	if !strings.HasPrefix(in.publicOrigin, "https://") {
 		return errors.New("transactional email requires an HTTPS PUBLIC_ORIGIN in production")

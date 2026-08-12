@@ -23,6 +23,21 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 		{"identity.password_reset_completed", TemplatePasswordChanged, false}, {"identity.staff_invitation_created", TemplateStaffInvitation, true},
 		{"access.invitation_issued", TemplateCourseInvitation, true}, {"access.granted", TemplateAccessGranted, false},
 		{"access.invitation_rejected", TemplateInviteRejected, false}, {"access.invitation_cancelled", TemplateInviteCancelled, false},
+		{"access.entitlement_adjusted", TemplateAccessAdjusted, false}, {"access.entitlement_revoked", TemplateAccessRevoked, false},
+	}
+
+	// The launch-critical inventory is whatever the dispatcher will actually
+	// carry, so it is read from the contract map rather than restated here. A
+	// new transactional message cannot reach production without production
+	// rendering evidence in both locales.
+	covered := make(map[string]bool, len(cases))
+	for _, tc := range cases {
+		covered[tc.eventType] = true
+	}
+	for eventType, template := range eventTemplates {
+		if !covered[eventType] {
+			t.Fatalf("event %q (%s) is deliverable but has no production rendering case", eventType, template)
+		}
 	}
 	for _, tc := range cases {
 		for _, locale := range []string{"ar", "en"} {
@@ -49,9 +64,20 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 					t.Errorf("HTML lacks %s direction/locale", locale)
 				}
 				lower := strings.ToLower(message.HTML + message.Text)
-				for _, forbidden := range []string{"tracking pixel", "unsubscribe", "utm_", "debug", "localhost"} {
+				// `resend.dev` and `mailpit` would mean a production message built
+				// from a sandbox sender or a local capture host.
+				for _, forbidden := range []string{"tracking pixel", "unsubscribe", "utm_", "debug", "localhost", "resend.dev", "mailpit", "127.0.0.1"} {
 					if strings.Contains(lower, forbidden) {
 						t.Errorf("content contains forbidden %q", forbidden)
+					}
+				}
+				// Every link a recipient can follow is built from the production
+				// origin, which is where the token stays valid.
+				for _, scheme := range []string{"http://", "https://"} {
+					for _, link := range linksWithScheme(message.Text, scheme) {
+						if !strings.HasPrefix(link, "https://gradex.example/") {
+							t.Errorf("message links to %q, outside the production origin", link)
+						}
 					}
 				}
 				if tc.credential {
@@ -68,6 +94,18 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 			})
 		}
 	}
+}
+
+// linksWithScheme returns every whitespace-delimited token that starts a URL,
+// which is how the plain-text part presents an action link.
+func linksWithScheme(text, scheme string) []string {
+	var links []string
+	for _, field := range strings.Fields(text) {
+		if strings.HasPrefix(field, scheme) {
+			links = append(links, field)
+		}
+	}
+	return links
 }
 
 func TestRendererRefusesContractConfusion(t *testing.T) {
