@@ -37,3 +37,8 @@ composition tests retain the named fail-closed prerequisite coverage.
 The repository integration schema is recreated per run. The test makes no
 network email delivery call, never logs an action credential, and uses the
 existing encrypted outbox test seam only after proving the durable intent.
+
+The test owns a temporary authenticated TLS Redis container. It generates a
+test CA and a loopback server certificate only for that run, passes the CA via
+the existing Redis CA-file configuration, waits with an authenticated verified
+TLS client, and cleans all container and key material through test cleanup.

@@ -70,6 +70,14 @@ existing Account, and no MFA enter this scope. §4's exclusions still hold.
       reinstatement under production composition. It must also prove Instructor, Student, anonymous,
       and stale-recent-auth denials without manual browser operation.
 
+**2026-08-12 T108 test-infrastructure amendment:** T108 may create a run-owned Redis container for
+its production-composition integration journey. The fixture may generate a run-owned CA, a server
+certificate valid for its loopback test hostname, and authenticated Redis credentials; it must use the
+existing `REDIS_TLS_CA_CERT_FILE` verification path, never disable certificate verification, and remove
+the container, certificates, keys, credentials, and temporary directory through deterministic test
+cleanup. This permits no production Redis configuration or security-policy change and no shared
+development-harness redesign.
+
 **2026-08-12 implementation amendment:** T101–T108 are authorized only by spec §19.4. They are the
 bounded C4 remediation: production composition of the existing staff lifecycle, its smallest
 Instructor/status operational read/UI surface, and the directly required verification. They do not
