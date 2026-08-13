@@ -81,7 +81,7 @@ func run(args []string, stdout io.Writer) error {
 		return fmt.Errorf("unexpected positional argument %q", flags.Arg(0))
 	}
 
-	cfg, err := config.Load()
+	cfg, err := config.LoadEmailPreflight()
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
 	}
