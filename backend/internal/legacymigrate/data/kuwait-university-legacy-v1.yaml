@@ -1,0 +1,44 @@
+# Kuwait University legacy taxonomy translation (D-091 §13, T5).
+#
+# WHY THIS FILE IS DATA AND NOT CODE
+#
+# The legacy `taxonomy_terms` vocabulary has no Institution. A SUBJECT term is a
+# bare label with an optional academic code, so nothing in the legacy model says
+# which university it belongs to or which canonical Subject it means. That is
+# missing information, not ambiguous information, and it is supplied here by the
+# Founder rather than guessed by the migrator.
+#
+# HOW MATCHING WORKS
+#
+#   term_code    -> the legacy taxonomy_terms.academic_code
+#   subject_code -> the canonical subjects.official_code in this Institution
+#
+# Both are compared after the same normalization the database applies
+# (academic_normalize_code), so "MATH101", "math-101" and "MATH 101" are one key
+# on either side. `term_label_en` is carried for human review only and is never
+# used for matching: a label is prose, not identity.
+#
+# A legacy term absent from this file is reported UNMAPPED and its Course is left
+# on the legacy classification, fully operational. Absence is never permission to
+# guess.
+
+id: kuwait-university-legacy-v1
+version: "1.0.0"
+institution_slug: kuwait-university
+
+# Legacy SUBJECT terms -> canonical Subjects.
+#
+# Empty at the T5 boundary because the legacy corpus this repository actually
+# carries has no coded SUBJECT terms to translate (see the T5 evidence record).
+# Entries are added here as the Founder identifies real legacy Courses to
+# migrate; the migrator's behaviour is proven against fixture corpora that do
+# exercise every outcome.
+subjects: []
+
+# Legacy MAJOR terms -> the Programs a migrated Course should target.
+#
+# This becomes revision-scoped audience metadata, never Course identity: a
+# legacy Major is closer to "who this was for" than to "what this teaches". A
+# Major with no entry is not an error — the migrated Course simply keeps the
+# automatic audience its canonical Subject already implies.
+majors: []
