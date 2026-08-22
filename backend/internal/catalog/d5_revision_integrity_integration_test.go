@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -117,10 +118,7 @@ func (f *d5Fixture) seedDependencies(t *testing.T) {
 		t.Fatalf("seeding legacy asset section: %v", err)
 	}
 
-	assets := []string{
-		f.videoOld, f.videoNew, f.previewOld, f.previewNew,
-		f.resourceOld, f.resourceNew, f.labOld, f.labNew,
-	}
+	assets := []string{f.videoOld, f.videoNew}
 	for i, assetID := range assets {
 		lessonID := fmt.Sprintf("80000000-0000-0000-0000-%012d", i+1)
 		if i == 0 {
@@ -141,6 +139,103 @@ func (f *d5Fixture) seedDependencies(t *testing.T) {
 	}
 }
 
+// seedReadyProtectedLessonFileAsset makes the D5 graph use the real protected
+// media contract for Resources and Lab Materials. Unlike the legacy video
+// compatibility rows in this fixture, it carries exact-version scan evidence
+// and can therefore exercise the delivery-grade approval revalidation.
+func (f *d5Fixture) seedReadyProtectedLessonFileAsset(t *testing.T, kind LessonFileKind, versionID string) {
+	t.Helper()
+	assetID, scanID := uuid.NewString(), uuid.NewString()
+	contentType := "application/pdf"
+	if kind == FileKindLabMaterial {
+		contentType = "application/zip"
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility)
+		VALUES ($1::uuid, $2::media_asset_kind, $3::uuid, $4::uuid, $5::uuid, 'PROTECTED')
+	`, assetID, kind, f.ownerID, f.courseID, f.lessonIdentityID); err != nil {
+		t.Fatalf("seeding protected %s asset: %v", kind, err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes
+		) VALUES ($1::uuid, $2::uuid, $3::media_asset_kind, 'QUARANTINED', $4, 'fixture-v1', $5, 12)
+	`, versionID, assetID, kind, "quarantine/"+f.courseID+"/"+versionID+"/source", contentType); err != nil {
+		t.Fatalf("seeding protected %s version: %v", kind, err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO scan_attempts (
+			id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity
+		) VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'fixture')
+	`, scanID, versionID, "scan:"+versionID); err != nil {
+		t.Fatalf("seeding protected %s scan evidence: %v", kind, err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("starting protected %s scan: %v", kind, err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED'
+		WHERE id = $2::uuid
+	`, scanID, versionID); err != nil {
+		t.Fatalf("recording protected %s scan success: %v", kind, err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("making protected %s asset ready: %v", kind, err)
+	}
+}
+
+// seedPreviewAsset creates the distinct, scanner-cleared PREVIEW asset that a
+// revision can expose publicly. It deliberately has no Lesson relation.
+func (f *d5Fixture) seedPreviewAsset(t *testing.T, versionID, revisionID string) {
+	f.seedPreviewAssetFor(t, f.courseID, f.ownerID, versionID, revisionID)
+}
+
+func (f *d5Fixture) seedPreviewAssetFor(t *testing.T, courseID, ownerID, versionID, revisionID string) {
+	t.Helper()
+	assetID, scanID := uuid.NewString(), uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_assets (
+			id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility
+		) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')
+	`, assetID, ownerID, courseID, revisionID); err != nil {
+		t.Fatalf("seeding preview asset: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes
+		) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)
+	`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding preview version: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO scan_attempts (
+			id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity
+		) VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'fixture')
+	`, scanID, versionID, "scan:"+versionID); err != nil {
+		t.Fatalf("seeding preview scan: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("starting preview scan: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, scanID, versionID); err != nil {
+		t.Fatalf("marking preview scan successful: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("making preview ready: %v", err)
+	}
+}
+
+func (f *d5Fixture) seedUnreadyPreviewAsset(t *testing.T, versionID, revisionID string) {
+	t.Helper()
+	assetID := uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')`, assetID, f.ownerID, f.courseID, revisionID); err != nil {
+		t.Fatalf("seeding unready preview asset: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)`, versionID, assetID, "quarantine/"+f.courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding unready preview version: %v", err)
+	}
+}
+
 func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 	t.Helper()
 	var revisionID string
@@ -153,17 +248,16 @@ func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 
 	year := StudyYearYear1
 	if _, err := f.repo.UpdateCourseRevision(f.ctx, f.validator, UpdateRevisionRequest{
-		CourseID:              f.courseID,
-		RevisionID:            revisionID,
-		OwnerAccountID:        f.ownerID,
-		TitleAr:               "النسخة القديمة",
-		TitleEn:               "OLD",
-		DescriptionAr:         "وصف قديم",
-		DescriptionEn:         "OLD DESCRIPTION",
-		MajorTermID:           &f.majorOld,
-		SubjectTermID:         &f.subjectOld,
-		StudyYear:             &year,
-		PreviewAssetVersionID: &f.previewOld,
+		CourseID:       f.courseID,
+		RevisionID:     revisionID,
+		OwnerAccountID: f.ownerID,
+		TitleAr:        "النسخة القديمة",
+		TitleEn:        "OLD",
+		DescriptionAr:  "وصف قديم",
+		DescriptionEn:  "OLD DESCRIPTION",
+		MajorTermID:    &f.majorOld,
+		SubjectTermID:  &f.subjectOld,
+		StudyYear:      &year,
 	}, f.ownerID); err != nil {
 		t.Fatalf("UpdateCourseRevision: %v", err)
 	}
@@ -185,6 +279,17 @@ func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 		t.Fatalf("AddLesson: %v", err)
 	}
 	f.lessonIdentityID = lesson.LessonIdentityID
+	for _, asset := range []struct {
+		kind    LessonFileKind
+		version string
+	}{
+		{FileKindResource, f.resourceOld},
+		{FileKindResource, f.resourceNew},
+		{FileKindLabMaterial, f.labOld},
+		{FileKindLabMaterial, f.labNew},
+	} {
+		f.seedReadyProtectedLessonFileAsset(t, asset.kind, asset.version)
+	}
 
 	if _, err := f.repo.SetLessonVideo(f.ctx, f.validator, SetVideoRequest{
 		CourseID: f.courseID, RevisionID: revisionID, LessonID: lesson.LessonIdentityID,
@@ -207,6 +312,12 @@ func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 		if _, err := f.repo.AddLessonFile(f.ctx, f.validator, file, f.ownerID); err != nil {
 			t.Fatalf("AddLessonFile(%s): %v", file.Kind, err)
 		}
+	}
+	f.seedPreviewAsset(t, f.previewOld, revisionID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+		CourseID: f.courseID, RevisionID: revisionID, PreviewAssetVersionID: f.previewOld, OwnerAccountID: f.ownerID,
+	}, f.ownerID); err != nil {
+		t.Fatalf("SetPreviewAsset initial revision: %v", err)
 	}
 
 	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
@@ -427,6 +538,117 @@ func TestD5CandidateCloneIsDeepAtomicAndIdentityStable(t *testing.T) {
 	}
 	if recreatedLesson.LessonIdentityID == f.lessonIdentityID {
 		t.Fatal("delete/recreate reused the old stable Lesson identity")
+	}
+}
+
+func TestPublicPreviewIsRevisionScopedAndSwitchesOnlyOnApproval(t *testing.T) {
+	f := newD5Fixture(t)
+
+	liveA, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+	if err != nil || liveA.LiveRevision == nil || liveA.LiveRevision.PreviewAssetVersionID == nil || *liveA.LiveRevision.PreviewAssetVersionID != f.previewOld {
+		t.Fatalf("live A preview=%v err=%v, want %s", liveA.LiveRevision, err, f.previewOld)
+	}
+
+	candidateB := f.candidate(t)
+	f.seedPreviewAsset(t, f.previewNew, candidateB.ID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+		CourseID: f.courseID, RevisionID: candidateB.ID, PreviewAssetVersionID: f.previewNew, OwnerAccountID: f.ownerID,
+	}, f.ownerID); err != nil {
+		t.Fatalf("setting candidate B preview: %v", err)
+	}
+	liveBeforeApproval, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+	if err != nil || liveBeforeApproval.LiveRevision == nil || liveBeforeApproval.LiveRevision.PreviewAssetVersionID == nil || *liveBeforeApproval.LiveRevision.PreviewAssetVersionID != f.previewOld {
+		t.Fatalf("candidate B leaked before approval: preview=%v err=%v", liveBeforeApproval.LiveRevision, err)
+	}
+
+	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{CourseID: f.courseID, RevisionID: candidateB.ID, OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID}); err != nil {
+		t.Fatalf("submitting candidate B: %v", err)
+	}
+	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{CourseID: f.courseID, RevisionID: candidateB.ID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID}); err != nil {
+		t.Fatalf("approving candidate B: %v", err)
+	}
+	liveB, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+	if err != nil || liveB.LiveRevision == nil || liveB.LiveRevision.ID != candidateB.ID || liveB.LiveRevision.PreviewAssetVersionID == nil || *liveB.LiveRevision.PreviewAssetVersionID != f.previewNew {
+		t.Fatalf("live B preview=%v revision=%v err=%v, want B/%s", liveB.LiveRevision, liveB.LiveRevision, err, f.previewNew)
+	}
+
+	candidateC := f.candidate(t)
+	if _, err := f.repo.ClearPreviewAsset(f.ctx, ClearPreviewAssetRequest{CourseID: f.courseID, RevisionID: candidateC.ID, OwnerAccountID: f.ownerID}, f.ownerID); err != nil {
+		t.Fatalf("clearing candidate C preview: %v", err)
+	}
+	liveBeforeRemovalApproval, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+	if err != nil || liveBeforeRemovalApproval.LiveRevision == nil || liveBeforeRemovalApproval.LiveRevision.PreviewAssetVersionID == nil || *liveBeforeRemovalApproval.LiveRevision.PreviewAssetVersionID != f.previewNew {
+		t.Fatalf("candidate preview removal changed live B early: preview=%v err=%v", liveBeforeRemovalApproval.LiveRevision, err)
+	}
+	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{CourseID: f.courseID, RevisionID: candidateC.ID, OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID}); err != nil {
+		t.Fatalf("submitting candidate C: %v", err)
+	}
+	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{CourseID: f.courseID, RevisionID: candidateC.ID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID}); err != nil {
+		t.Fatalf("approving candidate C: %v", err)
+	}
+	liveC, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+	if err != nil || liveC.LiveRevision == nil || liveC.LiveRevision.ID != candidateC.ID || liveC.LiveRevision.PreviewAssetVersionID != nil {
+		t.Fatalf("approved removal live preview=%v revision=%v err=%v", liveC.LiveRevision, liveC.LiveRevision, err)
+	}
+}
+
+func TestPublicPreviewDesignationRejectsProtectedForeignAndUnreadyMedia(t *testing.T) {
+	f := newD5Fixture(t)
+	candidate := f.candidate(t)
+
+	for name, assetVersionID := range map[string]string{
+		"protected lesson video": f.videoOld,
+		"live revision preview":  f.previewOld,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+				CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: assetVersionID, OwnerAccountID: f.ownerID,
+			}, f.ownerID)
+			if !errors.Is(err, ErrAssetVersionInvalid) {
+				t.Fatalf("SetPreviewAsset(%s) error=%v, want %v", name, err, ErrAssetVersionInvalid)
+			}
+		})
+	}
+
+	unready := uuid.NewString()
+	f.seedUnreadyPreviewAsset(t, unready, candidate.ID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: unready, OwnerAccountID: f.ownerID}, f.ownerID); !errors.Is(err, ErrAssetVersionInvalid) {
+		t.Fatalf("unready preview error=%v, want %v", err, ErrAssetVersionInvalid)
+	}
+
+	foreignCourseID, foreignRevisionID, foreignPreviewID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, foreignCourseID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'أجنبي', 'Foreign')`, foreignRevisionID, foreignCourseID); err != nil {
+		t.Fatal(err)
+	}
+	f.seedPreviewAssetFor(t, foreignCourseID, f.ownerID, foreignPreviewID, foreignRevisionID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: foreignPreviewID, OwnerAccountID: f.ownerID}, f.ownerID); !errors.Is(err, ErrAssetVersionInvalid) {
+		t.Fatalf("foreign Course preview error=%v, want %v", err, ErrAssetVersionInvalid)
+	}
+
+	eligible := uuid.NewString()
+	f.seedPreviewAsset(t, eligible, candidate.ID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: eligible, OwnerAccountID: f.adminID}, f.adminID); !errors.Is(err, ErrCourseNotFound) {
+		t.Fatalf("non-owning Admin preview change error=%v, want %v", err, ErrCourseNotFound)
+	}
+	studentID := uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES ($1::uuid, $2, $2, 'STUDENT', 'ACTIVE', 'Student')`, studentID, studentID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: eligible, OwnerAccountID: studentID}, studentID); !errors.Is(err, ErrCourseNotFound) {
+		t.Fatalf("Student preview change error=%v, want %v", err, ErrCourseNotFound)
+	}
+	selected, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: eligible, OwnerAccountID: f.ownerID}, f.ownerID)
+	if err != nil || selected.PreviewAssetVersionID == nil || *selected.PreviewAssetVersionID != eligible {
+		t.Fatalf("eligible preview selection=%+v err=%v", selected, err)
+	}
+	replacement := uuid.NewString()
+	f.seedPreviewAsset(t, replacement, candidate.ID)
+	selected, err = f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: replacement, OwnerAccountID: f.ownerID}, f.ownerID)
+	if err != nil || selected.PreviewAssetVersionID == nil || *selected.PreviewAssetVersionID != replacement {
+		t.Fatalf("preview replacement=%+v err=%v", selected, err)
 	}
 }
 
@@ -718,6 +940,14 @@ func TestD5ApprovalRevalidatesEveryDependencyClass(t *testing.T) {
 		}{
 			name: asset.name,
 			invalidate: func(t *testing.T, f *d5Fixture, _ *CourseRevision) {
+				if asset.name == "preview asset" || asset.name == "resource asset" || asset.name == "lab material asset" {
+					if _, err := f.p.Exec(f.ctx,
+						`UPDATE media_assets SET retired_at = now() WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
+					); err != nil {
+						t.Fatalf("invalidating %s: %v", asset.name, err)
+					}
+					return
+				}
 				if _, err := f.p.Exec(f.ctx,
 					`UPDATE videos SET status = 'FAILED' WHERE id = $1::uuid`, asset.id(f),
 				); err != nil {
@@ -725,6 +955,14 @@ func TestD5ApprovalRevalidatesEveryDependencyClass(t *testing.T) {
 				}
 			},
 			restore: func(t *testing.T, f *d5Fixture) {
+				if asset.name == "preview asset" || asset.name == "resource asset" || asset.name == "lab material asset" {
+					if _, err := f.p.Exec(f.ctx,
+						`UPDATE media_assets SET retired_at = NULL WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, asset.id(f),
+					); err != nil {
+						t.Fatalf("restoring %s: %v", asset.name, err)
+					}
+					return
+				}
 				if _, err := f.p.Exec(f.ctx,
 					`UPDATE videos SET status = 'READY' WHERE id = $1::uuid`, asset.id(f),
 				); err != nil {
@@ -755,6 +993,55 @@ func TestD5ApprovalRevalidatesEveryDependencyClass(t *testing.T) {
 	}
 }
 
+func TestST15ApprovalRefusesRetiredProtectedLessonFileDependencies(t *testing.T) {
+	for _, dependency := range []struct {
+		name      string
+		versionID func(*d5Fixture) string
+		dimension string
+	}{
+		{name: "Resource", versionID: func(f *d5Fixture) string { return f.resourceOld }, dimension: string(FileKindResource)},
+		{name: "Lab Material", versionID: func(f *d5Fixture) string { return f.labOld }, dimension: string(FileKindLabMaterial)},
+	} {
+		dependency := dependency
+		t.Run(dependency.name, func(t *testing.T) {
+			f := newD5Fixture(t)
+			candidate := f.submittedCandidate(t) // Valid scanned attachment at submission time.
+			before := f.approvalSnapshot(t, candidate.ID)
+
+			if _, err := f.p.Exec(f.ctx, `
+				UPDATE media_assets SET retired_at = now()
+				WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)
+			`, dependency.versionID(f)); err != nil {
+				t.Fatalf("retiring submitted %s dependency: %v", dependency.name, err)
+			}
+
+			_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+				CourseID: f.courseID, RevisionID: candidate.ID,
+				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+			})
+			assertSubmissionFailure(t, err)
+			var validation *SubmissionValidationError
+			if !errors.As(err, &validation) {
+				t.Fatalf("approval error=%v, want submission validation", err)
+			}
+			foundUnavailable := false
+			for _, violation := range validation.Violations {
+				if violation.Code == "ASSET_VERSION_UNAVAILABLE" && violation.Dimension == dependency.dimension {
+					foundUnavailable = true
+					break
+				}
+			}
+			if !foundUnavailable {
+				t.Fatalf("approval violations=%+v, want unavailable %s dependency", validation.Violations, dependency.dimension)
+			}
+			after := f.approvalSnapshot(t, candidate.ID)
+			if after != before || after.livePointer != f.liveID {
+				t.Fatalf("failed approval switched the live revision: before=%+v after=%+v", before, after)
+			}
+		})
+	}
+}
+
 func (f *d5Fixture) mutateCandidateToNewGraph(t *testing.T, candidate *CourseRevision) {
 	t.Helper()
 	year := StudyYearYear2
@@ -763,9 +1050,14 @@ func (f *d5Fixture) mutateCandidateToNewGraph(t *testing.T, candidate *CourseRev
 		TitleAr: "النسخة الجديدة", TitleEn: "NEW",
 		DescriptionAr: "وصف جديد", DescriptionEn: "NEW DESCRIPTION",
 		MajorTermID: &f.majorNew, SubjectTermID: &f.subjectNew, StudyYear: &year,
-		PreviewAssetVersionID: &f.previewNew,
 	}, f.ownerID); err != nil {
 		t.Fatalf("updating candidate metadata: %v", err)
+	}
+	f.seedPreviewAsset(t, f.previewNew, candidate.ID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID, PreviewAssetVersionID: f.previewNew, OwnerAccountID: f.ownerID,
+	}, f.ownerID); err != nil {
+		t.Fatalf("setting candidate preview: %v", err)
 	}
 	if _, err := f.repo.UpdateSection(f.ctx, UpdateSectionRequest{
 		CourseID: f.courseID, RevisionID: candidate.ID, SectionID: f.sectionIdentityID,

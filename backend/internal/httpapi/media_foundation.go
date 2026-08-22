@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Owlah2025/gradex/backend/internal/media"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 // mediaDeliveryIssuer is the narrow production boundary used by the live
@@ -17,7 +18,9 @@ type mediaDeliveryIssuer interface {
 	IssuePlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
 	IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error)
 	IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error)
+	IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error)
 	IssuePreview(context.Context, string) (media.PreviewAuthorization, error)
+	IssueCoursePreview(context.Context, string) (media.PreviewAuthorization, error)
 }
 
 type adminReviewPlaybackIssuer interface {
@@ -53,20 +56,38 @@ func (f *MediaFoundation) AdminReviewMedia() adminReviewPlaybackIssuer {
 // not contain Course publication or entitlement decisions; those remain in
 // their owning slices.
 type MediaFoundation struct {
-	service  *media.Service
-	delivery mediaDeliveryIssuer
+	service           *media.Service
+	delivery          mediaDeliveryIssuer
+	rateLimiter       *ratelimit.Limiter
+	previewRatePolicy ratelimit.Policy
 }
 
 type MediaFoundationOptions struct {
-	Service  *media.Service
-	Delivery mediaDeliveryIssuer
+	Service            *media.Service
+	Delivery           mediaDeliveryIssuer
+	PreviewRateLimiter *ratelimit.Limiter
+	PreviewRatePolicy  ratelimit.Policy
 }
 
 func NewMediaFoundation(options MediaFoundationOptions) (*MediaFoundation, error) {
 	if options.Service == nil {
 		return nil, errors.New("media service is required")
 	}
-	return &MediaFoundation{service: options.Service, delivery: options.Delivery}, nil
+	if options.PreviewRateLimiter == nil && options.PreviewRatePolicy.Endpoint != "" {
+		return nil, errors.New("public preview rate policy requires a limiter")
+	}
+	if options.PreviewRateLimiter != nil {
+		if options.PreviewRatePolicy.Endpoint != "public-preview" {
+			return nil, errors.New("public preview rate policy must target public-preview")
+		}
+		if err := options.PreviewRatePolicy.Validate(); err != nil {
+			return nil, err
+		}
+	}
+	return &MediaFoundation{
+		service: options.Service, delivery: options.Delivery,
+		rateLimiter: options.PreviewRateLimiter, previewRatePolicy: options.PreviewRatePolicy,
+	}, nil
 }
 
 // WithMediaFoundation mounts D7 pipeline routes and, when the complete D8

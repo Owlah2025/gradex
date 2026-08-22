@@ -46,7 +46,7 @@ func (l *localFallback) decide(entries []Entry, maxKeys int) (allowed bool, avai
 		return false, false
 	}
 
-	allowed = true
+	prospective := make(map[string]localEntry, len(entries))
 	for _, requested := range entries {
 		current := l.entries[requested.Key]
 		if requested.Burst > 0 {
@@ -59,22 +59,24 @@ func (l *localFallback) decide(entries []Entry, maxKeys int) (allowed bool, avai
 				current.updatedAt = now
 			}
 			if current.tokens < 1 {
-				allowed = false
-			} else {
-				current.tokens--
+				return false, true
 			}
+			current.tokens--
 			current.expiresAt = now.Add(requested.Window)
-			l.entries[requested.Key] = current
+			prospective[requested.Key] = current
 			continue
 		}
 		if !now.Before(current.expiresAt) {
 			current = localEntry{expiresAt: now.Add(requested.Window)}
 		}
 		current.count++
-		l.entries[requested.Key] = current
 		if current.count > requested.Limit {
-			allowed = false
+			return false, true
 		}
+		prospective[requested.Key] = current
 	}
-	return allowed, true
+	for key, entry := range prospective {
+		l.entries[key] = entry
+	}
+	return true, true
 }

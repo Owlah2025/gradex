@@ -16,7 +16,24 @@ Inspect repository evidence instead of relying on conversation memory. Preserve 
 user-owned working-tree changes. Do not mark work complete without the evidence required by the
 current daily record.
 
-## Current phase — integrated remediation approved; release gates remain
+## Current phase — MVP functional completion, one tranche at a time
+
+[D-089](docs/DECISIONS.md#d-089--mvp-functional-completion-work-is-authorized-one-remediation-tranche-at-a-time)
+opens a bounded implementation stream on top of the D-086 freeze. Read
+[`docs/mvp/FUNCTIONAL_COMPLETION.md`](docs/mvp/FUNCTIONAL_COMPLETION.md) first: it is the canonical
+completion tracker and its `MVP-Fxx` queue is the only authorized work list.
+
+- Scope is limited to gaps recorded in that tracker. One tranche at a time; none starts automatically.
+- Production code changes only where tracing proves it is necessary to close an identified gap.
+- Visual UI/UX work stays paused ([`docs/ux/`](docs/ux/README.md)). Functional UI changes are
+  authorized only when a canonical capability is otherwise unreachable through the product.
+- Security, authorization, entitlement, lifecycle, and product contracts remain authoritative. Never
+  relax an assertion to obtain a green run.
+- `E2E_PROVEN` requires an observed green run against real layers. Code inspection never qualifies.
+
+The freeze below remains the baseline that D-089 amends.
+
+### Prior phase — integrated remediation approved; release gates remain
 
 The complete integrated remediation range
 `18fb7e033d0fad162caebe150fb641a00201e259..2c43b90fcf7a5c5913f42412fad5369911f781aa`

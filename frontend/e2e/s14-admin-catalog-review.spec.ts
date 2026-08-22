@@ -70,7 +70,53 @@ async function openAdminCatalog(page: Page): Promise<void> {
   await expect(page.getByTestId("review-queue-loading")).toHaveCount(0);
 }
 
+const AUTHORING_UNIVERSITY = "S14 Authoring University";
+const AUTHORING_SUBJECT_CODE = "S14-101";
+/**
+ * Creates a small catalog owned by this spec.
+ *
+ * Deliberately NOT the Kuwait University manifest: this spec runs before
+ * `t2-launch-catalog-data`, whose dry run must find the launch catalog
+ * unimported. These cases only need one university and one Subject to author
+ * against, so they create their own and leave the launch manifest alone.
+ */
+async function ensureAuthoringCatalog(): Promise<void> {
+  const admin = await apiContext(issueRotatingSession(ADMIN));
+  const existing = await admin.get("/api/v1/admin/academic/institutions");
+  const institutions = existing.ok() ? await existing.json() : [];
+  const already = Array.isArray(institutions)
+    ? institutions.find((entry: { name_en?: string }) => entry.name_en === AUTHORING_UNIVERSITY)
+    : undefined;
+  let institutionID: string = already?.id ?? "";
+  if (!institutionID) {
+    const created = await admin.post("/api/v1/admin/academic/institutions", {
+      data: {
+        country_code: "KW",
+        slug: "s14-authoring-university",
+        name_ar: "جامعة التأليف",
+        name_en: AUTHORING_UNIVERSITY,
+        max_academic_level: 4,
+      },
+    });
+    expect(created.status()).toBe(201);
+    institutionID = (await created.json()).id;
+    const subject = await admin.post(`/api/v1/admin/academic/institutions/${institutionID}/subjects`, {
+      data: {
+        official_code: AUTHORING_SUBJECT_CODE,
+        title_ar: "مادة التأليف",
+        title_en: "Authoring Subject",
+      },
+    });
+    expect(subject.status()).toBe(201);
+  }
+  await admin.dispose();
+}
+
 test.describe("S14 Admin Catalog review surface", () => {
+  test.beforeAll(async () => {
+    await ensureAuthoringCatalog();
+  });
+
   test("A the queue is the server's review queue, and carries no demo Course", async ({ browser }) => {
     const context = await browser.newContext({ locale: "en-US" });
     const session = await signIn(context, ADMIN);
@@ -195,7 +241,14 @@ test.describe("S14 Admin Catalog review surface", () => {
     await expect(page.locator("h1")).toContainText("Course Authoring Studio");
 
     await page.getByTestId("toggle-new-course").click();
-    await page.getByTestId("new-course-title-ar").fill("دورة غير مكتملة");
+    // T4-B (§48): ordinary creation is Academic Catalog based, so the Course
+    // begins with a university and a canonical Subject.
+    await page.getByTestId("new-course-institution").selectOption({ label: AUTHORING_UNIVERSITY });
+    await page.getByTestId("new-course-subject-search").fill(AUTHORING_SUBJECT_CODE);
+    const subjectResult = page.getByTestId("new-course-subject-result").first();
+    await expect(subjectResult).toBeVisible({ timeout: 15_000 });
+    await subjectResult.click();
+    await page.getByTestId("new-course-title-ar").fill("كورس غير مكتمل");
     await page.getByTestId("new-course-title-en").fill(`Incomplete Course ${Date.now()}`);
     await page.getByTestId("new-course-description-ar").fill("وصف");
     await page.getByTestId("new-course-description-en").fill("Incomplete");
@@ -208,10 +261,14 @@ test.describe("S14 Admin Catalog review surface", () => {
     // The founder clicked Submit and saw nothing happen, because the reason
     // rendered far above the viewport. It now renders at the control, and the
     // server's own violation codes are shown unchanged.
+    // T4-B (§48): this previously also asserted TAXONOMY_DIMENSION_MISSING. That
+    // gate belongs to the legacy classification, which an Academic Course does
+    // not carry and must never be asked for. The property under test — the
+    // server's own reason, rendered at the control — is unchanged.
     const submitError = page.getByTestId("submit-error");
     await expect(submitError).toBeVisible();
-    await expect(submitError).toContainText("TAXONOMY_DIMENSION_MISSING");
     await expect(submitError).toContainText("COURSE_EMPTY");
+    await expect(submitError).not.toContainText("TAXONOMY_DIMENSION_MISSING");
 
     const errorBox = await submitError.boundingBox();
     const buttonBox = await submit.boundingBox();

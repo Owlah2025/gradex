@@ -4,7 +4,7 @@ export type PublicTaxonomy = { label: string; code?: string };
 export type PublicPrice = { minor_units: number; currency: "KWD" };
 export type PublicCourse = {
   id: string; slug: string; title: string; instructor_display_name: string;
-  major?: PublicTaxonomy; subject?: PublicTaxonomy; study_year?: PublicTaxonomy;
+  university?: PublicTaxonomy; major?: PublicTaxonomy; subject?: PublicTaxonomy; study_year?: PublicTaxonomy;
   price?: PublicPrice; has_preview: boolean;
 };
 export type PublicCourseDetail = PublicCourse & {
@@ -12,6 +12,7 @@ export type PublicCourseDetail = PublicCourse & {
   sections: { title: string; position: number; lesson_count: number }[];
 };
 export type PublicCourseList = { items: PublicCourse[]; page: number; page_size: number; total: number };
+export type PublicPreviewAuthorization = { url: string; expires_at: string };
 
 async function publicRequest<T>(path: string, locale: "ar" | "en"): Promise<T> {
   const response = await fetch(`/api/v1/catalog${path}`, {
@@ -30,3 +31,23 @@ export function getPublicCourses(locale: "ar" | "en", query = "") {
   return publicRequest<PublicCourseList>(`/courses${suffix}`, locale);
 }
 export function getPublicCourse(idOrSlug: string, locale: "ar" | "en") { return publicRequest<PublicCourseDetail>(`/courses/${encodeURIComponent(idOrSlug)}`, locale); }
+
+/**
+ * Requests the preview for the public Course, not for a browser-supplied Asset
+ * Version. The server resolves the currently approved live revision before
+ * returning an expiry-bounded media URL.
+ */
+export async function getPublicCoursePreview(
+  courseID: string,
+  locale: "ar" | "en",
+): Promise<PublicPreviewAuthorization> {
+  const response = await fetch(`/api/v1/media/courses/${encodeURIComponent(courseID)}/preview`, {
+    headers: { Accept: "application/json, application/problem+json", "Accept-Language": locale },
+    cache: "no-store",
+  });
+  const body: unknown = await response.json();
+  if (!response.ok) {
+    throw isProblem(body) ? new ProblemError(body) : new Error("Public preview request failed");
+  }
+  return body as PublicPreviewAuthorization;
+}

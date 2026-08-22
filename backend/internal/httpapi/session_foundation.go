@@ -35,12 +35,13 @@ type sessionCommands interface {
 // SessionFoundation is the validated dependency set for the four
 // authenticated-session routes and their anonymous login bootstrap.
 type SessionFoundation struct {
-	security         *anonymousSecurity
-	repository       sessionCommands
-	authenticator    *auth.SessionAuthenticator
-	compromised      identity.CompromisedRangeSource
-	limiter          *ratelimit.Limiter
-	endpointPolicies map[string]ratelimit.Policy
+	security            *anonymousSecurity
+	repository          sessionCommands
+	authenticator       *auth.SessionAuthenticator
+	compromised         identity.CompromisedRangeSource
+	limiter             *ratelimit.Limiter
+	endpointPolicies    map[string]ratelimit.Policy
+	loginRequestTimeout time.Duration
 }
 
 type SessionFoundationOptions struct {
@@ -53,9 +54,10 @@ type SessionFoundationOptions struct {
 	// than optional so a deployment cannot mount the password-change route with
 	// screening quietly absent — the one route whose whole purpose is to
 	// install a credential that will not be changed again.
-	Compromised      identity.CompromisedRangeSource
-	Limiter          *ratelimit.Limiter
-	EndpointPolicies map[string]ratelimit.Policy
+	Compromised         identity.CompromisedRangeSource
+	Limiter             *ratelimit.Limiter
+	EndpointPolicies    map[string]ratelimit.Policy
+	LoginRequestTimeout time.Duration
 }
 
 func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation, error) {
@@ -73,6 +75,9 @@ func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation,
 	}
 	if options.Compromised == nil {
 		return nil, errors.New("session foundation compromised-password source is required")
+	}
+	if options.LoginRequestTimeout <= 0 {
+		options.LoginRequestTimeout = time.Minute
 	}
 	endpointPolicies := make(map[string]ratelimit.Policy, len(options.EndpointPolicies))
 	for endpoint, policy := range options.EndpointPolicies {
@@ -94,11 +99,12 @@ func NewSessionFoundation(options SessionFoundationOptions) (*SessionFoundation,
 		return nil, err
 	}
 	return &SessionFoundation{
-		security:         security,
-		repository:       options.Repository,
-		authenticator:    authenticator,
-		compromised:      options.Compromised,
-		limiter:          options.Limiter,
-		endpointPolicies: endpointPolicies,
+		security:            security,
+		repository:          options.Repository,
+		authenticator:       authenticator,
+		compromised:         options.Compromised,
+		limiter:             options.Limiter,
+		endpointPolicies:    endpointPolicies,
+		loginRequestTimeout: options.LoginRequestTimeout,
 	}, nil
 }

@@ -27,10 +27,17 @@ The conceptual relationships and lifecycles behind these terms are defined in
 | Term | Definition |
 |---|---|
 | Course | Top-level catalog and learning product owned by one Instructor and priced/published by Admins. |
-| Taxonomy Term | Admin-managed bilingual vocabulary entry used to classify Courses; covers the Major and Subject dimensions. |
-| Major | Course classification dimension naming the field of study, drawn from the Admin vocabulary. |
-| Subject | Course classification dimension naming the university subject, with an optional academic code such as `CS 101`. |
-| Study Year | Course classification dimension using the fixed enumeration `PREP`, `YEAR_1`–`YEAR_4`. |
+| Taxonomy Term | *(Legacy, D-022 — superseded by D-091.)* Admin-managed bilingual vocabulary entry used to classify Courses; covers the Major and Subject dimensions. Operational until the Academic Catalog cutover. |
+| Institution | A degree-granting university. Owns every academic identity beneath it. Arabic: الجامعة. *(D-091)* |
+| Academic Unit | A named organisational unit inside an Institution — `COLLEGE` (الكلية), `DEPARTMENT` (القسم), or `SERVICE_UNIT`. Self-nesting; a unit may attach directly to the Institution. *(D-091)* |
+| Program | The degree specialisation a Student follows, owned by an Academic Unit. Distinct from a Department. Arabic: التخصص. *(D-091)* |
+| Curriculum | A versioned academic plan (major sheet) for one Program; exactly one is `ACTIVE`. Arabic: الخطة الدراسية. *(D-091)* |
+| Curriculum Subject | The mapping between a Curriculum and a Subject, carrying requirement kind, recommended level, recommended semester, and credits as metadata only. *(D-091)* |
+| Academic Level | A Student's current standing at their Institution, and separately a CurriculumSubject *recommendation*. Never a property of a Subject or a Gradex Course. Bounds are per-Institution. Arabic: المستوى الدراسي. *(D-091)* |
+| Student Academic Profile | A Student's `(Institution, Program, Curriculum, level, enrollment status)`. **Discovery-only — never influences entitlement or access.** *(D-091)* |
+| Major | *(Legacy, D-022 — superseded by D-091's Program.)* Course classification dimension naming the field of study, drawn from the Admin vocabulary. |
+| Subject | The Institution's canonical academic course identity, with Arabic and English titles and an optional official code such as `0410-101`. Belongs to the Institution, never to one Program; a Gradex Course teaches exactly one. Arabic: المادة (official alternative: المقرر). *(D-091; supersedes the D-022 classification dimension of the same name.)* |
+| Study Year | *(Legacy, D-022 — superseded by D-091's Academic Level.)* Course classification dimension using the fixed enumeration `PREP`, `YEAR_1`–`YEAR_4`. Operational until the Academic Catalog cutover. |
 | Section | Ordered grouping inside one Course. The canonical domain term. Not an acquirable access scope in MVP. |
 | Chapter | Optional localized/Student-facing label for Section; never a separate entity or access scope. |
 | Lesson | Ordered learning unit inside one Section, with video and optional protected attachments. |

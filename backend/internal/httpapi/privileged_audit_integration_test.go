@@ -17,17 +17,17 @@ import (
 )
 
 type privilegedAuditFixture struct {
-	ctx                                 context.Context
-	client                              *http.Client
-	engine                              *gin.Engine
-	baseURL                             string
-	pool                                *pgxpool.Pool
-	repo                                *catalog.Repository
-	adminID, instructorID               string
-	adminToken, instructorToken         string
-	courseID, revisionID                string
-	sectionID, lessonID, fileID, termID string
-	majorID, subjectID, videoID         string
+	ctx                                    context.Context
+	client                                 *http.Client
+	engine                                 *gin.Engine
+	baseURL                                string
+	pool                                   *pgxpool.Pool
+	repo                                   *catalog.Repository
+	adminID, instructorID                  string
+	adminToken, instructorToken            string
+	courseID, revisionID                   string
+	sectionID, lessonID, fileID, termID    string
+	majorID, subjectID, videoID, previewID string
 }
 
 type privilegedAuditExpectation struct {
@@ -121,14 +121,24 @@ func TestProductionInstructorMutationRoutesCommitAuditEvidence(t *testing.T) {
 
 func instructorAuditScenarios() map[string]instructorAuditScenario {
 	return map[string]instructorAuditScenario{
-		http.MethodPost + " /api/v1/courses": {body: func(*privilegedAuditFixture) string {
-			return `{"title_ar":"دورة تدقيق","title_en":"Audit Course","description_ar":"وصف","description_en":"Description"}`
+		http.MethodPost + " /api/v1/courses": {prepare: prepareAuditAcademicCatalog, body: func(f *privilegedAuditFixture) string {
+			// T4-B: ordinary Instructor creation is Academic Catalog based, so the
+			// audited create names its university and canonical Subject.
+			return fmt.Sprintf(`{"title_ar":"كورس تدقيق","title_en":"Audit Course","description_ar":"وصف","description_en":"Description","institution_id":%q,"subject_id":%q}`,
+				auditInstitutionID, auditSubjectID)
 		}, status: http.StatusCreated, action: "COURSE_CREATED", targetType: "COURSE"},
+		http.MethodPut + " /api/v1/courses/:id/subject": {prepare: prepareAuditAcademicCourse, body: func(*privilegedAuditFixture) string {
+			return fmt.Sprintf(`{"subject_id":%q}`, auditSubjectAltID)
+		}, status: http.StatusOK, action: "COURSE_SUBJECT_ASSIGNED", targetType: "COURSE"},
 		http.MethodPut + " /api/v1/courses/:id/candidate": {prepare: preparePublishedCourse, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_CANDIDATE_CREATED", targetType: "COURSE_REVISION"},
 		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId": {body: func(*privilegedAuditFixture) string {
 			return `{"title_ar":"عنوان","title_en":"Title","description_ar":"وصف","description_en":"Description"}`
 		}, status: http.StatusOK, action: "COURSE_REVISION_UPDATED", targetType: "COURSE_REVISION"},
-		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/sections": {body: func(*privilegedAuditFixture) string { return `{"title_ar":"قسم","title_en":"Section"}` }, status: http.StatusCreated, action: "SECTION_CREATED", targetType: "SECTION"},
+		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/audience": {prepare: prepareAuditAudience, body: func(*privilegedAuditFixture) string {
+			return fmt.Sprintf(`{"program_ids":[%q]}`, auditProgramID)
+		}, status: http.StatusOK, action: "COURSE_AUDIENCE_CUSTOMIZED", targetType: "COURSE_REVISION"},
+		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/audience": {prepare: prepareAuditAudienceTarget, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_AUDIENCE_AUTOMATIC", targetType: "COURSE_REVISION"},
+		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/sections":   {body: func(*privilegedAuditFixture) string { return `{"title_ar":"قسم","title_en":"Section"}` }, status: http.StatusCreated, action: "SECTION_CREATED", targetType: "SECTION"},
 		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId": {body: func(*privilegedAuditFixture) string {
 			return `{"title_ar":"قسم محدث","title_en":"Updated Section"}`
 		}, status: http.StatusOK, action: "SECTION_UPDATED", targetType: "SECTION"},
@@ -144,7 +154,7 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		}, status: http.StatusCreated, action: "LESSON_FILE_ATTACHED", targetType: "LESSON_FILE"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files": {prepare: prepareAuditFile, body: func(f *privilegedAuditFixture) string { return `{"file_id":"` + f.fileID + `"}` }, status: http.StatusNoContent, action: "LESSON_FILE_DELETED", targetType: "LESSON_FILE"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/preview": {body: func(f *privilegedAuditFixture) string {
-			return fmt.Sprintf(`{"preview_asset_version_id":%q}`, f.videoID)
+			return fmt.Sprintf(`{"preview_asset_version_id":%q}`, f.previewID)
 		}, status: http.StatusOK, action: "PREVIEW_ASSET_SET", targetType: "COURSE_REVISION"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/preview": {prepare: prepareAuditPreview, body: emptyAuditBody, status: http.StatusOK, action: "PREVIEW_ASSET_CLEARED", targetType: "COURSE_REVISION"},
 		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/submit":    {prepare: prepareSubmittableCourse, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_SUBMITTED", targetType: "COURSE"},
@@ -180,6 +190,7 @@ func newPrivilegedAuditFixture(t *testing.T) *privilegedAuditFixture {
 	if _, err := p.Exec(ctx, `INSERT INTO videos (id, lesson_id, status) VALUES ('10000000-0000-0000-0000-000000000012', '10000000-0000-0000-0000-000000000011', 'READY')`); err != nil {
 		t.Fatalf("seeding ready video fixture: %v", err)
 	}
+	seedAuditPreviewAsset(t, p, ctx, instructorID, courseID, revisionID)
 	repo, err := catalog.NewRepository(p, testWriterForAuthoring(t))
 	if err != nil {
 		t.Fatalf("catalog.NewRepository: %v", err)
@@ -189,7 +200,33 @@ func newPrivilegedAuditFixture(t *testing.T) *privilegedAuditFixture {
 		adminID: adminID, instructorID: instructorID, adminToken: adminToken,
 		instructorToken: instToken,
 		courseID:        courseID, revisionID: revisionID, sectionID: sectionID,
-		videoID: "10000000-0000-0000-0000-000000000012",
+		videoID:   "10000000-0000-0000-0000-000000000012",
+		previewID: "10000000-0000-0000-0000-000000000014",
+	}
+}
+
+func seedAuditPreviewAsset(t *testing.T, p *pgxpool.Pool, ctx context.Context, ownerID, courseID, revisionID string) {
+	t.Helper()
+	const assetID = "10000000-0000-0000-0000-000000000013"
+	const versionID = "10000000-0000-0000-0000-000000000014"
+	const scanID = "10000000-0000-0000-0000-000000000015"
+	if _, err := p.Exec(ctx, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')`, assetID, ownerID, courseID, revisionID); err != nil {
+		t.Fatalf("seeding audit preview asset: %v", err)
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding audit preview version: %v", err)
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity) VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'fixture')`, scanID, versionID, "scan:"+versionID); err != nil {
+		t.Fatalf("seeding audit preview scan: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("starting audit preview scan: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, scanID, versionID); err != nil {
+		t.Fatalf("passing audit preview scan: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("making audit preview ready: %v", err)
 	}
 }
 
@@ -287,6 +324,92 @@ func (f *privilegedAuditFixture) assertNewInstructorAudit(t *testing.T, action, 
 
 func preparePublishedCourse(t *testing.T, f *privilegedAuditFixture) { f.preparePublished(t) }
 
+// Academic Catalog identifiers for the T4-B audit scenarios.
+const (
+	auditInstitutionID = "aa000000-0000-0000-0000-000000000001"
+	auditSubjectID     = "bb000000-0000-0000-0000-000000000001"
+	auditSubjectAltID  = "bb000000-0000-0000-0000-000000000002"
+	auditProgramID     = "dd000000-0000-0000-0000-000000000001"
+	auditCurriculumID  = "ee000000-0000-0000-0000-000000000001"
+)
+
+// prepareAuditAcademicCatalog seeds the university and two canonical Subjects an
+// Academic Course is authored against.
+func prepareAuditAcademicCatalog(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	var seeded bool
+	if err := f.pool.QueryRow(f.ctx,
+		`SELECT EXISTS (SELECT 1 FROM institutions WHERE id = $1::uuid)`, auditInstitutionID).Scan(&seeded); err != nil {
+		t.Fatalf("checking audit institution: %v", err)
+	}
+	if seeded {
+		return
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO institutions (id, country_code, slug, name_ar, name_en)
+		VALUES ($1, 'KW', 'audit-university', 'جامعة', 'Audit University')`, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit institution: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO subjects (id, institution_id, official_code, title_ar, title_en) VALUES
+		($1, $3, '0418-320', 'مبادئ نظم الحاسوب', 'Principles of Computer Systems'),
+		($2, $3, '0418-321', 'نظم التشغيل', 'Operating Systems')`,
+		auditSubjectID, auditSubjectAltID, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit subjects: %v", err)
+	}
+}
+
+// prepareAuditAcademicCourse puts the fixture Course onto the Academic Catalog
+// model so the Subject-correction route has something to correct.
+//
+// The conversion is written directly rather than through the product, because
+// the product has no such conversion: T5 owns moving an existing Course between
+// classification models. This is a fixture, not a supported path.
+func prepareAuditAcademicCourse(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	prepareAuditAcademicCatalog(t, f)
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE courses
+		SET classification_model = 'ACADEMIC_CATALOG', institution_id = $1::uuid, subject_id = $2::uuid
+		WHERE id = $3::uuid`, auditInstitutionID, auditSubjectID, f.courseID); err != nil {
+		t.Fatalf("preparing academic audit course: %v", err)
+	}
+}
+
+func prepareAuditAudience(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	prepareAuditAcademicCourse(t, f)
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO programs (id, institution_id, slug, name_ar, name_en, degree_kind)
+		VALUES ($1, $2, 'audit-program', 'تخصص', 'Audit Program', 'BSC')`,
+		auditProgramID, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit Program: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO curricula (id, program_id, institution_id, version_label, status)
+		VALUES ($1, $2, $3, '2026', 'ACTIVE')`,
+		auditCurriculumID, auditProgramID, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit Curriculum: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO curriculum_subjects (curriculum_id, subject_id, institution_id, requirement_kind)
+		VALUES ($1, $2, $3, 'MAJOR_CORE')`,
+		auditCurriculumID, auditSubjectID, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit Subject mapping: %v", err)
+	}
+}
+
+func prepareAuditAudienceTarget(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	prepareAuditAudience(t, f)
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_program_targets (revision_id, course_id, program_id, institution_id)
+		VALUES ($1, $2, $3, $4)`,
+		f.revisionID, f.courseID, auditProgramID, auditInstitutionID); err != nil {
+		t.Fatalf("seeding audit audience target: %v", err)
+	}
+}
+
 func prepareAuditLesson(t *testing.T, f *privilegedAuditFixture) {
 	t.Helper()
 	if f.lessonID != "" {
@@ -311,7 +434,7 @@ func prepareAuditFile(t *testing.T, f *privilegedAuditFixture) {
 
 func prepareAuditPreview(t *testing.T, f *privilegedAuditFixture) {
 	t.Helper()
-	if _, err := f.repo.SetPreviewAsset(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.PreviewAssetRequest{CourseID: f.courseID, RevisionID: f.revisionID, PreviewAssetVersionID: f.videoID, OwnerAccountID: f.instructorID}, f.instructorID); err != nil {
+	if _, err := f.repo.SetPreviewAsset(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.PreviewAssetRequest{CourseID: f.courseID, RevisionID: f.revisionID, PreviewAssetVersionID: f.previewID, OwnerAccountID: f.instructorID}, f.instructorID); err != nil {
 		t.Fatalf("setting audit preview: %v", err)
 	}
 }

@@ -1,0 +1,18 @@
+[Unit]
+Description=Gradex PostgreSQL provider backup
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=@GRADEX_USER@
+Group=@GRADEX_GROUP@
+WorkingDirectory=@GRADEX_REPO@
+ExecStart=@GRADEX_REPO@/deploy/hostinger/host.sh backup
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gradex-backup

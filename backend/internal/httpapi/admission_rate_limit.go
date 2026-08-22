@@ -59,6 +59,11 @@ func verificationRequestIdentifier(c *gin.Context) string {
 	return rateLimitEmailIdentifier(request.Email)
 }
 
+func purchaseRequestIdentifier(c *gin.Context) string {
+	request := c.MustGet(strictJSONBodyContextKey).(*createPurchaseRequestBody)
+	return rateLimitEmailIdentifier(request.Email)
+}
+
 // passwordResetIdentifier keys the limiter on the normalized address, exactly
 // as the verification request does. Using the raw address would let case or
 // whitespace variants each buy a fresh budget against one Account.

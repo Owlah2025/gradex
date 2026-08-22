@@ -91,12 +91,43 @@ func loginSession(
 	email string,
 ) SessionGrant {
 	t.Helper()
-	grant, err := repository.Login(context.Background(), LoginRequest{
+	admitted := false
+	var timing []LoginTimingEvent
+	ctx := WithPasswordVerificationObserver(context.Background(), func(event PasswordVerificationEvent) {
+		if event == PasswordVerificationAdmitted {
+			admitted = true
+		}
+	})
+	ctx = WithLoginTimingObserver(ctx, func(event LoginTimingEvent) {
+		timing = append(timing, event)
+	})
+	grant, err := repository.Login(ctx, LoginRequest{
 		Email: email, Password: config.NewSecret(sessionTestPassword),
 		RequestID: "request-login",
 	})
 	if err != nil {
 		t.Fatalf("logging in: %v", err)
+	}
+	if !admitted {
+		t.Fatal("successful login did not traverse password-verification admission")
+	}
+	wantStages := []LoginStage{
+		LoginStageCandidateLookup,
+		LoginStageGateWait,
+		LoginStagePasswordVerify,
+		LoginStageSessionPrepare,
+		LoginStageSessionWrite,
+	}
+	if len(timing) != len(wantStages) {
+		t.Fatalf("login timing event count = %d, want %d: %#v", len(timing), len(wantStages), timing)
+	}
+	for index, want := range wantStages {
+		if timing[index].Stage != want {
+			t.Errorf("login timing stage %d = %s, want %s", index, timing[index].Stage, want)
+		}
+		if timing[index].Duration < 0 {
+			t.Errorf("login timing stage %s reported negative duration %s", want, timing[index].Duration)
+		}
 	}
 	return grant
 }
@@ -156,6 +187,73 @@ func TestLoginCreatesDigestOnlyFamily(t *testing.T) {
 	}
 }
 
+func TestCurrentSessionReadDoesNotLockAndObservesCommittedRevocation(t *testing.T) {
+	pool := admissionPool(t)
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	repository := sessionRepository(t, pool, now)
+	insertSessionAccount(t, pool, "read-revoke@example.com", StatusActive, true)
+	grant := loginSession(t, repository, "read-revoke@example.com")
+	digest := DigestToken(grant.Credential.Expose())
+
+	revocation, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("beginning revocation: %v", err)
+	}
+	defer func() { _ = revocation.Rollback(context.Background()) }()
+	if _, err := revocation.Exec(context.Background(),
+		`UPDATE sessions
+		    SET state = 'REVOKED', revocation_reason = 'ADMIN_REVOKED', revoked_at = $2
+		  WHERE id = $1::uuid`, grant.Session.SessionID, now,
+	); err != nil {
+		t.Fatalf("staging revocation: %v", err)
+	}
+
+	resolved := make(chan error, 1)
+	go func() {
+		_, err := repository.Resolve(
+			context.Background(), digest, UseReadOnly, "request-before-revoke-commit",
+		)
+		resolved <- err
+	}()
+	select {
+	case err := <-resolved:
+		if err != nil {
+			t.Fatalf("read concurrent with uncommitted revocation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ordinary session read waited on the revocation row lock")
+	}
+
+	if err := revocation.Commit(context.Background()); err != nil {
+		t.Fatalf("committing revocation: %v", err)
+	}
+	if _, err := repository.Resolve(
+		context.Background(), digest, UseReadOnly, "request-after-revoke-commit",
+	); !errors.Is(err, ErrAuthenticationRequired) {
+		t.Fatalf("session resolved after committed revocation: %v", err)
+	}
+}
+
+func TestCurrentSessionReadRejectsExpiredFamily(t *testing.T) {
+	pool := admissionPool(t)
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	repository := sessionRepository(t, pool, now)
+	insertSessionAccount(t, pool, "expired-read@example.com", StatusActive, true)
+	grant := loginSession(t, repository, "expired-read@example.com")
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE sessions SET idle_expires_at = $2 WHERE id = $1::uuid`,
+		grant.Session.SessionID, now.Add(-time.Second),
+	); err != nil {
+		t.Fatalf("expiring session: %v", err)
+	}
+	if _, err := repository.Resolve(
+		context.Background(), DigestToken(grant.Credential.Expose()),
+		UseReadOnly, "request-expired",
+	); !errors.Is(err, ErrAuthenticationRequired) {
+		t.Fatalf("expired session resolved: %v", err)
+	}
+}
+
 func TestHiddenLoginFailuresCreateNoFamily(t *testing.T) {
 	pool := admissionPool(t)
 	repository := sessionRepository(
@@ -182,10 +280,19 @@ func TestHiddenLoginFailuresCreateNoFamily(t *testing.T) {
 	for name, request := range failures {
 		t.Run(name, func(t *testing.T) {
 			request.RequestID = "request-hidden"
-			if _, err := repository.Login(context.Background(), request); !errors.Is(
+			admitted := false
+			ctx := WithPasswordVerificationObserver(context.Background(), func(event PasswordVerificationEvent) {
+				if event == PasswordVerificationAdmitted {
+					admitted = true
+				}
+			})
+			if _, err := repository.Login(ctx, request); !errors.Is(
 				err, ErrAuthenticationFailed,
 			) {
 				t.Errorf("failure = %v, want ErrAuthenticationFailed", err)
+			}
+			if !admitted {
+				t.Fatal("hidden failure did not traverse password-verification admission")
 			}
 		})
 	}

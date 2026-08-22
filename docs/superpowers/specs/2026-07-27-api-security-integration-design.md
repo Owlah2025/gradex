@@ -457,8 +457,10 @@ Each endpoint category has a versioned policy: ID, category, dimensions, algorit
 burst, operation cost, concurrency limit, outage mode, local fallback budget, and retry behavior.
 Only four modes exist: `FAIL_CLOSED`, `STRICT_LOCAL_FALLBACK`,
 `CONSERVATIVE_LOCAL_FALLBACK`, and `WEBHOOK_DURABLE_ADMISSION`. Payout, Refund, suspension,
-retention, and highest-risk security commands fail closed. Explicitly approved login, recovery,
-checkout, upload, report, and playback-grant paths use strict local fallback; low-cost reads use
+retention, highest-risk security commands, and production password login fail closed. Login requires
+Redis-coordinated admission before PostgreSQL lookup or Argon2id because a process-local fallback
+cannot enforce the shared expensive-work budget. Explicitly approved recovery, checkout, upload,
+report, and playback-grant paths use strict local fallback; low-cost reads use
 conservative local fallback; valid provider webhooks use durable admission.
 
 Return `429` only after a policy has been evaluated and quota exceeded; it is Problem Details with
@@ -466,6 +468,19 @@ Return `429` only after a policy has been evaluated and quota exceeded; it is Pr
 `503 RATE_LIMITING_UNAVAILABLE`, never `429`. Include `Retry-After` only when safe. Local
 fallback is deliberately stricter, short-windowed, memory/key-bounded, sized for maximum replicas,
 and never merged into Redis.
+
+Production browser bootstrap is cheap and permits 600 attempts/minute endpoint-wide, globally, and
+per exact IPv4 source (IPv6 is aggregated to `/64`). Production login atomically checks then commits
+five one-minute buckets: normalized identifier 6, anonymous browser 10, exact IPv4 source or IPv6
+`/64` 600, endpoint 600, and global expensive-work budget 600. A denial commits none of them, so an
+attack against one identifier cannot drain the shared legitimate budget. Trusted-proxy parsing is
+the only source of forwarding-header authority.
+
+After distributed admission, one process-local bounded gate wraps the actual stored or dummy
+Argon2id verification. The current KVM2 default is one active verification, 500 waiting requests,
+and a 45-second queue wait inside a login-only 60-second request/write deadline. Cancellation frees
+the queue slot; saturation and timeout fail authentication safely. Unknown Accounts still execute
+the current-strength dummy hash and receive the same generic authentication response.
 
 Public Identity keys combine endpoint + HMAC-normalized identifier using dedicated versioned secret,
 trusted gateway-sanitized IP, network prefix, anonymous session/device, and global budget. Normalize
@@ -533,17 +548,33 @@ the Gradex domain model.
 
 ### 7.1 Malware-scanning adapter
 
-Upload completion establishes the exact provider object/version, size, type, and checksum and leaves
-the Asset Version quarantined. It atomically appends one stable scanning operation to the
-transactional outbox. No public preview, protected download, HLS capability, Course approval, or
+Upload completion always establishes the exact provider object/version, size, type, and checksum and
+leaves the Asset Version in private quarantine. From quarantine, Gradex selects the authorized
+safety path for that upload. Under the bounded trusted-Instructor launch profile in D-088, an
+`ACTIVE` vetted Instructor's approved MP4 Lesson video or PDF/DOCX Lesson Resource may progress
+without malware scanning only after exact-version validation succeeds. That validation verifies the
+configured size bound, actual stored size, declared type against the actual file format/signature,
+and SHA-256 checksum. The system records this path as validation rather than fabricating
+`SCAN_PASSED` or a successful scan attempt.
+
+A validated D-088 Lesson video still requires successful trusted FFmpeg processing before `READY`
+and protected HLS delivery. A validated D-088 PDF/DOCX Lesson Resource may become `READY` after the
+required exact-version validation and remains available only through the existing authenticated,
+Entitlement-checked protected-download boundary. Validation failure leaves the Asset Version
+non-deliverable.
+
+Public previews and every upload outside the D-088 trusted-Instructor profile remain scanner-gated.
+For those assets, quarantine atomically appends one stable scanning operation to the transactional
+outbox, and no public preview, protected delivery, Course approval dependent on that asset, or
 `READY` transition is possible until the exact quarantined object has verified clean scan evidence.
 
-The scanner adapter is provider-neutral until `LG-014` approves a service, supported limits,
-authenticity mechanism, and test vectors. Its operation binds provider account/environment, exact
-object identity/version/checksum, scan-policy version, and Gradex operation ID. It uses that operation
-ID as provider idempotency key where supported. A callback is external ingress authenticated by the
-approved scanner-specific procedure; polling retrieves the authoritative provider result. Source IP,
-filename, content type, and caller-supplied result fields never prove scan success.
+The scanner adapter remains provider-neutral until `LG-014` is reopened and approves a service,
+supported limits, authenticity mechanism, and test vectors. Its operation binds provider
+account/environment, exact object identity/version/checksum, scan-policy version, and Gradex
+operation ID. It uses that operation ID as provider idempotency key where supported. A callback is
+external ingress authenticated by the approved scanner-specific procedure; polling retrieves the
+authoritative provider result. Source IP, filename, content type, and caller-supplied result fields
+never prove scan success.
 
 Immutable scan attempts distinguish queued/submitted, provider-accepted, clean, rejected,
 retryable-failed, unknown, and exhausted outcomes. A timeout or ambiguous provider response is
@@ -555,10 +586,12 @@ policy, current Asset Version state, and authority epoch still match.
 
 Transient failures retry with bounded backoff, jitter, concurrency, cost, and elapsed-time limits.
 Known malicious content, unsupported permanent conditions, or authenticity failure never retries as
-clean. Scanner outage, unknown result, exhausted retry, or missing `LG-014` configuration fails
-closed: the Asset Version remains quarantined and unavailable, the exhausted operation stays visible,
-and any manual retry is an authorized idempotent command with immutable attempt evidence. No feature
-flag, Admin action, or direct storage URL can bypass successful scan evidence.
+clean. For an asset that requires scanning, scanner outage, unknown result, exhausted retry, or
+missing scanner configuration fails closed: the Asset Version remains quarantined and unavailable,
+the exhausted operation stays visible, and any manual retry is an authorized idempotent command
+with immutable attempt evidence. No feature flag, Admin action, or direct storage URL may bypass
+required scan evidence. The only launch exception is the explicit D-088 trusted-Instructor
+validation path; it must never be represented as malware-scanned or malware-free.
 
 ## 8. Provider ingress and reconciliation
 

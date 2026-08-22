@@ -14,7 +14,7 @@ checks:
     expected_running_replicas: 1
   - id: backup_freshness
     source: backup_completed_at
-    maximum_age_seconds: 93600
+    maximum_age_seconds: 7200
 log_alerts:
   - id: unexpected_server_error
     event: http_request
@@ -32,5 +32,5 @@ log_alerts:
     condition: phase in [permanent_failure, exhausted]
 delivery:
   type: webhook
-  required_secret: GRADEX_ALERT_WEBHOOK_TOKEN
   required_environment: GRADEX_ALERT_WEBHOOK_URL
+  optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN

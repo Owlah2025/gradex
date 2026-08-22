@@ -34,6 +34,13 @@ const (
 	CapCatalogPricing  Capability = "CATALOG_PRICING"
 	CapCatalogTaxonomy Capability = "CATALOG_TAXONOMY"
 
+	// CapAcademicCatalog is the D-091 Academic Catalog administration subject.
+	// Deliberately distinct from CapCatalogTaxonomy: the legacy Course
+	// vocabulary and the canonical academic catalog are separate authorities,
+	// and separating them keeps the legacy grant from silently widening into
+	// Institution/Program/Subject write access when the legacy path is retired.
+	CapAcademicCatalog Capability = "ACADEMIC_CATALOG"
+
 	// S6 Course Access Grant capability — Admin only.
 	CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"
 )
@@ -54,6 +61,7 @@ var AllCapabilities = []Capability{
 	CapCatalogPublish,
 	CapCatalogPricing,
 	CapCatalogTaxonomy,
+	CapAcademicCatalog,
 	CapCourseAccessGrant,
 }
 
@@ -151,7 +159,7 @@ func Authorize(p Principal, c Capability) Decision {
 		case CapAdminOperations, CapFinancialOperations, CapSecurityOperations,
 			CapRetentionOperations, CapProviderOperations, CapContentManagement,
 			CapCatalogPublish, CapCatalogPricing, CapCatalogTaxonomy,
-			CapCourseAccessGrant:
+			CapAcademicCatalog, CapCourseAccessGrant:
 			return allow()
 		}
 		// Deliberately not CapLearningAccess. Admin access to protected content

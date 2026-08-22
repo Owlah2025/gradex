@@ -32,6 +32,15 @@ service_id() {
   compose ps --all --quiet "$1"
 }
 
+image_max_schema_version() {
+  local image="$1" version
+  version="$(docker run --rm --entrypoint gradex-migrate "$image" max-version)" ||
+    die "could not read max schema version from target backend image"
+  [[ "$version" =~ ^[0-9]+$ ]] ||
+    die "target backend image returned an invalid max schema version"
+  printf '%s' "$version"
+}
+
 wait_for_status() {
   local service="$1" wanted="$2" attempts=0 container status
   container="$(service_id "$service")"
@@ -55,7 +64,8 @@ apply_release() {
   . "$S12_ENV_FILE"
   set +a
 
-  local release_id backend_image frontend_image postgres_id schema_state
+  local release_id backend_image frontend_image postgres_id
+  local schema_state schema_version schema_dirty target_max_schema
   release_id="$(manifest_value "$manifest" GRADEX_RELEASE_ID)"
   backend_image="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)"
   frontend_image="$(manifest_value "$manifest" GRADEX_FRONTEND_IMAGE)"
@@ -66,7 +76,13 @@ apply_release() {
   [ -n "$postgres_id" ] || die "PostgreSQL is absent"
   schema_state="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname gradex \
     --tuples-only --no-align --command 'SELECT version::text || '\''|'\'' || dirty::text FROM schema_migrations;')"
-  [ "$schema_state" = "15|false" ] || die "schema is $schema_state, expected forward schema 15|false"
+  IFS='|' read -r schema_version schema_dirty <<<"$schema_state"
+  [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $schema_state"
+  [ "$schema_dirty" = false ] || die "schema is dirty: $schema_state"
+
+  target_max_schema="$(image_max_schema_version "$backend_image")"
+  [ "$schema_version" -le "$target_max_schema" ] ||
+    die "schema $schema_version is newer than target release maximum $target_max_schema"
 
   export GRADEX_BACKEND_IMAGE="$backend_image"
   export GRADEX_FRONTEND_IMAGE="$frontend_image"
@@ -84,7 +100,7 @@ apply_release() {
     printf 'GRADEX_FRONTEND_IMAGE=%s\n' "$frontend_image"
   } >"$selection.partial"
   mv "$selection.partial" "$selection"
-  note "application release $release_id is healthy on forward schema 15; no migration command ran"
+  note "application release $release_id is healthy on unchanged schema $schema_version (target max $target_max_schema); no migration command ran"
 }
 
 usage() {

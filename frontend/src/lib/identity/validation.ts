@@ -20,9 +20,10 @@ export function validDisplayName(value: string) {
   const letters = characters.filter(isSupportedLetter);
   return (
     letters.length >= 2 &&
-    characters.every((character) =>
-      isSupportedLetter(character) ||
-      /[\p{Mark}\p{White_Space}'’\-]/u.test(character),
+    characters.every(
+      (character) =>
+        isSupportedLetter(character) ||
+        /[\p{Mark}\p{White_Space}'’\-]/u.test(character),
     )
   );
 }
@@ -59,6 +60,14 @@ export type FragmentTokenPurpose =
   | "COURSE_ACCESS_INVITATION";
 
 type FragmentCapture = { token: string | null; spent: boolean };
+
+type CourseAccessInvitationContext = { invitationId: string; token: string };
+
+// This is deliberately session-scoped rather than a query parameter, cookie,
+// or persistent local storage. A Student who must register, verify, and sign
+// in navigates through several pages; module memory cannot survive those page
+// loads, but the fragment bearer must never be placed into a URL.
+const courseAccessInvitationContextKey = "gradex.course-access-invitation.v1";
 
 /**
  * Per-purpose capture slots for this document.
@@ -121,6 +130,47 @@ export function releaseFragmentToken(purpose: FragmentTokenPurpose) {
   if (!capture) return;
   capture.token = null;
   capture.spent = true;
+}
+
+export function retainCourseAccessInvitationContext(
+  invitationId: string,
+  token: string,
+) {
+  if (!invitationId || !token) return;
+  window.sessionStorage.setItem(
+    courseAccessInvitationContextKey,
+    JSON.stringify({
+      invitationId,
+      token,
+    } satisfies CourseAccessInvitationContext),
+  );
+}
+
+export function restoreCourseAccessInvitationContext(invitationId: string) {
+  const serialized = window.sessionStorage.getItem(
+    courseAccessInvitationContextKey,
+  );
+  if (!serialized) return null;
+  try {
+    const context = JSON.parse(
+      serialized,
+    ) as Partial<CourseAccessInvitationContext>;
+    if (
+      context.invitationId === invitationId &&
+      typeof context.token === "string" &&
+      context.token.length > 0
+    ) {
+      return context.token;
+    }
+  } catch {
+    // A malformed browser-local value is not invitation authority.
+  }
+  window.sessionStorage.removeItem(courseAccessInvitationContextKey);
+  return null;
+}
+
+export function releaseCourseAccessInvitationContext() {
+  window.sessionStorage.removeItem(courseAccessInvitationContextKey);
 }
 
 /**

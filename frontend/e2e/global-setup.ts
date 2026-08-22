@@ -36,7 +36,30 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   throw new Error(`Timeout waiting for Go API health probe at ${url}`);
 }
 
-export default async function globalSetup() {
+/**
+ * Refuses to run this single-tenant harness under concurrency.
+ *
+ * The config pins `workers: 1`, but `--workers=N` on the command line silently overrides it. Every
+ * spec shares one seeded database, one API, one Next server, and one set of fixed `/var/tmp`
+ * singletons, and several specs mutate shared authority rows by id mid-run. Under more than one
+ * worker the failing set stops being a property of the code (GAP-05), which is exactly the
+ * condition this gate exists to prevent — so it fails loudly instead of producing an untrustworthy
+ * green.
+ */
+function assertSingleWorker(config: { workers?: number }): void {
+  const workers = config.workers ?? 1;
+  if (workers <= 1) return;
+  throw new Error(
+    `[E2E Setup] Refusing to run with ${workers} workers. This harness shares one seeded database, ` +
+      `one API process, one Next server, and fixed /var/tmp run-state — and specs mutate shared ` +
+      `authority rows by id. Concurrency makes the failing set depend on execution order rather ` +
+      `than on the code (GAP-05). Run with one worker, or build per-worker isolation first.`,
+  );
+}
+
+export default async function globalSetup(config?: { workers?: number }) {
+  assertSingleWorker(config ?? {});
+
   const runId = (Date.now().toString(36) + Math.random().toString(36).substring(2, 10)).toLowerCase().replace(/[^a-z0-9]/g, "").substring(0, 16);
   const dbName = `gradex_playwright_e2e_${runId}`;
 

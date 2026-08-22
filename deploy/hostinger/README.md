@@ -73,6 +73,13 @@ install -m 0600 deploy/hostinger/runtime.env.example /var/lib/gradex/runtime.env
 ./deploy/hostinger/host.sh prepare
 ```
 
+The four `LOGIN_*` values are non-secret capacity controls. The current KVM2 baseline is one active
+password verification, 500 waiting requests, a 45-second queue wait, and a login-only 60-second
+request deadline. Do not raise concurrency from raw-hash benchmarks alone; run the external
+browser-equivalent LG-019 scenario and capture API, PostgreSQL, Redis, CPU, RAM, and swap evidence.
+Caddy has no shorter response timeout configured, while unrelated API requests retain the ordinary
+30-second server write timeout.
+
 `prepare` validates the release labels and configuration, creates a private 90-day Redis CA/server
 certificate with the `redis` DNS identity, and renders the narrow R2 CORS policy. Apply that policy
 through the R2 dashboard or API without changing public bucket access.
@@ -85,8 +92,10 @@ go test -tags=provider -run '^TestCloudflareR2PreservesPrivateVersionBoundMediaC
 ```
 
 Export only `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `PUBLIC_ORIGIN` into that
-shell. The test uploads disposable objects, proves private/CORS behavior and exact version-bound reads,
-then removes its prefix. A missing `x-amz-version-id` or silent current-object substitution is a hard
+shell. `S3_PRESIGN_ENDPOINT` is optional and defaults to `S3_ENDPOINT`, so the existing R2 deployment
+continues to sign with its configured R2 endpoint. The test uploads disposable objects, proves
+private/CORS behavior and exact version-bound reads, then removes its prefix. A missing
+`x-amz-version-id` or silent current-object substitution is a hard
 S4 compatibility failure; do not work around it by weakening media provenance.
 
 ## 4. DNS, origin TLS, and Cloudflare
@@ -110,8 +119,10 @@ correctness.
 ./deploy/hostinger/verify-public.sh "https://staging.example.com"
 ```
 
-Replace the example hostname. `verify` asserts schema `15|false`, worker lifecycle, plaintext Redis
-refusal, unauthenticated TLS refusal, authenticated verified-TLS Redis, and public health/readiness.
+Replace the example hostname. `verify` reads the selected backend image's maximum supported schema
+with `gradex-migrate max-version`, requires the live database to be clean at exactly that version, and
+checks worker lifecycle, plaintext Redis refusal, unauthenticated TLS refusal, authenticated
+verified-TLS Redis, and public health/readiness.
 `verify-public.sh` independently checks public DNS, HTTP-to-HTTPS redirect, certificate validity,
 Cloudflare presence, conservative cache behavior, frontend, `/healthz`, and `/readyz`.
 
@@ -125,10 +136,15 @@ After the controlled public S5/S6 smoke has created provenance-bearing records:
 ./deploy/hostinger/host.sh verify-restore
 ```
 
-The source database is never destroyed. The restore command verifies the backup checksum, provisions
-a fresh separate volume/database, restores without `--clean`, and starts a separate API against it.
-Verification requires schema 15 plus Account, Course, invitation, ACTIVE Entitlement with
-`source_invitation_id`, and Enrollment records.
+The source database is never destroyed. Backup accepts only a clean schema, records its
+`version|false` state before the dump, rejects a schema change during the dump, and checksum-protects
+both the dump and schema metadata. Restore verifies both checksums, invalidates stale restored-source
+evidence before replacing the isolated target, provisions a fresh separate volume/database, and
+restores without `--clean`. Only a successful restore records the exact backup filename in
+`restored-source`. Verification follows that immutable identity rather than the mutable `latest.dump`
+pointer, rechecks both checksums, requires the restored schema to match the recorded backup schema,
+checks Account, Course, invitation, ACTIVE Entitlement with `source_invitation_id`, and Enrollment
+records, and then requires the separate restore API to become healthy.
 
 ## 7. Public smoke, rollback, and alerts
 
@@ -176,15 +192,97 @@ For rollback, load both compatible release archives and run:
 ./deploy/hostinger/host.sh verify
 ```
 
-This selects application images only. It keeps schema 15 and verifies Entitlement provenance count;
-never run migration 0015 down as an application rollback.
+Application rollback selects application images only and never performs a schema-down migration. It
+requires a clean live schema, reads the target backend image's maximum supported schema, and fails
+closed before replacing application processes if that image cannot run the retained forward schema.
+A compatible selection leaves the schema unchanged and verifies the Entitlement provenance count.
+In particular, never run migration `0015_course_access_grant.down.sql` as an application rollback
+after real Course Access grants because it clears `source_invitation_id` provenance.
 
-Configure a protected alert webhook, then schedule `host.sh monitor` at least every five minutes and
-`host.sh backup` on the selected backup schedule. Prove real delivery by causing a short controlled
-readiness failure, invoking `monitor`, confirming delivery at the external destination, restoring the
-service, and rerunning `verify`. Record timestamps and correlation IDs, never webhook credentials.
+Configure a protected alert webhook, then install the systemd scheduler described below. Prove real
+delivery by causing a short controlled readiness failure, invoking `monitor`, confirming delivery at
+the external destination, restoring the service, and rerunning `verify`. Record timestamps and
+correlation IDs, never webhook credentials.
 
-## 8. Evidence and operations
+## 8. Systemd monitoring and backup schedule
+
+The production unit sources and installer live in `deploy/hostinger/systemd/`. Installation renders
+the repository checkout and an explicitly supplied non-root operator into the services; the
+repository does not invent a VPS username or checkout path. The services execute only the supported
+`host.sh monitor` and `host.sh backup` entrypoints. `host.sh` reads the mode-0400/0600
+`/var/lib/gradex/runtime.env`, so webhook and provider credentials do not enter unit files or command
+arguments.
+
+Before installation, verify the chosen operator can read the protected state and reach Docker:
+
+```bash
+sudo -u <operator> test -r /var/lib/gradex/runtime.env
+sudo -u <operator> docker info >/dev/null
+```
+
+From the intended repository checkout, render, validate, copy, and reload the units without starting
+any job:
+
+```bash
+sudo ./deploy/hostinger/systemd/install.sh install \
+  --user <operator> \
+  --repo "$(pwd)"
+```
+
+The installer requires the protected runtime file to be owned by that non-root operator. It validates
+the rendered units with `systemd-analyze verify`, installs them under `/etc/systemd/system`, and runs
+`daemon-reload`. It deliberately leaves both timers disabled so installation cannot immediately run a
+monitor or provider backup. After the application, Docker access, runtime configuration, and external
+destinations are ready, enable both timers explicitly:
+
+```bash
+sudo systemctl enable --now gradex-monitor.timer gradex-backup.timer
+systemctl list-timers gradex-monitor.timer gradex-backup.timer
+```
+
+`gradex-monitor.timer` runs at exact five-minute calendar boundaries.
+`gradex-backup.timer` runs hourly. Both use `Persistent=true`, so a missed event is run after the VPS
+returns. A oneshot service cannot overlap another invocation of the same unit; the backup command's
+existing `flock` remains the authoritative guard against overlap with manual or other invocations.
+Failures propagate to systemd and journald.
+
+Inspect schedules, results, and bounded logs with:
+
+```bash
+systemctl status gradex-monitor.timer gradex-backup.timer
+systemctl status gradex-monitor.service gradex-backup.service
+journalctl -u gradex-monitor.service -u gradex-backup.service --since today
+```
+
+Manual starts execute the real configured operation. Use them deliberately for an operator check:
+
+```bash
+sudo systemctl start gradex-monitor.service
+sudo systemctl start gradex-backup.service
+```
+
+Disable future scheduling without stopping Gradex application containers:
+
+```bash
+sudo systemctl disable --now gradex-monitor.timer gradex-backup.timer
+```
+
+The protected runtime file supplies `GRADEX_ALERT_WEBHOOK_URL`, optional
+`GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_MONITOR_CA_FILE`, and
+`GRADEX_BACKUP_MAX_AGE_SECONDS`. `host.sh monitor` derives health/readiness URLs from
+`PUBLIC_ORIGIN` and points freshness monitoring at `/var/lib/gradex/backups/latest.completed-at`.
+The hourly schedule uses a two-hour freshness threshold: this allows one delayed or missed run and
+detects stale backup state before a third hourly opportunity. It does not prove an RPO. Successful
+scheduled backups, real external alert delivery, and an isolated provider restore drill remain
+required evidence.
+
+Hourly dumps are backup-based recovery, not WAL archiving or point-in-time recovery. A practical
+approximately one-hour backup-based RPO requires every scheduled backup to complete and still needs
+production evidence. The older provisional 15-minute PostgreSQL RPO is unsupported without an
+implemented and tested WAL/PITR mechanism; PostgreSQL RPO and the provisional four-hour RTO still
+require Founder approval under `LG-019`.
+
+## 9. Evidence and operations
 
 `host.sh status` and `host.sh logs [SERVICE]` expose bounded container status/logs. Containers restart
 unless stopped, except migration/proof/restore jobs. Persistent state is in named PostgreSQL and Caddy

@@ -156,9 +156,6 @@ export function ServerPricingPanel() {
             ) : serverCourseDetail ? (
               <div className="space-y-3">
                 <div className="border-b pb-2">
-                  <span className="text-xs font-mono text-blue-600 dark:text-blue-400">
-                    ID: {serverCourseDetail.id}
-                  </span>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
                     {getCourseDisplayTitle(serverCourseDetail, isAr)}
                   </h3>

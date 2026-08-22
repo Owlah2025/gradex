@@ -268,8 +268,11 @@ Previously recorded fast-follow items, unchanged:
   cannot be deleted.
 - Published content changes use a pending revision and never silently mutate the approved version.
 - Protected files remain inaccessible without entitlement. A public preview is a distinct asset.
-- Uploads are type/size validated and quarantined; public/downloadable assets require a successful
-  malware scan before availability.
+- Uploads are type/size validated and quarantined. Under D-088, only approved MP4 Lesson video and
+  PDF/DOCX Lesson Resources uploaded by ACTIVE vetted Instructors may become available through the
+  exact-version trusted-validation path without malware scanning; videos still require successful
+  trusted processing before READY. Public previews and every upload outside that bounded profile
+  require a successful malware scan before availability.
 
 ## Course Access Invitation and Entitlement
 
@@ -372,6 +375,17 @@ revenue-share terms remain required under `LG-020`, and the approved payout desi
 - Read API endpoints target p95 under 300 ms and transactional writes under 800 ms, excluding
   third-party gateway latency.
 - Progress-write failure must not interrupt playback.
+- The Founder-approved launch validation envelope is 5,000 registered accounts and 500 simultaneous
+  active sessions. Its exam-start case has 500 Students begin using Gradex within one minute, sustains
+  250 API requests per second for 60 seconds, and starts 250 playbacks within that minute. Media bytes
+  are served by object storage/CDN rather than the Go API. The Instructor path covers 20 concurrent
+  direct uploads, with no more than two simultaneous transcodes per worker. These are capacity-test
+  requirements, not a demand forecast, and remain unproven until representative load evidence exists.
+- The exam-start login path must admit 500 distinct legitimate Students within that minute even when
+  they share one public IPv4/NAT. Production keeps six attempts/minute per normalized identifier and
+  ten per anonymous browser, admits at most 600 expensive login attempts/minute across Redis, and
+  bounds local Argon2id execution to one verifier plus 500 waiters on the current KVM2 baseline.
+  These are security/admission controls, not evidence that the full login transaction meets capacity.
 
 ## Security
 
@@ -390,7 +404,8 @@ revenue-share terms remain required under `LG-020`, and the approved payout desi
 
 ## Reliability
 
-- Core catalog, course-access, and playback paths target 99.5% monthly availability for MVP.
+- The Founder-approved MVP target for core catalog, course-access, and playback paths is 99.5%
+  monthly availability.
 - Entitlement writes are transactional and idempotent: a repeated or concurrent Admin Approval
   produces exactly one Entitlement.
 - Backup/restore procedures must be automated and restore-tested before production; system design

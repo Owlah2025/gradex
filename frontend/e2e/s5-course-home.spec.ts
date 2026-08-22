@@ -93,16 +93,12 @@ test.describe("T060 — S5 Course Home E2E Test Suite", () => {
 
         // Verify Aggregate and Per-Lesson Progress
         await expect(page.getByText(/33%/)).toBeVisible();
-        await expect(page.getByRole("link", { name: /Open resource/i })).toBeVisible();
-        await expect(page.getByRole("link", { name: /Open lab material/i })).toBeVisible();
+        // Materials are disclosed as a Resource/Lab split and their only action
+        // is a fresh protected-download authorization, never a raw entry link.
+        await expect(page.getByRole("button", { name: "Download: Lecture Notes PDF" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Download: Lab Starter Code Zip" })).toBeVisible();
 
-        // Verify D-064 Material Entry route links are same-origin fixed paths with stable lesson identity
-        const resourceLink = page.getByRole("link", { name: /Open resource/i });
-        const labLink = page.getByRole("link", { name: /Open lab material/i });
-        await expect(resourceLink).toHaveAttribute("href", /\/api\/v1\/media\/lessons\/30000000-0000-0000-0000-000000000001\/materials\/resource/);
-        await expect(labLink).toHaveAttribute("href", /\/api\/v1\/media\/lessons\/30000000-0000-0000-0000-000000000001\/materials\/lab-material/);
-
-        // Assert NO prefetch request was issued to material entry routes during render
+        // Rendering must never prefetch a protected download authorization.
         const materialPrefetches = networkRequests.filter((url) => url.includes("/materials/"));
         expect(materialPrefetches.length).toBe(0);
 
@@ -117,6 +113,8 @@ test.describe("T060 — S5 Course Home E2E Test Suite", () => {
         await expect(page.getByRole("heading", { name: "مقدمة في البرمجة CS101", level: 1 })).toBeVisible();
         await expect(page.getByText("القسم الأول: الأساسيات")).toBeVisible();
         await expect(page.getByText("الدرس الأول: مرحباً بك")).toBeVisible();
+        await expect(page.getByRole("button", { name: "تحميل: ملاحظات المحاضرة" })).toBeVisible();
+        await expect(page.getByRole("button", { name: "تحميل: كود المختبر" })).toBeVisible();
 
         const isOverflowingRTL = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
         expect(isOverflowingRTL).toBe(false);

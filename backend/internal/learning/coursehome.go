@@ -288,3 +288,99 @@ func (r *Repository) ListStudentCourseSummaries(ctx context.Context, studentID s
 	}
 	return summaries, nil
 }
+
+// ResumeCandidate is the best Lesson to continue in one Course: the Lesson the Student was last
+// watching and has not finished, or — when nothing in that Course is part-finished — its first
+// unfinished Lesson in authored order.
+type ResumeCandidate struct {
+	CourseID      string
+	LessonID      string
+	TitleAr       string
+	TitleEn       string
+	LastWatchedAt *time.Time
+	// The Course's most recent learning activity, used to rank Courses against each other when no
+	// single Lesson is part-finished.
+	CourseLastActiveAt *time.Time
+}
+
+// ListStudentResumeCandidates answers "what should this Student continue?" from Progress alone.
+//
+// No new persistence was needed: `progress.last_watched_at` and `completed_at` already carry it.
+// Only the current approved live revision is joined, so an Instructor's in-flight candidate revision
+// can never redirect a Student, and a Lesson dropped from the live graph simply stops being a
+// candidate rather than producing a broken pointer.
+//
+// One bounded query with a per-Course window; there is no per-Course or per-Lesson round trip.
+// Entitlement is deliberately NOT filtered here — enrollment and Progress outlive access by design,
+// so the caller applies the authoritative evaluator decision and drops Courses that are no longer
+// readable. Ordering is total and deterministic: a part-finished Lesson outranks an unstarted one,
+// then most recent activity, then the Course's own recency, then stable Course id.
+func (r *Repository) ListStudentResumeCandidates(ctx context.Context, studentID string) ([]ResumeCandidate, error) {
+	if r == nil || r.pool == nil || studentID == "" {
+		return nil, ErrEnrollmentNotFound
+	}
+	r.observeQuery("learning.resume")
+	rows, err := r.pool.Query(ctx, `
+		WITH student_lessons AS (
+			-- The pointer must carry the stable Lesson identity, not the revision-scoped
+			-- course_lessons row id. Progress is keyed on the identity, the Lesson routes
+			-- resolve the identity, and a row id changes every time a revision is replaced,
+			-- so selecting cl.id here produced a link the Student could not follow.
+			SELECT e.course_id, cli.id AS lesson_id, cl.title_ar, cl.title_en,
+			       cs.position AS section_position, cl.position AS lesson_position,
+			       p.completed_at, p.last_watched_at
+			FROM enrollments e
+			JOIN courses c ON c.id = e.course_id
+			JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id AND cr.state = 'APPROVED'
+			JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
+			JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+			JOIN course_lesson_identities cli
+			  ON cli.id = cl.lesson_identity_id AND cli.course_id = c.id AND cli.section_identity_id = cl.section_identity_id
+			LEFT JOIN progress p
+			  ON p.enrollment_id = e.id AND p.course_lesson_identity_id = cli.id
+			WHERE e.student_account_id = $1::uuid
+		),
+		course_activity AS (
+			SELECT course_id, max(last_watched_at) AS last_active
+			FROM student_lessons GROUP BY course_id
+		),
+		ranked AS (
+			SELECT sl.course_id, sl.lesson_id, sl.title_ar, sl.title_en, sl.last_watched_at,
+			       ca.last_active,
+			       row_number() OVER (
+			         PARTITION BY sl.course_id
+			         ORDER BY (sl.last_watched_at IS NOT NULL) DESC,
+			                  sl.last_watched_at DESC NULLS LAST,
+			                  sl.section_position ASC, sl.lesson_position ASC
+			       ) AS rank_in_course
+			FROM student_lessons sl
+			JOIN course_activity ca ON ca.course_id = sl.course_id
+			WHERE sl.completed_at IS NULL
+		)
+		SELECT course_id::text, lesson_id::text, title_ar, title_en, last_watched_at, last_active
+		FROM ranked
+		WHERE rank_in_course = 1
+		ORDER BY (last_watched_at IS NOT NULL) DESC, last_watched_at DESC NULLS LAST,
+		         last_active DESC NULLS LAST, course_id ASC
+	`, studentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing student resume candidates: %w", err)
+	}
+	defer rows.Close()
+
+	candidates := make([]ResumeCandidate, 0)
+	for rows.Next() {
+		var candidate ResumeCandidate
+		if err := rows.Scan(
+			&candidate.CourseID, &candidate.LessonID, &candidate.TitleAr, &candidate.TitleEn,
+			&candidate.LastWatchedAt, &candidate.CourseLastActiveAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning student resume candidate: %w", err)
+		}
+		candidates = append(candidates, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating student resume candidates: %w", err)
+	}
+	return candidates, nil
+}

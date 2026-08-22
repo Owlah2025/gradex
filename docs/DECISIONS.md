@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-08-09 (real calendar)
+> Last Updated: 2026-08-21 (real calendar)
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -95,6 +95,12 @@ decision for history.
 ## D-011 — Lesson resources split from lab materials; both MVP, labs-only watermark
 
 **Date:** 2026-07-21
+**Status:** Amended by D-088 on 2026-08-14. Lesson Resources additionally permit DOCX. The original
+resource/lab split, size caps, and watermark policy remain in force. D-088 further permits only MP4
+Lesson video and PDF/DOCX Lesson Resources from ACTIVE vetted Instructors to use the bounded
+exact-version validation path without malware scanning; the other D-011 resource/lab formats remain
+scanner-gated.
+
 **Decision:** Split per-lesson downloadable attachments into two distinct categories: **lesson resources** (supplementary reference to consume — slides, notes, readings; allowed types PDF, slides (PPT/PPTX), images) and **lab materials** (hands-on practice — project files + a written guide; allowed types archives (ZIP), common project files, plus a PDF/Markdown guide). Both ship in MVP, share the same upload/storage/signed-URL/entitlement plumbing, and are optional per lesson. Upload size caps: lesson resources 50 MB per file / 200 MB per lesson; lab materials 250 MB per file / 1 GB per lesson (set 2026-07-21; tunable in implementation, distinct from video's own cap). The per-purchase watermark/buyer-tag (BR-103) applies to lab materials only; lesson resources are entitlement-gated and rate-limited but not watermarked.
 **Reason:** Slides/notes and hands-on lab files differ in purpose (consume vs. do) and value (labs are the paid differentiator most worth pirating). A single "lab materials" bucket conflated them and left non-lab PDFs like lecture slides with no clean home. Splitting is near-zero added infrastructure — the same download pipeline with a category flag — while giving each bucket its own allowed-type list and anti-piracy posture. Watermarking labs only keeps the anti-piracy effort on the high-value target; slide/image formats carry per-buyer tags poorly and are lower-stakes.
 **Alternatives rejected:** Single "lab materials" bucket for everything (rejected — conflates reference material with hands-on labs, no home for slides/notes); deferring lesson resources to fast-follow (rejected — same plumbing as labs, near-zero marginal cost to include at launch); watermarking both buckets (rejected — slide/image formats don't carry per-buyer tags cleanly, and resources are lower-value than labs).
@@ -2487,7 +2493,11 @@ review finding M-1, recorded in
 ## D-079 — The Instructor authoring UI is wired to the existing authoring and media APIs, and a development-only scanner mode makes the whole path testable
 
 **Date:** 2026-08-10
-**Status:** Active. Product Owner-authorized launch remediation of a founder manual-test finding.
+**Status:** Active, amended in part by D-088 on 2026-08-14. The UI/API wiring and development-only
+scanner test seam remain authoritative. D-088 supersedes only D-079's production/staging assumption
+that trusted Instructor Lesson uploads must remain in `ADMIN_CATALOGUE` solely because no malware
+scanner is integrated; the bounded `TRUSTED_INSTRUCTOR` exact-version validation path now governs
+the approved MP4/PDF/DOCX Lesson-media launch profile.
 
 **Finding:** A founder manual browser test on 2026-08-10 showed that the Instructor could
 authenticate and reach `/en/instructor/courses`, that server-backed reads on that page worked, and
@@ -2907,3 +2917,491 @@ plaintext use, or wider diagnostic projection requires new review and authority.
 
 **Source:** Product Owner instruction of 2026-08-12 to diagnose and resolve the sole remaining
 automated exposure gate while preserving T035a sanitization and production behavior.
+
+## D-088 — Launch permits validated uploads from vetted Instructors without malware scanning
+
+**Date:** 2026-08-14
+**Status:** Active. Supersedes only the mandatory-malware-scanning launch requirement in D-019,
+BR-104, LG-014, and API/security design §7.1 for the bounded trusted-Instructor launch
+profile described below. All unrelated content-safety, authorization, storage, review, moderation,
+privacy, and processing requirements remain in force.
+
+**Finding:** Gradex launch content is authored only by explicitly invited, vetted Instructors whose
+accounts are created through the controlled staff-onboarding flow. The Product Owner has determined
+that selecting, integrating, operating, and validating a production malware-scanning provider adds
+disproportionate launch complexity for this bounded trust model. The existing implementation
+therefore blocks the ordinary Instructor authoring journey through `ADMIN_CATALOGUE` even though
+exact-version storage, type/size inspection, checksum verification, private quarantine, protected
+delivery, Course review, and trusted video processing already exist.
+
+**Decision:**
+
+1. The Product Owner accepts the residual malware risk for the bounded launch profile and defers
+   production malware scanning. `LG-014` no longer blocks this profile solely because no malware
+   scanner/provider is configured.
+2. Direct upload remains available only to an `ACTIVE` vetted Instructor and only for a Course that
+   the Instructor is authorized to author. This decision creates no anonymous, Student, public, or
+   self-service Instructor upload capability.
+3. The initial unscanned launch allowlist is deliberately narrow:
+   - Lesson video: `video/mp4`.
+   - Lesson resource: PDF.
+   - Lesson resource: DOCX.
+   Executables, scripts, archives, macro-enabled Office formats, and any other unapproved file type
+   are not accepted by this profile.
+4. Every upload still enters private quarantine and must bind the exact immutable storage object
+   version. Before it may progress, Gradex must verify the configured size bound, actual stored
+   object size, declared type against the file's actual format/signature, and SHA-256 checksum over
+   the exact stored version. Validation failure leaves the Asset Version non-deliverable.
+5. Successful validation without malware scanning must be represented truthfully as a distinct
+   validated lifecycle state/evidence path. The system must not create a fake `SCAN_PASSED`,
+   successful `scan_attempt`, scanner identity, or other record that claims malware inspection
+   occurred.
+6. A validated video must still complete the existing trusted FFmpeg processing path before
+   `READY`. `READY` video continues to require successful processing evidence and trusted duration;
+   this decision does not weaken video-processing integrity.
+7. A validated PDF or DOCX Lesson Resource may become `READY` without malware-scan evidence after
+   the exact-version validation in item 4 succeeds. It remains protected content and is delivered
+   only through the existing entitlement-checked signed-download boundary.
+8. The provider-neutral `Scanner` abstraction, scan states, scan-attempt evidence, and scanner
+   operating path remain in the architecture. This decision defers their production use rather than
+   deleting or disguising them.
+9. Malware scanning must be reconsidered before broadening this trust boundary, including any of:
+   self-service or materially less-vetted Instructor onboarding; Student/user uploads; executable,
+   scriptable, archive, macro-enabled, or similarly higher-risk file types; or a legal, contractual,
+   security-review, or customer requirement for malware scanning.
+10. Historical launch/evidence records remain unchanged. Current normative Business Rules,
+    Launch Gates, launch runbooks, and API/security design must be reconciled to this decision before
+    production media behavior is changed.
+
+**Boundary:** This decision authorizes the minimum authority and implementation changes needed for
+the trusted-Instructor validated-upload path. It does not authorize public uploads, Student uploads,
+arbitrary file types, weakening Course ownership checks, public object storage, bypassing exact
+object-version validation, bypassing Course review, bypassing FFmpeg evidence for video, or claiming
+that unscanned files are malware-free. It does not close unrelated launch gates.
+
+**Source:** Product Owner instruction of 2026-08-14 accepting the bounded trusted-Instructor upload
+risk in order to keep the MVP operationally simple while preserving explicit validation and a
+future scanner boundary.
+
+## D-089 — MVP functional-completion work is authorized, one remediation tranche at a time
+
+**Date:** 2026-08-20
+**Status:** Active. Amends the implementation freeze in
+[D-083](#d-083--production-implementation-is-frozen-at-afe1624-for-authority-reconciliation-and-one-independent-review)
+and [D-086](#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized)
+by opening one bounded, gap-driven implementation stream. It changes no product scope, no business
+rule, and no security, authorization, entitlement, lifecycle, or media contract. It does not close
+any launch gate, and it does not reopen in-platform payments
+([D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+remains in force).
+
+**Finding:** D-086 froze production behavior at the independently approved head
+`2c43b90fcf7a5c5913f42412fad5369911f781aa`. A measured functional audit on 2026-08-20 established
+that approval of a commit range is not evidence that a user journey works. Recorded in
+[`docs/mvp/FUNCTIONAL_COMPLETION.md`](mvp/FUNCTIONAL_COMPLETION.md):
+
+- 23 of 52 canonical MVP features are demonstrably `E2E_PROVEN`; the rest are unproven, partial,
+  broken, blocked, or scope-unresolved.
+- The full Playwright suite ran **82 passed / 27 failed** against a clean local stack.
+- The S5 protected-learning slice held **no valid E2E proof at `HEAD`** from 2026-08-12, because
+  `f25a565` broke leak assertions created by `5cc8ede` and the suite was never re-run.
+- Two cross-role journeys do not complete for a real user: rejection → revision → resubmission, and
+  Instructor creation → Admin review → publication.
+
+The freeze was written to prevent unreviewed scope drift. Applied to defects that block the MVP's
+own journeys it instead preserves them, so a bounded exception is recorded rather than assumed.
+
+**Decision:**
+
+1. MVP functional-completion work is authorized.
+2. Scope is limited to canonical MVP gaps recorded in
+   [`docs/mvp/FUNCTIONAL_COMPLETION.md`](mvp/FUNCTIONAL_COMPLETION.md). A gap not in that register is
+   not authorized by this decision. Adding a gap requires the same evidence standard: a measured
+   failure, not an opinion.
+3. Work proceeds **one remediation tranche at a time**, in the `MVP-Fxx` queue order recorded there.
+   No subsequent tranche starts automatically, and no tranche starts while another is open.
+4. Production code may be changed **only where tracing proves the change is necessary to close an
+   identified canonical MVP gap**. Where a gap is closable in one layer, it is closed in that layer.
+5. Visual and stylistic UI work remains out of scope. Functional UI changes are authorized only
+   where a canonical MVP capability is otherwise unreachable, unreadable, or undiscoverable through
+   the product's own surfaces. The dedicated UI/UX phase in [`docs/ux/`](ux/README.md) stays paused.
+6. Existing security, authorization, entitlement, lifecycle, moderation, privacy, and product
+   contracts remain authoritative. No tranche may weaken an authorization check, bypass a lifecycle
+   transition, substitute a test-only shortcut for business logic, or relax a test assertion to
+   obtain a passing run. Correcting an assertion that is provably wrong is permitted only with
+   recorded evidence that the corrected assertion still fails on the real defect it audits.
+7. Every tranche ends with automated proof and an updated completion tracker. A feature reaches
+   `E2E_PROVEN` only when a test drove the real journey across real layers and the run was observed
+   green in this repository. Source-code inspection never justifies `E2E_PROVEN`.
+8. Each tranche reports its measured baseline, its result, and any pre-existing failures it did not
+   cause, so unrelated known failures are never counted as tranche regressions.
+
+**Boundary:** This decision authorizes gap closure only. It does not authorize new MVP features,
+scope expansion, redesign, refactors of passing code, deployment, production configuration, external
+provider procurement, or manual acceptance. It does not resolve the scope questions recorded as
+`FOUNDER_DECISION_REQUIRED`, and it does not by itself authorize any change that would depend on
+resolving them.
+
+**Source:** Product Owner instruction of 2026-08-20 accepting the 2026-08-20 functional audit and its
+remediation queue, and directing that the canonical MVP be completed and end-to-end proven before
+visual UI/UX work resumes. First authorized tranche: **MVP-F02 — Instructor change-request reason →
+revision → resubmission**.
+
+## D-090 — Automated manual-payment Purchase Requests close the pre-invitation sales gap
+
+**Date:** 2026-08-21
+**Status:** Active. Founder decision. Amends D-045 only for the bounded manual-payment Purchase
+Request, purchase-backed Invitation, and Entitlement provenance workflow below; amends D-089 only
+to authorize this founder-approved new canonical MVP capability. D-045's no-in-platform-payment
+boundary and every standard/manual Invitation lifecycle rule remain active.
+
+**Decision:** A Student may discover a public `PUBLISHED` Course, select **I want to buy this
+Course**, provide an email, and cause Gradex to persist a Purchase Request before the browser makes
+a client-side WhatsApp handoff to a configured Gradex sales number. The handoff includes only the
+Course title, server-authoritative price snapshot, submitted email, and a human-safe request
+reference. Gradex does not send WhatsApp messages, collect a payment method, or integrate a payment
+provider.
+
+The canonical lifecycle is:
+
+```text
+Published Course Details
+  → email-first Purchase Request persisted
+  → client-side WhatsApp handoff for external/manual payment
+  → Admin Purchase Requests queue
+  → Confirm payment & send invitation
+  → one linked purchase-backed Course Access Invitation + existing encrypted email outbox event
+  → intended Student registers/verifies/signs in if necessary and returns to the same invitation
+  → matching Student accepts
+  → one active Entitlement + Enrollment
+  → Course Home
+```
+
+`Confirm payment & send invitation` is the Admin approval for a purchase-backed Invitation. The
+Student's matching authenticated acceptance proves possession/use of the intended account and
+acceptance of the invitation. Together they authorise the atomic entitlement grant; there is no
+second Admin approval. A legacy/manual Invitation remains unchanged:
+
+```text
+Admin creates invitation → Student accepts → PENDING_ADMIN_APPROVAL → Admin approves → entitlement
+```
+
+The persistence and authority boundaries are mandatory:
+
+1. A Purchase Request is accepted only for a Course that passes the same public `PUBLISHED`
+   predicate as the catalogue. The server snapshots its integer-fils KWD price; the browser cannot
+   submit a price, paid flag, entitlement result, or pre-authorisation marker.
+2. The purchase request gets a unique human-safe reference and deduplicates an active
+   `(Course, normalized email)` request without exposing account, entitlement, or unrelated-request
+   existence to the public caller.
+3. An authorised Admin alone may confirm payment. In one coherent transaction the system locks and
+   revalidates the request/Course, records the factual confirmation, creates or reuses one linked
+   canonical Course Access Invitation, and writes one existing invitation-email outbox event. Retry,
+   double-click, and repeated command are idempotent.
+4. Purchase-backed acceptance validates authenticated email identity, invitation/action-secret
+   validity, linked confirmed request, Course consistency, and entitlement uniqueness. It atomically
+   approves the Invitation, creates or reuses the Enrollment and `PURCHASE_REQUEST` Entitlement, and
+   marks the request `ACCESS_GRANTED`. The client cannot assert this relationship.
+5. Invitation bearer secrets remain fragment-bound. Registration/login return context carries only
+   the safe invitation identifier; the bearer is held only in tab-scoped browser storage and is
+   released on terminal handling. No token enters an ordinary query string, admin UI, Course Home
+   URL, WhatsApp message, audit payload, or new log field.
+6. The existing encrypted transactional outbox and invitation email contract are reused. A queued
+   event means queued, never delivered; purchase-backed copy correctly explains that payment was
+   confirmed and acceptance activates access.
+
+**Boundary:** This decision authorizes no checkout, cart, card/KNET/Apple Pay/BNPL UI, coupons,
+subscriptions, refunds, invoice, payment-proof upload, bank reconciliation, WhatsApp Business API,
+server-side WhatsApp sending, CRM, phone-number collection, or payment-provider integration. It
+does not remove `PENDING_ADMIN_APPROVAL` or alter legacy Invitation behaviour.
+
+**Source:** Founder product decision supplied 2026-08-21.
+
+## D-091 — Gradex adopts an Institution-scoped Academic Catalog and retires the flat Course taxonomy
+
+**Date:** 2026-08-21
+**Decision:** Gradex replaces the flat two-vocabulary Course classification established by
+[D-022](#d-022--catalog-taxonomy-is-three-admin-controlled-dimensions-instructors-select-never-invent)
+with a canonical, Institution-scoped **Academic Catalog**.
+
+1. **Institution scope.** Every academic identity belongs to exactly one Institution (university).
+   The model is multi-institution and multi-country from day one; no institution's structure is a
+   universal assumption.
+2. **Flexible academic hierarchy.** An Institution owns a self-referencing tree of **Academic Units**
+   (`COLLEGE`, `DEPARTMENT`, `SERVICE_UNIT`) rather than a fixed College→Department chain. A unit may
+   attach directly to the Institution. Depth is data, not schema.
+3. **Program is not Department.** A **Program** is the degree specialisation a Student follows. It is
+   owned by an Academic Unit, and one Academic Unit may own several Programs.
+4. **Subjects are canonical Institution-owned academic identities.** A **Subject** is the
+   university's own course-catalog entry (for example `0410-101 · Calculus I`). It belongs to the
+   Institution, never to one Program, and is never duplicated per Program. It is not a Gradex
+   product.
+5. **Curriculum maps Programs to Subjects.** A versioned **Curriculum** (academic plan / major sheet)
+   belongs to a Program, and **CurriculumSubject** is the many-to-many mapping carrying requirement
+   kind, recommended level, recommended semester, and credits as metadata only. Exactly one
+   Curriculum per Program is `ACTIVE`.
+6. **Academic level is not a property of academic content.** Level belongs to the Student's academic
+   profile and, as a *recommendation*, to a CurriculumSubject mapping. It is never a property of a
+   Subject or of a Gradex Course. Level bounds are per-Institution data. The fixed `PREP`/`YEAR_1`–
+   `YEAR_4` enumeration D-022 established is superseded.
+7. **Course Subject is Course-level stable product identity.** A Gradex Course teaches exactly one
+   canonical Subject, held on the Course. It may be absent while a Course is drafting, must be
+   present and active to submit for review, and is **immutable through ordinary authoring once the
+   Course has been published**. A different Subject is a different Gradex Course. Any exceptional
+   post-publication correction must be explicit, privileged, audited, Course-scoped, and
+   reason-required; none is authorized by this decision.
+8. **Program audience targeting is revision-scoped.** Audience is publishable metadata and follows
+   the ordinary revision review and publication lifecycle. By default a Course's audience is derived
+   from every Program whose applicable active Curriculum maps its Subject; an Instructor may
+   optionally narrow it. **An empty target set means every such Program, never "no audience".**
+9. **Instructors cannot create canonical taxonomy.** An Instructor selects from the Admin-owned
+   catalog and may raise a Subject request for Admin resolution. Only Admin principals create,
+   amend, or retire Institutions, Academic Units, Programs, Curricula, Subjects, and their mappings.
+   This preserves and extends
+   [D-022](#d-022--catalog-taxonomy-is-three-admin-controlled-dimensions-instructors-select-never-invent)'s
+   controlled-vocabulary boundary.
+10. **The Student academic profile is discovery-only.** It personalises catalogue ranking and
+    filtering and **must never influence entitlement, access grant, purchase, enrollment,
+    invitation, or media-playback decisions**. Changing or clearing it never alters access.
+11. **Kuwait University is the only launch-data Institution.** Other Kuwaiti institutions were
+    researched to prove the model generalises; they are not seeded until Gradex has inventory for
+    them.
+12. **Arabic primary product vocabulary.** A Gradex Course is **`الكورس`** (superseding `الدورة`) and
+    a university Subject is **`المادة`**. Official university terminology such as `المقرر` may appear
+    secondarily. Copy changes apply only on surfaces a tranche touches; no global copy rewrite is
+    authorized by this decision.
+13. **Legacy taxonomy migrates additively.** The `taxonomy_terms` vocabulary, the `MAJOR`/`SUBJECT`
+    discriminator, the `study_year` enumeration, and the revision-scoped classification columns
+    remain operational and authoritative until the new catalog is proven on a dual path. They are
+    removed only in a separate, later migration after that proof.
+
+**Reason:** D-022's three fixed dimensions were chosen when no institution entity existed and filters
+had to stay exact-match and cheap. That model cannot express what the launch institution actually
+publishes. Primary sources establish that Kuwait University defines academic standing by credits
+earned across **five** levels, that normal time to graduate is eight, nine, or ten semesters
+depending on credit count, that programs are laid out by requirement category rather than by year,
+that a single canonical course code such as `0410-101 Calculus I` is shared verbatim by multiple
+engineering programs, and that Departments own several distinct Programs. A flat vocabulary with no
+Institution forces duplicate Subjects, makes Department and Major indistinguishable, and cannot
+support a second university. It also produced the operational defects the Product Owner reported:
+duplicate near-identical Subjects, Admin repair of Course classification by raw identifier, and
+identifier copying between portals.
+
+**Alternatives rejected:** Keeping D-022 and adding an Institution column to `taxonomy_terms`
+(rejected — leaves Major/Subject conflated, still permits duplicates, and cannot express curricula);
+binding a Gradex Course to a CurriculumSubject (rejected — ties a commercial product to a curriculum
+version, so publishing a new plan invalidates existing Courses); keeping Subject on `CourseRevision`
+(rejected by the Founder as D-D — it preserves the exact defect the redesign exists to remove, since
+two revisions of one Course could disagree about what the product teaches); a fixed
+Institution→College→Department→Program chain (rejected — Abdullah Al Salem University has no
+department layer and the American University of the Middle East has departments outside any college);
+making academic year structural (rejected — no surveyed Kuwaiti program is organised by year, and
+Kuwait University's own regulation derives standing from credits).
+
+**Boundary:** This decision authorizes no degree audit, prerequisite engine, credit accumulation,
+graduation logic, minors logic, GPA, registration, scheduling, transcripts, Tracks/Concentrations, or
+automated university-catalog scraping. It does not change entitlement, access, purchase, media, or
+review contracts. Implementation proceeds only through the `MVP-Fxx` tranches recorded in
+[FUNCTIONAL_COMPLETION.md](mvp/FUNCTIONAL_COMPLETION.md), one at a time, under
+[D-089](#d-089--mvp-functional-completion-work-is-authorized-one-remediation-tranche-at-a-time).
+
+**Amends:** [D-023](#d-023--catalog-search-is-bilingual-arabic-normalized-and-scoped-to-published-courses)
+— bilingual Arabic-normalized search is unchanged and remains authoritative, but the structured
+filters it composes with become the Academic Catalog filters (Institution / Program / academic level /
+Subject) rather than D-022's Major / Subject / Study Year. Arabic normalization behaviour must not
+fork: the Academic Catalog reuses the existing `catalog_normalize_ar` primitive.
+
+**Supersedes:** [D-022](#d-022--catalog-taxonomy-is-three-admin-controlled-dimensions-instructors-select-never-invent)'s
+classification model — the three fixed dimensions, the `MAJOR`/`SUBJECT` vocabulary split, the
+`PREP`/`YEAR_1`–`YEAR_4` enumeration, and the Admin per-Course classification override. D-022's
+retained principle — that Instructors select from an Admin-controlled vocabulary and never invent one
+— is carried forward and strengthened. D-022 is retained as historical authority and is not deleted.
+
+**Source:** Founder decisions D-A, D-B, D-C, and the D-D correction, supplied 2026-08-21, against the
+research and design report at
+[docs/superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md](superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md).
+
+## D-092 — The Student academic profile persists academic-unit context for Program-less states and records onboarding as an explicit three-state decision
+
+**Date:** 2026-08-22
+**Amends:** [D-091](#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy) §10 and the Student-profile design in
+[docs/superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md](superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md) §10–§11.
+**Decision:**
+
+1. **The Student academic profile remains discovery-only.** It personalises catalogue ranking and
+   filtering and **must never be read by any entitlement, Course access, purchase, invitation,
+   enrollment, progress, playback, protected Resource, or Lab Material decision**. Changing or
+   clearing it never alters access. D-091 §10 is unchanged and is restated here because the
+   remaining clauses attach to it.
+2. **Academic-unit context is persisted for Program-less states.** The redesign said College is a
+   transient filter that is never stored. That is incomplete: Kuwait University admits Students into
+   a College before a sub-major is assigned, so a Student may truthfully be *Kuwait University →
+   College of Engineering and Petroleum → not yet declared*. The profile therefore carries an
+   optional `academic_unit_id`, whose sole purpose is to retain that context when no Program is
+   selected.
+3. **College is not redundantly stored for an enrolled Student.** When a Program is present it
+   already determines the College through its owning unit's ancestry, so no `college_id` exists and
+   `academic_unit_id` must not duplicate it. Two fields that can disagree about the same fact are a
+   defect, not a convenience.
+4. **Onboarding is an explicit three-state decision**, never inferred from a combination of nullable
+   fields: **`NOT_STARTED`** (no row), **`SKIPPED`** (the Student chose to defer), **`COMPLETED`**
+   (the Student saved a profile). A skipped Student is not prompted again on every visit, and
+   `SKIPPED → COMPLETED` is an ordinary later transition.
+5. **Enrollment status is a closed set:** `ENROLLED`, `UNDECLARED`, `FOUNDATION`, `NON_DEGREE`. No
+   placeholder Program row is ever created to represent "undeclared" or "non-degree"; those are
+   states of the Student, not degrees the institution confers. `FOUNDATION` is offered only where
+   the Institution's own data declares a foundation stage.
+6. **The Curriculum is resolved server-side and is never client-selected.** A client-supplied
+   curriculum is rejected. On first save and on any Program change the server resolves that
+   Program's `ACTIVE` Curriculum. **Editing only the academic level must not migrate a Student to a
+   newer Curriculum**: a Student stays on the plan they enrolled under until they change Program.
+7. **Onboarding never gates access.** It must not be implemented as a global route guard or as
+   protected-access middleware. A Student arriving through a Course invitation, a purchase-backed
+   invitation, or an access redemption completes that flow first; a Student who already holds an
+   entitlement reaches their Course, Lesson, media, and protected materials with no profile at all.
+
+**Reason:** Two defects in the approved design surfaced when it met the real Kuwait University launch
+catalog. Discarding College for a Program-less Student throws away true, useful academic context and
+leaves an undeclared Student indistinguishable from a Student who told us only their university. And
+a single `completed_at` timestamp cannot express the difference between "has not decided yet" and
+"decided to defer" — a product that cannot tell those apart either nags a Student who already said
+no, or silently treats a deferral as completion. Both are cheap to fix before any profile row exists
+and expensive afterwards.
+
+**Alternatives rejected:** Storing `college_id` alongside `program_id` (rejected — two sources for
+one derivable fact, guaranteed to disagree eventually); creating an "Undeclared" Program row per
+College (rejected — fabricates degrees the university does not confer, and pollutes every Program
+projection); inferring the three onboarding states from nullable-field combinations (rejected —
+unreadable, and the states are genuinely distinct product decisions); resolving the Curriculum at
+read time rather than storing it (rejected — a Student would be silently moved to a new plan the
+moment the university published one, which breaks the "what plan am I on" question the field exists
+to answer); putting the profile into the session or JWT (rejected — it is not authorization data,
+it changes independently, and caching it into a credential is exactly how discovery data becomes an
+access input by accident).
+
+**Boundary:** This decision authorizes no Instructor academic context, no `courses.subject_id`, no
+legacy taxonomy migration, and no catalogue filtering or ranking. It changes no Academic Catalog
+launch data. Implementation proceeds only through `MVP-F19` in
+[FUNCTIONAL_COMPLETION.md](mvp/FUNCTIONAL_COMPLETION.md).
+
+**Source:** Founder product decision supplied 2026-08-22 for the T3 Student Academic Profile tranche.
+
+## D-093 — Course academic identity is an explicit classification model, and an official Subject code is permanently reserved
+
+**Date:** 2026-08-22
+**Decision:** [D-091](#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)
+places Subject on the Course but does not say how a Course carrying the new model is told apart from
+one still carrying the old, nor what happens to a Subject's official code when the Subject is
+retired. Both must be settled before any Course row is written, because both are schema.
+
+1. **Course classification is explicit during the migration period.** Every Course carries a
+   server-controlled `classification_model` of `LEGACY_TAXONOMY` or `ACADEMIC_CATALOG`. It is never
+   inferred from `subject_id` nullability, from the presence of legacy taxonomy, from a timestamp,
+   or from a Course's creation date, because a Course with no classification data is both the normal
+   initial state of the pre-T4 create path and a legitimate subject-less Academic draft. It is never
+   a client-supplied field: the server derives it from whether academic context was supplied, and no
+   ordinary authoring route can move a Course between models.
+2. **Existing Courses are legacy until T5 migrates them.** The T4 migration classifies every
+   pre-existing Course as `LEGACY_TAXONOMY` and changes nothing else about it. No existing Course
+   becomes Academic as a side effect of the schema.
+3. **An Academic Course carries its own Institution.** `courses.institution_id` is required for an
+   `ACADEMIC_CATALOG` Course and forbidden for a `LEGACY_TAXONOMY` one. It exists because the
+   Instructor flow begins at the University while the Subject may legitimately be absent, so
+   Institution cannot be derived from Subject during drafting. It is not a second authority: when a
+   Subject is present it is pinned to the Course's Institution by composite foreign key, so the two
+   cannot disagree.
+4. **Subject is Course-level.** `courses.subject_id`, never `course_revisions.subject_id`. It may be
+   NULL while drafting and must be present to submit for review.
+5. **Subject becomes immutable at first publication.** `courses.live_revision_id` is the
+   publication-history fact — it is set only when a revision goes live and is never cleared — so no
+   `has_been_published`, `first_published`, or `subject_locked` flag is introduced. Before first
+   publication the Subject may be set and changed, including after an Admin requests changes; while
+   a candidate is held in `PENDING_REVIEW` it is frozen. Enforcement is a domain command **and** a
+   database trigger; UI-only enforcement is insufficient.
+6. **Legacy compatibility remains until T5.** The legacy taxonomy vocabulary stays operational and
+   authoritative for `LEGACY_TAXONOMY` Courses, and is refused server-side for `ACADEMIC_CATALOG`
+   Courses on every write path that can set it. Each model is validated by its own rules and never by
+   both, so an Academic Course is never pushed into populating legacy terms to pass review. This
+   restates and applies [D-091](#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)
+   §13.
+7. **An official Subject code is canonical identity and is immutable once established.**
+   *(Amended 2026-08-22 by T4-A.1 — see the amendment note below.)* A normalized official code
+   permanently identifies one canonical Subject within its Institution. Uniqueness spans active and
+   retired rows, so no second Subject may take it. The holder may not release it either: once
+   established, the normalized code cannot be changed to a different normalized identity and cannot
+   be withdrawn, whether the Subject is active or retired.
+
+   **Display formatting remains correctable**, because it is not identity: `0418 320` → `0418-320`
+   is allowed, since both normalize to `0418320`. `0418-320` → `0418-321`, `0418-320` → `CS320`, and
+   `0418-320` → NULL are refused.
+
+   **A codeless Subject may receive its first official code** through ordinary Admin correction while
+   it is active, provided the code collides with no existing reservation. That establishes an
+   identity which did not previously exist rather than replacing one that did, and from that moment
+   the immutability above applies. A **retired** codeless Subject may not be given a first code:
+   retirement freezes academic identity in both directions.
+
+   Codeless Subjects are otherwise **not** covered: their identity is their title, titles are
+   Gradex-authored and editable, and reserving editable prose forever has none of the same
+   justification, so their existing title-based rule is unchanged.
+
+   **Genuine university renumbering is out of scope.** If an institution truly renumbers a course,
+   that needs an explicit workflow built from supersession, aliases, lineage, effective dates, or an
+   audited exceptional correction. An ordinary Admin edit must never be able to approximate it.
+8. **Program audience targeting remains revision-scoped**, per D-091 §8, with zero target rows
+   meaning the inferred audience and no representation of an explicit empty audience.
+9. **Academic classification changes no entitlement semantics.** Classification, Institution, and
+   Subject are never read by any entitlement, Course access, purchase, invitation, enrollment,
+   progress, playback, or protected-material decision, and never enter a JWT claim.
+
+**Reason:** The T4 architecture trace found that no existing Course property distinguishes the two
+models. `owner_account_id` is reassignable, `lifecycle` is mutable, `slug` derives from `id`, and a
+NULL Subject describes a legacy Course and a subject-less Academic draft equally, so an explicit
+discriminator is the only correct option rather than the merely safest one. The trace also found that
+the design report's instruction to delete the Instructor taxonomy route in T4 would delete Instructor
+authoring outright, because that route is shared with title and description and is not a separate
+surface — and that D-091 §13 already required retention until dual-path proof.
+
+Code permanence is a Founder correction to the trace. T1 scoped coded-Subject uniqueness to live
+rows, so retiring a Subject freed its code. A published Gradex Course keeps pointing at the retired
+Subject, so a second Subject taking the same Institution and code makes academic identity ambiguous
+with no temporal or supersession semantics to resolve it.
+
+**Alternatives rejected:** Inferring classification from `subject_id` nullability (rejected — it
+cannot distinguish a legacy Course from a subject-less Academic draft, which is a state the product
+requires); inferring it from creation date or an environment flag (rejected — brittle, and wrong for
+any Course created after the flag flips); holding Institution only on the Subject request (rejected —
+a draft with no request has nowhere to persist the University the Instructor already chose, so
+reopening the draft loses it); a `has_been_published` column (rejected — `live_revision_id` already
+carries that fact and is already projected as `is_first_publish`); an audience mode column beside the
+target rows (rejected — it recreates the contradictory boolean-plus-rows state it would exist to
+prevent); temporal Subject versioning with effective dates and supersession (rejected for MVP — a
+real code reuse needs an explicit design, and pretending to support it now would ship ambiguity).
+
+**Boundary:** This decision authorizes no Instructor UI, no Subject search projection, no audience
+inference or customization behaviour, no Subject request workflow, no legacy data migration, no
+removal of any legacy schema, and no catalogue filtering or ranking. `course_program_targets` and
+`subject_requests` ship their schema so the T4 shape is designed once; their behaviour belongs to
+later slices. Implementation proceeds only through the T4 sub-tranches recorded under `MVP-F20` in
+[FUNCTIONAL_COMPLETION.md](mvp/FUNCTIONAL_COMPLETION.md).
+
+**Amends:** [D-091](#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)
+§7 — the Subject lifecycle it states is unchanged and is made enforceable here — and the T4 line of
+the design report at
+[docs/superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md](superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md),
+whose instruction to delete the Instructor taxonomy route in T4 is superseded by D-091 §13 and by
+clause 6 above. It also tightens the coded-Subject uniqueness rule established by D-091 §4.
+
+**Amendment — T4-A.1, 2026-08-22.** Clause 7 originally said only that a code stays *reserved* after
+retirement. T4-A closed reuse from two directions but left a third open: an **active** coded Subject
+could renumber itself, freeing its old normalized code for a different Subject. That is academic
+renumbering performed through an ordinary Admin edit, and it would leave a published Course pointing
+at a Subject whose canonical identity had silently changed. The rule is therefore not reservation but
+**immutability**: the normalized code is part of canonical Subject identity. Clause 7 above is the
+amended text. Enforcement is both domain and database (migration 0026), proven in
+[the T4-A evidence](launch/evidence/2026-08-22-mvp-f20-t4a-course-academic-identity-foundation.md)
+§15.
+
+**Source:** Builder architecture trace of 2026-08-22 accepted by the Founder, with one Founder
+correction: official Subject code permanence, clause 7. Clause 7 amended the same day by a second
+Founder decision after T4-A.1 verification exposed the active-Subject renumbering path.

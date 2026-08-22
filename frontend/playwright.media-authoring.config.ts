@@ -18,6 +18,11 @@ const apiPort = runPort(API_PORT_ENV);
 export default defineConfig({
   testDir: "./e2e/media-authoring",
   fullyParallel: false,
+  // Same single-tenant constraint as `playwright.config.ts`: one seeded database, one API, one
+  // worker process, and the same fixed /var/tmp singletons. `fullyParallel: false` only serialises
+  // tests within a file, so the worker count is pinned here too — this config is the second door
+  // into the identical shared infrastructure.
+  workers: 1,
   // Transcoding a real file is slower than any UI assertion in the suite.
   timeout: 5 * 60 * 1000,
   globalSetup: "./e2e/media-authoring/global-setup.ts",

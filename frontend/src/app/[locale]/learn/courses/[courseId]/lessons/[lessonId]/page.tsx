@@ -66,7 +66,14 @@ async function LessonContent({
             <AccessUntil expiresAt={lesson.expires_at} labels={labels} locale={locale} />
           </div>
         </header>
-        {lesson.learning_status === "active" ? <LessonMaterials lessonID={lesson.lesson_id} lessonTitle={lesson.title} materials={lesson.materials} labels={labels} /> : null}
+        {lesson.learning_status === "active" ? (
+          <LessonMaterials
+            resources={lesson.resources}
+            labMaterials={lesson.lab_materials}
+            locale={locale}
+            labels={labels}
+          />
+        ) : null}
         {playbackPlan.mountPlayer ? (
           <LessonPlayer lessonID={lesson.lesson_id} locale={locale} labels={playerLabels} initialPositionSeconds={lesson.progress.position_seconds} />
         ) : (

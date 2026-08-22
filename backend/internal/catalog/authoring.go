@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -67,8 +68,15 @@ func (v *DBAssetVersionValidator) ValidateAssetVersion(ctx context.Context, asse
 
 	// `media_asset_versions` is the authority for every Asset Version the S4
 	// pipeline produces, which is every Asset Version an Instructor can create
-	// today. Only READY means the bytes were uploaded, scanned, and processed;
-	// nothing else in the state machine is readiness evidence.
+	// today. Only READY means the media pipeline finished: the bytes were
+	// uploaded, cleared their required safety path — an exact-version malware
+	// scan, or the D-088 trusted-Instructor exact-version validation — and,
+	// for video, completed trusted processing. Nothing else in the state
+	// machine is readiness evidence.
+	//
+	// Which safety path a version took is media's decision and is enforced
+	// there and in the database. Authoring asks only whether the pipeline
+	// finished, so it must not re-derive that rule from a provenance column.
 	//
 	// The legacy `videos` table is consulted only when the identifier has no
 	// media row at all, so pre-S4 references keep resolving. It is deliberately
@@ -108,20 +116,26 @@ type CreateCourseRequest struct {
 	TitleEn        string
 	DescriptionAr  string
 	DescriptionEn  string
+
+	// Academic is the semantic switch between the two classification models
+	// (D-093 §1). When it is present the server creates an ACADEMIC_CATALOG
+	// Course; when it is absent the Course is LEGACY_TAXONOMY, which is what
+	// every pre-T4 caller continues to get. The classification model is never
+	// itself a caller-supplied value.
+	Academic *AcademicCourseContext
 }
 
 type UpdateRevisionRequest struct {
-	CourseID              string
-	RevisionID            string
-	OwnerAccountID        string
-	TitleAr               string
-	TitleEn               string
-	DescriptionAr         string
-	DescriptionEn         string
-	MajorTermID           *string
-	SubjectTermID         *string
-	StudyYear             *StudyYear
-	PreviewAssetVersionID *string
+	CourseID       string
+	RevisionID     string
+	OwnerAccountID string
+	TitleAr        string
+	TitleEn        string
+	DescriptionAr  string
+	DescriptionEn  string
+	MajorTermID    *string
+	SubjectTermID  *string
+	StudyYear      *StudyYear
 }
 
 type AddSectionRequest struct {
@@ -322,6 +336,20 @@ func (r *Repository) CreateCourse(ctx context.Context, req CreateCourseRequest, 
 		return nil, errors.New("title_ar and title_en are required")
 	}
 
+	// The server, not the caller, decides the classification model.
+	model := ClassificationLegacyTaxonomy
+	var institutionID, subjectID *string
+	if req.Academic != nil {
+		if strings.TrimSpace(req.Academic.InstitutionID) == "" {
+			return nil, ErrInstitutionRequired
+		}
+		model = ClassificationAcademicCatalog
+		institutionID = &req.Academic.InstitutionID
+		if req.Academic.SubjectID != nil && strings.TrimSpace(*req.Academic.SubjectID) != "" {
+			subjectID = req.Academic.SubjectID
+		}
+	}
+
 	var course Course
 	var revision CourseRevision
 
@@ -330,13 +358,22 @@ func (r *Repository) CreateCourse(ctx context.Context, req CreateCourseRequest, 
 			return err
 		}
 
+		// A Subject named at creation is held to the same eligibility rule as
+		// one assigned later: active, and in the Course's own Institution.
+		if subjectID != nil {
+			if err := lockAssignableSubject(ctx, tx, *subjectID, *institutionID); err != nil {
+				return err
+			}
+		}
+
 		queryCourse := `
-			INSERT INTO courses (owner_account_id, lifecycle)
-			VALUES ($1::uuid, 'DRAFT')
-			RETURNING id, owner_account_id, lifecycle, created_at, updated_at
+			INSERT INTO courses (owner_account_id, lifecycle, classification_model, institution_id, subject_id)
+			VALUES ($1::uuid, 'DRAFT', $2, $3::uuid, $4::uuid)
+			RETURNING id, owner_account_id, lifecycle, classification_model, institution_id, subject_id, created_at, updated_at
 		`
-		err := tx.QueryRow(ctx, queryCourse, req.OwnerAccountID).Scan(
+		err := tx.QueryRow(ctx, queryCourse, req.OwnerAccountID, model, institutionID, subjectID).Scan(
 			&course.ID, &course.OwnerAccountID, &course.Lifecycle,
+			&course.ClassificationModel, &course.InstitutionID, &course.SubjectID,
 			&course.CreatedAt, &course.UpdatedAt,
 		)
 		if err != nil {
@@ -370,7 +407,10 @@ func (r *Repository) CreateCourse(ctx context.Context, req CreateCourseRequest, 
 			TargetType:      "COURSE",
 			TargetID:        course.ID,
 			Reason:          "Course created in DRAFT",
-			Metadata:        map[string]any{"title_en": req.TitleEn},
+			Metadata: map[string]any{
+				"title_en":             req.TitleEn,
+				"classification_model": string(model),
+			},
 		}
 		if err := WriteAuditEvent(ctx, tx, audit); err != nil {
 			return err
@@ -474,6 +514,16 @@ func (r *Repository) CreateCandidate(
 			return fmt.Errorf("inserting candidate revision: %w", err)
 		}
 
+		// Audience is revision-scoped publishable metadata. Explicit targets clone
+		// exactly; automatic mode has zero rows and therefore remains automatic.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO course_program_targets (revision_id, course_id, program_id, institution_id, created_at)
+			SELECT $1::uuid, course_id, program_id, institution_id, $2
+			FROM course_program_targets
+			WHERE revision_id = $3::uuid`, newRevID, now, liveRevID); err != nil {
+			return fmt.Errorf("cloning revision audience targets: %w", err)
+		}
+
 		for _, sec := range liveRev.Sections {
 			var newSecID string
 			err = tx.QueryRow(ctx, `
@@ -551,6 +601,7 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 
 	query := `
 		SELECT c.id, c.owner_account_id, c.lifecycle, c.live_revision_id,
+		       c.classification_model, c.institution_id, c.subject_id,
 		       c.access_suspended_at, c.access_suspension_reason, c.retired_at,
 		       cpc.new_value_minor_units AS price_minor_units,
 		       c.created_at, c.updated_at
@@ -577,6 +628,7 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 		var c Course
 		if err := rows.Scan(
 			&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
+			&c.ClassificationModel, &c.InstitutionID, &c.SubjectID,
 			&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
 			&c.PriceMinorUnits,
 			&c.CreatedAt, &c.UpdatedAt,
@@ -602,6 +654,9 @@ func (r *Repository) ListOwnedCourses(ctx context.Context, ownerAccountID string
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("querying active revision for course %s: %w", c.ID, err)
 		}
+		if err := loadCourseAcademicProjection(ctx, r.pool, &c); err != nil {
+			return nil, err
+		}
 
 		result = append(result, c)
 	}
@@ -621,6 +676,7 @@ func (r *Repository) GetLiveCourseGraph(ctx context.Context, courseID string) (*
 
 	query := `
 		SELECT id, owner_account_id, lifecycle, live_revision_id,
+		       classification_model, institution_id, subject_id,
 		       access_suspended_at, access_suspension_reason, retired_at,
 		       created_at, updated_at
 		FROM courses
@@ -629,6 +685,7 @@ func (r *Repository) GetLiveCourseGraph(ctx context.Context, courseID string) (*
 	var c Course
 	err := r.pool.QueryRow(ctx, query, courseID).Scan(
 		&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
+		&c.ClassificationModel, &c.InstitutionID, &c.SubjectID,
 		&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
@@ -650,6 +707,9 @@ func (r *Repository) GetLiveCourseGraph(ctx context.Context, courseID string) (*
 		}
 		c.LiveRevision = liveRev
 	}
+	if err := loadCourseAcademicProjection(ctx, r.pool, &c); err != nil {
+		return nil, err
+	}
 
 	return &c, nil
 }
@@ -661,6 +721,7 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 
 	query := `
 		SELECT id, owner_account_id, lifecycle, live_revision_id,
+		       classification_model, institution_id, subject_id,
 		       access_suspended_at, access_suspension_reason, retired_at,
 		       created_at, updated_at
 		FROM courses
@@ -669,6 +730,7 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 	var c Course
 	err := r.pool.QueryRow(ctx, query, courseID, ownerAccountID).Scan(
 		&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
+		&c.ClassificationModel, &c.InstitutionID, &c.SubjectID,
 		&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
@@ -722,17 +784,24 @@ func (r *Repository) GetOwnedCourse(ctx context.Context, courseID, ownerAccountI
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("querying active revision for course %s: %w", courseID, err)
 	}
+	if err := loadCourseAcademicProjection(ctx, r.pool, &c); err != nil {
+		return nil, err
+	}
 
 	return &c, nil
 }
 
 type queryExecer interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevision) error {
 	if rev == nil {
 		return nil
+	}
+	if err := loadRevisionAudience(ctx, q, rev); err != nil {
+		return err
 	}
 
 	secQuery := `
@@ -862,12 +931,6 @@ func (r *Repository) UpdateCourseRevision(
 		return nil, errors.New("asset version validator is required")
 	}
 
-	if req.PreviewAssetVersionID != nil && *req.PreviewAssetVersionID != "" {
-		if err := validator.ValidateAssetVersion(ctx, *req.PreviewAssetVersionID); err != nil {
-			return nil, err
-		}
-	}
-
 	var updatedRev *CourseRevision
 	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
 		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
@@ -918,9 +981,12 @@ func (r *Repository) UpdateCourseRevision(
 		if req.StudyYear != nil {
 			studyYear = req.StudyYear
 		}
-		previewAssetVersionID := rev.PreviewAssetVersionID
-		if req.PreviewAssetVersionID != nil {
-			previewAssetVersionID = req.PreviewAssetVersionID
+		// D-093 §6. An Academic Course must not carry the legacy classification
+		// vocabulary. This route is shared with title and description, so the
+		// refusal is scoped to the legacy fields rather than the whole call, and
+		// it reads the classification from the row already locked above.
+		if err := rejectLegacyTaxonomyOnAcademicCourse(courseRow, req.MajorTermID, req.SubjectTermID, req.StudyYear); err != nil {
+			return err
 		}
 		if req.MajorTermID != nil || req.SubjectTermID != nil {
 			if err := validateTaxonomyAssignments(ctx, tx, req.MajorTermID, req.SubjectTermID); err != nil {
@@ -933,12 +999,12 @@ func (r *Repository) UpdateCourseRevision(
 			UPDATE course_revisions
 			SET title_ar = $1, title_en = $2, description_ar = $3, description_en = $4,
 			    major_term_id = $5::uuid, subject_term_id = $6::uuid, study_year = $7,
-			    preview_asset_version_id = $8::uuid, updated_at = $9
-			WHERE id = $10::uuid AND course_id = $11::uuid
+			    updated_at = $8
+			WHERE id = $9::uuid AND course_id = $10::uuid
 		`
 		_, err = tx.Exec(ctx, query,
 			titleAr, titleEn, descAr, descEn,
-			majorTermID, subjectTermID, studyYear, previewAssetVersionID,
+			majorTermID, subjectTermID, studyYear,
 			now, rev.ID, req.CourseID,
 		)
 		if err != nil {
@@ -1553,10 +1619,6 @@ func (r *Repository) SetPreviewAsset(
 		return nil, errors.New("asset version validator is required")
 	}
 
-	if err := validator.ValidateAssetVersion(ctx, req.PreviewAssetVersionID); err != nil {
-		return nil, err
-	}
-
 	var rev *CourseRevision
 	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
 		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
@@ -1572,6 +1634,9 @@ func (r *Repository) SetPreviewAsset(
 
 		candidate, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
 		if err != nil {
+			return err
+		}
+		if err := validatePreviewAsset(ctx, tx, req.CourseID, candidate.ID, req.PreviewAssetVersionID, true); err != nil {
 			return err
 		}
 
@@ -1710,7 +1775,7 @@ func (r *Repository) SubmitCourse(
 
 		valErr, err := validateCourseForSubmission(ctx, submissionValidationRequest{
 			tx: tx, validator: newTxAssetVersionValidator(tx),
-			courseID: courseID, revision: revGraph,
+			courseID: courseID, revision: revGraph, course: row,
 		})
 		if err != nil {
 			return err

@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+S12_SYSTEMD_DIR="$S12_ROOT/deploy/hostinger/systemd"
+S12_TEMPORARY=""
+
+note() { printf 'hostinger-systemd: %s\n' "$*" >&2; }
+die() { note "$*"; exit 1; }
+
+cleanup() {
+  if [ -n "$S12_TEMPORARY" ] && [ -d "$S12_TEMPORARY" ]; then
+    rm -rf -- "$S12_TEMPORARY"
+  fi
+}
+
+assert_line() {
+  local file="$1" expected="$2"
+  grep --quiet --fixed-strings --line-regexp "$expected" "$file" ||
+    die "$(basename "$file") is missing: $expected"
+}
+
+main() {
+  local tool file operator group fake_bin backup_marker curl_args_log monitor_log monitor_status now
+  for tool in cat chmod date grep id mkdir mktemp systemd-analyze; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
+  done
+
+  for file in \
+    gradex-monitor.service.in gradex-monitor.timer \
+    gradex-backup.service.in gradex-backup.timer install.sh; do
+    [ -f "$S12_SYSTEMD_DIR/$file" ] || die "$file is absent"
+  done
+
+  if "$S12_SYSTEMD_DIR/install.sh" install --user root --repo "$S12_ROOT" >/dev/null 2>&1; then
+    die "the installer accepted root as the scheduled operator"
+  fi
+  if grep --extended-regexp 'systemctl[[:space:]]+(enable|start)|--now' \
+    "$S12_SYSTEMD_DIR/install.sh"; then
+    die "the installer enables or starts scheduled work as a side effect"
+  fi
+
+  S12_TEMPORARY="$(mktemp -d)"
+  trap cleanup EXIT
+  operator="$(id -un)"
+  group="$(id -gn)"
+  "$S12_SYSTEMD_DIR/install.sh" render \
+    --output "$S12_TEMPORARY" --user "$operator" --group "$group" --repo "$S12_ROOT"
+
+  for file in gradex-monitor.service gradex-monitor.timer gradex-backup.service gradex-backup.timer; do
+    [ -f "$S12_TEMPORARY/$file" ] || die "rendered $file is absent"
+  done
+
+  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'Type=oneshot'
+  assert_line "$S12_TEMPORARY/gradex-monitor.service" "User=$operator"
+  assert_line "$S12_TEMPORARY/gradex-monitor.service" "Group=$group"
+  assert_line "$S12_TEMPORARY/gradex-monitor.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$S12_TEMPORARY/gradex-monitor.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh monitor"
+  assert_line "$S12_TEMPORARY/gradex-monitor.timer" 'OnCalendar=*:0/5'
+  assert_line "$S12_TEMPORARY/gradex-monitor.timer" 'Persistent=true'
+
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'Type=oneshot'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" "User=$operator"
+  assert_line "$S12_TEMPORARY/gradex-backup.service" "Group=$group"
+  assert_line "$S12_TEMPORARY/gradex-backup.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$S12_TEMPORARY/gradex-backup.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh backup"
+  assert_line "$S12_TEMPORARY/gradex-backup.timer" 'OnCalendar=hourly'
+  assert_line "$S12_TEMPORARY/gradex-backup.timer" 'Persistent=true'
+
+  if grep --ignore-case --extended-regexp \
+    '(runtime\.env|webhook|token|password|database_url|secret|Environment(File)?=)' \
+    "$S12_TEMPORARY"/*.service "$S12_TEMPORARY"/*.timer; then
+    die "rendered units contain a secret or duplicate environment-loading surface"
+  fi
+
+  grep --quiet --fixed-strings 'GRADEX_BACKUP_MAX_AGE_SECONDS="${GRADEX_BACKUP_MAX_AGE_SECONDS:-7200}"' \
+    "$S12_ROOT/deploy/monitoring/monitor-once.sh" ||
+    die "monitor default backup freshness is not two hours"
+  assert_line "$S12_ROOT/deploy/monitoring/monitor.env.example" 'GRADEX_BACKUP_MAX_AGE_SECONDS=7200'
+  grep --quiet --fixed-strings 'maximum_age_seconds: 7200' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not match the two-hour freshness contract"
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_BACKUP_MAX_AGE_SECONDS=7200'
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_CA_FILE='
+  grep --quiet --fixed-strings 'optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN' \
+    "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not describe the optional bearer credential accurately"
+
+  fake_bin="$S12_TEMPORARY/fake-bin"
+  backup_marker="$S12_TEMPORARY/latest.completed-at"
+  curl_args_log="$S12_TEMPORARY/curl.args"
+  monitor_log="$S12_TEMPORARY/monitor.log"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+output=""
+write_status=0
+[ -z "${FAKE_CURL_ARGS_LOG:-}" ] || printf '%s\n' "$@" >>"$FAKE_CURL_ARGS_LOG"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) output="$2"; shift 2 ;;
+    --write-out) write_status=1; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[ -z "$output" ] || : >"$output"
+[ "$write_status" = 0 ] || printf '200'
+EOF
+  chmod 0755 "$fake_bin/curl"
+
+  now="$(date +%s)"
+  printf '%s\n' "$((now - 7199))" >"$backup_marker"
+  PATH="$fake_bin:$PATH" \
+    GRADEX_HEALTH_URL=https://health.example \
+    GRADEX_READY_URL=https://ready.example \
+    GRADEX_ENVIRONMENT=systemd-proof \
+    GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
+    GRADEX_BACKUP_MAX_AGE_SECONDS= \
+    "$S12_ROOT/deploy/monitoring/monitor-once.sh" >"$monitor_log" 2>&1 ||
+    die "a backup younger than two hours was reported stale"
+
+  printf '%s\n' "$((now - 7201))" >"$backup_marker"
+  set +e
+  PATH="$fake_bin:$PATH" \
+    GRADEX_HEALTH_URL=https://health.example \
+    GRADEX_READY_URL=https://ready.example \
+    GRADEX_ENVIRONMENT=systemd-proof \
+    GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
+    GRADEX_BACKUP_MAX_AGE_SECONDS= \
+    GRADEX_ALERT_WEBHOOK_URL=https://alerts.example/systemd-proof-url-secret-sentinel \
+    GRADEX_ALERT_WEBHOOK_TOKEN=systemd-proof-secret-sentinel \
+    FAKE_CURL_ARGS_LOG="$curl_args_log" \
+    "$S12_ROOT/deploy/monitoring/monitor-once.sh" >"$monitor_log" 2>&1
+  monitor_status=$?
+  set -e
+  [ "$monitor_status" = 1 ] || die "a backup older than two hours did not fail monitoring"
+  grep --quiet --fixed-strings 'alert delivery succeeded' "$monitor_log" ||
+    die "the stale-backup path did not attempt alert delivery"
+  if grep --quiet --fixed-strings 'systemd-proof-secret-sentinel' "$curl_args_log"; then
+    die "the alert bearer credential reached curl command arguments"
+  fi
+  if grep --quiet --fixed-strings 'systemd-proof-url-secret-sentinel' "$curl_args_log"; then
+    die "the alert webhook URL reached curl command arguments"
+  fi
+
+  systemd-analyze verify \
+    "$S12_TEMPORARY/gradex-monitor.service" "$S12_TEMPORARY/gradex-monitor.timer" \
+    "$S12_TEMPORARY/gradex-backup.service" "$S12_TEMPORARY/gradex-backup.timer"
+
+  note "rendering, cadence, entrypoints, persistence, secret isolation, freshness, and unit syntax passed"
+}
+
+main "$@"

@@ -116,6 +116,15 @@ export default async function globalSetup() {
       publicOrigin: frontendOrigin(),
       limiterKey: createHash("sha256").update(`gradex-media-e2e-limiter-${runId}`).digest("hex"),
     });
+    // The canonical seed owns the existing Lab Material association. These
+    // deterministic private bytes make its real Student download verifiable
+    // without creating a Lab authoring workflow in this Resource-only slice.
+    console.log("[Media E2E Setup] Writing deterministic private Resource/Lab fixture bytes...");
+    execSync("go run ./cmd/e2e-material-fixture", {
+      cwd: backendDir,
+      stdio: "inherit",
+      env: { ...process.env, ...backendEnvironment, GRADEX_E2E_SEED_PRIVATE_MATERIALS: "true" },
+    });
     const env = { ...process.env, ...backendEnvironment, PORT: String(port), SERVICE_ROLE: "api" };
 
     // The session-issuance helper builds the same production configuration the

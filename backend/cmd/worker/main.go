@@ -56,12 +56,13 @@ func main() {
 	}
 
 	storageClient, err := storage.New(ctx, storage.Options{
-		Endpoint:     cfg.S3Endpoint(),
-		AccessKey:    cfg.S3AccessKey().Expose(),
-		SecretKey:    cfg.S3SecretKey().Expose(),
-		Bucket:       cfg.S3Bucket(),
-		Region:       cfg.S3Region(),
-		UsePathStyle: cfg.S3UsePathStyle(),
+		Endpoint:        cfg.S3Endpoint(),
+		PresignEndpoint: cfg.S3PresignEndpoint(),
+		AccessKey:       cfg.S3AccessKey().Expose(),
+		SecretKey:       cfg.S3SecretKey().Expose(),
+		Bucket:          cfg.S3Bucket(),
+		Region:          cfg.S3Region(),
+		UsePathStyle:    cfg.S3UsePathStyle(),
 	})
 	if err != nil {
 		exitWorker(logger, "storage_connect", logging.ErrorClassOf(err))

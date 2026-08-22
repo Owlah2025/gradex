@@ -120,6 +120,29 @@ func DevelopmentAdmissionPolicy(endpoint string) Policy {
 	}
 }
 
+// PurchaseRequestsPolicy protects the public manual-sales write boundary. It
+// deliberately budgets both the browser source and the normalized email: an
+// attacker cannot rotate email spellings to evade the source ceiling, nor can
+// a distributed source flood a single sales recipient. The policy is not
+// business authority and its denial response is identical for every address.
+func PurchaseRequestsPolicy() Policy {
+	return Policy{
+		ID:       "purchase-requests-v1",
+		Category: "PUBLIC_PURCHASE",
+		Endpoint: "purchase-requests",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 60, LocalLimit: 6},
+			{Dimension: DimensionIdentifier, Limit: 6, LocalLimit: 2},
+			{Dimension: DimensionSourceAddr, Limit: 20, LocalLimit: 3},
+			{Dimension: DimensionAnonymous, Limit: 10, LocalLimit: 2},
+			{Dimension: DimensionGlobal, Limit: 300, LocalLimit: 20},
+		},
+		LocalMaxKeys: 4096,
+		FailClosed:   true,
+	}
+}
+
 func DevelopmentPolicySetReadPolicy() Policy {
 	return Policy{
 		ID:       "registration-policy-set-v1",
@@ -148,6 +171,32 @@ func DevelopmentAnonymousBootstrapPolicy() Policy {
 			{Dimension: DimensionGlobal, Limit: 600, LocalLimit: 30},
 		},
 		LocalMaxKeys: 4096,
+	}
+}
+
+const (
+	ProductionSessionBootstrapRequestsPerMinute int64 = 600
+	ProductionLoginIdentifierAttemptsPerMinute  int64 = 6
+	ProductionLoginAnonymousAttemptsPerMinute   int64 = 10
+	ProductionLoginSharedAttemptsPerMinute      int64 = 600
+)
+
+// ProductionAnonymousBootstrapPolicy admits the cheap browser bootstrap that
+// must precede login. It performs no database lookup or password verification,
+// and its exact-source ceiling accommodates the approved 500-Student campus-NAT
+// burst without trusting a client-supplied forwarding header.
+func ProductionAnonymousBootstrapPolicy() Policy {
+	return Policy{
+		ID:       "anonymous-session-bootstrap-v2",
+		Category: "PUBLIC_IDENTITY_CAPABILITY",
+		Endpoint: "session-bootstrap",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: ProductionSessionBootstrapRequestsPerMinute, LocalLimit: ProductionSessionBootstrapRequestsPerMinute},
+			{Dimension: DimensionSourceAddr, Limit: ProductionSessionBootstrapRequestsPerMinute, LocalLimit: ProductionSessionBootstrapRequestsPerMinute},
+			{Dimension: DimensionGlobal, Limit: ProductionSessionBootstrapRequestsPerMinute, LocalLimit: ProductionSessionBootstrapRequestsPerMinute},
+		},
+		LocalMaxKeys: 8192,
 	}
 }
 
@@ -216,6 +265,28 @@ func DevelopmentLoginPolicy() Policy {
 			{Dimension: DimensionGlobal, Limit: 300, LocalLimit: 20},
 		},
 		LocalMaxKeys: 4096,
+	}
+}
+
+// ProductionLoginPolicy keeps per-identifier and per-browser brute-force
+// controls while allowing the approved 500 distinct first attempts from one
+// campus NAT. Redis is authoritative because the shared ceiling protects the
+// expensive password-verification boundary across API processes.
+func ProductionLoginPolicy() Policy {
+	return Policy{
+		ID:       "sessions-v2",
+		Category: "PUBLIC_AUTHENTICATION",
+		Endpoint: "sessions",
+		Window:   time.Minute,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: ProductionLoginSharedAttemptsPerMinute, LocalLimit: ProductionLoginSharedAttemptsPerMinute},
+			{Dimension: DimensionIdentifier, Limit: ProductionLoginIdentifierAttemptsPerMinute, LocalLimit: ProductionLoginIdentifierAttemptsPerMinute},
+			{Dimension: DimensionSourceAddr, Limit: ProductionLoginSharedAttemptsPerMinute, LocalLimit: ProductionLoginSharedAttemptsPerMinute},
+			{Dimension: DimensionAnonymous, Limit: ProductionLoginAnonymousAttemptsPerMinute, LocalLimit: ProductionLoginAnonymousAttemptsPerMinute},
+			{Dimension: DimensionGlobal, Limit: ProductionLoginSharedAttemptsPerMinute, LocalLimit: ProductionLoginSharedAttemptsPerMinute},
+		},
+		LocalMaxKeys: 8192,
+		FailClosed:   true,
 	}
 }
 
@@ -344,6 +415,68 @@ func ProtectedLearningPlaybackSourcePolicy() Policy {
 		// fallback cannot decide a shared quota, so an undecidable ceiling must refuse
 		// rather than approximate: playback fails closed like learning-progress-source.
 		FailClosed: true,
+	}
+}
+
+// ProtectedLearningMaterialDownloadPolicy applies D-071's established
+// protected-signing Student ceiling to Resource and Lab Material downloads.
+// A download is another short-lived private-object capability, so it must not
+// become an unbounded bypass around the already-bounded video issuance path.
+// The authenticated Account is intentionally the whole key: including Course,
+// Lesson, or material identity would let a collector reset its quota by
+// walking the catalogue.
+func ProtectedLearningMaterialDownloadPolicy() Policy {
+	return Policy{
+		ID:       "learning-material-download-v1",
+		Category: "PROTECTED_LEARNING",
+		Endpoint: "learning-material-download",
+		Window:   playbackIssuanceWindow,
+		Rules: []Rule{{
+			Dimension:  DimensionIdentifier,
+			Limit:      ProtectedLearningPlaybackIssuancesPer10Min,
+			LocalLimit: ProtectedLearningPlaybackIssuancesPer10Min,
+		}},
+		LocalMaxKeys: 8192,
+		FailClosed:   true,
+	}
+}
+
+// ProtectedLearningMaterialDownloadSourcePolicy applies the matching D-071
+// source-address ceiling before the Student ceiling. It keeps shared-campus
+// use viable while bounding bulk private-download issuance from one network.
+func ProtectedLearningMaterialDownloadSourcePolicy() Policy {
+	return Policy{
+		ID:       "learning-material-download-source-v1",
+		Category: "PROTECTED_LEARNING",
+		Endpoint: "learning-material-download-source",
+		Window:   playbackIssuanceWindow,
+		Rules: []Rule{{
+			Dimension:  DimensionSourceAddr,
+			Limit:      ProtectedLearningPlaybackSourceIssuancesPer10Min,
+			LocalLimit: ProtectedLearningPlaybackSourceIssuancesPer10Min,
+		}},
+		LocalMaxKeys: 8192,
+		FailClosed:   true,
+	}
+}
+
+// PublicPreviewPolicy budgets anonymous signing by the trusted source address
+// before any storage URL is issued. The Course or Asset identifier is never a
+// limiter key: public-media existence must not affect a caller's quota and
+// cannot become an inventory oracle.
+func PublicPreviewPolicy() Policy {
+	return Policy{
+		ID:       "public-preview-v1",
+		Category: "PUBLIC_MEDIA",
+		Endpoint: "public-preview",
+		Window:   playbackIssuanceWindow,
+		Rules: []Rule{
+			{Dimension: DimensionEndpoint, Limit: 1200, LocalLimit: 1200},
+			{Dimension: DimensionSourceAddr, Limit: 120, LocalLimit: 120},
+			{Dimension: DimensionGlobal, Limit: 12000, LocalLimit: 12000},
+		},
+		LocalMaxKeys: 8192,
+		FailClosed:   true,
 	}
 }
 

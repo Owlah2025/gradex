@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,75 @@ func TestProgressSourcePolicyUsesStrictAddressTokenBucket(t *testing.T) {
 	}
 }
 
+func TestPublicPreviewPolicyIsFailClosedAndDoesNotKeyOnCourseOrAssetInventory(t *testing.T) {
+	policy := PublicPreviewPolicy()
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("public preview policy is invalid: %v", err)
+	}
+	if !policy.FailClosed || policy.Endpoint != "public-preview" {
+		t.Fatalf("public preview policy is not fail-closed: %+v", policy)
+	}
+	if len(policy.Rules) != 3 {
+		t.Fatalf("public preview policy rules=%+v, want endpoint/source/global only", policy.Rules)
+	}
+	for _, rule := range policy.Rules {
+		if rule.Dimension == DimensionIdentifier || rule.Dimension == DimensionAnonymous {
+			t.Fatalf("public preview limiter must not turn Course or preview input into an inventory oracle: %+v", policy.Rules)
+		}
+	}
+}
+
+func TestPurchaseRequestsPolicyBindsNormalizedEmailAndSourceAddress(t *testing.T) {
+	policy := PurchaseRequestsPolicy()
+	if err := policy.Validate(); err != nil {
+		t.Fatalf("purchase policy is invalid: %v", err)
+	}
+	if policy.ID != "purchase-requests-v1" || !policy.FailClosed {
+		t.Fatalf("purchase policy identity = %+v", policy)
+	}
+	if _, ok := policyRule(policy, DimensionSourceAddr); !ok {
+		t.Fatal("purchase policy has no source-address budget")
+	}
+	if _, ok := policyRule(policy, DimensionIdentifier); !ok {
+		t.Fatal("purchase policy has no normalized-email budget")
+	}
+	store := &scriptedStore{err: errors.New("limiter unavailable")}
+	limiter, err := New(store, []byte(strings.Repeat("p", 32)), time.Second)
+	if err != nil {
+		t.Fatalf("constructing limiter: %v", err)
+	}
+	// The live policy is fail-closed. This local proof isolates the bounded
+	// quota algorithm while retaining the exact dimensions and limits.
+	policy.FailClosed = false
+	for attempt := 0; attempt < 3; attempt++ {
+		decision := limiter.Decide(context.Background(), policy, Input{
+			Identifier: fmt.Sprintf("buyer-%d@example.test", attempt), AnonymousID: fmt.Sprintf("browser-%d", attempt), ClientIP: "192.0.2.90",
+		})
+		if !decision.Allowed {
+			t.Fatalf("source attempt %d denied before source budget: %+v", attempt+1, decision)
+		}
+	}
+	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "buyer-four@example.test", AnonymousID: "browser-four", ClientIP: "192.0.2.90"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
+		t.Fatalf("source abuse decision = %+v, want fallback deny", decision)
+	}
+
+	limiter, err = New(store, []byte(strings.Repeat("q", 32)), time.Second)
+	if err != nil {
+		t.Fatalf("constructing email limiter: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		decision := limiter.Decide(context.Background(), policy, Input{
+			Identifier: "same-buyer@example.test", AnonymousID: fmt.Sprintf("browser-%d", attempt), ClientIP: fmt.Sprintf("192.0.2.%d", attempt+1),
+		})
+		if !decision.Allowed {
+			t.Fatalf("email attempt %d denied before identifier budget: %+v", attempt+1, decision)
+		}
+	}
+	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "same-buyer@example.test", AnonymousID: "browser-three", ClientIP: "192.0.2.3"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
+		t.Fatalf("normalized-email abuse decision = %+v, want fallback deny", decision)
+	}
+}
+
 func TestProgressSourceBurstIsDeterministicAndLimiterFailureIsStrict(t *testing.T) {
 	store := &scriptedStore{err: errors.New("redis unavailable")}
 	limiter, err := New(store, []byte(strings.Repeat("s", 32)), time.Second)
@@ -211,5 +281,92 @@ func TestSourceAddressNormalizesIPv4AndIPv6AsRequired(t *testing.T) {
 	}
 	if _, ok := sourceAddress("not-an-address"); ok {
 		t.Fatal("invalid source address was accepted")
+	}
+}
+
+func TestProductionSessionPoliciesAdmitApprovedSameNATEnvelope(t *testing.T) {
+	bootstrap := ProductionAnonymousBootstrapPolicy()
+	login := ProductionLoginPolicy()
+	for name, policy := range map[string]Policy{"bootstrap": bootstrap, "login": login} {
+		if err := policy.Validate(); err != nil {
+			t.Fatalf("%s policy: %v", name, err)
+		}
+		if sourceRule, ok := policyRule(policy, DimensionSourceAddr); !ok || sourceRule.Limit < 500 {
+			t.Fatalf("%s source rule = %+v, present=%v; want at least 500/minute", name, sourceRule, ok)
+		}
+		if _, hasNetwork := policyRule(policy, DimensionNetwork); hasNetwork {
+			t.Fatalf("%s policy retained the shared /24 network dimension", name)
+		}
+	}
+	if !login.FailClosed {
+		t.Fatal("production login must fail closed when distributed admission is unavailable")
+	}
+	if rule, _ := policyRule(login, DimensionIdentifier); rule.Limit != 6 {
+		t.Fatalf("identifier limit = %d, want 6/minute", rule.Limit)
+	}
+	if rule, _ := policyRule(login, DimensionAnonymous); rule.Limit != 10 {
+		t.Fatalf("anonymous limit = %d, want 10/minute", rule.Limit)
+	}
+	if rule, _ := policyRule(login, DimensionGlobal); rule.Limit != 600 {
+		t.Fatalf("shared limit = %d, want 600/minute", rule.Limit)
+	}
+}
+
+func TestProductionLoginAdmissionAllowsFiveHundredDistinctBrowsersFromOneIPv4(t *testing.T) {
+	limiter, err := New(&scriptedStore{allowed: true}, []byte(strings.Repeat("p", 32)), time.Second)
+	if err != nil {
+		t.Fatalf("constructing limiter: %v", err)
+	}
+	policy := ProductionLoginPolicy()
+	for student := 0; student < 500; student++ {
+		_, local, ok := limiter.entries(policy, Input{
+			Identifier:  fmt.Sprintf("student-%d@example.test", student),
+			AnonymousID: fmt.Sprintf("browser-%d", student),
+			ClientIP:    "192.0.2.44",
+		})
+		if !ok {
+			t.Fatalf("student %d entries were not derived", student)
+		}
+		allowed, available := limiter.local.decide(local, policy.LocalMaxKeys)
+		if !allowed || !available {
+			t.Fatalf("student %d was rejected at admission", student+1)
+		}
+	}
+}
+
+func policyRule(policy Policy, dimension Dimension) (Rule, bool) {
+	for _, rule := range policy.Rules {
+		if rule.Dimension == dimension {
+			return rule, true
+		}
+	}
+	return Rule{}, false
+}
+
+func TestLocalConditionalChargingDoesNotDrainSharedCapacity(t *testing.T) {
+	local := newLocalFallback()
+	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.UTC)
+	local.now = func() time.Time { return now }
+	identifier := Entry{Key: "identifier", Limit: 1, Window: time.Minute}
+	shared := Entry{Key: "shared", Limit: 2, Window: time.Minute}
+
+	if allowed, available := local.decide([]Entry{identifier, shared}, 10); !allowed || !available {
+		t.Fatal("first request was not admitted")
+	}
+	if allowed, available := local.decide([]Entry{identifier, shared}, 10); allowed || !available {
+		t.Fatal("identifier overflow was not denied")
+	}
+	for attempt := 0; attempt < 1; attempt++ {
+		if allowed, available := local.decide([]Entry{{Key: "identifier-2", Limit: 1, Window: time.Minute}, shared}, 10); !allowed || !available {
+			t.Fatal("denied identifier attempt drained shared capacity")
+		}
+	}
+	third := Entry{Key: "identifier-3", Limit: 1, Window: time.Minute}
+	if allowed, available := local.decide([]Entry{third, shared}, 10); allowed || !available {
+		t.Fatal("shared overflow was not denied")
+	}
+	delete(local.entries, shared.Key)
+	if allowed, available := local.decide([]Entry{third, shared}, 10); !allowed || !available {
+		t.Fatal("shared denial consumed the unrelated identifier allowance")
 	}
 }

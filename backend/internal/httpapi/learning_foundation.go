@@ -49,6 +49,7 @@ type learningReadRepository interface {
 	ReadCourseProgress(context.Context, string, string, learning.CourseGraph) (map[string]learning.Progress, learning.CourseProgressSummary, error)
 	ReadLessonProgress(context.Context, string, string) (learning.Progress, error)
 	ListStudentCourseSummaries(context.Context, string) ([]learning.StudentCourseSummary, error)
+	ListStudentResumeCandidates(context.Context, string) ([]learning.ResumeCandidate, error)
 	EnrollmentID(context.Context, string, string) (string, error)
 }
 

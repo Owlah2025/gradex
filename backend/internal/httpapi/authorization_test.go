@@ -126,6 +126,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	}
 	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
+	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 
 	english, arabic := identityPolicySets()
 	policies, err := identity.NewStaticPolicySetResolver(english, arabic)
@@ -348,7 +349,10 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/learn/reports":                                                 {Method: http.MethodPost, Path: "/api/v1/learn/reports", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses/:id":                                                    {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/candidate":                                          {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/subject":                                            {Method: http.MethodPut, Path: "/api/v1/courses/:id/subject", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},
+	"PUT /api/v1/courses/:id/revisions/:revisionId/audience":                     {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/audience", Class: ClassOwnershipProtected},
+	"DELETE /api/v1/courses/:id/revisions/:revisionId/audience":                  {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/audience", Class: ClassOwnershipProtected},
 	"POST /api/v1/courses/:id/revisions/:revisionId/sections":                    {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/sections", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId":        {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId", Class: ClassOwnershipProtected},
 	"DELETE /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId":       {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId", Class: ClassOwnershipProtected},
@@ -393,6 +397,9 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/course-access-invitations/:id/reject":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/reject", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/course-access-invitations/:id/cancel":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/cancel", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/course-access-invitations/:id/resend":  {Method: http.MethodPost, Path: "/api/v1/admin/course-access-invitations/:id/resend", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/purchase-requests":                      {Method: http.MethodGet, Path: "/api/v1/admin/purchase-requests", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/purchase-requests/:id/confirm-payment": {Method: http.MethodPost, Path: "/api/v1/admin/purchase-requests/:id/confirm-payment", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/purchase-requests/:id/cancel":          {Method: http.MethodPost, Path: "/api/v1/admin/purchase-requests/:id/cancel", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/entitlements/:id":                       {Method: http.MethodGet, Path: "/api/v1/admin/entitlements/:id", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/entitlements/:id/expiry":                {Method: http.MethodPut, Path: "/api/v1/admin/entitlements/:id/expiry", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/entitlements/:id/revocation":           {Method: http.MethodPost, Path: "/api/v1/admin/entitlements/:id/revocation", Class: ClassCapabilityProtected},
@@ -400,6 +407,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/me/course-access-invitations/:id":             {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/me/course-access-invitations/:id/accept":     {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},
 	"GET /api/v1/me/course-access":                             {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
+	"POST /api/v1/purchase-requests":                           {Method: http.MethodPost, Path: "/api/v1/purchase-requests", Class: ClassAnonymous},
 }
 
 type fakeOwnershipChecker struct{}

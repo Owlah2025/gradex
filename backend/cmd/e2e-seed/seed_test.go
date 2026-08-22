@@ -58,6 +58,8 @@ func TestMain(m *testing.M) {
 	var lessonIDParam string
 	var courseIDParam string
 	var issueSessionFlag bool
+	var issueLoadtestSessionsFlag bool
+	var loadtestFixtures bool
 	var useRegistrationPassword bool
 	var emailParam string
 	var accessMutationParam string
@@ -77,10 +79,15 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
 	flag.StringVar(&invitationIDParam, "invitation", "", "Invitation ID for query")
 	flag.BoolVar(&issueSessionFlag, "issue-session", false, "Issue a production-valid session for a seeded Student and emit its cookie and CSRF token")
+	flag.BoolVar(&issueLoadtestSessionsFlag, "issue-loadtest-sessions", false, "Issue production-valid sessions for the disposable load-test Students")
+	flag.BoolVar(&loadtestFixtures, "loadtest", false, "Add the disposable LG-019 load-test population and emit its non-secret manifest")
 	flag.BoolVar(&useRegistrationPassword, "use-registration-password", false, "Authenticate session issuance with the run-scoped registration password")
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
 	flag.Parse()
+	if loadtestFixtures && issueLoadtestSessionsFlag {
+		log.Fatalf("-loadtest and -issue-loadtest-sessions are separate operations")
+	}
 
 	// Is this the seeding tool, or an ordinary repository-wide `go test ./...`?
 	//
@@ -232,6 +239,26 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if issueLoadtestSessionsFlag {
+		password := os.Getenv("GRADEX_LOADTEST_PASSWORD")
+		if password == "" {
+			log.Fatalf("-issue-loadtest-sessions requires GRADEX_LOADTEST_PASSWORD")
+		}
+		outputPath := os.Getenv("GRADEX_LOADTEST_SESSION_FILE")
+		if outputPath == "" {
+			log.Fatalf("-issue-loadtest-sessions requires GRADEX_LOADTEST_SESSION_FILE")
+		}
+		sessions, err := issueLoadtestSessions(ctx, targetDSN, password)
+		if err != nil {
+			log.Fatalf("issuing load-test sessions: %v", err)
+		}
+		if err := writeLoadtestSessionManifest(outputPath, sessions); err != nil {
+			log.Fatalf("writing protected load-test sessions: %v", err)
+		}
+		log.Printf("issued %d protected load-test sessions", len(sessions.Sessions))
+		os.Exit(0)
+	}
+
 	if queryLearningState {
 		if studentIDParam == "" || courseIDParam == "" {
 			log.Fatalf("-query-learning-state requires -student and -course flags")
@@ -352,6 +379,21 @@ func TestMain(m *testing.M) {
 
 	if err := seedFixtures(ctx, pool); err != nil {
 		log.Fatalf("seeding fixtures: %v", err)
+	}
+	if loadtestFixtures {
+		password := os.Getenv("GRADEX_LOADTEST_PASSWORD")
+		if password == "" {
+			log.Fatalf("-loadtest requires GRADEX_LOADTEST_PASSWORD")
+		}
+		manifest, err := seedLoadtestFixtures(ctx, pool, password)
+		if err != nil {
+			log.Fatalf("seeding load-test fixtures: %v", err)
+		}
+		encoded, err := json.Marshal(manifest)
+		if err != nil {
+			log.Fatalf("encoding load-test manifest: %v", err)
+		}
+		fmt.Printf("%s", encoded)
 	}
 
 	log.Printf("e2e database %s seeding completed successfully", targetDB)
@@ -646,6 +688,25 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("insert student 3 creds: %w", err)
 	}
 
+	// Dedicated account for the purchase-flow existing-account proof. It must not
+	// reuse the canonical unentitled Student, whose no-access state is asserted
+	// by S6/S11 and other retained authorization journeys.
+	purchaseStudentID := "a0000000-0000-0000-0000-000000000005"
+	_, err = tx.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+		VALUES ($1, 'student-purchase-existing@example.test', 'student-purchase-existing@example.test', 'STUDENT', 'ACTIVE', 'Purchase Existing Student', $2)
+	`, purchaseStudentID, now)
+	if err != nil {
+		return fmt.Errorf("insert purchase existing student: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		VALUES ($1, $2, 'ACTIVE')
+	`, purchaseStudentID, passwordHash.Expose())
+	if err != nil {
+		return fmt.Errorf("insert purchase existing student creds: %w", err)
+	}
+
 	// Create Instructor
 	instructorID := "a0000000-0000-0000-0000-000000000003"
 	_, err = tx.Exec(ctx, `
@@ -711,6 +772,16 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	`, revisionID, courseID)
 	if err != nil {
 		return fmt.Errorf("update live revision: %w", err)
+	}
+	// The public Course needs one real informational price for the manual
+	// purchase-request journey. It is still a server-owned integer-fils value;
+	// no purchase, invitation, or entitlement is seeded from it.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO course_price_changes (course_id, new_value_minor_units, changed_by_account_id, reason)
+		VALUES ($1, 25000, $2, 'E2E published Course price')
+	`, courseID, adminAccountID)
+	if err != nil {
+		return fmt.Errorf("insert published Course price: %w", err)
 	}
 
 	// Create Section Identities & Sections (out-of-order DB insertion to verify authored ordering)

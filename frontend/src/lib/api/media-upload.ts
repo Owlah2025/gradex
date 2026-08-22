@@ -17,6 +17,26 @@ import { authenticatedRequest } from "./http";
 export const ACCEPTED_VIDEO_CONTENT_TYPES = ["video/mp4"] as const;
 
 /**
+ * The Lesson Resource types the launch profile accepts: PDF and DOCX.
+ *
+ * The server decides this, not the browser. It re-reads the stored object and
+ * proves the real format — for DOCX it parses the whole OOXML package and
+ * rejects a renamed archive or a macro-bearing document — so this list only
+ * spares the Instructor an upload that would certainly be refused.
+ */
+export const ACCEPTED_RESOURCE_CONTENT_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+] as const;
+
+/** File extensions offered alongside the media types, for browsers that report
+ *  an empty or generic type for a .docx picked from disk. */
+export const ACCEPTED_RESOURCE_EXTENSIONS = [".pdf", ".docx"] as const;
+
+/** Per-file ceiling for a Lesson Resource (D-011: 50 MB). The API enforces it. */
+export const MAX_RESOURCE_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+/**
  * Client-side ceiling for a single browser upload.
  *
  * This is a usability bound, not the security bound: the API enforces
@@ -52,8 +72,39 @@ export type MediaAssetStatus = {
 
 export type LocalisedInput = { locale: "ar" | "en"; csrf: string };
 
-/** States the pipeline will not leave on its own; polling stops at these. */
-const TERMINAL_STATES = new Set(["READY", "SCAN_FAILED", "PROCESSING_FAILED", "REJECTED", "FAILED"]);
+/**
+ * States the pipeline will not leave on its own; polling stops at these.
+ *
+ * These are the API's own failure states, spelled exactly as it reports them —
+ * `PROCESS_FAILED`, not `PROCESSING_FAILED`. A mismatch here would leave a
+ * failed upload spinning until the poll timed out instead of showing the
+ * Instructor what actually went wrong.
+ *
+ * `VALIDATED` is deliberately absent: it is a real state a D-088 video passes
+ * through on its way to PROCESSING, so polling must continue past it.
+ */
+const TERMINAL_STATES = new Set(["READY", "SCAN_FAILED", "SCAN_ERROR", "PROCESS_FAILED"]);
+
+/** Locale-aware explanation for a state the pipeline stopped at. */
+export function describeAssetState(state: string, locale: "ar" | "en"): string {
+  const isAr = locale === "ar";
+  switch (state) {
+    case "SCAN_FAILED":
+      return isAr
+        ? "رفض الفحص هذا الملف. اختر ملفًا آخر."
+        : "The file was rejected by content checks. Choose a different file.";
+    case "SCAN_ERROR":
+      return isAr
+        ? "تعذر إكمال فحص الملف. حاول مرة أخرى لاحقًا."
+        : "The file could not be checked. Try again later.";
+    case "PROCESS_FAILED":
+      return isAr
+        ? "تعذر تجهيز الملف للعرض. حاول رفعه مرة أخرى."
+        : "The file could not be prepared for playback. Try uploading it again.";
+    default:
+      return isAr ? `حالة الملف: ${state}` : `File state: ${state}`;
+  }
+}
 
 export function isReadyState(state: string): boolean {
   return state === "READY";
@@ -84,10 +135,62 @@ export function validateSelectedVideo(file: File, locale: "ar" | "en"): string |
   return null;
 }
 
-export async function beginVideoUpload(
+export type AssetKind = "VIDEO" | "RESOURCE" | "PREVIEW";
+
+/**
+ * Resolves the content type to declare for a picked file.
+ *
+ * Browsers are inconsistent about .docx: some report the OOXML type, some
+ * report a generic ZIP type, and some report nothing at all. The extension is
+ * used only to pick which *allowed* type to declare — it is never treated as
+ * proof of format, because the server independently parses the stored bytes.
+ */
+export function resourceContentType(file: File): string | null {
+  const declared = (file.type || "").toLowerCase();
+  if ((ACCEPTED_RESOURCE_CONTENT_TYPES as readonly string[]).includes(declared)) {
+    return declared;
+  }
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  return null;
+}
+
+/**
+ * Rejects a Lesson Resource the server would certainly refuse. As with video,
+ * this is convenience only: the API re-checks size, real format, and checksum
+ * against the exact stored object.
+ */
+export function validateSelectedResource(
+  file: File,
+  locale: "ar" | "en",
+): { contentType: string } | { error: string } {
+  const isAr = locale === "ar";
+  const contentType = resourceContentType(file);
+  if (!contentType) {
+    return { error: isAr ? "يجب اختيار ملف PDF أو DOCX." : "Select a PDF or DOCX file." };
+  }
+  if (file.size <= 0) {
+    return { error: isAr ? "الملف فارغ." : "The selected file is empty." };
+  }
+  if (file.size > MAX_RESOURCE_UPLOAD_BYTES) {
+    return {
+      error: isAr
+        ? "حجم الملف يتجاوز الحد المسموح به للمرفقات (50 ميغابايت)."
+        : "The file exceeds the 50 MB limit for Lesson Resources.",
+    };
+  }
+  return { contentType };
+}
+
+export async function beginUpload(
   input: LocalisedInput & {
     courseID: string;
-    lessonID: string;
+    lessonID?: string;
+    revisionID?: string;
+    kind: AssetKind;
     contentType: string;
     sizeBytes: number;
   },
@@ -100,7 +203,8 @@ export async function beginVideoUpload(
     {
       course_id: input.courseID,
       lesson_id: input.lessonID,
-      kind: "VIDEO",
+	  revision_id: input.revisionID,
+      kind: input.kind,
       content_type: input.contentType,
       size_bytes: input.sizeBytes,
     },
@@ -111,6 +215,40 @@ export async function beginVideoUpload(
     );
   }
   return ticket;
+}
+
+export async function beginVideoUpload(
+  input: LocalisedInput & {
+    courseID: string;
+    lessonID: string;
+    contentType: string;
+    sizeBytes: number;
+  },
+): Promise<UploadTicket> {
+  return beginUpload({ ...input, kind: "VIDEO" });
+}
+
+export async function beginResourceUpload(
+  input: LocalisedInput & {
+    courseID: string;
+    lessonID: string;
+    contentType: string;
+    sizeBytes: number;
+  },
+): Promise<UploadTicket> {
+  return beginUpload({ ...input, kind: "RESOURCE" });
+}
+
+/** Begins a separate scanner-gated public-preview upload for one editable revision. */
+export async function beginPublicPreviewUpload(
+  input: LocalisedInput & {
+    courseID: string;
+    revisionID: string;
+    contentType: string;
+    sizeBytes: number;
+  },
+): Promise<UploadTicket> {
+  return beginUpload({ ...input, kind: "PREVIEW" });
 }
 
 export type DirectUploadResult = { storageObjectVersion: string };
@@ -173,7 +311,7 @@ export async function sha256Hex(file: File): Promise<string> {
     .join("");
 }
 
-export async function completeVideoUpload(
+export async function completeUpload(
   input: LocalisedInput & {
     assetVersionID: string;
     providerEventID: string;
@@ -207,6 +345,9 @@ export async function completeVideoUpload(
   }
   return result;
 }
+
+/** Retained name for the video call site; the request is kind-independent. */
+export const completeVideoUpload = completeUpload;
 
 export async function getMediaAssetStatus(
   assetVersionID: string,

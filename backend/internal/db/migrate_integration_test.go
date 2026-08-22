@@ -128,6 +128,7 @@ var (
 	protectedLearningTables  = []string{"enrollments", "content_reports"}
 	courseAccessGrantTables  = []string{"course_access_invitations"}
 	transactionalEmailTables = []string{"transactional_email_deliveries", "transactional_email_attempts"}
+	purchaseRequestTables    = []string{"purchase_requests"}
 )
 
 func allTables() []string {
@@ -141,7 +142,8 @@ func allTables() []string {
 	all = append(all, mediaTables...)
 	all = append(all, protectedLearningTables...)
 	all = append(all, courseAccessGrantTables...)
-	return append(all, transactionalEmailTables...)
+	all = append(all, transactionalEmailTables...)
+	return append(all, purchaseRequestTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -630,15 +632,111 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
-func TestMaxSchemaVersionTracksMailpitEmailSchema(t *testing.T) {
+func TestMaxSchemaVersionTracksSubjectCodeIdentitySchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
-	if MaxSchemaVersion != MailpitEmailSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want MailpitEmailSchemaVersion %d", MaxSchemaVersion, MailpitEmailSchemaVersion)
+	if MaxSchemaVersion != SubjectCodeIdentitySchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want SubjectCodeIdentitySchemaVersion %d",
+			MaxSchemaVersion, SubjectCodeIdentitySchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
 			MailpitEmailSchemaVersion, EmailActivationSchemaVersion)
+	}
+	// D-088 lands as two steps on purpose: PostgreSQL refuses to use a new enum
+	// value in the transaction that created it, so the VALIDATED label is added
+	// alone before anything can reference it.
+	if MediaValidatedStateSchemaVersion != MailpitEmailSchemaVersion+1 {
+		t.Fatalf("validated state schema = %d, want one past Mailpit email %d",
+			MediaValidatedStateSchemaVersion, MailpitEmailSchemaVersion)
+	}
+	if TrustedValidationSchemaVersion != MediaValidatedStateSchemaVersion+1 {
+		t.Fatalf("trusted validation schema = %d, want one past the validated state %d",
+			TrustedValidationSchemaVersion, MediaValidatedStateSchemaVersion)
+	}
+	if ManualPurchaseRequestsSchemaVersion != TrustedValidationSchemaVersion+1 {
+		t.Fatalf("manual purchase schema = %d, want one past trusted validation %d",
+			ManualPurchaseRequestsSchemaVersion, TrustedValidationSchemaVersion)
+	}
+	if RevisionScopedPreviewSchemaVersion != ManualPurchaseRequestsSchemaVersion+1 {
+		t.Fatalf("revision-scoped public preview schema = %d, want one past manual purchase %d",
+			RevisionScopedPreviewSchemaVersion, ManualPurchaseRequestsSchemaVersion)
+	}
+	// D-091 T1 lands as one additive step on top of the preview schema.
+	if AcademicCatalogSchemaVersion != RevisionScopedPreviewSchemaVersion+1 {
+		t.Fatalf("academic catalog schema = %d, want one past revision-scoped preview %d",
+			AcademicCatalogSchemaVersion, RevisionScopedPreviewSchemaVersion)
+	}
+	// D-092 T3 lands as one additive step on top of the academic catalog.
+	if StudentAcademicProfileSchemaVersion != AcademicCatalogSchemaVersion+1 {
+		t.Fatalf("student academic profile schema = %d, want one past the academic catalog %d",
+			StudentAcademicProfileSchemaVersion, AcademicCatalogSchemaVersion)
+	}
+	// D-093 T4-A lands as one additive step on top of the Student profile.
+	if CourseAcademicIdentitySchemaVersion != StudentAcademicProfileSchemaVersion+1 {
+		t.Fatalf("course academic identity schema = %d, want one past the student profile %d",
+			CourseAcademicIdentitySchemaVersion, StudentAcademicProfileSchemaVersion)
+	}
+	// T4-A.1 hardens Subject code identity in its own migration rather than by
+	// editing 0025, which is already accepted and proven.
+	if SubjectCodeIdentitySchemaVersion != CourseAcademicIdentitySchemaVersion+1 {
+		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
+			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
+	}
+}
+
+func TestManualPurchaseRollbackGuardRefusesLivePurchaseEntitlementWithoutDirtyingSchema(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating up: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	const adminID = "41000000-0000-0000-0000-000000000001"
+	const studentID = "41000000-0000-0000-0000-000000000002"
+	const courseID = "42000000-0000-0000-0000-000000000001"
+	var invitationID string
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES
+		($1::uuid, 'rollback-admin@example.test', 'rollback-admin@example.test', 'ADMIN', 'ACTIVE', 'Rollback Admin'),
+		($2::uuid, 'rollback-student@example.test', 'rollback-student@example.test', 'STUDENT', 'ACTIVE', 'Rollback Student')
+	`, adminID, studentID); err != nil {
+		t.Fatalf("seeding rollback accounts: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, courseID, adminID); err != nil {
+		t.Fatalf("seeding rollback Course: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_access_invitations (normalized_email, email, course_id, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
+		VALUES ('rollback-student@example.test', 'rollback-student@example.test', $1::uuid, $2::uuid, $3::uuid, $2::uuid, 'APPROVED')
+		RETURNING id::text
+	`, courseID, adminID, studentID).Scan(&invitationID); err != nil {
+		t.Fatalf("seeding purchase invitation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
+		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'PURCHASE_REQUEST', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
+	`, studentID, courseID, invitationID); err != nil {
+		t.Fatalf("creating live PURCHASE_REQUEST entitlement: %v", err)
+	}
+	if err := CheckManualPurchaseRollbackSafety(ctx, pool); err == nil || !strings.Contains(err.Error(), "PURCHASE_REQUEST entitlements exist") {
+		t.Fatalf("rollback guard error = %v, want actionable purchase-entitlement refusal", err)
+	}
+	state, err := ReadSchemaState(ctx, pool)
+	// The property is that a refused rollback leaves the fully-migrated marker
+	// untouched and clean, so this tracks MaxSchemaVersion rather than whichever
+	// migration happened to be last when the test was written.
+	if err != nil || state.Version != MaxSchemaVersion || state.Dirty {
+		t.Fatalf("schema marker after refused rollback = %+v (err=%v), want clean version %d", state, err, MaxSchemaVersion)
+	}
+	if !tableExists(t, pool, "purchase_requests") {
+		t.Fatal("purchase request schema changed before rollback guard refused")
+	}
+	var grants int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE grant_source='PURCHASE_REQUEST'`).Scan(&grants); err != nil || grants != 1 {
+		t.Fatalf("live purchase entitlement after refusal = %d (err=%v), want 1", grants, err)
 	}
 }
 
@@ -1544,6 +1642,12 @@ func TestCourseAccessGrantSchemaInvariants(t *testing.T) {
 		`INSERT INTO entitlements
 		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
 		 VALUES ($1, 'COURSE', $2, $2, 'MANUAL_INVITATION', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
+		adminAccountID, courseID,
+	)
+	assertConstraintViolation(t, pool, ctx, "ent_purchase_needs_invitation",
+		`INSERT INTO entitlements
+		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		 VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
 		adminAccountID, courseID,
 	)
 

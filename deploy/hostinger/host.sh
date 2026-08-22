@@ -17,7 +17,7 @@ die() { note "$*"; exit 1; }
 
 require_tools() {
   local tool
-  for tool in awk curl date docker grep jq mktemp openssl readlink sed sha256sum stat timeout; do
+  for tool in awk curl date docker flock grep jq mktemp openssl readlink sed sha256sum stat timeout; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
@@ -53,7 +53,7 @@ validate_environment() {
   for name in GRADEX_RELEASE_SHA GRADEX_BACKEND_IMAGE GRADEX_FRONTEND_IMAGE GRADEX_PROOF_IMAGE \
     STAGING_HOSTNAME ACME_EMAIL PUBLIC_ORIGIN POSTGRES_DB POSTGRES_PASSWORD DATABASE_URL \
     GRADEX_E2E_ADMIN_DB_URL RESTORE_POSTGRES_PASSWORD RESTORE_DATABASE_URL REDIS_PASSWORD S3_ENDPOINT S3_BUCKET \
-    S3_ACCESS_KEY S3_SECRET_KEY PLAYBACK_TOKEN_SECRET SESSION_CSRF_KEY \
+	S3_ACCESS_KEY S3_SECRET_KEY PLAYBACK_TOKEN_SECRET SALES_WHATSAPP_NUMBER SESSION_CSRF_KEY \
     ANONYMOUS_COOKIE_SIGNING_KEY ANONYMOUS_CSRF_KEY ADMISSION_LIMITER_HMAC_KEY \
     OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION OUTBOX_PROTECTED_PAYLOAD_KEY; do
     require_value "$name"
@@ -63,6 +63,8 @@ validate_environment() {
   [ "$PUBLIC_ORIGIN" = "https://$STAGING_HOSTNAME" ] || die "PUBLIC_ORIGIN must exactly match the HTTPS staging hostname"
   [[ "$S3_ENDPOINT" =~ ^https://[A-Za-z0-9]+\.r2\.cloudflarestorage\.com$ ]] ||
     die "S3_ENDPOINT must be the credential-free Cloudflare R2 S3 API origin"
+	[[ "$SALES_WHATSAPP_NUMBER" =~ ^[0-9]{7,15}$ ]] ||
+		die "SALES_WHATSAPP_NUMBER must contain 7 to 15 digits"
   case "$GRADEX_BACKEND_IMAGE $GRADEX_FRONTEND_IMAGE $GRADEX_PROOF_IMAGE" in
     *:latest*|*' 'latest*) die "provider releases may not use latest image tags" ;;
   esac
@@ -86,6 +88,15 @@ validate_environment() {
 compose() {
   sed -n '1,999p' "$S12_COMPOSE_FILE" |
     docker compose --file - --project-directory "$S12_HOST_DIR" --project-name "$S12_PROJECT" "$@"
+}
+
+image_max_schema_version() {
+  local image="$1" version
+  version="$(docker run --rm --entrypoint gradex-migrate "$image" max-version)" ||
+    die "could not read max schema version from backend image $image"
+  [[ "$version" =~ ^[0-9]+$ ]] ||
+    die "backend image $image returned an invalid max schema version"
+  printf '%s' "$version"
 }
 
 prepare_redis_tls() {
@@ -185,7 +196,7 @@ verify_environment() {
   require_tools
   load_environment
   validate_environment
-  local postgres_id redis_id worker_id schema_state unauthenticated authenticated
+  local postgres_id redis_id worker_id schema_state expected_schema unauthenticated authenticated
   postgres_id="$(service_id postgres)"
   redis_id="$(service_id redis)"
   worker_id="$(service_id worker)"
@@ -193,7 +204,9 @@ verify_environment() {
 
   schema_state="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
     --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
-  [ "$schema_state" = "15|false" ] || die "schema is not clean version 15"
+  expected_schema="$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")"
+  [ "$schema_state" = "$expected_schema|false" ] ||
+    die "schema is $schema_state, expected clean version $expected_schema for selected backend image"
   [ "$(docker inspect --format '{{.State.Status}}' "$worker_id")" = running ] || die "worker is not running"
 
   if timeout 5 docker exec "$redis_id" redis-cli -h redis -p 6379 ping >/dev/null 2>&1; then
@@ -210,7 +223,7 @@ verify_environment() {
   curl --fail --silent --show-error "$PUBLIC_ORIGIN/healthz" | jq --exit-status '.status == "ok"' >/dev/null
   curl --fail --silent --show-error "$PUBLIC_ORIGIN/readyz" |
     jq --exit-status '.status == "ok" and .checks.postgres == "ok" and .checks.redis == "ok" and .checks.schema == "ok"' >/dev/null
-  note "public probes, schema 15, worker, and authenticated verified-TLS Redis passed"
+  note "public probes, clean schema $expected_schema, worker, and authenticated verified-TLS Redis passed"
 }
 
 seed_smoke() {
@@ -266,31 +279,71 @@ close_db_tunnel() {
 create_backup() {
   require_tools
   load_environment
-  local postgres_id stamp backup partial
+  local postgres_id stamp backup partial schema_file schema_before schema_after backup_artifact backup_lock_fd
+
+  mkdir -p "$S12_BACKUP_DIR"
+  chmod 700 "$S12_BACKUP_DIR"
+
+  umask 077
+  exec {backup_lock_fd}>"$S12_BACKUP_DIR/.backup.lock"
+  flock --nonblock "$backup_lock_fd" ||
+    die "another provider backup is already running"
+
   postgres_id="$(service_id postgres)"
   [ -n "$postgres_id" ] || die "source PostgreSQL is absent"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   backup="$S12_BACKUP_DIR/gradex-$stamp.dump"
   partial="$backup.partial"
+  schema_file="$backup.schema-state"
+
+  for backup_artifact in "$backup" "$partial" "$backup.sha256" "$schema_file" "$schema_file.sha256"; do
+    [ ! -e "$backup_artifact" ] && [ ! -L "$backup_artifact" ] ||
+      die "refusing to reuse provider backup identity $stamp"
+  done
+
+  schema_before="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
+  [[ "$schema_before" =~ ^[0-9]+\|false$ ]] ||
+    die "refusing backup from invalid or non-clean schema state: $schema_before"
+
   umask 077
   docker exec "$postgres_id" pg_dump --format=custom --no-owner --no-acl \
     --username gradex --dbname "$POSTGRES_DB" >"$partial"
   [ -s "$partial" ] || die "backup is empty"
+
+  schema_after="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
+  [ "$schema_after" = "$schema_before" ] ||
+    die "schema changed while backup was being created: $schema_before -> $schema_after"
+
   mv "$partial" "$backup"
+  printf '%s\n' "$schema_before" >"$schema_file"
   sha256sum "$backup" >"$backup.sha256"
+  sha256sum "$schema_file" >"$schema_file.sha256"
   date +%s >"$S12_BACKUP_DIR/latest.completed-at"
-  chmod 600 "$backup" "$backup.sha256" "$S12_BACKUP_DIR/latest.completed-at"
+
+  chmod 600     "$backup"     "$backup.sha256"     "$schema_file"     "$schema_file.sha256"     "$S12_BACKUP_DIR/latest.completed-at"
+
   ln -sfn "$(basename "$backup")" "$S12_BACKUP_DIR/latest.dump"
-  note "created checksum-protected provider-hosted database backup $stamp"
+  note "created checksum-protected provider-hosted database backup $stamp at schema $schema_before"
 }
 
 restore_backup() {
   require_tools
   load_environment
-  local backup source_id target_id target_volume
+  local backup schema_file source_id target_id target_volume
   backup="$(readlink -f "$S12_BACKUP_DIR/latest.dump")"
   [ -f "$backup" ] || die "latest backup is absent"
+  schema_file="$backup.schema-state"
+
+  [ -f "$schema_file" ] || die "backup schema metadata is absent"
+  [ -f "$schema_file.sha256" ] || die "backup schema metadata checksum is absent"
+
   (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$backup").sha256") >/dev/null
+  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$schema_file").sha256") >/dev/null
+
+  rm -f -- "$S12_BACKUP_DIR/restored-source"
+
   source_id="$(service_id postgres)"
   [ -n "$source_id" ] || die "source PostgreSQL is absent"
   target_volume="${S12_PROJECT}_restore-data"
@@ -304,13 +357,42 @@ restore_backup() {
   [ -n "$target_id" ] && [ "$source_id" != "$target_id" ] || die "restore target is not isolated from source"
   docker exec --interactive "$target_id" pg_restore --exit-on-error --single-transaction \
     --no-owner --no-acl --username gradex_restore --dbname gradex_restore <"$backup"
-  note "restored provider backup into a fresh isolated PostgreSQL volume"
+
+  local restored_marker restored_marker_tmp
+  restored_marker="$S12_BACKUP_DIR/restored-source"
+  restored_marker_tmp="$(mktemp "$S12_BACKUP_DIR/restored-source.XXXXXX")"
+  chmod 600 "$restored_marker_tmp"
+  printf '%s\n' "$(basename "$backup")" >"$restored_marker_tmp"
+  mv -- "$restored_marker_tmp" "$restored_marker"
+
+  note "restored provider backup $(basename "$backup") into a fresh isolated PostgreSQL volume"
 }
 
 verify_restore() {
   require_tools
   load_environment
-  local target_id restored_state
+  local backup schema_file restored_marker restored_source expected_schema_state target_id restored_state
+  local version dirty accounts courses invitations provenanced enrollments
+
+  restored_marker="$S12_BACKUP_DIR/restored-source"
+  [ -f "$restored_marker" ] || die "restored backup identity is absent"
+  restored_source="$(cat "$restored_marker")"
+  [[ "$restored_source" =~ ^gradex-[0-9]{8}T[0-9]{6}Z\.dump$ ]] ||
+    die "restored backup identity is invalid: $restored_source"
+
+  backup="$S12_BACKUP_DIR/$restored_source"
+  [ -f "$backup" ] || die "restored source backup is absent: $restored_source"
+  schema_file="$backup.schema-state"
+  [ -f "$schema_file" ] || die "backup schema metadata is absent"
+  [ -f "$schema_file.sha256" ] || die "backup schema metadata checksum is absent"
+
+  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$backup").sha256") >/dev/null
+  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$schema_file").sha256") >/dev/null
+
+  expected_schema_state="$(cat "$schema_file")"
+  [[ "$expected_schema_state" =~ ^[0-9]+\|false$ ]] ||
+    die "backup schema metadata is invalid: $expected_schema_state"
+
   target_id="$(service_id restore-postgres)"
   [ -n "$target_id" ] || die "restore target is absent"
   restored_state="$(docker exec "$target_id" psql --no-psqlrc --username gradex_restore --dbname gradex_restore \
@@ -322,14 +404,18 @@ verify_restore() {
         (SELECT count(*) FROM course_access_invitations) || '|' ||
         (SELECT count(*) FROM entitlements WHERE state = 'ACTIVE' AND source_invitation_id IS NOT NULL) || '|' ||
         (SELECT count(*) FROM enrollments);")"
+
   IFS='|' read -r version dirty accounts courses invitations provenanced enrollments <<<"$restored_state"
-  [ "$version" = 15 ] && [ "$dirty" = false ] || die "restored schema is not clean version 15"
+  [ "$version|$dirty" = "$expected_schema_state" ] ||
+    die "restored schema $version|$dirty does not match backup schema $expected_schema_state"
+
   for value in "$accounts" "$courses" "$invitations" "$provenanced" "$enrollments"; do
     [ "$value" -gt 0 ] || die "restore is missing an identity/access-critical record class"
   done
+
   compose --profile restore up --detach api-restore
   wait_for_status api-restore healthy
-  note "restored schema, identity, Course, invitation provenance, Entitlement, Enrollment, and API readiness passed"
+  note "restored schema $expected_schema_state, identity, Course, invitation provenance, Entitlement, Enrollment, and API readiness passed"
 }
 
 manifest_value() {
@@ -367,6 +453,7 @@ apply_release() {
   require_tools
   load_environment
   local manifest="$1" release backend frontend proof postgres_id state provenance image
+  local schema_version schema_dirty target_max_schema
   [ -f "$manifest" ] || die "release manifest is absent"
   release="$(manifest_value "$manifest" GRADEX_RELEASE_SHA)"
   backend="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)"
@@ -385,7 +472,13 @@ apply_release() {
   postgres_id="$(service_id postgres)"
   state="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
     --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
-  [ "$state" = "15|false" ] || die "application release requires forward schema 15|false"
+  IFS='|' read -r schema_version schema_dirty <<<"$state"
+  [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $state"
+  [ "$schema_dirty" = false ] || die "schema is dirty: $state"
+
+  target_max_schema="$(image_max_schema_version "$backend")"
+  [ "$schema_version" -le "$target_max_schema" ] ||
+    die "schema $schema_version is newer than target release maximum $target_max_schema"
   provenance="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
     --tuples-only --no-align --command "SELECT count(*) FROM entitlements WHERE source_invitation_id IS NOT NULL;")"
   export GRADEX_BACKEND_IMAGE="$backend" GRADEX_FRONTEND_IMAGE="$frontend"
@@ -397,7 +490,7 @@ apply_release() {
     --tuples-only --no-align --command "SELECT count(*) FROM entitlements WHERE source_invitation_id IS NOT NULL;")" = "$provenance" ] ||
     die "Entitlement provenance changed during application release selection"
   persist_release_selection "$release" "$backend" "$frontend" "$proof"
-  note "application release $release is healthy on unchanged schema 15 and provenance"
+  note "application release $release is healthy on unchanged schema $schema_version (target max $target_max_schema) and provenance"
 }
 
 usage() {

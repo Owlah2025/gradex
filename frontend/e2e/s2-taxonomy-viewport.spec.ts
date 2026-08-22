@@ -14,7 +14,28 @@ const surfaces = [
 async function mockCatalogAPI(page: Page) {
   await page.route("**/api/v1/session/bootstrap", (route) => route.fulfill({ json: { csrf_token: "csrf" } }));
   await page.route("**/api/v1/session", (route) => route.fulfill({ status: 401, json: { type: "https://api.gradex.com/problems/authentication-required" } }));
-  await page.route("**/api/v1/courses", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/courses", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "00000000-0000-0000-0000-0000000000c1",
+          owner_account_id: "00000000-0000-0000-0000-0000000000a1",
+          lifecycle: "DRAFT",
+          classification_model: "LEGACY_TAXONOMY",
+          editable_revision: {
+            id: "00000000-0000-0000-0000-0000000000r1",
+            state: "DRAFT",
+            revision_number: 1,
+            title_ar: "دورة قديمة",
+            title_en: "Legacy Course",
+            description_ar: "",
+            description_en: "",
+            sections: [],
+          },
+        },
+      ],
+    }),
+  );
   await page.route("**/api/v1/taxonomy/terms", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/admin/review/queue", (route) => route.fulfill({ json: [] }));
 }

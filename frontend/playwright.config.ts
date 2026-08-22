@@ -67,6 +67,34 @@ export default defineConfig({
   // and ffmpeg, so it has its own config and environment.
   testIgnore: ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**"],
   fullyParallel: false,
+  /**
+   * One worker, because this harness is single-tenant by construction.
+   *
+   * `fullyParallel: false` only serialises tests *within* a file — Playwright still runs separate
+   * spec files concurrently, defaulting to half the machine's cores. That contradicts everything
+   * the harness owns:
+   *
+   *  - one seeded database per *run*, created once in `globalSetup` and shared by every spec;
+   *  - one Go API and one Next server, each bound at startup to that single database/origin;
+   *  - process-global singletons at fixed paths — `LOCK_FILE_PATH`, `RUN_STATE_FILE_PATH`,
+   *    `API_BINARY_PATH`, `SEED_BINARY_PATH` — with `acquireEnvironmentLock` throwing outright if a
+   *    second run appears;
+   *  - specs that deliberately mutate *shared seeded authority rows by fixed id* through the seeder
+   *    binary (`s5-access-ends` revokes entitlements and suspends accounts; `s5-expired-entitlement`
+   *    rewrites access windows) while other specs read those same rows.
+   *
+   * Run concurrently, `s5-access-ends` revoked a Student's entitlement while `s5-lesson-player` was
+   * mid-playback for that same Student, so the failing set changed between runs of identical code
+   * and the suite could not be used as a regression instrument (GAP-05). This is not identifier
+   * collision, so unique-data factories cannot fix it: the specs are testing authority *removal* on
+   * shared fixtures.
+   *
+   * Per-worker isolation would mean a per-worker database, Go API, Next server, port set, Redis
+   * namespace, MinIO prefix, lock, run-state file and seeder invocation — replacing the harness
+   * rather than configuring it. That is recorded as test-infrastructure debt, not attempted here.
+   * Pinning the worker count restores the model the harness already documents.
+   */
+  workers: 1,
   globalSetup: externalDeployment ? undefined : "./e2e/global-setup.ts",
   globalTeardown: externalDeployment ? undefined : "./e2e/global-teardown.ts",
   // The HTML report is the retained artifact of record, so its destination is overridable: the CI

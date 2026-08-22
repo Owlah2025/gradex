@@ -21,23 +21,31 @@ import (
 // tables added by version 2, so serving against version 1 would turn every
 // authorization decision into an infrastructure fault.
 const (
-	MinSchemaVersion                  = 2
-	SessionSchemaVersion              = 4
-	AdmissionSchemaVersion            = 5
-	AuthenticatedSessionSchemaVersion = 6
-	PasswordRecoverySchemaVersion     = 7
-	StaffLifecycleSchemaVersion       = 8
-	CourseAuthoringSchemaVersion      = 9
-	RevisionIntegritySchemaVersion    = 10
-	CatalogSearchSchemaVersion        = 11
-	MediaAndEntitlementSchemaVersion  = 12
-	EnrollmentSchemaVersion           = 13
-	ProtectedLearningSchemaVersion    = 14
-	CourseAccessGrantSchemaVersion    = 15
-	TransactionalEmailSchemaVersion   = 16
-	EmailActivationSchemaVersion      = 17
-	MailpitEmailSchemaVersion         = 18
-	MaxSchemaVersion                  = MailpitEmailSchemaVersion
+	MinSchemaVersion                    = 2
+	SessionSchemaVersion                = 4
+	AdmissionSchemaVersion              = 5
+	AuthenticatedSessionSchemaVersion   = 6
+	PasswordRecoverySchemaVersion       = 7
+	StaffLifecycleSchemaVersion         = 8
+	CourseAuthoringSchemaVersion        = 9
+	RevisionIntegritySchemaVersion      = 10
+	CatalogSearchSchemaVersion          = 11
+	MediaAndEntitlementSchemaVersion    = 12
+	EnrollmentSchemaVersion             = 13
+	ProtectedLearningSchemaVersion      = 14
+	CourseAccessGrantSchemaVersion      = 15
+	TransactionalEmailSchemaVersion     = 16
+	EmailActivationSchemaVersion        = 17
+	MailpitEmailSchemaVersion           = 18
+	MediaValidatedStateSchemaVersion    = 19
+	TrustedValidationSchemaVersion      = 20
+	ManualPurchaseRequestsSchemaVersion = 21
+	RevisionScopedPreviewSchemaVersion  = 22
+	AcademicCatalogSchemaVersion        = 23
+	StudentAcademicProfileSchemaVersion = 24
+	CourseAcademicIdentitySchemaVersion = 25
+	SubjectCodeIdentitySchemaVersion    = 26
+	MaxSchemaVersion                    = SubjectCodeIdentitySchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
@@ -55,6 +63,31 @@ var (
 	// supports.
 	ErrSchemaIncompatible = errors.New("schema version is not supported by this build")
 )
+
+// CheckManualPurchaseRollbackSafety is the preflight used by the canonical
+// migration command before it asks golang-migrate to execute 0021 down.
+// golang-migrate marks its target dirty before running SQL; performing this
+// guard on a separate, read-only-in-effect transaction therefore preserves a
+// clean migration marker when live purchase access makes rollback impossible.
+func CheckManualPurchaseRollbackSafety(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("database pool is required")
+	}
+	_, err := pool.Exec(ctx, `
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM entitlements WHERE grant_source = 'PURCHASE_REQUEST') THEN
+        RAISE EXCEPTION 'cannot roll back 0021: PURCHASE_REQUEST entitlements exist; retain schema 0021 or remove the live purchase data through an approved migration';
+    END IF;
+    IF EXISTS (SELECT 1 FROM purchase_requests) THEN
+        RAISE EXCEPTION 'cannot roll back 0021: purchase request records exist; retain schema 0021 or archive them through an approved migration';
+    END IF;
+END $$;`)
+	if err != nil {
+		return fmt.Errorf("manual purchase rollback safety guard: %w", err)
+	}
+	return nil
+}
 
 // SchemaState is what the bookkeeping table currently reports.
 type SchemaState struct {

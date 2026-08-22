@@ -91,16 +91,23 @@ func LevelFromString(level string) slog.Level {
 // /api/v1/lessons/:lessonID/video/publish — never the literal path, which
 // carries identifiers and can carry tokens.
 type RequestEvent struct {
-	RequestID             string
-	ParentRequestID       string
-	Method                string
-	RouteTemplate         string
-	Status                int
-	DurationMillis        int64
-	ResponseSize          int
-	SafeErrorCode         string
-	LimiterOutcome        string
-	AdmissionFailureStage AdmissionFailureStage
+	RequestID                   string
+	ParentRequestID             string
+	Method                      string
+	RouteTemplate               string
+	Status                      int
+	DurationMillis              int64
+	ResponseSize                int
+	SafeErrorCode               string
+	LimiterOutcome              string
+	AdmissionFailureStage       AdmissionFailureStage
+	PasswordVerificationQueued  bool
+	PasswordVerificationOutcome string
+	LoginCandidateMicros        int64
+	PasswordQueueMicros         int64
+	PasswordVerifyMicros        int64
+	SessionPrepareMicros        int64
+	SessionWriteMicros          int64
 	// Routine marks a high-frequency endpoint whose successful attempts are
 	// not worth an info line. Failures ignore it.
 	Routine bool
@@ -155,6 +162,17 @@ func (l *Logger) RequestCompleted(ev RequestEvent) {
 	if ev.AdmissionFailureStage.valid() {
 		attrs = append(attrs,
 			slog.String("admission_failure_stage", string(ev.AdmissionFailureStage)),
+		)
+	}
+	if ev.PasswordVerificationOutcome != "" {
+		attrs = append(attrs,
+			slog.Bool("password_verification_queued", ev.PasswordVerificationQueued),
+			slog.String("password_verification_outcome", Sanitize(ev.PasswordVerificationOutcome)),
+			slog.Int64("login_candidate_us", ev.LoginCandidateMicros),
+			slog.Int64("password_verification_queue_us", ev.PasswordQueueMicros),
+			slog.Int64("password_verification_us", ev.PasswordVerifyMicros),
+			slog.Int64("session_prepare_us", ev.SessionPrepareMicros),
+			slog.Int64("session_write_us", ev.SessionWriteMicros),
 		)
 	}
 

@@ -20,8 +20,9 @@ import (
 const accessMutationBodyLimit = 16 * 1024
 
 type accessHandlers struct {
-	repo  *access.Repository
-	clock func() time.Time
+	repo                *access.Repository
+	clock               func() time.Time
+	salesWhatsAppNumber string
 }
 
 type setDefaultAccessExpiryBody struct {
@@ -63,6 +64,23 @@ type rejectInvitationBody struct {
 	Reason string `json:"reason"`
 }
 
+type createPurchaseRequestBody struct {
+	CourseID string `json:"course_id"`
+	Email    string `json:"email"`
+}
+
+type createPurchaseRequestResponse struct {
+	Reference   string `json:"reference"`
+	WhatsAppURL string `json:"whatsapp_url"`
+}
+
+type adminPurchaseRequestListResponse struct {
+	PurchaseRequests []access.PurchaseRequest `json:"purchase_requests"`
+	Total            int                      `json:"total"`
+	Page             int                      `json:"page"`
+	Limit            int                      `json:"limit"`
+}
+
 type adminInvitationListResponse struct {
 	Invitations []access.Invitation `json:"invitations"`
 	Total       int                 `json:"total"`
@@ -77,13 +95,14 @@ type studentInvitationListResponse struct {
 func mountAccessRoutes(
 	v1 *gin.RouterGroup,
 	foundation *AccessFoundation,
+	admissionFoundation *AdmissionFoundation,
 	sessionFoundation *SessionFoundation,
 	authenticator auth.Authenticator,
 	principals identity.PrincipalResolver,
 	logger *logging.Logger,
 ) error {
-	if foundation == nil || foundation.repository == nil {
-		return errors.New("access foundation and repository are required")
+	if foundation == nil || foundation.repository == nil || admissionFoundation == nil {
+		return errors.New("access and admission foundations are required")
 	}
 
 	clock := foundation.clock
@@ -91,7 +110,18 @@ func mountAccessRoutes(
 		clock = time.Now
 	}
 
-	h := &accessHandlers{repo: foundation.repository, clock: clock}
+	h := &accessHandlers{
+		repo: foundation.repository, clock: clock, salesWhatsAppNumber: foundation.salesWhatsAppNumber,
+	}
+
+	// A purchase request is public by design. It creates no authority for the
+	// caller and accepts no client-owned price or payment state.
+	v1.POST("/purchase-requests",
+		strictJSONMiddleware(func() any { return &createPurchaseRequestBody{} }, accessMutationBodyLimit),
+		admissionFoundation.security.requireAdmission(),
+		admissionFoundation.requireRateDecision("purchase-requests", purchaseRequestIdentifier),
+		h.createPurchaseRequest,
+	)
 
 	// Admin mutations
 	adminAccessGroup := v1.Group("/admin")
@@ -122,6 +152,12 @@ func mountAccessRoutes(
 		adminAccessGroup.POST("/course-access-invitations/:id/resend",
 			h.resendCourseAccessInvitation,
 		)
+		adminAccessGroup.POST("/purchase-requests/:id/confirm-payment",
+			h.confirmPurchaseRequestPayment,
+		)
+		adminAccessGroup.POST("/purchase-requests/:id/cancel",
+			h.cancelPurchaseRequest,
+		)
 		// AD07 elevated-Admin entitlement operations (BR-026). Neither route can
 		// mint an Entitlement: both address one that Admin Approval already
 		// created.
@@ -143,6 +179,7 @@ func mountAccessRoutes(
 	)
 	{
 		adminReadGroup.GET("/course-access-invitations", h.listAdminCourseAccessInvitations)
+		adminReadGroup.GET("/purchase-requests", h.listAdminPurchaseRequests)
 		adminReadGroup.GET("/entitlements/:id", h.getAdminEntitlement)
 	}
 
@@ -173,6 +210,139 @@ func mountAccessRoutes(
 	}
 
 	return nil
+}
+
+func (h *accessHandlers) createPurchaseRequest(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*createPurchaseRequestBody)
+	if _, err := uuid.Parse(body.CourseID); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+	if _, err := identity.NormalizeEmail(body.Email); err != nil {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code: "INVALID_EMAIL", Detail: "A valid email address is required",
+			Location: problem.LocationBody, Parameter: "email",
+		}))
+		return
+	}
+	locale, ok := requestedLocale(c.GetHeader("Accept-Language"))
+	if !ok {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+	request, err := h.repo.CreatePurchaseRequest(c.Request.Context(), access.CreatePurchaseRequestParams{
+		CourseID: body.CourseID, Email: body.Email, Now: now,
+	})
+	if err != nil {
+		if errors.Is(err, access.ErrCourseNotPurchasable) {
+			writeProblem(c, problem.NotFound())
+			return
+		}
+		if errors.Is(err, access.ErrInvalidEmail) {
+			writeProblem(c, problem.ValidationFailed())
+			return
+		}
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	handoff, err := access.WhatsAppHandoffURL(h.salesWhatsAppNumber, request, locale)
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusCreated, createPurchaseRequestResponse{Reference: request.ReferenceCode, WhatsAppURL: handoff})
+}
+
+func (h *accessHandlers) listAdminPurchaseRequests(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	filter := access.ListPurchaseRequestsFilter{Query: c.Query("q"), Limit: limit, Offset: (page - 1) * limit}
+	if state := access.PurchaseRequestState(c.Query("state")); state.Valid() {
+		filter.State = &state
+	}
+	requests, total, err := h.repo.ListPurchaseRequests(c.Request.Context(), filter)
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	locale, _ := requestedLocale(c.GetHeader("Accept-Language"))
+	for index := range requests {
+		if locale == identity.LocaleArabic {
+			requests[index].CourseTitle = requests[index].CourseTitleAr
+		} else {
+			requests[index].CourseTitle = requests[index].CourseTitleEn
+		}
+	}
+	c.JSON(http.StatusOK, adminPurchaseRequestListResponse{PurchaseRequests: requests, Total: total, Page: page, Limit: limit})
+}
+
+func (h *accessHandlers) confirmPurchaseRequestPayment(c *gin.Context) {
+	if _, err := uuid.Parse(c.Param("id")); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+	locale, ok := requestedLocale(c.GetHeader("Accept-Language"))
+	if !ok {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+	result, err := h.repo.ConfirmPurchaseRequest(c.Request.Context(), access.ConfirmPurchaseRequestParams{
+		PurchaseRequestID: c.Param("id"), AdminAccountID: c.GetString(ctxUserIDKey), Locale: locale, Now: now,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, access.ErrPurchaseRequestNotFound), errors.Is(err, access.ErrCourseNotPurchasable):
+			writeProblem(c, problem.NotFound())
+		case errors.Is(err, access.ErrPurchaseRequestTransition), errors.Is(err, access.ErrDuplicateInvitation), errors.Is(err, access.ErrExpiryRequired):
+			writeProblem(c, problem.New(http.StatusConflict, "purchase-request-state-conflict", "Purchase request cannot be confirmed", "The purchase request is no longer eligible for this action."))
+		case errors.Is(err, access.ErrIneligibleRecipient):
+			writeProblem(c, problem.New(http.StatusConflict, "ineligible-recipient", "Ineligible recipient", "The recipient account does not satisfy recipient eligibility."))
+		default:
+			writeProblem(c, problem.Internal(""))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *accessHandlers) cancelPurchaseRequest(c *gin.Context) {
+	if _, err := uuid.Parse(c.Param("id")); err != nil {
+		writeProblem(c, problem.NotFound())
+		return
+	}
+	now := time.Now()
+	if h != nil && h.clock != nil {
+		now = h.clock()
+	}
+	request, err := h.repo.CancelPurchaseRequest(c.Request.Context(), access.CancelPurchaseRequestParams{
+		PurchaseRequestID: c.Param("id"), AdminAccountID: c.GetString(ctxUserIDKey), Now: now,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, access.ErrPurchaseRequestNotFound):
+			writeProblem(c, problem.NotFound())
+		case errors.Is(err, access.ErrPurchaseRequestTransition):
+			writeProblem(c, problem.New(http.StatusConflict, "purchase-request-state-conflict", "Purchase request cannot be cancelled", "The purchase request is no longer eligible for this action."))
+		default:
+			writeProblem(c, problem.Internal(""))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, request)
 }
 
 func (h *accessHandlers) setCourseDefaultAccessExpiry(c *gin.Context) {
@@ -862,6 +1032,17 @@ func (h *accessHandlers) getStudentCourseAccessHistory(c *gin.Context) {
 	if err != nil {
 		writeProblem(c, problem.Internal(""))
 		return
+	}
+
+	// The Course is named in the Student's language at the boundary, the same way the learning read
+	// models resolve their titles. The authored pair never leaves the process.
+	for i := range history.Items {
+		history.Items[i].CourseTitle = localizedLearningTitle(
+			c, history.Items[i].CourseTitleAr, history.Items[i].CourseTitleEn,
+		)
+	}
+	if strings.TrimSpace(c.GetHeader("Accept-Language")) != "" {
+		appendVary(c, "Accept-Language")
 	}
 
 	c.JSON(http.StatusOK, history)

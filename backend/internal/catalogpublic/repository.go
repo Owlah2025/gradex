@@ -35,6 +35,7 @@ type Course struct {
 	Slug                  string    `json:"slug"`
 	Title                 string    `json:"title"`
 	InstructorDisplayName string    `json:"instructor_display_name"`
+	University            *Taxonomy `json:"university,omitempty"`
 	Major                 *Taxonomy `json:"major,omitempty"`
 	Subject               *Taxonomy `json:"subject,omitempty"`
 	StudyYear             *Taxonomy `json:"study_year,omitempty"`
@@ -131,6 +132,8 @@ func (r *Repository) searchCountQuery(visibility string) string {
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
+		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
+		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
 		WHERE ` + visibility + ` AND ` + SearchMatchPredicate("$1")
 }
 
@@ -139,8 +142,9 @@ func (r *Repository) searchCountQuery(visibility string) string {
 // normalized input while PublishedOnly remains the sole visibility authority.
 func SearchMatchPredicate(queryParameter string) string {
 	normalizedQuery := "catalog_normalize_ar(" + queryParameter + ")"
-	joinedFields := "catalog_normalize_ar(concat_ws(' ', a.display_name, major.label_ar, major.label_en, major.academic_code, subject.label_ar, subject.label_en, subject.academic_code, cr.study_year::text))"
-	return "(" + normalizedQuery + " = '' OR cr.search_text LIKE '%' || " + normalizedQuery + " || '%' OR " + joinedFields + " LIKE '%' || " + normalizedQuery + " || '%')"
+	joinedFields := "catalog_normalize_ar(concat_ws(' ', a.display_name, major.label_ar, major.label_en, major.academic_code, subject.label_ar, subject.label_en, subject.academic_code, cr.study_year::text, academic_institution.name_ar, academic_institution.name_en, academic_subject.official_code, academic_subject.title_ar, academic_subject.title_en))"
+	normalizedCode := "academic_normalize_code(" + queryParameter + ")"
+	return "(" + normalizedQuery + " = '' OR cr.search_text LIKE '%' || " + normalizedQuery + " || '%' OR " + joinedFields + " LIKE '%' || " + normalizedQuery + " || '%' OR (" + normalizedCode + " <> '' AND academic_subject.code_normalized LIKE '%' || " + normalizedCode + " || '%'))"
 }
 
 // Detail reports whether an exact Course identifier is public. The identifier
@@ -193,16 +197,50 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 	return `SELECT c.id::text, c.slug,
 		CASE WHEN $1 THEN cr.title_ar ELSE cr.title_en END,
 		a.display_name,
+		CASE WHEN academic_institution.id IS NULL THEN NULL ELSE CASE WHEN $1 THEN academic_institution.name_ar ELSE academic_institution.name_en END END, NULL::text,
 		CASE WHEN major.id IS NULL THEN NULL ELSE CASE WHEN $1 THEN major.label_ar ELSE major.label_en END END, NULL::text,
-		CASE WHEN subject.id IS NULL THEN NULL ELSE CASE WHEN $1 THEN subject.label_ar ELSE subject.label_en END END, subject.academic_code,
+		CASE
+			WHEN academic_subject.id IS NOT NULL THEN CASE WHEN $1 THEN academic_subject.title_ar ELSE academic_subject.title_en END
+			WHEN subject.id IS NOT NULL THEN CASE WHEN $1 THEN subject.label_ar ELSE subject.label_en END
+			ELSE NULL
+		END,
+		COALESCE(academic_subject.official_code, subject.academic_code),
 		cr.study_year::text,
 		price.new_value_minor_units,
-		cr.preview_asset_version_id IS NOT NULL
+		EXISTS (
+			SELECT 1
+			FROM media_asset_versions mav
+			JOIN media_assets ma ON ma.id = mav.logical_asset_id
+			JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
+				AND scan.asset_version_id = mav.id
+				AND scan.storage_object_version = mav.storage_object_version
+				AND scan.outcome = 'PASSED'
+			WHERE mav.id = cr.preview_asset_version_id
+				AND mav.kind = 'PREVIEW'
+				AND mav.state = 'READY'
+				AND mav.content_type = 'video/mp4'
+				AND ma.kind = 'PREVIEW'
+				AND ma.course_id = c.id
+				AND ma.visibility = 'PUBLIC_PREVIEW'
+				AND ma.retired_at IS NULL
+				AND EXISTS (
+					WITH RECURSIVE lineage AS (
+						SELECT cr.id, cr.based_on_revision_id
+						UNION ALL
+						SELECT parent.id, parent.based_on_revision_id
+						FROM course_revisions parent
+						JOIN lineage child ON child.based_on_revision_id = parent.id
+					)
+					SELECT 1 FROM lineage WHERE lineage.id = ma.preview_origin_revision_id
+				)
+		)
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
+		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
+		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
 		LEFT JOIN LATERAL (SELECT new_value_minor_units FROM course_price_changes WHERE course_id = c.id AND section_id IS NULL ORDER BY changed_at DESC, id DESC LIMIT 1) price ON true
 		WHERE ` + visibility + ` ` + identifier + ` ` + suffix
 }
@@ -215,10 +253,13 @@ func scanCourses(rows interface {
 	var items []Course
 	for rows.Next() {
 		var item Course
-		var majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
+		var universityLabel, universityCode, majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
 		var amount *int64
-		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &amount, &item.HasPreview); err != nil {
+		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &amount, &item.HasPreview); err != nil {
 			return nil, fmt.Errorf("scanning public course: %w", err)
+		}
+		if universityLabel != nil {
+			item.University = &Taxonomy{Label: *universityLabel, Code: universityCode}
 		}
 		if majorLabel != nil {
 			item.Major = &Taxonomy{Label: *majorLabel, Code: majorCode}

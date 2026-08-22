@@ -43,6 +43,15 @@ container_image() {
   docker inspect --format '{{.Image}}' "$container"
 }
 
+image_max_schema_version() {
+  local image="$1" version
+  version="$(docker run --rm --entrypoint gradex-migrate "$image" max-version)" ||
+    die "could not read max schema version from backend image $image"
+  [[ "$version" =~ ^[0-9]+$ ]] ||
+    die "backend image $image returned an invalid max schema version"
+  printf '%s' "$version"
+}
+
 write_manifest() {
   local file="$1" release="$2" backend="$3" frontend="$4"
   {
@@ -82,6 +91,14 @@ main() {
   docker tag "$GRADEX_BACKEND_IMAGE" gradex-backend:s12-rollback-n-plus-1
   docker tag "$GRADEX_FRONTEND_IMAGE" gradex-frontend:s12-rollback-n-plus-1
 
+  local live_state live_schema base_max_schema
+  live_state="$(database_state)"
+  IFS='|' read -r live_schema _ <<<"$live_state"
+  [[ "$live_schema" =~ ^[0-9]+$ ]] || die "live schema state is invalid: $live_state"
+  base_max_schema="$(image_max_schema_version gradex-backend:s12-rollback-n)"
+  [ "$live_schema" -le "$base_max_schema" ] ||
+    die "rollback proof base release $S12_BASE_RELEASE supports schema through $base_max_schema, but the live schema is $live_schema; choose a schema-compatible N release"
+
   write_manifest "$n_manifest" "$S12_BASE_RELEASE" \
     gradex-backend:s12-rollback-n gradex-frontend:s12-rollback-n
   write_manifest "$next_manifest" "$S12_CURRENT_RELEASE" \
@@ -103,7 +120,10 @@ main() {
   [ "$n_backend" = "$rollback_backend" ] || die "rollback did not restore the N backend image"
   [ "$before" = "$after_n" ] && [ "$before" = "$after_next" ] && [ "$before" = "$after_rollback" ] ||
     die "schema or Entitlement provenance counts changed: $before / $after_n / $after_next / $after_rollback"
-  case "$after_rollback" in 15\|false\|*\|*) ;; *) die "rollback did not retain clean schema 15" ;; esac
+  case "$after_rollback" in
+    "$live_schema"\|false\|*\|*) ;;
+    *) die "rollback did not retain clean schema $live_schema" ;;
+  esac
 
   note "N=$S12_BASE_RELEASE N+1=$S12_CURRENT_RELEASE N restored; probes passed and schema/provenance state stayed $after_rollback"
   note "backend images N=$n_backend N+1=$next_backend rollback=$rollback_backend"

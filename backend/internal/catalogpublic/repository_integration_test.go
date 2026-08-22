@@ -64,6 +64,90 @@ func TestDetailSecondaryReadsRecheckPublishedOnly(t *testing.T) {
 	}
 }
 
+func TestPublicProjectionExposesOnlyReadyLiveRevisionPreview(t *testing.T) {
+	freshCatalogPublicSchema(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, catalogPublicTestDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	courseID := seedVisibleDetailCourse(t, pool, ctx)
+	var liveRevisionID string
+	if err := pool.QueryRow(ctx, `SELECT live_revision_id::text FROM courses WHERE id = $1::uuid`, courseID).Scan(&liveRevisionID); err != nil {
+		t.Fatal(err)
+	}
+	livePreviewID := seedPublicPreview(t, pool, ctx, courseID, liveRevisionID)
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, livePreviewID, liveRevisionID); err != nil {
+		t.Fatal(err)
+	}
+
+	candidateRevisionID := "22222222-2222-2222-2222-222222222222"
+	if _, err := pool.Exec(ctx, `INSERT INTO course_revisions (id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, $3::uuid, 'DRAFT', 2, 'مرشح', 'Candidate')`, candidateRevisionID, courseID, liveRevisionID); err != nil {
+		t.Fatal(err)
+	}
+	candidatePreviewID := seedPublicPreview(t, pool, ctx, courseID, candidateRevisionID)
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, candidatePreviewID, candidateRevisionID); err != nil {
+		t.Fatal(err)
+	}
+
+	repository, err := NewRepository(pool, PublishedOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := repository.Detail(ctx, courseID, false)
+	if err != nil || detail == nil || !detail.HasPreview {
+		t.Fatalf("live ready preview projection=%#v err=%v", detail, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_assets SET retired_at = now() WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, livePreviewID); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = repository.Detail(ctx, courseID, false)
+	if err != nil || detail == nil || detail.HasPreview {
+		t.Fatalf("retired live preview or candidate leaked into projection=%#v err=%v", detail, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_assets SET retired_at = NULL WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $1::uuid)`, livePreviewID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = NULL WHERE id = $1::uuid`, liveRevisionID); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = repository.Detail(ctx, courseID, false)
+	if err != nil || detail == nil || detail.HasPreview {
+		t.Fatalf("no-preview live revision projected a candidate preview=%#v err=%v", detail, err)
+	}
+}
+
+func seedPublicPreview(t *testing.T, pool *pgxpool.Pool, ctx context.Context, courseID, revisionID string) string {
+	t.Helper()
+	var ownerID string
+	if err := pool.QueryRow(ctx, `SELECT owner_account_id::text FROM courses WHERE id = $1::uuid`, courseID).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	assetID := "30000000-0000-0000-0000-" + revisionID[24:]
+	versionID := "40000000-0000-0000-0000-" + revisionID[24:]
+	scanID := "50000000-0000-0000-0000-" + revisionID[24:]
+	if _, err := pool.Exec(ctx, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')`, assetID, ownerID, courseID, revisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)`, versionID, assetID, "quarantine/"+courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity) VALUES ($1::uuid, $2::uuid, 1, $3, 'fixture-v1', 'PASSED', 'fixture')`, scanID, versionID, "scan:"+versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, scanID, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatal(err)
+	}
+	return versionID
+}
+
 func freshCatalogPublicSchema(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

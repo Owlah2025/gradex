@@ -10,7 +10,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -27,12 +29,13 @@ type Client struct {
 }
 
 type Options struct {
-	Endpoint     string
-	AccessKey    string
-	SecretKey    string
-	Bucket       string
-	Region       string
-	UsePathStyle bool
+	Endpoint        string
+	PresignEndpoint string
+	AccessKey       string
+	SecretKey       string
+	Bucket          string
+	Region          string
+	UsePathStyle    bool
 }
 
 func New(ctx context.Context, opts Options) (*Client, error) {
@@ -44,18 +47,27 @@ func New(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("loading aws config: %w", err)
 	}
 
-	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		if opts.Endpoint != "" {
-			o.BaseEndpoint = aws.String(opts.Endpoint)
-		}
-		o.UsePathStyle = opts.UsePathStyle
-	})
+	s3Client := newS3Client(cfg, opts.Endpoint, opts.UsePathStyle)
+	presignEndpoint := opts.PresignEndpoint
+	if presignEndpoint == "" {
+		presignEndpoint = opts.Endpoint
+	}
+	presignClient := newS3Client(cfg, presignEndpoint, opts.UsePathStyle)
 
 	return &Client{
 		s3:      s3Client,
-		presign: s3.NewPresignClient(s3Client),
+		presign: s3.NewPresignClient(presignClient),
 		bucket:  opts.Bucket,
 	}, nil
+}
+
+func newS3Client(cfg aws.Config, endpoint string, usePathStyle bool) *s3.Client {
+	return s3.NewFromConfig(cfg, func(o *s3.Options) {
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+		}
+		o.UsePathStyle = usePathStyle
+	})
 }
 
 // CheckBucket verifies that the configured private bucket is reachable with
@@ -94,6 +106,63 @@ func (c *Client) PresignGetURL(ctx context.Context, key string, expiry time.Dura
 		return "", fmt.Errorf("presigning GET for %q: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// PresignGetDownloadURL asks the object provider to serve a private object as
+// a download with a safely derived filename. The filename is display metadata,
+// never an object key; controls and path separators cannot enter a response
+// header, and the UTF-8 variant is percent-encoded for S3's query override.
+func (c *Client) PresignGetDownloadURL(ctx context.Context, key, filename string, expiry time.Duration) (string, error) {
+	name := safeDownloadFilename(filename)
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket:                     aws.String(c.bucket),
+		Key:                        aws.String(key),
+		ResponseContentDisposition: aws.String(downloadContentDisposition(name)),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("presigning download GET for %q: %w", key, err)
+	}
+	return req.URL, nil
+}
+
+func safeDownloadFilename(filename string) string {
+	var cleaned strings.Builder
+	for _, r := range strings.TrimSpace(filename) {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		switch r {
+		case '/', '\\', '"':
+			cleaned.WriteByte('_')
+		default:
+			cleaned.WriteRune(r)
+		}
+	}
+	name := strings.TrimSpace(cleaned.String())
+	if name == "" || name == "." || name == ".." {
+		return "download"
+	}
+	const maxFilenameRunes = 180
+	if len([]rune(name)) > maxFilenameRunes {
+		name = string([]rune(name)[:maxFilenameRunes])
+	}
+	return name
+}
+
+func downloadContentDisposition(filename string) string {
+	var ascii strings.Builder
+	for _, r := range filename {
+		if r >= 0x20 && r <= 0x7e && r != '"' && r != '\\' {
+			ascii.WriteRune(r)
+		} else {
+			ascii.WriteByte('_')
+		}
+	}
+	fallback := strings.TrimSpace(ascii.String())
+	if fallback == "" {
+		fallback = "download"
+	}
+	return `attachment; filename="` + fallback + `"; filename*=UTF-8''` + url.PathEscape(filename)
 }
 
 // HeadObject reports whether an object exists and its size, used by

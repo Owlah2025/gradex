@@ -3,6 +3,7 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { SEED_BINARY_PATH, RUN_STATE_FILE_PATH } from "../src/lib/api/e2e-infrastructure";
+import { AUTHORIZATION_FLAG, expectAbsent } from "./authority-leak";
 
 /**
  * T043 — an expired Entitlement shows retained Enrollment, retained Progress, and an explicit
@@ -97,14 +98,14 @@ const PROBLEM_TYPE_URI = "https://api.gradex.com/problems/not-found";
  * Field names, capability flags, and storage details that a retained-expired response must never
  * carry (D-063, D-064). `learning_status` is the only permitted public state enum.
  */
-const PROHIBITED_READ_MODEL_FIELDS = [
+const PROHIBITED_READ_MODEL_FIELDS: (string | RegExp)[] = [
   "asset_version_id",
   "entitlement_id",
   "enrollment_id",
   "revision_id",
   "can_play",
   "can_update_progress",
-  "authorized",
+  AUTHORIZATION_FLAG,
   "capability",
   "evaluator",
   "signed_url",
@@ -284,7 +285,7 @@ function expectUniformRefusal(result: {
 
   const body = result.text;
   for (const field of PROHIBITED_READ_MODEL_FIELDS) {
-    expect(body).not.toContain(field);
+    expectAbsent(body, field);
   }
 
   // The only URI the body may carry is the fixed, cause-free problem type. No signed target,
@@ -628,11 +629,11 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
       expect(subject.learning_status).toBe("expired");
       expect(subject.expires_at).toBe(baseline.entitlement.access_ends_at);
 
-      // Retained-expired reads expose no actionable material kinds (D-063, D-064).
-      if (Array.isArray(body.materials)) expect(body.materials).toEqual([]);
-      if (Array.isArray(body.sections)) {
-        for (const section of body.sections) {
-          for (const lesson of section.lessons) expect(lesson.materials).toEqual([]);
+      if (Array.isArray(body.resources)) expect(body.resources).toEqual([]); if (Array.isArray(body.lab_materials)) expect(body.lab_materials).toEqual([]);
+      if (Array.isArray(body.sections)) { for (const section of body.sections) {
+          for (const lesson of section.lessons) {
+            expect(lesson.resources).toEqual([]); expect(lesson.lab_materials).toEqual([]);
+          }
         }
       }
     }
@@ -811,7 +812,7 @@ async function expectNoProtectedActions(page: Page, t: (typeof TEXT)[Locale]) {
 
 function expectNoProhibitedFields(markup: string) {
   for (const field of PROHIBITED_READ_MODEL_FIELDS) {
-    expect(markup).not.toContain(field);
+    expectAbsent(markup, field);
   }
 }
 

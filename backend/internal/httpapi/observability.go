@@ -17,8 +17,15 @@ import (
 // ctxSafeErrorCodeKey carries the Problem Details code a handler produced, so
 // the request log can record it without re-deriving it from the response body.
 const (
-	ctxSafeErrorCodeKey             = "safeErrorCode"
-	admissionFailureStageContextKey = "admissionFailureStage"
+	ctxSafeErrorCodeKey                   = "safeErrorCode"
+	admissionFailureStageContextKey       = "admissionFailureStage"
+	passwordVerificationQueuedContextKey  = "passwordVerificationQueued"
+	passwordVerificationOutcomeContextKey = "passwordVerificationOutcome"
+	loginCandidateMicrosContextKey        = "loginCandidateMicros"
+	passwordQueueMicrosContextKey         = "passwordQueueMicros"
+	passwordVerifyMicrosContextKey        = "passwordVerifyMicros"
+	sessionPrepareMicrosContextKey        = "sessionPrepareMicros"
+	sessionWriteMicrosContextKey          = "sessionWriteMicros"
 )
 
 const (
@@ -113,17 +120,24 @@ func requestLogger(logger *logging.Logger) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 		logger.RequestCompleted(logging.RequestEvent{
-			RequestID:             requestid.FromContext(ctx),
-			ParentRequestID:       requestid.ParentFromContext(ctx),
-			Method:                c.Request.Method,
-			RouteTemplate:         routeTemplateOf(c),
-			Status:                c.Writer.Status(),
-			DurationMillis:        time.Since(start).Milliseconds(),
-			ResponseSize:          size,
-			SafeErrorCode:         c.GetString(ctxSafeErrorCodeKey),
-			LimiterOutcome:        c.GetString(limiterOutcomeContextKey),
-			AdmissionFailureStage: admissionFailureStageOf(c),
-			Routine:               isProbePath(routeTemplateOf(c)),
+			RequestID:                   requestid.FromContext(ctx),
+			ParentRequestID:             requestid.ParentFromContext(ctx),
+			Method:                      c.Request.Method,
+			RouteTemplate:               routeTemplateOf(c),
+			Status:                      c.Writer.Status(),
+			DurationMillis:              time.Since(start).Milliseconds(),
+			ResponseSize:                size,
+			SafeErrorCode:               c.GetString(ctxSafeErrorCodeKey),
+			LimiterOutcome:              c.GetString(limiterOutcomeContextKey),
+			AdmissionFailureStage:       admissionFailureStageOf(c),
+			PasswordVerificationQueued:  c.GetBool(passwordVerificationQueuedContextKey),
+			PasswordVerificationOutcome: c.GetString(passwordVerificationOutcomeContextKey),
+			LoginCandidateMicros:        c.GetInt64(loginCandidateMicrosContextKey),
+			PasswordQueueMicros:         c.GetInt64(passwordQueueMicrosContextKey),
+			PasswordVerifyMicros:        c.GetInt64(passwordVerifyMicrosContextKey),
+			SessionPrepareMicros:        c.GetInt64(sessionPrepareMicrosContextKey),
+			SessionWriteMicros:          c.GetInt64(sessionWriteMicrosContextKey),
+			Routine:                     isProbePath(routeTemplateOf(c)),
 		})
 	}
 }

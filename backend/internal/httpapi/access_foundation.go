@@ -9,13 +9,15 @@ import (
 )
 
 type AccessFoundation struct {
-	repository *access.Repository
-	clock      func() time.Time
+	repository          *access.Repository
+	clock               func() time.Time
+	salesWhatsAppNumber string
 }
 
 type AccessFoundationOptions struct {
-	Repository *access.Repository
-	Clock      func() time.Time
+	Repository          *access.Repository
+	Clock               func() time.Time
+	SalesWhatsAppNumber string
 }
 
 func NewAccessFoundation(options AccessFoundationOptions) (*AccessFoundation, error) {
@@ -26,7 +28,16 @@ func NewAccessFoundation(options AccessFoundationOptions) (*AccessFoundation, er
 	if clock == nil {
 		clock = time.Now
 	}
-	return &AccessFoundation{repository: options.Repository, clock: clock}, nil
+	salesWhatsAppNumber := options.SalesWhatsAppNumber
+	if salesWhatsAppNumber == "" {
+		// The test-only default keeps existing isolated route fixtures
+		// deterministic. Real application composition receives the validated
+		// configuration value.
+		salesWhatsAppNumber = "15550000000"
+	}
+	return &AccessFoundation{
+		repository: options.Repository, clock: clock, salesWhatsAppNumber: salesWhatsAppNumber,
+	}, nil
 }
 
 func WithAccessFoundation(foundation *AccessFoundation) RouterOption {

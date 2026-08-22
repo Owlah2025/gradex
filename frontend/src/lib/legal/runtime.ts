@@ -1,9 +1,9 @@
 import "server-only";
 
 import {
-  controlledStagingOrigin,
   stagingLegalRegisteredAddress,
   stagingLegalRegistrationNumber,
+  validateLegalIdentityMode,
   type LegalIdentity,
 } from "./policy";
 
@@ -68,31 +68,6 @@ function configuredIdentity(): LegalIdentity {
   };
 }
 
-function controlledStagingMode(publicOrigin: string, identity: LegalIdentity): boolean {
-  const mode = required("LEGAL_IDENTITY_MODE");
-  const hasSentinel =
-    identity.registrationNumber === stagingLegalRegistrationNumber ||
-    identity.registeredAddress === stagingLegalRegisteredAddress;
-
-  if (mode === "public") {
-    if (hasSentinel) {
-      throw new Error("public legal identity rejects controlled-staging sentinel values");
-    }
-    return false;
-  }
-  if (
-    mode !== "controlled-staging" ||
-    publicOrigin !== controlledStagingOrigin ||
-    identity.registrationNumber !== stagingLegalRegistrationNumber ||
-    identity.registeredAddress !== stagingLegalRegisteredAddress
-  ) {
-    throw new Error(
-      "controlled-staging legal identity requires the exact disposable S11 origin and sentinels",
-    );
-  }
-  return true;
-}
-
 function developmentRuntime(): LegalRuntime {
   return {
     publicOrigin: exactOrigin(process.env.PUBLIC_ORIGIN || "http://localhost:3000", false),
@@ -108,6 +83,10 @@ export function legalRuntime(): LegalRuntime {
   return {
     publicOrigin,
     identity,
-    controlledStaging: controlledStagingMode(publicOrigin, identity),
+    controlledStaging: validateLegalIdentityMode(
+      required("LEGAL_IDENTITY_MODE"),
+      publicOrigin,
+      identity,
+    ),
   };
 }

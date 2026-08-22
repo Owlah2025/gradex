@@ -8,7 +8,7 @@ import (
 )
 
 func TestBatchB_AccessInvariants(t *testing.T) {
-	t.Run("Invariant 1 (T062): No route creates an Entitlement except POST .../approve", func(t *testing.T) {
+	t.Run("Invariant 1 (T062): Entitlements originate only in canonical invitation transactions", func(t *testing.T) {
 		repoPath := filepath.Join("..", "..")
 		err := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
@@ -20,11 +20,11 @@ func TestBatchB_AccessInvariants(t *testing.T) {
 			}
 			content := string(data)
 			if strings.Contains(content, "INSERT INTO entitlements") {
-				if !strings.HasSuffix(path, "backend/internal/access/repository.go") && !strings.Contains(path, "internal/access/repository.go") {
+				if !strings.Contains(path, "internal/access/repository.go") && !strings.Contains(path, "internal/access/purchase.go") {
 					if strings.Contains(path, "seed") || strings.Contains(path, "test") {
 						// Allowed non-production test / seed files
 					} else {
-						t.Errorf("file %s performs INSERT INTO entitlements outside of ApproveInvitation repository method", path)
+						t.Errorf("file %s performs INSERT INTO entitlements outside a canonical invitation transaction", path)
 					}
 				}
 			}

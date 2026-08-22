@@ -142,8 +142,11 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
   Course data.
 - **Actions:** Search, filter by Major/Subject/Study Year, clear filters, sort, open Course Details.
 - **States:** Loading, no Courses, no matches, error.
-- **Rules:** Only `PUBLISHED` Courses appear (BR-161). Filters are exact-match on one value per
-  dimension; taxonomy labels render in the selected language while search matches Arabic and English
+- **Rules:** Only `PUBLISHED` Courses appear (BR-161). **Under
+  [D-091](DECISIONS.md#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)
+  the filter set becomes University / Program / academic level / Subject; the Major/Subject/Study
+  Year set below is the legacy model and is retained until cutover.** Filters are exact-match on one
+  value per dimension; taxonomy labels render in the selected language while search matches Arabic and English
   at once with diacritic/alef/digit normalization (BR-162). Ranking is relevance only — no
   recommendations, promotion, or personalization.
 - **Responsive:** Filter sheet on small screens; rail where space allows.
@@ -154,20 +157,24 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
 
 - **Content:** Title, Instructor, authored description/language, outline, Resources/Labs summary,
   office-hours support, community, Course price, access term, and how-to-get-access guidance.
-- **Actions:** Play optional Public Preview, open how-to-get-access guidance, Go to Course if access
-  is active, Login/Register when required.
+- **Actions:** Play optional Public Preview, open how-to-get-access guidance, submit only an email
+  to **I want to buy this Course**, then hand the Student to WhatsApp only after Gradex has persisted
+  the Purchase Request; Go to Course if access is active, Login/Register when required.
 - **Public Preview state:** Separate validated asset; absent preview removes the control.
 - **Locked content:** Lesson titles may be visible, but protected media/files are not public.
 - **Constraints:** No checkout, cart, coupon field, Section purchase control, Sample Lab download,
   ratings/reviews, recommendations, bundle, or BNPL CTA. The price is informational — Gradex charges
-  nothing. Section prices are not displayed.
+  nothing. The manual purchase request snapshots it server-side before the external handoff. Section
+  prices are not displayed.
 
 ## ST03 — Course Access Invitation
 
 **Purpose:** Let the invited Student review and accept an invitation to one Course.
 
 - **Content:** Course identity, inviting message, the invited email address, access term that would
-  apply, accepted policy versions, and an explicit statement that acceptance does not grant access.
+  apply, accepted policy versions, and the correct conditional statement: standard acceptance awaits
+  Admin approval; a payment-confirmed purchase-backed invitation activates access on matching
+  Student acceptance.
 - **Actions:** Accept, decline to act, sign in or register with the invited email.
 - **States:** Awaiting acceptance; accepted and awaiting Admin approval; approved and active;
   rejected with reason; cancelled; wrong identity signed in; acceptance link expired with resend.
@@ -391,10 +398,10 @@ Owned by Course Details only when entitled, Course Home, Lesson Player, and Mate
 
 ## AD06 — Course Access Invitations
 
-**Purpose:** Create Course Access Invitations after confirming External Payment, and work the
-approval queue.
+**Purpose:** Create standard Course Access Invitations after confirming External Payment, work the
+approval queue, and manage automatic Purchase Requests.
 
-- **Content:** Queue filtered by state; per invitation the Student email, Course, creating Admin,
+- **Content:** Standard-invitation queue filtered by state; per invitation the Student email, Course, creating Admin,
   current state, and timestamps; optional Admin note and opaque external reference.
 - **Fields (create):** Student email, one Course, optional Admin note, optional external reference.
 - **Actions:** Create, approve, reject with a required reason, cancel before a decision, resend the
@@ -403,8 +410,10 @@ approval queue.
   duplicate non-terminal invitation refused; Course missing a future access-expiry instant blocks
   approval.
 - **Constraints:** **Approval is the only action that grants access.** It requires the course-access
-  capability and valid recent authentication, and is refused — not degraded — without them. No
-  amount, currency, or payment-status field exists on this screen. Every transition is audited.
+  capability and valid recent authentication, and is refused — not degraded — without them. The
+  Purchase Requests panel displays request reference, email, Course title, historical price snapshot,
+  requested time and factual state, and can only confirm payment/send the linked invitation. Every
+  transition is audited.
 
 ## AD07 — Entitlement Detail
 
@@ -419,7 +428,8 @@ approval queue.
 - **Actions (S8):** Extend or shorten expiry with a required reason; revoke with a required reason —
   the audited elevated adjustment under BR-026.
 - **States:** Active, expired, revoked.
-- **Constraints:** No screen may create an Entitlement — creation is AD06 approval only.
+- **Constraints:** No screen may create an Entitlement directly — creation is the authorised standard
+  approval or the server-side purchase-backed acceptance transaction only.
   `original_access_ends_at` is never editable by any actor in any slice.
 
 ## AD08, AD09 — Refunds and Payouts — deferred out of MVP
@@ -448,7 +458,11 @@ renamed ones.
 - **Action:** Cancel with required reason.
 - **Constraints:** No Admin create/platform-wide session action.
 
-## AD12 — Catalog Taxonomy
+## AD12 — Catalog Taxonomy *(legacy; superseded by AD13 on cutover)*
+
+> **[D-091](DECISIONS.md#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy) supersedes this screen's model.**
+> It remains operational until the Academic Catalog migration is proven on a dual path. The
+> canonical replacement is AD13 below.
 
 **Purpose:** Maintain the Major and Subject vocabularies that classify and filter the catalog.
 
@@ -464,6 +478,29 @@ renamed ones.
 - **Constraints:** Study Year is a fixed enumeration and is not editable here. No fourth
   classification dimension, no free-text tags, and no Instructor access.
 
+## AD13 — Academic Catalog / الكتالوج الأكاديمي
+
+**Purpose:** Maintain the canonical Institution-scoped Academic Catalog that Courses classify
+against and that Students are personalised by. Separate from Course review (AD10).
+
+- **Content:** Institution list; per Institution an Academic Unit tree (Colleges/Departments),
+  Programs with their owning unit, each Program's active Curriculum and its Subject mappings, and
+  the Institution's Subject list with official code, bilingual titles, active/retired state, and
+  usage counts.
+- **Actions:** Create/edit/retire an Institution, Academic Unit (including safe re-parenting),
+  Program, Curriculum, and Subject; map a Subject into a Curriculum with requirement kind and
+  recommended level/semester; unmap.
+- **States:** Empty catalog (the launch state — must render cleanly with a clear first action),
+  loading, saving, duplicate-Subject conflict naming the existing Subject, invalid hierarchy
+  rejection, retired-entity display, error.
+- **Rules:** Admin only (BR-180). Every mutation is audited. Cross-Institution relationships are
+  refused server-side, not merely hidden in the UI (BR-173–BR-176). A duplicate Subject is refused
+  deterministically by the database (BR-175). Retirement is soft (BR-180).
+- **Vocabulary:** الجامعة · الكلية · القسم · التخصص · الخطة الدراسية · المادة. **Never** display a
+  UUID, a revision identifier, or the word "taxonomy"/"تصنيف" as user workflow.
+- **Constraints:** No Kuwait University data is hardcoded; launch catalog data is loaded separately.
+  No Course read or write path depends on this screen until the migration cutover.
+
 ---
 
 # Screen Index
@@ -473,7 +510,7 @@ renamed ones.
 | S01–S10 | Shared/auth/legal/system screens | Public or role-aware |
 | ST01–ST10 | Catalog, Course details, access invitation and status, learning, office hours, access history | Student/public where stated |
 | IN01–IN08 | Course operations, analytics, office hours | Instructor |
-| AD01–AD07, AD10–AD12 | Users, pricing, course review, course-access invitations, entitlements, moderation, catalog taxonomy | Admin |
+| AD01–AD07, AD10–AD13 | Users, pricing, course review, course-access invitations, entitlements, moderation, legacy catalog taxonomy, Academic Catalog | Admin |
 
 Modal/drawer states: Public Preview · Report Content · invitation accept/reject confirmation ·
 confirmation dialogs · unsaved/upload warning. External destination: meeting link. **There is no

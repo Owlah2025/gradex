@@ -159,8 +159,8 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 	if pf.StaffRedis == nil {
 		t.Fatal("staff lifecycle foundation was not composed while Student registration is disabled")
 	}
-	if pf.AdmissionRedis != nil {
-		t.Fatal("Student admission foundation was composed while STUDENT_REGISTRATION_ENABLED is false")
+	if pf.AdmissionRedis == nil {
+		t.Fatal("purchase-request admission security was not composed while STUDENT_REGISTRATION_ENABLED is false")
 	}
 
 	logger := logging.New(&syncBuffer{}, "gradex-api-test", "development", logging.LevelFromString("info"))
@@ -204,6 +204,9 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 		if mounted[route] {
 			t.Fatalf("Student admission route %q was mounted while registration is disabled", route)
 		}
+	}
+	if !mounted["POST /api/v1/purchase-requests"] {
+		t.Fatal("rate-limited public purchase request route was not mounted while registration is disabled")
 	}
 
 	// The Admin surface is composed, not exposed: the staff mutation boundary
@@ -357,6 +360,9 @@ func TestDevelopmentStaffCompositionRequiresSessions(t *testing.T) {
 		"S3_SECRET_KEY":                "b",
 		"PLAYBACK_TOKEN_SECRET":        "c",
 		"OUTBOX_PROTECTED_PAYLOAD_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"ANONYMOUS_COOKIE_SIGNING_KEY": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+		"ANONYMOUS_CSRF_KEY":           "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+		"ADMISSION_LIMITER_HMAC_KEY":   "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
 	})
 	if err != nil {
 		t.Fatalf("config: %v", err)
@@ -422,7 +428,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building test storage client: %v", err)
 	}
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient)
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter)
 	if err != nil {
 		t.Fatalf("building test media foundation: %v", err)
 	}
@@ -470,6 +476,8 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		{method: "GET", path: "/api/v1/courses/:id"},
 		{method: "PUT", path: "/api/v1/courses/:id/candidate"},
 		{method: "PATCH", path: "/api/v1/courses/:id/revisions/:revisionId"},
+		{method: "PUT", path: "/api/v1/courses/:id/revisions/:revisionId/audience"},
+		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/audience"},
 		{method: "POST", path: "/api/v1/courses/:id/revisions/:revisionId/sections"},
 		{method: "PATCH", path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId"},
 		{method: "DELETE", path: "/api/v1/courses/:id/revisions/:revisionId/sections/:sectionId"},

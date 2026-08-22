@@ -7,6 +7,7 @@ export type WorkspaceRole = Extract<SessionRole, "ADMIN" | "INSTRUCTOR">;
 
 export type WorkspaceNavigationKey =
   | "courseReview"
+  | "academicCatalog"
   | "courseAccess"
   | "staffOperations"
   | "instructorStudio"
@@ -43,6 +44,7 @@ export function roleWorkspaceNavigation(
   if (role === "ADMIN") {
     return [
       { key: "courseReview", href: home },
+      { key: "academicCatalog", href: `/${locale}/admin/academic-catalog` },
       { key: "courseAccess", href: `/${locale}/admin/course-access` },
       { key: "staffOperations", href: "/staff" },
     ];

@@ -19,6 +19,7 @@ func validSettings() map[string]string {
 		"REDIS_TLS_ENABLED":         "true",
 		"S3_ENDPOINT":               "https://storage.example",
 		"S3_BUCKET":                 "gradex-media",
+		"SALES_WHATSAPP_NUMBER":     "15550000000",
 		"AUTH_FAKE_MODE":            "false",
 		"LEGAL_IDENTITY_MODE":       "public",
 		"LEGAL_OPERATOR_NAME":       "Gradex Courses",
@@ -120,11 +121,101 @@ func TestValidProductionConfigLoads(t *testing.T) {
 	if cfg.MediaOperatingMode() != MediaOperatingModeScanner {
 		t.Errorf("media operating mode default = %q, want SCANNER", cfg.MediaOperatingMode())
 	}
+	login := cfg.LoginAdmission()
+	if login.VerificationConcurrency() != 1 || login.VerificationQueue() != 500 ||
+		login.VerificationQueueWait() != 45*time.Second || login.RequestTimeout() != time.Minute {
+		t.Fatalf("login admission defaults = concurrency %d, queue %d, wait %s, request %s",
+			login.VerificationConcurrency(), login.VerificationQueue(),
+			login.VerificationQueueWait(), login.RequestTimeout())
+	}
 	if sessions.CSRFKey().IsEmpty() || strings.Contains(
 		fmt.Sprintf("%v", sessions.CSRFKey()), strings.Repeat("s", 32),
 	) {
 		t.Error("session CSRF key is absent or printable")
 	}
+}
+
+func TestSalesWhatsAppNumberIsValidatedOutsideDevelopment(t *testing.T) {
+	wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+		delete(settings, "SALES_WHATSAPP_NUMBER")
+	}, "SALES_WHATSAPP_NUMBER is required outside development")
+	wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["SALES_WHATSAPP_NUMBER"] = "+965 555 00000"
+	}, "SALES_WHATSAPP_NUMBER must contain digits only")
+	cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["APP_ENV"] = "development"
+		delete(settings, "SALES_WHATSAPP_NUMBER")
+	})
+	if cfg.SalesWhatsAppNumber() != "15550000000" {
+		t.Fatalf("development safe number = %q", cfg.SalesWhatsAppNumber())
+	}
+}
+
+func TestLoginAdmissionConfigurationFailsClosed(t *testing.T) {
+	for name, setting := range map[string]string{
+		"zero concurrency":     "LOGIN_PASSWORD_VERIFY_CONCURRENCY",
+		"zero queue":           "LOGIN_PASSWORD_VERIFY_QUEUE_CAPACITY",
+		"zero queue wait":      "LOGIN_PASSWORD_VERIFY_QUEUE_WAIT",
+		"zero request timeout": "LOGIN_REQUEST_TIMEOUT",
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings[setting] = "0"
+			}, setting)
+		})
+	}
+	wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["LOGIN_PASSWORD_VERIFY_QUEUE_WAIT"] = "60s"
+		settings["LOGIN_REQUEST_TIMEOUT"] = "60s"
+	}, "must be less than LOGIN_REQUEST_TIMEOUT")
+}
+
+func TestS3PresignEndpointDefaultsAndValidatesBrowserOrigin(t *testing.T) {
+	t.Run("defaults to the internal endpoint", func(t *testing.T) {
+		cfg := mustLoad(t, nil)
+		if cfg.S3PresignEndpoint() != cfg.S3Endpoint() {
+			t.Fatalf("presign endpoint = %q, want internal endpoint %q", cfg.S3PresignEndpoint(), cfg.S3Endpoint())
+		}
+	})
+
+	t.Run("accepts a distinct HTTPS browser endpoint", func(t *testing.T) {
+		cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+			settings["S3_PRESIGN_ENDPOINT"] = "https://media.gradex.example"
+		})
+		if cfg.S3PresignEndpoint() != "https://media.gradex.example" {
+			t.Fatalf("presign endpoint = %q", cfg.S3PresignEndpoint())
+		}
+	})
+
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment+" requires HTTPS", func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["APP_ENV"] = environment
+				settings["S3_PRESIGN_ENDPOINT"] = "http://storage.internal:9000"
+			}, "S3_PRESIGN_ENDPOINT must use HTTPS outside development")
+		})
+	}
+
+	t.Run("development permits an HTTP browser endpoint", func(t *testing.T) {
+		cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+			settings["APP_ENV"] = "development"
+			settings["S3_PRESIGN_ENDPOINT"] = "http://localhost:9000"
+		})
+		if cfg.S3PresignEndpoint() != "http://localhost:9000" {
+			t.Fatalf("presign endpoint = %q", cfg.S3PresignEndpoint())
+		}
+	})
+
+	t.Run("rejects credentials and paths", func(t *testing.T) {
+		for _, endpoint := range []string{
+			"https://user:secret@storage.example",
+			"https://storage.example/private",
+		} {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["S3_PRESIGN_ENDPOINT"] = endpoint
+			}, "S3_PRESIGN_ENDPOINT must be an exact HTTP origin")
+		}
+	})
 }
 
 func TestRedisSecurityBoundary(t *testing.T) {
@@ -190,15 +281,30 @@ func TestRedisSecurityBoundary(t *testing.T) {
 }
 
 func TestMediaOperatingModeIsExplicitAndValidated(t *testing.T) {
-	cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
-		settings["MEDIA_OPERATING_MODE"] = "ADMIN_CATALOGUE"
-	})
-	if cfg.MediaOperatingMode() != MediaOperatingModeAdminCatalogue {
-		t.Fatalf("catalogue mode = %q", cfg.MediaOperatingMode())
+	if cfg := mustLoad(t, nil); cfg.MediaOperatingMode() != MediaOperatingModeScanner {
+		t.Fatalf("default mode = %q, want SCANNER", cfg.MediaOperatingMode())
 	}
-	wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
-		settings["MEDIA_OPERATING_MODE"] = "bypass"
-	}, "MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE")
+	for name, want := range map[string]MediaOperatingMode{
+		"SCANNER":            MediaOperatingModeScanner,
+		"ADMIN_CATALOGUE":    MediaOperatingModeAdminCatalogue,
+		"TRUSTED_INSTRUCTOR": MediaOperatingModeTrustedInstructor,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["MEDIA_OPERATING_MODE"] = name
+			})
+			if cfg.MediaOperatingMode() != want {
+				t.Fatalf("mode = %q, want %q", cfg.MediaOperatingMode(), want)
+			}
+		})
+	}
+	// An absent or empty value is the safe SCANNER default, consistent with
+	// every other setting; only a present unknown value blocks startup.
+	for _, unknown := range []string{"bypass", "trusted_instructor", "TRUSTED"} {
+		wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+			settings["MEDIA_OPERATING_MODE"] = unknown
+		}, "MEDIA_OPERATING_MODE must be SCANNER, ADMIN_CATALOGUE or TRUSTED_INSTRUCTOR")
+	}
 }
 
 // The no-op scanner inspects nothing, so the only environment allowed to build
@@ -842,38 +948,59 @@ func TestPublicLegalIdentityRejectsEitherStagingSentinel(t *testing.T) {
 	}
 }
 
-func TestControlledStagingLegalIdentityIsRestrictedToExactDisposableStack(t *testing.T) {
-	cfg := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
-		settings["PUBLIC_ORIGIN"] = ControlledStagingPublicOrigin
-		settings["CORS_ALLOWED_ORIGINS"] = ControlledStagingPublicOrigin
+func TestControlledStagingLegalIdentityAcceptsOnlyApprovedContexts(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		environment Environment
+		origin      string
+	}{
+		"local production-like": {EnvProduction, ControlledStagingLocalOrigin},
+		"LG-019 public staging": {EnvStaging, ControlledStagingLG019Origin},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := mustLoad(t, controlledStagingLegalSettings(testCase.environment, testCase.origin, nil))
+			if cfg.Legal().IdentityMode() != LegalIdentityControlledStaging {
+				t.Fatalf("legal identity mode = %q", cfg.Legal().IdentityMode())
+			}
+		})
+	}
+
+	for name, testCase := range map[string]struct {
+		environment Environment
+		origin      string
+		mutate      func(map[string]string)
+	}{
+		"production with LG-019 origin": {EnvProduction, ControlledStagingLG019Origin, nil},
+		"staging with local origin":     {EnvStaging, ControlledStagingLocalOrigin, nil},
+		"arbitrary staging origin":      {EnvStaging, "https://other.gradex.network", nil},
+		"HTTP staging origin":           {EnvStaging, "http://staging.gradex.network", nil},
+		"wrong registration sentinel": {EnvStaging, ControlledStagingLG019Origin, func(settings map[string]string) {
+			settings["LEGAL_REGISTRATION_NUMBER"] = "KWT-REAL-123"
+		}},
+		"wrong address sentinel": {EnvStaging, ControlledStagingLG019Origin, func(settings map[string]string) {
+			settings["LEGAL_REGISTERED_ADDRESS"] = "Kuwait City, Kuwait"
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantErrContaining(t, controlledStagingLegalSettings(testCase.environment, testCase.origin, testCase.mutate),
+				"controlled-staging legal identity requires an exact approved disposable context and sentinel values")
+		})
+	}
+}
+
+func controlledStagingLegalSettings(
+	environment Environment,
+	origin string,
+	mutate func(map[string]string),
+) func(map[string]string, MapSecretResolver) {
+	return func(settings map[string]string, _ MapSecretResolver) {
+		settings["APP_ENV"] = string(environment)
+		settings["PUBLIC_ORIGIN"] = origin
+		settings["CORS_ALLOWED_ORIGINS"] = origin
 		settings["LEGAL_IDENTITY_MODE"] = string(LegalIdentityControlledStaging)
 		settings["LEGAL_REGISTRATION_NUMBER"] = StagingLegalRegistrationNumber
 		settings["LEGAL_REGISTERED_ADDRESS"] = StagingLegalRegisteredAddress
-	})
-	if cfg.Legal().IdentityMode() != LegalIdentityControlledStaging {
-		t.Fatalf("legal identity mode = %q", cfg.Legal().IdentityMode())
-	}
-
-	for name, mutate := range map[string]func(map[string]string){
-		"wrong origin": func(settings map[string]string) {
-			settings["PUBLIC_ORIGIN"] = "https://public.gradex.example"
-		},
-		"staging app environment": func(settings map[string]string) {
-			settings["APP_ENV"] = "staging"
-		},
-		"non-sentinel registration": func(settings map[string]string) {
-			settings["LEGAL_REGISTRATION_NUMBER"] = "KWT-REAL-123"
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
-				settings["PUBLIC_ORIGIN"] = ControlledStagingPublicOrigin
-				settings["CORS_ALLOWED_ORIGINS"] = ControlledStagingPublicOrigin
-				settings["LEGAL_IDENTITY_MODE"] = string(LegalIdentityControlledStaging)
-				settings["LEGAL_REGISTRATION_NUMBER"] = StagingLegalRegistrationNumber
-				settings["LEGAL_REGISTERED_ADDRESS"] = StagingLegalRegisteredAddress
-				mutate(settings)
-			}, "controlled-staging legal identity requires the exact disposable S11 origin and sentinel values")
-		})
+		if mutate != nil {
+			mutate(settings)
+		}
 	}
 }

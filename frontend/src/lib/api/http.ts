@@ -26,6 +26,11 @@ export async function ensureAnonymousBrowser(): Promise<string> {
   return bootstrapRequest;
 }
 
+function invalidateAnonymousBrowser(): void {
+  anonymousCSRFToken = null;
+  bootstrapRequest = null;
+}
+
 export async function getJSON<T>(
   path: string,
   language: "ar" | "en",
@@ -48,20 +53,32 @@ export async function postJSON<T>(
   body: unknown,
   language: "ar" | "en",
 ): Promise<T> {
-  const csrf = await ensureAnonymousBrowser();
-  const response = await fetch(`${apiBase}${path}`, {
-    method: "POST",
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json, application/problem+json",
-      "Accept-Language": language,
-      "Content-Type": "application/json",
-      "X-CSRF-Token": csrf,
-    },
-    body: JSON.stringify(body),
-  });
-  return readJSONResponse<T>(response);
+  let csrf = await ensureAnonymousBrowser();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await fetch(`${apiBase}${path}`, {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json, application/problem+json",
+        "Accept-Language": language,
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrf,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 403) {
+      const problem = await response.clone().json().catch(() => null);
+      if (problem?.code === "CSRF_VALIDATION_FAILED" && attempt === 0) {
+        invalidateAnonymousBrowser();
+        csrf = await ensureAnonymousBrowser();
+        continue;
+      }
+    }
+    return readJSONResponse<T>(response);
+  }
+  throw new Error("unreachable");
 }
 
 /**

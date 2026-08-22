@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -31,22 +32,80 @@ func TestT059SharedInstructorCourseHomesDoNotLeakGraphProgressOrMaterials(t *tes
 	}
 
 	for _, tc := range []struct {
-		name, courseID, ownLesson, foreignLesson, ownMaterial, foreignMaterial string
+		name, courseID, ownLesson, foreignLesson, ownTitle, ownFileType, foreignTitle string
+		ownIsLab                                                                      bool
+		position                                                                      float64
+		completed                                                                     bool
 	}{
-		{name: "Course A", courseID: f.courseID, ownLesson: f.lessonID, foreignLesson: lessonB, ownMaterial: `"resource"`, foreignMaterial: `"lab_material"`},
-		{name: "Course B", courseID: courseB, ownLesson: lessonB, foreignLesson: f.lessonID, ownMaterial: `"lab_material"`, foreignMaterial: `"resource"`},
+		{name: "Course A", courseID: f.courseID, ownLesson: f.lessonID, foreignLesson: lessonB, ownTitle: "Resource", ownFileType: "PDF", foreignTitle: "Shared Lab", position: 60, completed: true},
+		{name: "Course B", courseID: courseB, ownLesson: lessonB, foreignLesson: f.lessonID, ownTitle: "Shared Lab", ownFileType: "ZIP", foreignTitle: "Resource", ownIsLab: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			response := f.request(http.MethodGet, "/api/v1/learn/courses/"+tc.courseID, "")
+			response := f.requestWithHeaders(http.MethodGet, "/api/v1/learn/courses/"+tc.courseID, "", map[string]string{"Accept-Language": "en"})
 			assertReadSuccess(t, response)
-			body := response.Body.String()
-			if !strings.Contains(body, `"course_id":"`+tc.courseID+`"`) || !strings.Contains(body, `"lesson_id":"`+tc.ownLesson+`"`) || strings.Contains(body, `"lesson_id":"`+tc.foreignLesson+`"`) {
-				t.Fatalf("Course Home leaked graph identity: %s", body)
+			var home courseHomeResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &home); err != nil {
+				t.Fatalf("decoding Course Home: %v", err)
 			}
-			if !strings.Contains(body, tc.ownMaterial) || strings.Contains(body, tc.foreignMaterial) {
-				t.Fatalf("Course Home leaked material kind: %s", body)
+			if home.CourseID != tc.courseID {
+				t.Fatalf("Course Home course_id = %q, want %q", home.CourseID, tc.courseID)
 			}
+			ownLesson := t059CourseHomeLesson(t, home, tc.ownLesson, tc.foreignLesson)
+			if ownLesson.Progress.PositionSeconds != tc.position || ownLesson.Progress.Completed != tc.completed {
+				t.Fatalf("Course Home progress for %s = %+v, want position=%v completed=%t", tc.ownLesson, ownLesson.Progress, tc.position, tc.completed)
+			}
+			t059AssertMaterialIsolation(t, ownLesson, tc.courseID, tc.ownLesson, tc.foreignLesson, tc.ownTitle, tc.ownFileType, tc.foreignTitle, tc.ownIsLab)
 		})
+	}
+}
+
+// ST15-4: structured material assertions retain the T059 regression's
+// cross-Course guarantee after the materials field split into Resources and
+// Lab Materials. Foreign title, graph identity, or authorization path fails.
+func t059CourseHomeLesson(t *testing.T, home courseHomeResponse, ownLessonID, foreignLessonID string) courseHomeLessonResponse {
+	t.Helper()
+	var found *courseHomeLessonResponse
+	for _, section := range home.Sections {
+		for _, lesson := range section.Lessons {
+			if lesson.LessonID == foreignLessonID {
+				t.Fatalf("Course Home for %s exposes foreign Lesson %s", home.CourseID, foreignLessonID)
+			}
+			if lesson.LessonID != ownLessonID {
+				continue
+			}
+			if found != nil {
+				t.Fatalf("Course Home for %s repeats Lesson %s", home.CourseID, ownLessonID)
+			}
+			copy := lesson
+			found = &copy
+		}
+	}
+	if found == nil {
+		t.Fatalf("Course Home for %s does not expose Lesson %s", home.CourseID, ownLessonID)
+	}
+	return *found
+}
+
+func t059AssertMaterialIsolation(t *testing.T, lesson courseHomeLessonResponse, courseID, lessonID, foreignLessonID, ownTitle, ownFileType, foreignTitle string, ownIsLab bool) {
+	t.Helper()
+	var own, foreign []learningMaterialResponse
+	if ownIsLab {
+		own, foreign = lesson.LabMaterials, lesson.Resources
+	} else {
+		own, foreign = lesson.Resources, lesson.LabMaterials
+	}
+	if len(own) != 1 || len(foreign) != 0 {
+		t.Fatalf("Lesson %s materials = resources:%+v lab_materials:%+v, want exactly its own %s", lessonID, lesson.Resources, lesson.LabMaterials, ownFileType)
+	}
+	material := own[0]
+	pathPrefix := "/media/courses/" + courseID + "/lessons/" + lessonID + "/materials/"
+	if material.Title != ownTitle || material.FileType != ownFileType || material.SizeBytes != 12 || !strings.HasPrefix(material.DownloadAuthorizationPath, pathPrefix) {
+		t.Fatalf("Lesson %s material = %+v, want %s %s (12 bytes) under %q", lessonID, material, ownTitle, ownFileType, pathPrefix)
+	}
+	for _, item := range append(append([]learningMaterialResponse(nil), lesson.Resources...), lesson.LabMaterials...) {
+		if item.Title == foreignTitle || strings.Contains(item.DownloadAuthorizationPath, "/lessons/"+foreignLessonID+"/") {
+			t.Fatalf("Lesson %s exposes foreign material %+v", lessonID, item)
+		}
 	}
 }
 

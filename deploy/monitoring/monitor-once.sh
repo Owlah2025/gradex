@@ -18,7 +18,7 @@ require_value GRADEX_HEALTH_URL
 require_value GRADEX_READY_URL
 require_value GRADEX_ENVIRONMENT
 
-GRADEX_BACKUP_MAX_AGE_SECONDS="${GRADEX_BACKUP_MAX_AGE_SECONDS:-93600}"
+GRADEX_BACKUP_MAX_AGE_SECONDS="${GRADEX_BACKUP_MAX_AGE_SECONDS:-7200}"
 [[ "$GRADEX_BACKUP_MAX_AGE_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
   die "GRADEX_BACKUP_MAX_AGE_SECONDS must be a positive integer"
 
@@ -77,12 +77,25 @@ if [ -z "${GRADEX_ALERT_WEBHOOK_URL:-}" ]; then
   exit 1
 fi
 
+case "$GRADEX_ALERT_WEBHOOK_URL" in
+  *$'\r'*|*$'\n'*|*'"'*|*'\'*) die "GRADEX_ALERT_WEBHOOK_URL contains a character unsafe for curl configuration" ;;
+esac
+webhook_url_config="$temporary/webhook-url.curl-config"
+printf 'url = "%s"\n' "$GRADEX_ALERT_WEBHOOK_URL" >"$webhook_url_config"
+chmod 600 "$webhook_url_config"
+
 webhook_args=(--fail --silent --show-error --connect-timeout 5 --max-time 10
   --header 'Content-Type: application/json' --data "$payload")
 if [ -n "${GRADEX_ALERT_WEBHOOK_TOKEN:-}" ]; then
-  webhook_args+=(--header "Authorization: Bearer $GRADEX_ALERT_WEBHOOK_TOKEN")
+  case "$GRADEX_ALERT_WEBHOOK_TOKEN" in
+    *$'\r'*|*$'\n'*) die "GRADEX_ALERT_WEBHOOK_TOKEN contains an invalid line break" ;;
+  esac
+  authorization_header="$temporary/webhook-authorization.header"
+  printf 'Authorization: Bearer %s\n' "$GRADEX_ALERT_WEBHOOK_TOKEN" >"$authorization_header"
+  chmod 600 "$authorization_header"
+  webhook_args+=(--header "@$authorization_header")
 fi
-if ! curl "${webhook_args[@]}" "$GRADEX_ALERT_WEBHOOK_URL" >/dev/null; then
+if ! curl "${webhook_args[@]}" --config "$webhook_url_config" >/dev/null; then
   note "checks failed and alert delivery failed (correlation_id=$correlation_id)"
   exit 1
 fi

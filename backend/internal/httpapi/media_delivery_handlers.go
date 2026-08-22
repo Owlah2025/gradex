@@ -1,7 +1,11 @@
 package httpapi
 
 import (
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,11 +14,14 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 type mediaDeliveryHandlers struct {
-	delivery mediaDeliveryIssuer
-	logger   *logging.Logger
+	delivery          mediaDeliveryIssuer
+	logger            *logging.Logger
+	rateLimiter       *ratelimit.Limiter
+	previewRatePolicy ratelimit.Policy
 }
 
 type playbackAuthorizationBody struct {
@@ -28,15 +35,39 @@ type downloadAuthorizationBody struct {
 	Kind           media.AssetKind `json:"kind" binding:"required"`
 }
 
-func mountMediaDeliveryRoutes(content *gin.RouterGroup, delivery mediaDeliveryIssuer, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
-	h := &mediaDeliveryHandlers{delivery: delivery, logger: logger}
+// lessonFileDownloadAuthorizationResponse contains only the temporary object
+// capability the browser needs. BuyerTag is present only for a Lab Material
+// and is the existing opaque per-Entitlement BR-103 marker; it is never an
+// entitlement or Student identifier. Attachment, asset-version, storage,
+// scan, and entitlement internals are deliberately absent.
+type lessonFileDownloadAuthorizationResponse struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	BuyerTag  string    `json:"buyer_tag,omitempty"`
+}
+
+// publicPreviewAuthorizationBody deliberately excludes the internal Asset
+// Version identifier. Course Details needs an expiring media URL only; the
+// Course-scoped route already resolved the exact revision-owned preview.
+type publicPreviewAuthorizationBody struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func mountMediaDeliveryRoutes(content *gin.RouterGroup, foundation *MediaFoundation, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+	h := &mediaDeliveryHandlers{
+		delivery: foundation.delivery, logger: logger,
+		rateLimiter: foundation.rateLimiter, previewRatePolicy: foundation.previewRatePolicy,
+	}
 	protected := content.Group("")
 	protected.Use(requireProtectedLearningAccess(authenticator, principals, logger))
 	protected.POST("/playback-authorizations", strictJSONMiddleware(func() any { return &playbackAuthorizationBody{} }, mediaRequestBodyLimit), h.playbackAuthorization)
 	protected.GET("/playback-manifests/:playbackSession/index.m3u8", h.playbackManifest)
 	protected.POST("/download-authorizations", strictJSONMiddleware(func() any { return &downloadAuthorizationBody{} }, mediaRequestBodyLimit), h.downloadAuthorization)
+	protected.POST("/courses/:courseId/lessons/:lessonId/materials/:materialId/download-authorizations", h.lessonFileDownloadAuthorization)
 	protected.GET("/lessons/:lessonId/materials/resource", func(c *gin.Context) { h.materialEntry(c, media.KindResource) })
 	protected.GET("/lessons/:lessonId/materials/lab-material", func(c *gin.Context) { h.materialEntry(c, media.KindLabMaterial) })
+	content.GET("/courses/:courseID/preview", h.coursePreview)
 	content.GET("/previews/:id", h.preview)
 }
 
@@ -71,6 +102,9 @@ func (h *mediaDeliveryHandlers) playbackAuthorization(c *gin.Context) {
 }
 
 func (h *mediaDeliveryHandlers) downloadAuthorization(c *gin.Context) {
+	if !h.allowProtectedMaterialDownload(c) {
+		return
+	}
 	body := c.MustGet(strictJSONBodyContextKey).(*downloadAuthorizationBody)
 	issued, err := h.delivery.IssueDownload(c.Request.Context(), media.DownloadRequest{
 		StudentID: c.GetString(ctxUserIDKey), LessonID: body.LessonID, AssetVersionID: body.AssetVersionID, Kind: body.Kind,
@@ -84,7 +118,34 @@ func (h *mediaDeliveryHandlers) downloadAuthorization(c *gin.Context) {
 	c.JSON(http.StatusOK, issued)
 }
 
+func (h *mediaDeliveryHandlers) lessonFileDownloadAuthorization(c *gin.Context) {
+	if !h.allowProtectedMaterialDownload(c) {
+		return
+	}
+	locale := "ar"
+	if strings.HasPrefix(strings.ToLower(c.GetHeader("Accept-Language")), "en") {
+		locale = "en"
+	}
+	issued, err := h.delivery.IssueLessonFileDownload(c.Request.Context(), media.LessonFileDownloadRequest{
+		StudentID: c.GetString(ctxUserIDKey), CourseID: c.Param("courseId"), LessonID: c.Param("lessonId"),
+		FileID: c.Param("materialId"), Locale: locale,
+	})
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.JSON(http.StatusOK, lessonFileDownloadAuthorizationResponse{
+		URL: issued.URL, ExpiresAt: issued.ExpiresAt, BuyerTag: issued.BuyerTag,
+	})
+}
+
 func (h *mediaDeliveryHandlers) materialEntry(c *gin.Context, kind media.AssetKind) {
+	if !h.allowProtectedMaterialDownload(c) {
+		return
+	}
 	issued, err := h.delivery.IssueDownloadEntry(c.Request.Context(), media.DownloadEntryRequest{
 		StudentID: c.GetString(ctxUserIDKey), LessonID: c.Param("lessonId"), Kind: kind,
 	})
@@ -101,7 +162,47 @@ func (h *mediaDeliveryHandlers) materialEntry(c *gin.Context, kind media.AssetKi
 	c.Status(http.StatusFound)
 }
 
+// allowProtectedMaterialDownload applies the existing protected-learning
+// signing ceilings before resolving a Course, Lesson, or attachment. The
+// quota cannot become a material-inventory oracle, and an unavailable limiter
+// never leaves a route that can mint a private object URL.
+func (h *mediaDeliveryHandlers) allowProtectedMaterialDownload(c *gin.Context) bool {
+	// The production composition always supplies this established limiter for
+	// media signing. Test-only router seams may omit it when their subject is
+	// route authorization rather than rate limiting.
+	if h.rateLimiter == nil {
+		return true
+	}
+	for _, check := range []struct {
+		policy ratelimit.Policy
+		input  ratelimit.Input
+	}{
+		{ratelimit.ProtectedLearningMaterialDownloadSourcePolicy(), ratelimit.Input{ClientIP: c.ClientIP()}},
+		{ratelimit.ProtectedLearningMaterialDownloadPolicy(), ratelimit.Input{Identifier: c.GetString(ctxUserIDKey)}},
+	} {
+		decision := h.rateLimiter.Decide(c.Request.Context(), check.policy, check.input)
+		c.Set(limiterOutcomeContextKey, string(decision.Outcome))
+		if decision.Allowed {
+			continue
+		}
+		c.Header("Cache-Control", "no-store")
+		if decision.Outcome == ratelimit.OutcomeDenied || decision.Outcome == ratelimit.OutcomeFallbackDenied {
+			if seconds := int(math.Ceil(decision.RetryAfter.Seconds())); seconds > 0 {
+				c.Header("Retry-After", strconv.Itoa(seconds))
+			}
+			writeProblem(c, problem.RateLimited())
+			return false
+		}
+		writeProtectedUnavailable(c)
+		return false
+	}
+	return true
+}
+
 func (h *mediaDeliveryHandlers) preview(c *gin.Context) {
+	if !h.allowPublicPreview(c) {
+		return
+	}
 	issued, err := h.delivery.IssuePreview(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		logProtectedDeliveryDenial(c, h.logger, err)
@@ -110,6 +211,46 @@ func (h *mediaDeliveryHandlers) preview(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, issued)
+}
+
+func (h *mediaDeliveryHandlers) coursePreview(c *gin.Context) {
+	if !h.allowPublicPreview(c) {
+		return
+	}
+	issued, err := h.delivery.IssueCoursePreview(c.Request.Context(), c.Param("courseID"))
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, publicPreviewAuthorizationBody{URL: issued.URL, ExpiresAt: issued.ExpiresAt})
+}
+
+func (h *mediaDeliveryHandlers) allowPublicPreview(c *gin.Context) bool {
+	// Test-only router seams can omit the limiter. Production composition always
+	// supplies it; an empty policy therefore never silently disables a live
+	// public issuance boundary.
+	if h.rateLimiter == nil {
+		return true
+	}
+	decision := h.rateLimiter.Decide(c.Request.Context(), h.previewRatePolicy, ratelimit.Input{ClientIP: c.ClientIP()})
+	c.Set(limiterOutcomeContextKey, string(decision.Outcome))
+	if decision.Allowed {
+		return true
+	}
+	c.Header("Cache-Control", "no-store")
+	if decision.Outcome == ratelimit.OutcomeDenied || decision.Outcome == ratelimit.OutcomeFallbackDenied {
+		if seconds := int(math.Ceil(decision.RetryAfter.Seconds())); seconds > 0 {
+			c.Header("Retry-After", strconv.Itoa(seconds))
+		}
+		writeProblem(c, problem.RateLimited())
+		return false
+	}
+	// Issuance must never proceed when a fail-closed source quota cannot be
+	// decided. Keep the same inventory-safe response used by absent media.
+	writeProtectedUnavailable(c)
+	return false
 }
 
 func logProtectedDeliveryDenial(c *gin.Context, logger *logging.Logger, err error) {

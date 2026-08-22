@@ -1,0 +1,1094 @@
+# Kuwait University — Gradex launch catalog.
+#
+# D-091 §11 makes Kuwait University the only launch-data institution. The schema
+# is multi-institution; this manifest is deliberately the only one shipped.
+#
+# Scope principle (D-091, design report §23): cover the Programs Gradex actually
+# serves at launch, with every parent Academic Unit those Programs need. This is
+# not a complete Kuwait University catalog and is not meant to become one; the
+# model expands incrementally without schema change.
+#
+# Two curation rules are enforced by validation, not convention:
+#   * every factual claim cites a source id defined in sources.yaml;
+#   * every Arabic string declares whether Kuwait University publishes that exact
+#     wording (`official`) or Gradex supplied it (`gradex_translation`).
+#
+# Placement (recommended_level / recommended_semester) is populated ONLY where
+# Kuwait University itself publishes it. The Computer Science Suggested Study
+# Plan places named courses in a year (FRESHMAN—SENIOR / السنة الأولى—الرابعة)
+# and a semester (Fall, Spring), so those mappings carry both. Every other
+# curriculum leaves them null, because no cited source places its courses.
+#
+# The plan's recommended year and the Student Manual's credit-derived
+# الفرقة الدراسية are different concepts that happen to share a scale: the plan
+# recommends when to take a course, the manual measures where a Student stands.
+# recommended_level stores the former; Student standing is never derived here.
+
+id: kuwait-university-launch-v1
+version: "1.2.0"
+description: >-
+  Kuwait University launch catalog: College of Science and College of Engineering
+  and Petroleum units, three undergraduate Programs, their current academic
+  plans, and the shared foundation Subjects those plans require.
+
+institution:
+  key: ku
+  slug: kuwait-university
+  country_code: KW
+  name_ar: جامعة الكويت
+  name_en: Kuwait University
+  name_ar_source: official
+  # The Student Manual defines الفرقة الدراسية by credits earned across five
+  # bands (<=29, 30-59, 60-89, 90-136, >=137). Five is data, never a constant in
+  # application logic.
+  max_academic_level: 5
+  # No foundation/preparatory stage is claimed. Kuwait University admits into a
+  # College and assigns sub-majors through the Deanship; that is an enrollment
+  # status question for the Student profile tranche, not a foundation programme.
+  # Other Kuwaiti universities do run preparatory programmes, which is exactly
+  # why this must not be copied across institutions.
+  has_foundation_stage: false
+  sources: [ku-colleges-index, ku-student-manual]
+
+academic_units:
+  - key: ku-science
+    kind: COLLEGE
+    slug: science
+    name_ar: كلية العلوم
+    name_en: College of Science
+    name_ar_source: official
+    sources: [ku-colleges-index, ku-student-manual]
+
+  - key: ku-engineering-petroleum
+    kind: COLLEGE
+    slug: engineering-and-petroleum
+    name_ar: كلية الهندسة والبترول
+    name_en: College of Engineering and Petroleum
+    name_ar_source: official
+    sources: [ku-colleges-index, ku-student-manual, ku-coep-home]
+
+  # T2.2: the College of Life Sciences enters launch scope because it confers the
+  # Data Science and Artificial Intelligence degree.
+  - key: ku-life-sciences
+    kind: COLLEGE
+    slug: life-sciences
+    name_ar: كلية العلوم الحياتية
+    name_en: College of Life Sciences
+    name_ar_source: official
+    sources: [ku-colleges-index, ku-student-manual]
+
+  - key: ku-information-science-dept
+    parent_key: ku-life-sciences
+    kind: DEPARTMENT
+    slug: information-science
+    name_ar: قسم علوم المعلومات
+    name_en: Information Science
+    name_ar_source: official
+    sources: [ku-student-manual, ku-dsai-program]
+
+  - key: ku-computer-science-dept
+    parent_key: ku-science
+    kind: DEPARTMENT
+    slug: computer-science
+    name_ar: قسم علوم الحاسوب
+    name_en: Computer Science
+    name_ar_source: official
+    sources: [ku-science-departments, ku-student-manual]
+
+  - key: ku-mathematics-dept
+    parent_key: ku-science
+    kind: DEPARTMENT
+    slug: mathematics
+    name_ar: قسم الرياضيات
+    name_en: Mathematics
+    name_ar_source: official
+    sources: [ku-science-departments, ku-student-manual]
+
+  - key: ku-physics-dept
+    parent_key: ku-science
+    kind: DEPARTMENT
+    slug: physics
+    name_ar: قسم الفيزياء
+    name_en: Physics
+    name_ar_source: official
+    sources: [ku-science-departments, ku-student-manual]
+
+  - key: ku-chemistry-dept
+    parent_key: ku-science
+    kind: DEPARTMENT
+    slug: chemistry
+    name_ar: قسم الكيمياء
+    name_en: Chemistry
+    name_ar_source: official
+    sources: [ku-science-departments, ku-student-manual]
+
+  - key: ku-statistics-or-dept
+    parent_key: ku-science
+    kind: DEPARTMENT
+    slug: statistics-and-operations-research
+    name_ar: قسم الإحصاء وبحوث العمليات
+    name_en: Statistics and Operations Research
+    name_ar_source: official
+    sources: [ku-science-departments, ku-student-manual]
+
+  - key: ku-computer-engineering-dept
+    parent_key: ku-engineering-petroleum
+    kind: DEPARTMENT
+    slug: computer-engineering
+    name_ar: قسم هندسة الكمبيوتر
+    name_en: Computer Engineering
+    name_ar_source: official
+    sources: [ku-coep-home, ku-student-manual]
+
+  - key: ku-electrical-engineering-dept
+    parent_key: ku-engineering-petroleum
+    kind: DEPARTMENT
+    slug: electrical-engineering
+    name_ar: قسم الهندسة الكهربائية
+    name_en: Electrical Engineering
+    name_ar_source: official
+    sources: [ku-coep-home, ku-student-manual]
+
+programs:
+  # Department is not Major: the Computer Engineering Department owns this
+  # Program, and other Kuwait University departments own several Programs each.
+  - key: ku-computer-science
+    owning_unit_key: ku-computer-science-dept
+    slug: computer-science
+    name_ar: علوم الحاسوب
+    name_en: Computer Science
+    name_ar_source: official
+    degree_kind: BSC
+    sources: [ku-cs-department, ku-student-manual]
+
+  # A real Kuwait University degree, initiated Summer 2024 and owned by the same
+  # Computer Science department as the Computer Science degree. It is the actual
+  # academic home of Gradex's "Cybersecurity" teaching area — that area is NOT
+  # modelled as an invented Program.
+  - key: ku-cybersecurity
+    owning_unit_key: ku-computer-science-dept
+    slug: cybersecurity
+    name_ar: الأمن السيبراني
+    name_en: Cybersecurity
+    name_ar_source: gradex_translation
+    degree_kind: BSC
+    sources: [ku-cybersecurity-program, ku-cybersecurity-major-sheet]
+
+  # T2.2, Founder Decision 1. A real Kuwait University degree conferred by the
+  # Department of Information Science in the College of Life Sciences — not the
+  # College of Science, and not a Gradex "Data Science" label. Its Arabic name is
+  # the university's own, taken from the official Arabic major sheet.
+  - key: ku-data-science-ai
+    owning_unit_key: ku-information-science-dept
+    slug: data-science-and-artificial-intelligence
+    name_ar: علم البيانات والذكاء الاصطناعي
+    name_en: Data Science and Artificial Intelligence
+    name_ar_source: official
+    degree_kind: BSC
+    sources: [ku-dsai-program, ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+
+  - key: ku-computer-engineering
+    owning_unit_key: ku-computer-engineering-dept
+    slug: computer-engineering
+    name_ar: هندسة الكمبيوتر
+    name_en: Computer Engineering
+    name_ar_source: official
+    degree_kind: BSC
+    sources: [ku-cpe-undergraduate, ku-student-manual]
+
+  - key: ku-electrical-engineering
+    owning_unit_key: ku-electrical-engineering-dept
+    slug: electrical-engineering
+    name_ar: الهندسة الكهربائية
+    name_en: Electrical Engineering
+    name_ar_source: official
+    degree_kind: BSC
+    sources: [ku-ee-undergraduate, ku-student-manual]
+
+curricula:
+  - key: ku-cs-2024
+    program_key: ku-computer-science
+    # Kuwait University's Computer Science department publishes this sheet under
+    # the label "2024"; it also publishes an older "2018/2023" sheet, which is
+    # deliberately not imported (see the launch scope report).
+    version_label: "2024"
+    version_label_source: official
+    effective_from_year: 2024
+    sources: [ku-cs-major-2024, ku-cs-department, ku-cs-suggested-study-plan]
+
+  - key: ku-cybersecurity-current
+    program_key: ku-cybersecurity
+    # The Cybersecurity major sheet carries no version label. The programme was
+    # initiated in Summer 2024, which is recorded as the effective year, but the
+    # label itself remains an explicit Gradex placeholder.
+    version_label: current
+    version_label_source: gradex_translation
+    version_label_note: >-
+      Kuwait University publishes no plan version label on the Cybersecurity
+      major sheet. This label is a Gradex placeholder for the currently
+      published requirements and must be replaced when an official plan label
+      is observed. It must never be shown to a Student as the university's own
+      version name.
+    effective_from_year: 2024
+    sources: [ku-cybersecurity-major-sheet, ku-cybersecurity-program]
+
+  - key: ku-dsai-current
+    program_key: ku-data-science-ai
+    # The programme documents are dated (major sheets 12 Nov 2024, 8-semester plan
+    # 6 Apr 2025) but Kuwait University prints no plan *version label* on them,
+    # unlike the Computer Science "2024" sheet. The launch academic year 2025/2026
+    # is recorded as effective_from_year rather than invented as a label.
+    version_label: current
+    version_label_source: gradex_translation
+    version_label_note: >-
+      Kuwait University publishes no plan version label on the Data Science and
+      Artificial Intelligence major sheets or 8-semester plan; the documents carry
+      dates (12 Nov 2024 and 6 Apr 2025) rather than a version name. This label is
+      a Gradex placeholder and must never be shown to a Student as the
+      university's own version name. Replace it when an official label appears.
+    effective_from_year: 2025
+    sources: [ku-dsai-program, ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]
+
+  - key: ku-cpe-current
+    program_key: ku-computer-engineering
+    # The engineering program pages publish current requirements without a plan
+    # version label. "current" states exactly that rather than inventing a year.
+    # Replace it the moment an official label is observed.
+    version_label: current
+    version_label_source: gradex_translation
+    version_label_note: >-
+      Kuwait University does not publish a plan version label on the Computer
+      Engineering undergraduate program page. This label is a Gradex placeholder
+      for the currently published requirements and must be replaced when an
+      official plan label is observed.
+    sources: [ku-cpe-undergraduate]
+
+  - key: ku-ee-current
+    program_key: ku-electrical-engineering
+    version_label: current
+    version_label_source: gradex_translation
+    version_label_note: >-
+      Kuwait University does not publish a plan version label on the Electrical
+      Engineering undergraduate program page. This label is a Gradex placeholder
+      for the currently published requirements and must be replaced when an
+      official plan label is observed.
+    sources: [ku-ee-undergraduate]
+
+subjects:
+  # Official display formatting is the dashed form the program and course pages
+  # print. Normalization to 0410101 exists only for identity and dedupe; the
+  # stored official code keeps the form a Student would recognise on a plan.
+  #
+  # Arabic Subject titles are Gradex translations throughout: Kuwait University
+  # publishes these course titles in English on the pages cited, and the Arabic
+  # course-description pages were not used as a title source. Marking them
+  # honestly is the point — Gradex must not present its own wording as the
+  # university's official Arabic.
+
+  # Mathematics (0410) — shared by all three launch Programs.
+  - key: ku-0410-101
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-101
+    title_ar: حساب التفاضل والتكامل ١
+    title_en: Calculus I
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate, ku-cs-major-2024]
+  - key: ku-0410-102
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-102
+    title_ar: حساب التفاضل والتكامل ٢
+    title_en: Calculus II
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate, ku-cs-major-2024]
+  - key: ku-0410-111
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-111
+    title_ar: الجبر الخطي
+    title_en: Linear Algebra
+    # Upgraded to official in T2.2: the Arabic DSAI major sheet publishes this
+    # exact wording for this exact code. The string is unchanged; only the
+    # provenance claim changes, from Gradex translation to the university's own.
+    title_ar_source: official
+    sources: [ku-ee-undergraduate, ku-cs-major-2024, ku-dsai-major-sheet-ar]
+  - key: ku-0410-211
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-211
+    title_ar: حساب التفاضل والتكامل ٣
+    title_en: Calculus III
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+  - key: ku-0410-240
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-240
+    title_ar: المعادلات التفاضلية العادية
+    title_en: Ordinary Differential Equation
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+
+  # Chemistry (0420) — engineering basic science.
+  - key: ku-0420-101
+    owning_unit_key: ku-chemistry-dept
+    official_code: 0420-101
+    title_ar: الكيمياء العامة ١
+    title_en: General Chemistry I
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+  - key: ku-0420-105
+    owning_unit_key: ku-chemistry-dept
+    official_code: 0420-105
+    title_ar: مختبر الكيمياء العامة ١
+    title_en: General Chemistry I Laboratory
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+
+  # Physics (0430) — engineering basic science.
+  - key: ku-0430-101
+    owning_unit_key: ku-physics-dept
+    official_code: 0430-101
+    title_ar: الفيزياء العامة ١
+    title_en: General Physics I
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+  - key: ku-0430-105
+    owning_unit_key: ku-physics-dept
+    official_code: 0430-105
+    title_ar: مختبر الفيزياء العامة ١
+    title_en: General Physics I Laboratory
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+  - key: ku-0430-102
+    owning_unit_key: ku-physics-dept
+    official_code: 0430-102
+    title_ar: الفيزياء العامة ٢
+    title_en: General Physics II
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+  - key: ku-0430-107
+    owning_unit_key: ku-physics-dept
+    official_code: 0430-107
+    title_ar: مختبر الفيزياء العامة ٢
+    title_en: General Physics II Laboratory
+    title_ar_source: gradex_translation
+    sources: [ku-ee-undergraduate]
+
+  # Statistics (0480) — College of Science requirement for Computer Science.
+  - key: ku-0480-201
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-201
+    title_ar: الإحصاء للعلوم والهندسة
+    title_en: Statistics for Science and Engineering
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+
+  # University requirements. No owning unit is claimed: the CS Major 2024 sheet
+  # groups these as University Requirements without naming an owning department,
+  # and inventing one would be fabricated structure.
+  - key: ku-0310-101
+    official_code: 0310-101
+    title_ar: مهارات الاتصال اللغوي
+    title_en: Language Skills Communication
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-0330-100
+    official_code: 0330-100
+    title_ar: تاريخ الكويت الحديث والمعاصر
+    title_en: Modern and Cont. Hist. of Kuwait
+    # Upgraded to official in T2.2, same reasoning as 0410-111: the Arabic DSAI
+    # major sheet publishes this exact wording. String unchanged.
+    title_ar_source: official
+    sources: [ku-cs-major-2024, ku-dsai-major-sheet-ar]
+  - key: ku-0330-102
+    official_code: 0330-102
+    title_ar: الحضارة العربية الإسلامية
+    title_en: Arab Islam Civilization
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-9988-161
+    official_code: 9988-161
+    title_ar: اللغة الإنجليزية ١
+    title_en: English Language I
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-9988-162
+    official_code: 9988-162
+    title_ar: اللغة الإنجليزية ٢
+    title_en: English Language II
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+
+  # Computer Science core (0418), exactly as the Major 2024 sheet lists it.
+  - key: ku-0418-101
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-101
+    title_ar: مقدمة في علوم الحاسوب
+    title_en: Introduction to Computer Science
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en, ku-cybersecurity-major-sheet]
+  - key: ku-0418-111
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-111
+    title_ar: الرياضيات المتقطعة لعلوم الحاسوب
+    title_en: Discrete Mathematics for Computer Science
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+  - key: ku-0418-143
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-143
+    title_ar: أساسيات برمجة الحاسوب
+    title_en: Fundamentals of Computer Programming
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+  - key: ku-0418-201
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-201
+    title_ar: هياكل البيانات والخوارزميات
+    title_en: Data Structures & Algorithms
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+  - key: ku-0418-220
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-220
+    title_ar: البرمجة بلغة C ونظام يونكس
+    title_en: Programming in C & UNIX
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+  - key: ku-0418-221
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-221
+    title_ar: تنظيم الحاسوب
+    title_en: Computer Organization
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-0418-310
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-310
+    title_ar: نظرية الحوسبة
+    title_en: Theory of Computation
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-0418-320
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-320
+    title_ar: مبادئ أنظمة الحاسوب
+    title_en: Principles of Computer Systems
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024]
+  - key: ku-0418-491
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-491
+    title_ar: مشروع التخرج ١
+    title_en: Capstone Project I
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+  - key: ku-0418-492
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-492
+    title_ar: مشروع التخرج ٢
+    title_en: Capstone Project II
+    title_ar_source: gradex_translation
+    sources: [ku-cs-major-2024, ku-cs-courses-en]
+
+  # ---- Computer Science: software-area Subjects (T2.1) -------------------
+  # 0418-321 and 0418-331 are compulsory on the Cybersecurity major sheet, so
+  # they carry real curriculum mappings. The remaining four are official CS
+  # courses that Kuwait University publishes as part of its CS elective pool;
+  # the sheets state the pool as a credit requirement rather than enumerating
+  # which elective belongs to which plan, so they are canonical Subjects with
+  # no curriculum mapping. That is the honest shape, not an omission.
+  - key: ku-0418-321
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-321
+    title_ar: نظم التشغيل
+    title_en: Operating Systems
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet, ku-cs-courses-en]
+  - key: ku-0418-331
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-331
+    title_ar: شبكات الحاسوب
+    title_en: Computer Networks
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet, ku-cs-courses-en]
+  - key: ku-0418-301
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-301
+    title_ar: تصميم وتحليل الخوارزميات
+    title_en: Algorithm Design and Analysis
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+  - key: ku-0418-335
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-335
+    title_ar: برمجة الويب
+    title_en: Web Programming
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+  - key: ku-0418-390
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-390
+    title_ar: هندسة البرمجيات
+    title_en: Software Engineering
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+  - key: ku-0418-470
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-470
+    title_ar: نظم قواعد البيانات
+    title_en: Database Systems
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+
+  # ---- Cybersecurity: security-area Subjects (T2.1) ----------------------
+  # All five are compulsory on the official Cybersecurity major sheet.
+  - key: ku-0418-231
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-231
+    title_ar: مقدمة في أمن الحاسوب
+    title_en: Introduction to Computer Security
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-0418-312
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-312
+    title_ar: التشفير التطبيقي
+    title_en: Applied Cryptography
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-0418-348
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-348
+    title_ar: البرمجة الآمنة
+    title_en: Secure Programming
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-0418-435
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-435
+    title_ar: أمن الشبكات
+    title_en: Network Security
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-0418-493
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-493
+    title_ar: تصميم أمن الحاسوب
+    title_en: Computer Security Design
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+
+  # Interdisciplinary block of the Cybersecurity plan. The 1830 prefix is not
+  # attributed to an owning unit: the major sheet gives the codes and titles but
+  # names no owning department, and guessing one would be fabricated structure.
+  - key: ku-1830-351
+    official_code: 1830-351
+    title_ar: تقنية المعلومات وأخلاقيات الفضاء السيبراني
+    title_en: Info Technology and Cyber Ethics
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-1830-434
+    official_code: 1830-434
+    title_ar: عمليات الأمن السيبراني
+    title_en: Security Operations
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-1830-435
+    official_code: 1830-435
+    title_ar: التحقيق الجنائي الرقمي
+    title_en: Digital Security Forensics
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+  - key: ku-1830-436
+    official_code: 1830-436
+    title_ar: الأمن والخصوصية القابلة للاستخدام
+    title_en: Usable Security and Privacy
+    title_ar_source: gradex_translation
+    sources: [ku-cybersecurity-major-sheet]
+
+  # ---- Data-science-area Subjects (T2.1) ---------------------------------
+  # Kuwait University's Data Science and Artificial Intelligence degree lives in
+  # the College of Life Sciences and is NOT imported here: its major sheet is
+  # published only as a .docx and its Subjects are not yet transcribed, so a
+  # selectable Program with an empty catalog would be worse than none. These two
+  # official Computer Science courses are what serve the data-science teaching
+  # area for CS and Cybersecurity Students today.
+  - key: ku-0418-365
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-365
+    title_ar: الذكاء الاصطناعي
+    title_en: Artificial Intelligence
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+  - key: ku-0418-466
+    owning_unit_key: ku-computer-science-dept
+    official_code: 0418-466
+    title_ar: مقدمة في تعلم الآلة
+    title_en: Introduction to Machine Learning
+    title_ar_source: gradex_translation
+    sources: [ku-cs-courses-en]
+
+  # ---- Data Science & AI: readiness programme (T2.2) ---------------------
+  # Kuwait University calls this "READINESS PROGRAM / البرنامج التحضيري" (4
+  # credits). These are real coded courses, so they are real Subjects. The T1
+  # requirement_kind enum has no readiness category and adding one would be a
+  # schema migration this pass forbids, so they map as SUPPORTING — the nearest
+  # existing category — and that choice is recorded rather than hidden.
+  - key: ku-0410-091
+    owning_unit_key: ku-mathematics-dept
+    official_code: 0410-091
+    title_ar: الحسبان التمهيدي
+    title_en: Pre-Calculus
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-9988-097
+    official_code: 9988-097
+    title_ar: تمهيدي اللغة الإنجليزية 1
+    title_en: Pre-English 1
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-9988-107
+    official_code: 9988-107
+    title_ar: تمهيدي اللغة الإنجليزية 2
+    title_en: Pre-English 2
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+
+  # ---- Data Science & AI: general education requirements (T2.2) ----------
+  # No owning unit is claimed for the 1800- and 9988- families: the major sheets
+  # publish their codes and titles but name no owning department.
+  - key: ku-1800-130
+    official_code: 1800-130
+    title_ar: الأخلاقيات والممارسات
+    title_en: Ethics and Practices
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1800-100
+    official_code: 1800-100
+    title_ar: اللغة العربية
+    title_en: Arabic Language
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-9988-126
+    official_code: 9988-126
+    title_ar: مهارات الكتابة الأكاديمية والبحث
+    title_en: Academic Writing & Research Skills
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-9988-146
+    official_code: 9988-146
+    title_ar: المهارات الأكاديمية الشفهية
+    title_en: Academic Oral Skills
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1800-109
+    official_code: 1800-109
+    title_ar: الإحصاء
+    title_en: Statistics
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-101
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-101
+    title_ar: مدخل الى نظم المعلومات
+    title_en: Introduction to Information Systems
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+
+  # ---- Data Science & AI: core requirement (T2.2) ------------------------
+  # The 1830- family is Information Science and the 1832- family is the DSAI
+  # programme itself; the DSAI plan evidences both. Note that the four 1830-
+  # Subjects added from the Cybersecurity sheet in T2.1 still carry no owning
+  # unit: assigning one now would be an ownership change, which the importer
+  # correctly refuses. That is a recorded follow-up, not an oversight.
+  - key: ku-1832-102
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-102
+    title_ar: مقدمة في علم البيانات
+    title_en: Introduction to Data Science
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-112
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-112
+    title_ar: هياكل متقطعة لعلوم المعلومات
+    title_en: Discrete Structures for Information Sciences
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-140
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-140
+    title_ar: البرمجة وحل المسائل
+    title_en: Programming and Problem Solving
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-151
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-151
+    title_ar: امن المعلومات والتشفير
+    title_en: Information Security and Cryptography
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-200
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-200
+    title_ar: مقدمة في الذكاء الاصطناعي
+    title_en: Introduction to Artificial Intelligence
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-0480-210
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-210
+    title_ar: مقدمة في الاحتمال
+    title_en: Introduction to Probability
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-220
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-220
+    title_ar: قواعد البيانات (1)
+    title_en: Database Systems I
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-230
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-230
+    title_ar: البنية التحتية لتكنولوجيا المعلومات
+    title_en: IT Infrastructure
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-0480-240
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-240
+    title_ar: طرائق احصائية
+    title_en: Statistical Methods
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-242
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-242
+    title_ar: الحصول على البيانات وإدارتها
+    title_en: Data Acquisition and Management
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-244
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-244
+    title_ar: تطوير التطبيقات والبرمجة
+    title_en: Application Development and Programming
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-245
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-245
+    title_ar: هياكل البيانات والخوارزميات
+    title_en: Data Structures and Algorithms
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-0480-342
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-342
+    title_ar: السلاسل الزمنية والتنبؤ
+    title_en: Time Series and Forecasting
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-343
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-343
+    title_ar: التنقيب عن البيانات
+    title_en: Data Mining
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-344
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-344
+    title_ar: انظمة البيانات الضخمة
+    title_en: Big Data Systems
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-345
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-345
+    title_ar: تحليل البيانات والتصور
+    title_en: Data Analytics and Visualization
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-346
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-346
+    title_ar: أخلاقيات البيانات والذكاء الاصطناعي
+    title_en: Data and Artificial Intelligence Ethics
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-347
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-347
+    title_ar: تطوير البرمجيات لمشاريع علوم البيانات
+    title_en: Software Development for Data Science Projects
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-348
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-348
+    title_ar: التعلم الآلي
+    title_en: Machine Learning
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-442
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-442
+    title_ar: تحليلات بيانات المؤسسة
+    title_en: Enterprise Data Analytics
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-446
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-446
+    title_ar: التعلم العميق
+    title_en: Deep Learning
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1830-495
+    owning_unit_key: ku-information-science-dept
+    official_code: 1830-495
+    title_ar: التدريب العملي
+    title_en: Internship
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-496
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-496
+    title_ar: تطوير متطلبات التصميم المتكامل
+    title_en: Capstone Requirements Development
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-497
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-497
+    title_ar: تنفيذ التصميم المتكامل
+    title_en: Capstone Design Implementation
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+
+  # ---- Data Science & AI: programme electives (T2.2) ---------------------
+  # Kuwait University enumerates these by code, so they are real Subjects. The
+  # plan says "select 2 or 3", which is a choose-N requirement the T1 model does
+  # not express and this pass does not build. They map as MAJOR_ELECTIVE, which
+  # states availability without claiming a Student must take each one.
+  - key: ku-1832-399
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-399
+    title_ar: موضوعات متخصصة في علم البيانات والذكاء الاصطناعي
+    title_en: Special Topics Data Science and Artificial Intelligence
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-445
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-445
+    title_ar: معالجة اللغات الطبيعية
+    title_en: Natural Language Processing
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-447
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-447
+    title_ar: الرؤية الحاسوبية
+    title_en: Computer Vision
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-448
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-448
+    title_ar: الذكاء الاصطناعي وانترنت الأشياء
+    title_en: AI and Internet of Things
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-1832-449
+    owning_unit_key: ku-information-science-dept
+    official_code: 1832-449
+    title_ar: أبحاث متخصصة في علم البيانات والذكاء الاصطناعي
+    title_en: Directed Research in Data Science and Artificial Intelligence
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-0480-411
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-411
+    title_ar: نظرية صنع القرار
+    title_en: Decision Theory
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+  - key: ku-0480-423
+    owning_unit_key: ku-statistics-or-dept
+    official_code: 0480-423
+    title_ar: تحليل المتغيرات المتعددة
+    title_en: Multivariate Analysis
+    title_ar_source: official
+    sources: [ku-dsai-major-sheet-en, ku-dsai-major-sheet-ar]
+
+curriculum_subjects:
+  # ---- Computer Science, Major 2024 -------------------------------------
+  # Credits are the major sheet's own values. Placement comes from Kuwait
+  # University's official Suggested Study Plan for this same 2024 major, which
+  # names a year (FRESHMAN—SENIOR / السنة الأولى—الرابعة) and a term (Fall,
+  # Spring) for every named course: level 1-4, semester 1=Fall, 2=Spring.
+  #
+  # The plan writes courses in short form (CS101, MATH102, ENG161, STAT201),
+  # which resolve to this university's full codes by prefix — CS=0418,
+  # MATH=0410, ENG=9988, STAT=0480 — as corroborated by the major sheet itself.
+  # That resolution is a recorded curation step, not a transcription.
+  #
+  # The three university-requirement rows below carry no placement: the plan
+  # holds slots called UNIV. COMP. 1/2/3 without saying which requirement fills
+  # which slot, so assigning them would be a guess.
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0310-101, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cs-major-2024]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0330-100, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cs-major-2024]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0330-102, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cs-major-2024]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-9988-161, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-9988-162, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0410-101, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0410-102, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0410-111, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0480-201, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-101, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-111, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-143, requirement_kind: MAJOR_CORE, credits: 4, recommended_level: 1, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-201, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-220, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-221, requirement_kind: MAJOR_CORE, credits: 4, recommended_level: 2, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-310, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-320, requirement_kind: MAJOR_CORE, credits: 4, recommended_level: 3, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-491, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 1, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+  - {curriculum_key: ku-cs-2024, subject_key: ku-0418-492, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 2, sources: [ku-cs-major-2024, ku-cs-suggested-study-plan]}
+
+  # ---- Electrical Engineering, current plan ------------------------------
+  # The Mathematics and Basic Science block, 27 credits, itemized with codes on
+  # the official program page. Recorded as COLLEGE_REQUIREMENT: it is required
+  # of the College's programs and sits outside the major department.
+  - {curriculum_key: ku-ee-current, subject_key: ku-0410-101, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0410-102, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0410-111, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0410-211, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0410-240, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0420-101, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0420-105, requirement_kind: COLLEGE_REQUIREMENT, credits: 1, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0430-101, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0430-105, requirement_kind: COLLEGE_REQUIREMENT, credits: 1, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0430-102, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-ee-undergraduate]}
+  - {curriculum_key: ku-ee-current, subject_key: ku-0430-107, requirement_kind: COLLEGE_REQUIREMENT, credits: 1, sources: [ku-ee-undergraduate]}
+
+  # ---- Computer Engineering, current plan --------------------------------
+  # The program page names this block by course title (Calculus I-III, Linear
+  # Algebra, Differential Equations, General Physics I/II with laboratories,
+  # General Chemistry I with laboratory) and cites the university-wide code
+  # scheme, including 0410-101 itself. Codes are therefore the same shared
+  # Subjects, not Computer Engineering copies. Credits are omitted here: the
+  # page states the block total (27) without itemized per-course credits.
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0410-101, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0410-102, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0410-111, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0410-211, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0410-240, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0420-101, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0420-105, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0430-101, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0430-105, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0430-102, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+  - {curriculum_key: ku-cpe-current, subject_key: ku-0430-107, requirement_kind: COLLEGE_REQUIREMENT, sources: [ku-cpe-undergraduate]}
+
+  # ---- Cybersecurity, current plan (T2.1) --------------------------------
+  # Itemized verbatim from the official Cybersecurity major sheet (127 credits).
+  # No level or semester: that sheet publishes no placement.
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0310-101, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0330-100, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0330-102, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-9988-161, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-9988-162, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0410-101, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0410-102, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0410-111, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0480-201, requirement_kind: COLLEGE_REQUIREMENT, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-101, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-111, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-143, requirement_kind: MAJOR_CORE, credits: 4, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-201, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-220, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-221, requirement_kind: MAJOR_CORE, credits: 4, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-310, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-320, requirement_kind: MAJOR_CORE, credits: 4, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-321, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-331, requirement_kind: MAJOR_CORE, credits: 4, sources: [ku-cybersecurity-major-sheet]}
+
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-231, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-312, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-348, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-435, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-0418-493, requirement_kind: MAJOR_CORE, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-1830-351, requirement_kind: SUPPORTING, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-1830-434, requirement_kind: SUPPORTING, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-1830-435, requirement_kind: SUPPORTING, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+  - {curriculum_key: ku-cybersecurity-current, subject_key: ku-1830-436, requirement_kind: SUPPORTING, credits: 3, sources: [ku-cybersecurity-major-sheet]}
+
+  # ---- Data Science and Artificial Intelligence, current plan (T2.2) -----
+  # Requirement kinds and credits come from the official major sheet; level and
+  # semester come from the official 8-semester plan, where semester 1-8 maps to
+  # year = ceil(semester / 2) and term 1 = the year's first semester. Only
+  # courses the plan names by code are placed: its "xxx" elective slots name no
+  # course, so the readiness block and the programme electives stay unplaced.
+  #
+  # 0410-101, 0410-111, and 0330-100 are REUSED canonical Subjects, already
+  # required by other Kuwait University programmes. Note that the plan places
+  # 0410-101 in the second semester while the Computer Science plan places it in
+  # the first: the same Subject, sequenced differently by two programmes, which
+  # is exactly why placement lives on the mapping rather than on the Subject.
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0410-091, requirement_kind: SUPPORTING, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-9988-097, requirement_kind: SUPPORTING, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-9988-107, requirement_kind: SUPPORTING, sources: [ku-dsai-major-sheet-en]}
+
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0330-100, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1800-130, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1800-100, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-9988-126, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-9988-146, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 2, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0410-111, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1800-109, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-101, requirement_kind: UNIVERSITY_REQUIREMENT, credits: 3, recommended_level: 1, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0410-101, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-102, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-112, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-140, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 1, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-151, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-200, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0480-210, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-220, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-230, requirement_kind: MAJOR_CORE, credits: 4, recommended_level: 2, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0480-240, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-242, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-244, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 2, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-245, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0480-342, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-343, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-344, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-345, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-346, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-347, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-348, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 3, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-442, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-446, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1830-495, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-496, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 1, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-497, requirement_kind: MAJOR_CORE, credits: 3, recommended_level: 4, recommended_semester: 2, sources: [ku-dsai-major-sheet-en, ku-dsai-8-semester-plan]}
+
+  # Programme electives. 0480-423 carries no credits: the English sheet prints
+  # 3(3-0-3) and the Arabic sheet prints 4(3-3-4) for the same code, so neither
+  # value is asserted. The conflict is recorded in the scope document.
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-399, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-445, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-447, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-448, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-1832-449, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0480-411, requirement_kind: MAJOR_ELECTIVE, credits: 3, sources: [ku-dsai-major-sheet-en]}
+  - {curriculum_key: ku-dsai-current, subject_key: ku-0480-423, requirement_kind: MAJOR_ELECTIVE, sources: [ku-dsai-major-sheet-en]}

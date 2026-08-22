@@ -9,6 +9,9 @@ S12_ENV_FILE="$S12_STATE_DIR/production-like.env"
 S12_BACKUP_DIR="$S12_STATE_DIR/backups"
 S12_BACKUP_FILE="$S12_BACKUP_DIR/gradex-s12.dump"
 S12_CHECKSUM_FILE="$S12_BACKUP_FILE.sha256"
+S12_SCHEMA_STATE_FILE="$S12_BACKUP_FILE.schema-state"
+S12_SCHEMA_STATE_CHECKSUM_FILE="$S12_SCHEMA_STATE_FILE.sha256"
+S12_RESTORED_SCHEMA_STATE_FILE="$S12_BACKUP_DIR/restored-schema-state"
 S12_COMPLETED_AT_FILE="$S12_BACKUP_FILE.completed-at"
 S12_PROJECT="gradex-s12"
 
@@ -82,21 +85,43 @@ SQL
 
 create_backup() {
   load_environment
-  local source_id partial_file
+  local source_id partial_file schema_before schema_after
   source_id="$(service_id postgres)"
   [ -n "$source_id" ] || die "source PostgreSQL is absent"
   mkdir -p "$S12_BACKUP_DIR"
   chmod 700 "$S12_BACKUP_DIR"
   partial_file="$S12_BACKUP_FILE.partial"
   rm -f "$partial_file"
+
+  schema_before="$(docker exec "$source_id" psql --no-psqlrc --username gradex --dbname gradex \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
+  [[ "$schema_before" =~ ^[0-9]+\|false$ ]] ||
+    die "refusing backup from invalid or non-clean schema state: $schema_before"
+
   docker exec "$source_id" pg_dump --format=custom --no-owner --no-acl \
     --username gradex --dbname gradex >"$partial_file"
   [ -s "$partial_file" ] || die "backup is empty"
+
+  schema_after="$(docker exec "$source_id" psql --no-psqlrc --username gradex --dbname gradex \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
+  [ "$schema_after" = "$schema_before" ] ||
+    die "schema changed while backup was being created: $schema_before -> $schema_after"
+
   mv "$partial_file" "$S12_BACKUP_FILE"
+  printf '%s\n' "$schema_before" >"$S12_SCHEMA_STATE_FILE"
   sha256sum "$S12_BACKUP_FILE" >"$S12_CHECKSUM_FILE"
+  sha256sum "$S12_SCHEMA_STATE_FILE" >"$S12_SCHEMA_STATE_CHECKSUM_FILE"
   date +%s >"$S12_COMPLETED_AT_FILE"
-  chmod 600 "$S12_BACKUP_FILE" "$S12_CHECKSUM_FILE" "$S12_COMPLETED_AT_FILE"
-  note "backup and checksum created in ignored state"
+  chmod 600 \
+    "$S12_BACKUP_FILE" \
+    "$S12_CHECKSUM_FILE" \
+    "$S12_SCHEMA_STATE_FILE" \
+    "$S12_SCHEMA_STATE_CHECKSUM_FILE" \
+    "$S12_COMPLETED_AT_FILE"
+
+  rm -f -- "$S12_RESTORED_SCHEMA_STATE_FILE"
+
+  note "backup, schema metadata, and checksums created in ignored state at schema $schema_before"
 }
 
 wait_for_healthy() {
@@ -119,9 +144,19 @@ wait_for_healthy() {
 restore_backup() {
   load_environment
   [ -s "$S12_BACKUP_FILE" ] || die "backup is absent"
-  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$S12_CHECKSUM_FILE")") >/dev/null
+  [ -s "$S12_SCHEMA_STATE_FILE" ] || die "backup schema metadata is absent"
+  [ -s "$S12_SCHEMA_STATE_CHECKSUM_FILE" ] || die "backup schema metadata checksum is absent"
 
-  local source_id target_id source_volume target_volume
+  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$S12_CHECKSUM_FILE")") >/dev/null
+  (cd "$S12_BACKUP_DIR" && sha256sum --check "$(basename "$S12_SCHEMA_STATE_CHECKSUM_FILE")") >/dev/null
+
+  local expected_schema_state source_id target_id source_volume target_volume
+  expected_schema_state="$(cat "$S12_SCHEMA_STATE_FILE")"
+  [[ "$expected_schema_state" =~ ^[0-9]+\|false$ ]] ||
+    die "backup schema metadata is invalid: $expected_schema_state"
+
+  rm -f -- "$S12_RESTORED_SCHEMA_STATE_FILE"
+
   source_id="$(service_id postgres)"
   [ -n "$source_id" ] || die "source PostgreSQL is absent"
   source_volume="${S12_PROJECT}_postgres-data"
@@ -139,7 +174,11 @@ restore_backup() {
 
   docker exec --interactive "$target_id" pg_restore --exit-on-error --single-transaction \
     --no-owner --no-acl --username gradex_restore --dbname gradex_restore <"$S12_BACKUP_FILE"
-  note "backup restored into the fresh restore-postgres database without cleaning the source"
+
+  printf '%s\n' "$expected_schema_state" >"$S12_RESTORED_SCHEMA_STATE_FILE"
+  chmod 600 "$S12_RESTORED_SCHEMA_STATE_FILE"
+
+  note "backup restored into the fresh restore-postgres database at schema $expected_schema_state without cleaning the source"
 }
 
 usage() {

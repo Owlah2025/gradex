@@ -66,6 +66,7 @@ func mountedAdmissionRouterWithObserver(
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	bootstrapPolicy.LocalMaxKeys = localMaxKeys
 	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
+	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",

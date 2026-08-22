@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Gradex PostgreSQL provider backup hourly
+
+[Timer]
+OnCalendar=hourly
+AccuracySec=1s
+Persistent=true
+Unit=gradex-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -77,25 +77,37 @@ approved under `LG-019`.
 - External providers remain replaceable and testable.
 - The launch is single-region; multi-region active-active behavior is not an MVP requirement.
 
-### 3.2 PRD targets
+### 3.2 Founder-approved availability and PRD performance targets
 
-- Core catalog, purchase, and playback paths target 99.5% monthly availability.
+- Core catalog, course-access, and playback paths have a Founder-approved 99.5% monthly availability
+  target for MVP.
 - Read APIs target p95 latency below 300 milliseconds.
 - Transactional writes target p95 below 800 milliseconds, excluding payment-gateway latency.
 - Entitled video targets p95 time-to-first-frame below 3 seconds when the selected media-delivery
   path is healthy.
 - Public catalog/Course pages target p95 LCP below 2.5 seconds on representative Kuwait 4G.
 
-### 3.3 Provisional load-test floor
+### 3.3 Founder-approved launch validation envelope
 
-These are validation values, not an approved demand forecast:
+These are capacity and launch-validation requirements, not a demand forecast. They have not passed a
+representative load test yet:
 
 - 5,000 registered accounts;
-- 500 concurrent platform sessions;
-- 100 concurrent playback starts, with media bytes served by object storage/CDN;
-- 100 API requests per second for short bursts;
+- 500 simultaneous active platform sessions;
+- an exam-start surge in which 500 Students begin using Gradex within one minute;
+- 250 API requests per second sustained for 60 seconds during that exam-start surge;
+- 250 playback starts within the same minute, with media bytes served by object storage/CDN rather
+  than proxied through the Go API;
 - 20 concurrent direct uploads;
 - no more than two simultaneous transcodes per worker instance.
+
+The login portion explicitly permits all 500 distinct Students to share one public IPv4/NAT. Real
+KVM2 measurements of Gradex `internal/identity.VerifyPassword` at the production Argon2id parameters
+(64 MiB, time cost 3, parallelism 4) completed 500 verifications with one worker in about 35.45
+seconds (14.105/second, about 188% CPU, no swap). Two workers were slower and used more memory, so
+the current production gate defaults to one active verifier with 500 bounded waiters. This raw-hash
+measurement does not include Redis, PostgreSQL, TLS, account lookup, or session persistence and does
+not close LG-019; the browser-equivalent external 500-login test remains mandatory.
 
 ### 3.4 Provisional recovery targets
 
@@ -108,8 +120,14 @@ These are validation values, not an approved demand forecast:
 | Redis | No authoritative durability requirement; queued intent is reconstructed from PostgreSQL |
 | Application deployment | Previous known-good frontend/API/worker versions restorable within 30 minutes |
 
-The final budget, load forecast, instance sizes, minimum replicas, availability tier, RPO, and RTO
-remain blocked on `LG-019`.
+The repository now defines an hourly systemd provider-backup schedule and a two-hour backup-freshness
+alert threshold. Scheduling is not recovery evidence. When every hourly backup succeeds, it supports
+an approximately one-hour backup-based RPO direction; it does not provide point-in-time recovery.
+There is no implemented and tested PostgreSQL WAL archive/PITR mechanism, so the provisional
+15-minute RPO above is unsupported. PostgreSQL RPO and the provisional four-hour RTO remain unapproved.
+
+The final budget, load-test result, instance sizes, minimum replicas, recovery targets, and restore
+evidence remain blocked on `LG-019`.
 
 ### 3.5 Provisional region boundary
 
@@ -501,7 +519,7 @@ foundation and later operational runbooks.
   infrastructure noise.
 - Synthetic checks exercise the public catalog, authentication boundary, API readiness, and
   protected-media path.
-- Dashboards expose the PRD targets and provisional launch-load floor.
+- Dashboards expose the PRD targets and Founder-approved launch validation envelope.
 
 ## 13. Validation and Production Acceptance
 
@@ -519,7 +537,8 @@ foundation and later operational runbooks.
   interfaces and player controls, including RTL/LTR behavior; hosted-checkout and caption gaps are
   assessed and disclosed under `LG-015`. Gradex must not claim complete product-level WCAG
   conformance while the approved media-accessibility gap remains.
-- Load tests exercise the provisional envelope without routing media bytes through the API.
+- Load tests exercise the Founder-approved launch validation envelope without routing media bytes
+  through the API.
 - Recovery drills cover Redis loss, interrupted workers, duplicate callbacks, PostgreSQL restore,
   source-media backup recovery, derived-media regeneration, and deployment rollback.
 
@@ -546,7 +565,7 @@ temporary mitigation, accountable owner, approver, and expiry or next review dat
 | Tax, invoice, receipt, and accounting treatment | `LG-016` | Commerce/Reporting preserve extensible immutable transaction fields without assuming tax or document rules |
 | Disputes and chargebacks | `LG-017` | Commerce records immutable dispute events; Entitlement, revenue, payout, notification, and evidence effects remain policy-driven |
 | Transactional email | `LG-018` | Delivery adapter, attempts, suppression, monitoring, and sender configuration remain replaceable |
-| Operating/recovery envelope | `LG-019` | Load, cost, region, scaling, backup, RPO, and RTO values remain provisional |
+| Operating/recovery envelope | `LG-019` | Preserve the Founder-approved load and availability targets while cost, region, sizing, production schedule evidence, restore proof, RPO, and RTO remain open |
 | Instructor agreement and content rights | `LG-020` | Identity/Moderation retain versioned agreement and rights evidence boundaries without inventing terms |
 
 Other legal, commercial, content, accessibility, support, accounting, and production gates in

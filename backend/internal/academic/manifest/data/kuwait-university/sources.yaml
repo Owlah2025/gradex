@@ -1,0 +1,251 @@
+# Provenance for the Kuwait University launch catalog.
+#
+# This file is curation evidence. Nothing here is read by authorization or by
+# any runtime decision — the importer only checks that every factual claim in
+# manifest.yaml cites an id defined below.
+#
+# Priority order followed: official Kuwait University pages and the official
+# Deanship of Admission and Registration Student Manual. No competitor or
+# aggregator source contributes any academic fact.
+
+sources:
+  - id: ku-colleges-index
+    url: https://www.ku.edu.kw/academic/colleges
+    title: Colleges of Kuwait University
+    type: official_university_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - institution: ku
+      - unit: ku-science
+      - unit: ku-engineering-petroleum
+
+  - id: ku-student-manual
+    url: https://portal.ku.edu.kw/manuals/admission/en/student_manual.pdf
+    title: دليل الطالب — عمادة القبول والتسجيل (Student Manual, Deanship of Admission and Registration)
+    type: official_university_manual
+    retrieved_at: "2026-08-21"
+    supports:
+      - institution: ku
+      - institution_max_academic_level: 5
+      - official_arabic_names: colleges_and_departments
+
+  - id: ku-coep-home
+    url: https://eng.ku.edu.kw/
+    title: College of Engineering and Petroleum — Kuwait University
+    type: official_college_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - unit: ku-engineering-petroleum
+      - unit: ku-computer-engineering-dept
+      - unit: ku-electrical-engineering-dept
+
+  - id: ku-science-departments
+    url: https://sci.ku.edu.kw/
+    title: College of Science — Kuwait University
+    type: official_college_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - unit: ku-science
+      - unit: ku-computer-science-dept
+      - unit: ku-mathematics-dept
+      - unit: ku-physics-dept
+      - unit: ku-chemistry-dept
+      - unit: ku-statistics-or-dept
+
+  - id: ku-cpe-undergraduate
+    url: https://engineering.ku.edu.kw/cpe/undergraduates/undergraduate-program
+    title: Undergraduate Program — Computer Engineering, Kuwait University
+    type: official_program_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - program: ku-computer-engineering
+      - curriculum: ku-cpe-current
+      - course_code_format: four-digit prefix, dash, three-digit number
+
+  - id: ku-ee-undergraduate
+    url: https://engineering.ku.edu.kw/ee/undergraduates/undergraduate-program
+    title: Undergraduate Program — Electrical Engineering, Kuwait University
+    type: official_program_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - program: ku-electrical-engineering
+      - curriculum: ku-ee-current
+      - subject: ku-0410-101
+      - subject: ku-0410-102
+      - subject: ku-0410-111
+      - subject: ku-0410-211
+      - subject: ku-0410-240
+      - subject: ku-0420-101
+      - subject: ku-0420-105
+      - subject: ku-0430-101
+      - subject: ku-0430-105
+      - subject: ku-0430-102
+      - subject: ku-0430-107
+
+  - id: ku-cs-department
+    url: https://www.cs.ku.edu.kw/undergraduate/
+    title: Undergraduate — Computer Science Department, Kuwait University
+    type: official_department_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - program: ku-computer-science
+      - degree_name: B.Sc. Computer Science
+      - observed_major_sheet_versions: ["2024", "2018/2023"]
+
+  - id: ku-cs-major-2024
+    url: https://www.cs.ku.edu.kw/computer-science-major-2024-kuwait-university/
+    title: Computer Science Major 2024 (Kuwait University)
+    type: official_major_sheet
+    retrieved_at: "2026-08-21"
+    supports:
+      - curriculum: ku-cs-2024
+      - total_credits: 122
+      - requirement_categories: university, college_of_science, department, free_electives
+      - subject: ku-0310-101
+      - subject: ku-0330-100
+      - subject: ku-0330-102
+      - subject: ku-9988-161
+      - subject: ku-9988-162
+      - subject: ku-0480-201
+      - subject: ku-0418-101
+      - subject: ku-0418-111
+      - subject: ku-0418-143
+      - subject: ku-0418-201
+      - subject: ku-0418-220
+      - subject: ku-0418-221
+      - subject: ku-0418-310
+      - subject: ku-0418-320
+      - subject: ku-0418-491
+      - subject: ku-0418-492
+
+  - id: ku-cs-courses-en
+    url: https://www.cs.ku.edu.kw/undergraduate/courses-en/
+    title: Courses — Computer Science Department, Kuwait University (English)
+    type: official_course_catalog
+    retrieved_at: "2026-08-21"
+    supports:
+      - course_code_display_format: "0418-111"
+      - subject_titles: computer_science
+
+  # ---- T2.1 Founder launch-scope alignment (researched 2026-08-21) ----
+
+  - id: ku-cybersecurity-program
+    url: https://sci.ku.edu.kw/academics/study-programs/cybersecurity
+    title: Bachelor in CyberSecurity — College of Science, Kuwait University
+    type: official_program_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - program: ku-cybersecurity
+      - owning_college: College of Science
+      - owning_department: Computer Science
+      - initiated: Summer 2024
+
+  - id: ku-cybersecurity-major-sheet
+    url: https://www.cs.ku.edu.kw/cybersecurity/
+    title: Cybersecurity at Kuwait University — Computer Science Department
+    type: official_major_sheet
+    retrieved_at: "2026-08-21"
+    supports:
+      - curriculum: ku-cybersecurity-current
+      - total_credits: 127
+      - subject: ku-0418-231
+      - subject: ku-0418-312
+      - subject: ku-0418-348
+      - subject: ku-0418-435
+      - subject: ku-0418-493
+      - subject: ku-0418-321
+      - subject: ku-0418-331
+      - subject: ku-1830-351
+      - subject: ku-1830-434
+      - subject: ku-1830-435
+      - subject: ku-1830-436
+      - resolves: the CS course-catalogue conflict recorded in T2
+
+  - id: ku-cs-suggested-study-plan
+    url: https://www.cs.ku.edu.kw/computer-science-major-2024-kuwait-university-2/
+    title: Computer Science Major 2024 — Suggested Study Plan (Kuwait University)
+    type: official_study_plan
+    retrieved_at: "2026-08-21"
+    supports:
+      - authoritative_year_placement: FRESHMAN/SOPHOMORE/JUNIOR/SENIOR (السنة الأولى—الرابعة)
+      - authoritative_semester_placement: Fall and Spring per year
+      - curriculum: ku-cs-2024
+
+  - id: ku-coep-departments
+    url: https://engineering.ku.edu.kw/about
+    title: About — College of Engineering and Petroleum, Kuwait University
+    type: official_college_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - fact: the College awards exactly seven B.Sc. engineering degrees
+      - fact: no Cybersecurity Engineering degree is listed among them
+
+  - id: ku-mathematics-department
+    url: https://math.sci.kuniv.edu.kw/undergraduate/financial-mathematics
+    title: Department of Mathematics — Financial Mathematics, Kuwait University
+    type: official_department_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - fact: the Mathematics Department owns B.Sc. Mathematics and B.Sc. Financial Mathematics
+      - fact: department is not program
+
+  - id: ku-dsai-program
+    url: https://cls.ku.edu.kw/academics/study-programs/dsai
+    title: Bachelor of Science in Data Science and Artificial Intelligence (DSAI) — Kuwait University
+    type: official_program_page
+    retrieved_at: "2026-08-21"
+    supports:
+      - fact: DSAI is a real Kuwait University degree program
+      - owning_college: College of Life Sciences
+      - owning_department: Information Science
+      - total_credits: 121
+      - note: major sheet published only as .docx; subjects not yet transcribed
+
+  - id: ku-cs-courses-ar
+    url: https://www.cs.ku.edu.kw/undergraduate/courses-ar/
+    title: المقررات — Computer Science Department, Kuwait University
+    type: official_course_catalog
+    retrieved_at: "2026-08-21"
+    supports:
+      - subject_titles: computer_science_electives
+
+  # ---- T2.2 Data Science & AI launch program (researched 2026-08-21) ----
+
+  - id: ku-dsai-major-sheet-en
+    url: https://cls.ku.edu.kw/sites/default/files/2025-05/Data%20Science%20%26%20AI%20Major%20Sheet%20English%20-%2012%20Nov%2024.docx
+    title: Data Science & AI Major Sheet (English), 12 Nov 2024 — Kuwait University
+    type: official_major_sheet
+    retrieved_at: "2026-08-21"
+    supports:
+      - curriculum: ku-dsai-current
+      - total_credits: 121-125
+      - fact: full numeric course codes for every DSAI requirement
+      - fact: resolves the short forms used in the 8-semester plan
+
+  - id: ku-dsai-major-sheet-ar
+    url: https://cls.ku.edu.kw/sites/default/files/2025-05/Data%20Science%20%26%20AI%20Major%20Sheet%20Arabic%20-%2012%20Nov%2024_0.docx
+    title: صحائف تخرج برنامج علم البيانات والذكاء الاصطناعي (Arabic major sheet), 12 Nov 2024
+    type: official_major_sheet
+    retrieved_at: "2026-08-21"
+    supports:
+      - official_arabic_program_name: علم البيانات والذكاء الاصطناعي
+      - official_arabic_subject_titles: all DSAI plan subjects
+      - fact: official Arabic for 0410-111 and 0330-100, previously Gradex translations
+
+  - id: ku-dsai-8-semester-plan
+    url: https://www.ku.edu.kw/sites/default/files/2025-05/Data%20Science%20%26%20AI%20-%208%20Semester%20Plan-%206-April-2025.docx
+    title: Data Science & AI — 8 Semester Plan, 6 April 2025 — Kuwait University
+    type: official_study_plan
+    retrieved_at: "2026-08-21"
+    supports:
+      - authoritative_year_placement: Freshman/Sophomore/Junior/Senior (First-Fourth Year)
+      - authoritative_semester_placement: Semester 1-8
+      - curriculum: ku-dsai-current
+
+  - id: ku-dsai-dependency-chart
+    url: https://www.ku.edu.kw/sites/default/files/2025-05/DS%20Dependency%20Chart%20-%2017%20Mar%202025.pdf
+    title: DS Dependency Chart, 17 Mar 2025 — Kuwait University
+    type: official_study_plan
+    retrieved_at: "2026-08-21"
+    supports:
+      - fact: prerequisite structure corroborating the 8-semester sequence

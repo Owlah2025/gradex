@@ -158,6 +158,10 @@ PUBLISHED ──────────────────────→ 
 
 ### Taxonomy Term and Course Classification
 
+> **Superseded by [D-091](DECISIONS.md#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy) (2026-08-21).**
+> The three-dimension model below remains the operational classification until the Academic Catalog
+> migration is proven on a dual path. See *Academic Catalog* below for the canonical target model.
+
 Catalog classification uses exactly three dimensions, and a Course carries exactly one value on
 each: **Major**, **Subject**, and **Study Year**.
 
@@ -482,8 +486,17 @@ Instructor Account 1 ── owns ── * Course
 Course 1 ── contains ── * Section 1 ── contains ── * Lesson
 Lesson 1 ── has ── 0..1 Video, * Resources, * Lab Materials
 Course 1 ── has ── 0..1 Public Preview
-Course 1 ── classified by ── 1 Major, 1 Subject, 1 Study Year
-Taxonomy Term 1 ── classifies ── * Course
+Course 1 ── classified by ── 1 Major, 1 Subject, 1 Study Year   [legacy; D-022, superseded by D-091]
+Taxonomy Term 1 ── classifies ── * Course                       [legacy; D-022, superseded by D-091]
+
+Institution 1 ── owns ── * Academic Unit (tree; a unit may parent other units)
+Institution 1 ── owns ── * Program, * Subject
+Academic Unit 1 ── owns ── * Program, * Subject
+Program 1 ── has ── * Curriculum (exactly one ACTIVE)
+Curriculum * ── maps ── * Subject   (via CurriculumSubject)
+Course 1 ── teaches ── 1 Subject     [Course-level, stable product identity]
+Course Revision 1 ── targets ── * Program  [revision-scoped audience override]
+Student Account 1 ── has ── 0..1 Student Academic Profile  [discovery-only]
 
 Student Account 1 ── has ── * Enrollment (Course)
 Enrollment 1 ── has ── * Progress (Lesson)

@@ -6,6 +6,7 @@ import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
   beginVideoUpload,
   completeVideoUpload,
+  describeAssetState,
   isReadyState,
   newProviderEventID,
   sha256Hex,
@@ -109,11 +110,7 @@ export function LessonVideoUpload({
       const status = await waitForProcessing(ticket.asset_version_id, locale);
       if (!isReadyState(status.state)) {
         setPhase("FAILED");
-        setMessage(
-          isAr
-            ? `تعذر إعداد الفيديو. حالة الأصل: ${status.state}`
-            : `The video could not be prepared. Asset state: ${status.state}`,
-        );
+        setMessage(describeAssetState(status.state, locale));
         return;
       }
 

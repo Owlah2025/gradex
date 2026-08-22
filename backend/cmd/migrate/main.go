@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/db"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // migrationsSource is relative to the backend module root, which is where
@@ -170,6 +172,22 @@ func down(m *migrate.Migrate, cfg *config.Config, args []string) error {
 			return fmt.Errorf("down expects a positive step count, got %q", args[0])
 		}
 		steps = n
+	}
+	version, dirty, err := m.Version()
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+		return fmt.Errorf("reading current schema version: %w", err)
+	}
+	if !dirty && version >= db.ManualPurchaseRequestsSchemaVersion && steps > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+		defer cancel()
+		pool, err := pgxpool.New(ctx, cfg.DatabaseURL().Expose())
+		if err != nil {
+			return fmt.Errorf("opening rollback preflight connection: %w", err)
+		}
+		defer pool.Close()
+		if err := db.CheckManualPurchaseRollbackSafety(ctx, pool); err != nil {
+			return err
+		}
 	}
 
 	if err := m.Steps(-steps); err != nil && !errors.Is(err, migrate.ErrNoChange) {

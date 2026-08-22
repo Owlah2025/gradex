@@ -4,13 +4,34 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { switchLocalePath } from "@/lib/i18n/locale-path";
+import { getStudentCourseAccessHistory } from "@/lib/api/access";
+import { CourseAccessPanel } from "./course-access-panel";
+import {
+  courseAccessRelationship,
+  type AccessLookup,
+} from "./course-access-relationship";
+import { PurchaseRequestForm } from "./purchase-request-form";
 import {
   getPublicCourse,
+  getPublicCoursePreview,
   getPublicCourses,
   type PublicCourse,
   type PublicCourseDetail,
 } from "@/lib/api/public-catalog";
 import { ProblemError } from "@/lib/api/problem";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardHeader, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
+import { DisplayHeading, Prose } from "@/components/ui/typography";
+import { Navbar } from "@/components/layout/navbar";
+import { Footer } from "@/components/layout/footer";
+import { Container } from "@/components/layout/container";
+import { EmptyState } from "@/components/common/empty-state";
+import { SkipLink } from "@/components/common/skip-link";
+import { formatFils } from "@/lib/formatters/currency";
 
 const copy = {
   ar: {
@@ -32,6 +53,11 @@ const copy = {
     searchSubmit: "بحث",
     searching: "جارٍ البحث في الدورات…",
     noResults: "لا توجد دورات مطابقة.",
+    watchPreview: "شاهد المعاينة",
+    previewHeading: "معاينة: ",
+    previewFailed: "تعذّر تشغيل المعاينة. حاول مرة أخرى.",
+    clearSearch: "مسح البحث",
+    retry: "إعادة المحاولة",
   },
   en: {
     catalogue: "Catalogue",
@@ -52,6 +78,11 @@ const copy = {
     searchSubmit: "Search",
     searching: "Searching courses…",
     noResults: "No matching courses were found.",
+    watchPreview: "Watch preview",
+    previewHeading: "Preview: ",
+    previewFailed: "The preview could not be played. Try again.",
+    clearSearch: "Clear search",
+    retry: "Retry",
   },
 };
 
@@ -62,10 +93,13 @@ function CatalogueLanguageToggle() {
   const nextLocale = locale === "ar" ? "en" : "ar";
 
   function switchLanguage() {
+    // Shared with the header and the learning toggle. The previous inline version replaced
+    // `segments[1]` unconditionally, so on any route without a locale prefix it overwrote the first
+    // real path segment instead — `/login` became `/en`.
+    const search = typeof window === "undefined" ? "" : window.location.search;
+    const target = switchLocalePath(pathname, search, nextLocale);
     setLocale(nextLocale);
-    const segments = pathname.split("/");
-    segments[1] = nextLocale;
-    router.push(segments.join("/"));
+    if (target !== null) router.push(target);
   }
 
   return (
@@ -94,7 +128,10 @@ function Shell({ children }: { children: ReactNode }) {
           aria-label={t.navigation}
           className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4"
         >
-          <Link href={`/${locale}/catalog`} className="font-display text-xl font-bold">
+          <Link
+            href={`/${locale}/catalog`}
+            className="font-display text-xl font-bold"
+          >
             Gradex · {t.catalogue}
           </Link>
           <CatalogueLanguageToggle />
@@ -108,10 +145,13 @@ function Shell({ children }: { children: ReactNode }) {
 function Taxonomy({ course }: { course: PublicCourse }) {
   return (
     <dl className="flex flex-wrap gap-2 text-sm text-slate-600">
-      {[course.major, course.subject, course.study_year]
+      {[course.university, course.major, course.subject, course.study_year]
         .filter(Boolean)
         .map((term) => (
-          <div key={term!.label} className="rounded-full bg-slate-100 px-3 py-1">
+          <div
+            key={term!.label}
+            className="rounded-full bg-slate-100 px-3 py-1"
+          >
             <dt className="sr-only">Taxonomy</dt>
             <dd>
               {term!.label}
@@ -128,14 +168,18 @@ function Price({ course, label }: { course: PublicCourse; label: string }) {
 
   return (
     <p className="mt-3 text-sm font-semibold text-teal-800">
-      {label}: {(course.price.minor_units / 1000).toFixed(3)} {course.price.currency}
+      {label}: {(course.price.minor_units / 1000).toFixed(3)}{" "}
+      {course.price.currency}
     </p>
   );
 }
 
 function Failure({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-950">
+    <p
+      role="alert"
+      className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-950"
+    >
       {children}
     </p>
   );
@@ -143,7 +187,7 @@ function Failure({ children }: { children: ReactNode }) {
 
 function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
   const { locale } = useLocale();
-  const t = copy[locale];
+  const t = copy[locale as keyof typeof copy];
   const pathname = usePathname();
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
@@ -159,93 +203,166 @@ function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
   }
 
   return (
-    <form className="mt-8 flex max-w-xl gap-3" role="search" onSubmit={submitSearch}>
+    <form
+      className="mt-8 flex max-w-xl gap-3"
+      role="search"
+      onSubmit={submitSearch}
+    >
       <label className="sr-only" htmlFor="catalogue-search">
         {t.searchLabel}
       </label>
-      <input
+      <Input
         id="catalogue-search"
         type="search"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder={t.searchPlaceholder}
-        className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
       />
-      <button
-        type="submit"
-        className="rounded-md bg-teal-800 px-4 py-2 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
-      >
-        {t.searchSubmit}
-      </button>
+      <Button type="submit">{t.searchSubmit}</Button>
     </form>
   );
 }
 
 export function CatalogueList() {
   const { locale } = useLocale();
-  const t = copy[locale];
+  const t = copy[locale as keyof typeof copy];
+  const pathname = usePathname();
+  const router = useRouter();
   const searchParameters = useSearchParams();
   const query = searchParameters.get("q") ?? "";
-  const [state, setState] = useState<{ items?: PublicCourse[]; error?: string }>({});
+  const [state, setState] = useState<{
+    items?: PublicCourse[];
+    error?: string;
+  }>({});
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     setState({});
     getPublicCourses(locale, query)
       .then((result) => setState({ items: result.items }))
       .catch(() => setState({ error: t.failed }));
-  }, [locale, query, t.failed]);
+  }, [locale, query, t.failed, retryCount]);
+
+  function clearSearch() {
+    router.push(pathname);
+  }
 
   return (
-    <Shell>
-      <main id="catalogue-main" className="mx-auto max-w-6xl px-5 py-10">
-        <h1 className="font-display text-4xl font-bold">{t.catalogue}</h1>
-        <CatalogueSearch initialQuery={query} />
-        {!state.items && !state.error && (
-          <p className="mt-8" aria-live="polite">
-            {query === "" ? t.loading : t.searching}
-          </p>
-        )}
-        {state.error && (
-          <div className="mt-8">
-            <Failure>{state.error}</Failure>
-          </div>
-        )}
-        {state.items?.length === 0 && <p className="mt-8 text-slate-600">{query === "" ? t.empty : t.noResults}</p>}
-        <section aria-label={t.catalogue} className="mt-8 grid gap-5 md:grid-cols-2">
-          {state.items?.map((course) => (
-            <article key={course.id} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <Taxonomy course={course} />
-              <h2 className="mt-4 font-display text-2xl font-bold">
-                <Link
-                  href={`/${locale}/catalog/${course.slug}`}
-                  className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-700"
+    <>
+      <SkipLink />
+      <Navbar />
+      <main id="main" tabIndex={-1} className="py-10 outline-none">
+        <Container>
+          <DisplayHeading as="h1">{t.catalogue}</DisplayHeading>
+          <CatalogueSearch key={query} initialQuery={query} />
+
+          {!state.items && !state.error && (
+            <Prose className="mt-8" aria-live="polite">
+              {query === "" ? t.loading : t.searching}
+            </Prose>
+          )}
+
+          {state.error && (
+            <div className="mt-8">
+              <Alert tone="error" title={state.error}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRetryCount((c) => c + 1)}
                 >
-                  {course.title}
-                </Link>
-              </h2>
-              <p className="mt-2 text-slate-600">
-                {t.instructor}: {course.instructor_display_name}
-              </p>
-              <Price course={course} label={t.price} />
-              {course.has_preview && <p className="mt-3 text-sm text-teal-800">{t.preview}</p>}
-            </article>
-          ))}
-        </section>
+                  {t.retry}
+                </Button>
+              </Alert>
+            </div>
+          )}
+
+          {state.items?.length === 0 && (
+            <div className="mt-8">
+              <EmptyState
+                title={query === "" ? t.empty : t.noResults}
+                action={
+                  query !== "" ? (
+                    <Button variant="outline" onClick={clearSearch}>
+                      {t.clearSearch}
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </div>
+          )}
+
+          <section
+            aria-label={t.catalogue}
+            className="mt-8 grid gap-5 md:grid-cols-2"
+          >
+            {state.items?.map((course) => (
+              <Link
+                key={course.id}
+                href={`/${locale}/catalog/${course.slug}`}
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <Card interactive className="flex h-full flex-col">
+                  <CardHeader>
+                    <div className="flex flex-wrap gap-2 text-sm">
+                      {[course.university, course.major, course.subject, course.study_year]
+                        .filter(Boolean)
+                        .map((term) => (
+                          <Badge key={term!.label} variant="neutral">
+                            {term!.label}
+                            {term!.code ? ` · ${term!.code}` : ""}
+                          </Badge>
+                        ))}
+                    </div>
+                    <h2 className="mt-4 font-display text-lg font-bold leading-snug">
+                      {course.title}
+                    </h2>
+                  </CardHeader>
+                  <CardContent className="mt-auto">
+                    <Prose className="text-sm">
+                      {t.instructor}: {course.instructor_display_name}
+                    </Prose>
+                    {course.price && (
+                      <p className="mt-3 text-sm font-semibold text-primary">
+                        {t.price}:{" "}
+                        <span dir="ltr" className="dir-ltr font-mono">
+                          {formatFils(
+                            course.price.minor_units,
+                            locale as "ar" | "en",
+                          )}
+                        </span>
+                      </p>
+                    )}
+                    {course.has_preview && (
+                      <p className="mt-3 text-sm text-primary">{t.preview}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </Link>
+            ))}
+          </section>
+        </Container>
       </main>
-    </Shell>
+      <Footer />
+    </>
   );
 }
 
 export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
-  const { locale } = useLocale();
+  const { locale, t: dictionary } = useLocale();
   const t = copy[locale];
   const [state, setState] = useState<{
     course?: PublicCourseDetail;
     error?: string;
     missing?: boolean;
   }>({});
+  const [lookup, setLookup] = useState<AccessLookup | null>(null);
+  const [accessAttempt, setAccessAttempt] = useState(0);
+  const [preview, setPreview] = useState<{ url: string } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
+    setPreview(null);
+    setPreviewError(null);
     setState({});
     getPublicCourse(idOrSlug, locale)
       .then((course) => setState({ course }))
@@ -258,29 +375,110 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
       });
   }, [idOrSlug, locale, t.failed]);
 
+  // The Student's own access records, read separately from the public Course.
+  //
+  // This page stays public: a 401 means "not signed in", which is an ordinary state here and must
+  // never surface as an error or hide the Course. Any other failure resolves to UNAVAILABLE rather
+  // than to "no access", so a transient outage cannot tell an entitled Student they have nothing.
+  useEffect(() => {
+    let cancelled = false;
+    setLookup(null);
+    getStudentCourseAccessHistory(locale)
+      .then((history) => {
+        if (!cancelled)
+          setLookup({ status: "loaded", items: history?.items ?? [] });
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        const anonymous =
+          cause instanceof ProblemError && cause.problem.status === 401;
+        setLookup(anonymous ? { status: "anonymous" } : { status: "failed" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, accessAttempt]);
+
+  function openPreview() {
+    if (!state.course) return;
+    setPreviewError(null);
+    getPublicCoursePreview(state.course.id, locale)
+      .then((issued) => setPreview({ url: issued.url }))
+      .catch(() => setPreviewError(t.previewFailed));
+  }
+
   return (
     <Shell>
       <main id="catalogue-main" className="mx-auto max-w-4xl px-5 py-10">
-        {!state.course && !state.error && !state.missing && <p aria-live="polite">{t.loading}</p>}
+        {!state.course && !state.error && !state.missing && (
+          <p aria-live="polite">{t.loading}</p>
+        )}
         {state.missing && <Failure>{t.unavailable}</Failure>}
         {state.error && <Failure>{state.error}</Failure>}
         {state.course && (
           <article>
             <Taxonomy course={state.course} />
-            <h1 className="mt-4 font-display text-4xl font-bold">{state.course.title}</h1>
+            <h1 className="mt-4 font-display text-4xl font-bold">
+              {state.course.title}
+            </h1>
             <p className="mt-3 text-slate-600">
               {t.instructor}: {state.course.instructor_display_name}
             </p>
             <Price course={state.course} label={t.price} />
-            {state.course.has_preview && <p className="mt-3 text-sm text-teal-800">{t.preview}</p>}
-            <p className="mt-8 whitespace-pre-wrap text-lg leading-8">{state.course.description}</p>
+            {state.course.has_preview ? (
+              <section className="mt-5" aria-labelledby="public-preview-heading">
+                <h2 id="public-preview-heading" className="sr-only">
+                  {t.previewHeading}{state.course.title}
+                </h2>
+                <button
+                  type="button"
+                  onClick={openPreview}
+                  data-testid="watch-public-preview"
+                  className="rounded-md bg-teal-800 px-4 py-2 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+                >
+                  {t.watchPreview}
+                </button>
+                {previewError ? (
+                  <div className="mt-3" role="alert" data-testid="public-preview-error">
+                    <Failure>{previewError}</Failure>
+                    <button
+                      type="button"
+                      onClick={openPreview}
+                      className="mt-2 text-sm font-semibold text-teal-800 underline"
+                    >
+                      {t.retry}
+                    </button>
+                  </div>
+                ) : null}
+                {preview ? (
+                  <div className="mt-4" data-testid="public-preview-surface">
+                    <video
+                      controls
+                      autoPlay
+                      preload="metadata"
+                      src={preview.url}
+                      className="w-full rounded-lg bg-black"
+                      data-testid="public-preview-player"
+                    >
+                      {t.previewFailed}
+                    </video>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+            <p className="mt-8 whitespace-pre-wrap text-lg leading-8">
+              {state.course.description}
+            </p>
             <section className="mt-10" aria-labelledby="outline">
               <h2 id="outline" className="font-display text-2xl font-bold">
                 {t.outline}
               </h2>
               <ol className="mt-4 space-y-3">
                 {state.course.sections.map((section) => (
-                  <li key={section.position} className="flex justify-between rounded-lg border bg-white p-4">
+                  <li
+                    key={section.position}
+                    className="flex justify-between rounded-lg border bg-white p-4"
+                  >
                     <span>{section.title}</span>
                     <span className="text-slate-600">
                       {section.lesson_count} {t.lessons}
@@ -289,6 +487,38 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
                 ))}
               </ol>
             </section>
+
+            {/* What the visitor should do next about access. Rendered once the Course is known and
+                the access lookup has settled, so the state shown is never a guess. */}
+            {lookup ? (
+              <>
+                <CourseAccessPanel
+                  relationship={courseAccessRelationship(
+                    lookup,
+                    state.course.id,
+                  )}
+                  courseID={state.course.id}
+                  labels={dictionary.access}
+                  locale={locale}
+                  onRetry={() => setAccessAttempt((attempt) => attempt + 1)}
+                />
+                {[
+                  "ANONYMOUS",
+                  "NO_ACCESS",
+                  "ACCESS_ENDED",
+                  "REJECTED",
+                  "CANCELLED",
+                ].includes(
+                  courseAccessRelationship(lookup, state.course.id),
+                ) ? (
+                  <PurchaseRequestForm
+                    courseId={state.course.id}
+                    locale={locale}
+                    labels={dictionary.access.purchase}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </article>
         )}
       </main>

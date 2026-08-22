@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,105 @@ func TestRedisStoreMakesAtomicLayeredAllowDenyDecision(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = client.Del(context.Background(), entry.Key).Err() })
 	}
+}
+
+func TestRedisConditionalChargingDoesNotDrainSharedCapacity(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("Redis is required for integration test: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	identifier := Entry{Key: "gradex:rl:conditional-v1:identifier:" + suffix, Limit: 1, Window: time.Minute}
+	shared := Entry{Key: "gradex:rl:conditional-v1:global:" + suffix, Limit: 2, Window: time.Minute}
+	otherIdentifier := Entry{Key: "gradex:rl:conditional-v1:identifier-other:" + suffix, Limit: 1, Window: time.Minute}
+	thirdIdentifier := Entry{Key: "gradex:rl:conditional-v1:identifier-third:" + suffix, Limit: 1, Window: time.Minute}
+	store := NewRedisStore(client)
+	decisions := []struct {
+		entries []Entry
+		want    bool
+	}{
+		{[]Entry{identifier, shared}, true},
+		{[]Entry{identifier, shared}, false},
+		{[]Entry{otherIdentifier, shared}, true},
+	}
+	for attempt, decision := range decisions {
+		entries := decision.entries
+		allowed, err := store.Decide(ctx, entries)
+		if err != nil {
+			t.Fatalf("conditional decision: %v", err)
+		}
+		if allowed != decision.want {
+			t.Fatalf("decision %d = %v, want %v", attempt+1, allowed, decision.want)
+		}
+	}
+	allowed, err := store.Decide(ctx, []Entry{thirdIdentifier, shared})
+	if err != nil || allowed {
+		t.Fatalf("shared overflow = %v, %v; want deny", allowed, err)
+	}
+	if err := client.Del(ctx, shared.Key).Err(); err != nil {
+		t.Fatalf("resetting test-only shared key: %v", err)
+	}
+	allowed, err = store.Decide(ctx, []Entry{thirdIdentifier, shared})
+	if err != nil || !allowed {
+		t.Fatalf("shared denial consumed identifier allowance: %v, %v", allowed, err)
+	}
+	t.Cleanup(func() {
+		_ = client.Del(context.Background(), identifier.Key, otherIdentifier.Key, thirdIdentifier.Key, shared.Key).Err()
+	})
+}
+
+func TestRedisConditionalChargingIsAtomicUnderConcurrency(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	t.Cleanup(func() { _ = client.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := client.Ping(ctx).Err(); err != nil {
+		t.Fatalf("Redis is required for integration test: %v", err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	shared := Entry{Key: "gradex:rl:atomic-v1:global:" + suffix, Limit: 25, Window: time.Minute}
+	store := NewRedisStore(client)
+	var wg sync.WaitGroup
+	type result struct {
+		allowed bool
+		err     error
+	}
+	results := make(chan result, 100)
+	keys := make([]string, 0, 101)
+	for attempt := 0; attempt < 100; attempt++ {
+		identifierKey := fmt.Sprintf("gradex:rl:atomic-v1:identifier:%s:%d", suffix, attempt)
+		keys = append(keys, identifierKey)
+		wg.Add(1)
+		go func(key string) {
+			defer wg.Done()
+			ok, err := store.Decide(ctx, []Entry{
+				{Key: key, Limit: 1, Window: time.Minute},
+				shared,
+			})
+			results <- result{allowed: ok, err: err}
+		}(identifierKey)
+	}
+	wg.Wait()
+	close(results)
+	count := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent decision: %v", result.err)
+		}
+		if result.allowed {
+			count++
+		}
+	}
+	if count != 25 {
+		t.Fatalf("allowed = %d, want exactly 25", count)
+	}
+	keys = append(keys, shared.Key)
+	t.Cleanup(func() { _ = client.Del(context.Background(), keys...).Err() })
 }
 
 func TestRedisStoreHonorsTokenBucketBurst(t *testing.T) {

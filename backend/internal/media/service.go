@@ -3,7 +3,6 @@ package media
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,12 +31,16 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var errCatalogueCallbackRace = errors.New("catalogue callback was recorded concurrently")
 
+// allowedContentTypes is the BR-067 bucket allowlist, which is wider than the
+// D-088 no-malware-scan profile. Membership here means the type may be uploaded
+// at all; TrustedProfileAdmits decides which of those may skip scanning.
 var allowedContentTypes = map[AssetKind]map[string]struct{}{
 	KindVideo: {
 		"video/mp4": {}, "video/quicktime": {},
 	},
 	KindResource: {
-		"application/pdf": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {},
+		"application/pdf": {}, ContentTypeDOCX: {},
+		"image/jpeg": {}, "image/png": {}, "image/webp": {},
 	},
 	KindLabMaterial: {
 		"application/pdf": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {},
@@ -57,6 +59,7 @@ type Service struct {
 	scanner         *ScannerAdapter
 	uploadURLExpiry time.Duration
 	maxUploadBytes  int64
+	limits          uploadLimits
 	operatingMode   OperatingMode
 	now             func() time.Time
 }
@@ -84,6 +87,7 @@ type uploadCompletion struct {
 	request     CompleteUploadRequest
 	fingerprint string
 	kind        AssetKind
+	maxSize     int64
 }
 
 // NewService validates every dependency required by the D7 pipeline. A
@@ -123,22 +127,34 @@ func NewService(options ServiceOptions) (*Service, error) {
 	return &Service{
 		db: options.DB, store: options.Store, outbox: options.Outbox,
 		scanner: options.Scanner, uploadURLExpiry: options.UploadURLExpiry,
-		maxUploadBytes: options.MaxUploadBytes, operatingMode: mode, now: now,
+		maxUploadBytes: options.MaxUploadBytes, limits: resolveUploadLimits(options),
+		operatingMode: mode, now: now,
 	}, nil
 }
 
 // BeginUpload creates one immutable Asset Version and an upload intent before
 // issuing a private quarantine target. A replacement is represented by a new
 // version ID and never rewrites the prior version.
+//
+// In TRUSTED_INSTRUCTOR mode it refuses anything outside the D-088 profile
+// rather than issuing an intent the deployment cannot finish. That deployment
+// has no scanner, so a preview, a Lab Material, or an unapproved type would
+// otherwise upload successfully and then sit quarantined and undeliverable
+// forever — a silent dead end instead of an answer the Instructor can act on.
 func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (UploadTicket, error) {
 	if s.operatingMode == OperatingModeAdminCatalogue {
 		return UploadTicket{}, ErrNotAuthorized
+	}
+	if s.operatingMode == OperatingModeTrustedInstructor && !TrustedProfileAdmits(request.Kind, request.ContentType) {
+		return UploadTicket{}, fmt.Errorf(
+			"%w: this deployment accepts only MP4 Lesson video and PDF or DOCX Lesson Resources",
+			ErrValidation)
 	}
 	return s.beginUploadForOwner(ctx, request)
 }
 
 func (s *Service) beginUploadForOwner(ctx context.Context, request UploadRequest) (UploadTicket, error) {
-	if err := validateBeginUpload(request, s.maxUploadBytes); err != nil {
+	if err := validateBeginUpload(request, s.limits.perFile(request.Kind)); err != nil {
 		return UploadTicket{}, err
 	}
 	record := newUploadRecord(request, s.now, s.uploadURLExpiry)
@@ -163,7 +179,7 @@ func (s *Service) BeginCatalogueLoad(ctx context.Context, request CatalogueLoadR
 	if s.operatingMode != OperatingModeAdminCatalogue {
 		return UploadTicket{}, ErrNotAuthorized
 	}
-	if err := validateUploadRequest(UploadRequest{Kind: request.Kind, ContentType: request.ContentType, SizeBytes: request.SizeBytes}, s.maxUploadBytes); err != nil {
+	if err := validateUploadRequest(UploadRequest{Kind: request.Kind, ContentType: request.ContentType, SizeBytes: request.SizeBytes}, s.limits.perFile(request.Kind)); err != nil {
 		return UploadTicket{}, err
 	}
 	if _, err := uuid.Parse(request.AdminAccountID); err != nil {
@@ -218,7 +234,7 @@ func (s *Service) CompleteCatalogueLoad(ctx context.Context, request CatalogueCo
 		}
 		return CompletionResult{AssetVersionID: completion.AssetVersionID, State: record.state, Duplicate: true}, nil
 	}
-	if err := s.verifyCompletedObject(ctx, completion); err != nil {
+	if err := s.verifyCompletedObject(ctx, completion, record.kind, record.maxSize); err != nil {
 		return CompletionResult{}, err
 	}
 	if err := s.quarantineCatalogueObject(ctx, tx, completion); err != nil {
@@ -427,16 +443,27 @@ func validateBeginUpload(request UploadRequest, maxUploadBytes int64) error {
 	if err := validateUploadRequest(request, maxUploadBytes); err != nil {
 		return err
 	}
+	if request.Kind == KindPreview {
+		if request.LessonID != "" || request.RevisionID == "" {
+			return fmt.Errorf("%w: public preview requires a Course revision and cannot target a Lesson", ErrValidation)
+		}
+		if strings.ToLower(strings.TrimSpace(request.ContentType)) != "video/mp4" {
+			return fmt.Errorf("%w: public preview must be an MP4 video", ErrValidation)
+		}
+	} else if request.RevisionID != "" {
+		return fmt.Errorf("%w: only a public preview can target a Course revision", ErrValidation)
+	}
 	for _, identity := range []struct {
 		name  string
 		value string
 	}{
 		{name: "owner account", value: request.OwnerAccountID},
 		{name: "course", value: request.CourseID},
+		{name: "Course revision", value: request.RevisionID},
 		{name: "lesson", value: request.LessonID},
 		{name: "logical asset", value: request.LogicalAssetID},
 	} {
-		if identity.value == "" && (identity.name == "lesson" || identity.name == "logical asset") {
+		if identity.value == "" && (identity.name == "Course revision" || identity.name == "lesson" || identity.name == "logical asset") {
 			continue
 		}
 		if _, err := uuid.Parse(identity.value); err != nil {
@@ -465,6 +492,12 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	if err := s.requireCourseOwner(ctx, tx, request.CourseID, request.OwnerAccountID); err != nil {
 		return err
 	}
+	if err := requirePreviewRevision(ctx, tx, request); err != nil {
+		return err
+	}
+	if err := s.enforceLessonAggregate(ctx, tx, request); err != nil {
+		return err
+	}
 	logicalAssetID, err := s.ensureLogicalAsset(ctx, tx, request)
 	if err != nil {
 		return err
@@ -477,12 +510,15 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	`, record.assetVersionID, logicalAssetID, request.Kind, record.objectKey, record.objectVersion, request.ContentType, request.SizeBytes); err != nil {
 		return fmt.Errorf("creating media asset version: %w", err)
 	}
+	// The intent stores the bound that actually applies to this bucket, not the
+	// deployment ceiling, so completion re-checks the same number the request
+	// was admitted against.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO upload_intents (
 			asset_version_id, expected_object_key, expected_content_type,
 			expected_size_bytes, max_size_bytes, expires_at
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6)
-	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.maxUploadBytes, record.expiresAt); err != nil {
+	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.limits.perFile(request.Kind), record.expiresAt); err != nil {
 		return fmt.Errorf("creating media upload intent: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -495,10 +531,17 @@ func (s *Service) ensureLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 	if request.LogicalAssetID == "" {
 		var assetID string
 		err := tx.QueryRow(ctx, `
-			INSERT INTO media_assets (kind, owner_account_id, course_id, lesson_id, visibility)
-			VALUES ($1::media_asset_kind, $2::uuid, $3::uuid, NULLIF($4, '')::uuid, $5::media_asset_visibility)
+			INSERT INTO media_assets (
+				kind, owner_account_id, course_id, lesson_id,
+				preview_origin_revision_id, visibility
+			)
+			VALUES (
+				$1::media_asset_kind, $2::uuid, $3::uuid, NULLIF($4, '')::uuid,
+				NULLIF($5, '')::uuid, $6::media_asset_visibility
+			)
 			RETURNING id::text
-		`, request.Kind, request.OwnerAccountID, request.CourseID, request.LessonID, visibilityForKind(request.Kind)).Scan(&assetID)
+		`, request.Kind, request.OwnerAccountID, request.CourseID, request.LessonID,
+			request.RevisionID, visibilityForKind(request.Kind)).Scan(&assetID)
 		if err != nil {
 			return "", fmt.Errorf("creating logical media asset: %w", err)
 		}
@@ -510,20 +553,56 @@ func (s *Service) ensureLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 func (s *Service) verifyLogicalAsset(ctx context.Context, tx pgx.Tx, request UploadRequest) (string, error) {
 	var owner, course string
 	var kind AssetKind
+	var originRevisionID *string
 	err := tx.QueryRow(ctx, `
-		SELECT owner_account_id::text, course_id::text, kind
+		SELECT owner_account_id::text, course_id::text, kind, preview_origin_revision_id::text
 		FROM media_assets WHERE id = $1::uuid FOR SHARE
-	`, request.LogicalAssetID).Scan(&owner, &course, &kind)
+	`, request.LogicalAssetID).Scan(&owner, &course, &kind, &originRevisionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {
 		return "", fmt.Errorf("loading logical media asset: %w", err)
 	}
-	if owner != request.OwnerAccountID || course != request.CourseID || kind != request.Kind {
+	if owner != request.OwnerAccountID || course != request.CourseID || kind != request.Kind ||
+		!sameOptionalID(originRevisionID, request.RevisionID) {
 		return "", ErrNotAuthorized
 	}
 	return request.LogicalAssetID, nil
+}
+
+// requirePreviewRevision binds a newly-uploaded public preview to the active
+// candidate it was created for. The storage intent is rejected before any
+// signed PUT URL is issued, so an Asset Version cannot later be substituted
+// across Courses or revisions simply by guessing its immutable ID.
+func requirePreviewRevision(ctx context.Context, tx pgx.Tx, request UploadRequest) error {
+	if request.Kind != KindPreview {
+		return nil
+	}
+	var state string
+	err := tx.QueryRow(ctx, `
+		SELECT state::text
+		FROM course_revisions
+		WHERE id = $1::uuid AND course_id = $2::uuid
+		FOR SHARE
+	`, request.RevisionID, request.CourseID).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotAuthorized
+	}
+	if err != nil {
+		return fmt.Errorf("checking public-preview revision: %w", err)
+	}
+	if state != "DRAFT" && state != "CHANGES_REQUESTED" {
+		return ErrConflict
+	}
+	return nil
+}
+
+func sameOptionalID(stored *string, requested string) bool {
+	if requested == "" {
+		return stored == nil || *stored == ""
+	}
+	return stored != nil && *stored == requested
 }
 
 // CompleteUpload authorizes and locks the immutable upload intent before it
@@ -578,10 +657,11 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 		return CompletionResult{}, fmt.Errorf("%w: media upload has already left the upload state", ErrConflict)
 	}
 
-	// Head and prefix inspection are bounded; HashObjectVersion deliberately
-	// reads the exact complete object and therefore only runs after ownership,
-	// intent identity, idempotency, and current-state checks have passed.
-	if err := s.verifyCompletedObject(ctx, request); err != nil {
+	// Head, format, and hash inspection are all performed against the exact
+	// stored object version. HashObjectVersion deliberately reads the complete
+	// object and therefore only runs after ownership, intent identity,
+	// idempotency, and current-state checks have passed.
+	if err := s.verifyCompletedObject(ctx, request, record.kind, record.maxSize); err != nil {
 		return CompletionResult{}, err
 	}
 
@@ -598,11 +678,15 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 	}
 
 	if state == StateUploaded {
-		completion := uploadCompletion{request: request, fingerprint: fingerprint, kind: record.kind}
-		if err := s.quarantineUpload(ctx, tx, completion); err != nil {
+		completion := uploadCompletion{
+			request: request, fingerprint: fingerprint,
+			kind: record.kind, maxSize: record.maxSize,
+		}
+		next, err := s.quarantineUpload(ctx, tx, completion)
+		if err != nil {
 			return CompletionResult{}, err
 		}
-		state = StateQuarantined
+		state = next
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -633,7 +717,15 @@ func (s *Service) loadUploadCompletionRecord(ctx context.Context, tx pgx.Tx, ass
 	return record, nil
 }
 
-func (s *Service) quarantineUpload(ctx context.Context, tx pgx.Tx, completion uploadCompletion) error {
+// quarantineUpload binds the exact stored object version to the Asset Version,
+// closes the intent, and then selects the one authorized safety path for these
+// bytes. It returns the state the Asset Version actually reached.
+//
+// Every upload lands in private quarantine first. From there a D-088 upload
+// carries its exact-version validation evidence forward, and everything else
+// gets one committed scan-work intent. The two paths are mutually exclusive
+// and neither can produce the other's evidence.
+func (s *Service) quarantineUpload(ctx context.Context, tx pgx.Tx, completion uploadCompletion) (AssetVersionState, error) {
 	request := completion.request
 	commandTag, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions
@@ -641,22 +733,37 @@ func (s *Service) quarantineUpload(ctx context.Context, tx pgx.Tx, completion up
 		WHERE id = $4::uuid AND state = 'UPLOADED'
 	`, request.StorageObjectVersion, request.SizeBytes, strings.ToLower(request.SHA256Hex), request.AssetVersionID)
 	if err != nil {
-		return fmt.Errorf("quarantining media asset version: %w", err)
+		return "", fmt.Errorf("quarantining media asset version: %w", err)
 	}
 	if commandTag.RowsAffected() != 1 {
-		return ErrConcurrentModification
+		return "", ErrConcurrentModification
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE upload_intents
 		SET completed_at = now(), completion_fingerprint = $1
 		WHERE asset_version_id = $2::uuid AND completed_at IS NULL
 	`, completion.fingerprint, request.AssetVersionID); err != nil {
-		return fmt.Errorf("completing media upload intent: %w", err)
+		return "", fmt.Errorf("completing media upload intent: %w", err)
 	}
+
+	if s.trustedPathApplies(completion.kind, request.ContentType) {
+		return s.applyTrustedValidation(ctx, tx, completion, "upload:"+request.ProviderEventID)
+	}
+
 	if err := s.appendScanWork(ctx, tx, request.AssetVersionID, string(completion.kind), request.ProviderEventID); err != nil {
-		return err
+		return "", err
 	}
-	return appendMediaAudit(ctx, tx, request.OwnerAccountID, "INSTRUCTOR", "MEDIA_UPLOAD_COMPLETED", request.AssetVersionID, "Direct upload completed into quarantine", map[string]any{"state": string(StateQuarantined)})
+	if err := appendMediaAudit(ctx, tx, request.OwnerAccountID, "INSTRUCTOR", "MEDIA_UPLOAD_COMPLETED", request.AssetVersionID, "Direct upload completed into quarantine", map[string]any{"state": string(StateQuarantined)}); err != nil {
+		return "", err
+	}
+	return StateQuarantined, nil
+}
+
+// trustedPathApplies is the single place the D-088 no-malware-scan path is
+// selected. Both the deployment's operating mode and the exact kind/type must
+// admit it; either one saying no means the asset stays scanner-gated.
+func (s *Service) trustedPathApplies(kind AssetKind, contentType string) bool {
+	return s.operatingMode == OperatingModeTrustedInstructor && TrustedProfileAdmits(kind, contentType)
 }
 
 func (s *Service) resolveDuplicateUpload(ctx context.Context, request CompleteUploadRequest, fingerprint string) (CompletionResult, error) {
@@ -679,11 +786,15 @@ func (s *Service) resolveDuplicateUpload(ctx context.Context, request CompleteUp
 	return CompletionResult{AssetVersionID: asset, State: AssetVersionState(state), Duplicate: true}, nil
 }
 
-func (s *Service) verifyCompletedObject(ctx context.Context, request CompleteUploadRequest) error {
+// verifyCompletedObject proves the exact stored object version against the
+// completion evidence: it exists, its actual size matches, its real format
+// matches the declared type, and its SHA-256 matches. Every check reads the
+// stored object; none of them trusts the caller's claim.
+func (s *Service) verifyCompletedObject(ctx context.Context, request CompleteUploadRequest, kind AssetKind, maxSize int64) error {
 	if err := s.verifyObjectSize(ctx, request); err != nil {
 		return err
 	}
-	if err := s.verifyObjectContent(ctx, request); err != nil {
+	if err := s.verifyObjectContent(ctx, request, kind, maxSize); err != nil {
 		return err
 	}
 	actualHash, err := s.store.HashObjectVersion(ctx, request.StorageObjectKey, request.StorageObjectVersion)
@@ -710,13 +821,49 @@ func (s *Service) verifyObjectSize(ctx context.Context, request CompleteUploadRe
 	return nil
 }
 
-func (s *Service) verifyObjectContent(ctx context.Context, request CompleteUploadRequest) error {
+// verifyObjectContent proves the stored bytes really are the declared format.
+//
+// Most formats are decided by a bounded prefix. DOCX cannot be: an OOXML
+// package's manifest lives in the ZIP central directory at the end of the
+// object, so a prefix can only show a generic ZIP header and an arbitrary
+// archive renamed to .docx would pass. The whole object is therefore inspected
+// for DOCX, bounded by the intent's own configured size limit so an untrusted
+// archive can never cost more than the upload it was admitted as.
+func (s *Service) verifyObjectContent(ctx context.Context, request CompleteUploadRequest, kind AssetKind, maxSize int64) error {
+	if strings.EqualFold(strings.TrimSpace(request.ContentType), ContentTypeDOCX) {
+		return s.verifyDOCXObject(ctx, request, maxSize)
+	}
 	prefix, err := s.store.DownloadPrefixVersion(ctx, request.StorageObjectKey, request.StorageObjectVersion, maxTypeProbeBytes)
 	if err != nil {
 		return fmt.Errorf("%w: inspecting uploaded object: %v", ErrUnavailable, err)
 	}
 	if !contentMatchesDeclaredType(prefix, request.ContentType) {
 		return fmt.Errorf("%w: uploaded bytes do not match the declared content type", ErrValidation)
+	}
+	return nil
+}
+
+// verifyDOCXObject reads the exact stored object and proves it is a macro-free
+// OOXML WordprocessingML package. Nothing in the package is executed or
+// written to disk; only its structure is parsed, under the bounds in
+// defaultArchiveLimits.
+func (s *Service) verifyDOCXObject(ctx context.Context, request CompleteUploadRequest, maxSize int64) error {
+	bound := maxSize
+	if bound <= 0 || bound > s.limits.perFile(KindResource) {
+		bound = s.limits.perFile(KindResource)
+	}
+	if request.SizeBytes > bound {
+		return fmt.Errorf("%w: the object is larger than the configured DOCX inspection bound", ErrValidation)
+	}
+	object, err := s.store.DownloadPrefixVersion(ctx, request.StorageObjectKey, request.StorageObjectVersion, bound)
+	if err != nil {
+		return fmt.Errorf("%w: inspecting uploaded object: %v", ErrUnavailable, err)
+	}
+	if int64(len(object)) != request.SizeBytes {
+		return fmt.Errorf("%w: the stored object could not be read completely for inspection", ErrValidation)
+	}
+	if err := validateDOCXObject(object, defaultArchiveLimits()); err != nil {
+		return fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	return nil
 }
@@ -757,8 +904,17 @@ func (s *Service) GetStatus(ctx context.Context, versionID string, viewer Viewer
 	return status, nil
 }
 
-// Retry re-enters quarantine and creates a new scan work intent. It never
-// moves a failed version directly to PROCESSING or READY.
+// Retry re-enters quarantine and re-establishes the safety evidence the asset's
+// own path requires. It never moves a failed version directly to PROCESSING or
+// READY, and it never switches an asset from one safety path to the other.
+//
+// Which path is re-entered is decided by the provenance the Asset Version
+// already carries, not by the current operating mode. A scanner-gated asset
+// gets a fresh scan-work intent, exactly as before. A D-088 asset re-runs the
+// full exact-version validation against the same immutable object version — a
+// retry cannot inherit the earlier pass. If the deployment has since left
+// TRUSTED_INSTRUCTOR mode, the retry is refused rather than routed into a
+// malware scanner that is not there.
 func (s *Service) Retry(ctx context.Context, request RetryRequest) error {
 	if err := validateRetryRequest(request); err != nil {
 		return err
@@ -771,14 +927,14 @@ func (s *Service) Retry(ctx context.Context, request RetryRequest) error {
 	if err := s.requireActiveAdmin(ctx, tx, request.AdminAccountID); err != nil {
 		return err
 	}
-	state, kind, err := loadRetryTarget(ctx, tx, request.AssetVersionID)
+	target, err := loadRetryTarget(ctx, tx, request.AssetVersionID)
 	if err != nil {
 		return err
 	}
-	if state != StateScanFailed && state != StateScanError && state != StateProcessFailed {
+	if target.state != StateScanFailed && target.state != StateScanError && target.state != StateProcessFailed {
 		return fmt.Errorf("%w: media version is not failed", ErrConflict)
 	}
-	if err := s.applyRetry(ctx, tx, request, state, kind); err != nil {
+	if err := s.applyRetry(ctx, tx, request, target); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -815,33 +971,107 @@ func (s *Service) requireActiveAdmin(ctx context.Context, tx pgx.Tx, accountID s
 	return nil
 }
 
-func loadRetryTarget(ctx context.Context, tx pgx.Tx, assetVersionID string) (AssetVersionState, AssetKind, error) {
-	var state AssetVersionState
-	var kind AssetKind
-	err := tx.QueryRow(ctx, `
-		SELECT state, kind FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&state, &kind)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrNotFound
-	}
-	if err != nil {
-		return "", "", fmt.Errorf("loading retryable media version: %w", err)
-	}
-	return state, kind, nil
+// retryTarget is the immutable record a retry must re-establish evidence for.
+// Every field except state is fixed for the life of the Asset Version, so a
+// retry is bound to the same bytes the original completion proved.
+type retryTarget struct {
+	state         AssetVersionState
+	kind          AssetKind
+	ownerID       string
+	objectKey     string
+	objectVersion string
+	contentType   string
+	sizeBytes     int64
+	sha256Hex     string
+	maxSize       int64
+	trusted       bool
 }
 
-func (s *Service) applyRetry(ctx context.Context, tx pgx.Tx, request RetryRequest, state AssetVersionState, kind AssetKind) error {
-	if err := Transition(state, StateQuarantined); err != nil {
+func loadRetryTarget(ctx context.Context, tx pgx.Tx, assetVersionID string) (retryTarget, error) {
+	var target retryTarget
+	err := tx.QueryRow(ctx, `
+		SELECT mav.state, mav.kind, ma.owner_account_id::text, mav.storage_object_key,
+		       mav.storage_object_version, mav.content_type, mav.size_bytes,
+		       COALESCE(mav.sha256_hex, ''), ui.max_size_bytes,
+		       mav.successful_validation_attempt_id IS NOT NULL
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		JOIN upload_intents ui ON ui.asset_version_id = mav.id
+		WHERE mav.id = $1::uuid
+		FOR UPDATE OF mav
+	`, assetVersionID).Scan(&target.state, &target.kind, &target.ownerID, &target.objectKey,
+		&target.objectVersion, &target.contentType, &target.sizeBytes, &target.sha256Hex,
+		&target.maxSize, &target.trusted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return retryTarget{}, ErrNotFound
+	}
+	if err != nil {
+		return retryTarget{}, fmt.Errorf("loading retryable media version: %w", err)
+	}
+	return target, nil
+}
+
+func (s *Service) applyRetry(ctx context.Context, tx pgx.Tx, request RetryRequest, target retryTarget) error {
+	if err := Transition(target.state, StateQuarantined); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state = 'QUARANTINED' WHERE id = $1::uuid`, request.AssetVersionID); err != nil {
 		return fmt.Errorf("resetting media version for retry: %w", err)
 	}
-	if err := s.appendScanWork(ctx, tx, request.AssetVersionID, string(kind), "admin-retry"); err != nil {
+	reached, err := s.reestablishRetryEvidence(ctx, tx, request, target)
+	if err != nil {
 		return err
 	}
-	metadata := map[string]any{"from_state": string(state), "to_state": string(StateQuarantined), "actor": request.ActorDescriptor}
+	metadata := map[string]any{
+		"from_state": string(target.state),
+		"to_state":   string(reached),
+		"actor":      request.ActorDescriptor,
+		"path":       retryPathLabel(target.trusted),
+	}
 	return appendMediaAudit(ctx, tx, request.AdminAccountID, "ADMIN", "MEDIA_PROCESSING_RETRIED", request.AssetVersionID, "Admin retried failed media processing", metadata)
+}
+
+// reestablishRetryEvidence re-enters the asset's own safety path from
+// quarantine and reports the state it reached.
+func (s *Service) reestablishRetryEvidence(ctx context.Context, tx pgx.Tx, request RetryRequest, target retryTarget) (AssetVersionState, error) {
+	if !target.trusted {
+		if err := s.appendScanWork(ctx, tx, request.AssetVersionID, string(target.kind), "admin-retry"); err != nil {
+			return "", err
+		}
+		return StateQuarantined, nil
+	}
+	if !s.trustedPathApplies(target.kind, target.contentType) {
+		return "", fmt.Errorf(
+			"%w: this Asset Version holds D-088 trusted-validation provenance, which this deployment no longer accepts",
+			ErrConflict)
+	}
+	completion := uploadCompletion{
+		request: CompleteUploadRequest{
+			OwnerAccountID:       target.ownerID,
+			AssetVersionID:       request.AssetVersionID,
+			ProviderEventID:      "admin-retry:" + request.AssetVersionID,
+			StorageObjectKey:     target.objectKey,
+			StorageObjectVersion: target.objectVersion,
+			ContentType:          target.contentType,
+			SizeBytes:            target.sizeBytes,
+			SHA256Hex:            target.sha256Hex,
+		},
+		kind:    target.kind,
+		maxSize: target.maxSize,
+	}
+	// A retry never inherits the earlier pass: the exact stored object version
+	// is re-proved from scratch before any new evidence is written.
+	if err := s.verifyCompletedObject(ctx, completion.request, target.kind, target.maxSize); err != nil {
+		return "", err
+	}
+	return s.applyTrustedValidation(ctx, tx, completion, "admin-retry:"+request.AssetVersionID)
+}
+
+func retryPathLabel(trusted bool) string {
+	if trusted {
+		return "D-088_TRUSTED_REVALIDATION"
+	}
+	return "MALWARE_SCAN"
 }
 
 func (s *Service) requireCourseOwner(ctx context.Context, tx pgx.Tx, courseID, ownerID string) error {
@@ -929,36 +1159,6 @@ func validateCompletionRequest(request CompleteUploadRequest) error {
 func isAllowedContentType(kind AssetKind, contentType string) bool {
 	_, ok := allowedContentTypes[kind][strings.ToLower(strings.TrimSpace(contentType))]
 	return ok
-}
-
-func contentMatchesDeclaredType(prefix []byte, declared string) bool {
-	if len(prefix) == 0 {
-		return false
-	}
-	declared = strings.ToLower(strings.TrimSpace(declared))
-	if declared == "video/mp4" {
-		return hasMP4FileTypeBox(prefix)
-	}
-	detected := strings.ToLower(mimetype.Detect(prefix).String())
-	if detected == declared {
-		return true
-	}
-	return false
-}
-
-// hasMP4FileTypeBox accepts only a bounded ISO-BMFF file-type signature for
-// video/mp4. A client declaration, extension, or generic octet-stream probe
-// is not evidence that arbitrary bytes are an MP4 file.
-func hasMP4FileTypeBox(prefix []byte) bool {
-	if len(prefix) < 16 || binary.BigEndian.Uint32(prefix[:4]) < 16 || string(prefix[4:8]) != "ftyp" {
-		return false
-	}
-	switch string(prefix[8:12]) {
-	case "isom", "iso2", "iso4", "iso5", "iso6", "avc1", "mp41", "mp42", "dash":
-		return true
-	default:
-		return false
-	}
 }
 
 func visibilityForKind(kind AssetKind) string {

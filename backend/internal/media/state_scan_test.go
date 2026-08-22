@@ -23,6 +23,12 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 		{StateScanFailed, StateQuarantined},
 		{StateScanError, StateQuarantined},
 		{StateProcessFailed, StateQuarantined},
+		// D-088 trusted validation. VALIDATED is reached only from quarantine,
+		// and it is a distinct honest state rather than a scan outcome.
+		{StateQuarantined, StateValidated},
+		{StateValidated, StateProcessing},
+		{StateValidated, StateReady},
+		{StateValidated, StateProcessFailed},
 	}
 	for _, tc := range valid {
 		if err := Transition(tc.from, tc.to); err != nil {
@@ -30,14 +36,13 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 		}
 	}
 
-	for _, from := range []AssetVersionState{
+	every := []AssetVersionState{
 		StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
-		StateScanFailed, StateScanError, StateProcessing, StateReady, StateProcessFailed,
-	} {
-		for _, to := range []AssetVersionState{
-			StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
-			StateScanFailed, StateScanError, StateProcessing, StateReady, StateProcessFailed,
-		} {
+		StateScanFailed, StateScanError, StateValidated, StateProcessing,
+		StateReady, StateProcessFailed,
+	}
+	for _, from := range every {
+		for _, to := range every {
 			allowed := false
 			for _, tc := range valid {
 				if tc.from == from && tc.to == to {
@@ -54,8 +59,23 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 	if err := Transition("UNKNOWN", StateReady); err == nil {
 		t.Fatal("unknown source state was accepted")
 	}
-	if StateScanError.Deliverable() || StateProcessFailed.Deliverable() || StateProcessing.Deliverable() {
+	if StateScanError.Deliverable() || StateProcessFailed.Deliverable() ||
+		StateProcessing.Deliverable() || StateValidated.Deliverable() {
 		t.Fatal("a non-READY state is deliverable")
+	}
+	// Trusted validation is an honest, distinct state. Nothing in the machine
+	// may let it stand in for a scan outcome, and no scan outcome produces it.
+	if _, err := ScanTransition(ScanOutcome("VALIDATED")); err == nil {
+		t.Fatal("VALIDATED was accepted as a scan outcome")
+	}
+	for _, outcome := range []ScanOutcome{ScanPassed, ScanFailed, ScanError} {
+		next, err := ScanTransition(outcome)
+		if err != nil {
+			t.Fatalf("ScanTransition(%q) = %v", outcome, err)
+		}
+		if next == StateValidated {
+			t.Fatalf("scan outcome %q produced VALIDATED", outcome)
+		}
 	}
 	if !StateReady.Deliverable() {
 		t.Fatal("READY is not deliverable")

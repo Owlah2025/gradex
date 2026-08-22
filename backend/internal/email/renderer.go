@@ -143,6 +143,9 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
+	if request.Template == TemplateCourseInvitation && purchaseBackedInvitation(request.Event) {
+		copy = purchaseInvitationCopy(request.Locale)
+	}
 	actionURL, needsExpiry, err := r.actionURL(request)
 	if err != nil {
 		return Message{}, err
@@ -159,6 +162,34 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 		return Message{}, errors.New("transactional email HTML rendering failed")
 	}
 	return Message{From: r.from, Recipient: request.Payload.Destination, ReplyTo: r.replyTo, Subject: copy.Subject, Text: renderText(request.Locale, copy, actionURL, expiry), HTML: htmlBody}, nil
+}
+
+func purchaseBackedInvitation(event outbox.Event) bool {
+	payload, ok := event.SafePayload.(map[string]any)
+	if !ok {
+		return false
+	}
+	purchaseBacked, _ := payload["purchase_backed"].(bool)
+	return purchaseBacked
+}
+
+func purchaseInvitationCopy(locale string) localizedTemplate {
+	if locale == "ar" {
+		return localizedTemplate{
+			Subject: "دعوة وصول مدفوعة إلى دورة Gradex",
+			Title:   "دعوتك إلى الدورة جاهزة",
+			Body:    "تم تأكيد الدفع الخارجي من Gradex. سجّل أو سجّل دخولك بالبريد الإلكتروني المقصود ثم اقبل الدعوة؛ عندها يصبح الوصول إلى الدورة نشطاً مباشرة.",
+			Action:  "فتح الدعوة",
+			Footer:  "لا تشارك رابط الدعوة المخصص للاستخدام مرة واحدة.",
+		}
+	}
+	return localizedTemplate{
+		Subject: "Your paid Gradex Course invitation",
+		Title:   "Your Course invitation is ready",
+		Body:    "Gradex has confirmed the external payment. Register or sign in with the intended email, then accept this invitation; Course access becomes active immediately.",
+		Action:  "Open invitation",
+		Footer:  "Do not forward this single-use invitation link.",
+	}
 }
 
 func validateRenderRequest(request RenderRequest) (localizedTemplate, error) {

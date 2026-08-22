@@ -28,19 +28,28 @@ func (k AssetKind) Valid() bool {
 	}
 }
 
-// OperatingMode makes the unresolved LG-014 response explicit. Scanner mode
-// keeps normal Instructor upload available but fail-closed; Admin catalogue
-// mode disables it and accepts only an audited Admin procedure with exact
-// out-of-band scan evidence.
+// OperatingMode makes the deployment's media-safety posture explicit.
+//
+// Scanner mode keeps normal Instructor upload available but fail-closed behind
+// malware scanning. Admin catalogue mode disables Instructor upload and accepts
+// only an audited Admin procedure with exact out-of-band scan evidence.
+// Trusted-Instructor mode is the bounded D-088 launch profile: an ACTIVE vetted
+// Instructor may upload only the approved MP4 Lesson video and PDF/DOCX Lesson
+// Resource types, which progress on exact-version validation evidence instead
+// of malware scanning. Everything outside that profile stays scanner-gated in
+// every mode.
 type OperatingMode string
 
 const (
-	OperatingModeScanner        OperatingMode = "SCANNER"
-	OperatingModeAdminCatalogue OperatingMode = "ADMIN_CATALOGUE"
+	OperatingModeScanner           OperatingMode = "SCANNER"
+	OperatingModeAdminCatalogue    OperatingMode = "ADMIN_CATALOGUE"
+	OperatingModeTrustedInstructor OperatingMode = "TRUSTED_INSTRUCTOR"
 )
 
 func (m OperatingMode) Valid() bool {
-	return m == OperatingModeScanner || m == OperatingModeAdminCatalogue
+	return m == OperatingModeScanner ||
+		m == OperatingModeAdminCatalogue ||
+		m == OperatingModeTrustedInstructor
 }
 
 var (
@@ -72,6 +81,9 @@ type DeliveryStore interface {
 type UploadRequest struct {
 	OwnerAccountID string
 	CourseID       string
+	// RevisionID is required only for a separately stored public-preview asset.
+	// Lesson media is bound through LessonID instead.
+	RevisionID     string
 	LessonID       string
 	LogicalAssetID string
 	Kind           AssetKind
@@ -171,7 +183,17 @@ type ServiceOptions struct {
 	UploadURLExpiry time.Duration
 	MaxUploadBytes  int64
 	OperatingMode   OperatingMode
-	Now             func() time.Time
+
+	// The D-011 per-bucket caps enforced under BR-068. Each is optional and
+	// falls back to the Default* value in limits.go; they are tunable
+	// implementation parameters, not deployment switches, so composition
+	// normally leaves them unset.
+	ResourceMaxBytes          int64
+	ResourceLessonMaxBytes    int64
+	LabMaterialMaxBytes       int64
+	LabMaterialLessonMaxBytes int64
+
+	Now func() time.Time
 }
 
 type CatalogueLoadRequest struct {

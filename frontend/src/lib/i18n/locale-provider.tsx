@@ -34,7 +34,12 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     // treating incidental path segments (for example /en/admin) as a locale
     // selection.
     if (
-      (routeSegments[2] === "catalog" || routeSegments[2] === "learn") &&
+      (routeSegments[2] === "catalog" ||
+        routeSegments[2] === "learn" ||
+        // Course access is a Student surface reached by ordinary navigation and by locale-specific
+        // links, so `/en/access` must render English exactly as `/en/catalog` does. Admin and
+        // Instructor routes stay excluded on purpose: their `/en/...` segment is incidental.
+        routeSegments[2] === "access") &&
       (routeLocale === "en" || routeLocale === "ar")
     ) {
       setLocaleState(routeLocale);

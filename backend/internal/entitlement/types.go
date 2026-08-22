@@ -13,9 +13,14 @@ func (s ScopeKind) Valid() bool { return s == ScopeCourse || s == ScopeSection }
 
 type GrantSource string
 
-const GrantSourceManualInvitation GrantSource = "MANUAL_INVITATION"
+const (
+	GrantSourceManualInvitation GrantSource = "MANUAL_INVITATION"
+	GrantSourcePurchaseRequest  GrantSource = "PURCHASE_REQUEST"
+)
 
-func (s GrantSource) Valid() bool { return s == GrantSourceManualInvitation }
+func (s GrantSource) Valid() bool {
+	return s == GrantSourceManualInvitation || s == GrantSourcePurchaseRequest
+}
 
 type State string
 

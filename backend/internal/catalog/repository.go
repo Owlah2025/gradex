@@ -33,6 +33,9 @@ type CourseRow struct {
 	OwnerAccountID         string
 	Lifecycle              string
 	LiveRevisionID         *string
+	ClassificationModel    string
+	InstitutionID          *string
+	SubjectID              *string
 	AccessSuspendedAt      *time.Time
 	AccessSuspensionReason *string
 	RetiredAt              *time.Time
@@ -112,6 +115,7 @@ func (r *Repository) LockCourse(
 
 	query := `
 		SELECT id, owner_account_id, lifecycle, live_revision_id,
+		       classification_model, institution_id, subject_id,
 		       access_suspended_at, access_suspension_reason, retired_at,
 		       created_at, updated_at
 		FROM courses
@@ -122,6 +126,7 @@ func (r *Repository) LockCourse(
 	var row CourseRow
 	err := tx.QueryRow(ctx, query, courseID).Scan(
 		&row.ID, &row.OwnerAccountID, &row.Lifecycle, &row.LiveRevisionID,
+		&row.ClassificationModel, &row.InstitutionID, &row.SubjectID,
 		&row.AccessSuspendedAt, &row.AccessSuspensionReason, &row.RetiredAt,
 		&row.CreatedAt, &row.UpdatedAt,
 	)

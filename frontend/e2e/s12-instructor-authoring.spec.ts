@@ -19,6 +19,11 @@ import { frontendOrigin } from "../src/lib/api/e2e-ports";
 const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000-0000-0000-000000000003" };
 const OTHER_INSTRUCTOR = { email: "instructor-other@example.test", accountID: "a0000000-0000-0000-0000-000000000004" };
 const STUDENT = { email: "student-unentitled@example.test", accountID: "a0000000-0000-0000-0000-000000000099" };
+const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
+
+// T4-B: the Academic Catalog an ordinary Course is now authored against.
+const AUTHORING_UNIVERSITY = "S12 Authoring University";
+const AUTHORING_SUBJECT_CODE = "S12-101";
 
 const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -67,8 +72,16 @@ async function openStudio(page: Page): Promise<void> {
   await expect(page.getByTestId("owned-course-list")).toBeVisible();
 }
 
+/**
+ * Creates a Course through the studio.
+ *
+ * T4-B (§48): ordinary Instructor creation is Academic Catalog based, so the
+ * flow now begins with the university and a canonical Subject. The rest of this
+ * helper — and every persistence assertion built on it — is unchanged.
+ */
 async function createCourse(page: Page, titleEn: string, titleAr: string): Promise<string> {
   await page.getByTestId("toggle-new-course").click();
+  await selectAcademicSubject(page);
   await page.getByTestId("new-course-title-ar").fill(titleAr);
   await page.getByTestId("new-course-title-en").fill(titleEn);
   await page.getByTestId("new-course-description-ar").fill("وصف اختبار القبول");
@@ -76,13 +89,71 @@ async function createCourse(page: Page, titleEn: string, titleAr: string): Promi
   await page.getByTestId("create-course").click();
 
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
-  const rendered = await page.getByTestId("selected-course-id").innerText();
-  const match = rendered.match(UUID_PATTERN);
-  expect(match, "the studio must show a server-issued Course ID").not.toBeNull();
-  return match![0];
+  const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
+  expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
+  return courseID!;
+}
+
+/**
+ * University then Subject, exactly as an Instructor does it: pick the
+ * university, type a Subject code, choose the result. No identifier is typed.
+ */
+async function selectAcademicSubject(page: Page, code = AUTHORING_SUBJECT_CODE): Promise<void> {
+  const institution = page.getByTestId("new-course-institution");
+  await expect(institution).toBeVisible();
+  await institution.selectOption({ label: AUTHORING_UNIVERSITY });
+  await page.getByTestId("new-course-subject-search").fill(code);
+  const firstResult = page.getByTestId("new-course-subject-result").first();
+  await expect(firstResult).toBeVisible({ timeout: 15_000 });
+  await firstResult.click();
+  await expect(page.getByTestId("new-course-selected-subject")).toBeVisible();
+}
+
+/**
+ * Creates a small catalog owned by this spec.
+ *
+ * Deliberately NOT the Kuwait University manifest: this spec runs before
+ * `t2-launch-catalog-data`, whose dry run must find the launch catalog
+ * unimported. These cases only need one university and one Subject to author
+ * against, so they create their own and leave the launch manifest alone.
+ */
+async function ensureAuthoringCatalog(): Promise<void> {
+  const admin = await apiContext(issueRotatingSession(ADMIN));
+  const existing = await admin.get("/api/v1/admin/academic/institutions");
+  const institutions = existing.ok() ? await existing.json() : [];
+  const already = Array.isArray(institutions)
+    ? institutions.find((entry: { name_en?: string }) => entry.name_en === AUTHORING_UNIVERSITY)
+    : undefined;
+  let institutionID: string = already?.id ?? "";
+  if (!institutionID) {
+    const created = await admin.post("/api/v1/admin/academic/institutions", {
+      data: {
+        country_code: "KW",
+        slug: "s12-authoring-university",
+        name_ar: "جامعة التأليف",
+        name_en: AUTHORING_UNIVERSITY,
+        max_academic_level: 4,
+      },
+    });
+    expect(created.status()).toBe(201);
+    institutionID = (await created.json()).id;
+    const subject = await admin.post(`/api/v1/admin/academic/institutions/${institutionID}/subjects`, {
+      data: {
+        official_code: AUTHORING_SUBJECT_CODE,
+        title_ar: "مادة التأليف",
+        title_en: "Authoring Subject",
+      },
+    });
+    expect(subject.status()).toBe(201);
+  }
+  await admin.dispose();
 }
 
 test.describe("S12 Instructor authoring persistence", () => {
+  test.beforeAll(async () => {
+    await ensureAuthoringCatalog();
+  });
+
   test("A Course created in the studio survives a page reload", async ({ browser }) => {
     const context = await browser.newContext({ locale: "en-US" });
     await signIn(context, INSTRUCTOR);
@@ -97,7 +168,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.reload();
     await expect(page.getByTestId(`owned-course-${courseID}`)).toContainText(title);
     await page.getByTestId(`owned-course-${courseID}`).click();
-    await expect(page.getByTestId("selected-course-id")).toContainText(courseID);
+    await expect(page.getByTestId("selected-course-context")).toHaveAttribute("data-course-id", courseID);
     // The removed local-demo fixture must not reappear anywhere in production UI.
     await expect(page.locator("body")).not.toContainText("Local Demo Drafts");
     await expect(page.locator("body")).not.toContainText("course-demo-1");
@@ -147,7 +218,8 @@ test.describe("S12 Instructor authoring persistence", () => {
 
     await openStudio(page);
     const courseID = await createCourse(page, `Ownership Course ${Date.now()}`, "دورة الملكية");
-    const revisionID = (await page.getByTestId("selected-revision-id").innerText()).match(UUID_PATTERN)![0];
+    const revisionID = (await page.getByTestId("selected-course-context").getAttribute("data-revision-id"))!;
+    expect(revisionID).toMatch(UUID_PATTERN);
 
     const otherInstructor = await apiContext(issueRotatingSession(OTHER_INSTRUCTOR));
     const intrusion = await otherInstructor.post(
@@ -188,13 +260,19 @@ test.describe("S12 Instructor authoring persistence", () => {
 
     await page.getByTestId("submit-for-review").click();
 
-    // The Course has no taxonomy, no Sections, and no Lesson video, so the
-    // server refuses it. The Instructor is shown which requirements failed
-    // rather than a generic error.
+    // The Course has a canonical Subject but no Sections and no Lesson video,
+    // so the server refuses it. The Instructor is shown which requirements
+    // failed rather than a generic error.
+    //
+    // T4-B (§48): this previously also asserted TAXONOMY_DIMENSION_MISSING.
+    // That gate belongs to the legacy classification, which an Academic Course
+    // does not carry and must never be asked for — the property is unchanged,
+    // the dimension that fails is. The legacy gate itself stays proven for
+    // legacy Courses in the backend suite until T5.
     const failure = page.getByTestId("authoring-error");
     await expect(failure).toBeVisible();
-    await expect(failure).toContainText("TAXONOMY_DIMENSION_MISSING");
     await expect(failure).toContainText("COURSE_EMPTY");
+    await expect(failure).not.toContainText("TAXONOMY_DIMENSION_MISSING");
 
     await context.close();
   });

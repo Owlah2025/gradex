@@ -63,6 +63,47 @@ func reviewMediaFoundation(t *testing.T, pool *pgxpool.Pool) *MediaFoundation {
 	return foundation
 }
 
+// T4-B academic fixture identifiers. Ordinary Instructor Course creation is now
+// Academic Catalog based (D-093 §1), so a test that creates a Course through the
+// product API needs a real Institution and a real canonical Subject.
+const (
+	reviewInstitutionID = "aaaa9999-0000-0000-0000-000000000001"
+	reviewSubjectID     = "bbbb9999-0000-0000-0000-000000000001"
+	reviewSubjectAltID  = "bbbb9999-0000-0000-0000-000000000002"
+)
+
+// academicCourseBody is the ordinary T4-B create payload: university, Subject,
+// and the Course's own copy. There is no classification field — the server
+// derives ACADEMIC_CATALOG from the academic context.
+func academicCourseBody(titleAr, titleEn string) []byte {
+	return []byte(`{"title_ar":"` + titleAr + `","title_en":"` + titleEn +
+		`","institution_id":"` + reviewInstitutionID + `","subject_id":"` + reviewSubjectID + `"}`)
+}
+
+// seedLegacyCourseFixture builds a LEGACY_TAXONOMY Course directly, which the
+// ordinary Instructor API deliberately can no longer do (D-093 §1, T4-B §18).
+//
+// This is a fixture path, not a product path. It exists so the legacy behaviour
+// that must survive until T5 stays under test: an existing Course created before
+// the redesign still validates, edits, submits, and reviews exactly as it did.
+func seedLegacyCourseFixture(
+	t *testing.T, p *pgxpool.Pool, ctx context.Context, instructorID, titleAr, titleEn string,
+) (courseID, revisionID string) {
+	t.Helper()
+	if err := p.QueryRow(ctx, `
+		INSERT INTO courses (owner_account_id, lifecycle, classification_model)
+		VALUES ($1::uuid, 'DRAFT', 'LEGACY_TAXONOMY') RETURNING id::text`, instructorID).Scan(&courseID); err != nil {
+		t.Fatalf("seeding legacy course: %v", err)
+	}
+	if err := p.QueryRow(ctx, `
+		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en)
+		VALUES ($1::uuid, 'DRAFT', 1, $2, $3) RETURNING id::text`,
+		courseID, titleAr, titleEn).Scan(&revisionID); err != nil {
+		t.Fatalf("seeding legacy revision: %v", err)
+	}
+	return courseID, revisionID
+}
+
 func seedReviewDatabase(t *testing.T, pool interface{}, ctx context.Context) (adminID, instructorID, videoAssetID, majorTermID, subjectTermID string) {
 	t.Helper()
 	p := pool.(*pgxpool.Pool)
@@ -101,6 +142,22 @@ func seedReviewDatabase(t *testing.T, pool interface{}, ctx context.Context) (ad
 	_, err = p.Exec(ctx, `INSERT INTO videos (id, lesson_id, status) VALUES ($1, $2, 'READY')`, videoAssetID, lesID)
 	if err != nil {
 		t.Fatalf("seeding video: %v", err)
+	}
+
+	// The Academic Catalog an ordinary T4-B Course is authored against.
+	_, err = p.Exec(ctx, `
+		INSERT INTO institutions (id, country_code, slug, name_ar, name_en)
+		VALUES ($1, 'KW', 'review-university', 'جامعة', 'Review University')`, reviewInstitutionID)
+	if err != nil {
+		t.Fatalf("seeding institution: %v", err)
+	}
+	_, err = p.Exec(ctx, `
+		INSERT INTO subjects (id, institution_id, official_code, title_ar, title_en) VALUES
+		($1, $3, '0418-320', 'مبادئ نظم الحاسوب', 'Principles of Computer Systems'),
+		($2, $3, '0418-321', 'نظم التشغيل', 'Operating Systems')`,
+		reviewSubjectID, reviewSubjectAltID, reviewInstitutionID)
+	if err != nil {
+		t.Fatalf("seeding subjects: %v", err)
 	}
 
 	_, err = p.Exec(ctx, `
@@ -159,13 +216,11 @@ func TestSubmissionValidationReportsAllDefectsInOneResponse(t *testing.T) {
 	ts := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive)
 
 	// Create course
-	resp, body := doAuthReq(ts, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة تجريبية","title_en":"Demo Course"}`))
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("creating course: status %d", resp.StatusCode)
-	}
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة تجريبية", "Demo Course")
 
 	// Set Major taxonomy term only (leave Subject and StudyYear missing)
 	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`"}`))
@@ -238,13 +293,11 @@ func TestConcurrentSubmissionReturns409(t *testing.T) {
 	ts := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive)
 
 	// Create complete valid course
-	resp, body := doAuthReq(ts, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة متكاملة","title_en":"Complete Course"}`))
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create course status %d: %v", resp.StatusCode, body)
-	}
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة متكاملة", "Complete Course")
 
 	studyYear := "YEAR_1"
 	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{
@@ -300,10 +353,11 @@ func TestEditingPendingReviewCourseIsRefused(t *testing.T) {
 	ts := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive)
 
 	// Create and submit complete course
-	resp, body := doAuthReq(ts, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة للمراجعة","title_en":"Review Course"}`))
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة للمراجعة", "Review Course")
 
 	_, _ = doAuthReq(ts, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
 	resp, secBody := doAuthReq(ts, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
@@ -351,11 +405,11 @@ func TestAdminReviewFlowApproveRequestChangesAndPreview(t *testing.T) {
 	adminTS := buildTestRouterWithAccount(t, p, adminID, identity.RoleAdmin, identity.StatusActive, WithMediaFoundation(mediaFoundation))
 
 	// 1. Create and submit course as Instructor
-	resp, body := doAuthReq(instructorTS, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة مراجعة أدمن","title_en":"Admin Review Course"}`))
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
-
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة مراجعة أدمن", "Admin Review Course")
 	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_2"}`))
 	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	secID := secBody["id"].(string)
@@ -467,14 +521,11 @@ func TestInstructorCannotPublishThroughReviewRoutes(t *testing.T) {
 	instructorTS := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive)
 
 	// Create and submit course
-	resp, body := doAuthReq(instructorTS, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة","title_en":"Course"}`))
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("create course status %d: %v", resp.StatusCode, body)
-	}
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
-
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة", "Course")
 	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
 	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	if resp.StatusCode != http.StatusCreated {
@@ -522,14 +573,11 @@ func TestApprovalRevalidatesOwnerSuspension(t *testing.T) {
 	adminTS := buildTestRouterWithAccount(t, p, adminID, identity.RoleAdmin, identity.StatusActive)
 
 	// Create and submit course as Instructor
-	resp, body := doAuthReq(instructorTS, "POST", "/api/v1/courses", []byte(`{"title_ar":"دورة للمراجعة","title_en":"Review Course"}`))
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("creating course: status %d", resp.StatusCode)
-	}
-	courseID := body["id"].(string)
-	revMap := body["editable_revision"].(map[string]any)
-	revID := revMap["id"].(string)
-
+	// LEGACY compatibility fixture (T4-B §48). Ordinary Instructor creation is
+	// Academic Catalog based now, so this Course is constructed explicitly as
+	// LEGACY_TAXONOMY to keep proving that an existing pre-redesign Course still
+	// works end to end through review until T5 migrates it.
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة للمراجعة", "Review Course")
 	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_1"}`))
 	resp, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
 	secID := secBody["id"].(string)

@@ -21,6 +21,7 @@ type mediaHandlers struct {
 
 type mediaUploadBody struct {
 	CourseID       string          `json:"course_id" binding:"required"`
+	RevisionID     string          `json:"revision_id"`
 	LessonID       string          `json:"lesson_id"`
 	LogicalAssetID string          `json:"logical_asset_id"`
 	Kind           media.AssetKind `json:"kind" binding:"required"`
@@ -52,7 +53,7 @@ func mountMediaRoutes(v1 *gin.RouterGroup, foundation *MediaFoundation, authenti
 	mountMediaRetryRoute(content, h, authenticator, principals, logger)
 	mountMediaCatalogueRoutes(content, h, authenticator, principals, logger)
 	if foundation.delivery != nil {
-		mountMediaDeliveryRoutes(content, foundation.delivery, authenticator, principals, logger)
+		mountMediaDeliveryRoutes(content, foundation, authenticator, principals, logger)
 	}
 }
 
@@ -107,7 +108,7 @@ func mountMediaRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authentica
 func (h *mediaHandlers) beginUpload(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*mediaUploadBody)
 	ticket, err := h.service.BeginUpload(c.Request.Context(), media.UploadRequest{
-		OwnerAccountID: c.GetString(ctxUserIDKey), CourseID: body.CourseID, LessonID: body.LessonID,
+		OwnerAccountID: c.GetString(ctxUserIDKey), CourseID: body.CourseID, RevisionID: body.RevisionID, LessonID: body.LessonID,
 		LogicalAssetID: body.LogicalAssetID, Kind: body.Kind,
 		ContentType: body.ContentType, SizeBytes: body.SizeBytes,
 	})

@@ -196,8 +196,11 @@ Each is authorised, auditable, documented, and safe:
    through the S2 emergency-suspension path.
 7. **Support recovery** — Admin resends verification or reset intents; if `LG-018` is unresolved, an
    Admin issues them directly through an audited operation.
-8. **Catalogue upload** — if `LG-014` is unresolved, public upload stays disabled and the Admin loads
-   the launch catalogue with out-of-band scanning.
+8. **Lesson-media upload** — under D-088, an ACTIVE vetted Instructor may upload only approved MP4
+   Lesson video and PDF/DOCX Lesson Resources through the exact-version trusted-validation path.
+   Public previews and uploads outside that bounded profile remain scanner-gated; when such content
+   is required before an integrated scanner is available, the Admin catalogue/out-of-band scanning
+   procedure remains the fail-closed fallback.
 
 ## 4. Go/no-go criteria for August 15
 

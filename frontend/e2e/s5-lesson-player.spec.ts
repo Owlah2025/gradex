@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
+import { AUTHORIZATION_FLAG, expectAbsent } from "./authority-leak";
 import {
   queryProgress,
   requireNoProgressRow,
@@ -293,14 +294,14 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
 
           // 10. Information leak audit in rendered DOM (14 sensitive tokens)
           const bodyHtml = await page.content();
-          const PROHIBITED_TOKENS = [
+          const PROHIBITED_TOKENS: (string | RegExp)[] = [
             "asset_version_id",
             "entitlement_id",
             "enrollment_id",
             "revision_id",
             "can_play",
             "can_update_progress",
-            "authorized",
+            AUTHORIZATION_FLAG,
             "internal evaluator reason",
             "object key",
             "storage bucket",
@@ -312,7 +313,7 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
             "test/master.m3u8",
           ];
           for (const token of PROHIBITED_TOKENS) {
-            expect(bodyHtml).not.toContain(token);
+            expectAbsent(bodyHtml, token);
           }
 
           // 11. Browser storage information-leak audit (localStorage / sessionStorage)

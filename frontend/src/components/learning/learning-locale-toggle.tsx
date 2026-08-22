@@ -3,16 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { localeSwitchLabel, type Locale } from "@/lib/i18n/config";
-
-function withLocale(pathname: string | null, locale: Locale): string {
-  const path = pathname || "/";
-  const segments = path.split("/");
-  if (segments[1] === "ar" || segments[1] === "en") {
-    segments[1] = locale;
-    return segments.join("/") || `/${locale}`;
-  }
-  return `/${locale}${path.startsWith("/") ? path : `/${path}`}`;
-}
+import { switchLocalePath } from "@/lib/i18n/locale-path";
 
 export function LearningLocaleToggle({
   locale,
@@ -28,7 +19,11 @@ export function LearningLocaleToggle({
 
   function switchLocale() {
     setLocale(nextLocale);
-    router.push(withLocale(pathname, nextLocale));
+    // Learning routes are always locale-addressed, so the helper never returns null here; the
+    // fallback keeps the control honest rather than navigating to a manufactured path.
+    const search = typeof window === "undefined" ? "" : window.location.search;
+    const target = switchLocalePath(pathname, search, nextLocale);
+    if (target !== null) router.push(target);
   }
 
   return (

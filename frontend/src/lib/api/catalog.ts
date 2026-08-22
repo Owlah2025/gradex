@@ -56,6 +56,19 @@ export type SectionWire = {
   lessons?: LessonWire[];
 };
 
+export type ProgramAudienceWire = {
+	program_id: string;
+	name_ar: string;
+	name_en: string;
+	recommended_level?: number;
+	recommended_semester?: number;
+};
+
+export type RevisionAudienceWire = {
+	mode: "AUTOMATIC" | "CUSTOMIZED";
+	programs: ProgramAudienceWire[];
+};
+
 export type CourseRevisionWire = {
 	id?: string;
 	course_id?: string;
@@ -68,6 +81,20 @@ export type CourseRevisionWire = {
 	major_term_id?: string;
 	subject_term_id?: string;
 	study_year?: string;
+	/** Separate public-preview Asset Version; never a Lesson asset. */
+	preview_asset_version_id?: string;
+	/**
+	 * The Admin's change-request/rejection reason for this revision.
+	 *
+	 * Written by the review mutation (`catalog/review.go`) and already served to the owning
+	 * Instructor by `GET /courses` and `GET /courses/:id`. It is retained on the row after a
+	 * resubmission, so it describes the *last decision*, not the current state — read it only
+	 * alongside `state`, never on its own.
+	 */
+	review_reason?: string;
+	/** When the last review decision was recorded. Same retention caveat as `review_reason`. */
+	reviewed_at?: string;
+	audience?: RevisionAudienceWire;
 	sections: SectionWire[];
 };
 
@@ -86,10 +113,51 @@ export type OwnedCourseSummary = {
   id: string;
   owner_account_id?: string;
   lifecycle?: string;
+  /**
+   * The published revision's id.
+   *
+   * Present on both the owned-Course *list* and *detail* payloads. `live_revision` below is the
+   * expanded graph and is populated only by the detail read (`GetOwnedCourse`), so anything that
+   * merely needs to know whether a Course has a published revision must read this field.
+   */
+  live_revision_id?: string;
   editable_revision?: CourseRevisionWire;
   live_revision?: CourseRevisionWire;
   price_minor_units?: number | null;
+
+  /**
+   * D-093 academic identity.
+   *
+   * `classification_model` is the server's own answer to which authority owns
+   * this Course's academic identity. Presentation branches on it and NEVER on
+   * whether `subject_id` happens to be null: a legacy Course and a subject-less
+   * Academic draft both have no Subject, and only this field tells them apart.
+   *
+   * It is read-only. No authoring call sends it, and the server derives it at
+   * creation, so a Course cannot be moved between models from the client.
+   */
+  classification_model?: "LEGACY_TAXONOMY" | "ACADEMIC_CATALOG";
+  institution_id?: string;
+  subject_id?: string;
+  academic_context?: {
+    institution_name_ar: string;
+    institution_name_en: string;
+    subject?: {
+      official_code?: string;
+      title_ar: string;
+      title_en: string;
+      owning_unit_name_ar?: string;
+      owning_unit_name_en?: string;
+      parent_unit_name_ar?: string;
+      parent_unit_name_en?: string;
+    };
+  };
 };
+
+/** True when the Course's academic identity is the canonical Academic Catalog. */
+export function isAcademicCourse(course: Pick<OwnedCourseSummary, "classification_model">): boolean {
+  return course.classification_model === "ACADEMIC_CATALOG";
+}
 
 export type OwnedCourseDetail = OwnedCourseSummary;
 

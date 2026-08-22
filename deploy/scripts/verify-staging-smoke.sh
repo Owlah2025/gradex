@@ -248,7 +248,7 @@ main() {
 
   if [ "$S12_SMOKE_MODE" = "s11" ]; then
     note "HTTPS S11 deployed login-to-learning journey, zero-before-approval, exact provenance/cardinality, progress, unrelated denial, authorized replay, and protected media passed"
-    note "S11 production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB schema=15 state=$state_assertion"
+    note "S11 production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB state=$state_assertion"
   else
     note "HTTPS S6 invitation-to-learning journey, zero-before-approval, exact grant counts, progress, unrelated denial, and protected media passed"
     note "production-like origin=$PUBLIC_ORIGIN database=$S12_SMOKE_DB state=$state_assertion"

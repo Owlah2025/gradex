@@ -21,6 +21,35 @@ import (
 
 var ErrProtectedUnavailable = errors.New("protected media is unavailable")
 
+// ExactVersionProvenanceJoin admits an Asset Version only if these exact bytes
+// carry one of the two legitimate safety provenances: successful exact-version
+// malware-scan evidence, or D-088 trusted-validation evidence. It is an inner
+// join, so an asset with neither is invisible to delivery.
+//
+// Public preview deliberately does not use it. D-088 keeps every public preview
+// scanner-gated, so IssuePreview joins scan_attempts directly and no validation
+// evidence can satisfy it.
+//
+// It is a compile-time constant spliced into queries that already bind their
+// own parameters; it carries no caller input.
+const ExactVersionProvenanceJoin = `
+		JOIN LATERAL (SELECT 1 AS admitted) provenance ON (
+			EXISTS (
+				SELECT 1 FROM scan_attempts sa
+				WHERE sa.id = mav.successful_scan_attempt_id
+				  AND sa.asset_version_id = mav.id
+				  AND sa.storage_object_version = mav.storage_object_version
+				  AND sa.outcome = 'PASSED'
+			)
+			OR EXISTS (
+				SELECT 1 FROM validation_attempts va
+				WHERE va.id = mav.successful_validation_attempt_id
+				  AND va.asset_version_id = mav.id
+				  AND va.storage_object_version = mav.storage_object_version
+				  AND va.outcome = 'PASSED'
+			)
+		)`
+
 // protectedDenial retains the evaluator's typed internal reason for the
 // audit/diagnostic boundary while preserving one external refusal. It is not a
 // response model and callers must never serialize it.
@@ -137,6 +166,17 @@ type DownloadEntryRequest struct {
 	Kind      AssetKind
 }
 
+// LessonFileDownloadRequest selects one revision-scoped attachment through a
+// stable Lesson identity. FileID is only a selector: the live-graph query and
+// entitlement evaluator below independently decide whether it is deliverable.
+type LessonFileDownloadRequest struct {
+	StudentID string
+	CourseID  string
+	LessonID  string
+	FileID    string
+	Locale    string
+}
+
 type PlaybackAuthorization struct {
 	PlaybackSession string    `json:"playback_session"`
 	ManifestURL     string    `json:"manifest_url"`
@@ -179,6 +219,7 @@ type deliveryTarget struct {
 	kind           AssetKind
 	state          AssetVersionState
 	storageKey     string
+	downloadName   string
 	durationMS     int64
 	retiredAt      *time.Time
 }
@@ -386,12 +427,27 @@ func (s *DeliveryService) IssueDownloadEntry(ctx context.Context, request Downlo
 	return s.issueDownloadTarget(ctx, request.StudentID, request.Kind, target)
 }
 
+// IssueLessonFileDownload issues a private download only when the requested
+// attachment is still part of the Course's current approved Lesson graph. The
+// attachment ID never substitutes for Course access: it is joined to the
+// requested Course and live revision before the canonical evaluator runs.
+func (s *DeliveryService) IssueLessonFileDownload(ctx context.Context, request LessonFileDownloadRequest) (DownloadAuthorization, error) {
+	if request.StudentID == "" || request.CourseID == "" || request.LessonID == "" || request.FileID == "" {
+		return DownloadAuthorization{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadCurrentMaterialFileTarget(ctx, request.CourseID, request.LessonID, request.FileID, request.Locale)
+	if err != nil || target.state != StateReady || target.storageKey == "" {
+		return DownloadAuthorization{}, ErrProtectedUnavailable
+	}
+	return s.issueDownloadTarget(ctx, request.StudentID, target.kind, target)
+}
+
 func (s *DeliveryService) issueDownloadTarget(ctx context.Context, studentID string, kind AssetKind, target deliveryTarget) (DownloadAuthorization, error) {
 	decision := s.evaluator.EvaluateTarget(ctx, studentID, target.lessonID, target.retiredAt, s.now().UTC())
 	if !decision.Allowed {
 		return DownloadAuthorization{}, denyProtected(decision.Reason)
 	}
-	url, err := s.store.PresignGetURL(ctx, target.storageKey, s.signatureLifetime)
+	url, err := s.presignDownload(ctx, target.storageKey, target.downloadName)
 	if err != nil {
 		return DownloadAuthorization{}, ErrProtectedUnavailable
 	}
@@ -403,17 +459,38 @@ func (s *DeliveryService) issueDownloadTarget(ctx context.Context, studentID str
 	return result, nil
 }
 
+// namedDownloadStore is intentionally optional so existing test stores that
+// model signing alone remain valid. Production storage implements it and
+// supplies an attachment Content-Disposition for Student downloads.
+type namedDownloadStore interface {
+	PresignGetDownloadURL(context.Context, string, string, time.Duration) (string, error)
+}
+
+func (s *DeliveryService) presignDownload(ctx context.Context, key, filename string) (string, error) {
+	if filename != "" {
+		if store, ok := s.store.(namedDownloadStore); ok {
+			return store.PresignGetDownloadURL(ctx, key, filename, s.signatureLifetime)
+		}
+	}
+	return s.store.PresignGetURL(ctx, key, s.signatureLifetime)
+}
+
 // Material is one current, ready material attached to a stable Lesson identity.
 //
 // AssetVersionID is internal: it names the exact version this read resolved, which S5 needs to
 // bind a report context to the instance actually rendered (D-065). It carries no JSON tag and is
 // never serialized — the public material contract exposes only the kind.
 type Material struct {
+	FileID         string
 	Kind           MaterialKind
 	AssetVersionID string
+	DisplayNameAr  string
+	DisplayNameEn  string
+	ContentType    string
+	SizeBytes      int64
 }
 
-// MaterialKinds returns only current, ready materials for stable Lesson
+// MaterialKinds returns every current, ready attachment for stable Lesson
 // identities in the approved live graph. It is a bounded bulk read and never
 // signs a target or exposes storage detail.
 func (s *DeliveryService) MaterialKinds(ctx context.Context, lessonIDs []string) (map[string][]Material, error) {
@@ -421,41 +498,36 @@ func (s *DeliveryService) MaterialKinds(ctx context.Context, lessonIDs []string)
 	if len(lessonIDs) == 0 {
 		return result, nil
 	}
-	// One row per (Lesson, kind), selecting the same version D-064's stable entry route resolves,
-	// so a report context and a download resolve the identical instance. Still one query.
+	// One bounded row per live attachment. The exact Asset Version remains internal
+	// for report-context minting; Student read models receive only display metadata
+	// plus an authorization route generated at the HTTP boundary.
 	rows, err := s.db.Query(ctx, `
-		SELECT lesson_identity_id, kind, asset_version_id
-		FROM (
-			SELECT DISTINCT ON (cl.lesson_identity_id, lf.kind)
-				cl.lesson_identity_id::text AS lesson_identity_id,
-				lf.kind::text AS kind,
-				mav.id::text AS asset_version_id,
-				lf.kind AS ordering_kind
-			FROM courses c
-			JOIN course_revisions cr ON cr.id = c.live_revision_id
-				AND cr.course_id = c.id AND cr.state = 'APPROVED'
-			JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
-			JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
-			JOIN lesson_files lf ON lf.lesson_id = cl.id
-			JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
-				AND mav.kind::text = lf.kind::text AND mav.state = 'READY'
-			JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-				AND scan.asset_version_id = mav.id
-				AND scan.storage_object_version = mav.storage_object_version
-				AND scan.outcome = 'PASSED'
-			WHERE cl.lesson_identity_id = ANY($1::uuid[])
-			ORDER BY cl.lesson_identity_id, lf.kind, lf.position ASC, lf.id ASC, mav.created_at DESC
-		) selected
-		ORDER BY lesson_identity_id ASC,
-			CASE ordering_kind WHEN 'RESOURCE' THEN 0 WHEN 'LAB_MATERIAL' THEN 1 ELSE 2 END ASC
+		SELECT cl.lesson_identity_id::text, lf.id::text, lf.kind::text, mav.id::text,
+		       lf.display_name_ar, lf.display_name_en, mav.content_type, mav.size_bytes
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = c.live_revision_id
+			AND cr.course_id = c.id AND cr.state = 'APPROVED'
+		JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
+		JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+		JOIN lesson_files lf ON lf.lesson_id = cl.id
+		JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
+			AND mav.kind::text = lf.kind::text AND mav.state = 'READY'
+	`+ExactVersionProvenanceJoin+`
+		WHERE cl.lesson_identity_id = ANY($1::uuid[])
+		ORDER BY cl.lesson_identity_id ASC,
+			CASE lf.kind WHEN 'RESOURCE' THEN 0 WHEN 'LAB_MATERIAL' THEN 1 ELSE 2 END ASC,
+			lf.position ASC, lf.id ASC
 	`, lessonIDs)
 	if err != nil {
 		return nil, fmt.Errorf("reading current lesson material kinds: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var lessonID, kind, assetVersionID string
-		if err := rows.Scan(&lessonID, &kind, &assetVersionID); err != nil {
+		var lessonID, fileID, kind, assetVersionID string
+		var material Material
+		if err := rows.Scan(&lessonID, &fileID, &kind, &assetVersionID,
+			&material.DisplayNameAr, &material.DisplayNameEn, &material.ContentType, &material.SizeBytes,
+		); err != nil {
 			return nil, fmt.Errorf("scanning current lesson material kinds: %w", err)
 		}
 		var materialKind MaterialKind
@@ -467,16 +539,10 @@ func (s *DeliveryService) MaterialKinds(ctx context.Context, lessonIDs []string)
 		default:
 			continue
 		}
-		duplicate := false
-		for _, existing := range result[lessonID] {
-			if existing.Kind == materialKind {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			result[lessonID] = append(result[lessonID], Material{Kind: materialKind, AssetVersionID: assetVersionID})
-		}
+		material.FileID = fileID
+		material.Kind = materialKind
+		material.AssetVersionID = assetVersionID
+		result[lessonID] = append(result[lessonID], material)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating current lesson material kinds: %w", err)
@@ -484,12 +550,32 @@ func (s *DeliveryService) MaterialKinds(ctx context.Context, lessonIDs []string)
 	return result, nil
 }
 
-// IssuePreview is anonymous but has a strictly narrower S2 publication query:
-// only the exact live, published preview reference can be signed.
+// IssuePreview is anonymous but has a strictly narrower publication query:
+// only the exact live, published preview reference can be signed. It remains
+// for safe legacy callers; public Course Details uses IssueCoursePreview so it
+// never has to learn an Asset Version identifier.
 func (s *DeliveryService) IssuePreview(ctx context.Context, assetVersionID string) (PreviewAuthorization, error) {
 	if assetVersionID == "" {
 		return PreviewAuthorization{}, ErrProtectedUnavailable
 	}
+	return s.issuePreview(ctx, `cr.preview_asset_version_id = $1::uuid`, assetVersionID)
+}
+
+// IssueCoursePreview signs only the current live preview for the requested
+// public Course. The Course identifier is not an authorization grant: the
+// query still proves lifecycle, revision, exact scanner evidence, kind,
+// visibility, and retirement state before issuing the short-lived URL.
+func (s *DeliveryService) IssueCoursePreview(ctx context.Context, courseID string) (PreviewAuthorization, error) {
+	if courseID == "" {
+		return PreviewAuthorization{}, ErrProtectedUnavailable
+	}
+	return s.issuePreview(ctx, `c.id = $1::uuid`, courseID)
+}
+
+func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, targetID string) (PreviewAuthorization, error) {
+	// A public preview stays scanner-gated under D-088. This join is
+	// deliberately scan_attempts and not ExactVersionProvenanceJoin: no
+	// trusted-validation evidence may ever make bytes publicly readable.
 	var target deliveryTarget
 	err := s.db.QueryRow(ctx, `
 		SELECT cr.preview_asset_version_id::text, mav.kind, mav.state, mav.storage_object_key, ma.retired_at
@@ -501,12 +587,24 @@ func (s *DeliveryService) IssuePreview(ctx context.Context, assetVersionID strin
 			AND scan.asset_version_id = mav.id
 			AND scan.storage_object_version = mav.storage_object_version
 			AND scan.outcome = 'PASSED'
-		WHERE cr.preview_asset_version_id = $1::uuid
+		WHERE `+targetPredicate+`
 		  AND c.lifecycle = 'PUBLISHED'
 		  AND cr.state = 'APPROVED'
 		  AND mav.kind = 'PREVIEW'
+		  AND ma.kind = 'PREVIEW'
+		  AND mav.content_type = 'video/mp4'
 		  AND ma.visibility = 'PUBLIC_PREVIEW'
-	`, assetVersionID).Scan(&target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.retiredAt)
+		  AND EXISTS (
+			WITH RECURSIVE lineage AS (
+				SELECT cr.id, cr.based_on_revision_id
+				UNION ALL
+				SELECT parent.id, parent.based_on_revision_id
+				FROM course_revisions parent
+				JOIN lineage child ON child.based_on_revision_id = parent.id
+			)
+			SELECT 1 FROM lineage WHERE lineage.id = ma.preview_origin_revision_id
+		  )
+	`, targetID).Scan(&target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.retiredAt)
 	if err != nil || target.state != StateReady || target.retiredAt != nil {
 		return PreviewAuthorization{}, ErrProtectedUnavailable
 	}
@@ -531,10 +629,7 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 		JOIN courses c ON c.id = cl.course_id
 		JOIN media_asset_versions mav ON mav.id = $2::uuid
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = cl.course_id
-		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-			AND scan.asset_version_id = mav.id
-			AND scan.storage_object_version = mav.storage_object_version
-			AND scan.outcome = 'PASSED'
+	`+ExactVersionProvenanceJoin+`
 		LEFT JOIN LATERAL (
 			SELECT storage_object_key FROM video_renditions WHERE asset_version_id = mav.id ORDER BY name LIMIT 1
 		) vr ON mav.kind = 'VIDEO'
@@ -576,9 +671,7 @@ func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request Adm
 		JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
 		JOIN media_asset_versions mav ON mav.id = $4::uuid AND mav.id = cl.video_asset_version_id
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = c.id AND ma.retired_at IS NULL
-		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-			AND scan.asset_version_id = mav.id AND scan.storage_object_version = mav.storage_object_version
-			AND scan.outcome = 'PASSED'
+	`+ExactVersionProvenanceJoin+`
 		JOIN LATERAL (
 			SELECT storage_object_key FROM video_renditions WHERE asset_version_id = mav.id ORDER BY name LIMIT 1
 		) vr ON true
@@ -611,10 +704,7 @@ func (s *DeliveryService) loadCurrentMaterialTarget(ctx context.Context, lessonI
 		JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
 			AND mav.kind = $3::media_asset_kind AND mav.state = 'READY'
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = cl.course_id
-		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-			AND scan.asset_version_id = mav.id
-			AND scan.storage_object_version = mav.storage_object_version
-			AND scan.outcome = 'PASSED'
+	`+ExactVersionProvenanceJoin+`
 		WHERE cl.lesson_identity_id = $1::uuid
 		ORDER BY lf.position ASC, lf.id ASC, mav.created_at DESC
 		LIMIT 1
@@ -624,6 +714,50 @@ func (s *DeliveryService) loadCurrentMaterialTarget(ctx context.Context, lessonI
 	}
 	if err != nil {
 		return deliveryTarget{}, fmt.Errorf("loading current lesson material target: %w", err)
+	}
+	target.retiredAt = assetRetiredAt
+	return target, nil
+}
+
+// loadCurrentMaterialFileTarget binds a revision-scoped lesson_files row to
+// the requested Course's current approved graph. Unlike the historical
+// category route, this supports more than one Resource or Lab Material while
+// retaining the same fail-closed provenance and retirement checks.
+func (s *DeliveryService) loadCurrentMaterialFileTarget(ctx context.Context, courseID, lessonID, fileID, locale string) (deliveryTarget, error) {
+	var target deliveryTarget
+	var assetRetiredAt *time.Time
+	var displayNameAr, displayNameEn string
+	err := s.db.QueryRow(ctx, `
+		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, mav.storage_object_key,
+		       0, ma.retired_at, lf.display_name_ar, lf.display_name_en
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = c.live_revision_id
+			AND cr.course_id = c.id AND cr.state = 'APPROVED'
+		JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
+		JOIN course_lessons cl ON cl.section_id = cs.id AND cl.course_id = c.id
+		JOIN lesson_files lf ON lf.lesson_id = cl.id AND lf.id = $3::uuid
+		JOIN media_asset_versions mav ON mav.id = lf.asset_version_id
+			AND mav.kind::text = lf.kind::text AND mav.state = 'READY'
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = c.id
+	`+ExactVersionProvenanceJoin+`
+		WHERE c.id = $1::uuid AND cl.lesson_identity_id = $2::uuid
+	`, courseID, lessonID, fileID).Scan(
+		&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey,
+		&target.durationMS, &assetRetiredAt, &displayNameAr, &displayNameEn,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return deliveryTarget{}, ErrProtectedUnavailable
+	}
+	if err != nil {
+		return deliveryTarget{}, fmt.Errorf("loading current lesson material file target: %w", err)
+	}
+	if target.kind != KindResource && target.kind != KindLabMaterial {
+		return deliveryTarget{}, ErrProtectedUnavailable
+	}
+	if locale == "en" {
+		target.downloadName = displayNameEn
+	} else {
+		target.downloadName = displayNameAr
 	}
 	target.retiredAt = assetRetiredAt
 	return target, nil

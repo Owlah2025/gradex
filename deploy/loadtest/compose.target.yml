@@ -1,0 +1,343 @@
+# LG-019 KVM2 acceptance target only: disposable, non-production, and not a
+# Founder Acceptance or release topology. Load generation must run elsewhere.
+name: gradex-lg019-target
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+x-backend-volumes: &backend-volumes
+  - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+
+x-backend-environment: &backend-environment
+  APP_ENV: staging
+  PUBLIC_ORIGIN: https://${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+  CORS_ALLOWED_ORIGINS: https://${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+  CORS_ALLOW_CREDENTIALS: "true"
+  TRUSTED_PROXIES: 172.16.0.0/12
+  LOG_LEVEL: info
+  READINESS_TIMEOUT: 5s
+  SHUTDOWN_TIMEOUT: 30s
+  DATABASE_URL: postgres://gradex:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+  REDIS_ADDR: redis:6379
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+  REDIS_TLS_ENABLED: "true"
+  REDIS_TLS_SERVER_NAME: redis
+  REDIS_TLS_CA_CERT_FILE: /run/gradex/redis/ca.crt
+  S3_ENDPOINT: http://minio:9000
+  S3_PRESIGN_ENDPOINT: https://${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+  S3_BUCKET: ${S3_BUCKET:-gradex-lg019-media}
+  S3_REGION: auto
+  S3_USE_PATH_STYLE: "true"
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+  PLAYBACK_TOKEN_SECRET: ${PLAYBACK_TOKEN_SECRET:?PLAYBACK_TOKEN_SECRET is required}
+  SESSION_CSRF_KEY: ${SESSION_CSRF_KEY:?SESSION_CSRF_KEY is required}
+  ANONYMOUS_COOKIE_SIGNING_KEY: ${ANONYMOUS_COOKIE_SIGNING_KEY:?ANONYMOUS_COOKIE_SIGNING_KEY is required}
+  ANONYMOUS_CSRF_KEY: ${ANONYMOUS_CSRF_KEY:?ANONYMOUS_CSRF_KEY is required}
+  ADMISSION_LIMITER_HMAC_KEY: ${ADMISSION_LIMITER_HMAC_KEY:?ADMISSION_LIMITER_HMAC_KEY is required}
+  LOGIN_PASSWORD_VERIFY_CONCURRENCY: "1"
+  LOGIN_PASSWORD_VERIFY_QUEUE_CAPACITY: "500"
+  LOGIN_PASSWORD_VERIFY_QUEUE_WAIT: 45s
+  LOGIN_REQUEST_TIMEOUT: 60s
+  OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION: lg019-acceptance-v1
+  OUTBOX_PROTECTED_PAYLOAD_KEY: ${OUTBOX_PROTECTED_PAYLOAD_KEY:?OUTBOX_PROTECTED_PAYLOAD_KEY is required}
+  EMAIL_ENABLED: "false"
+  MEDIA_OPERATING_MODE: TRUSTED_INSTRUCTOR
+  STUDENT_REGISTRATION_ENABLED: "false"
+  PASSWORD_SCREEN_MODE: adapter
+  COMPROMISED_PASSWORD_ADAPTER_APPROVED: "true"
+  LEGAL_IDENTITY_MODE: controlled-staging
+  LEGAL_OPERATOR_NAME: Gradex Courses
+  LEGAL_REGISTRATION_NUMBER: STAGING-NOT-REGISTERED
+  LEGAL_REGISTERED_ADDRESS: STAGING ONLY — LEGAL ENTITY DETAILS PENDING
+  PRIVACY_EMAIL: ${PRIVACY_EMAIL:?PRIVACY_EMAIL is required}
+  SUPPORT_EMAIL: ${SUPPORT_EMAIL:?SUPPORT_EMAIL is required}
+  SECURITY_EMAIL: ${SECURITY_EMAIL:?SECURITY_EMAIL is required}
+  AUTH_FAKE_MODE: "false"
+
+services:
+  postgres:
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        case "$${POSTGRES_DB}" in
+          gradex_playwright_e2e_*) suffix="$${POSTGRES_DB#gradex_playwright_e2e_}" ;;
+          *) echo "POSTGRES_DB must match gradex_playwright_e2e_<run>" >&2; exit 1 ;;
+        esac
+        case "$${suffix}" in
+          ""|*[!A-Za-z0-9_]*) echo "POSTGRES_DB run suffix must contain only letters, digits, or underscores" >&2; exit 1 ;;
+        esac
+        exec docker-entrypoint.sh postgres
+    environment:
+      POSTGRES_USER: gradex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradex -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.9-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        exec redis-server --appendonly no --save "" --port 0 --tls-port 6379 \
+          --tls-cert-file /run/gradex/redis/server.crt \
+          --tls-key-file /run/gradex/redis/server.key \
+          --tls-ca-cert-file /run/gradex/redis/ca.crt \
+          --tls-auth-clients no --requirepass "$${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+      - ${REDIS_TLS_SERVER_CERT_FILE_HOST:?REDIS_TLS_SERVER_CERT_FILE_HOST is required}:/run/gradex/redis/server.crt:ro
+      - ${REDIS_TLS_SERVER_KEY_FILE_HOST:?REDIS_TLS_SERVER_KEY_FILE_HOST is required}:/run/gradex/redis/server.key:ro
+    networks: [app]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /run/gradex/redis/ca.crt -h redis ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+      MINIO_SITE_REGION: auto
+    volumes:
+      - minio-data:/data
+    networks:
+      app:
+        aliases:
+          # Retain the bucket DNS alias for authenticated addressing diagnostics;
+          # application and proof tooling explicitly use path-style against MinIO.
+          - ${S3_BUCKET:-gradex-lg019-media}.minio
+      edge: {}
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: *default-logging
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      S3_BUCKET: ${S3_BUCKET:-gradex-lg019-media}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc anonymous set none "local/$${S3_BUCKET}"
+        mc version enable "local/$${S3_BUCKET}"
+        mc admin user add local "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}" || mc admin user enable local "$${S3_ACCESS_KEY}"
+        mc admin policy attach local readwrite --user "$${S3_ACCESS_KEY}"
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+
+  migrate:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-migrate", "up"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+    volumes: *backend-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+
+  api:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-api"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      PORT: 8080
+    volumes: *backend-volumes
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+
+  worker:
+    image: ${GRADEX_BACKEND_IMAGE:?GRADEX_BACKEND_IMAGE is required}
+    pull_policy: never
+    command: ["gradex-worker"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: worker
+    volumes: *backend-volumes
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks: [app]
+    logging: *default-logging
+    restart: unless-stopped
+
+  # This profile supports `gradex-e2e-seed -loadtest`, session issuance, and
+  # the existing `gradex-storage-fixture -key test/{master.m3u8,segment000.ts}`
+  # entrypoint override. It never starts during an ordinary target `up`.
+  proof-tool:
+    profiles: [fixtures]
+    image: ${GRADEX_PROOF_IMAGE:?GRADEX_PROOF_IMAGE is required}
+    pull_policy: never
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+      GRADEX_E2E_ALLOW_DATABASE_RESET: "1"
+      GRADEX_E2E_ADMIN_DB_URL: postgres://gradex:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/postgres?sslmode=disable
+      GRADEX_E2E_TARGET_DB_NAME: ${POSTGRES_DB:?POSTGRES_DB is required}
+      GRADEX_E2E_TARGET_DB_URL: postgres://gradex:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}?sslmode=disable
+      DATABASE_URL: postgres://gradex:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/gradex_loadtest_tool_guard?sslmode=disable
+      GRADEX_LOADTEST_PASSWORD: ${GRADEX_LOADTEST_PASSWORD:-}
+      GRADEX_LOADTEST_SESSION_FILE: /output/sessions.json
+    volumes:
+      - ${REDIS_TLS_CA_CERT_FILE_HOST:?REDIS_TLS_CA_CERT_FILE_HOST is required}:/run/gradex/redis/ca.crt:ro
+      - ${GRADEX_LOADTEST_OUTPUT_DIR:-./.state}:/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    networks: [app]
+    logging: *default-logging
+    restart: "no"
+
+  frontend:
+    image: ${GRADEX_FRONTEND_IMAGE:?GRADEX_FRONTEND_IMAGE is required}
+    pull_policy: never
+    environment:
+      GRADEX_API_ORIGIN: http://api:8080
+      PUBLIC_ORIGIN: https://${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+      LEGAL_IDENTITY_MODE: controlled-staging
+      LEGAL_OPERATOR_NAME: Gradex Courses
+      LEGAL_REGISTRATION_NUMBER: STAGING-NOT-REGISTERED
+      LEGAL_REGISTERED_ADDRESS: STAGING ONLY — LEGAL ENTITY DETAILS PENDING
+      PRIVACY_EMAIL: ${PRIVACY_EMAIL:?PRIVACY_EMAIL is required}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:?SUPPORT_EMAIL is required}
+      SECURITY_EMAIL: ${SECURITY_EMAIL:?SECURITY_EMAIL is required}
+      PORT: 3000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [app, edge]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    logging: *default-logging
+    restart: unless-stopped
+
+  edge:
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      STAGING_HOSTNAME: ${STAGING_HOSTNAME:?STAGING_HOSTNAME is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      S3_BUCKET: ${S3_BUCKET:-gradex-lg019-media}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    logging: *default-logging
+    restart: unless-stopped
+
+networks:
+  app:
+    internal: true
+  edge: {}
+
+volumes:
+  postgres-data:
+  minio-data:
+  caddy-data:
+  caddy-config:
+
+configs:
+  caddyfile:
+    content: |
+      {
+        email {$$ACME_EMAIL}
+        servers {
+          trusted_proxies static private_ranges
+          client_ip_headers X-Forwarded-For X-Real-IP
+        }
+      }
+
+      {$$STAGING_HOSTNAME} {
+        @api path /api/* /healthz /readyz
+        handle @api {
+          header Cache-Control "private, no-store"
+          reverse_proxy api:8080
+        }
+
+        # The bucket remains private; this route only makes correctly signed,
+        # path-style MinIO requests reachable through the public TLS edge.
+        @storage path /{$$S3_BUCKET}/*
+        handle @storage {
+          reverse_proxy minio:9000
+        }
+
+        handle {
+          reverse_proxy frontend:3000
+        }
+      }

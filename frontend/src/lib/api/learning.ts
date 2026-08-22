@@ -1,10 +1,13 @@
 import { authenticatedRequest, ensureAnonymousBrowser } from "./http";
 
 export type LearningStatus = "active" | "expired";
-export type LearningMaterialKind = "resource" | "lab_material";
 
 export type LearningMaterial = {
-  kind: LearningMaterialKind;
+  title: string;
+  file_type: string;
+  size_bytes: number;
+  /** Opaque same-origin authorization route; never a storage URL or asset identifier. */
+  download_authorization_path: string;
 };
 
 export type LearningProgress = {
@@ -26,15 +29,33 @@ export type DashboardCourse = {
   progress: LearningCourseProgress;
 };
 
+/**
+ * The single "continue learning" target, absent when nothing remains to continue.
+ *
+ * Derived server-side from Progress and filtered through the same entitlement evaluator that governs
+ * the protected reads, so a Course whose access ended never produces one. Identifiers build the
+ * link; the titles are what the Student reads. Playback position stays the Lesson Player's business.
+ */
+export type LearningResume = {
+  course_id: string;
+  course_title: string;
+  lesson_id: string;
+  lesson_title: string;
+  /** True when this Lesson is part-watched, so the surface can say "continue" rather than "start". */
+  started: boolean;
+};
+
 export type LearningDashboard = {
   courses: DashboardCourse[];
+  resume?: LearningResume | null;
 };
 
 export type CourseHomeLesson = {
   lesson_id: string;
   title: string;
   progress: LearningProgress;
-  materials: LearningMaterial[];
+  resources: LearningMaterial[];
+  lab_materials: LearningMaterial[];
 };
 
 export type CourseHomeSection = {
@@ -78,7 +99,8 @@ export type LessonReadModel = {
   expires_at: string | null;
   progress: LearningProgress;
   navigation: LessonNavigation;
-  materials: LearningMaterial[];
+  resources: LearningMaterial[];
+  lab_materials: LearningMaterial[];
   /**
    * Present only on an active read, and only for target kinds actually present in the visible
    * Lesson. A kind absent here is a kind this page cannot report — availability is read from the
@@ -98,6 +120,28 @@ export type PlaybackAuthorization = {
   asset_version_id: string;
   expires_at: string;
 };
+
+/** A temporary private-object capability returned only after live-graph and entitlement revalidation. */
+export type MaterialDownloadAuthorization = {
+  url: string;
+  expires_at: string;
+  /** Present only for a Lab Material as an opaque BR-103 buyer marker. Never render or decode it. */
+  buyer_tag?: string;
+};
+
+export async function requestMaterialDownload(
+  authorizationPath: string,
+  locale: "ar" | "en",
+  csrf: string | null,
+): Promise<MaterialDownloadAuthorization> {
+  const effectiveCSRF = csrf || (await ensureAnonymousBrowser());
+  return authenticatedRequest<MaterialDownloadAuthorization>(
+    authorizationPath,
+    "POST",
+    locale,
+    effectiveCSRF,
+  ).then((response) => requireLearningResponse(response, "Material download authorization"));
+}
 
 /**
  * The closed report reason set, exactly as the server's `rep_reason` enumeration defines it.

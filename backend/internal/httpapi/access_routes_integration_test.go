@@ -167,11 +167,34 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 	if err != nil {
 		t.Fatalf("NewSessionFoundation: %v", err)
 	}
+	english, arabic := identityPolicySets()
+	policies, err := identity.NewStaticPolicySetResolver(english, arabic)
+	if err != nil {
+		t.Fatalf("constructing admission policies: %v", err)
+	}
+	admissionPolicies := map[string]ratelimit.Policy{}
+	for _, endpoint := range []string{"student-registrations", "email-verification-requests", "email-verifications", "password-reset-requests"} {
+		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
+	}
+	admissionPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
+	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
+	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
+	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
+	admissionFoundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
+		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte{0x31}, 32),
+		CSRFKey: bytes.Repeat([]byte{0x32}, 32), AnonymousSessionTTL: time.Hour,
+		Policies: policies, Service: &fakeAdmissionService{}, Recovery: &fakeRecoveryService{},
+		Limiter: limiter, EndpointPolicies: admissionPolicies,
+	})
+	if err != nil {
+		t.Fatalf("NewAdmissionFoundation: %v", err)
+	}
 
 	principals := dbPrincipalResolver{pool: p}
 
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
+		WithAdmissionFoundation(admissionFoundation),
 		WithAccessFoundation(accessFoundation),
 	)
 	if err != nil {

@@ -110,6 +110,15 @@ func mountedSessionRouter(
 	repository *fakeSessionRepository,
 	store admissionRateStore,
 ) *gin.Engine {
+	return mountedSessionRouterWithPolicies(t, repository, store, testSessionEndpointPolicies())
+}
+
+func mountedSessionRouterWithPolicies(
+	t *testing.T,
+	repository *fakeSessionRepository,
+	store admissionRateStore,
+	policies map[string]ratelimit.Policy,
+) *gin.Engine {
 	t.Helper()
 	limiter, err := ratelimit.New(
 		store, bytes.Repeat([]byte{0x31}, 32), time.Second,
@@ -125,7 +134,7 @@ func mountedSessionRouter(
 		Repository:          repository,
 		Compromised:         testCompromisedSource(t),
 		Limiter:             limiter,
-		EndpointPolicies:    testSessionEndpointPolicies(),
+		EndpointPolicies:    policies,
 	})
 	if err != nil {
 		t.Fatalf("constructing session foundation: %v", err)
@@ -597,6 +606,22 @@ func TestSessionRateDenialPreventsCredentialVerification(t *testing.T) {
 	if response.Code != http.StatusTooManyRequests || repository.loginCalls != 0 ||
 		response.Header().Get("Retry-After") == "" {
 		t.Fatalf("rate denial = %d calls=%d headers=%#v", response.Code, repository.loginCalls, response.Header())
+	}
+}
+
+func TestProductionLoginFailsBeforeCredentialVerificationWhenRedisIsUnavailable(t *testing.T) {
+	repository := &fakeSessionRepository{}
+	browserRouter := mountedSessionRouter(t, &fakeSessionRepository{}, admissionRateStore{allowed: true})
+	policies := testSessionEndpointPolicies()
+	policies["sessions"] = ratelimit.ProductionLoginPolicy()
+	router := mountedSessionRouterWithPolicies(
+		t, repository, admissionRateStore{err: errors.New("redis unavailable")}, policies,
+	)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, admittedLoginRequest(t, browserRouter))
+	if response.Code != http.StatusServiceUnavailable || repository.loginCalls != 0 {
+		t.Fatalf("dependency failure = %d calls=%d, want 503 and no credential work",
+			response.Code, repository.loginCalls)
 	}
 }
 

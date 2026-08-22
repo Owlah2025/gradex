@@ -17,9 +17,13 @@ Privacy section 4 and Terms section 4 remain the course-access disclosures.
 `config.Config` owns immutable legal identity settings and rejects invalid
 non-development configuration before composition. Public deployments reject
 the two approved staging sentinels. A narrowly typed controlled-staging mode is
-accepted only for the exact disposable origin
-`https://gradex.localhost:18443`, with both exact sentinel values; it is not a
-general production bypass.
+accepted only for two exact disposable contexts, with both exact sentinel
+values: `APP_ENV=production` at `https://gradex.localhost:18443` for local
+production-like acceptance, and `APP_ENV=staging` at
+`https://staging.gradex.network` for public LG-019 acceptance. These paired
+contexts are not a general production bypass. The public LG-019 staging context
+does not represent a registered commercial entity and is not commercial-launch
+legal evidence.
 
 `identity.PolicySetResolver` remains the single admission policy boundary. A
 distinct production resolver exposes the approved ID, version, effective date,

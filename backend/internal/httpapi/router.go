@@ -75,7 +75,7 @@ func NewRouter(
 	if routerConfig.sessions != nil {
 		mountSessionRoutes(v1, routerConfig.sessions, authenticator, principals, logger)
 	}
-	if routerConfig.admission != nil {
+	if routerConfig.admission != nil && routerConfig.mountAdmissionRoutes {
 		mountAdmissionRoutesWithBootstrap(
 			v1, routerConfig.admission, routerConfig.sessions == nil,
 		)
@@ -103,8 +103,13 @@ func NewRouter(
 		}
 	}
 	if routerConfig.access != nil {
-		if err := mountAccessRoutes(v1, routerConfig.access, routerConfig.sessions, authenticator, principals, logger); err != nil {
+		if err := mountAccessRoutes(v1, routerConfig.access, routerConfig.admission, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting access routes: %w", err)
+		}
+	}
+	if routerConfig.academic != nil {
+		if err := mountAcademicRoutes(v1, routerConfig.academic, routerConfig.sessions, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting academic catalog routes: %w", err)
 		}
 	}
 
@@ -175,14 +180,16 @@ func mountAdmissionRoutesWithBootstrap(
 }
 
 type routerOptions struct {
-	admission     *AdmissionFoundation
-	sessions      *SessionFoundation
-	staff         *StaffFoundation
-	catalog       *CatalogFoundation
-	publicCatalog *PublicCatalogFoundation
-	media         *MediaFoundation
-	learning      *LearningFoundation
-	access        *AccessFoundation
+	admission            *AdmissionFoundation
+	mountAdmissionRoutes bool
+	sessions             *SessionFoundation
+	staff                *StaffFoundation
+	catalog              *CatalogFoundation
+	publicCatalog        *PublicCatalogFoundation
+	media                *MediaFoundation
+	learning             *LearningFoundation
+	access               *AccessFoundation
+	academic             *AcademicFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
@@ -206,6 +213,24 @@ func WithStaffFoundation(foundation *StaffFoundation) RouterOption {
 // Student admission commands only after their complete fail-closed dependency
 // set and ordered middleware chain have been constructed.
 func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("admission foundation is required")
+		}
+		if options.admission != nil {
+			return fmt.Errorf("anonymous admission is already configured")
+		}
+		options.admission = foundation
+		options.mountAdmissionRoutes = true
+		return nil
+	}
+}
+
+// WithAdmissionSecurityFoundation makes the anonymous admission boundary
+// available to another public route without enabling Student-registration
+// routes. Purchase requests remain fail-closed when registration is
+// deliberately disabled for an environment.
+func WithAdmissionSecurityFoundation(foundation *AdmissionFoundation) RouterOption {
 	return func(options *routerOptions) error {
 		if foundation == nil {
 			return fmt.Errorf("admission foundation is required")
@@ -251,6 +276,7 @@ func mountSessionRoutes(
 	)
 	v1.POST(
 		"/sessions",
+		foundation.loginAdmission(),
 		strictJSONMiddleware(func() any { return &sessionLoginRequest{} }, sessionLoginBodyLimit),
 		foundation.security.requireAdmission(),
 		foundation.requireSessionRateDecision("sessions", loginRateIdentifier),

@@ -127,6 +127,7 @@ func realAdmissionRouter(
 	endpointPolicies[readPolicy.Endpoint] = readPolicy
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
+	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
 		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,

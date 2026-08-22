@@ -15,3 +15,8 @@ https://gradex.localhost:18443 {
 		reverse_proxy frontend:3000
 	}
 }
+
+https://storage.gradex.localhost:18443 {
+	tls internal
+	reverse_proxy minio:9000
+}

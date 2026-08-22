@@ -1,6 +1,8 @@
 export const en = {
   meta: {
-    switchToAria: "Switch language to Arabic",
+    // Mirrors the Arabic counterpart exactly ("التبديل إلى الإنجليزية" = "Switch to English"),
+    // so the two languages name the same control the same way.
+    switchToAria: "Switch to Arabic",
     themeToggleAria: "Toggle dark mode",
     openMenu: "Open menu",
     closeMenu: "Close menu",
@@ -19,6 +21,7 @@ export const en = {
     adminWorkspace: "Admin workspace",
     workspaceNavigation: "Workspace navigation",
     courseReview: "Course review & administration",
+    academicCatalog: "Academic Catalog",
     courseAccess: "Course Access",
     staffOperations: "Staff operations",
     courseBuilder: "Course Builder",
@@ -30,7 +33,8 @@ export const en = {
       sideTitle: "Start with one clear next step.",
       sideBody:
         "Create your Student account, confirm your email, then return to sign in when access opens.",
-      privacy: "Your password and verification link stay in this browser flow only.",
+      privacy:
+        "Your password and verification link stay in this browser flow only.",
       language: "Language",
       steps: ["Create account", "Confirm email", "Sign in"],
     },
@@ -38,10 +42,12 @@ export const en = {
       title: "Create your Student account",
       intro: "Use an email you can open now. We’ll ask you to confirm it next.",
       displayName: "Display name",
-      displayHint: "2–50 Arabic or Latin characters. This can be changed later.",
+      displayHint:
+        "2–50 Arabic or Latin characters. This can be changed later.",
       email: "Email address",
       password: "Password",
-      passwordHint: "15–128 characters. Spaces are welcome; there are no symbol rules.",
+      passwordHint:
+        "15–128 characters. Spaces are welcome; there are no symbol rules.",
       policiesLoading: "Loading the current terms…",
       policiesUnavailable: "The current terms could not be loaded.",
       acceptPrefix: "I have read and accept",
@@ -65,7 +71,8 @@ export const en = {
         "If this address is eligible, a new link will be prepared. Check your inbox and spam folder.",
       retry: "Try again",
       limited: "Too many attempts. Wait a little before trying again.",
-      unavailable: "Verification requests are temporarily unavailable. Try again shortly.",
+      unavailable:
+        "Verification requests are temporarily unavailable. Try again shortly.",
     },
     result: {
       title: "Confirming your email",
@@ -111,7 +118,8 @@ export const en = {
         "If this address belongs to an active account, a reset link is on its way. The link can be used once and expires.",
       invalidEmail: "Enter a complete email address.",
       limited: "Too many attempts. Wait a little before trying again.",
-      unavailable: "Password reset is temporarily unavailable. Try again shortly.",
+      unavailable:
+        "Password reset is temporarily unavailable. Try again shortly.",
       failed: "The request could not be completed. Try again shortly.",
       backToSignIn: "Back to sign in",
     },
@@ -137,7 +145,8 @@ export const en = {
       reinstateAction: "Reinstate Account",
       reinstating: "Reinstating account…",
       onboardTitle: "Complete Staff Onboarding",
-      onboardIntro: "Set your display name and password to complete your account setup.",
+      onboardIntro:
+        "Set your display name and password to complete your account setup.",
       displayName: "Display name",
       password: "Password",
       completeOnboarding: "Complete Onboarding",
@@ -152,11 +161,13 @@ export const en = {
       active: "Active",
       suspended: "Suspended",
       loading: "Loading Instructor accounts…",
-      loadingFailed: "Instructor accounts could not be loaded. Try again shortly.",
+      loadingFailed:
+        "Instructor accounts could not be loaded. Try again shortly.",
     },
     resetPassword: {
       title: "Choose a new password",
-      intro: "This link works once. After resetting, sign in with your new password.",
+      intro:
+        "This link works once. After resetting, sign in with your new password.",
       checking: "Opening your reset link…",
       password: "New password",
       confirm: "Confirm new password",
@@ -169,7 +180,8 @@ export const en = {
       // narrow it back down.
       invalidLink: "This reset link is no longer valid. Request a new one.",
       limited: "Too many attempts. Wait a little before trying again.",
-      unavailable: "Password reset is temporarily unavailable. Try again shortly.",
+      unavailable:
+        "Password reset is temporarily unavailable. Try again shortly.",
       failed: "The password could not be reset. Try again shortly.",
       successTitle: "Password reset",
       successBody:
@@ -261,6 +273,19 @@ export const en = {
   learning: {
     dashboardTitle: "Your learning",
     dashboardIntro: "Continue your enrolled courses from one place.",
+    resumeHeading: "Continue learning",
+    resumeStartHeading: "Start learning",
+    resumeAction: "Continue",
+    resumeStartAction: "Start",
+    resumeLesson: "Lesson",
+    pendingAccessTitle: "Course access",
+    accessActionRequiredOne:
+      "1 course invitation is waiting for you to accept.",
+    accessActionRequiredMany:
+      "course invitations are waiting for you to accept.",
+    pendingAccessOne: "1 course is waiting for approval.",
+    pendingAccessMany: "courses are waiting for approval.",
+    pendingAccessAction: "View access status",
     courseHome: "Course home",
     courseOutline: "Course outline",
     lessonNavigation: "Lesson navigation",
@@ -283,10 +308,15 @@ export const en = {
     completed: "Completed",
     notCompleted: "Not completed",
     materials: "Lesson materials",
+    resources: "Resources",
+    labMaterials: "Lab materials",
     resource: "Resource",
     labMaterial: "Lab material",
     openResource: "Open resource",
     openLabMaterial: "Open lab material",
+    download: "Download",
+    preparingDownload: "Preparing download…",
+    downloadUnavailable: "This file cannot be downloaded right now. Try again.",
     reportAction: "Report",
     reportCourseAction: "Report this course",
     reportLessonAction: "Report this lesson",
@@ -322,7 +352,8 @@ export const en = {
     reportDone: "Done",
     reportDuplicate: "You have already reported this content.",
     reportThrottled: "Too many report attempts. Try again later.",
-    reportUnavailable: "This content cannot be reported right now. Reload the page and try again.",
+    reportUnavailable:
+      "This content cannot be reported right now. Reload the page and try again.",
     reportInvalid: "Check the form and try again.",
     reportUnexpected: "The report could not be sent. Try again.",
   },
@@ -347,9 +378,18 @@ export const en = {
     eyebrow: "Why Gradex",
     title: "Built to get you through the semester — and past it.",
     pillars: [
-      { title: "Clear course details", body: "Published course pages show their authored titles, descriptions, and available course outline." },
-      { title: "Arabic and English", body: "The Gradex interface is available in Arabic and English while Course content remains as authored." },
-      { title: "Authorised access", body: "An Admin-approved Course Access Invitation grants access to the invited Course." },
+      {
+        title: "Clear course details",
+        body: "Published course pages show their authored titles, descriptions, and available course outline.",
+      },
+      {
+        title: "Arabic and English",
+        body: "The Gradex interface is available in Arabic and English while Course content remains as authored.",
+      },
+      {
+        title: "Authorised access",
+        body: "An Admin-approved Course Access Invitation grants access to the invited Course.",
+      },
     ],
     note: "Published course prices are displayed in KWD when the Course has a configured price.",
   },
@@ -393,6 +433,146 @@ export const en = {
     },
     copyright: "© 2026 Gradex. Built in Kuwait.",
     pricingNote: "Prices in KWD, VAT where applicable.",
+  },
+  access: {
+    title: "Course access",
+    intro: "Invitations you have received and the courses you can open.",
+    navLabel: "Course access",
+    loading: "Loading your course access…",
+    failed: "Your course access could not be loaded.",
+    retry: "Try again",
+    emptyTitle: "No course access yet",
+    emptyBody:
+      "When an administrator invites you to a course, it will appear here. Browse the catalogue to see what is available.",
+    emptyAction: "Browse courses",
+    goToCourse: "Go to course",
+    accessUntil: "Access until",
+    reasonLabel: "Reason given",
+    /** State labels and explanations. Never render the wire enum to a Student. */
+    state: {
+      ACTION_REQUIRED: {
+        label: "Action needed",
+        body: "Open the invitation link sent to your email to accept this course.",
+      },
+      AWAITING_APPROVAL: {
+        label: "Waiting for approval",
+        body: "You have accepted. An administrator still has to approve it before the course opens — there is nothing more for you to do, and you do not need to keep the invitation email.",
+      },
+      ACTIVE: {
+        label: "Access granted",
+        body: "You can open this course now.",
+      },
+      ACCESS_ENDED: {
+        label: "Access ended",
+        body: "Your access to this course has ended. Contact an administrator if you need it again.",
+      },
+      REJECTED: {
+        label: "Not approved",
+        body: "An administrator did not approve this request.",
+      },
+      CANCELLED: {
+        label: "Withdrawn",
+        body: "This invitation was withdrawn and is no longer active.",
+      },
+      UNKNOWN: {
+        label: "No access",
+        body: "You do not have access to this course.",
+      },
+    },
+    /** The access section on public Course Details. Concise; the Access page carries the detail. */
+    courseDetails: {
+      heading: "Access to this course",
+      viewStatus: "View access status",
+      /** Gradex takes no payment. This must never read as a purchase path. */
+      howItWorks:
+        "An administrator invites you to a course. Accepting the invitation records your request; access opens once an administrator approves it.",
+      anonymous:
+        "Sign in to see whether you already have access to this course.",
+      signIn: "Sign in",
+      noAccess:
+        "You do not have access to this course yet. Access begins with an administrator invitation.",
+      actionRequired:
+        "You have an invitation for this course. Open the invitation link sent to your email to accept it.",
+      awaitingApproval:
+        "You have accepted. An administrator still has to approve it — you do not need to accept again.",
+      active: "You have access to this course.",
+      accessEnded: "Your access to this course has ended.",
+      rejected: "An administrator did not approve access to this course.",
+      cancelled: "The invitation for this course was withdrawn.",
+      unavailable:
+        "Your access status could not be loaded. The course details above are unaffected.",
+      retry: "Try again",
+    },
+    purchase: {
+      heading: "Buy this course",
+      intro:
+        "Share your email first, then continue the payment conversation on WhatsApp.",
+      action: "I want to buy this course",
+      email: "Email address",
+      invalidEmail: "Enter a complete email address.",
+      submit: "Continue to WhatsApp",
+      submitting: "Saving your request…",
+      failed:
+        "Your request could not be saved. WhatsApp was not opened; try again.",
+    },
+    /** The invitation-link surface. */
+    invitation: {
+      heading: "Course invitation",
+      accept: "Accept invitation",
+      accepting: "Accepting…",
+      acceptedTitle: "Invitation accepted",
+      acceptedBody:
+        "An administrator will review it. You can close this page — your status stays on the Course access page.",
+      purchaseAcceptedBody:
+        "Your invitation is accepted and course access is now active. Opening your course…",
+      acceptNote:
+        "Accept to continue. If Gradex has already confirmed payment, access starts immediately; otherwise an administrator reviews your acceptance.",
+      missingToken:
+        "This invitation link is incomplete. Ask an administrator to send it again.",
+      expired:
+        "This invitation link is no longer usable. Ask an administrator to send a new one.",
+      notFound: "This invitation is not available to your account.",
+      wrongState: "This invitation can no longer be accepted.",
+      failed: "The invitation could not be accepted.",
+    },
+  },
+  instructor: {
+    /**
+     * Human labels for the revision lifecycle. The wire enum stays available as a data attribute
+     * for tests and support; it is never the Instructor's primary explanation of what happened.
+     */
+    revisionState: {
+      DRAFT: "Draft",
+      PENDING_REVIEW: "In review",
+      CHANGES_REQUESTED: "Changes requested",
+      REJECTED: "Changes requested",
+      APPROVED: "Approved",
+      SUPERSEDED: "Superseded",
+    },
+    revision: {
+      startTitle: "This course is published",
+      startBody:
+        "Students see the published version. To change it, start a new revision — the published version keeps serving until an administrator approves your changes.",
+      startAction: "Start a new revision",
+      starting: "Starting…",
+      startFailed:
+        "The revision could not be started. Nothing was changed — try again.",
+      editingPublishedTitle: "You are editing a draft revision",
+      editingPublishedBody:
+        "Students still see the published version. Nothing here reaches them until you submit this revision and an administrator approves it.",
+      inReviewTitle: "This revision is with an administrator",
+      inReviewBody:
+        "It cannot be edited while it is in review. The published version is unaffected.",
+      unavailable: "This course has no editable revision.",
+    },
+    changeRequest: {
+      title: "Changes requested before this course can be published",
+      reasonLabel: "What the reviewer asked for",
+      noReason:
+        "The reviewer did not record a reason. Contact an administrator before resubmitting.",
+      nextStep:
+        "Edit the course below to address this, then choose Submit for review again. Your course stays editable until you resubmit.",
+    },
   },
 };
 

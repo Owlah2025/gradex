@@ -39,18 +39,26 @@ var (
 )
 
 type Course struct {
-	ID                     string          `json:"id"`
-	OwnerAccountID         string          `json:"owner_account_id"`
-	Lifecycle              CourseLifecycle `json:"lifecycle"`
-	LiveRevisionID         *string         `json:"live_revision_id,omitempty"`
-	AccessSuspendedAt      *time.Time      `json:"access_suspended_at,omitempty"`
-	AccessSuspensionReason *string         `json:"access_suspension_reason,omitempty"`
-	RetiredAt              *time.Time      `json:"retired_at,omitempty"`
-	CreatedAt              time.Time       `json:"created_at"`
-	UpdatedAt              time.Time       `json:"updated_at"`
-	EditableRevision       *CourseRevision `json:"editable_revision,omitempty"`
-	LiveRevision           *CourseRevision `json:"live_revision,omitempty"`
-	PriceMinorUnits        *int64          `json:"price_minor_units,omitempty"`
+	ID             string          `json:"id"`
+	OwnerAccountID string          `json:"owner_account_id"`
+	Lifecycle      CourseLifecycle `json:"lifecycle"`
+	LiveRevisionID *string         `json:"live_revision_id,omitempty"`
+
+	// D-093 academic identity. ClassificationModel names which authority owns
+	// this Course's academic identity; InstitutionID and SubjectID are populated
+	// only under ACADEMIC_CATALOG.
+	ClassificationModel    ClassificationModel       `json:"classification_model"`
+	InstitutionID          *string                   `json:"institution_id,omitempty"`
+	SubjectID              *string                   `json:"subject_id,omitempty"`
+	AcademicContext        *AcademicCourseProjection `json:"academic_context,omitempty"`
+	AccessSuspendedAt      *time.Time                `json:"access_suspended_at,omitempty"`
+	AccessSuspensionReason *string                   `json:"access_suspension_reason,omitempty"`
+	RetiredAt              *time.Time                `json:"retired_at,omitempty"`
+	CreatedAt              time.Time                 `json:"created_at"`
+	UpdatedAt              time.Time                 `json:"updated_at"`
+	EditableRevision       *CourseRevision           `json:"editable_revision,omitempty"`
+	LiveRevision           *CourseRevision           `json:"live_revision,omitempty"`
+	PriceMinorUnits        *int64                    `json:"price_minor_units,omitempty"`
 }
 
 func (c *Course) ValidateInvariants() error {
@@ -65,6 +73,17 @@ func (c *Course) ValidateInvariants() error {
 	}
 	if c.Lifecycle == LifecyclePublished && (c.LiveRevisionID == nil || *c.LiveRevisionID == "") {
 		return errors.New("published course must have live_revision_id set")
+	}
+	if !c.ClassificationModel.Valid() {
+		return fmt.Errorf("invalid course classification model: %s", c.ClassificationModel)
+	}
+	// The two halves of D-093 §2 and §3, restated in the domain so an in-memory
+	// Course cannot describe a state the database would refuse.
+	if c.ClassificationModel == ClassificationAcademicCatalog && (c.InstitutionID == nil || *c.InstitutionID == "") {
+		return errors.New("academic catalog course must have institution_id set")
+	}
+	if c.ClassificationModel == ClassificationLegacyTaxonomy && (c.InstitutionID != nil || c.SubjectID != nil) {
+		return errors.New("legacy taxonomy course must not carry academic catalog identity")
 	}
 	return nil
 }
@@ -318,5 +337,13 @@ func writeAdminCourseAudit(ctx context.Context, tx pgx.Tx, adminID, descriptor, 
 }
 
 func courseFromRow(row *CourseRow) Course {
-	return Course{ID: row.ID, OwnerAccountID: row.OwnerAccountID, Lifecycle: CourseLifecycle(row.Lifecycle), LiveRevisionID: row.LiveRevisionID, AccessSuspendedAt: row.AccessSuspendedAt, AccessSuspensionReason: row.AccessSuspensionReason, RetiredAt: row.RetiredAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	return Course{
+		ID: row.ID, OwnerAccountID: row.OwnerAccountID, Lifecycle: CourseLifecycle(row.Lifecycle),
+		LiveRevisionID:      row.LiveRevisionID,
+		ClassificationModel: ClassificationModel(row.ClassificationModel),
+		InstitutionID:       row.InstitutionID,
+		SubjectID:           row.SubjectID,
+		AccessSuspendedAt:   row.AccessSuspendedAt, AccessSuspensionReason: row.AccessSuspensionReason,
+		RetiredAt: row.RetiredAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
 }

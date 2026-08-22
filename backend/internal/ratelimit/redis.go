@@ -21,15 +21,15 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 }
 
 var layeredDecisionScript = redis.NewScript(`
-local allowed = 1
+local clock = redis.call("TIME")
+local now = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
+local next_tokens = {}
 for i, key in ipairs(KEYS) do
   local arg = ((i - 1) * 3) + 1
   local limit = tonumber(ARGV[arg])
   local window = tonumber(ARGV[arg + 1])
   local burst = tonumber(ARGV[arg + 2])
   if burst > 0 then
-    local clock = redis.call("TIME")
-    local now = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
     local state = redis.call("HMGET", key, "tokens", "updated_at")
     local tokens = tonumber(state[1])
     local updated = tonumber(state[2])
@@ -39,23 +39,33 @@ for i, key in ipairs(KEYS) do
     end
     tokens = math.min(burst, tokens + (math.max(0, now - updated) / window) * limit)
     if tokens < 1 then
-      allowed = 0
-    else
-      tokens = tokens - 1
+      return 0
     end
-    redis.call("HSET", key, "tokens", tokens, "updated_at", now)
+    next_tokens[i] = tokens - 1
+  else
+    local count = tonumber(redis.call("GET", key)) or 0
+    if count + 1 > limit then
+      return 0
+    end
+  end
+end
+
+for i, key in ipairs(KEYS) do
+  local arg = ((i - 1) * 3) + 1
+  local limit = tonumber(ARGV[arg])
+  local window = tonumber(ARGV[arg + 1])
+  local burst = tonumber(ARGV[arg + 2])
+  if burst > 0 then
+    redis.call("HSET", key, "tokens", next_tokens[i], "updated_at", now)
     redis.call("PEXPIRE", key, math.max(window, math.ceil((burst / limit) * window)))
   else
     local count = redis.call("INCR", key)
     if count == 1 then
       redis.call("PEXPIRE", key, window)
     end
-    if count > limit then
-      allowed = 0
-    end
   end
 end
-return allowed
+return 1
 `)
 
 func (s *RedisStore) Decide(ctx context.Context, entries []Entry) (bool, error) {

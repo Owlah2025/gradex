@@ -1,5 +1,12 @@
 import { authenticatedRequest } from "./http";
-import type { CourseRevisionWire, LessonWire, OwnedCourseSummary, SectionWire } from "./catalog";
+import type {
+  CourseRevisionWire,
+  LessonFileWire,
+  LessonWire,
+  OwnedCourseSummary,
+	RevisionAudienceWire,
+  SectionWire,
+} from "./catalog";
 
 /**
  * Instructor Course authoring commands.
@@ -40,12 +47,48 @@ const path = {
     `/courses/${encodeURIComponent(courseID)}/revisions/${encodeURIComponent(revisionID)}`,
 };
 
+/**
+ * Begins a new editable revision of an already-published Course.
+ *
+ * The server clones the live revision — metadata, taxonomy, sections, Lessons, and their Asset
+ * Version references — into a fresh `DRAFT` and leaves `live_revision_id` pointing at the published
+ * revision, so Students keep seeing the published Course throughout.
+ *
+ * Safe to call more than once: the server keeps at most one active candidate per Course and returns
+ * the existing `DRAFT`/`CHANGES_REQUESTED`/`PENDING_REVIEW` revision instead of cloning a second.
+ */
+export async function createCandidateRevision(
+  input: AuthoringInput & { courseID: string },
+): Promise<CourseRevisionWire> {
+  requireCSRF(input);
+  const candidate = await authenticatedRequest<CourseRevisionWire>(
+    `${path.course(input.courseID)}/candidate`,
+    "PUT",
+    input.locale,
+    input.csrf,
+  );
+  return requireResult(candidate, input.locale);
+}
+
+/**
+ * Creates a Course on the Academic Catalog model (D-093 §1, T4-B).
+ *
+ * The university is required. The canonical Subject is normally supplied; T4-D
+ * may omit it only for a subject-less draft immediately attached to a request.
+ * There is deliberately
+ * no classification argument: the server derives ACADEMIC_CATALOG from the
+ * academic context, so this module offers no way to create a legacy Course.
+ * Existing legacy Courses stay editable through their own compatibility surface
+ * until T5 migrates them.
+ */
 export async function createCourse(
   input: AuthoringInput & {
     titleAr: string;
     titleEn: string;
     descriptionAr: string;
     descriptionEn: string;
+    institutionID: string;
+    subjectID?: string;
   },
 ): Promise<CourseWire> {
   requireCSRF(input);
@@ -54,8 +97,32 @@ export async function createCourse(
     title_en: input.titleEn,
     description_ar: input.descriptionAr,
     description_en: input.descriptionEn,
+    institution_id: input.institutionID,
+    ...(input.subjectID ? { subject_id: input.subjectID } : {}),
   });
   return requireResult(created, input.locale);
+}
+
+/**
+ * Corrects the canonical Subject of an Academic Course that has never been
+ * published.
+ *
+ * Every lifecycle rule lives on the server: never published, no candidate under
+ * review, active Subject, same Institution. This call does not pre-judge them —
+ * a refusal comes back as a semantic problem the surface reports.
+ */
+export async function setCourseSubject(
+  input: AuthoringInput & { courseID: string; subjectID: string },
+): Promise<CourseWire> {
+  requireCSRF(input);
+  const updated = await authenticatedRequest<CourseWire>(
+    `/courses/${encodeURIComponent(input.courseID)}/subject`,
+    "PUT",
+    input.locale,
+    input.csrf,
+    { subject_id: input.subjectID },
+  );
+  return requireResult(updated, input.locale);
 }
 
 /**
@@ -94,6 +161,33 @@ export async function updateCourseRevision(
     },
   );
   return requireResult(updated, input.locale);
+}
+
+export async function setRevisionAudience(
+	input: AuthoringInput & { courseID: string; revisionID: string; programIDs: string[] },
+): Promise<RevisionAudienceWire> {
+	requireCSRF(input);
+	const audience = await authenticatedRequest<RevisionAudienceWire>(
+		`/courses/${encodeURIComponent(input.courseID)}/revisions/${encodeURIComponent(input.revisionID)}/audience`,
+		"PUT",
+		input.locale,
+		input.csrf,
+		{ program_ids: input.programIDs },
+	);
+	return requireResult(audience, input.locale);
+}
+
+export async function resetRevisionAudience(
+	input: AuthoringInput & { courseID: string; revisionID: string },
+): Promise<RevisionAudienceWire> {
+	requireCSRF(input);
+	const audience = await authenticatedRequest<RevisionAudienceWire>(
+		`/courses/${encodeURIComponent(input.courseID)}/revisions/${encodeURIComponent(input.revisionID)}/audience`,
+		"DELETE",
+		input.locale,
+		input.csrf,
+	);
+	return requireResult(audience, input.locale);
 }
 
 export async function addSection(
@@ -205,6 +299,101 @@ export async function setLessonVideo(
   return requireResult(updated, input.locale);
 }
 
+/**
+ * Attaches a READY, separately uploaded public-preview Asset Version to this
+ * editable revision. The server proves kind, ownership, Course/revision origin
+ * and scanner evidence; callers never send a Lesson or storage identifier.
+ */
+export async function setPublicPreview(
+  input: AuthoringInput & {
+    courseID: string;
+    revisionID: string;
+    assetVersionID: string;
+  },
+): Promise<CourseRevisionWire> {
+  requireCSRF(input);
+  const revision = await authenticatedRequest<CourseRevisionWire>(
+    `${path.revision(input.courseID, input.revisionID)}/preview`,
+    "PUT",
+    input.locale,
+    input.csrf,
+    { preview_asset_version_id: input.assetVersionID },
+  );
+  return requireResult(revision, input.locale);
+}
+
+/** Removes the preview from this editable revision without deleting bytes. */
+export async function clearPublicPreview(
+  input: AuthoringInput & { courseID: string; revisionID: string },
+): Promise<CourseRevisionWire> {
+  requireCSRF(input);
+  const revision = await authenticatedRequest<CourseRevisionWire>(
+    `${path.revision(input.courseID, input.revisionID)}/preview`,
+    "DELETE",
+    input.locale,
+    input.csrf,
+  );
+  return requireResult(revision, input.locale);
+}
+
+/**
+ * Attaches a READY Asset Version to a Lesson as a downloadable file.
+ *
+ * The server re-validates the Asset Version's readiness and this Instructor's
+ * ownership of the Course, so a successful response is the only evidence that
+ * the Lesson now carries the file.
+ */
+export async function addLessonFile(
+  input: AuthoringInput & {
+    courseID: string;
+    revisionID: string;
+    lessonID: string;
+    kind: LessonFileWire["kind"];
+    assetVersionID: string;
+    displayNameAr: string;
+    displayNameEn: string;
+  },
+): Promise<LessonFileWire> {
+  requireCSRF(input);
+  const created = await authenticatedRequest<LessonFileWire>(
+    `${path.revision(input.courseID, input.revisionID)}/lessons/${encodeURIComponent(input.lessonID)}/files`,
+    "PUT",
+    input.locale,
+    input.csrf,
+    {
+      kind: input.kind,
+      asset_version_id: input.assetVersionID,
+      display_name_ar: input.displayNameAr,
+      display_name_en: input.displayNameEn,
+    },
+  );
+  return requireResult(created, input.locale);
+}
+
+/**
+ * Detaches one file from a Lesson.
+ *
+ * The stored Asset Version is untouched: media versions are immutable, and
+ * removing a file from a draft Lesson is a Course-authoring change, not a
+ * deletion of bytes.
+ */
+export async function deleteLessonFile(
+  input: AuthoringInput & {
+    courseID: string;
+    revisionID: string;
+    lessonID: string;
+    fileID: string;
+  },
+): Promise<void> {
+  requireCSRF(input);
+  await authenticatedRequest<unknown>(
+    `${path.revision(input.courseID, input.revisionID)}/lessons/${encodeURIComponent(input.lessonID)}/files?file_id=${encodeURIComponent(input.fileID)}`,
+    "DELETE",
+    input.locale,
+    input.csrf,
+  );
+}
+
 export async function submitCourseRevision(
   input: AuthoringInput & { courseID: string; revisionID: string },
 ): Promise<CourseWire> {
@@ -219,4 +408,10 @@ export async function submitCourseRevision(
 }
 
 export { getOwnedCourses, getOwnedCourseDetail } from "./catalog";
-export type { CourseRevisionWire, LessonWire, OwnedCourseSummary, SectionWire } from "./catalog";
+export type {
+  CourseRevisionWire,
+  LessonFileWire,
+  LessonWire,
+  OwnedCourseSummary,
+  SectionWire,
+} from "./catalog";

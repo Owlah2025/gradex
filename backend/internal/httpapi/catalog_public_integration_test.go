@@ -281,6 +281,8 @@ func TestPublicCatalogSearchShippedPredicateRecordsTrigramNonParticipation(t *te
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
+		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
+		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
 		WHERE `+catalogpublic.PublishedOnly("c", "cr")+` AND `+catalogpublic.SearchMatchPredicate("$1"), "ownership needle")
 	t.Logf("shipped public-search predicate plan at launch scale (trigram non-participation expected):\n%s", plan)
 	if strings.Contains(plan, "course_revisions_search_text_trgm_idx") {

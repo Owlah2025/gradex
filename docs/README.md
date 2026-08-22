@@ -32,6 +32,8 @@ Read these documents in order before system design:
 | [WIREFRAMES.md](WIREFRAMES.md) | Low-fidelity layouts tied to canonical screen IDs |
 | [design-system/README.md](design-system/README.md) | Repository-backed visual, responsive, RTL, and accessibility guidance |
 | [design/landing-page/LANDING_SPEC.md](design/landing-page/LANDING_SPEC.md) | MVP landing-page contract and current implementation drift |
+| [ux/README.md](ux/README.md) | UI/UX improvement phase: charter, Definition of Done, work-unit statuses, and session protocol — **paused** pending MVP functional completion |
+| [mvp/FUNCTIONAL_COMPLETION.md](mvp/FUNCTIONAL_COMPLETION.md) | **Canonical MVP completion tracker**: measured test baselines, per-feature status, gap register, and remediation queue |
 
 ## Engineering and Feature Artifacts
 

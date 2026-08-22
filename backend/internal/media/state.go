@@ -16,13 +16,22 @@ const (
 	StateProcessing    AssetVersionState = "PROCESSING"
 	StateReady         AssetVersionState = "READY"
 	StateProcessFailed AssetVersionState = "PROCESS_FAILED"
+
+	// StateValidated records that the exact stored object version passed the
+	// D-088 trusted-Instructor validation — configured size bound, actual
+	// stored size, declared type against the real file format, and SHA-256
+	// over that exact version. It deliberately does not claim, imply, or
+	// substitute for malware scanning, and it is never produced by a scan
+	// outcome.
+	StateValidated AssetVersionState = "VALIDATED"
 )
 
 // Valid reports whether s is one of the states owned by this state machine.
 func (s AssetVersionState) Valid() bool {
 	switch s {
 	case StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
-		StateScanFailed, StateScanError, StateProcessing, StateReady, StateProcessFailed:
+		StateScanFailed, StateScanError, StateValidated, StateProcessing,
+		StateReady, StateProcessFailed:
 		return true
 	default:
 		return false
@@ -35,13 +44,20 @@ func (s AssetVersionState) Valid() bool {
 func (s AssetVersionState) Deliverable() bool { return s == StateReady }
 
 // transitionTable is exhaustive by state. Retry always returns through
-// quarantine and scanning; no retry path can skip malware scanning.
+// quarantine, and quarantine is the only entry to either safety path: a
+// scanner-gated asset leaves it through SCANNING, and a D-088 trusted asset
+// leaves it through VALIDATED. No retry path can skip the safety evidence its
+// asset requires, and neither path can enter the other's states.
 var transitionTable = map[AssetVersionState]map[AssetVersionState]struct{}{
 	StateUploaded: {
 		StateQuarantined: {},
 	},
 	StateQuarantined: {
 		StateScanning: {},
+		// D-088: only after exact-version validation evidence exists for this
+		// object version. The service and the database trigger both enforce
+		// that evidence; the table alone only says the edge is reachable.
+		StateValidated: {},
 	},
 	StateScanning: {
 		StateScanPassed: {},
@@ -60,6 +76,13 @@ var transitionTable = map[AssetVersionState]map[AssetVersionState]struct{}{
 		// successful scan. The worker and database trigger enforce that this
 		// edge is never used for VIDEO assets.
 		StateReady: {},
+	},
+	StateValidated: {
+		// A validated video still owes the trusted FFmpeg evidence; only a
+		// validated non-video D-088 Lesson Resource may become READY here.
+		StateProcessing:    {},
+		StateReady:         {},
+		StateProcessFailed: {},
 	},
 	StateProcessing: {
 		StateReady:         {},

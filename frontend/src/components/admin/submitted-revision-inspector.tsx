@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getTaxonomyTerms, type CourseRevisionWire, type TaxonomyKind, type TaxonomyTerm } from "@/lib/api/catalog";
+import { getTaxonomyTerms, isAcademicCourse, type CourseRevisionWire, type TaxonomyKind, type TaxonomyTerm } from "@/lib/api/catalog";
 import { describeApiError } from "@/lib/api/api-error";
 import { ProblemError } from "@/lib/api/problem";
 import { getMediaAssetStatus } from "@/lib/api/media-upload";
@@ -19,6 +19,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 import { ReviewLessonPreview } from "./review-lesson-preview";
 import { PricingPanel } from "./pricing-panel";
 import { TaxonomyOverrideForm } from "./taxonomy-override-form";
+import { AcademicReviewContext } from "./academic-review-context";
 
 type SubmittedRevisionInspectorProps = {
   item: ReviewQueueItem;
@@ -27,6 +28,7 @@ type SubmittedRevisionInspectorProps = {
 };
 
 type LoadedRevision = {
+  course: ReviewedCourse;
   revision: CourseRevisionWire;
   terms: TaxonomyTerm[];
 };
@@ -77,6 +79,11 @@ function mediaStateLabel(state: string, locale: "ar" | "en"): string {
   return locale === "ar" ? value[0] : value[1];
 }
 
+function lessonFileKindLabel(kind: "RESOURCE" | "LAB_MATERIAL", locale: "ar" | "en"): string {
+  if (kind === "RESOURCE") return locale === "ar" ? "مورد" : "Resource";
+  return locale === "ar" ? "مادة مختبر" : "Lab material";
+}
+
 /**
  * Reads and renders the graph stored in the submitted revision. It deliberately
  * never reads the Instructor's current draft; actions remain unavailable until
@@ -120,12 +127,14 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
         throw new Error(isAr ? "لم تطابق تفاصيل المراجعة الدورة أو المراجعة المحددة." : "Review detail did not match the selected Course or revision.");
       }
       let terms: TaxonomyTerm[] = [];
-      try {
-        terms = await getTaxonomyTerms(locale);
-      } catch (cause) {
-        setTaxonomyError(describeApiError(cause, locale));
+      if (!isAcademicCourse(course)) {
+        try {
+          terms = await getTaxonomyTerms(locale);
+        } catch (cause) {
+          setTaxonomyError(describeApiError(cause, locale));
+        }
       }
-      setLoaded({ revision, terms });
+      setLoaded({ course, revision, terms });
       const assetVersionIDs = videoIDs(revision);
       if (assetVersionIDs.length > 0) {
         const states = await Promise.all(
@@ -154,6 +163,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
   const canReview = loaded !== null && !loading && !loadError;
   const canAct = canReview && !reviewed;
   const revision = loaded?.revision;
+  const course = loaded?.course;
   const terms = loaded?.terms ?? [];
 
   const csrf = (): string | null => {
@@ -219,10 +229,10 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-indigo-200 pb-4 dark:border-indigo-900">
         <div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            {isAr ? "فحص المراجعة المُرسلة" : "Submitted Revision Inspector"}
+            {isAr ? "مراجعة الكورس المُرسل" : "Submitted Course Review"}
           </h2>
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-            {isAr ? "المحتوى أدناه هو المراجعة المُرسلة فقط." : "The content below is the submitted revision only."}
+            {isAr ? "المحتوى أدناه هو النسخة المُرسلة فقط." : "The content below is the submitted version only."}
           </p>
         </div>
         <button type="button" onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">
@@ -240,10 +250,17 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
             <div><p className="text-xs font-semibold text-slate-500">{isAr ? "العنوان الإنجليزي" : "English title"}</p><p dir="ltr" data-testid="submitted-title-en" className="mt-1 text-slate-900 dark:text-slate-100">{revision.title_en}</p></div>
             <div><p className="text-xs font-semibold text-slate-500">{isAr ? "الوصف العربي" : "Arabic description"}</p><p dir="rtl" data-testid="submitted-description-ar" className="mt-1 whitespace-pre-wrap text-slate-900 dark:text-slate-100">{revision.description_ar || "—"}</p></div>
             <div><p className="text-xs font-semibold text-slate-500">{isAr ? "الوصف الإنجليزي" : "English description"}</p><p dir="ltr" data-testid="submitted-description-en" className="mt-1 whitespace-pre-wrap text-slate-900 dark:text-slate-100">{revision.description_en || "—"}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "سنة الدراسة" : "Study year"}</p><p data-testid="submitted-study-year" className="mt-1 text-slate-900 dark:text-slate-100">{revision.study_year || "—"}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "حالة المراجعة" : "Revision state"}</p><p data-testid="submitted-revision-state" className="mt-1 text-slate-900 dark:text-slate-100">{revision.state || "—"}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "التخصص" : "Major"}</p><p data-testid="submitted-major" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.major_term_id, "MAJOR", terms, locale)}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "المادة" : "Subject"}</p><p data-testid="submitted-subject" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.subject_term_id, "SUBJECT", terms, locale)}</p></div>
+            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "حالة المراجعة" : "Review status"}</p><p data-testid="submitted-revision-state" className="mt-1 text-slate-900 dark:text-slate-100">{revision.state || "—"}</p></div>
+            {course && isAcademicCourse(course) ? (
+              <AcademicReviewContext course={course} revision={revision} locale={locale} />
+            ) : (
+              <>
+                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "سنة الدراسة" : "Study year"}</p><p data-testid="submitted-study-year" className="mt-1 text-slate-900 dark:text-slate-100">{revision.study_year || "—"}</p></div>
+                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "التخصص" : "Major"}</p><p data-testid="submitted-major" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.major_term_id, "MAJOR", terms, locale)}</p></div>
+                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "المادة" : "Subject"}</p><p data-testid="submitted-subject" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.subject_term_id, "SUBJECT", terms, locale)}</p></div>
+              </>
+            )}
+            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "المعاينة العامة" : "Public preview"}</p><p data-testid="submitted-public-preview" className="mt-1 text-slate-900 dark:text-slate-100">{revision.preview_asset_version_id ? (isAr ? "تم اختيار معاينة عامة منفصلة لهذه المراجعة." : "A separate public preview is selected for this revision.") : (isAr ? "لا توجد معاينة عامة لهذه المراجعة." : "No public preview is selected for this revision.")}</p></div>
           </section>
 
           <section aria-labelledby="submitted-outline-heading" className="space-y-3">
@@ -267,7 +284,11 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
                         <p data-testid={`submitted-lesson-media-state-${lesson.id}`} className="mt-2 text-xs text-slate-600 dark:text-slate-300">{isAr ? "حالة الوسائط: " : "Media state: "}{mediaStateLabel(mediaState, locale)}</p>
                         {lesson.files && lesson.files.length > 0 && (
                           <ul data-testid={`submitted-lesson-materials-${lesson.id}`} className="mt-2 list-inside list-disc text-xs text-slate-600 dark:text-slate-300">
-                            {lesson.files.map((file) => <li key={file.id}>{file.kind}: {isAr ? file.display_name_ar : file.display_name_en}</li>)}
+                            {lesson.files.map((file) => (
+                              <li key={file.id}>
+                                {lessonFileKindLabel(file.kind, locale)}: {isAr ? file.display_name_ar : file.display_name_en}
+                              </li>
+                            ))}
                           </ul>
                         )}
                         <button
@@ -291,7 +312,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
           {preview && <section data-testid="review-preview-player" className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="mb-3 font-semibold text-slate-900 dark:text-slate-100">{isAr ? "معاينة الدرس المُرسل" : "Submitted Lesson Preview"}</h3><ReviewLessonPreview playbackURL={preview.playback_url} locale={locale} /></section>}
 
           <section className="grid gap-5 lg:grid-cols-2">
-            {taxonomyError ? (
+          {course && isAcademicCourse(course) ? null : taxonomyError ? (
               <p role="alert" data-testid="review-taxonomy-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{taxonomyError}</p>
             ) : (
               <TaxonomyOverrideForm courseID={item.course_id} revisionID={item.revision_id} terms={terms} />

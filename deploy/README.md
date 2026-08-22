@@ -19,6 +19,7 @@ gradex-api
 gradex-worker
 gradex-migrate up
 gradex-migrate version
+gradex-migrate max-version
 ```
 
 The frontend image starts `node server.js`. Set `PORT` for each runtime. The API binds `PORT`; the
@@ -43,13 +44,22 @@ publishes only a Caddy TLS edge on loopback. It generates secrets into the ignor
 ./deploy/scripts/verify-observability.sh
 ./deploy/scripts/verify-application-rollback.sh
 ./deploy/scripts/verify-staging-smoke.sh
+./deploy/scripts/verify-compose-render.sh
 ```
+
+`verify-compose-render.sh` renders the production-like Compose model only — it starts nothing and
+needs no images. It proves the ordinary topology still resolves when no `BOOTSTRAP_ADMIN_*` variable
+is set, that `bootstrap-admin` stays behind its profile, and that the bootstrap passphrase never
+reaches the command arguments. Compose interpolates the whole model before filtering by profile, so
+a required `${VAR:?}` expression inside a profiled service would otherwise break ordinary startup for
+everyone who does not set it.
 
 The verified local origin is `https://gradex.localhost:18443`; Caddy uses an environment-local CA.
 The `verify` command extracts that CA certificate into ignored state and uses it to validate the
-frontend plus `/healthz` and `/readyz`. `data-plane` verifies schema 15, Redis, an application-credential
-object write/read/delete, and the bucket's private policy. Use `logs [service]`, `stop`, or `reset` for
-the corresponding lifecycle operation. `stop` preserves volumes; `reset` removes them.
+frontend plus `/healthz` and `/readyz`. `data-plane` reports the live PostgreSQL schema state and
+verifies Redis, an application-credential object write/read/delete, and the bucket's private policy.
+Use `logs [service]`, `stop`, or `reset` for the corresponding lifecycle operation. `stop` preserves
+volumes; `reset` removes them.
 `redis-security` verifies the generated certificate chain, proves the Redis port refuses plaintext
 and unauthenticated TLS, then proves authenticated verified TLS without printing the credential.
 
@@ -82,18 +92,25 @@ For the isolated database recovery drill after the environment is up:
 ./deploy/scripts/verify-restored-database.sh
 ```
 
-The restore command checksum-verifies the custom-format backup, removes only the prior disposable
-restore target, provisions a fresh `restore-postgres` container/database, and restores without
-`--clean`. The verifier asserts schema 15 plus fixed identity, invitation-provenance, Entitlement, and
-Enrollment records before starting `api-restore` against the restored database.
-Each successful backup also writes an ignored completion timestamp used by the freshness monitor.
+Backup accepts only a clean schema, records its `version|false` state before `pg_dump`, rejects a
+schema change during the dump, and checksum-protects both the custom-format backup and its schema
+metadata. A new backup invalidates prior restore provenance. The restore command verifies both
+checksums, invalidates stale restore provenance before replacing only the disposable restore target,
+provisions a fresh `restore-postgres` container/database, and restores without `--clean`. Only a
+successful restore records the restored schema state. The verifier requires that recorded state,
+asserts the restored database matches it plus the fixed identity, invitation-provenance, Entitlement,
+and Enrollment records, and then starts `api-restore` against the restored database. Each successful
+backup also writes an ignored completion timestamp used by the freshness monitor.
 
 `application-rollback.sh apply RELEASE_MANIFEST` changes only the API, worker, and frontend image
 selection. A release manifest contains an immutable release ID plus backend/frontend image references.
-The command verifies clean forward schema 15, recreates only those application processes, and runs the
-TLS-edge probes. It intentionally has no schema-down operation; `migrate`, `downgrade`, `schema`, and
-`database` commands are refused. `verify-application-rollback.sh` builds two real compatible revisions
-and proves N → N+1 → N while comparing Entitlement invitation-provenance counts.
+The command requires a clean live forward schema, reads the selected backend image's maximum supported
+schema with `gradex-migrate max-version`, and fails closed before recreating any application process if
+the image cannot run that schema. A compatible selection retains the live schema unchanged and runs
+the TLS-edge probes. It intentionally has no schema-down operation; `migrate`, `downgrade`, `schema`,
+and `database` commands are refused. `verify-application-rollback.sh` first rejects an incompatible N
+release; otherwise it proves N → N+1 → N without a schema downgrade while comparing Entitlement
+invitation-provenance counts.
 
 `verify-staging-smoke.sh` resets only `gradex_playwright_e2e_s12smoke01`, exposes PostgreSQL through
 a pinned disposable tunnel bound to loopback for the safety-gated seed/query tool, and deploys the
@@ -124,10 +141,12 @@ T047 can be checked.
 - Browser API calls use the public same-origin edge; no `NEXT_PUBLIC_*` secret is required.
 - The public browser surface does not grant cross-origin CORS access. Browser API calls are same-origin;
   the edge check proves a foreign preflight receives no allow-origin or allow-credentials header.
-- `S3_ENDPOINT` is also the origin embedded into signed segment URLs. In staging/production it must
-  be browser-reachable over HTTPS, and the private bucket must allow credential-free CORS `GET`/`HEAD`
-  from only `PUBLIC_ORIGIN` for presigned requests. CORS does not make objects public; every object
-  request still requires a valid signature.
+- `S3_ENDPOINT` is the private endpoint used by API and worker storage operations.
+  `S3_PRESIGN_ENDPOINT` is the optional browser-facing origin used when signing direct uploads and
+  downloads; it defaults to `S3_ENDPOINT`, and must be an exact HTTPS origin outside development.
+  The private bucket must allow credential-free CORS `PUT`/`GET`/`HEAD` from only `PUBLIC_ORIGIN`
+  for presigned requests and expose `x-amz-version-id`. CORS does not make objects public; every
+  object request still requires a valid signature.
 
 Every secret entry in the committed examples is blank. Supply real values through the deployment
 platform's managed secret/environment facility. Do not pass secrets as image build arguments, bake them
@@ -153,9 +172,10 @@ storage preflight failure.
 
 ## Rollback boundary
 
-Select earlier immutable frontend and backend application images while retaining the forward-compatible
-database schema. Never use migration `0015_course_access_grant.down.sql` as the normal rollback after real
-S6 grants because it clears `source_invitation_id` provenance.
+Application rollback selects earlier immutable frontend and backend images only; it never runs a
+schema-down migration. The selected backend must support the retained forward schema or the rollback
+must fail closed. In particular, never use migration `0015_course_access_grant.down.sql` as the normal
+rollback after real S6 grants because it clears `source_invitation_id` provenance.
 
 Enabling mandatory Redis TLS/authentication is a deployment compatibility boundary: do not select a
 pre-T046 backend image after the Redis service has been hardened. Establish the first T046-capable

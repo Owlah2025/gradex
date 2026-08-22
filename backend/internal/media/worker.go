@@ -26,14 +26,16 @@ type Worker struct {
 	process           Processor
 	outbox            *outbox.Writer
 	processingTimeout time.Duration
+	transcodeGate     *concurrencyGate
 }
 
 type WorkerOptions struct {
-	DB                *pgxpool.Pool
-	Scanner           *ScannerAdapter
-	Process           Processor
-	Outbox            *outbox.Writer
-	ProcessingTimeout time.Duration
+	DB                   *pgxpool.Pool
+	Scanner              *ScannerAdapter
+	Process              Processor
+	Outbox               *outbox.Writer
+	ProcessingTimeout    time.Duration
+	TranscodeConcurrency int
 }
 
 func NewWorker(options WorkerOptions) (*Worker, error) {
@@ -56,7 +58,33 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 	if timeout <= 0 {
 		return nil, errors.New("media processing timeout must be positive")
 	}
-	return &Worker{db: options.DB, scanner: options.Scanner, process: options.Process, outbox: options.Outbox, processingTimeout: timeout}, nil
+	concurrency := options.TranscodeConcurrency
+	if concurrency == 0 {
+		concurrency = 2
+	}
+	if concurrency < 0 {
+		return nil, errors.New("media transcode concurrency must be positive")
+	}
+	return &Worker{
+		db: options.DB, scanner: options.Scanner, process: options.Process, outbox: options.Outbox,
+		processingTimeout: timeout, transcodeGate: newConcurrencyGate(concurrency),
+	}, nil
+}
+
+type concurrencyGate struct{ slots chan struct{} }
+
+func newConcurrencyGate(limit int) *concurrencyGate {
+	return &concurrencyGate{slots: make(chan struct{}, limit)}
+}
+
+func (g *concurrencyGate) run(ctx context.Context, work func() error) error {
+	select {
+	case g.slots <- struct{}{}:
+		defer func() { <-g.slots }()
+		return work()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (w *Worker) Register(mux *asynq.ServeMux) error {
@@ -342,13 +370,25 @@ func (w *Worker) recordScanFailure(ctx context.Context, version versionRecord, a
 	}, StateScanError)
 }
 
-// Transcode claims one SCAN_PASSED version, runs the trusted processor, and
-// records a single immutable processing result. Zero outputs and all provider
-// errors become PROCESS_FAILED and never READY.
+// Transcode claims one version that already holds legitimate safety evidence —
+// SCAN_PASSED from the scanner path or VALIDATED from the D-088 path — runs the
+// trusted processor, and records a single immutable processing result. Zero
+// outputs and all provider errors become PROCESS_FAILED and never READY.
+//
+// The worker is deliberately mode-agnostic. It reads the provenance the
+// database already holds rather than the deployment's operating mode, so it
+// cannot start processing an asset whose safety path was never satisfied, and
+// it never has to decide which path an asset should have taken.
 func (w *Worker) Transcode(ctx context.Context, assetVersionID, operationID string) error {
 	if strings.TrimSpace(operationID) == "" {
 		return fmt.Errorf("%w: transcode operation ID is required", ErrValidation)
 	}
+	return w.transcodeGate.run(ctx, func() error {
+		return w.transcode(ctx, assetVersionID, operationID)
+	})
+}
+
+func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID string) error {
 	version, applied, err := w.beginTranscode(ctx, assetVersionID)
 	if err != nil || !applied {
 		return err
@@ -390,11 +430,21 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID string) (ver
 		return versionRecord{}, false, fmt.Errorf("loading media version for transcode: %w", err)
 	}
 	version.Object.AssetVersionID = version.ID
-	if version.State != StateScanPassed {
+	// Only a version that already holds its own safety evidence may be claimed.
+	// A quarantined, scanning, failed, or arbitrary version is left alone.
+	if version.State != StateScanPassed && version.State != StateValidated {
 		return version, false, nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid AND state = 'SCAN_PASSED' AND successful_scan_attempt_id IS NOT NULL`, assetVersionID); err != nil {
+	claimed, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions SET state = 'PROCESSING'
+		WHERE id = $1::uuid AND state = $2::media_asset_version_state
+		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
+	`, assetVersionID, version.State)
+	if err != nil {
 		return versionRecord{}, false, fmt.Errorf("claiming media version for transcode: %w", err)
+	}
+	if claimed.RowsAffected() != 1 {
+		return version, false, nil
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return versionRecord{}, false, fmt.Errorf("committing transcode claim: %w", err)
@@ -501,12 +551,8 @@ func insertTranscodeReceipt(ctx context.Context, tx pgx.Tx, completion transcode
 }
 
 func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, completion transcodeCompletion) error {
-	scanEvidence, err := successfulScanEvidence(ctx, tx, completion.assetVersionID)
-	if err != nil {
+	if err := requireProcessingProvenance(ctx, tx, completion.assetVersionID); err != nil {
 		return err
-	}
-	if scanEvidence == "" {
-		return fmt.Errorf("%w: transcode target lacks successful scan evidence", ErrConflict)
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO processing_attempts (
@@ -530,29 +576,37 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions
 		SET trusted_duration_ms = $1, successful_processing_attempt_id = $2::uuid, state = 'READY'
-		WHERE id = $3::uuid AND state = 'PROCESSING' AND successful_scan_attempt_id IS NOT NULL
+		WHERE id = $3::uuid AND state = 'PROCESSING'
+		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
 	`, completion.result.TrustedDurationMS, attemptID, completion.assetVersionID); err != nil {
 		return fmt.Errorf("marking media asset ready: %w", err)
 	}
 	return nil
 }
 
-func successfulScanEvidence(ctx context.Context, tx pgx.Tx, assetVersionID string) (string, error) {
+// requireProcessingProvenance refuses to record a successful processing result
+// for a version that is not in PROCESSING or that holds neither legitimate
+// safety evidence. It accepts either provenance without confusing them: the two
+// columns stay distinct, and nothing here writes or reads one as the other.
+func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID string) error {
 	var state AssetVersionState
-	var scanEvidence string
+	var scanEvidence, validationEvidence *string
 	if err := tx.QueryRow(ctx, `
-		SELECT state, successful_scan_attempt_id::text
+		SELECT state, successful_scan_attempt_id::text, successful_validation_attempt_id::text
 		FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&state, &scanEvidence); err != nil {
+	`, assetVersionID).Scan(&state, &scanEvidence, &validationEvidence); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return "", ErrNotFound
+			return ErrNotFound
 		}
-		return "", fmt.Errorf("loading transcode target: %w", err)
+		return fmt.Errorf("loading transcode target: %w", err)
 	}
 	if state != StateProcessing {
-		return "", fmt.Errorf("%w: transcode target is not PROCESSING", ErrConflict)
+		return fmt.Errorf("%w: transcode target is not PROCESSING", ErrConflict)
 	}
-	return scanEvidence, nil
+	if scanEvidence == nil && validationEvidence == nil {
+		return fmt.Errorf("%w: transcode target lacks successful scan or validation evidence", ErrConflict)
+	}
+	return nil
 }
 
 func recordRenditions(ctx context.Context, tx pgx.Tx, completion transcodeCompletion) error {
@@ -586,9 +640,12 @@ func (w *Worker) recordProcessingFailure(ctx context.Context, assetVersionID, op
 	`, assetVersionID, operationID, cause.Error()); err != nil {
 		return fmt.Errorf("recording processing failure: %w", err)
 	}
+	// PROCESS_FAILED is reachable from PROCESSING and from either pre-processing
+	// state, so a failure recorded before or after the claim leaves the asset
+	// non-deliverable either way.
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions SET state = 'PROCESS_FAILED'
-		WHERE id = $1::uuid AND state IN ('PROCESSING', 'SCAN_PASSED')
+		WHERE id = $1::uuid AND state IN ('PROCESSING', 'SCAN_PASSED', 'VALIDATED')
 	`, assetVersionID); err != nil {
 		return fmt.Errorf("marking processing failure: %w", err)
 	}

@@ -4,21 +4,34 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { ServerPricingPanel } from "./server-pricing-panel";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
+import { AcademicSubjectPicker, type AcademicSubjectSelection } from "./academic-subject-picker";
+import { AcademicCourseContextPanel } from "./academic-course-context";
 import { LessonVideoUpload } from "./lesson-video-upload";
+import { PublicPreviewUpload } from "./public-preview-upload";
+import { LessonResourceUpload } from "./lesson-resource-upload";
+import { ChangeRequestNotice } from "./change-request-notice";
+import { editsPublishedCourse, revisionWorkflow } from "./revision-workflow";
+import { EditingPublishedNotice, RevisionWorkflowPanel } from "./revision-workflow-panel";
 import {
   addLesson,
   addSection,
+  createCandidateRevision,
   createCourse,
   deleteLesson,
   deleteSection,
   getOwnedCourseDetail,
   getOwnedCourses,
+  setCourseSubject,
+  setRevisionAudience,
+  resetRevisionAudience,
   submitCourseRevision,
   updateCourseRevision,
   type CourseWire,
 } from "@/lib/api/authoring";
+import { isAcademicCourse } from "@/lib/api/catalog";
 import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
+import { createSubjectRequest } from "@/lib/api/subject-requests";
 
 /**
  * Instructor Course Authoring Studio.
@@ -29,8 +42,19 @@ import { currentCSRFToken } from "@/lib/identity/session";
  * Instructor sees is what a page reload would show.
  */
 export function CourseBuilder() {
-  const { locale, dir } = useLocale();
+  const { locale, dir, t } = useLocale();
   const isAr = locale === "ar";
+
+  /**
+   * Wire enum → the Instructor's language. The raw enum stays on `data-revision-state` for tests
+   * and support, but it is never what the Instructor is asked to interpret.
+   */
+  const stateLabel = (state: string | undefined, lifecycle: string | undefined): string => {
+    const wire = state ?? lifecycle;
+    if (!wire) return "";
+    const labels = t.instructor.revisionState as Record<string, string | undefined>;
+    return labels[wire] ?? wire;
+  };
 
   const [courses, setCourses] = useState<CourseWire[]>([]);
   const [selectedCourseID, setSelectedCourseID] = useState<string | null>(null);
@@ -53,6 +77,15 @@ export function CourseBuilder() {
   const [newTitleEn, setNewTitleEn] = useState("");
   const [newDescAr, setNewDescAr] = useState("");
   const [newDescEn, setNewDescEn] = useState("");
+  // The academic identity of the Course being created. A Course cannot be
+  // created without it (D-093 §1), so Create stays disabled until it is present.
+  const [newAcademic, setNewAcademic] = useState<AcademicSubjectSelection | null>(null);
+  const [newInstitutionID, setNewInstitutionID] = useState("");
+  const [requestingMissingSubject, setRequestingMissingSubject] = useState(false);
+  const [requestedCode, setRequestedCode] = useState("");
+  const [requestedTitleAr, setRequestedTitleAr] = useState("");
+  const [requestedTitleEn, setRequestedTitleEn] = useState("");
+  const [requestedNote, setRequestedNote] = useState("");
 
   const [detailTitleAr, setDetailTitleAr] = useState("");
   const [detailTitleEn, setDetailTitleEn] = useState("");
@@ -71,6 +104,8 @@ export function CourseBuilder() {
   );
   const revision = selectedCourse?.editable_revision ?? null;
   const sections = revision?.sections ?? [];
+  const workflow = revisionWorkflow(selectedCourse);
+  const editingPublished = editsPublishedCourse(selectedCourse);
 
   const loadCourses = useCallback(
     async (preferCourseID?: string) => {
@@ -157,25 +192,141 @@ export function CourseBuilder() {
     }
   };
 
+  /**
+   * Begins a new revision of a published Course.
+   *
+   * The server is idempotent here — it returns any existing active candidate rather than cloning a
+   * second one — so a double click or a reload cannot fork the Course. On failure `command` surfaces
+   * the server's own reason and nothing local is mutated, so the Instructor is never left believing
+   * a revision exists when it does not.
+   */
+  const handleStartRevision = () => {
+    if (!selectedCourse) return;
+    void command(async (csrf) => {
+      await createCandidateRevision({ courseID: selectedCourse.id, locale, csrf });
+      await loadCourses(selectedCourse.id);
+      setNotice(t.instructor.revision.editingPublishedTitle);
+    });
+  };
+
   const handleCreateCourse = (event: React.FormEvent) => {
     event.preventDefault();
     if (!newTitleAr || !newTitleEn) return;
+    // A Course is created on the Academic Catalog model or not at all. There is
+    // no legacy creation path in the ordinary UI after T4-B.
+    const academic = newAcademic;
+    const validRequest = requestingMissingSubject && newInstitutionID && requestedTitleAr && requestedTitleEn;
+    if (!academic && !validRequest) return;
     void command(async (csrf) => {
       const created = await createCourse({
         titleAr: newTitleAr,
         titleEn: newTitleEn,
         descriptionAr: newDescAr,
         descriptionEn: newDescEn,
+        institutionID: academic?.institutionID ?? newInstitutionID,
+        subjectID: academic?.subject.id,
         locale,
         csrf,
       });
+      if (!academic) {
+        await createSubjectRequest({
+          institutionID: newInstitutionID,
+          courseID: created.id,
+          proposedOfficialCode: requestedCode,
+          proposedTitleAr: requestedTitleAr,
+          proposedTitleEn: requestedTitleEn,
+          note: requestedNote,
+          locale,
+          csrf,
+        });
+      }
       await loadCourses(created.id);
       setNewTitleAr("");
       setNewTitleEn("");
       setNewDescAr("");
       setNewDescEn("");
+      setNewAcademic(null);
+      setNewInstitutionID("");
+      setRequestingMissingSubject(false);
+      setRequestedCode("");
+      setRequestedTitleAr("");
+      setRequestedTitleEn("");
+      setRequestedNote("");
       setIsCreating(false);
-      setNotice(isAr ? "تم إنشاء الدورة على الخادم." : "Course created on the server.");
+      setNotice(
+        academic
+          ? (isAr ? "تم إنشاء الكورس على الخادم." : "Course created on the server.")
+          : (isAr ? "تم إنشاء مسودة الكورس وإرسال طلب المادة للمراجعة." : "Course draft created and Subject request sent for review."),
+      );
+    });
+  };
+
+  /**
+   * Corrects the canonical Subject of an Academic Course that has never been
+   * published. The server owns every lifecycle rule; a refusal is reported the
+   * same way any other command failure is.
+   */
+  const handleChangeSubject = (subjectID: string) => {
+    if (!selectedCourse) return;
+    void command(async (csrf) => {
+      await setCourseSubject({ courseID: selectedCourse.id, subjectID, locale, csrf });
+      await refreshSelectedCourse();
+      setNotice(isAr ? "تم تحديث مادة الكورس." : "Course Subject updated.");
+    });
+  };
+
+  const handleRequestSubject = async (input: {
+    proposedOfficialCode?: string;
+    proposedTitleAr: string;
+    proposedTitleEn: string;
+    note?: string;
+  }): Promise<boolean> => {
+    if (!selectedCourse?.institution_id || busy) return false;
+    const csrf = requireCSRF();
+    if (!csrf) return false;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await createSubjectRequest({
+        institutionID: selectedCourse.institution_id,
+        courseID: selectedCourse.id,
+        ...input,
+        locale,
+        csrf,
+      });
+      await refreshSelectedCourse();
+      setNotice(isAr ? "تم إرسال طلب المادة للمراجعة." : "Subject request sent for review.");
+      return true;
+    } catch (cause) {
+      setError(describeApiError(cause, locale));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCustomizeAudience = (programIDs: string[]) => {
+    if (!selectedCourse || !revision?.id) return;
+    void command(async (csrf) => {
+      await setRevisionAudience({
+        courseID: selectedCourse.id,
+        revisionID: revision.id!,
+        programIDs,
+        locale,
+        csrf,
+      });
+      await refreshSelectedCourse();
+      setNotice(isAr ? "تم تخصيص جمهور الكورس." : "Course audience customized.");
+    });
+  };
+
+  const handleResetAudience = () => {
+    if (!selectedCourse || !revision?.id) return;
+    void command(async (csrf) => {
+      await resetRevisionAudience({ courseID: selectedCourse.id, revisionID: revision.id!, locale, csrf });
+      await refreshSelectedCourse();
+      setNotice(isAr ? "تمت استعادة الجمهور التلقائي." : "Automatic audience restored.");
     });
   };
 
@@ -190,9 +341,11 @@ export function CourseBuilder() {
         titleEn: detailTitleEn,
         descriptionAr: detailDescAr,
         descriptionEn: detailDescEn,
-        majorTermID: revision.major_term_id,
-        subjectTermID: revision.subject_term_id,
-        studyYear: detailStudyYear,
+        // Omitted entirely for an Academic Course: its identity is the
+        // Course-level Subject, and the server refuses the legacy vocabulary.
+        majorTermID: isAcademicCourse(selectedCourse) ? undefined : revision.major_term_id,
+        subjectTermID: isAcademicCourse(selectedCourse) ? undefined : revision.subject_term_id,
+        studyYear: isAcademicCourse(selectedCourse) ? undefined : detailStudyYear,
         locale,
         csrf,
       });
@@ -339,7 +492,17 @@ export function CourseBuilder() {
 
       <ServerPricingPanel />
 
-      <TaxonomyAssignmentPanel />
+      {/*
+        Legacy taxonomy compatibility (D-093 §6).
+
+        This panel edits major_term_id / subject_term_id / study_year, which only
+        a LEGACY_TAXONOMY Course carries. It stays mounted until T5 migrates the
+        existing Courses that still depend on it, and it disappears entirely once
+        an Instructor owns no legacy Course. The server refuses these fields on an
+        Academic Course regardless of what is rendered, so this is presentation,
+        not the control.
+      */}
+      {courses.some((course) => !isAcademicCourse(course)) && <TaxonomyAssignmentPanel />}
 
       {isCreating && (
         <form
@@ -347,7 +510,68 @@ export function CourseBuilder() {
           data-testid="new-course-form"
           className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4"
         >
-          <h2 className="text-lg font-semibold">{isAr ? "تفاصيل الدورة الجديدة" : "New Course Details"}</h2>
+          <h2 className="text-lg font-semibold">{isAr ? "إنشاء كورس جديد" : "Create a new Course"}</h2>
+
+          {/*
+            University then Subject, before any Course copy. The academic identity
+            is what the Course IS; the title and description describe it.
+          */}
+          <AcademicSubjectPicker
+            onChange={(selection) => {
+              setNewAcademic(selection);
+              if (selection) setRequestingMissingSubject(false);
+            }}
+            onInstitutionChange={(institutionID) => {
+              setNewInstitutionID(institutionID);
+              setRequestingMissingSubject(false);
+            }}
+            onRequestMissing={() => setRequestingMissingSubject(true)}
+          />
+
+          {requestingMissingSubject && (
+            <fieldset className="space-y-3 rounded-md border border-amber-300 p-4" data-testid="new-course-subject-request">
+              <legend className="px-1 text-sm font-semibold">
+                {isAr ? "طلب إضافة مادة" : "Request a missing Subject"}
+              </legend>
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                {isAr
+                  ? "يمكنك متابعة إعداد محتوى الكورس، لكن لا يمكن إرساله للمراجعة حتى تربطه الإدارة بمادة رسمية."
+                  : "You can keep building the Course, but it cannot be submitted until Admin links an official Subject."}
+              </p>
+              <input
+                value={requestedCode}
+                onChange={(event) => setRequestedCode(event.target.value)}
+                placeholder={isAr ? "الرمز الرسمي (اختياري)" : "Official code (optional)"}
+                data-testid="subject-request-code"
+                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
+              />
+              <input
+                value={requestedTitleAr}
+                onChange={(event) => setRequestedTitleAr(event.target.value)}
+                placeholder={isAr ? "اسم المادة الرسمي بالعربية" : "Official Arabic Subject title"}
+                required
+                data-testid="subject-request-title-ar"
+                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
+              />
+              <input
+                value={requestedTitleEn}
+                onChange={(event) => setRequestedTitleEn(event.target.value)}
+                placeholder={isAr ? "اسم المادة الرسمي بالإنجليزية" : "Official English Subject title"}
+                required
+                data-testid="subject-request-title-en"
+                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
+              />
+              <textarea
+                value={requestedNote}
+                onChange={(event) => setRequestedNote(event.target.value)}
+                placeholder={isAr ? "سياق أو ملاحظة للإدارة" : "Context or note for Admin"}
+                rows={2}
+                data-testid="subject-request-note"
+                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
+              />
+            </fieldset>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block text-sm font-medium">
               {isAr ? "عنوان الدورة (بالعربية)" : "Course Title (Arabic)"}
@@ -394,12 +618,19 @@ export function CourseBuilder() {
           </div>
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || (!newAcademic && !(requestingMissingSubject && newInstitutionID && requestedTitleAr && requestedTitleEn))}
             data-testid="create-course"
             className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
           >
-            {isAr ? "حفظ كمسودة" : "Save as Draft"}
+            {isAr ? "إنشاء الكورس" : "Create Course"}
           </button>
+          {!newAcademic && !requestingMissingSubject && (
+            <p className="text-xs text-slate-600 dark:text-slate-400" data-testid="create-course-needs-subject">
+              {isAr
+                ? "اختر الجامعة والمادة أولًا."
+                : "Choose the university and Subject first."}
+            </p>
+          )}
         </form>
       )}
 
@@ -431,8 +662,11 @@ export function CourseBuilder() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="font-semibold text-sm">{courseTitle(course)}</h3>
-                  <span className="text-xs px-2 py-0.5 rounded font-mono bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                    {course.editable_revision?.state ?? course.lifecycle ?? ""}
+                  <span
+                    data-revision-state={course.editable_revision?.state ?? course.lifecycle ?? ""}
+                    className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                  >
+                    {stateLabel(course.editable_revision?.state, course.lifecycle)}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
@@ -448,27 +682,37 @@ export function CourseBuilder() {
         {selectedCourse ? (
           <div className="md:col-span-2 space-y-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
-              <div>
-                <span
-                  data-testid="selected-course-id"
-                  className="text-xs font-mono text-blue-600 dark:text-blue-400 font-semibold"
-                >
-                  ID: {selectedCourse.id}
-                </span>
+              <div
+                data-testid="selected-course-context"
+                data-course-id={selectedCourse.id}
+                data-revision-id={revision?.id ?? ""}
+              >
                 <h2 className="text-xl font-bold mt-0.5">{courseTitle(selectedCourse)}</h2>
-                {revision?.id && (
-                  <span data-testid="selected-revision-id" className="text-[11px] font-mono text-slate-500">
-                    revision_id: {revision.id}
-                  </span>
-                )}
               </div>
+              {isAcademicCourse(selectedCourse) && (
+                <AcademicCourseContextPanel
+                  course={selectedCourse}
+                  busy={busy}
+                  onChangeSubject={handleChangeSubject}
+                  onCustomizeAudience={handleCustomizeAudience}
+                  onResetAudience={handleResetAudience}
+                  onRequestSubject={handleRequestSubject}
+                />
+              )}
               <span
                 data-testid="revision-state"
+                data-revision-state={revision?.state ?? selectedCourse.lifecycle ?? ""}
                 className="text-xs px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 font-medium"
               >
-                {revision?.state ?? selectedCourse.lifecycle ?? ""}
+                {stateLabel(revision?.state, selectedCourse.lifecycle)}
               </span>
             </div>
+
+            {/* Standing notice, not a toast: the Instructor usually returns in a later session. */}
+            <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />
+
+            {/* Edits to a candidate behind a live revision reach nobody until an Admin approves. */}
+            {editingPublished ? <EditingPublishedNotice labels={t.instructor.revision} /> : null}
 
             {revision?.id ? (
               <>
@@ -508,22 +752,30 @@ export function CourseBuilder() {
                       className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
                     />
                   </div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    {isAr ? "السنة الدراسية" : "Study year"}
-                    <select
-                      value={detailStudyYear}
-                      onChange={(event) => setDetailStudyYear(event.target.value)}
-                      data-testid="revision-study-year"
-                      className="mt-1 block rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
-                    >
-                      <option value="">{isAr ? "غير محددة" : "Not set"}</option>
-                      {["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"].map((year) => (
-                        <option key={year} value={year}>
-                          {year}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {/*
+                    Legacy study year (D-093 §6). This is part of the legacy
+                    classification, which an Academic Course does not carry and
+                    must never be asked for — the server refuses it there. It
+                    stays available for existing legacy Courses until T5.
+                  */}
+                  {!isAcademicCourse(selectedCourse) && (
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      {isAr ? "السنة الدراسية" : "Study year"}
+                      <select
+                        value={detailStudyYear}
+                        onChange={(event) => setDetailStudyYear(event.target.value)}
+                        data-testid="revision-study-year"
+                        className="mt-1 block rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
+                      >
+                        <option value="">{isAr ? "غير محددة" : "Not set"}</option>
+                        {["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"].map((year) => (
+                          <option key={year} value={year}>
+                            {year}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   <button
                     type="submit"
                     disabled={busy}
@@ -533,6 +785,14 @@ export function CourseBuilder() {
                     {isAr ? "حفظ التفاصيل" : "Save details"}
                   </button>
                 </form>
+
+                <PublicPreviewUpload
+                  courseID={selectedCourse.id}
+                  revisionID={revision.id}
+                  hasPreview={Boolean(revision.preview_asset_version_id)}
+                  locale={locale}
+                  onChanged={refreshSelectedCourse}
+                />
 
                 <div className="space-y-4">
                   <h3 className="text-md font-semibold">
@@ -599,16 +859,20 @@ export function CourseBuilder() {
                                     {isAr ? "حذف الدرس" : "Delete lesson"}
                                   </button>
                                 </div>
-                                {(lesson.files ?? []).length > 0 && (
+                                {/* Lab Materials are shown but not editable here: D-088
+                                    covers Lesson video and Lesson Resources only. */}
+                                {(lesson.files ?? []).some((file) => file.kind === "LAB_MATERIAL") && (
                                   <div className="text-[11px] text-slate-500 mt-1">
-                                    {(lesson.files ?? []).map((file) => (
-                                      <span
-                                        key={file.id}
-                                        className="me-2 inline-block bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded"
-                                      >
-                                        [{file.kind}] {isAr ? file.display_name_ar : file.display_name_en}
-                                      </span>
-                                    ))}
+                                    {(lesson.files ?? [])
+                                      .filter((file) => file.kind === "LAB_MATERIAL")
+                                      .map((file) => (
+                                        <span
+                                          key={file.id}
+                                          className="me-2 inline-block bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded"
+                                        >
+                                          [{file.kind}] {isAr ? file.display_name_ar : file.display_name_en}
+                                        </span>
+                                      ))}
                                   </div>
                                 )}
                                 <LessonVideoUpload
@@ -617,6 +881,14 @@ export function CourseBuilder() {
                                   lessonID={lesson.id}
                                   locale={locale}
                                   onAttached={refreshSelectedCourse}
+                                />
+                                <LessonResourceUpload
+                                  courseID={selectedCourse.id}
+                                  revisionID={revision.id!}
+                                  lessonID={lesson.id}
+                                  locale={locale}
+                                  files={lesson.files ?? []}
+                                  onChanged={refreshSelectedCourse}
                                 />
                               </div>
                             ))}
@@ -724,11 +996,12 @@ export function CourseBuilder() {
                 </div>
               </>
             ) : (
-              <p className="text-sm text-slate-500 italic" data-testid="no-editable-revision">
-                {isAr
-                  ? "لا توجد مراجعة قابلة للتحرير لهذه الدورة."
-                  : "This Course has no editable revision."}
-              </p>
+              <RevisionWorkflowPanel
+                workflow={workflow}
+                busy={busy}
+                labels={t.instructor.revision}
+                onStart={handleStartRevision}
+              />
             )}
           </div>
         ) : (

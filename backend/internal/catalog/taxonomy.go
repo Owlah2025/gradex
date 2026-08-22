@@ -248,6 +248,14 @@ func (r *Repository) AssignTaxonomyToRevision(ctx context.Context, req AssignTax
 		if !taxonomyOverrideAllowed(course, target) {
 			return ErrTaxonomyRevisionInvalid
 		}
+		// D-093 6. The Admin per-Course classification override is a legacy
+		// compatibility surface. It stays available for LEGACY_TAXONOMY Courses
+		// until T5 migrates them, and is refused for Academic Courses, whose
+		// Subject is corrected by the Instructor through Request Changes while
+		// the Course is still eligible to change it.
+		if err := rejectLegacyTaxonomyOnAcademicCourse(course, &req.MajorTermID, &req.SubjectTermID, nil); err != nil {
+			return err
+		}
 		if err := validateTaxonomyAssignments(ctx, tx, &req.MajorTermID, &req.SubjectTermID); err != nil {
 			return err
 		}

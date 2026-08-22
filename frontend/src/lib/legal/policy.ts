@@ -13,7 +13,8 @@ export const approvedPolicyMetadata = {
 export const stagingLegalRegistrationNumber = "STAGING-NOT-REGISTERED";
 export const stagingLegalRegisteredAddress =
   "STAGING ONLY — LEGAL ENTITY DETAILS PENDING";
-export const controlledStagingOrigin = "https://gradex.localhost:18443";
+export const controlledStagingLocalOrigin = "https://gradex.localhost:18443";
+export const controlledStagingLG019Origin = "https://staging.gradex.network";
 
 export type LegalLocale = "ar" | "en";
 export type LegalPolicyKind = "privacy" | "terms";
@@ -26,6 +27,43 @@ export type LegalIdentity = {
   supportEmail: string;
   securityEmail: string;
 };
+
+function isControlledStagingOrigin(publicOrigin: string): boolean {
+  switch (publicOrigin) {
+    case controlledStagingLocalOrigin:
+    case controlledStagingLG019Origin:
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function validateLegalIdentityMode(
+  mode: string,
+  publicOrigin: string,
+  identity: LegalIdentity,
+): boolean {
+  const hasSentinel =
+    identity.registrationNumber === stagingLegalRegistrationNumber ||
+    identity.registeredAddress === stagingLegalRegisteredAddress;
+  if (mode === "public") {
+    if (hasSentinel) {
+      throw new Error("public legal identity rejects controlled-staging sentinel values");
+    }
+    return false;
+  }
+  if (
+    mode !== "controlled-staging" ||
+    !isControlledStagingOrigin(publicOrigin) ||
+    identity.registrationNumber !== stagingLegalRegistrationNumber ||
+    identity.registeredAddress !== stagingLegalRegisteredAddress
+  ) {
+    throw new Error(
+      "controlled-staging legal identity requires an exact approved disposable origin and sentinels",
+    );
+  }
+  return true;
+}
 
 const approvedContactEmail = "ahmedhazemelmelegy11@gmail.com";
 

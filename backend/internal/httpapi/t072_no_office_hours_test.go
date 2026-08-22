@@ -115,7 +115,7 @@ func TestDashboardAndCourseHomeReadModelsCarryNoOfficeHoursField(t *testing.T) {
 		t.Fatalf("the ST05 read model no longer matches its accepted shape: %v", dashboardProperties)
 	}
 	courseHomeProperties := jsonPropertyNames(t, reflect.TypeOf(courseHomeResponse{}), map[reflect.Type]bool{})
-	if !containsAll(courseHomeProperties, []string{"course_id", "title", "learning_status", "expires_at", "progress", "sections", "lessons", "materials"}) {
+	if !containsAll(courseHomeProperties, []string{"course_id", "title", "learning_status", "expires_at", "progress", "sections", "lessons", "resources", "lab_materials"}) {
 		t.Fatalf("the ST06 read model no longer matches its accepted shape: %v", courseHomeProperties)
 	}
 }
@@ -142,7 +142,7 @@ func TestRenderedDashboardAndCourseHomeJSONNamesNoOfficeHours(t *testing.T) {
 			CourseID: "c", Title: "T",
 			Sections: []courseHomeSectionResponse{{
 				SectionID: "s", Title: "S",
-				Lessons: []courseHomeLessonResponse{{LessonID: "l", Title: "L", Materials: []learningMaterialResponse{{Kind: "resource"}}}},
+				Lessons: []courseHomeLessonResponse{{LessonID: "l", Title: "L", Resources: []learningMaterialResponse{{Title: "Resource"}}}},
 			}},
 		},
 	}

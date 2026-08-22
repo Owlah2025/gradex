@@ -21,7 +21,8 @@ func loadRedisSettings(
 	settings := map[string]string{
 		"APP_ENV": "production", "PUBLIC_ORIGIN": "https://gradex.example",
 		"CORS_ALLOWED_ORIGINS": "https://gradex.example", "CORS_ALLOW_CREDENTIALS": "true",
-		"REDIS_ADDR": "redis.internal:6379", "REDIS_TLS_ENABLED": "true",
+		"SALES_WHATSAPP_NUMBER": "15550000000",
+		"REDIS_ADDR":            "redis.internal:6379", "REDIS_TLS_ENABLED": "true",
 		"S3_ENDPOINT": "https://storage.example", "S3_BUCKET": "gradex-media",
 		"LEGAL_IDENTITY_MODE": "public", "LEGAL_OPERATOR_NAME": "Gradex Courses",
 		"LEGAL_REGISTRATION_NUMBER": "KWT-REAL-123", "LEGAL_REGISTERED_ADDRESS": "Kuwait City, Kuwait",

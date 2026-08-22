@@ -420,7 +420,20 @@ func (r *Repository) AcceptInvitation(ctx context.Context, params AcceptInvitati
 		return Invitation{}, fmt.Errorf("consuming action secret: %w", err)
 	}
 
-	// Transition invitation state to PENDING_ADMIN_APPROVAL
+	// A linked, payment-confirmed purchase is the sole exception to the
+	// standard invitation path. The persistent purchase relationship is locked
+	// and verified in this same acceptance transaction; a client cannot claim
+	// that an invitation was pre-authorized.
+	if approved, handled, err := r.CompletePurchaseInvitationAcceptance(ctx, tx, inv, params.CallerAccountID, now); err != nil {
+		return Invitation{}, err
+	} else if handled {
+		if err := tx.Commit(ctx); err != nil {
+			return Invitation{}, fmt.Errorf("committing purchase-backed acceptance: %w", err)
+		}
+		return approved, nil
+	}
+
+	// Transition standard invitation state to PENDING_ADMIN_APPROVAL.
 	inv.State = StatePendingAdminApproval
 	inv.AcceptedByAccountID = &params.CallerAccountID
 	inv.AcceptedAt = &now
@@ -1133,6 +1146,31 @@ func (r *Repository) CancelInvitation(ctx context.Context, params CancelInvitati
 		return Invitation{}, fmt.Errorf("updating invitation cancellation: %w", err)
 	}
 
+	// A purchase-backed invitation represents a paid, pre-authorized request.
+	// Cancelling it must also terminate that request, otherwise public dedupe
+	// would return an unusable invitation forever. Standard invitations have no
+	// linked row and retain their existing lifecycle unchanged.
+	var purchaseID string
+	var purchaseState PurchaseRequestState
+	err = tx.QueryRow(ctx, `SELECT id::text, state FROM purchase_requests WHERE invitation_id=$1::uuid FOR UPDATE`, inv.ID).Scan(&purchaseID, &purchaseState)
+	if err == nil {
+		if purchaseState != PurchaseRequestInvitationCreated {
+			return Invitation{}, ErrPurchaseRequestTransition
+		}
+		if _, err := tx.Exec(ctx, `UPDATE purchase_requests SET state='CANCELLED', cancelled_at=$1, updated_at=$1 WHERE id=$2::uuid`, now, purchaseID); err != nil {
+			return Invitation{}, fmt.Errorf("cancelling linked purchase request: %w", err)
+		}
+		metadata, _ := json.Marshal(map[string]any{"invitation_id": inv.ID})
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO audit_events (actor_account_id, actor_role, actor_descriptor, action, module, target_type, target_id, reason, metadata)
+			VALUES ($1::uuid, 'ADMIN', $1, 'PURCHASE_REQUEST_CANCELLED', 'IDENTITY_AND_ACCESS', 'PURCHASE_REQUEST', $2::uuid, 'Linked purchase invitation cancelled', $3)
+		`, params.AdminAccountID, purchaseID, metadata); err != nil {
+			return Invitation{}, fmt.Errorf("auditing linked purchase request cancellation: %w", err)
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return Invitation{}, fmt.Errorf("locking linked purchase request: %w", err)
+	}
+
 	if actionSecretID != nil && strings.TrimSpace(*actionSecretID) != "" {
 		if _, err := uuid.Parse(*actionSecretID); err == nil {
 			_, err = tx.Exec(ctx, `UPDATE identity_action_secrets SET consumed_at = $1 WHERE id = $2::uuid AND consumed_at IS NULL`, now, *actionSecretID)
@@ -1412,6 +1450,10 @@ func (r *Repository) GetStudentAccessHistory(ctx context.Context, callerAccountI
 		item.AccessEndsAt = &endsAtCopy
 	}
 
+	if err := r.attachCourseTitles(ctx, itemsByCourse); err != nil {
+		return StudentCourseAccessHistoryResponse{}, err
+	}
+
 	items := make([]StudentCourseAccessHistoryItem, 0, len(itemsByCourse))
 	for _, item := range itemsByCourse {
 		items = append(items, *item)
@@ -1421,6 +1463,59 @@ func (r *Repository) GetStudentAccessHistory(ctx context.Context, callerAccountI
 	}
 
 	return StudentCourseAccessHistoryResponse{Items: items}, nil
+}
+
+// attachCourseTitles fills the authored titles for every Course in the history, in one query.
+//
+// The live revision is preferred, because that is the Course as it is currently published. A Course
+// that was never published, or was delisted or archived after the invitation was issued, still has
+// to be nameable to the Student who holds a record against it, so the highest revision is the
+// fallback. A Course whose row is gone leaves the titles empty and the caller renders its own
+// placeholder rather than a UUID.
+func (r *Repository) attachCourseTitles(
+	ctx context.Context,
+	itemsByCourse map[string]*StudentCourseAccessHistoryItem,
+) error {
+	if len(itemsByCourse) == 0 {
+		return nil
+	}
+
+	courseIDs := make([]string, 0, len(itemsByCourse))
+	for courseID := range itemsByCourse {
+		courseIDs = append(courseIDs, courseID)
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT c.id::text,
+		       COALESCE(live.title_ar, latest.title_ar, ''),
+		       COALESCE(live.title_en, latest.title_en, '')
+		  FROM courses c
+		  LEFT JOIN course_revisions live ON live.id = c.live_revision_id
+		  LEFT JOIN LATERAL (
+		       SELECT title_ar, title_en
+		         FROM course_revisions
+		        WHERE course_id = c.id
+		        ORDER BY revision_number DESC
+		        LIMIT 1
+		  ) latest ON TRUE
+		 WHERE c.id = ANY($1::uuid[])
+	`, courseIDs)
+	if err != nil {
+		return fmt.Errorf("querying course titles: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var courseID, titleAr, titleEn string
+		if err := rows.Scan(&courseID, &titleAr, &titleEn); err != nil {
+			return fmt.Errorf("scanning course title: %w", err)
+		}
+		if item, ok := itemsByCourse[courseID]; ok {
+			item.CourseTitleAr = titleAr
+			item.CourseTitleEn = titleEn
+		}
+	}
+	return rows.Err()
 }
 
 // lockedEntitlement is the shared precondition of both elevated-Admin

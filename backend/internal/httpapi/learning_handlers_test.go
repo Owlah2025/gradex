@@ -260,6 +260,10 @@ func (r *countingLearningRepository) ListStudentCourseSummaries(context.Context,
 	return nil, nil
 }
 
+func (r *countingLearningRepository) ListStudentResumeCandidates(context.Context, string) ([]learning.ResumeCandidate, error) {
+	return nil, nil
+}
+
 func (r *countingLearningRepository) EnrollmentID(context.Context, string, string) (string, error) {
 	return "", learning.ErrEnrollmentNotFound
 }

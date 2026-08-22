@@ -45,15 +45,19 @@ import (
 //	required distinct expired Students        8 x 10 = 80
 //	provisioned                                       100 (25% headroom)
 //
+// T3 adds six Student academic profile slots (24-29). Allocation is
+// slot*repeats + repeat, so slots 0-23 keep indices 0-239 unchanged and the new
+// slots occupy 240-299; no existing execution is reassigned.
+//
 // Per-Student consumption stays far inside the production limits rather than near them: at most
 // two playback issuances of the thirty allowed per ten minutes, and at most four Progress writes
 // of the twelve allowed per minute for a Lesson.
 const (
 	// rotatingStudentPoolSize is the provisioned active pool. It must be at least
 	// rotatingTestSlots * rotatingMaxRepeats.
-	rotatingStudentPoolSize = 240
+	rotatingStudentPoolSize = 300
 	// rotatingTestSlots is the number of registered active-Student test identities.
-	rotatingTestSlots = 22
+	rotatingTestSlots = 30
 	// rotatingMaxRepeats is the greatest `--repeat-each` the pool supports.
 	rotatingMaxRepeats = 10
 

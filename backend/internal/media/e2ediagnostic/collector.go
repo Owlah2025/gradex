@@ -35,6 +35,7 @@ type Artifact struct {
 	Asset          *Asset                       `json:"asset,omitempty"`
 	Work           []Work                       `json:"work"`
 	Scans          []Scan                       `json:"scans"`
+	Validations    []Validation                 `json:"validations"`
 	Processing     []Processing                 `json:"processing"`
 	RenditionCount int                          `json:"rendition_count"`
 	Queue          []QueueTask                  `json:"queue"`
@@ -51,6 +52,33 @@ type Asset struct {
 	UploadID          string     `json:"upload_id"`
 	UploadCreatedAt   time.Time  `json:"upload_created_at"`
 	UploadCompletedAt *time.Time `json:"upload_completed_at,omitempty"`
+	// Provenance names which safety path admitted these exact bytes. An asset
+	// can legitimately reach READY on either, so a diagnostic that assumed a
+	// scan attempt would misreport a D-088 asset as broken. The two are never
+	// merged: MALWARE_SCAN means a scanner inspected the object, TRUSTED_VALIDATION
+	// means it did not and only the exact-version checks were performed.
+	Provenance string `json:"provenance"`
+}
+
+// Provenance values. NONE is the honest answer for an asset that has not
+// earned either path yet, and BOTH would be an anomaly worth seeing.
+const (
+	ProvenanceNone              = "NONE"
+	ProvenanceMalwareScan       = "MALWARE_SCAN"
+	ProvenanceTrustedValidation = "TRUSTED_VALIDATION"
+	ProvenanceScanAndValidation = "MALWARE_SCAN_AND_TRUSTED_VALIDATION"
+)
+
+// Validation is D-088 exact-version validation evidence. It is reported
+// separately from Scan and never relabelled as a scan: no malware inspection
+// took place on this path.
+type Validation struct {
+	ID          string    `json:"id"`
+	WorkID      string    `json:"work_id"`
+	Outcome     string    `json:"outcome"`
+	Validator   string    `json:"validator"`
+	Profile     string    `json:"profile"`
+	ValidatedAt time.Time `json:"validated_at"`
 }
 
 type Work struct {
@@ -120,7 +148,7 @@ func New(db *pgxpool.Pool, inspector *asynq.Inspector) (*Collector, error) {
 }
 
 func (c *Collector) Capture(ctx context.Context, input Input) Artifact {
-	a := Artifact{SchemaVersion: 1, RunID: input.RunID, CapturedAt: time.Now().UTC(), Runtime: safeRuntime(input.Runtime), Work: []Work{}, Scans: []Scan{}, Processing: []Processing{}, Queue: []QueueTask{}, Logs: Logs{APIPath: input.APILogPath, WorkerPath: input.WorkerLogPath, API: apiLogs(input.APILogPath), Worker: workerLogs(input.WorkerLogPath)}}
+	a := Artifact{SchemaVersion: 2, RunID: input.RunID, CapturedAt: time.Now().UTC(), Runtime: safeRuntime(input.Runtime), Work: []Work{}, Scans: []Scan{}, Validations: []Validation{}, Processing: []Processing{}, Queue: []QueueTask{}, Logs: Logs{APIPath: input.APILogPath, WorkerPath: input.WorkerLogPath, API: apiLogs(input.APILogPath), Worker: workerLogs(input.WorkerLogPath)}}
 	if input.AssetVersionID == "" {
 		return a
 	}
@@ -143,6 +171,10 @@ func (c *Collector) Capture(ctx context.Context, input Input) Artifact {
 		a.CaptureError = "scan_query_failed"
 		return a
 	}
+	if a.Validations, err = c.validations(ctx, input.AssetVersionID); err != nil {
+		a.CaptureError = "validation_query_failed"
+		return a
+	}
 	if a.Processing, err = c.processing(ctx, input.AssetVersionID); err != nil {
 		a.CaptureError = "processing_query_failed"
 		return a
@@ -163,11 +195,26 @@ func (c *Collector) Capture(ctx context.Context, input Input) Artifact {
 
 func (c *Collector) asset(ctx context.Context, id string) (*Asset, error) {
 	var a Asset
-	err := c.db.QueryRow(ctx, `SELECT ma.id::text,mav.id::text,mav.kind::text,mav.state::text,mav.created_at,ui.id::text,ui.created_at,ui.completed_at FROM media_asset_versions mav JOIN media_assets ma ON ma.id=mav.logical_asset_id JOIN upload_intents ui ON ui.asset_version_id=mav.id WHERE mav.id=$1::uuid`, id).Scan(&a.AssetID, &a.AssetVersionID, &a.Kind, &a.State, &a.CreatedAt, &a.UploadID, &a.UploadCreatedAt, &a.UploadCompletedAt)
+	var scanned, validated bool
+	err := c.db.QueryRow(ctx, `SELECT ma.id::text,mav.id::text,mav.kind::text,mav.state::text,mav.created_at,ui.id::text,ui.created_at,ui.completed_at,mav.successful_scan_attempt_id IS NOT NULL,mav.successful_validation_attempt_id IS NOT NULL FROM media_asset_versions mav JOIN media_assets ma ON ma.id=mav.logical_asset_id JOIN upload_intents ui ON ui.asset_version_id=mav.id WHERE mav.id=$1::uuid`, id).Scan(&a.AssetID, &a.AssetVersionID, &a.Kind, &a.State, &a.CreatedAt, &a.UploadID, &a.UploadCreatedAt, &a.UploadCompletedAt, &scanned, &validated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
+	a.Provenance = provenance(scanned, validated)
 	return &a, err
+}
+
+func provenance(scanned, validated bool) string {
+	switch {
+	case scanned && validated:
+		return ProvenanceScanAndValidation
+	case scanned:
+		return ProvenanceMalwareScan
+	case validated:
+		return ProvenanceTrustedValidation
+	default:
+		return ProvenanceNone
+	}
 }
 func (c *Collector) work(ctx context.Context, id string) ([]Work, error) {
 	rows, err := c.db.Query(ctx, `SELECT e.id::text,e.event_type,e.occurred_at,e.available_at,d.dispatched_at FROM outbox_events e LEFT JOIN media_outbox_dispatches d ON d.event_id=e.id WHERE e.source_module='MEDIA_AND_ASSETS' AND e.aggregate_type='MEDIA_ASSET_VERSION' AND e.aggregate_id=$1::uuid AND e.event_type IN ('media.scan_requested','media.transcode_requested') ORDER BY e.occurred_at`, id)
@@ -201,6 +248,23 @@ func (c *Collector) scans(ctx context.Context, id string) ([]Scan, error) {
 	}
 	return out, rows.Err()
 }
+func (c *Collector) validations(ctx context.Context, id string) ([]Validation, error) {
+	rows, err := c.db.Query(ctx, `SELECT id::text,work_id,outcome::text,validator_identity,profile,validated_at FROM validation_attempts WHERE asset_version_id=$1::uuid ORDER BY validated_at`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Validation{}
+	for rows.Next() {
+		var v Validation
+		if err := rows.Scan(&v.ID, &v.WorkID, &v.Outcome, &v.Validator, &v.Profile, &v.ValidatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (c *Collector) processing(ctx context.Context, id string) ([]Processing, error) {
 	rows, err := c.db.Query(ctx, `SELECT id::text,operation_id,state::text,rendition_count,completed_at FROM processing_attempts WHERE asset_version_id=$1::uuid ORDER BY completed_at`, id)
 	if err != nil {

@@ -4,7 +4,10 @@ set -euo pipefail
 
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_COMPOSE_FILE="$S12_ROOT/deploy/compose/compose.production-like.yml"
-S12_ENV_FILE="$S12_ROOT/deploy/.state/production-like.env"
+S12_STATE_DIR="$S12_ROOT/deploy/.state"
+S12_ENV_FILE="$S12_STATE_DIR/production-like.env"
+S12_BACKUP_DIR="$S12_STATE_DIR/backups"
+S12_RESTORED_SCHEMA_STATE_FILE="$S12_BACKUP_DIR/restored-schema-state"
 S12_PROJECT="gradex-s12"
 
 note() { printf 's12-restore-verify: %s\n' "$*" >&2; }
@@ -28,6 +31,12 @@ service_id() {
 restore_id="$(service_id restore-postgres)"
 [ -n "$restore_id" ] || die "restore-postgres is absent"
 
+[ -s "$S12_RESTORED_SCHEMA_STATE_FILE" ] || die "restored schema provenance is absent"
+expected_schema_state="$(cat "$S12_RESTORED_SCHEMA_STATE_FILE")"
+[[ "$expected_schema_state" =~ ^[0-9]+\|false$ ]] ||
+  die "restored schema provenance is invalid: $expected_schema_state"
+expected_schema_result="${expected_schema_state/|/:}"
+
 result="$(docker exec "$restore_id" psql --no-psqlrc --tuples-only --no-align \
   --username gradex_restore --dbname gradex_restore --command "
     SELECT
@@ -42,8 +51,9 @@ result="$(docker exec "$restore_id" psql --no-psqlrc --tuples-only --no-align \
           AND source_invitation_id = '00000000-0000-4000-8000-00000000d001' AND state = 'ACTIVE'),
       (SELECT count(*) FROM enrollments WHERE id = '00000000-0000-4000-8000-00000000f001');")"
 
-[ "$result" = "15:false|3|1|1|1|1" ] || die "restored critical-record assertion failed: $result"
-note "schema, identity, invitation provenance, entitlement, and enrollment assertions passed"
+[ "$result" = "$expected_schema_result|3|1|1|1|1" ] ||
+  die "restored critical-record assertion failed: $result"
+note "schema $expected_schema_state, identity, invitation provenance, entitlement, and enrollment assertions passed"
 
 compose up --detach api-restore
 api_id="$(service_id api-restore)"

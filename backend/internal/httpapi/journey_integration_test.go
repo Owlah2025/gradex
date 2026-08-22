@@ -105,6 +105,7 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
 	admissionPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
+	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 	readPolicy := ratelimit.DevelopmentPolicySetReadPolicy()
 	admissionPolicies[readPolicy.Endpoint] = readPolicy
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()

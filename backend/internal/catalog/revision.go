@@ -92,26 +92,27 @@ type TaxonomyTerm struct {
 }
 
 type CourseRevision struct {
-	ID                    string        `json:"id"`
-	CourseID              string        `json:"course_id"`
-	BasedOnRevisionID     *string       `json:"based_on_revision_id,omitempty"`
-	State                 RevisionState `json:"state"`
-	RevisionNumber        int           `json:"revision_number"`
-	TitleAr               string        `json:"title_ar"`
-	TitleEn               string        `json:"title_en"`
-	DescriptionAr         string        `json:"description_ar"`
-	DescriptionEn         string        `json:"description_en"`
-	MajorTermID           *string       `json:"major_term_id,omitempty"`
-	SubjectTermID         *string       `json:"subject_term_id,omitempty"`
-	StudyYear             *StudyYear    `json:"study_year,omitempty"`
-	PreviewAssetVersionID *string       `json:"preview_asset_version_id,omitempty"`
-	SubmittedAt           *time.Time    `json:"submitted_at,omitempty"`
-	ReviewedAt            *time.Time    `json:"reviewed_at,omitempty"`
-	ReviewedByAccountID   *string       `json:"reviewed_by_account_id,omitempty"`
-	ReviewReason          *string       `json:"review_reason,omitempty"`
-	CreatedAt             time.Time     `json:"created_at"`
-	UpdatedAt             time.Time     `json:"updated_at"`
-	Sections              []Section     `json:"sections"`
+	ID                    string            `json:"id"`
+	CourseID              string            `json:"course_id"`
+	BasedOnRevisionID     *string           `json:"based_on_revision_id,omitempty"`
+	State                 RevisionState     `json:"state"`
+	RevisionNumber        int               `json:"revision_number"`
+	TitleAr               string            `json:"title_ar"`
+	TitleEn               string            `json:"title_en"`
+	DescriptionAr         string            `json:"description_ar"`
+	DescriptionEn         string            `json:"description_en"`
+	MajorTermID           *string           `json:"major_term_id,omitempty"`
+	SubjectTermID         *string           `json:"subject_term_id,omitempty"`
+	StudyYear             *StudyYear        `json:"study_year,omitempty"`
+	PreviewAssetVersionID *string           `json:"preview_asset_version_id,omitempty"`
+	SubmittedAt           *time.Time        `json:"submitted_at,omitempty"`
+	ReviewedAt            *time.Time        `json:"reviewed_at,omitempty"`
+	ReviewedByAccountID   *string           `json:"reviewed_by_account_id,omitempty"`
+	ReviewReason          *string           `json:"review_reason,omitempty"`
+	CreatedAt             time.Time         `json:"created_at"`
+	UpdatedAt             time.Time         `json:"updated_at"`
+	Audience              *RevisionAudience `json:"audience,omitempty"`
+	Sections              []Section         `json:"sections"`
 }
 
 func (r *CourseRevision) ValidateInvariants() error {

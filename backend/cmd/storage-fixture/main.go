@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/storage"
@@ -52,6 +53,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	usePathStyle, err := booleanEnvironment("S3_USE_PATH_STYLE", false)
+	if err != nil {
+		return err
+	}
 
 	body, err := io.ReadAll(io.LimitReader(os.Stdin, maxFixtureBytes+1))
 	if err != nil || len(body) == 0 || len(body) > maxFixtureBytes {
@@ -61,7 +66,7 @@ func run() error {
 	defer cancel()
 	client, err := storage.New(ctx, storage.Options{
 		Endpoint: endpoint, AccessKey: accessKey, SecretKey: secretKey,
-		Bucket: bucket, Region: "auto", UsePathStyle: false,
+		Bucket: bucket, Region: "auto", UsePathStyle: usePathStyle,
 	})
 	if err != nil {
 		return err
@@ -78,4 +83,16 @@ func requiredEnvironment(name string) (string, error) {
 		return "", fmt.Errorf("%s is required", name)
 	}
 	return value, nil
+}
+
+func booleanEnvironment(name string, fallback bool) (bool, error) {
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback, fmt.Errorf("%s must be a boolean, got %q", name, value)
+	}
+	return parsed, nil
 }

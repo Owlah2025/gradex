@@ -259,6 +259,54 @@ func mediaState(t *testing.T, pool *pgxpool.Pool, versionID string) AssetVersion
 	return state
 }
 
+func TestPublicPreviewUploadIsSeparateAndBoundToItsEditableCourseRevision(t *testing.T) {
+	f := newMediaFixture(t)
+	revisionID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'معاينة', 'Preview')`, revisionID, f.courseID); err != nil {
+		t.Fatal(err)
+	}
+
+	ticket, err := f.service.BeginUpload(f.ctx, UploadRequest{
+		OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: revisionID,
+		Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024,
+	})
+	if err != nil {
+		t.Fatalf("beginning revision-scoped preview upload: %v", err)
+	}
+	var kind, visibility string
+	var lessonID *string
+	var originRevisionID string
+	err = f.pool.QueryRow(f.ctx, `
+		SELECT ma.kind::text, ma.visibility::text, ma.lesson_id::text, ma.preview_origin_revision_id::text
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE mav.id = $1::uuid
+	`, ticket.AssetVersionID).Scan(&kind, &visibility, &lessonID, &originRevisionID)
+	if err != nil || kind != string(KindPreview) || visibility != "PUBLIC_PREVIEW" || lessonID != nil || originRevisionID != revisionID {
+		t.Fatalf("stored preview binding kind=%q visibility=%q lesson=%v origin=%q err=%v", kind, visibility, lessonID, originRevisionID, err)
+	}
+
+	for name, request := range map[string]UploadRequest{
+		"missing revision":  {OwnerAccountID: f.instructorID, CourseID: f.courseID, Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024},
+		"lesson relation":   {OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: revisionID, LessonID: uuid.NewString(), Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024},
+		"non-video preview": {OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: revisionID, Kind: KindPreview, ContentType: "application/pdf", SizeBytes: 1024},
+		"wrong owner":       {OwnerAccountID: f.adminID, CourseID: f.courseID, RevisionID: revisionID, Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024},
+		"other revision":    {OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: uuid.NewString(), Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := f.service.BeginUpload(f.ctx, request); err == nil {
+				t.Fatal("preview upload unexpectedly received an upload intent")
+			}
+		})
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE id = $1::uuid`, revisionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.service.BeginUpload(f.ctx, UploadRequest{OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: revisionID, Kind: KindPreview, ContentType: "video/mp4", SizeBytes: 1024}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("pending-review preview upload error=%v, want %v", err, ErrConflict)
+	}
+}
+
 func scanWorkID(t *testing.T, pool *pgxpool.Pool, versionID string, offset int) string {
 	t.Helper()
 	var workID string
@@ -787,8 +835,8 @@ func TestD7ConcurrentAdminRetryCreatesOneNewScanWork(t *testing.T) {
 	}
 }
 
-func TestD7CleanNonVideoKindsBecomeReadyAfterExactVersionScan(t *testing.T) {
-	for _, kind := range []AssetKind{KindResource, KindLabMaterial, KindPreview} {
+func TestD7CleanProtectedNonVideoKindsBecomeReadyAfterExactVersionScan(t *testing.T) {
+	for _, kind := range []AssetKind{KindResource, KindLabMaterial} {
 		t.Run(string(kind), func(t *testing.T) {
 			f := newMediaFixture(t)
 			request, _ := f.beginUpload(kind, "object-"+strings.ToLower(string(kind)))

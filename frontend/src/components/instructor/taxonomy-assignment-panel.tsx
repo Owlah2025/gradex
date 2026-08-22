@@ -84,7 +84,6 @@ export function TaxonomyAssignmentPanel() {
         <TaxonomyTermSelect kind="MAJOR" locale={locale} terms={terms} value={majorTermID} onChange={setMajorTermID} disabled={!revision?.id || busy} />
         <TaxonomyTermSelect kind="SUBJECT" locale={locale} terms={terms} value={subjectTermID} onChange={setSubjectTermID} disabled={!revision?.id || busy} />
       </div>
-      {revision?.id && <p className="mt-2 text-[11px] font-mono text-indigo-700 dark:text-indigo-300">revision_id: {revision.id}</p>}
       <button type="button" disabled={busy || !revision?.id} onClick={save} className="mt-4 rounded bg-indigo-700 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-800 disabled:opacity-50">
         {busy ? (isAr ? "جارٍ الحفظ..." : "Saving...") : (isAr ? "حفظ التصنيف" : "Save Taxonomy")}
       </button>

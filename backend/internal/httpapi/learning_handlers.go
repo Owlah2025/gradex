@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -43,7 +44,17 @@ type learningProgressResponse struct {
 }
 
 type learningMaterialResponse struct {
-	Kind media.MaterialKind `json:"kind"`
+	Title                     string `json:"title"`
+	FileType                  string `json:"file_type"`
+	SizeBytes                 int64  `json:"size_bytes"`
+	DownloadAuthorizationPath string `json:"download_authorization_path"`
+}
+
+// learningMaterialCollections keeps the resource/lab domain split in the
+// Student contract without serializing the internal media-kind enum.
+type learningMaterialCollections struct {
+	Resources    []learningMaterialResponse `json:"resources"`
+	LabMaterials []learningMaterialResponse `json:"lab_materials"`
 }
 
 type learningCourseProgressResponse struct {
@@ -60,15 +71,29 @@ type dashboardCourseResponse struct {
 	Progress       learningCourseProgressResponse `json:"progress"`
 }
 
+// dashboardResumeResponse is the single "continue learning" target, or absent when the Student has
+// nothing left to continue. Identifiers are for building the link; the titles are what is shown.
+type dashboardResumeResponse struct {
+	CourseID    string `json:"course_id"`
+	CourseTitle string `json:"course_title"`
+	LessonID    string `json:"lesson_id"`
+	LessonTitle string `json:"lesson_title"`
+	// True when the Student has already watched part of this Lesson, so the surface can say
+	// "continue" rather than "start". Playback position stays the Lesson Player's business.
+	Started bool `json:"started"`
+}
+
 type dashboardResponse struct {
 	Courses []dashboardCourseResponse `json:"courses"`
+	Resume  *dashboardResumeResponse  `json:"resume,omitempty"`
 }
 
 type courseHomeLessonResponse struct {
-	LessonID  string                     `json:"lesson_id"`
-	Title     string                     `json:"title"`
-	Progress  learningProgressResponse   `json:"progress"`
-	Materials []learningMaterialResponse `json:"materials"`
+	LessonID     string                     `json:"lesson_id"`
+	Title        string                     `json:"title"`
+	Progress     learningProgressResponse   `json:"progress"`
+	Resources    []learningMaterialResponse `json:"resources"`
+	LabMaterials []learningMaterialResponse `json:"lab_materials"`
 }
 
 type courseHomeSectionResponse struct {
@@ -118,7 +143,8 @@ type lessonResponse struct {
 	ExpiresAt      *time.Time                 `json:"expires_at"`
 	Progress       learningProgressResponse   `json:"progress"`
 	Navigation     lessonNavigationResponse   `json:"navigation"`
-	Materials      []learningMaterialResponse `json:"materials"`
+	Resources      []learningMaterialResponse `json:"resources"`
+	LabMaterials   []learningMaterialResponse `json:"lab_materials"`
 	ReportContexts *lessonReportContexts      `json:"report_contexts,omitempty"`
 }
 
@@ -173,7 +199,63 @@ func (h *learningHandlers) dashboard(c *gin.Context) {
 		writeProtectedUnavailable(c)
 		return
 	}
-	writeLearningJSON(c, h.dashboardReadModel(c, summaries, decisions))
+	candidates, err := h.foundation.readRepository.ListStudentResumeCandidates(c.Request.Context(), studentID)
+	if err != nil {
+		h.logDenial(c, entitlement.ReasonDependency)
+		writeProtectedUnavailable(c)
+		return
+	}
+	model := h.dashboardReadModel(c, summaries, decisions)
+	model.Resume = h.resumeReadModel(c, summaries, candidates, decisions)
+	writeLearningJSON(c, model)
+}
+
+// resumeReadModel picks the first candidate the Student may still read.
+//
+// Candidates arrive already ordered, but enrollment and Progress outlive access, so a Course whose
+// entitlement expired or was revoked is still in the list. The authoritative evaluator decides:
+// only `ReadActive` survives, which is the same decision that governs the protected reads
+// themselves. An expired Course therefore keeps its retained history without ever producing a
+// "continue" pointer the Student could not follow.
+func (h *learningHandlers) resumeReadModel(
+	c *gin.Context,
+	summaries []learning.StudentCourseSummary,
+	candidates []learning.ResumeCandidate,
+	decisions map[string]entitlement.ReadDecision,
+) *dashboardResumeResponse {
+	for _, candidate := range candidates {
+		decision, ok := decisions[candidate.CourseID]
+		if !ok || !decision.CourseWide || decision.State != entitlement.ReadActive {
+			continue
+		}
+		courseTitle, ok := courseTitleFor(c, summaries, candidate.CourseID)
+		if !ok {
+			// The Course is readable but absent from the summaries — nothing to name it with, so
+			// no pointer rather than a half-labelled one.
+			continue
+		}
+		return &dashboardResumeResponse{
+			CourseID:    candidate.CourseID,
+			CourseTitle: courseTitle,
+			LessonID:    candidate.LessonID,
+			LessonTitle: localizedLearningTitle(c, candidate.TitleAr, candidate.TitleEn),
+			Started:     candidate.LastWatchedAt != nil,
+		}
+	}
+	return nil
+}
+
+func courseTitleFor(
+	c *gin.Context,
+	summaries []learning.StudentCourseSummary,
+	courseID string,
+) (string, bool) {
+	for _, summary := range summaries {
+		if summary.CourseID == courseID {
+			return localizedLearningTitle(c, summary.TitleAr, summary.TitleEn), true
+		}
+	}
+	return "", false
 }
 
 func (h *learningHandlers) dashboardReadModel(c *gin.Context, summaries []learning.StudentCourseSummary, decisions map[string]entitlement.ReadDecision) dashboardResponse {
@@ -291,19 +373,20 @@ func courseHomeReadModel(c *gin.Context, graph learning.CourseGraph, decision en
 		Progress: courseProgressResponse(summary), Sections: make([]courseHomeSectionResponse, 0, len(graph.Sections)),
 	}
 	for _, section := range graph.Sections {
-		response.Sections = append(response.Sections, courseHomeSectionReadModel(c, section, progressByLesson, materialKinds))
+		response.Sections = append(response.Sections, courseHomeSectionReadModel(c, graph.CourseID, section, progressByLesson, materialKinds))
 	}
 	return response
 }
 
-func courseHomeSectionReadModel(c *gin.Context, section learning.CourseGraphSection, progressByLesson map[string]learning.Progress, materialKinds map[string][]media.Material) courseHomeSectionResponse {
+func courseHomeSectionReadModel(c *gin.Context, courseID string, section learning.CourseGraphSection, progressByLesson map[string]learning.Progress, materialKinds map[string][]media.Material) courseHomeSectionResponse {
 	response := courseHomeSectionResponse{SectionID: section.ID, Title: localizedLearningTitle(c, section.TitleAr, section.TitleEn), Lessons: make([]courseHomeLessonResponse, 0, len(section.Lessons))}
 	for _, lesson := range section.Lessons {
 		progress := progressByLesson[lesson.ID]
+		materials := materialResponses(c, courseID, lesson.ID, materialKinds[lesson.ID])
 		response.Lessons = append(response.Lessons, courseHomeLessonResponse{
 			LessonID: lesson.ID, Title: localizedLearningTitle(c, lesson.TitleAr, lesson.TitleEn),
 			Progress:  learningProgressResponse{PositionSeconds: progress.LastPositionSeconds, Completed: progress.Completed},
-			Materials: materialResponses(materialKinds[lesson.ID]),
+			Resources: materials.Resources, LabMaterials: materials.LabMaterials,
 		})
 	}
 	return response
@@ -349,13 +432,14 @@ func (h *learningHandlers) lesson(c *gin.Context) {
 			return
 		}
 	}
+	materials := materialResponses(c, graph.CourseID, lessonID, materialKinds[lessonID])
 	response := lessonResponse{
 		CourseID: graph.CourseID, LessonID: selected.ID,
 		Section: lessonSectionResponse{SectionID: section.ID, Title: localizedLearningTitle(c, section.TitleAr, section.TitleEn)},
 		Title:   localizedLearningTitle(c, selected.TitleAr, selected.TitleEn), LearningStatus: presentationLearningStatus(decision),
 		ExpiresAt: utcTimePtr(decision.ExpiresAt), Progress: learningProgressResponse{PositionSeconds: progress.LastPositionSeconds, Completed: progress.Completed},
 		Navigation: lessonNavigationResponse{PreviousLessonID: previousID, NextLessonID: nextID},
-		Materials:  materialResponses(materialKinds[lessonID]),
+		Resources:  materials.Resources, LabMaterials: materials.LabMaterials,
 	}
 
 	if decision.State == entitlement.ReadActive {
@@ -410,19 +494,65 @@ func (h *learningHandlers) lesson(c *gin.Context) {
 	writeLearningJSON(c, response)
 }
 
-// materialResponses exposes only the kind. The exact Asset Version each material resolved to stays
-// internal: it feeds report-context minting and never the public contract.
-func materialResponses(materials []media.Material) []learningMaterialResponse {
-	response := make([]learningMaterialResponse, 0, len(materials))
-	for _, kind := range []media.MaterialKind{media.MaterialResource, media.MaterialLabMaterial} {
-		for _, available := range materials {
-			if available.Kind == kind {
-				response = append(response, learningMaterialResponse{Kind: kind})
-				break
-			}
+// materialResponses projects only Student-useful metadata. File and storage
+// identities stay server-side; the opaque same-origin path still revalidates
+// live-graph membership and entitlement when the Student asks to download.
+func materialResponses(c *gin.Context, courseID, lessonID string, materials []media.Material) learningMaterialCollections {
+	response := learningMaterialCollections{
+		Resources: make([]learningMaterialResponse, 0), LabMaterials: make([]learningMaterialResponse, 0),
+	}
+	for _, available := range materials {
+		item := learningMaterialResponse{
+			Title:    localizedLearningTitle(c, available.DisplayNameAr, available.DisplayNameEn),
+			FileType: localizedLearningFileType(c, available.ContentType), SizeBytes: available.SizeBytes,
+			DownloadAuthorizationPath: materialDownloadAuthorizationPath(courseID, lessonID, available.FileID),
+		}
+		switch available.Kind {
+		case media.MaterialResource:
+			response.Resources = append(response.Resources, item)
+		case media.MaterialLabMaterial:
+			response.LabMaterials = append(response.LabMaterials, item)
 		}
 	}
 	return response
+}
+
+func materialDownloadAuthorizationPath(courseID, lessonID, fileID string) string {
+	// Frontend authenticatedRequest owns the /api/v1 prefix. This is an
+	// opaque API-relative route, never a storage URL, and keeps the normal
+	// browser client from accidentally constructing /api/v1/api/v1/....
+	return "/media/courses/" + url.PathEscape(courseID) + "/lessons/" + url.PathEscape(lessonID) +
+		"/materials/" + url.PathEscape(fileID) + "/download-authorizations"
+}
+
+func localizedLearningFileType(c *gin.Context, contentType string) string {
+	isEnglish := strings.HasPrefix(strings.ToLower(c.GetHeader("Accept-Language")), "en")
+	switch contentType {
+	case "application/pdf":
+		return "PDF"
+	case media.ContentTypeDOCX:
+		return "DOCX"
+	case "application/zip":
+		return "ZIP"
+	case "application/x-7z-compressed":
+		return "7Z"
+	case "image/jpeg":
+		return "JPEG"
+	case "image/png":
+		return "PNG"
+	case "image/webp":
+		return "WebP"
+	case "text/markdown":
+		if isEnglish {
+			return "Markdown"
+		}
+		return "ماركداون"
+	default:
+		if isEnglish {
+			return "File"
+		}
+		return "ملف"
+	}
 }
 
 // materialVersion returns the exact Asset Version the visible graph resolved for one kind, or "".

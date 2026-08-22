@@ -62,6 +62,7 @@ type deliveryFixture struct {
 	resource     string
 	lab          string
 	preview      string
+	revision     string
 	store        *signedDeliveryStore
 	delivery     *DeliveryService
 	now          time.Time
@@ -80,6 +81,7 @@ func newDeliveryFixture(t *testing.T) *deliveryFixture {
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, 'APPROVED', 1, 'دورة', 'Course')`, revision, f.courseID); err != nil {
 		t.Fatal(err)
 	}
+	f.revision = revision
 	sectionRow := uuid.NewString()
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_section_identities (id, course_id) VALUES ($1::uuid, $2::uuid)`, f.section, f.courseID); err != nil {
 		t.Fatal(err)
@@ -131,10 +133,19 @@ func (f *deliveryFixture) readyAsset(kind AssetKind, outputKey string) string {
 	f.t.Helper()
 	assetID, versionID, scanID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	key := "quarantine/" + f.courseID + "/" + versionID + "/source"
-	if _, err := f.pool.Exec(f.ctx, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility) VALUES ($1::uuid, $2::media_asset_kind, $3::uuid, $4::uuid, $5::uuid, $6::media_asset_visibility)`, assetID, kind, f.instructorID, f.courseID, f.lesson, visibilityForKind(kind)); err != nil {
+	var lessonID, previewOriginRevisionID any = f.lesson, nil
+	if kind == KindPreview {
+		lessonID = nil
+		previewOriginRevisionID = f.revision
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, preview_origin_revision_id, visibility) VALUES ($1::uuid, $2::media_asset_kind, $3::uuid, $4::uuid, $5::uuid, $6::uuid, $7::media_asset_visibility)`, assetID, kind, f.instructorID, f.courseID, lessonID, previewOriginRevisionID, visibilityForKind(kind)); err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, $3::media_asset_kind, 'QUARANTINED', $4, 'v1', 'application/pdf', 12)`, versionID, assetID, kind, key); err != nil {
+	contentType := "application/pdf"
+	if kind == KindVideo || kind == KindPreview {
+		contentType = "video/mp4"
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes) VALUES ($1::uuid, $2::uuid, $3::media_asset_kind, 'QUARANTINED', $4, 'v1', $5, 12)`, versionID, assetID, kind, key, contentType); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity) VALUES ($1::uuid, $2::uuid, 1, $3, 'v1', 'PASSED', 'fixture')`, scanID, versionID, "scan:"+versionID); err != nil {
@@ -168,6 +179,14 @@ func (f *deliveryFixture) readyAsset(kind AssetKind, outputKey string) string {
 	return versionID
 }
 
+func (f *deliveryFixture) readyPreviewForRevision(revisionID string) string {
+	f.t.Helper()
+	previous := f.revision
+	f.revision = revisionID
+	defer func() { f.revision = previous }()
+	return f.readyAsset(KindPreview, "preview/"+revisionID+"/source.mp4")
+}
+
 func (f *deliveryFixture) seedGrant(id string, scope entitlement.ScopeKind, scopeID string, ends time.Time) {
 	f.t.Helper()
 	invID := uuid.NewString()
@@ -177,6 +196,21 @@ func (f *deliveryFixture) seedGrant(id string, scope entitlement.ScopeKind, scop
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO entitlements (id, student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state) VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, 'MANUAL_INVITATION', $6::uuid, $7, $7, $8, 'ACTIVE')`, id, f.student, scope, scopeID, f.courseID, invID, ends, f.now.Add(-time.Hour)); err != nil {
 		f.t.Fatal(err)
 	}
+}
+
+func (f *deliveryFixture) studentLearningFacts() [3]int {
+	f.t.Helper()
+	var facts [3]int
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM entitlements WHERE student_account_id = $1::uuid AND course_id = $2::uuid`, f.student, f.courseID).Scan(&facts[0]); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM enrollments WHERE student_account_id = $1::uuid AND course_id = $2::uuid`, f.student, f.courseID).Scan(&facts[1]); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM progress p JOIN enrollments e ON e.id = p.enrollment_id WHERE e.student_account_id = $1::uuid AND e.course_id = $2::uuid`, f.student, f.courseID).Scan(&facts[2]); err != nil {
+		f.t.Fatal(err)
+	}
+	return facts
 }
 
 func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *testing.T) {
@@ -341,6 +375,179 @@ func TestD064StableMaterialEntryResolvesCurrentVersionAndRechecksAuthority(t *te
 	}
 }
 
+func TestST15LessonFileDownloadProjectsEveryLiveAttachmentAndPreservesRevisionIsolation(t *testing.T) {
+	f := newDeliveryFixture(t)
+	fileID := func(assetVersionID string) string {
+		var id string
+		if err := f.pool.QueryRow(f.ctx, `
+			SELECT lf.id::text
+			FROM lesson_files lf
+			JOIN course_lessons cl ON cl.id = lf.lesson_id
+			JOIN course_sections cs ON cs.id = cl.section_id
+			WHERE cs.revision_id = $1::uuid AND lf.asset_version_id = $2::uuid
+		`, f.revision, assetVersionID).Scan(&id); err != nil {
+			t.Fatalf("finding lesson file for %s: %v", assetVersionID, err)
+		}
+		return id
+	}
+	resourceAFile, labAFile := fileID(f.resource), fileID(f.lab)
+
+	// The Student can select each distinct live attachment. A duplicate display
+	// name is not an identity: the attachment relationship selects the bytes.
+	resourceExtra := f.readyAsset(KindResource, "resource/extra.pdf")
+	var liveLessonRow string
+	if err := f.pool.QueryRow(f.ctx, `SELECT id::text FROM course_lessons WHERE lesson_identity_id = $1::uuid AND course_id = $2::uuid`, f.lesson, f.courseID).Scan(&liveLessonRow); err != nil {
+		t.Fatalf("finding live lesson row: %v", err)
+	}
+	var resourceExtraFile string
+	if err := f.pool.QueryRow(f.ctx, `
+		INSERT INTO lesson_files (lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position)
+		VALUES ($1::uuid, 'RESOURCE', $2::uuid, 'مرجع', 'Resource', 1) RETURNING id::text
+	`, liveLessonRow, resourceExtra).Scan(&resourceExtraFile); err != nil {
+		t.Fatalf("adding second live resource: %v", err)
+	}
+	for name, request := range map[string]LessonFileDownloadRequest{
+		"resource A":              {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceAFile, Locale: "en"},
+		"resource duplicate-name": {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceExtraFile, Locale: "ar"},
+		"lab":                     {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: labAFile, Locale: "en"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			issued, err := f.delivery.IssueLessonFileDownload(f.ctx, request)
+			if err != nil || issued.URL == "" || issued.ExpiresAt.Sub(f.now) != 5*time.Minute {
+				t.Fatalf("issuance=%+v err=%v", issued, err)
+			}
+			if request.FileID == labAFile {
+				if issued.BuyerTag == "" || strings.Contains(issued.BuyerTag, f.student) || strings.Contains(issued.BuyerTag, f.studentEmail) {
+					t.Fatalf("Lab Material buyer tag=%q, want opaque non-empty tag", issued.BuyerTag)
+				}
+			} else if issued.BuyerTag != "" {
+				t.Fatalf("Resource issuance included a Lab buyer tag: %q", issued.BuyerTag)
+			}
+		})
+	}
+	for name, studentID := range map[string]string{
+		"anonymous":  "",
+		"unentitled": uuid.NewString(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			issued, err := f.delivery.IssueLessonFileDownload(f.ctx, LessonFileDownloadRequest{
+				StudentID: studentID, CourseID: f.courseID, LessonID: f.lesson, FileID: labAFile, Locale: "en",
+			})
+			if !errors.Is(err, ErrProtectedUnavailable) || issued.BuyerTag != "" {
+				t.Fatalf("denied Lab authorization=%+v err=%v, want unavailable without buyer tag", issued, err)
+			}
+		})
+	}
+	materials, err := f.delivery.MaterialKinds(f.ctx, []string{f.lesson})
+	if err != nil || len(materials[f.lesson]) != 3 {
+		t.Fatalf("materials=%+v err=%v, want both Resources and Lab Material", materials, err)
+	}
+	if got := materials[f.lesson][0]; got.DisplayNameEn != "Resource" || got.ContentType != "application/pdf" || got.SizeBytes != 12 || got.FileID == "" {
+		t.Fatalf("resource projection=%+v", got)
+	}
+
+	// Candidate B carries replacement Resource and Lab attachments, but both
+	// fail closed until B becomes the Course's approved live revision.
+	candidateB, candidateBLesson := seedST15CandidateRevision(t, f, "DRAFT")
+	resourceB := f.readyAsset(KindResource, "resource/b.pdf")
+	labB := f.readyAsset(KindLabMaterial, "lab/b.zip")
+	var resourceBFile, labBFile string
+	for _, attachment := range []struct {
+		kind, asset, nameAr, nameEn string
+		destination                 *string
+	}{
+		{string(KindResource), resourceB, "مرجع ب", "Resource B", &resourceBFile},
+		{string(KindLabMaterial), labB, "مختبر ب", "Lab B", &labBFile},
+	} {
+		if err := f.pool.QueryRow(f.ctx, `
+			INSERT INTO lesson_files (lesson_id, kind, asset_version_id, display_name_ar, display_name_en, position)
+			VALUES ($1::uuid, $2::lesson_file_kind, $3::uuid, $4, $5, 0) RETURNING id::text
+		`, candidateBLesson, attachment.kind, attachment.asset, attachment.nameAr, attachment.nameEn).Scan(attachment.destination); err != nil {
+			t.Fatalf("adding candidate attachment %s: %v", attachment.kind, err)
+		}
+	}
+	for name, request := range map[string]LessonFileDownloadRequest{
+		"candidate resource": {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceBFile, Locale: "en"},
+		"candidate lab":      {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: labBFile, Locale: "en"},
+		"wrong course":       {StudentID: f.student, CourseID: uuid.NewString(), LessonID: f.lesson, FileID: resourceAFile, Locale: "en"},
+		"wrong lesson":       {StudentID: f.student, CourseID: f.courseID, LessonID: uuid.NewString(), FileID: resourceAFile, Locale: "en"},
+		"unknown attachment": {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: uuid.NewString(), Locale: "en"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := f.delivery.IssueLessonFileDownload(f.ctx, request); !errors.Is(err, ErrProtectedUnavailable) {
+				t.Fatalf("candidate/inventory probe error=%v, want %v", err, ErrProtectedUnavailable)
+			}
+		})
+	}
+	if _, err := f.delivery.IssueLessonFileDownload(f.ctx, LessonFileDownloadRequest{StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceAFile, Locale: "en"}); err != nil {
+		t.Fatalf("live A stopped serving while B was a candidate: %v", err)
+	}
+
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'APPROVED' WHERE id = $1::uuid`, candidateB); err != nil {
+		t.Fatalf("approving candidate B: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, candidateB, f.courseID); err != nil {
+		t.Fatalf("activating candidate B: %v", err)
+	}
+	for name, request := range map[string]LessonFileDownloadRequest{
+		"resource B": {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceBFile, Locale: "en"},
+		"lab B":      {StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: labBFile, Locale: "en"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := f.delivery.IssueLessonFileDownload(f.ctx, request); err != nil {
+				t.Fatalf("approved candidate B not deliverable: %v", err)
+			}
+		})
+	}
+	if _, err := f.delivery.IssueLessonFileDownload(f.ctx, LessonFileDownloadRequest{StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: resourceAFile, Locale: "en"}); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("superseded resource A error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+
+	// Candidate C removes both rows. B remains live until C is approved, then
+	// neither superseded attachment is selectable through the current graph.
+	candidateC, _ := seedST15CandidateRevision(t, f, "DRAFT")
+	if _, err := f.delivery.IssueLessonFileDownload(f.ctx, LessonFileDownloadRequest{StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: labBFile, Locale: "en"}); err != nil {
+		t.Fatalf("live B stopped serving while C was a candidate: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'APPROVED' WHERE id = $1::uuid`, candidateC); err != nil {
+		t.Fatalf("approving candidate C: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, candidateC, f.courseID); err != nil {
+		t.Fatalf("activating candidate C: %v", err)
+	}
+	for _, fileID := range []string{resourceBFile, labBFile} {
+		if _, err := f.delivery.IssueLessonFileDownload(f.ctx, LessonFileDownloadRequest{StudentID: f.student, CourseID: f.courseID, LessonID: f.lesson, FileID: fileID, Locale: "en"}); !errors.Is(err, ErrProtectedUnavailable) {
+			t.Fatalf("removed approved attachment %s error=%v, want %v", fileID, err, ErrProtectedUnavailable)
+		}
+	}
+}
+
+func seedST15CandidateRevision(t *testing.T, f *deliveryFixture, state string) (revisionID, lessonRowID string) {
+	t.Helper()
+	revisionID, lessonRowID = uuid.NewString(), uuid.NewString()
+	sectionRowID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_revisions (id, course_id, state, revision_number, based_on_revision_id, title_ar, title_en)
+		SELECT $1::uuid, course_id, $2, revision_number + 1, id, title_ar, title_en
+		FROM course_revisions WHERE id = (SELECT live_revision_id FROM courses WHERE id = $3::uuid)
+	`, revisionID, state, f.courseID); err != nil {
+		t.Fatalf("creating candidate revision: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم', 'Section', 0)
+	`, sectionRowID, revisionID, f.courseID, f.section); err != nil {
+		t.Fatalf("creating candidate section: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس', 'Lesson', 0)
+	`, lessonRowID, sectionRowID, f.courseID, f.section, f.lesson); err != nil {
+		t.Fatalf("creating candidate lesson: %v", err)
+	}
+	return revisionID, lessonRowID
+}
+
 func TestD064MaterialKindsBulkReadExposesOnlyCurrentReadyKinds(t *testing.T) {
 	f := newDeliveryFixture(t)
 	unknownLesson := uuid.NewString()
@@ -486,12 +693,72 @@ func TestD8DownloadsTagOnlyLabMaterialAndNeverExposeStudentPII(t *testing.T) {
 
 func TestD8PublicPreviewIsExactPublishedReadyAndPrivateOutsideSigning(t *testing.T) {
 	f := newDeliveryFixture(t)
+	factsBefore := f.studentLearningFacts()
 	preview, err := f.delivery.IssuePreview(f.ctx, f.preview)
 	if err != nil || preview.AssetVersionID != f.preview {
 		t.Fatalf("published preview=%+v err=%v", preview, err)
 	}
 	if _, err := f.delivery.IssuePreview(f.ctx, f.video); err == nil {
 		t.Fatal("protected Lesson video was reachable through public preview")
+	}
+	if coursePreview, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); err != nil || coursePreview.AssetVersionID != f.preview {
+		t.Fatalf("course-scoped preview=%+v err=%v", coursePreview, err)
+	}
+	if factsAfter := f.studentLearningFacts(); factsAfter != factsBefore {
+		t.Fatalf("public preview mutated entitlement, enrollment, or progress: before=%v after=%v", factsBefore, factsAfter)
+	}
+	if _, err := f.delivery.IssueCoursePreview(f.ctx, uuid.NewString()); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("another Course preview error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+
+	candidateB := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, $3::uuid, 'DRAFT', 2, 'ب', 'B')`, candidateB, f.courseID, f.revision); err != nil {
+		t.Fatal(err)
+	}
+	previewB := f.readyPreviewForRevision(candidateB)
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, previewB, candidateB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.IssuePreview(f.ctx, previewB); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("candidate preview error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if coursePreview, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); err != nil || coursePreview.AssetVersionID != f.preview {
+		t.Fatalf("candidate B leaked through course endpoint=%+v err=%v", coursePreview, err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'SUPERSEDED' WHERE id = $1::uuid`, f.revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'APPROVED' WHERE id = $1::uuid`, candidateB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, candidateB, f.courseID); err != nil {
+		t.Fatal(err)
+	}
+	if coursePreview, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); err != nil || coursePreview.AssetVersionID != previewB {
+		t.Fatalf("approved B course preview=%+v err=%v", coursePreview, err)
+	}
+	if _, err := f.delivery.IssuePreview(f.ctx, f.preview); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("superseded A preview remained authorized: %v", err)
+	}
+
+	candidateC := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, $3::uuid, 'DRAFT', 3, 'ج', 'C')`, candidateC, f.courseID, candidateB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'SUPERSEDED' WHERE id = $1::uuid`, candidateB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'APPROVED' WHERE id = $1::uuid`, candidateC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET live_revision_id = $1::uuid WHERE id = $2::uuid`, candidateC, f.courseID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("approved no-preview revision issued a preview: %v", err)
+	}
+	if _, err := f.delivery.IssuePreview(f.ctx, previewB); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("removed preview handle remained authorized: %v", err)
 	}
 	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET lifecycle = 'DRAFT' WHERE id = $1::uuid`, f.courseID); err != nil {
 		t.Fatal(err)

@@ -19,6 +19,7 @@ import {
 import { getPublicCourses } from "@/lib/api/public-catalog";
 import { ProblemError } from "@/lib/api/problem";
 import { PublishedCourseSelector } from "@/components/admin/published-course-selector";
+import { PurchaseRequestsPanel } from "@/components/admin/purchase-requests";
 import {
   buildPublishedCourseOptions,
   findPublishedCourse,
@@ -30,7 +31,12 @@ function getProblemErrorMessage(e: unknown, fallback: string): string {
   if (e instanceof ProblemError) {
     return e.problem.detail || e.problem.title || fallback;
   }
-  if (e && typeof e === "object" && "message" in e && typeof e.message === "string") {
+  if (
+    e &&
+    typeof e === "object" &&
+    "message" in e &&
+    typeof e.message === "string"
+  ) {
     return e.message;
   }
   return fallback;
@@ -45,7 +51,9 @@ export default function AdminCourseAccessPage() {
 
   // The one Course context both Admin operations act on. The Admin picks a
   // published Course by title; the identifier below is never typed by hand.
-  const [courseOptions, setCourseOptions] = useState<PublishedCourseOption[]>([]);
+  const [courseOptions, setCourseOptions] = useState<PublishedCourseOption[]>(
+    [],
+  );
   const [coursesLoading, setCoursesLoading] = useState<boolean>(true);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
@@ -69,7 +77,9 @@ export default function AdminCourseAccessPage() {
   // Modal state: Entitlement Detail — the AD07 surface. It is where an
   // existing grant is inspected and, under BR-026, extended, shortened, or
   // revoked. The Admin reaches it from a queue row, never by identifier.
-  const [detailModal, setDetailModal] = useState<AdminEntitlementDetail | null>(null);
+  const [detailModal, setDetailModal] = useState<AdminEntitlementDetail | null>(
+    null,
+  );
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailNotice, setDetailNotice] = useState<string | null>(null);
@@ -111,17 +121,24 @@ export default function AdminCourseAccessPage() {
         getPublicCourses(locale),
         getPublicCourses(alternateLocale).catch(() => null),
       ]);
-      const options = buildPublishedCourseOptions(primary.items ?? [], alternate?.items ?? []);
+      const options = buildPublishedCourseOptions(
+        primary.items ?? [],
+        alternate?.items ?? [],
+      );
       setCourseOptions(options);
       // A Course that left the published catalogue must not stay silently
       // selected under a stale label.
       setSelectedCourseId((current) =>
-        current && options.some((option) => option.id === current) ? current : "",
+        current && options.some((option) => option.id === current)
+          ? current
+          : "",
       );
     } catch (e: unknown) {
       setCourseOptions([]);
       setSelectedCourseId("");
-      setCoursesError(getProblemErrorMessage(e, "Failed to load published Courses"));
+      setCoursesError(
+        getProblemErrorMessage(e, "Failed to load published Courses"),
+      );
     } finally {
       setCoursesLoading(false);
     }
@@ -136,7 +153,8 @@ export default function AdminCourseAccessPage() {
   }, [fetchCourses]);
 
   const selectedCourse = findPublishedCourse(courseOptions, selectedCourseId);
-  const courseLabel = (courseID: string): string => invitationCourseLabel(courseOptions, courseID);
+  const courseLabel = (courseID: string): string =>
+    invitationCourseLabel(courseOptions, courseID);
 
   const handleSetExpiry = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,14 +163,21 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await setCourseDefaultAccessExpiry(selectedCourseId, expiryDate, expiryReason, locale);
+      await setCourseDefaultAccessExpiry(
+        selectedCourseId,
+        expiryDate,
+        expiryReason,
+        locale,
+      );
       setSuccess(
         `Default access expiry configured for ${selectedCourse?.title ?? courseLabel(selectedCourseId)}`,
       );
       setExpiryDate("");
       setExpiryReason("");
     } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Failed to set default access expiry"));
+      setError(
+        getProblemErrorMessage(err, "Failed to set default access expiry"),
+      );
     } finally {
       setExpirySubmitting(false);
     }
@@ -215,7 +240,11 @@ export default function AdminCourseAccessPage() {
     setError(null);
     setSuccess(null);
     try {
-      await rejectCourseAccessInvitation(rejectingInvId, rejectReason.trim(), locale);
+      await rejectCourseAccessInvitation(
+        rejectingInvId,
+        rejectReason.trim(),
+        locale,
+      );
       setSuccess(`Invitation ${rejectingInvId} rejected.`);
       setRejectingInvId(null);
       setRejectReason("");
@@ -244,7 +273,9 @@ export default function AdminCourseAccessPage() {
     setSuccess(null);
     try {
       await resendCourseAccessInvitation(id, locale);
-      setSuccess(`New acceptance link generated and queued for invitation ${id}.`);
+      setSuccess(
+        `New acceptance link generated and queued for invitation ${id}.`,
+      );
       fetchInvitations();
     } catch (err: unknown) {
       setError(getProblemErrorMessage(err, "Resend failed"));
@@ -271,7 +302,9 @@ export default function AdminCourseAccessPage() {
         setDetailModal(detail);
       }
     } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Failed to load entitlement details"));
+      setError(
+        getProblemErrorMessage(err, "Failed to load entitlement details"),
+      );
     } finally {
       setDetailLoading(false);
     }
@@ -289,7 +322,8 @@ export default function AdminCourseAccessPage() {
    */
   const handleAdjustExpiry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!detailModal || !adjustDate || !adjustReason.trim() || detailBusy) return;
+    if (!detailModal || !adjustDate || !adjustReason.trim() || detailBusy)
+      return;
     setDetailBusy(true);
     setDetailError(null);
     setDetailNotice(null);
@@ -313,7 +347,9 @@ export default function AdminCourseAccessPage() {
       setAdjustSupportRef("");
       fetchInvitations();
     } catch (err: unknown) {
-      setDetailError(getProblemErrorMessage(err, "Failed to update access expiry"));
+      setDetailError(
+        getProblemErrorMessage(err, "Failed to update access expiry"),
+      );
     } finally {
       setDetailBusy(false);
     }
@@ -321,7 +357,8 @@ export default function AdminCourseAccessPage() {
 
   const handleRevokeEntitlement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!detailModal || !revokeReason.trim() || !revokeConfirming || detailBusy) return;
+    if (!detailModal || !revokeReason.trim() || !revokeConfirming || detailBusy)
+      return;
     setDetailBusy(true);
     setDetailError(null);
     setDetailNotice(null);
@@ -336,7 +373,9 @@ export default function AdminCourseAccessPage() {
         locale,
       );
       if (updated) setDetailModal(updated);
-      setDetailNotice("Course access revoked. Enrollment and progress records are retained.");
+      setDetailNotice(
+        "Course access revoked. Enrollment and progress records are retained.",
+      );
       setRevokeReason("");
       setRevokeSupportRef("");
       setRevokeConfirming(false);
@@ -351,23 +390,34 @@ export default function AdminCourseAccessPage() {
   return (
     <main id="main" className="max-w-7xl mx-auto p-6 space-y-8">
       <div className="border-b pb-4">
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Course Access Management</h1>
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+          Course Access Management
+        </h1>
         <p className="text-sm text-gray-600 mt-1">
-          Configure course default access expiry, issue manual course invitations, approve pending grants, and manage entitlement records.
+          Configure course default access expiry, issue manual course
+          invitations, approve pending grants, and manage entitlement records.
         </p>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-800 rounded-md p-4 text-sm" role="alert">
+        <div
+          className="bg-red-50 border border-red-200 text-red-800 rounded-md p-4 text-sm"
+          role="alert"
+        >
           <strong>Error:</strong> {error}
         </div>
       )}
 
       {success && (
-        <div className="bg-green-50 border border-green-200 text-green-800 rounded-md p-4 text-sm" role="status">
+        <div
+          className="bg-green-50 border border-green-200 text-green-800 rounded-md p-4 text-sm"
+          role="status"
+        >
           <strong>Success:</strong> {success}
         </div>
       )}
+
+      <PurchaseRequestsPanel />
 
       <PublishedCourseSelector
         options={courseOptions}
@@ -381,15 +431,22 @@ export default function AdminCourseAccessPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Course Default Access Expiry Config */}
         <section className="bg-white p-6 rounded-lg border shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">1. Configure Course Access Expiry</h2>
-          <p className="text-sm text-gray-600 mb-4" data-testid="expiry-course-context">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">
+            1. Configure Course Access Expiry
+          </h2>
+          <p
+            className="text-sm text-gray-600 mb-4"
+            data-testid="expiry-course-context"
+          >
             {selectedCourse
               ? `Applies to ${selectedCourse.title}.`
               : "Select a published Course above to configure its default access expiry."}
           </p>
           <form onSubmit={handleSetExpiry} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Default Access Expiry Date (YYYY-MM-DD)</label>
+              <label className="block text-sm font-medium text-gray-700">
+                Default Access Expiry Date (YYYY-MM-DD)
+              </label>
               <input
                 type="date"
                 required
@@ -399,7 +456,9 @@ export default function AdminCourseAccessPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Reason / Reference</label>
+              <label className="block text-sm font-medium text-gray-700">
+                Reason / Reference
+              </label>
               <input
                 type="text"
                 required
@@ -421,15 +480,22 @@ export default function AdminCourseAccessPage() {
 
         {/* Create Invitation */}
         <section className="bg-white p-6 rounded-lg border shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">2. Issue Course Access Invitation</h2>
-          <p className="text-sm text-gray-600 mb-4" data-testid="invitation-course-context">
+          <h2 className="text-xl font-semibold mb-4 text-gray-800">
+            2. Issue Course Access Invitation
+          </h2>
+          <p
+            className="text-sm text-gray-600 mb-4"
+            data-testid="invitation-course-context"
+          >
             {selectedCourse
               ? `Grants access to ${selectedCourse.title}.`
               : "Select a published Course above to issue an invitation."}
           </p>
           <form onSubmit={handleCreateInvitation} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">Student Email Address</label>
+              <label className="block text-sm font-medium text-gray-700">
+                Student Email Address
+              </label>
               <input
                 type="email"
                 required
@@ -440,7 +506,9 @@ export default function AdminCourseAccessPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Admin Internal Note (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700">
+                Admin Internal Note (Optional)
+              </label>
               <input
                 type="text"
                 value={createNote}
@@ -450,7 +518,9 @@ export default function AdminCourseAccessPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">External Reference ID (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700">
+                External Reference ID (Optional)
+              </label>
               <input
                 type="text"
                 value={createRef}
@@ -473,7 +543,9 @@ export default function AdminCourseAccessPage() {
       {/* Invitations Queue & Decision Center */}
       <section className="bg-white p-6 rounded-lg border shadow-sm">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-gray-800">3. Invitation Queue & Decision Center</h2>
+          <h2 className="text-xl font-semibold text-gray-800">
+            3. Invitation Queue & Decision Center
+          </h2>
           <button
             onClick={fetchInvitations}
             disabled={loading}
@@ -484,9 +556,13 @@ export default function AdminCourseAccessPage() {
         </div>
 
         {loading ? (
-          <p className="text-gray-500 text-sm py-8 text-center">Loading invitations queue...</p>
+          <p className="text-gray-500 text-sm py-8 text-center">
+            Loading invitations queue...
+          </p>
         ) : invitations.length === 0 ? (
-          <p className="text-gray-500 text-sm py-8 text-center border rounded-md bg-gray-50">No invitations found.</p>
+          <p className="text-gray-500 text-sm py-8 text-center border rounded-md bg-gray-50">
+            No invitations found.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm border-collapse">
@@ -503,10 +579,15 @@ export default function AdminCourseAccessPage() {
                 {invitations.map((inv) => (
                   <tr key={inv.id} className="hover:bg-gray-50">
                     <td className="p-3 font-mono text-xs">
-                      <div className="font-semibold text-gray-900">{inv.email}</div>
+                      <div className="font-semibold text-gray-900">
+                        {inv.email}
+                      </div>
                       <div className="text-gray-400">{inv.id}</div>
                     </td>
-                    <td className="p-3 text-xs text-gray-700" data-testid={`invitation-course-${inv.id}`}>
+                    <td
+                      className="p-3 text-xs text-gray-700"
+                      data-testid={`invitation-course-${inv.id}`}
+                    >
                       {courseLabel(inv.course_id)}
                     </td>
                     <td className="p-3">
@@ -515,24 +596,36 @@ export default function AdminCourseAccessPage() {
                           inv.state === "APPROVED"
                             ? "bg-green-100 text-green-800"
                             : inv.state === "PENDING_ADMIN_APPROVAL"
-                            ? "bg-amber-100 text-amber-800"
-                            : inv.state === "PENDING_STUDENT_ACCEPTANCE"
-                            ? "bg-blue-100 text-blue-800"
-                            : inv.state === "REJECTED"
-                            ? "bg-red-100 text-red-800"
-                            : "bg-gray-100 text-gray-800"
+                              ? "bg-amber-100 text-amber-800"
+                              : inv.state === "PENDING_STUDENT_ACCEPTANCE"
+                                ? "bg-blue-100 text-blue-800"
+                                : inv.state === "REJECTED"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-gray-100 text-gray-800"
                         }`}
                       >
                         {inv.state}
                       </span>
                       {inv.decision_reason && (
-                        <div className="text-xs text-gray-500 mt-1">Reason: {inv.decision_reason}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                          Reason: {inv.decision_reason}
+                        </div>
                       )}
                     </td>
                     <td className="p-3 text-xs text-gray-500 space-y-1">
-                      <div>Created: {new Date(inv.created_at).toLocaleString()}</div>
-                      {inv.accepted_at && <div>Accepted: {new Date(inv.accepted_at).toLocaleString()}</div>}
-                      {inv.decided_at && <div>Decided: {new Date(inv.decided_at).toLocaleString()}</div>}
+                      <div>
+                        Created: {new Date(inv.created_at).toLocaleString()}
+                      </div>
+                      {inv.accepted_at && (
+                        <div>
+                          Accepted: {new Date(inv.accepted_at).toLocaleString()}
+                        </div>
+                      )}
+                      {inv.decided_at && (
+                        <div>
+                          Decided: {new Date(inv.decided_at).toLocaleString()}
+                        </div>
+                      )}
                     </td>
                     <td className="p-3 text-right space-x-2">
                       {inv.state === "PENDING_ADMIN_APPROVAL" && (
@@ -557,7 +650,9 @@ export default function AdminCourseAccessPage() {
 
                       {inv.entitlement_id && (
                         <button
-                          onClick={() => handleViewEntitlement(inv.entitlement_id as string)}
+                          onClick={() =>
+                            handleViewEntitlement(inv.entitlement_id as string)
+                          }
                           disabled={detailLoading}
                           data-testid={`manage-access-${inv.id}`}
                           className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 text-xs font-semibold rounded disabled:opacity-50"
@@ -595,13 +690,21 @@ export default function AdminCourseAccessPage() {
       {rejectingInvId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Reject Course Access Invitation</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">
+              Reject Course Access Invitation
+            </h3>
             <p className="text-sm text-gray-600 mb-4">
-              Specify the reason for rejecting invitation <code className="bg-gray-100 p-1 rounded text-xs">{rejectingInvId}</code>.
+              Specify the reason for rejecting invitation{" "}
+              <code className="bg-gray-100 p-1 rounded text-xs">
+                {rejectingInvId}
+              </code>
+              .
             </p>
             <form onSubmit={handleRejectSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Rejection Reason</label>
+                <label className="block text-sm font-medium text-gray-700">
+                  Rejection Reason
+                </label>
                 <textarea
                   required
                   rows={3}
@@ -635,9 +738,14 @@ export default function AdminCourseAccessPage() {
       {/* Entitlement Detail Modal (AD07) */}
       {detailModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-lg p-6 max-w-xl w-full shadow-xl space-y-4 my-8" data-testid="entitlement-detail">
+          <div
+            className="bg-white rounded-lg p-6 max-w-xl w-full shadow-xl space-y-4 my-8"
+            data-testid="entitlement-detail"
+          >
             <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-lg font-bold text-gray-900">Course Access Record</h3>
+              <h3 className="text-lg font-bold text-gray-900">
+                Course Access Record
+              </h3>
               <button
                 onClick={closeEntitlementDetail}
                 className="text-gray-500 hover:text-gray-700 font-bold text-lg"
@@ -646,7 +754,10 @@ export default function AdminCourseAccessPage() {
               </button>
             </div>
             <div className="space-y-2 text-sm bg-gray-50 p-4 rounded border">
-              <div><strong>Course:</strong> {courseLabel(detailModal.entitlement.course_id)}</div>
+              <div>
+                <strong>Course:</strong>{" "}
+                {courseLabel(detailModal.entitlement.course_id)}
+              </div>
               <div>
                 <strong>Status:</strong>{" "}
                 <span
@@ -657,40 +768,72 @@ export default function AdminCourseAccessPage() {
                 </span>
               </div>
               <div data-testid="entitlement-access-ends-at">
-                <strong>Access ends:</strong> {new Date(detailModal.entitlement.access_ends_at).toLocaleString()}
+                <strong>Access ends:</strong>{" "}
+                {new Date(
+                  detailModal.entitlement.access_ends_at,
+                ).toLocaleString()}
               </div>
               <div className="text-xs text-gray-600">
-                Originally granted until {new Date(detailModal.entitlement.original_access_ends_at).toLocaleString()}
+                Originally granted until{" "}
+                {new Date(
+                  detailModal.entitlement.original_access_ends_at,
+                ).toLocaleString()}
               </div>
               {detailModal.entitlement.revoked_at && (
-                <div className="text-xs text-red-700" data-testid="entitlement-revoked-at">
-                  Revoked on {new Date(detailModal.entitlement.revoked_at).toLocaleString()}
+                <div
+                  className="text-xs text-red-700"
+                  data-testid="entitlement-revoked-at"
+                >
+                  Revoked on{" "}
+                  {new Date(
+                    detailModal.entitlement.revoked_at,
+                  ).toLocaleString()}
                 </div>
               )}
-              <div className="text-xs text-gray-600">Grant source: {detailModal.entitlement.grant_source}</div>
+              <div className="text-xs text-gray-600">
+                Grant source: {detailModal.entitlement.grant_source}
+              </div>
             </div>
 
             {detailNotice && (
-              <p role="status" data-testid="entitlement-notice" className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <p
+                role="status"
+                data-testid="entitlement-notice"
+                className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+              >
                 {detailNotice}
               </p>
             )}
             {detailError && (
-              <p role="alert" data-testid="entitlement-error" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              <p
+                role="alert"
+                data-testid="entitlement-error"
+                className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+              >
                 {detailError}
               </p>
             )}
 
             {detailModal.entitlement.state === "ACTIVE" ? (
               <div className="space-y-5">
-                <form onSubmit={handleAdjustExpiry} className="space-y-3 border rounded-md p-4" data-testid="entitlement-expiry-form">
-                  <h4 className="font-semibold text-sm text-gray-800">Change access expiry</h4>
+                <form
+                  onSubmit={handleAdjustExpiry}
+                  className="space-y-3 border rounded-md p-4"
+                  data-testid="entitlement-expiry-form"
+                >
+                  <h4 className="font-semibold text-sm text-gray-800">
+                    Change access expiry
+                  </h4>
                   <p className="text-xs text-gray-600">
-                    A later date extends access; an earlier date shortens it. A date already past ends access
-                    immediately and keeps enrollment and progress.
+                    A later date extends access; an earlier date shortens it. A
+                    date already past ends access immediately and keeps
+                    enrollment and progress.
                   </p>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-date">
+                    <label
+                      className="block text-sm font-medium text-gray-700"
+                      htmlFor="entitlement-expiry-date"
+                    >
                       New access expiry date (YYYY-MM-DD)
                     </label>
                     <input
@@ -703,7 +846,10 @@ export default function AdminCourseAccessPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-reason">
+                    <label
+                      className="block text-sm font-medium text-gray-700"
+                      htmlFor="entitlement-expiry-reason"
+                    >
                       Reason
                     </label>
                     <input
@@ -717,7 +863,10 @@ export default function AdminCourseAccessPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-expiry-reference">
+                    <label
+                      className="block text-sm font-medium text-gray-700"
+                      htmlFor="entitlement-expiry-reference"
+                    >
                       Support reference (optional)
                     </label>
                     <input
@@ -739,14 +888,22 @@ export default function AdminCourseAccessPage() {
                   </button>
                 </form>
 
-                <form onSubmit={handleRevokeEntitlement} className="space-y-3 border border-red-200 rounded-md p-4 bg-red-50/40" data-testid="entitlement-revoke-form">
-                  <h4 className="font-semibold text-sm text-red-800">Revoke access</h4>
+                <form
+                  onSubmit={handleRevokeEntitlement}
+                  className="space-y-3 border border-red-200 rounded-md p-4 bg-red-50/40"
+                  data-testid="entitlement-revoke-form"
+                >
+                  <h4 className="font-semibold text-sm text-red-800">
+                    Revoke access
+                  </h4>
                   <p className="text-xs text-gray-700">
-                    Revoking ends this Student&apos;s access to the Course immediately. The enrollment record,
-                    learning progress and access history are kept.
+                    {"Revoking ends this Student's access to the Course immediately. The enrollment record, learning progress and access history are kept."}
                   </p>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-revoke-reason">
+                    <label
+                      className="block text-sm font-medium text-gray-700"
+                      htmlFor="entitlement-revoke-reason"
+                    >
                       Reason
                     </label>
                     <input
@@ -760,7 +917,10 @@ export default function AdminCourseAccessPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700" htmlFor="entitlement-revoke-reference">
+                    <label
+                      className="block text-sm font-medium text-gray-700"
+                      htmlFor="entitlement-revoke-reference"
+                    >
                       Support reference (optional)
                     </label>
                     <input
@@ -781,7 +941,8 @@ export default function AdminCourseAccessPage() {
                       className="mt-0.5"
                     />
                     <span>
-                      I confirm this Student should lose access to {courseLabel(detailModal.entitlement.course_id)} now.
+                      I confirm this Student should lose access to{" "}
+                      {courseLabel(detailModal.entitlement.course_id)} now.
                     </span>
                   </label>
                   <button
@@ -795,22 +956,35 @@ export default function AdminCourseAccessPage() {
                 </form>
               </div>
             ) : (
-              <p className="text-sm text-gray-700 border rounded-md p-4 bg-gray-50" data-testid="entitlement-terminal">
-                This access grant is revoked. It is kept as history and can no longer be extended, shortened, or
-                revoked again.
+              <p
+                className="text-sm text-gray-700 border rounded-md p-4 bg-gray-50"
+                data-testid="entitlement-terminal"
+              >
+                This access grant is revoked. It is kept as history and can no
+                longer be extended, shortened, or revoked again.
               </p>
             )}
             <div>
-              <h4 className="font-semibold text-sm mb-2 text-gray-800">Adjustment History</h4>
+              <h4 className="font-semibold text-sm mb-2 text-gray-800">
+                Adjustment History
+              </h4>
               {detailModal.adjustments.length === 0 ? (
-                <p className="text-xs text-gray-500 italic">No adjustments recorded for this entitlement.</p>
+                <p className="text-xs text-gray-500 italic">
+                  No adjustments recorded for this entitlement.
+                </p>
               ) : (
                 <ul className="text-xs space-y-2">
                   {detailModal.adjustments.map((adj) => (
                     <li key={adj.id} className="border p-2 rounded bg-gray-50">
-                      <div>Adjusted At: {new Date(adj.adjusted_at).toLocaleString()}</div>
+                      <div>
+                        Adjusted At:{" "}
+                        {new Date(adj.adjusted_at).toLocaleString()}
+                      </div>
                       <div>Reason: {adj.reason}</div>
-                      <div>New Expiry: {new Date(adj.new_access_ends_at).toLocaleString()}</div>
+                      <div>
+                        New Expiry:{" "}
+                        {new Date(adj.new_access_ends_at).toLocaleString()}
+                      </div>
                     </li>
                   ))}
                 </ul>

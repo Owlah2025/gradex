@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 22;
+export const ROTATING_TEST_SLOTS = 30;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 240;
+export const ROTATING_POOL_SIZE = 300;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -38,6 +38,11 @@ export const ROTATING_EXPIRED_POOL_SIZE = 100;
 //   16     Progress persistence     1
 //   17     infrastructure evidence  1
 //   18-21  rendered viewport evid.  4 viewports
+//   22-23  Dashboard resume (F15)   English and Arabic, one Student each
+//   24-29  Student academic profile 6 T3 journeys, one Student each
+//
+// Growing the map never reassigns an existing execution: allocation is
+// slot * repeats + repeat, so slots 0-23 keep indices 0-239.
 //
 // Expired pool: 0-3, the expired-access matrix's 4 viewports.
 
@@ -58,8 +63,25 @@ export function expiredTestSlot(viewportIndex: number): number {
   return viewportIndex;
 }
 export const PROGRESS_TEST_SLOT = 16;
+/**
+ * The MVP-F15 Dashboard resume journeys. Each locale gets its own Student so neither test
+ * inherits the other's Progress, and neither shares the Lesson Player matrix's playback budget.
+ */
+export const DASHBOARD_RESUME_EN_TEST_SLOT = 22;
+export const DASHBOARD_RESUME_AR_TEST_SLOT = 23;
 /** Retained for infrastructure evidence that needs a second, distinct active Student. */
 export const LIFECYCLE_TEST_SLOT = 17;
+
+/**
+ * The T3 Student academic profile journeys occupy active slots 24-29, one
+ * Student each so no journey observes another's onboarding state.
+ */
+export const ACADEMIC_ONBOARDING_TEST_SLOT = 24;
+export const ACADEMIC_DSAI_TEST_SLOT = 25;
+export const ACADEMIC_UNDECLARED_TEST_SLOT = 26;
+export const ACADEMIC_SKIP_TEST_SLOT = 27;
+export const ACADEMIC_INVITATION_TEST_SLOT = 28;
+export const ACADEMIC_ACCESS_PRESERVED_TEST_SLOT = 29;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

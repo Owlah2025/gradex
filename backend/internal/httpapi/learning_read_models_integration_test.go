@@ -169,9 +169,9 @@ func TestLearningReadModelsMatchD063SchemasAndStableProgress(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, rawLesson := range rawLessons {
-			lesson := assertJSONKeys(t, mustJSON(t, rawLesson), []string{"lesson_id", "materials", "progress", "title"})
-			if string(lesson["materials"]) != "[]" {
-				t.Fatalf("material kinds for fixture without files = %s, want []", lesson["materials"])
+			lesson := assertJSONKeys(t, mustJSON(t, rawLesson), []string{"lab_materials", "lesson_id", "progress", "resources", "title"})
+			if string(lesson["resources"]) != "[]" || string(lesson["lab_materials"]) != "[]" {
+				t.Fatalf("materials for fixture without files = resources:%s labs:%s, want empty lists", lesson["resources"], lesson["lab_materials"])
 			}
 			assertJSONKeys(t, lesson["progress"], []string{"completed", "position_seconds"})
 		}
@@ -188,9 +188,9 @@ func TestLearningReadModelsMatchD063SchemasAndStableProgress(t *testing.T) {
 		if f.queries.get("learning.graph") != 2 || f.queries.get("learning.lesson-progress") != 1 || f.queries.get("learning.course-progress") != 0 || f.queries.get("learning.enrollment") != 1 {
 			t.Fatalf("Lesson query counts = graph:%d lesson-progress:%d course-progress:%d enrollment:%d, want 2/1/0/1", f.queries.get("learning.graph"), f.queries.get("learning.lesson-progress"), f.queries.get("learning.course-progress"), f.queries.get("learning.enrollment"))
 		}
-		object := assertJSONKeys(t, response.Body.Bytes(), []string{"course_id", "expires_at", "learning_status", "lesson_id", "materials", "navigation", "progress", "report_contexts", "section", "title"})
-		if string(object["materials"]) != "[]" {
-			t.Fatalf("material kinds for fixture without files = %s, want []", object["materials"])
+		object := assertJSONKeys(t, response.Body.Bytes(), []string{"course_id", "expires_at", "lab_materials", "learning_status", "lesson_id", "navigation", "progress", "report_contexts", "resources", "section", "title"})
+		if string(object["resources"]) != "[]" || string(object["lab_materials"]) != "[]" {
+			t.Fatalf("materials for fixture without files = resources:%s labs:%s, want empty lists", object["resources"], object["lab_materials"])
 		}
 		var navigation struct {
 			Previous *string `json:"previous_lesson_id"`
@@ -261,7 +261,29 @@ func TestLearningDashboardScopesOrdersAndRetainsExpiry(t *testing.T) {
 	if f.queries.get("learning.dashboard") != 1 || f.queries.get("entitlement.dashboard") != 1 || f.queries.get("learning.enrollment") != 0 || f.queries.get("learning.lesson-progress") != 0 {
 		t.Fatalf("Dashboard query counts = learning:%d entitlement:%d enrollment:%d lesson-progress:%d, want 1/1/0/0", f.queries.get("learning.dashboard"), f.queries.get("entitlement.dashboard"), f.queries.get("learning.enrollment"), f.queries.get("learning.lesson-progress"))
 	}
-	object := assertJSONKeys(t, response.Body.Bytes(), []string{"courses"})
+	// The resume pointer costs exactly one bounded query for the whole Dashboard, whatever the
+	// number of Courses or Lessons. Two Courses are enrolled here, so a per-Course lookup would
+	// show up as 2 and this is what stops the pointer becoming an N+1.
+	if f.queries.get("learning.resume") != 1 {
+		t.Fatalf("resume query count = %d, want exactly 1 for the whole Dashboard", f.queries.get("learning.resume"))
+	}
+	// The Student has a part-finished Lesson, so the Dashboard carries the resume pointer
+	// alongside the Course list. Both keys are pinned exactly: `resume` is omitted entirely when
+	// there is nothing to continue, which the empty-Dashboard assertion at the end of this test
+	// still holds to `{"courses":[]}`.
+	object := assertJSONKeys(t, response.Body.Bytes(), []string{"courses", "resume"})
+	resume := assertJSONKeys(t, object["resume"], []string{"course_id", "course_title", "lesson_id", "lesson_title", "started"})
+	var resumePointer dashboardResumeResponse
+	if err := json.Unmarshal(object["resume"], &resumePointer); err != nil {
+		t.Fatal(err)
+	}
+	if resumePointer.CourseID != f.courseID || resumePointer.LessonID != f.lessonID ||
+		resumePointer.CourseTitle != "Course" || resumePointer.LessonTitle != "Lesson" || !resumePointer.Started {
+		t.Fatalf("resume pointer = %+v, want the part-finished Lesson of the entitled Course, started", resumePointer)
+	}
+	if string(resume["started"]) != "true" {
+		t.Fatalf("resume started = %s, want true for a Lesson with recorded watch time", resume["started"])
+	}
 	var courses []struct {
 		CourseID string `json:"course_id"`
 		Title    string `json:"title"`

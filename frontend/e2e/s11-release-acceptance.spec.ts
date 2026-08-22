@@ -192,17 +192,27 @@ test.describe("S11 release acceptance", () => {
       await studentPage.goto(
         `/en/access?invitation_id=${invitationID}#token=invalid-s11-invitation-token`,
       );
-      await studentPage.getByRole("button", { name: "Accept Invitation & Request Access" }).click();
-      await expect(
-        studentPage.getByRole("alert").filter({ hasText: /expired|consumed|not found|failed/i }),
-      ).toBeVisible();
+      // MVP-F12 renamed the control and stopped rendering wire enums to the Student, so the
+      // selectors follow the current contract. What is audited is unchanged: a bad token is
+      // refused with a visible reason, a good one records acceptance, and neither creates a grant —
+      // `expectZeroGrantState` still proves the authority half against the database.
+      await studentPage.getByTestId("accept-invitation").click();
+      await expect(studentPage.getByTestId("access-invitation-error")).toBeVisible();
+      await expect(studentPage.getByTestId("access-invitation-error")).toHaveText(
+        /no longer usable|not available|could not be accepted|incomplete/i,
+      );
       await expectZeroGrantState(verification.account_id);
 
       await studentPage.goto(
         `/en/access?invitation_id=${invitationID}#token=${encodeURIComponent(invitationToken)}`,
       );
-      await studentPage.getByRole("button", { name: "Accept Invitation & Request Access" }).click();
-      await expect(studentPage.locator("body")).toContainText("PENDING_ADMIN_APPROVAL");
+      await studentPage.getByTestId("accept-invitation").click();
+      // The Student reads plain language; the wire state is still asserted, on the data attribute.
+      await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Waiting for approval");
+      await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toHaveAttribute(
+        "data-access-state",
+        "AWAITING_APPROVAL",
+      );
       await expectZeroGrantState(verification.account_id);
 
       // Course, Lesson, playback, and Progress all deny before Admin Approval.

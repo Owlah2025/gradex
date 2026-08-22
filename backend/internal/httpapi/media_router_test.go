@@ -53,15 +53,42 @@ func (d *refusingDelivery) IssueDownloadEntry(context.Context, media.DownloadEnt
 	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
 }
 
+func (d *refusingDelivery) IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error) {
+	d.calls++
+	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
+}
+
 func (d *refusingDelivery) IssuePreview(context.Context, string) (media.PreviewAuthorization, error) {
 	d.calls++
 	return media.PreviewAuthorization{}, media.ErrProtectedUnavailable
 }
 
-type redirectingDelivery struct{ refusingDelivery }
+func (d *refusingDelivery) IssueCoursePreview(context.Context, string) (media.PreviewAuthorization, error) {
+	d.calls++
+	return media.PreviewAuthorization{}, media.ErrProtectedUnavailable
+}
+
+type redirectingDelivery struct {
+	refusingDelivery
+	buyerTag string
+}
 
 func (*redirectingDelivery) IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error) {
 	return media.DownloadAuthorization{URL: "https://storage.test/fresh-target"}, nil
+}
+
+func (d *redirectingDelivery) IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error) {
+	return media.DownloadAuthorization{URL: "https://storage.test/fresh-file-target", ExpiresAt: time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC), BuyerTag: d.buyerTag}, nil
+}
+
+type coursePreviewDelivery struct{ refusingDelivery }
+
+func (*coursePreviewDelivery) IssueCoursePreview(context.Context, string) (media.PreviewAuthorization, error) {
+	return media.PreviewAuthorization{
+		URL:            "https://storage.test/preview?signature=bounded",
+		AssetVersionID: "44444444-4444-4444-4444-444444444444",
+		ExpiresAt:      time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC),
+	}, nil
 }
 
 func (s *mediaRouterStore) PresignPutURL(context.Context, string, string, time.Duration) (string, error) {
@@ -201,6 +228,25 @@ func TestD7ProductionMediaRoutesRequireCapabilitiesBeforeHandlers(t *testing.T) 
 	}
 }
 
+func TestCourseScopedPreviewResponseDoesNotSerializeTheAssetVersion(t *testing.T) {
+	publicPrincipal := identity.Principal{Status: identity.StatusActive, CredentialState: identity.CredentialActive}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, publicPrincipal, &coursePreviewDelivery{})
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
+		"/api/v1/media/courses/11111111-1111-1111-1111-111111111111/preview", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("course preview status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"url":"https://storage.test/preview?signature=bounded"`) {
+		t.Fatalf("course preview response omitted signed URL: %s", body)
+	}
+	if strings.Contains(body, "44444444-4444-4444-4444-444444444444") || strings.Contains(body, "asset_version_id") {
+		t.Fatalf("course preview response leaked an internal asset version: %s", body)
+	}
+}
+
 func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *testing.T) {
 	student := identity.Principal{
 		AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive,
@@ -212,6 +258,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 		"POST /api/v1/media/playback-authorizations",
 		"GET /api/v1/media/playback-manifests/:playbackSession/index.m3u8",
 		"POST /api/v1/media/download-authorizations",
+		"POST /api/v1/media/courses/:courseId/lessons/:lessonId/materials/:materialId/download-authorizations",
 		"GET /api/v1/media/lessons/:lessonId/materials/resource",
 		"GET /api/v1/media/lessons/:lessonId/materials/lab-material",
 		"GET /api/v1/media/previews/:id",
@@ -272,6 +319,69 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	}
 	if delivery.calls != len(cases) {
 		t.Fatalf("delivery issuer calls=%d, want %d", delivery.calls, len(cases))
+	}
+}
+
+func TestLessonFileDownloadAuthorizationUsesAPrivateJSONContract(t *testing.T) {
+	student := identity.Principal{AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, student, &redirectingDelivery{})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/media/courses/course-1/lessons/lesson-1/materials/file-1/download-authorizations", nil)
+	request.Header.Set("Accept-Language", "en")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("response=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	for _, prohibited := range []string{"asset_version_id", "buyer_tag", "storage_object", "file-1", "course-1", "lesson-1"} {
+		if strings.Contains(response.Body.String(), prohibited) {
+			t.Fatalf("download authorization leaked %q: %s", prohibited, response.Body.String())
+		}
+	}
+	if !strings.Contains(response.Body.String(), `"url":"https://storage.test/fresh-file-target"`) {
+		t.Fatalf("download authorization omitted URL: %s", response.Body.String())
+	}
+}
+
+func TestLessonFileDownloadAuthorizationSerializesOnlyAnOpaqueIssuedBuyerTag(t *testing.T) {
+	student := identity.Principal{AccountID: "user-1", Role: identity.RoleStudent, Status: identity.StatusActive, CredentialState: identity.CredentialActive}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, student, &redirectingDelivery{buyerTag: "opaque-lab-marker"})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/media/courses/course-1/lessons/lesson-1/materials/file-1/download-authorizations", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("response=%d body=%s", response.Code, response.Body.String())
+	}
+	for _, prohibited := range []string{"user-1", "entitlement", "asset_version_id", "storage_object", "file-1", "course-1", "lesson-1"} {
+		if strings.Contains(response.Body.String(), prohibited) {
+			t.Fatalf("download authorization leaked %q: %s", prohibited, response.Body.String())
+		}
+	}
+	if !strings.Contains(response.Body.String(), `"buyer_tag":"opaque-lab-marker"`) {
+		t.Fatalf("download authorization omitted issued opaque buyer tag: %s", response.Body.String())
+	}
+}
+
+func TestPublicCoursePreviewRouteIsAnonymousAndKeepsUnknownCoursesInventorySafe(t *testing.T) {
+	delivery := &refusingDelivery{}
+	router, _ := mediaRouterWithDeliveryUnderTest(t, identity.Principal{}, delivery)
+	const path = "/api/v1/media/courses/00000000-0000-0000-0000-000000000001/preview"
+	mounted := false
+	for _, route := range router.Routes() {
+		if route.Method+" "+route.Path == "GET /api/v1/media/courses/:courseID/preview" {
+			mounted = true
+			break
+		}
+	}
+	if !mounted {
+		t.Fatal("public Course preview route is not mounted")
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusNotFound || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Location") != "" {
+		t.Fatalf("anonymous unknown Course preview response=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if delivery.calls != 1 {
+		t.Fatalf("delivery calls=%d, want one Course-scoped lookup", delivery.calls)
 	}
 }
 

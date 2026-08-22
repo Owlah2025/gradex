@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   captureTokenFromFragment,
   isFragmentTokenSpent,
+  releaseCourseAccessInvitationContext,
   releaseFragmentToken,
+  restoreCourseAccessInvitationContext,
+  retainCourseAccessInvitationContext,
 } from "./validation";
 
 /**
@@ -14,10 +17,23 @@ import {
  * are provided — anything more would make the stub a fiction that passes for
  * reasons the real browser would not.
  */
+const sessionValues = new Map<string, string>();
+
 function installWindow(hash: string) {
   (globalThis as unknown as { window: unknown }).window = {
     location: { hash, pathname: "/recover/reset", search: "" },
     history: { state: null, replaceState() {} },
+    sessionStorage: {
+      getItem(key: string) {
+        return sessionValues.get(key) ?? null;
+      },
+      setItem(key: string, value: string) {
+        sessionValues.set(key, value);
+      },
+      removeItem(key: string) {
+        sessionValues.delete(key);
+      },
+    },
   };
 }
 
@@ -79,4 +95,21 @@ test("a newly navigated link replaces a settled bearer for the same purpose", ()
     "fresh-course-invitation",
   );
   assert.equal(isFragmentTokenSpent("COURSE_ACCESS_INVITATION"), false);
+});
+
+test("course invitation context survives an admission navigation without entering a URL", () => {
+  installWindow("");
+  retainCourseAccessInvitationContext("invitation-a", "invitation-bearer");
+
+  // A fresh document has no fragment, just as it does after register/verify/login.
+  installWindow("");
+  assert.equal(
+    restoreCourseAccessInvitationContext("invitation-a"),
+    "invitation-bearer",
+  );
+  assert.equal(restoreCourseAccessInvitationContext("invitation-b"), null);
+
+  retainCourseAccessInvitationContext("invitation-a", "invitation-bearer");
+  releaseCourseAccessInvitationContext();
+  assert.equal(restoreCourseAccessInvitationContext("invitation-a"), null);
 });

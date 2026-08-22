@@ -32,12 +32,16 @@ The following two fields are configuration-backed and must be rendered into the 
 - `{{LEGAL_REGISTRATION_NUMBER}}`
 - `{{LEGAL_REGISTERED_ADDRESS}}`
 
-For controlled non-public staging only, the approved sentinel values are:
+For controlled, disposable acceptance only, the approved sentinel values are:
 
 - `LEGAL_REGISTRATION_NUMBER=STAGING-NOT-REGISTERED`
 - `LEGAL_REGISTERED_ADDRESS=STAGING ONLY — LEGAL ENTITY DETAILS PENDING`
 
 Public production must reject those sentinel values and require the actual legal registration number and registered address.
+The sentinels are limited to the exact local production-like context at
+`https://gradex.localhost:18443` and the exact public LG-019 staging context at
+`https://staging.gradex.network`. The latter does not represent a registered
+commercial entity and must not be used as commercial-launch legal evidence.
 
 ---
 

@@ -3,6 +3,7 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import { RUN_STATE_FILE_PATH, SEED_BINARY_PATH } from "../src/lib/api/e2e-infrastructure";
 import { queryProgress, requireProgressRow, type ProgressSnapshot } from "../src/lib/api/e2e-progress";
+import { AUTHORIZATION_FLAG, expectAbsent, tokenLabel } from "./authority-leak";
 
 /**
  * T042 — access ending mid-session (SC-005).
@@ -95,14 +96,14 @@ const SCENARIOS: Scenario[] = [
 ];
 
 /** Authority internals that must never reach the browser. */
-const FORBIDDEN_IN_BROWSER = [
+const FORBIDDEN_IN_BROWSER: (string | RegExp)[] = [
   "asset_version_id",
   "entitlement_id",
   "enrollment_id",
   "revision_id",
   "can_play",
   "can_update_progress",
-  "authorized",
+  AUTHORIZATION_FLAG,
   "capability",
   "evaluator",
   "object_key",
@@ -293,7 +294,7 @@ function expectUniformDenial(response: RawResponse | { status: number; headers: 
     expect(lowered, `${what} body leaked the authority cause "${term}"`).not.toContain(term);
   }
   for (const term of FORBIDDEN_IN_BROWSER) {
-    expect(lowered).not.toContain(term.toLowerCase());
+    expectAbsent(lowered, typeof term === "string" ? term.toLowerCase() : term);
   }
 }
 
@@ -471,7 +472,11 @@ test.describe("T042 — access ending mid-session denies the next issuance and t
         // ---------- Information hiding and browser storage ----------
         const pageText = ((await page.locator("body").textContent()) ?? "").toLowerCase();
         for (const term of FORBIDDEN_IN_BROWSER) {
-          expect(pageText, `authority internal "${term}" reached the DOM`).not.toContain(term.toLowerCase());
+          expectAbsent(
+            pageText,
+            typeof term === "string" ? term.toLowerCase() : term,
+            `authority internal "${tokenLabel(term)}" reached the DOM`,
+          );
         }
         const storage = await page.evaluate(() => ({
           local: JSON.stringify(Object.entries(localStorage)),

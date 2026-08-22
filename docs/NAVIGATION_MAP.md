@@ -60,11 +60,13 @@ Catalog / Search
 └── Course Details
     ├── Public Preview
     ├── [actively entitled] Go to Course → Course Home
+    ├── I want to buy this Course → email form → WhatsApp [external]
     └── How to Get Access                          [informational]
 
 Course Access Invitation                          [entry: emailed link]
 ├── Sign In / Register with the invited email
-├── Accept                                        → Awaiting Admin Approval  [state]
+├── Accept standard invitation                     → Awaiting Admin Approval  [state]
+├── Accept purchase-backed invitation              → Course Home
 ├── Wrong identity signed in                      [state, refused]
 └── Link expired → Request a new link             [state]
 
@@ -144,9 +146,15 @@ Admin Ops
 │       ├── Request Changes
 │       ├── Unpublish / Republish
 │       └── Archive (when allowed)
-├── Catalog Taxonomy
+├── Catalog Taxonomy                      [legacy; D-022, superseded by D-091]
 │   ├── Majors / Subjects vocabulary
 │   └── Term Detail → Edit / Retire / Delete (unreferenced only)
+├── Academic Catalog / الكتالوج الأكاديمي   [D-091, AD13]
+│   └── Institution
+│       ├── Academic Units (College / Department tree) → Create / Edit / Re-parent / Retire
+│       ├── Programs → Create / Edit / Retire
+│       │   └── Curriculum → Subject mappings (requirement kind, recommended level/semester)
+│       └── Subjects → Create / Edit / Retire (duplicate refused)
 ├── Pricing
 │   └── Course / Section Price + Audit History
 ├── Course Access Invitations
@@ -154,6 +162,10 @@ Admin Ops
 │   ├── Awaiting Acceptance                        [queue]
 │   ├── Awaiting Approval                          [queue]
 │   └── Invitation Detail → Approve / Reject with reason / Cancel / Resend link
+├── Purchase Requests
+│   ├── Search by request reference, email, Course title, or state
+│   ├── Waiting for external payment
+│   └── Confirm payment & send invitation          [idempotent]
 ├── Entitlements
 │   └── Entitlement Detail → Extend / Shorten expiry / Revoke  [audited]
 ├── Reported Content
@@ -165,7 +177,7 @@ Admin Ops
 Admins do not create platform-wide office-hours sessions in MVP. There is no coupon, revenue,
 refund, or payout route: those features are deferred with in-platform payments
 ([D-045](DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)).
-**Approve is the only route in the entire product that creates course access.**
+**Standard Invitation approval and purchase payment confirmation plus matching Student acceptance are the only product routes that create Course access.**
 
 ## Cross-Role Handoffs
 
@@ -176,6 +188,9 @@ Admin Publish / Request Changes   → Instructor status + notification
 Admin Creates Course Invitation   → Student invitation notice
 Student Accepts Invitation        → Admin Awaiting-Approval queue
 Admin Approval                    → Entitlement + Enrollment + Student access-granted notice
+Student Purchase Request           → persisted request → Student WhatsApp handoff
+Admin Payment Confirmation         → purchase-backed invitation email
+Student Accepts Purchase Invitation → Entitlement + Enrollment + Course Home
 Admin Rejection                   → Student notice with reason
 Student Content Report            → Admin Reported Content queue
 Admin Entitlement Adjustment      → Student expiry-change notice

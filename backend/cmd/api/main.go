@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Owlah2025/gradex/backend/internal/academic"
 	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
@@ -57,12 +58,13 @@ func main() {
 	defer pool.Close()
 
 	storageClient, err := storage.New(ctx, storage.Options{
-		Endpoint:     cfg.S3Endpoint(),
-		AccessKey:    cfg.S3AccessKey().Expose(),
-		SecretKey:    cfg.S3SecretKey().Expose(),
-		Bucket:       cfg.S3Bucket(),
-		Region:       cfg.S3Region(),
-		UsePathStyle: cfg.S3UsePathStyle(),
+		Endpoint:        cfg.S3Endpoint(),
+		PresignEndpoint: cfg.S3PresignEndpoint(),
+		AccessKey:       cfg.S3AccessKey().Expose(),
+		SecretKey:       cfg.S3SecretKey().Expose(),
+		Bucket:          cfg.S3Bucket(),
+		Region:          cfg.S3Region(),
+		UsePathStyle:    cfg.S3UsePathStyle(),
 	})
 	if err != nil {
 		log.Fatalf("connecting to storage: %v", err)
@@ -88,7 +90,7 @@ func main() {
 	routerOptions := pf.Options
 	sessionRepository = pf.SessionRepository
 
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient)
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter)
 	if err != nil {
 		log.Fatalf("building media foundation: %v", err)
 	}
@@ -202,9 +204,19 @@ func buildSessionFoundation(
 	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
 ) (*httpapi.SessionFoundation, *identity.SessionRepository, *redis.Client, error) {
+	loginAdmission := cfg.LoginAdmission()
+	passwordGate, err := identity.NewPasswordVerificationGate(identity.PasswordVerificationGateOptions{
+		Concurrency: loginAdmission.VerificationConcurrency(),
+		Queue:       loginAdmission.VerificationQueue(),
+		QueueWait:   loginAdmission.VerificationQueueWait(),
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("building password verification gate: %w", err)
+	}
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
 		Pool: pool, Settings: cfg.Sessions(),
 		CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now,
+		PasswordVerificationGate: passwordGate,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -228,13 +240,14 @@ func buildSessionFoundation(
 		return nil, nil, nil, err
 	}
 
-	endpointPolicies := map[string]ratelimit.Policy{
-		"session-bootstrap":  ratelimit.DevelopmentAnonymousBootstrapPolicy(),
-		"sessions":           ratelimit.DevelopmentLoginPolicy(),
+	endpointPolicies := sessionPolicies(cfg.Environment())
+	for endpoint, policy := range map[string]ratelimit.Policy{
 		"session-resolution": ratelimit.DevelopmentSessionPolicy("session-resolution"),
 		"session-renewals":   ratelimit.DevelopmentSessionPolicy("session-renewals"),
 		"session-logout":     ratelimit.DevelopmentSessionPolicy("session-logout"),
 		"password-changes":   ratelimit.DevelopmentSessionPolicy("password-changes"),
+	} {
+		endpointPolicies[endpoint] = policy
 	}
 	foundation, err := httpapi.NewSessionFoundation(httpapi.SessionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
@@ -245,12 +258,26 @@ func buildSessionFoundation(
 		Compromised:         compromisedSource,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
+		LoginRequestTimeout: loginAdmission.RequestTimeout(),
 	})
 	if err != nil {
 		_ = redisClient.Close()
 		return nil, nil, nil, err
 	}
 	return foundation, repository, redisClient, nil
+}
+
+func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy {
+	if environment == config.EnvDevelopment {
+		return map[string]ratelimit.Policy{
+			"session-bootstrap": ratelimit.DevelopmentAnonymousBootstrapPolicy(),
+			"sessions":          ratelimit.DevelopmentLoginPolicy(),
+		}
+	}
+	return map[string]ratelimit.Policy{
+		"session-bootstrap": ratelimit.ProductionAnonymousBootstrapPolicy(),
+		"sessions":          ratelimit.ProductionLoginPolicy(),
+	}
 }
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
@@ -328,7 +355,7 @@ func buildLearningFoundation(
 	return foundation, redisClient, nil
 }
 
-func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient *storage.Client) (*httpapi.MediaFoundation, error) {
+func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient *storage.Client, previewRateLimiter *ratelimit.Limiter) (*httpapi.MediaFoundation, error) {
 	admission := cfg.Admission()
 	writer, err := outbox.NewWriter(
 		admission.ProtectedPayloadKeyVersion(),
@@ -368,7 +395,13 @@ func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient 
 	if err != nil {
 		return nil, fmt.Errorf("building protected media delivery: %w", err)
 	}
-	return httpapi.NewMediaFoundation(httpapi.MediaFoundationOptions{Service: service, Delivery: delivery})
+	if previewRateLimiter == nil {
+		return nil, errors.New("public preview rate limiter is required")
+	}
+	return httpapi.NewMediaFoundation(httpapi.MediaFoundationOptions{
+		Service: service, Delivery: delivery,
+		PreviewRateLimiter: previewRateLimiter, PreviewRatePolicy: ratelimit.PublicPreviewPolicy(),
+	})
 }
 
 func buildAdmissionFoundation(
@@ -419,7 +452,8 @@ func buildAdmissionFoundation(
 	// Completion gets its own stricter policy rather than the generic
 	// admission one: it is the only anonymous route that reaches Argon2id.
 	endpointPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
-	endpointPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
+	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
+	endpointPolicies["session-bootstrap"] = sessionPolicies(cfg.Environment())["session-bootstrap"]
 	endpointPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 
 	service, err := identity.NewAdmissionService(identity.AdmissionServiceOptions{
@@ -459,6 +493,40 @@ func buildAdmissionFoundation(
 		Recovery:            recovery,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+	return foundation, redisClient, nil
+}
+
+// buildPurchaseAdmissionFoundation keeps public purchase intent protected in
+// deployments where Student registration is intentionally disabled. It uses
+// the same anonymous admission and rate-limit primitives without requiring
+// registration policy, password-screening, or email dependencies.
+func buildPurchaseAdmissionFoundation(
+	cfg *config.Config,
+	redisConnection *queue.Connection,
+) (*httpapi.AdmissionFoundation, *redis.Client, error) {
+	admission := cfg.Admission()
+	redisClient := redisConnection.NewRedisClient()
+	limiter, err := ratelimit.New(
+		ratelimit.NewRedisStore(redisClient),
+		[]byte(admission.LimiterHMACKey().Expose()),
+		admission.RateLimitTimeout(),
+	)
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, err
+	}
+	foundation, err := httpapi.NewPurchaseAdmissionFoundation(httpapi.PurchaseAdmissionFoundationOptions{
+		PublicOrigin:        cfg.PublicOrigin(),
+		CookieSigningKey:    []byte(admission.AnonymousCookieSigningKey().Expose()),
+		CSRFKey:             []byte(admission.AnonymousCSRFKey().Expose()),
+		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
+		Limiter:             limiter,
+		PurchasePolicy:      ratelimit.PurchaseRequestsPolicy(),
 	})
 	if err != nil {
 		_ = redisClient.Close()
@@ -686,16 +754,18 @@ func buildAccessFoundation(
 	}
 
 	return httpapi.NewAccessFoundation(httpapi.AccessFoundationOptions{
-		Repository: repository,
+		Repository:          repository,
+		SalesWhatsAppNumber: cfg.SalesWhatsAppNumber(),
 	})
 }
 
 type ProductionFoundations struct {
-	Options           []httpapi.RouterOption
-	SessionRepository *identity.SessionRepository
-	SessionRedis      *redis.Client
-	AdmissionRedis    *redis.Client
-	StaffRedis        *redis.Client
+	Options            []httpapi.RouterOption
+	SessionRepository  *identity.SessionRepository
+	SessionRedis       *redis.Client
+	AdmissionRedis     *redis.Client
+	StaffRedis         *redis.Client
+	PreviewRateLimiter *ratelimit.Limiter
 }
 
 func (f *ProductionFoundations) Close() {
@@ -740,14 +810,28 @@ func buildProductionFoundationsWithStaffSource(
 		pf.Options = append(pf.Options, httpapi.WithSessionFoundation(sessionFoundation))
 	}
 
+	// Purchase requests are anonymous writes even where Student registration is
+	// deliberately disabled. In that posture, compose only the same admission
+	// security primitives required for purchase intent; registration services
+	// and routes remain absent.
+	var admissionFoundation *httpapi.AdmissionFoundation
+	var limiterClient *redis.Client
+	var err error
 	if cfg.Admission().Enabled() {
-		foundation, limiterClient, err := buildAdmissionFoundation(cfg, pool, redisConnection)
-		if err != nil {
-			pf.Close()
-			return nil, err
-		}
-		pf.AdmissionRedis = limiterClient
-		pf.Options = append(pf.Options, httpapi.WithAdmissionFoundation(foundation))
+		admissionFoundation, limiterClient, err = buildAdmissionFoundation(cfg, pool, redisConnection)
+	} else {
+		admissionFoundation, limiterClient, err = buildPurchaseAdmissionFoundation(cfg, redisConnection)
+	}
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.AdmissionRedis = limiterClient
+	pf.PreviewRateLimiter = admissionFoundation.RateLimiter()
+	if cfg.Admission().Enabled() {
+		pf.Options = append(pf.Options, httpapi.WithAdmissionFoundation(admissionFoundation))
+	} else {
+		pf.Options = append(pf.Options, httpapi.WithAdmissionSecurityFoundation(admissionFoundation))
 	}
 
 	// Staff invitation and onboarding is an Admin capability, not part of public
@@ -766,7 +850,12 @@ func buildProductionFoundationsWithStaffSource(
 	// A staff dependency that is configured wrongly now fails startup with a
 	// named error instead of silently dropping the Admin surface, so a
 	// misconfigured environment is diagnosable rather than a mystery 404.
-	if (cfg.Environment() == config.EnvDevelopment && cfg.Sessions().Enabled()) || cfg.Environment().IsProduction() {
+	// Founder-Beta is a real staging runtime: it keeps the production session,
+	// screening, email, and authorization boundaries while remaining APP_ENV=staging.
+	// Staff operations must therefore be composed there too; omitting them makes
+	// the authenticated UI fail with an indistinguishable 404.
+	if cfg.Sessions().Enabled() && (cfg.Environment() == config.EnvDevelopment ||
+		cfg.Environment() == config.EnvStaging || cfg.Environment().IsProduction()) {
 		foundation, limiterClient, err := buildStaffFoundationWithSource(cfg, pool, redisConnection, newStaffSource)
 		if err != nil {
 			pf.Close()
@@ -797,5 +886,26 @@ func buildProductionFoundationsWithStaffSource(
 	}
 	pf.Options = append(pf.Options, httpapi.WithAccessFoundation(accessFoundation))
 
+	// D-091 Academic Catalog (T1). Admin-only, and additive: no Course,
+	// catalogue, entitlement, or media path reads it yet.
+	academicFoundation, err := buildAcademicFoundation(pool)
+	if err != nil {
+		pf.Close()
+		return nil, err
+	}
+	pf.Options = append(pf.Options, httpapi.WithAcademicFoundation(academicFoundation))
+
 	return pf, nil
+}
+
+func buildAcademicFoundation(pool *pgxpool.Pool) (*httpapi.AcademicFoundation, error) {
+	repository, err := academic.NewRepository(pool)
+	if err != nil {
+		return nil, fmt.Errorf("composing academic catalog repository: %w", err)
+	}
+	foundation, err := httpapi.NewAcademicFoundation(httpapi.AcademicFoundationOptions{Repository: repository})
+	if err != nil {
+		return nil, fmt.Errorf("composing academic catalog foundation: %w", err)
+	}
+	return foundation, nil
 }

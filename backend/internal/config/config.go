@@ -73,17 +73,30 @@ func (r ServiceRole) Valid() bool {
 // role, so that change is one edit with one obvious meaning.
 func (r ServiceRole) RequiresRedis() bool { return true }
 
-// MediaOperatingMode is the explicit LG-014 operating switch. It is typed and
-// startup-validated so an unknown mode cannot silently enable an unsafe path.
+// MediaOperatingMode is the explicit media-safety operating switch. It is typed
+// and startup-validated so an unknown mode cannot silently enable an unsafe
+// path.
+//
+// `SCANNER` keeps ordinary Instructor upload available but fail-closed behind
+// malware scanning. `ADMIN_CATALOGUE` disables Instructor upload and accepts
+// only an audited Admin procedure carrying exact out-of-band scan evidence.
+// `TRUSTED_INSTRUCTOR` is the bounded D-088 launch profile: an ACTIVE vetted
+// Instructor may upload the approved MP4 Lesson video and PDF/DOCX Lesson
+// Resource types, which progress on exact-version validation evidence rather
+// than malware scanning. Every other kind, type, public preview, and Lab
+// Material stays scanner-gated in every mode.
 type MediaOperatingMode string
 
 const (
-	MediaOperatingModeScanner        MediaOperatingMode = "SCANNER"
-	MediaOperatingModeAdminCatalogue MediaOperatingMode = "ADMIN_CATALOGUE"
+	MediaOperatingModeScanner           MediaOperatingMode = "SCANNER"
+	MediaOperatingModeAdminCatalogue    MediaOperatingMode = "ADMIN_CATALOGUE"
+	MediaOperatingModeTrustedInstructor MediaOperatingMode = "TRUSTED_INSTRUCTOR"
 )
 
 func (m MediaOperatingMode) Valid() bool {
-	return m == MediaOperatingModeScanner || m == MediaOperatingModeAdminCatalogue
+	return m == MediaOperatingModeScanner ||
+		m == MediaOperatingModeAdminCatalogue ||
+		m == MediaOperatingModeTrustedInstructor
 }
 
 // MediaScannerMode names which malware-scanning boundary this process builds.
@@ -185,7 +198,7 @@ func (m PasswordScreenMode) Valid() bool {
 }
 
 // LegalIdentityMode distinguishes an actual public operator identity from the
-// exact non-public sentinel identity approved for the disposable S11 stack.
+// exact non-public sentinel identity approved for disposable acceptance stacks.
 // It is deliberately an enum, not a permissive boolean bypass.
 type LegalIdentityMode string
 
@@ -195,7 +208,8 @@ const (
 
 	StagingLegalRegistrationNumber = "STAGING-NOT-REGISTERED"
 	StagingLegalRegisteredAddress  = "STAGING ONLY — LEGAL ENTITY DETAILS PENDING"
-	ControlledStagingPublicOrigin  = "https://gradex.localhost:18443"
+	ControlledStagingLocalOrigin   = "https://gradex.localhost:18443"
+	ControlledStagingLG019Origin   = "https://staging.gradex.network"
 )
 
 func (m LegalIdentityMode) Valid() bool {
@@ -260,6 +274,29 @@ func (a AdmissionSettings) AnonymousCookieSigningKey() Secret { return a.anonymo
 func (a AdmissionSettings) AnonymousCSRFKey() Secret          { return a.anonymousCSRFKey }
 func (a AdmissionSettings) LimiterHMACKey() Secret            { return a.limiterHMACKey }
 func (a AdmissionSettings) ProtectedPayloadKey() Secret       { return a.protectedPayloadKey }
+
+// LoginAdmissionSettings bounds the only public path that performs password
+// verification. These values are capacity controls, not secrets.
+type LoginAdmissionSettings struct {
+	verificationConcurrency int
+	verificationQueue       int
+	verificationQueueWait   time.Duration
+	requestTimeout          time.Duration
+}
+
+const (
+	DefaultLoginPasswordVerificationConcurrency = 1
+	DefaultLoginPasswordVerificationQueue       = 500
+	DefaultLoginPasswordVerificationQueueWait   = 45 * time.Second
+	DefaultLoginRequestTimeout                  = time.Minute
+)
+
+func (s LoginAdmissionSettings) VerificationConcurrency() int { return s.verificationConcurrency }
+func (s LoginAdmissionSettings) VerificationQueue() int       { return s.verificationQueue }
+func (s LoginAdmissionSettings) VerificationQueueWait() time.Duration {
+	return s.verificationQueueWait
+}
+func (s LoginAdmissionSettings) RequestTimeout() time.Duration { return s.requestTimeout }
 
 // SessionWindow is one role's immutable server-authoritative lifetime.
 type SessionWindow struct {
@@ -358,12 +395,13 @@ type Config struct {
 	databaseURL Secret
 	redis       RedisSettings
 
-	s3Endpoint     string
-	s3Bucket       string
-	s3Region       string
-	s3AccessKey    Secret
-	s3SecretKey    Secret
-	s3UsePathStyle bool
+	s3Endpoint        string
+	s3PresignEndpoint string
+	s3Bucket          string
+	s3Region          string
+	s3AccessKey       Secret
+	s3SecretKey       Secret
+	s3UsePathStyle    bool
 
 	uploadURLExpiry     time.Duration
 	playbackURLExpiry   time.Duration
@@ -376,12 +414,14 @@ type Config struct {
 	mediaOperatingMode     MediaOperatingMode
 	mediaScannerMode       MediaScannerMode
 
-	authFakeMode bool
+	authFakeMode        bool
+	salesWhatsAppNumber string
 
-	payments  Capability
-	email     EmailSettings
-	admission AdmissionSettings
-	legal     LegalSettings
+	payments       Capability
+	email          EmailSettings
+	admission      AdmissionSettings
+	loginAdmission LoginAdmissionSettings
+	legal          LegalSettings
 }
 
 func (c *Config) Environment() Environment { return c.environment }
@@ -439,12 +479,13 @@ func (c *Config) Sessions() SessionSettings { return c.sessions }
 func (c *Config) DatabaseURL() Secret  { return c.databaseURL }
 func (c *Config) Redis() RedisSettings { return c.redis }
 
-func (c *Config) S3Endpoint() string   { return c.s3Endpoint }
-func (c *Config) S3Bucket() string     { return c.s3Bucket }
-func (c *Config) S3Region() string     { return c.s3Region }
-func (c *Config) S3AccessKey() Secret  { return c.s3AccessKey }
-func (c *Config) S3SecretKey() Secret  { return c.s3SecretKey }
-func (c *Config) S3UsePathStyle() bool { return c.s3UsePathStyle }
+func (c *Config) S3Endpoint() string        { return c.s3Endpoint }
+func (c *Config) S3PresignEndpoint() string { return c.s3PresignEndpoint }
+func (c *Config) S3Bucket() string          { return c.s3Bucket }
+func (c *Config) S3Region() string          { return c.s3Region }
+func (c *Config) S3AccessKey() Secret       { return c.s3AccessKey }
+func (c *Config) S3SecretKey() Secret       { return c.s3SecretKey }
+func (c *Config) S3UsePathStyle() bool      { return c.s3UsePathStyle }
 
 func (c *Config) UploadURLExpiry() time.Duration   { return c.uploadURLExpiry }
 func (c *Config) PlaybackURLExpiry() time.Duration { return c.playbackURLExpiry }
@@ -461,10 +502,15 @@ func (c *Config) MediaScannerMode() MediaScannerMode     { return c.mediaScanner
 // to let it be true in production; see validate.
 func (c *Config) AuthFakeMode() bool { return c.authFakeMode }
 
-func (c *Config) Payments() Capability         { return c.payments }
-func (c *Config) Email() EmailSettings         { return c.email }
-func (c *Config) Admission() AdmissionSettings { return c.admission }
-func (c *Config) Legal() LegalSettings         { return c.legal }
+// SalesWhatsAppNumber is the destination for the browser-only manual-payment
+// handoff. It contains digits only so callers can safely compose a wa.me URL.
+func (c *Config) SalesWhatsAppNumber() string { return c.salesWhatsAppNumber }
+
+func (c *Config) Payments() Capability                   { return c.payments }
+func (c *Config) Email() EmailSettings                   { return c.email }
+func (c *Config) Admission() AdmissionSettings           { return c.admission }
+func (c *Config) LoginAdmission() LoginAdmissionSettings { return c.loginAdmission }
+func (c *Config) Legal() LegalSettings                   { return c.legal }
 
 // Lookup reads one setting. os.LookupEnv satisfies it; tests supply a map so
 // they never mutate the process environment.
@@ -495,6 +541,7 @@ func Load() (*Config, error) {
 func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 	p := &parser{lookup: lookup}
 	environment := Environment(p.str("APP_ENV", string(EnvDevelopment)))
+	s3Endpoint := p.str("S3_ENDPOINT", "")
 
 	cfg := &Config{
 		environment: environment,
@@ -512,6 +559,13 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		httpWriteTimeout: p.duration("HTTP_WRITE_TIMEOUT", 30*time.Second),
 		httpIdleTimeout:  p.duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		shutdownTimeout:  p.duration("SHUTDOWN_TIMEOUT", 20*time.Second),
+
+		loginAdmission: LoginAdmissionSettings{
+			verificationConcurrency: int(p.integer("LOGIN_PASSWORD_VERIFY_CONCURRENCY", DefaultLoginPasswordVerificationConcurrency)),
+			verificationQueue:       int(p.integer("LOGIN_PASSWORD_VERIFY_QUEUE_CAPACITY", DefaultLoginPasswordVerificationQueue)),
+			verificationQueueWait:   p.duration("LOGIN_PASSWORD_VERIFY_QUEUE_WAIT", DefaultLoginPasswordVerificationQueueWait),
+			requestTimeout:          p.duration("LOGIN_REQUEST_TIMEOUT", DefaultLoginRequestTimeout),
+		},
 
 		sessions: SessionSettings{
 			student: SessionWindow{
@@ -542,10 +596,11 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 			tlsCACertFile: p.str("REDIS_TLS_CA_CERT_FILE", ""),
 		},
 
-		s3Endpoint:     p.str("S3_ENDPOINT", ""),
-		s3Bucket:       p.str("S3_BUCKET", ""),
-		s3Region:       p.str("S3_REGION", "us-east-1"),
-		s3UsePathStyle: p.boolean("S3_USE_PATH_STYLE", true),
+		s3Endpoint:        s3Endpoint,
+		s3PresignEndpoint: p.str("S3_PRESIGN_ENDPOINT", s3Endpoint),
+		s3Bucket:          p.str("S3_BUCKET", ""),
+		s3Region:          p.str("S3_REGION", "us-east-1"),
+		s3UsePathStyle:    p.boolean("S3_USE_PATH_STYLE", true),
 
 		uploadURLExpiry:    p.duration("UPLOAD_URL_EXPIRY", 15*time.Minute),
 		playbackURLExpiry:  p.duration("PLAYBACK_URL_EXPIRY", 5*time.Minute),
@@ -557,7 +612,8 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		mediaOperatingMode:     MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
 		mediaScannerMode:       MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
 
-		authFakeMode: p.boolean("AUTH_FAKE_MODE", false),
+		authFakeMode:        p.boolean("AUTH_FAKE_MODE", false),
+		salesWhatsAppNumber: p.str("SALES_WHATSAPP_NUMBER", ""),
 
 		legal: LegalSettings{
 			identityMode:       LegalIdentityMode(p.str("LEGAL_IDENTITY_MODE", string(LegalIdentityPublic))),
@@ -568,6 +624,11 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 			supportEmail:       p.str("SUPPORT_EMAIL", ""),
 			securityEmail:      p.str("SECURITY_EMAIL", ""),
 		},
+	}
+	if cfg.salesWhatsAppNumber == "" && cfg.environment == EnvDevelopment {
+		// Deterministic, non-routable test configuration. Production-like
+		// environments must name their actual operating number explicitly.
+		cfg.salesWhatsAppNumber = "15550000000"
 	}
 
 	// Provider gates are read as settings here and turned into capabilities in
@@ -916,6 +977,20 @@ func (c *Config) validate(p *parser) {
 	if !c.environment.Valid() {
 		p.errf("APP_ENV must be one of development, staging, production; got %q", c.environment)
 	}
+	if c.salesWhatsAppNumber == "" && c.environment != EnvDevelopment {
+		p.errf("SALES_WHATSAPP_NUMBER is required outside development")
+	}
+	if c.salesWhatsAppNumber != "" {
+		if len(c.salesWhatsAppNumber) < 7 || len(c.salesWhatsAppNumber) > 15 {
+			p.errf("SALES_WHATSAPP_NUMBER must contain 7 to 15 international digits")
+		}
+		for _, character := range c.salesWhatsAppNumber {
+			if character < '0' || character > '9' {
+				p.errf("SALES_WHATSAPP_NUMBER must contain digits only")
+				break
+			}
+		}
+	}
 
 	if c.redis.addr == "" {
 		p.errf("REDIS_ADDR is required")
@@ -966,6 +1041,11 @@ func (c *Config) validate(p *parser) {
 	if c.s3Endpoint == "" {
 		p.errf("S3_ENDPOINT is required")
 	}
+	if presignOrigin, err := CanonicalPublicOrigin(c.s3PresignEndpoint); err != nil {
+		p.errf("S3_PRESIGN_ENDPOINT must be an exact HTTP origin")
+	} else if c.environment != EnvDevelopment && !strings.HasPrefix(presignOrigin, "https://") {
+		p.errf("S3_PRESIGN_ENDPOINT must use HTTPS outside development")
+	}
 	if c.s3Bucket == "" {
 		p.errf("S3_BUCKET is required")
 	}
@@ -996,10 +1076,23 @@ func (c *Config) validate(p *parser) {
 		{"PASSWORD_RESET_TOKEN_TTL", c.admission.passwordResetTokenTTL},
 		{"ADMISSION_RATE_LIMIT_TIMEOUT", c.admission.rateLimitTimeout},
 		{"COMPROMISED_PASSWORD_TIMEOUT", c.admission.compromisedPasswordTimeout},
+		{"LOGIN_PASSWORD_VERIFY_QUEUE_WAIT", c.loginAdmission.verificationQueueWait},
+		{"LOGIN_REQUEST_TIMEOUT", c.loginAdmission.requestTimeout},
 	} {
 		if d.v <= 0 {
 			p.errf("%s must be positive, got %s", d.name, d.v)
 		}
+	}
+	if c.loginAdmission.verificationConcurrency <= 0 {
+		p.errf("LOGIN_PASSWORD_VERIFY_CONCURRENCY must be positive, got %d", c.loginAdmission.verificationConcurrency)
+	}
+	if c.loginAdmission.verificationQueue <= 0 {
+		p.errf("LOGIN_PASSWORD_VERIFY_QUEUE_CAPACITY must be positive, got %d", c.loginAdmission.verificationQueue)
+	}
+	if c.loginAdmission.verificationQueueWait > 0 && c.loginAdmission.requestTimeout > 0 &&
+		c.loginAdmission.verificationQueueWait >= c.loginAdmission.requestTimeout {
+		p.errf("LOGIN_PASSWORD_VERIFY_QUEUE_WAIT (%s) must be less than LOGIN_REQUEST_TIMEOUT (%s)",
+			c.loginAdmission.verificationQueueWait, c.loginAdmission.requestTimeout)
 	}
 
 	for _, role := range []struct {
@@ -1029,7 +1122,7 @@ func (c *Config) validate(p *parser) {
 		p.errf("MAX_UPLOAD_SIZE_BYTES must be positive, got %d", c.maxUploadSizeBytes)
 	}
 	if !c.mediaOperatingMode.Valid() {
-		p.errf("MEDIA_OPERATING_MODE must be SCANNER or ADMIN_CATALOGUE, got %q", c.mediaOperatingMode)
+		p.errf("MEDIA_OPERATING_MODE must be SCANNER, ADMIN_CATALOGUE or TRUSTED_INSTRUCTOR, got %q", c.mediaOperatingMode)
 	}
 	if !c.mediaScannerMode.Valid() {
 		p.errf("MEDIA_SCANNER_MODE must be UNAVAILABLE or DEVELOPMENT_NO_OP, got %q", c.mediaScannerMode)
@@ -1148,11 +1241,22 @@ func (c *Config) validateLegalIdentityMode(origin string, p *parser) {
 			p.errf("public legal identity rejects controlled-staging sentinel values")
 		}
 	case LegalIdentityControlledStaging:
-		if c.environment != EnvProduction || origin != ControlledStagingPublicOrigin ||
+		if !isControlledStagingContext(c.environment, origin) ||
 			c.legal.registrationNumber != StagingLegalRegistrationNumber ||
 			c.legal.registeredAddress != StagingLegalRegisteredAddress {
-			p.errf("controlled-staging legal identity requires the exact disposable S11 origin and sentinel values")
+			p.errf("controlled-staging legal identity requires an exact approved disposable context and sentinel values")
 		}
+	}
+}
+
+func isControlledStagingContext(environment Environment, origin string) bool {
+	switch {
+	case environment == EnvProduction && origin == ControlledStagingLocalOrigin:
+		return true
+	case environment == EnvStaging && origin == ControlledStagingLG019Origin:
+		return true
+	default:
+		return false
 	}
 }
 

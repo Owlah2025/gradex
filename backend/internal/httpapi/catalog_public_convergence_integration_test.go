@@ -50,12 +50,12 @@ func TestPublicCatalogQueryPlansAtLaunchScale(t *testing.T) {
 		JOIN course_revisions cr ON cr.course_id = c.id
 		WHERE `+visibility+`
 		ORDER BY c.id
-		LIMIT 20`, "courses_pkey")
+		LIMIT 20`, courseIDLeadingIndexes)
 	requirePublicCatalogPlanIndex(t, conn, ctx, `
 		SELECT c.id
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
-		WHERE `+visibility+` AND c.id = $1::uuid`, "courses_pkey", detailCourseID)
+		WHERE `+visibility+` AND c.id = $1::uuid`, courseIDLeadingIndexes, detailCourseID)
 	if _, err := conn.Exec(ctx, `SET enable_seqscan = on`); err != nil {
 		t.Fatalf("restoring production query-planning defaults: %v", err)
 	}
@@ -68,10 +68,12 @@ func TestPublicCatalogQueryPlansAtLaunchScale(t *testing.T) {
 		JOIN accounts a ON a.id = c.owner_account_id
 		LEFT JOIN taxonomy_terms major ON major.id = cr.major_term_id
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
+		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
+		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
 		WHERE `+visibility+`
 			AND `+catalogpublic.SearchMatchPredicate("$1"), "public owner")
 	execution := publicCatalogPlanExecutionTime(t, plan)
-	t.Logf("shipped three-way search predicate at %d Courses: %s\n%s", publicCatalogueLaunchCourseCount, execution, plan)
+	t.Logf("shipped academic-enriched search predicate at %d Courses: %s\n%s", publicCatalogueLaunchCourseCount, execution, plan)
 	if strings.Contains(plan, "course_revisions_search_text_trgm_idx") {
 		t.Fatalf("shipped three-way search predicate unexpectedly uses the trigram index:\n%s", plan)
 	}
@@ -111,13 +113,24 @@ func TestPublicCatalogNotFoundTimingDistribution(t *testing.T) {
 	}
 }
 
-func requirePublicCatalogPlanIndex(t *testing.T, conn *pgxpool.Conn, ctx context.Context, query, index string, arguments ...any) {
+// requirePublicCatalogPlanIndex asserts the catalogue reaches Courses through an
+// index that leads with courses.id, never a sequential scan. Any of the named
+// indexes satisfies that: courses_pkey and the T4-A courses_id_institution_unique
+// constraint both lead with id, and which one the planner prefers is its choice,
+// not a property of the catalogue.
+func requirePublicCatalogPlanIndex(t *testing.T, conn *pgxpool.Conn, ctx context.Context, query string, indexes []string, arguments ...any) {
 	t.Helper()
 	plan := publicCatalogExplain(t, conn, ctx, "EXPLAIN (COSTS OFF) "+query, arguments...)
-	if !strings.Contains(plan, index) {
-		t.Fatalf("catalogue query plan omitted %s:\n%s", index, plan)
+	for _, index := range indexes {
+		if strings.Contains(plan, index) {
+			return
+		}
 	}
+	t.Fatalf("catalogue query plan used none of %v:\n%s", indexes, plan)
 }
+
+// courseIDLeadingIndexes are the indexes whose leading column is courses.id.
+var courseIDLeadingIndexes = []string{"courses_pkey", "courses_id_institution_unique"}
 
 func publicCatalogExplain(t *testing.T, conn *pgxpool.Conn, ctx context.Context, query string, arguments ...any) string {
 	t.Helper()

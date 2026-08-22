@@ -25,6 +25,59 @@ const STUDENT_B_ID = "a0000000-0000-0000-0000-000000000002";
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
 const LESSON_ID = "30000000-0000-0000-0000-000000000001";
 
+/**
+ * The Student's Course-access surface must speak product language only.
+ *
+ * Internal identifiers may live in `data-*` attributes for tests and support, so this reads the
+ * rendered *text*, not the markup: UUIDs and backend state enums must never be what the Student is
+ * asked to interpret.
+ */
+async function expectNoInternalIdentifiers(page: import("@playwright/test").Page): Promise<void> {
+  const visible = (await page.locator("main").innerText()) || "";
+  expect(visible, "a UUID reached the Student's visible copy").not.toMatch(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  );
+  for (const wireEnum of [
+    "PENDING_STUDENT_ACCEPTANCE",
+    "PENDING_ADMIN_APPROVAL",
+    "APPROVED",
+    "REJECTED",
+    "CANCELLED",
+    "ACTIVE",
+    "REVOKED",
+    "EXPIRED",
+    "entitlement",
+    "MANUAL_INVITATION",
+  ]) {
+    expect(visible, `backend term "${wireEnum}" reached the Student's visible copy`).not.toContain(wireEnum);
+  }
+}
+
+/**
+ * This journey drives Admin invitation, Student acceptance, Admin approval, protected learning, and
+ * the MVP-F12 persistence loop through the browser, across three contexts. F12 added two dashboard
+ * round-trips and an Arabic pass, which took it past the 30 s default. The budget matches the
+ * convention the other long S5 journeys already use (120–180 s); it is a work budget for a longer
+ * journey, not a retry or a stabilisation device — the assertions themselves are unchanged.
+ */
+/**
+ * Gradex takes no payment (D-045). No access state, on any surface, may offer one.
+ */
+async function expectNoCommerce(page: import("@playwright/test").Page): Promise<void> {
+  const visible = (await page.locator("main").innerText()) || "";
+  expect(visible, "commerce language reached a Student surface").not.toMatch(
+    /buy now|add to cart|checkout|purchase|pay now|السلة|الدفع|اشتر/i,
+  );
+  await expect(
+    page.getByRole("button", { name: /buy|cart|checkout|purchase|pay|اشتر|الدفع|السلة/i }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: /buy|cart|checkout|purchase|pay|اشتر|الدفع|السلة/i }),
+  ).toHaveCount(0);
+}
+
+test.describe.configure({ timeout: 120_000 });
+
 test.describe("S6 Course Access Grant — Real Production Launch Journey", () => {
   test("Complete 30-Step End-to-End Course Access Grant & Protected Learning Journey", async ({ browser }) => {
     // Context 1: Admin Context
@@ -123,15 +176,85 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     await studentPage.goto(invitationUrl);
     await studentPage.waitForURL((url) => url.pathname.includes("/access"));
-    await expect(studentPage.locator("h1")).toContainText("Student Course Access Portal");
+    await expect(studentPage.locator("h1")).toContainText("Course access");
 
-    // 11. Student A accepts invitation
-    await expect(studentPage.locator("body")).toContainText("PENDING_STUDENT_ACCEPTANCE");
-    await studentPage.click('button:has-text("Accept Invitation & Request Access")');
+    // The Course is named, not keyed. No UUID and no wire enum is product-visible anywhere here.
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toContainText("CS101");
+    await expectNoInternalIdentifiers(studentPage);
 
-    // 12. Assert UI shows pending Admin approval
-    await expect(studentPage.locator("body")).toContainText("PENDING_ADMIN_APPROVAL");
-    await expect(studentPage.locator('[role="status"]')).toContainText("pending admin approval");
+    // 11. Student A accepts invitation. The state is stated in the Student's language; the wire
+    // enum survives only as a data attribute for tests and support.
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Action needed");
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toHaveAttribute(
+      "data-access-state",
+      "ACTION_REQUIRED",
+    );
+    // MVP-F15 / ST-08 — the Dashboard's pending-access summary, in the window where the invitation
+    // genuinely awaits the Student. The same page is used rather than a second one, then the
+    // invitation URL is re-opened so the one-time fragment token is captured again for acceptance.
+    await studentPage.goto(`/en/learn/dashboard`);
+    await expect(studentPage.getByTestId("pending-access-summary")).toBeVisible();
+    await expect(studentPage.getByTestId("pending-access-action-required")).toContainText(
+      "waiting for you to accept",
+    );
+    await expect(studentPage.getByTestId("pending-access-awaiting-approval")).toHaveCount(0);
+    await expectNoInternalIdentifiers(studentPage);
+
+    await studentPage.goto(invitationUrl);
+    await studentPage.waitForURL((url) => url.pathname.includes("/access"));
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Action needed");
+
+    await studentPage.getByTestId("accept-invitation").click();
+
+    // 12. Acceptance is recorded, and the page says plainly that it granted nothing yet.
+    await expect(studentPage.getByTestId("access-invitation-accepted")).toBeVisible();
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Waiting for approval");
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toContainText(
+      "An administrator still has to approve it",
+    );
+    await expect(studentPage.getByTestId(`go-to-course-${COURSE_ID}`)).toHaveCount(0);
+    await expectNoInternalIdentifiers(studentPage);
+
+    // ---------------------------------------------------------------------
+    // MVP-F12 — the persistent half. The Student leaves the invitation context entirely and comes
+    // back through ordinary authenticated navigation. No token, no remembered URL, no email.
+    // ---------------------------------------------------------------------
+    await studentPage.goto(`/en/learn/dashboard`);
+
+    // MVP-F15 / ST-08 — the invitation is now waiting on an Admin, not on the Student, and the
+    // Dashboard says so in those terms. This journey leaves through the summary's own action.
+    await expect(studentPage.getByTestId("pending-access-summary")).toBeVisible();
+    await expect(studentPage.getByTestId("pending-access-awaiting-approval")).toContainText(
+      "waiting for approval",
+    );
+    await expect(studentPage.getByTestId("pending-access-action-required")).toHaveCount(0);
+    // The persistent access route remains available alongside it.
+    await expect(studentPage.getByTestId("dashboard-access-link")).toBeVisible();
+    await expectNoInternalIdentifiers(studentPage);
+
+    await studentPage.getByTestId("pending-access-action").click();
+    await studentPage.waitForURL((url) => url.pathname === "/en/access");
+    // Nothing token-bearing survived: the invitation panel is absent, and the record is still here.
+    expect(studentPage.url()).not.toContain("token");
+    expect(studentPage.url()).not.toContain("invitation_id");
+    await expect(studentPage.getByTestId("access-invitation-panel")).toHaveCount(0);
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toContainText("CS101");
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Waiting for approval");
+    await expectNoInternalIdentifiers(studentPage);
+
+    // MVP-F13 — Course Details knows this Student's real relationship to this Course. Waiting for
+    // approval must not offer a way into the Course, and must never offer a purchase.
+    await studentPage.goto(`/en/catalog/${COURSE_ID}`);
+    await expect(studentPage.getByTestId("course-access-panel")).toHaveAttribute(
+      "data-access-relationship",
+      "AWAITING_APPROVAL",
+    );
+    await expect(studentPage.getByTestId("course-access-message")).toContainText(
+      "An administrator still has to approve it",
+    );
+    await expect(studentPage.getByTestId("course-access-go-to-course")).toHaveCount(0);
+    await expect(studentPage.getByTestId("course-access-view-status")).toBeVisible();
+    await expectNoCommerce(studentPage);
 
     const preApprovalState = queryLearningState(STUDENT_A_ID, COURSE_ID);
     expect(preApprovalState.entitlement.count).toBe(0);
@@ -164,14 +287,56 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     expect(stateSnapshot.enrollment.found).toBe(true);
     expect(stateSnapshot.enrollment.count).toBe(1);
 
-    // 18. Student A refreshes/revisits access page
+    // 18. Student A returns through ordinary navigation — still no token, still no email.
+    await studentPage.goto(`/en/learn/dashboard`);
+    // MVP-F15 / ST-08 — nothing is pending any more, so the summary is gone entirely rather than
+    // lingering as a stale prompt.
+    await expect(studentPage.getByTestId("pending-access-summary")).toHaveCount(0);
+    await studentPage.getByTestId("dashboard-access-link").click();
+    await studentPage.waitForURL((url) => url.pathname === "/en/access");
+
+    // 19. Access is now granted, said in the Student's language, with the Course named.
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("Access granted");
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toContainText("CS101");
+    await expect(studentPage.getByTestId(`access-record-${COURSE_ID}`)).toContainText("Access until");
+    await expectNoInternalIdentifiers(studentPage);
+
+    // 19b. The same record in Arabic: Gradex is Arabic-default, so an English-only proof is not
+    // proof. Real Arabic copy is asserted, not merely `dir="rtl"`.
+    await studentPage.goto("/ar/access");
+    await expect(studentPage.locator("html")).toHaveAttribute("dir", "rtl");
+    await expect(studentPage.locator("h1")).toContainText("الوصول إلى المقررات");
+    await expect(studentPage.getByTestId(`access-state-${COURSE_ID}`)).toHaveText("تم منح الوصول");
+    await expect(studentPage.getByTestId(`go-to-course-${COURSE_ID}`)).toHaveText("افتح المقرر");
+    await expectNoInternalIdentifiers(studentPage);
     await studentPage.goto("/en/access");
 
-    // 19. Assert active access is displayed
-    await expect(studentPage.locator("body")).toContainText("Active Access Until");
+    // 19c. MVP-F13 — the same Course Details page now reflects granted access, in both languages,
+    // and its entry action reaches the real entitled Course Home.
+    await studentPage.goto(`/en/catalog/${COURSE_ID}`);
+    await expect(studentPage.getByTestId("course-access-panel")).toHaveAttribute(
+      "data-access-relationship",
+      "ACTIVE",
+    );
+    await expect(studentPage.getByTestId("course-access-message")).toContainText(
+      "You have access to this course",
+    );
+    await expectNoCommerce(studentPage);
 
-    // 20. Student A clicks localized Course CTA
-    const watchCourseCTA = studentPage.locator('a:has-text("Watch Course"), a[href*="/learn/courses"]').first();
+    await studentPage.goto(`/ar/catalog/${COURSE_ID}`);
+    await expect(studentPage.locator("html")).toHaveAttribute("dir", "rtl");
+    await expect(studentPage.getByTestId("course-access-message")).toHaveText("لديك وصول إلى هذا المقرر.");
+    await expect(studentPage.getByTestId("course-access-go-to-course")).toHaveText("افتح المقرر");
+    await expectNoCommerce(studentPage);
+
+    await studentPage.goto(`/en/catalog/${COURSE_ID}`);
+    await studentPage.getByTestId("course-access-go-to-course").click();
+    await studentPage.waitForURL((url) => url.pathname.includes(`/learn/courses/${COURSE_ID}`));
+    await expect(studentPage.locator("h1")).toContainText("CS101");
+
+    // 20. Student A opens the Course from the access record itself.
+    await studentPage.goto("/en/access");
+    const watchCourseCTA = studentPage.getByTestId(`go-to-course-${COURSE_ID}`);
     await expect(watchCourseCTA).toBeVisible();
     await watchCourseCTA.click();
 

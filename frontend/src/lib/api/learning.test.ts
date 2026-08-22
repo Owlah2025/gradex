@@ -5,6 +5,7 @@ import {
   requestCourseHome,
   requestLearningDashboard,
   requestLessonReadModel,
+  requestMaterialDownload,
   requestPlayback,
 } from "./learning";
 
@@ -25,6 +26,35 @@ test("playback authorization is a no-store Student request without a reusable UR
         method: "POST", credentials: "same-origin", cache: "no-store",
         headers: {
           Accept: "application/json, application/problem+json", "Accept-Language": "en", "X-CSRF-Token": "csrf-token",
+        }, body: undefined,
+      },
+    }]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("material download authorization sends only the opaque same-origin path and CSRF token", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return new Response(JSON.stringify({ url: "https://storage.example/temporary", expires_at: "2026-08-21T12:05:00Z", buyer_tag: "opaque-lab-buyer-tag" }), { status: 200 });
+  };
+  try {
+    const issued = await requestMaterialDownload(
+      "/media/courses/course/lessons/lesson/materials/opaque/download-authorizations",
+      "ar",
+      "csrf-token",
+    );
+    assert.equal(issued.url, "https://storage.example/temporary");
+    assert.equal(issued.buyer_tag, "opaque-lab-buyer-tag");
+    assert.deepEqual(requests, [{
+      url: "/api/v1/media/courses/course/lessons/lesson/materials/opaque/download-authorizations",
+      init: {
+        method: "POST", credentials: "same-origin", cache: "no-store",
+        headers: {
+          Accept: "application/json, application/problem+json", "Accept-Language": "ar", "X-CSRF-Token": "csrf-token",
         }, body: undefined,
       },
     }]);
@@ -54,7 +84,8 @@ test("read-model clients preserve D-063 paths, credentials, locale, and wire sha
         progress: { completed_lessons: 0, total_lessons: 1, percent: 0 }, sections: [{
           section_id: "section-id", title: "Section", lessons: [{
             lesson_id: "lesson-id", title: "Lesson", progress: { position_seconds: 0, completed: false },
-            materials: [{ kind: "resource" }, { kind: "lab_material" }],
+            resources: [{ title: "Notes.pdf", file_type: "PDF", size_bytes: 12, download_authorization_path: "/opaque/resource" }],
+            lab_materials: [{ title: "Lab.zip", file_type: "ZIP", size_bytes: 24, download_authorization_path: "/opaque/lab" }],
           }],
         }],
       },
@@ -69,7 +100,8 @@ test("read-model clients preserve D-063 paths, credentials, locale, and wire sha
         title: "Lesson", learning_status: "active", expires_at: "2026-12-22T20:59:59Z",
         progress: { position_seconds: 12.5, completed: false },
         navigation: { previous_lesson_id: null, next_lesson_id: "next-id" },
-        materials: [{ kind: "resource" }],
+        resources: [{ title: "Notes.pdf", file_type: "PDF", size_bytes: 12, download_authorization_path: "/opaque/resource" }],
+        lab_materials: [],
       },
     },
   ];

@@ -26,19 +26,21 @@ const dummyLoginPassword = "gradex timing equalization credential"
 
 // SessionRepositoryOptions is the complete server-side session authority.
 type SessionRepositoryOptions struct {
-	Pool     *pgxpool.Pool
-	Settings config.SessionSettings
-	CSRFKey  []byte
-	Now      func() time.Time
+	Pool                     *pgxpool.Pool
+	Settings                 config.SessionSettings
+	CSRFKey                  []byte
+	Now                      func() time.Time
+	PasswordVerificationGate *PasswordVerificationGate
 }
 
 // SessionRepository owns family and immutable-generation transactions.
 type SessionRepository struct {
-	pool      *pgxpool.Pool
-	settings  config.SessionSettings
-	csrfKey   []byte
-	now       func() time.Time
-	dummyHash string
+	pool                     *pgxpool.Pool
+	settings                 config.SessionSettings
+	csrfKey                  []byte
+	now                      func() time.Time
+	dummyHash                string
+	passwordVerificationGate *PasswordVerificationGate
 }
 
 // LoginRequest contains the only user-supplied credential boundary.
@@ -94,12 +96,24 @@ func NewSessionRepository(options SessionRepositoryOptions) (*SessionRepository,
 	if err != nil {
 		return nil, fmt.Errorf("creating dummy login credential: %w", err)
 	}
+	gate := options.PasswordVerificationGate
+	if gate == nil {
+		gate, err = NewPasswordVerificationGate(PasswordVerificationGateOptions{
+			Concurrency: config.DefaultLoginPasswordVerificationConcurrency,
+			Queue:       config.DefaultLoginPasswordVerificationQueue,
+			QueueWait:   config.DefaultLoginPasswordVerificationQueueWait,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &SessionRepository{
-		pool:      options.Pool,
-		settings:  options.Settings,
-		csrfKey:   append([]byte(nil), options.CSRFKey...),
-		now:       options.Now,
-		dummyHash: dummyHash,
+		pool:                     options.Pool,
+		settings:                 options.Settings,
+		csrfKey:                  append([]byte(nil), options.CSRFKey...),
+		now:                      options.Now,
+		dummyHash:                dummyHash,
+		passwordVerificationGate: gate,
 	}, nil
 }
 
@@ -119,7 +133,9 @@ func (r *SessionRepository) Login(
 	ctx context.Context,
 	request LoginRequest,
 ) (SessionGrant, error) {
+	candidateStarted := time.Now()
 	candidate, found, err := r.loginCandidate(ctx, request.Email)
+	observeLoginTiming(ctx, LoginStageCandidateLookup, candidateStarted)
 	if err != nil {
 		return SessionGrant{}, err
 	}
@@ -127,7 +143,24 @@ func (r *SessionRepository) Login(
 	if found {
 		hash = candidate.passwordHash
 	}
-	if err := verifyStoredCredential(ctx, request.Password, hash); err != nil {
+	gateStarted := time.Now()
+	verificationStarted := false
+	if err := r.passwordVerificationGate.Verify(ctx, func() error {
+		verificationStarted = true
+		observeLoginTiming(ctx, LoginStageGateWait, gateStarted)
+		verifyStarted := time.Now()
+		err := verifyStoredCredential(ctx, request.Password, hash)
+		observeLoginTiming(ctx, LoginStagePasswordVerify, verifyStarted)
+		return err
+	}); err != nil {
+		if !verificationStarted {
+			observeLoginTiming(ctx, LoginStageGateWait, gateStarted)
+		}
+		if errors.Is(err, ErrPasswordVerificationSaturated) ||
+			errors.Is(err, ErrPasswordVerificationTimeout) ||
+			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return SessionGrant{}, err
+		}
 		return SessionGrant{}, errors.Join(
 			ErrAuthenticationFailed,
 			fmt.Errorf("verifying login credential: %w", err),
@@ -188,13 +221,18 @@ func (r *SessionRepository) createSession(
 	request LoginRequest,
 	candidate loginCandidate,
 ) (SessionGrant, error) {
+	prepareStarted := time.Now()
 	pending, err := r.prepareSession(candidate)
+	observeLoginTiming(ctx, LoginStageSessionPrepare, prepareStarted)
 	if err != nil {
 		return SessionGrant{}, err
 	}
+	writeStarted := time.Now()
 	if err := r.persistSession(ctx, request, candidate, pending); err != nil {
+		observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
 		return SessionGrant{}, err
 	}
+	observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
 	return SessionGrant{
 		Session: pending.session, Credential: pending.issued.Credential,
 		CSRFToken: pending.issued.CSRFToken,
@@ -394,12 +432,7 @@ func (r *SessionRepository) Resolve(
 	useKind CredentialUseKind,
 	requestID string,
 ) (SessionView, error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-	if err != nil {
-		return SessionView{}, fmt.Errorf("beginning session resolution: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	record, err := loadSessionRecord(ctx, tx, credentialDigest)
+	record, err := readSessionRecord(ctx, r.pool, credentialDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionView{}, ErrAuthenticationRequired
 	}
@@ -407,8 +440,7 @@ func (r *SessionRepository) Resolve(
 		return SessionView{}, fmt.Errorf("resolving session credential: %w", err)
 	}
 	if record.credentialRowState == "SUPERSEDED" {
-		semanticErr := r.recordSupersededUse(ctx, tx, &record, useKind, requestID)
-		return SessionView{}, commitSemantic(ctx, tx, semanticErr)
+		return r.resolveSuperseded(ctx, credentialDigest, useKind, requestID)
 	}
 	if err := record.usable(r.now().UTC()); err != nil {
 		return SessionView{}, err
@@ -417,10 +449,52 @@ func (r *SessionRepository) Resolve(
 	if err != nil {
 		return SessionView{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return SessionView{}, fmt.Errorf("committing session resolution: %w", err)
-	}
 	return SessionView{Session: record.session, CSRFToken: csrfToken}, nil
+}
+
+func (r *SessionRepository) resolveSuperseded(
+	ctx context.Context,
+	credentialDigest string,
+	useKind CredentialUseKind,
+	requestID string,
+) (SessionView, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return SessionView{}, fmt.Errorf("beginning superseded session resolution: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	record, err := loadSessionRecord(ctx, tx, credentialDigest)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionView{}, ErrAuthenticationRequired
+	}
+	if err != nil {
+		return SessionView{}, fmt.Errorf("locking superseded session credential: %w", err)
+	}
+	if record.credentialRowState != "SUPERSEDED" {
+		return SessionView{}, ErrAuthenticationRequired
+	}
+	semanticErr := r.recordSupersededUse(ctx, tx, &record, useKind, requestID)
+	return SessionView{}, commitSemantic(ctx, tx, semanticErr)
+}
+
+const sessionRecordQuery = `SELECT a.id::text, s.id::text, a.display_name, a.role::text,
+		pc.state::text, c.generation, s.authenticated_at, s.reauthenticated_at,
+		s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
+		s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
+		c.credential_digest, c.csrf_digest, c.superseded_at,
+		c.stale_use_count, a.revision
+	   FROM session_credentials c
+	   JOIN sessions s ON s.id = c.session_id
+	   JOIN accounts a ON a.id = s.account_id
+	   JOIN password_credentials pc ON pc.account_id = a.id
+	  WHERE c.credential_digest = $1`
+
+func readSessionRecord(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	credentialDigest string,
+) (sessionRecord, error) {
+	return scanSessionRecord(pool.QueryRow(ctx, sessionRecordQuery, credentialDigest))
 }
 
 func loadSessionRecord(
@@ -428,20 +502,8 @@ func loadSessionRecord(
 	tx pgx.Tx,
 	credentialDigest string,
 ) (sessionRecord, error) {
-	return scanSessionRecord(tx.QueryRow(ctx,
-		`SELECT a.id::text, s.id::text, a.display_name, a.role::text,
-		        pc.state::text, c.generation, s.authenticated_at, s.reauthenticated_at,
-		        s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
-		        s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
-		        c.credential_digest, c.csrf_digest, c.superseded_at,
-		        c.stale_use_count, a.revision
-		   FROM session_credentials c
-		   JOIN sessions s ON s.id = c.session_id
-		   JOIN accounts a ON a.id = s.account_id
-		   JOIN password_credentials pc ON pc.account_id = a.id
-		  WHERE c.credential_digest = $1
-		  FOR UPDATE OF c, s, a, pc`,
-		credentialDigest,
+	return scanSessionRecord(tx.QueryRow(
+		ctx, sessionRecordQuery+` FOR UPDATE OF c, s, a, pc`, credentialDigest,
 	))
 }
 

@@ -8,11 +8,13 @@ import {
 test("Admin workspace navigation exposes the existing launch operations", () => {
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "en"), [
     { key: "courseReview", href: "/en/admin/catalog" },
+    { key: "academicCatalog", href: "/en/admin/academic-catalog" },
     { key: "courseAccess", href: "/en/admin/course-access" },
     { key: "staffOperations", href: "/staff" },
   ]);
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "ar"), [
     { key: "courseReview", href: "/ar/admin/catalog" },
+    { key: "academicCatalog", href: "/ar/admin/academic-catalog" },
     { key: "courseAccess", href: "/ar/admin/course-access" },
     { key: "staffOperations", href: "/staff" },
   ]);

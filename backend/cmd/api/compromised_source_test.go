@@ -19,6 +19,7 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 		"REDIS_TLS_ENABLED":                     "true",
 		"S3_ENDPOINT":                           "https://storage.example",
 		"S3_BUCKET":                             "gradex-media",
+		"SALES_WHATSAPP_NUMBER":                 "15550000000",
 		"AUTH_FAKE_MODE":                        "false",
 		"STUDENT_REGISTRATION_ENABLED":          "true",
 		"REGISTRATION_POLICY_SET_ID":            identity.ApprovedPolicySetID,

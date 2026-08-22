@@ -150,6 +150,7 @@ func (r *Repository) GetCourseRevisionGraph(ctx context.Context, courseID string
 	}
 	query := `
 		SELECT id, owner_account_id, lifecycle, live_revision_id,
+		       classification_model, institution_id, subject_id,
 		       access_suspended_at, access_suspension_reason, retired_at,
 		       created_at, updated_at
 		FROM courses
@@ -158,6 +159,7 @@ func (r *Repository) GetCourseRevisionGraph(ctx context.Context, courseID string
 	var c Course
 	err := r.pool.QueryRow(ctx, query, courseID).Scan(
 		&c.ID, &c.OwnerAccountID, &c.Lifecycle, &c.LiveRevisionID,
+		&c.ClassificationModel, &c.InstitutionID, &c.SubjectID,
 		&c.AccessSuspendedAt, &c.AccessSuspensionReason, &c.RetiredAt,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
@@ -187,6 +189,9 @@ func (r *Repository) GetCourseRevisionGraph(ctx context.Context, courseID string
 			return nil, fmt.Errorf("live revision %s is missing", liveRevisionID)
 		}
 		c.LiveRevision = liveRev
+	}
+	if err := loadCourseAcademicProjection(ctx, r.pool, &c); err != nil {
+		return nil, err
 	}
 
 	return &c, nil
@@ -344,12 +349,18 @@ func (r *Repository) revalidateApproval(
 	if err := lockTaxonomyDependencies(ctx, tx, graph); err != nil {
 		return err
 	}
+	if err := lockAcademicDependencies(ctx, tx, approval.course); err != nil {
+		return err
+	}
+	if err := lockAudienceDependencies(ctx, tx, graph, approval.course); err != nil {
+		return err
+	}
 	if err := lockAssetDependencies(ctx, tx, graph); err != nil {
 		return err
 	}
 	validation, err := validateCourseForSubmission(ctx, submissionValidationRequest{
 		tx: tx, validator: newTxAssetVersionValidator(tx),
-		courseID: approval.request.CourseID, revision: graph,
+		courseID: approval.request.CourseID, revision: graph, course: approval.course,
 	})
 	if err != nil {
 		return err
@@ -413,6 +424,22 @@ func lockTaxonomyDependencies(ctx context.Context, tx pgx.Tx, graph *CourseRevis
 	)
 	if err != nil {
 		return fmt.Errorf("locking taxonomy terms: %w", err)
+	}
+	return drainLockedIDs(rows)
+}
+
+// lockAcademicDependencies holds the Course's Subject for the duration of the
+// approval transaction, so a concurrent retirement cannot land between
+// revalidation and the live-revision swap. It mirrors lockTaxonomyDependencies
+// for the Academic model and is a no-op for a legacy Course.
+func lockAcademicDependencies(ctx context.Context, tx pgx.Tx, course *CourseRow) error {
+	if course == nil || course.SubjectID == nil || *course.SubjectID == "" {
+		return nil
+	}
+	rows, err := tx.Query(ctx,
+		`SELECT id FROM subjects WHERE id = $1::uuid FOR SHARE`, *course.SubjectID)
+	if err != nil {
+		return fmt.Errorf("locking course subject: %w", err)
 	}
 	return drainLockedIDs(rows)
 }

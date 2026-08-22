@@ -15,7 +15,8 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/a
 FROM build AS proof-build
 
 RUN CGO_ENABLED=0 go test -c -trimpath -o /out/gradex-e2e-seed ./cmd/e2e-seed \
-    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-storage-fixture ./cmd/storage-fixture
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-storage-fixture ./cmd/storage-fixture \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-bootstrap-admin ./cmd/bootstrap-admin
 
 FROM alpine:3.22.5 AS runtime-base
 
@@ -37,6 +38,13 @@ LABEL org.opencontainers.image.revision=$GRADEX_REVISION
 
 COPY --from=proof-build /out/gradex-e2e-seed /usr/local/bin/gradex-e2e-seed
 COPY --from=proof-build /out/gradex-storage-fixture /usr/local/bin/gradex-storage-fixture
+# The Administrator bootstrap lives only in this explicitly selected proof
+# target, never in the default runtime image. Two of the four LG-018 acceptance
+# journeys are Admin actions, and the disposable stack keeps PostgreSQL off the
+# host, so the command has to run inside the Compose network. It reads its
+# passphrase from BOOTSTRAP_ADMIN_PASSWORD, refuses a second Administrator, and
+# has no password flag.
+COPY --from=proof-build /out/gradex-bootstrap-admin /usr/local/bin/gradex-bootstrap-admin
 COPY --from=build /src/internal/db/migrations ./internal/db/migrations
 
 ENTRYPOINT ["gradex-e2e-seed"]

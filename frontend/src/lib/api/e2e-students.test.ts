@@ -14,6 +14,8 @@ import {
   ROTATING_MAX_REPEATS,
   ROTATING_POOL_SIZE,
   ROTATING_TEST_SLOTS,
+  DASHBOARD_RESUME_AR_TEST_SLOT,
+  DASHBOARD_RESUME_EN_TEST_SLOT,
 } from "./e2e-students";
 
 const VIEWPORTS = 4;
@@ -32,6 +34,8 @@ function activeSlotsPerRepeat(): { label: string; slot: number }[] {
     slots.push({ label: `lifecycle:v${viewport}`, slot: lifecycleTestSlot(viewport) });
   }
   slots.push({ label: "progress", slot: PROGRESS_TEST_SLOT });
+  slots.push({ label: "dashboard-resume:en", slot: DASHBOARD_RESUME_EN_TEST_SLOT });
+  slots.push({ label: "dashboard-resume:ar", slot: DASHBOARD_RESUME_AR_TEST_SLOT });
   for (let viewport = 0; viewport < VIEWPORTS; viewport += 1) {
     slots.push({ label: `evidence:v${viewport}`, slot: viewportEvidenceTestSlot(viewport) });
   }
@@ -40,7 +44,7 @@ function activeSlotsPerRepeat(): { label: string; slot: number }[] {
 
 test("rotating pool: the declared sizes cover the matrix at the greatest supported repeat count", () => {
   const active = activeSlotsPerRepeat();
-  assert.equal(active.length, 21, "the active matrix generates 21 executions per repetition");
+  assert.equal(active.length, 23, "the active matrix generates 23 executions per repetition");
   assert.ok(ROTATING_TEST_SLOTS >= active.length, "declared active slots must cover the matrix");
   assert.ok(
     ROTATING_POOL_SIZE >= ROTATING_TEST_SLOTS * ROTATING_MAX_REPEATS,
@@ -72,7 +76,7 @@ test("rotating pool: no two executions in a run share a Student", () => {
       seen.set(key, `expired:v${viewport}#${repeat}`);
     }
   }
-  assert.equal(seen.size, 21 * ROTATING_MAX_REPEATS + VIEWPORTS * ROTATING_MAX_REPEATS);
+  assert.equal(seen.size, 23 * ROTATING_MAX_REPEATS + VIEWPORTS * ROTATING_MAX_REPEATS);
 });
 
 test("rotating pool: the active and expired pools never overlap", () => {
@@ -105,8 +109,10 @@ test("rotating pool: allocation depends only on slot and repeat, never on execut
 
 test("rotating pool: allocation fails clearly instead of wrapping", () => {
   // Out of range slot.
-  assert.throws(() => studentFor({ repeatEachIndex: 0 }, ROTATING_TEST_SLOTS), /outside the 22 seeded active slots/);
-  assert.throws(() => studentFor({ repeatEachIndex: 0 }, -1), /outside the 22 seeded active slots/);
+  // Derived from the declared constant, so growing the pool cannot leave this assertion behind.
+  const outsideSlots = new RegExp(`outside the ${ROTATING_TEST_SLOTS} seeded active slots`);
+  assert.throws(() => studentFor({ repeatEachIndex: 0 }, ROTATING_TEST_SLOTS), outsideSlots);
+  assert.throws(() => studentFor({ repeatEachIndex: 0 }, -1), outsideSlots);
   assert.throws(() => expiredStudentFor({ repeatEachIndex: 0 }, ROTATING_EXPIRED_SLOTS), /seeded expired slots/);
 
   // Beyond the provisioned repeat count: grow the pool, never wrap onto an in-use Student.

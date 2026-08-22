@@ -70,6 +70,24 @@ func TestEvaluateCourseAndSectionScopeAcrossCompleteGraph(t *testing.T) {
 	}
 }
 
+func TestEvaluateAcceptsPurchaseRequestGrantSource(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	record := testRecord("purchase", "student", ScopeCourse, "course", "course", now)
+	record.GrantSource = GrantSourcePurchaseRequest
+	evaluator, err := NewEvaluator(readerFunc(func(context.Context, string, string) (Snapshot, error) {
+		return Snapshot{
+			Lesson:       Lesson{ID: "lesson", CourseID: "course", SectionID: "section", AccountStatus: "ACTIVE"},
+			Entitlements: []Record{record},
+		}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := evaluator.Evaluate(context.Background(), "student", "lesson", now); !got.Allowed || got.Reason != ReasonAllowed {
+		t.Fatalf("purchase-backed entitlement decision=%+v, want allowed", got)
+	}
+}
+
 func TestEvaluateUsesEffectiveExpiryAndAppliesRuntimeDenials(t *testing.T) {
 	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	student := "student"

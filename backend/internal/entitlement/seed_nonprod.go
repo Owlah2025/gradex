@@ -11,11 +11,11 @@ import (
 )
 
 // seedEvaluationRecord creates a real schema-conforming fixture for S4 tests.
-// It is intentionally unexported and absent from production builds. S6 remains
-// the only production grant producer.
+// It is intentionally unexported and absent from production builds. Standard
+// invitation approval and purchase-backed acceptance are production producers.
 func seedEvaluationRecord(ctx context.Context, pool *pgxpool.Pool, record Record) error {
 	if pool == nil || record.ID == "" || record.StudentAccountID == "" || record.ScopeID == "" ||
-		record.CourseID == "" || !record.ScopeKind.Valid() || record.GrantSource != GrantSourceManualInvitation ||
+		record.CourseID == "" || !record.ScopeKind.Valid() || !record.GrantSource.Valid() ||
 		record.OriginalAccessEndsAt.IsZero() || record.AccessEndsAt.IsZero() || record.RetirementEligibilityAt.IsZero() ||
 		!record.State.Valid() || record.CreatedAt.IsZero() || record.UpdatedAt.IsZero() {
 		return errors.New("complete valid non-production entitlement fixture is required")

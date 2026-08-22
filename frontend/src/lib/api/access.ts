@@ -1,4 +1,9 @@
-import { authenticatedRequest, ensureAnonymousBrowser, getJSON, postJSON } from "./http";
+import {
+  authenticatedRequest,
+  ensureAnonymousBrowser,
+  getJSON,
+  postJSON,
+} from "./http";
 import { currentCSRFToken } from "../identity/session";
 
 export interface CourseAccessInvitation {
@@ -11,7 +16,12 @@ export interface CourseAccessInvitation {
   created_by_account_id: string;
   decided_by_account_id?: string | null;
   accepted_by_account_id?: string | null;
-  state: "PENDING_STUDENT_ACCEPTANCE" | "PENDING_ADMIN_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED";
+  state:
+    | "PENDING_STUDENT_ACCEPTANCE"
+    | "PENDING_ADMIN_APPROVAL"
+    | "APPROVED"
+    | "REJECTED"
+    | "CANCELLED";
   decision_reason?: string | null;
   admin_note?: string | null;
   external_reference?: string | null;
@@ -24,7 +34,12 @@ export interface CourseAccessInvitation {
 export interface StudentCourseAccessInvitation {
   id: string;
   course_id: string;
-  state: "PENDING_STUDENT_ACCEPTANCE" | "PENDING_ADMIN_APPROVAL" | "APPROVED" | "REJECTED" | "CANCELLED";
+  state:
+    | "PENDING_STUDENT_ACCEPTANCE"
+    | "PENDING_ADMIN_APPROVAL"
+    | "APPROVED"
+    | "REJECTED"
+    | "CANCELLED";
   decision_reason?: string | null;
   created_at: string;
   accepted_at?: string | null;
@@ -73,6 +88,11 @@ export interface ApproveInvitationResult {
 
 export interface StudentCourseAccessHistoryItem {
   course_id: string;
+  /**
+   * The Course as the Student knows it, already resolved to the request's language by the server.
+   * The Course id stays available for building links, but is never product-visible copy.
+   */
+  course_title: string;
   has_active_access: boolean;
   access_ends_at?: string | null;
   invitation?: StudentCourseAccessInvitation | null;
@@ -87,6 +107,42 @@ export interface AdminInvitationListResponse {
   total: number;
   page: number;
   limit: number;
+}
+
+export type PurchaseRequestState =
+  "WAITING_PAYMENT" | "INVITATION_CREATED" | "ACCESS_GRANTED" | "CANCELLED";
+
+export interface PurchaseRequest {
+  id: string;
+  reference: string;
+  course_id: string;
+  email: string;
+  price_minor_units: number;
+  currency: "KWD";
+  state: PurchaseRequestState;
+  course_title?: string;
+  invitation_id?: string | null;
+  requested_at: string;
+  payment_confirmed_at?: string | null;
+  invitation_created_at?: string | null;
+  access_granted_at?: string | null;
+}
+
+export interface PurchaseRequestListResponse {
+  purchase_requests: PurchaseRequest[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PurchaseRequestCreated {
+  reference: string;
+  whatsapp_url: string;
+}
+
+export interface ConfirmPurchaseRequestResult {
+  purchase_request: PurchaseRequest;
+  invitation: CourseAccessInvitation;
 }
 
 async function resolveCSRF(csrf?: string): Promise<string> {
@@ -104,13 +160,14 @@ export async function setCourseDefaultAccessExpiry(
   csrf?: string,
 ) {
   const token = await resolveCSRF(csrf);
-  return authenticatedRequest<{ course_id: string; default_access_ends_at: string; reason: string }>(
-    `/admin/courses/${courseId}/default-access-expiry`,
-    "PUT",
-    lang,
-    token,
-    { date, reason },
-  );
+  return authenticatedRequest<{
+    course_id: string;
+    default_access_ends_at: string;
+    reason: string;
+  }>(`/admin/courses/${courseId}/default-access-expiry`, "PUT", lang, token, {
+    date,
+    reason,
+  });
 }
 
 export async function createCourseAccessInvitation(
@@ -320,5 +377,67 @@ export async function getStudentCourseAccessHistory(
     "GET",
     lang,
     csrf,
+  );
+}
+
+export async function createPurchaseRequest(
+  courseId: string,
+  email: string,
+  lang: "ar" | "en" = "en",
+) {
+  return postJSON<PurchaseRequestCreated>(
+    "/purchase-requests",
+    { course_id: courseId, email },
+    lang,
+  );
+}
+
+export async function listAdminPurchaseRequests(
+  options: {
+    page?: number;
+    limit?: number;
+    query?: string;
+    state?: PurchaseRequestState;
+  } = {},
+  lang: "ar" | "en" = "en",
+) {
+  const params = new URLSearchParams({
+    page: String(options.page ?? 1),
+    limit: String(options.limit ?? 50),
+  });
+  if (options.query) params.set("q", options.query);
+  if (options.state) params.set("state", options.state);
+  return authenticatedRequest<PurchaseRequestListResponse>(
+    `/admin/purchase-requests?${params}`,
+    "GET",
+    lang,
+  );
+}
+
+export async function confirmPurchaseRequestPayment(
+  requestId: string,
+  lang: "ar" | "en" = "en",
+  csrf?: string,
+) {
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<ConfirmPurchaseRequestResult>(
+    `/admin/purchase-requests/${requestId}/confirm-payment`,
+    "POST",
+    lang,
+    token,
+  );
+}
+
+export async function cancelPurchaseRequest(
+  requestId: string,
+  lang: "ar" | "en" = "en",
+  csrf?: string,
+) {
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<PurchaseRequest>(
+    `/admin/purchase-requests/${requestId}/cancel`,
+    "POST",
+    lang,
+    token,
   );
 }

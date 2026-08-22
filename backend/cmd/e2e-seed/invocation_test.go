@@ -104,6 +104,8 @@ func TestGoTestOwnFlagsAreNotToolFlags(t *testing.T) {
 		"dbname",
 		"drop",
 		"issue-session",
+		"issue-loadtest-sessions",
+		"loadtest",
 		"query-progress",
 		"query-email-verification-token",
 		"query-credential-state",

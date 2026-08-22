@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type {
   CourseHome,
-  LearningMaterialKind,
   LearningCourseProgress,
+  LearningMaterial,
   LearningProgress,
   LearningStatus,
   LessonReadModel,
@@ -14,43 +14,79 @@ import {
   formatLearningPercent,
   formatLearningPositionSeconds,
 } from "@/lib/formatters/learning";
-import { materialEntryPath } from "./material-links";
+import { MaterialDownload } from "./material-download";
 
 type LearningLabels = Dictionary["learning"];
 
 export function LessonMaterials({
-  lessonID,
-  materials,
+  resources,
+  labMaterials,
   labels,
-  lessonTitle,
+  locale,
 }: {
-  lessonID: string;
-  materials: { kind: LearningMaterialKind }[];
+  resources: LearningMaterial[];
+  labMaterials: LearningMaterial[];
   labels: LearningLabels;
-  lessonTitle?: string;
+  locale: "ar" | "en";
 }) {
-  if (materials.length === 0) return null;
+  if (resources.length === 0 && labMaterials.length === 0) return null;
   return (
-    <ul aria-label={labels.materials} className="flex flex-wrap gap-2">
-      {materials.map(({ kind }) => {
-        const label = kind === "resource" ? labels.resource : labels.labMaterial;
-        const linkLabel = kind === "resource" ? labels.openResource : labels.openLabMaterial;
-        const href = materialEntryPath(lessonID, kind);
-        if (!href) return null;
-        return (
-          <li key={kind}>
-            <a
-              href={href}
-              aria-label={lessonTitle ? `${linkLabel}: ${lessonTitle}` : linkLabel}
-              className="inline-flex rounded-md border border-border px-3 py-2 text-sm font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >
-              {label}
-            </a>
-          </li>
-        );
-      })}
-    </ul>
+    <section aria-label={labels.materials} className="mt-4 space-y-4 rounded-lg border border-border bg-card p-4">
+      {resources.length > 0 ? (
+        <MaterialList title={labels.resources} items={resources} locale={locale} labels={labels} />
+      ) : null}
+      {labMaterials.length > 0 ? (
+        <MaterialList title={labels.labMaterials} items={labMaterials} locale={locale} labels={labels} />
+      ) : null}
+    </section>
   );
+}
+
+function MaterialList({
+  title,
+  items,
+  locale,
+  labels,
+}: {
+  title: string;
+  items: LearningMaterial[];
+  locale: "ar" | "en";
+  labels: LearningLabels;
+}) {
+  return (
+    <section aria-label={title}>
+      <h2 className="font-display text-lg font-bold text-foreground">{title}</h2>
+      <ul className="mt-2 space-y-2">
+        {items.map((item) => (
+          <li key={item.download_authorization_path} className="rounded-md border border-border px-3 py-2">
+            <MaterialDownload
+              authorizationPath={item.download_authorization_path}
+              title={item.title}
+              locale={locale}
+              downloadLabel={labels.download}
+              preparingLabel={labels.preparingDownload}
+              unavailableLabel={labels.downloadUnavailable}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {item.file_type} · {formatMaterialSize(item.size_bytes, locale)}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function formatMaterialSize(bytes: number, locale: "ar" | "en"): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(size)} ${units[unit]}`;
 }
 
 export function LearningUnavailable({ labels }: { labels: LearningLabels }) {
@@ -125,7 +161,7 @@ export function CourseOutline({ course, locale, labels }: { course: CourseHome; 
                     <span className="min-w-0 truncate font-medium text-foreground">{lesson.title}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">{lessonProgressText(lesson.progress, labels, locale)}</span>
                   </Link>
-                  {course.learning_status === "active" ? <LessonMaterials lessonID={lesson.lesson_id} lessonTitle={lesson.title} materials={lesson.materials} labels={labels} /> : null}
+                  {course.learning_status === "active" ? <LessonMaterials resources={lesson.resources} labMaterials={lesson.lab_materials} locale={locale} labels={labels} /> : null}
                 </div>
               </li>
             ))}

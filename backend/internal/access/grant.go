@@ -71,10 +71,18 @@ type ResendInvitationParams struct {
 }
 
 type StudentCourseAccessHistoryItem struct {
-	CourseID        string             `json:"course_id"`
+	CourseID string `json:"course_id"`
+	// The Course as the Student knows it. Without this the only identity the Student surface could
+	// render was the Course UUID, which is not product language.
+	CourseTitle     string             `json:"course_title"`
 	Invitation      *StudentInvitation `json:"invitation,omitempty"`
 	AccessEndsAt    *time.Time         `json:"access_ends_at,omitempty"`
 	HasActiveAccess bool               `json:"has_active_access"`
+
+	// Localisation inputs. The repository loads both authored titles and the HTTP boundary picks
+	// one into CourseTitle from Accept-Language, matching localizedLearningTitle. Never serialised.
+	CourseTitleAr string `json:"-"`
+	CourseTitleEn string `json:"-"`
 }
 
 type StudentCourseAccessHistoryResponse struct {

@@ -115,3 +115,25 @@ func TestRendererRefusesContractConfusion(t *testing.T) {
 		t.Fatal("cross-purpose event/template pair was accepted")
 	}
 }
+
+func TestRendererExplainsPurchaseBackedCourseInvitationWithoutASecondApproval(t *testing.T) {
+	renderer, err := NewRenderer(RendererOptions{PublicOrigin: "https://gradex.example", FromAddress: "notify@gradex.example", FromName: "Gradex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := renderer.Render(RenderRequest{
+		Event:    outbox.Event{ID: uuid.NewString(), Type: "access.invitation_issued", AggregateID: uuid.NewString(), SafePayload: map[string]any{"purchase_backed": true}},
+		Template: TemplateCourseInvitation,
+		Locale:   "en",
+		Payload:  DeliveryPayload{Destination: "student@example.com", Locale: "en", TemplateContract: TemplateCourseInvitation, VerificationToken: "TOKEN_CANARY", ExpiresAt: time.Now().Add(time.Hour)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(message.Text, "access becomes active immediately") {
+		t.Fatalf("purchase invitation claims a second approval or omits automatic access: %q", message.Text)
+	}
+	if strings.Contains(message.Text, "must approve") {
+		t.Fatalf("purchase invitation incorrectly claims another Admin approval: %q", message.Text)
+	}
+}

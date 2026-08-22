@@ -93,7 +93,13 @@ func mountCatalogRoutes(
 	)
 	{
 		ownedMutationGroup.PUT("/candidate", h.createCandidate)
+		// D-093 5. Pre-publication Subject correction. The route exists for every
+		// Course; the domain refuses it for a legacy Course, for one under
+		// review, and for one that has published.
+		ownedMutationGroup.PUT("/subject", h.setCourseSubject)
 		ownedMutationGroup.PATCH("/revisions/:revisionId", h.updateCourseRevision)
+		ownedMutationGroup.PUT("/revisions/:revisionId/audience", h.setRevisionAudience)
+		ownedMutationGroup.DELETE("/revisions/:revisionId/audience", h.resetRevisionAudience)
 		ownedMutationGroup.POST("/revisions/:revisionId/sections", h.addSection)
 		ownedMutationGroup.PATCH("/revisions/:revisionId/sections/:sectionId", h.updateSection)
 		ownedMutationGroup.DELETE("/revisions/:revisionId/sections/:sectionId", h.deleteSection)
