@@ -45,8 +45,8 @@ The monitor queries `transactional_email_deliveries`, whose existing schema is t
 
 The one-hour default is based on the existing five-attempt retry schedule of 42m30s, with operational
 margin for polling and the five-minute monitor cadence. The query uses the existing partial indexes for
-due work and stale leases; a narrow reversible partial index covers terminal states so its `EXISTS` probe
-stays index-backed as the ledger grows. No payload, recipient, or message body is selected.
+due work and stale leases; a narrow reversible partial index covers terminal states so the planner has an
+index-only path as the ledger grows. No payload, recipient, or message body is selected.
 
 ## Filesystem health policy
 
