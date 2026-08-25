@@ -533,8 +533,10 @@ write_backup_metadata() {
 
 capture_backup_dump() {
   local postgres_id="$1" staging_dir="$2" stamp="$3"
-  local dump_file="$staging_dir/gradex-$stamp.dump" partial_file="$dump_file.partial"
-  local schema_file="$dump_file.schema-state" schema_before schema_after
+  local dump_file partial_file schema_file schema_before schema_after
+  dump_file="$staging_dir/gradex-$stamp.dump"
+  partial_file="$dump_file.partial"
+  schema_file="$dump_file.schema-state"
   schema_before="$(source_schema_state "$postgres_id")"
   [[ "$schema_before" =~ ^[0-9]+\|false$ ]] ||
     die "refusing backup from invalid or non-clean schema state: $schema_before"
