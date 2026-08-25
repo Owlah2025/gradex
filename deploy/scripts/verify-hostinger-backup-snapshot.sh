@@ -26,6 +26,15 @@ extract_host_function() {
   ' "$ROOT/deploy/hostinger/host.sh"
 }
 
+extract_backup_function() {
+  local function_name="$1"
+  awk -v function_name="$function_name" '
+    $0 == function_name "() {" { capture=1 }
+    capture { print }
+    capture && /^}/ { exit }
+  ' "$ROOT/deploy/hostinger/backup-restic.sh"
+}
+
 backup_snapshot_directory() {
   printf 'snapshot upload diagnostic\n' >&2
   printf '%s\n' "$RETURNED_SNAPSHOT_ID"
@@ -103,4 +112,53 @@ grep --quiet --fixed-strings 'retention progress' "$TMP/retention.stdout" ||
 grep --quiet --fixed-strings "encrypted offsite backup $SNAPSHOT_ID created and retention applied" \
   "$TMP/retention.stderr" || die "retention success diagnostic was lost"
 
-note 'snapshot stdout contract, integrity failure propagation, diagnostics, and retention assertion passed'
+backup_restic() {
+  printf '%s\n' "$@" >"$TMP/restic-arguments"
+}
+GRADEX_BACKUP_SNAPSHOT_TAG=gradex-test
+GRADEX_BACKUP_RETENTION_LAST=2
+GRADEX_BACKUP_RETENTION_HOURLY=48
+GRADEX_BACKUP_RETENTION_DAILY=14
+GRADEX_BACKUP_RETENTION_WEEKLY=8
+eval "$(extract_backup_function backup_prune_repository)"
+backup_prune_repository
+[ "$(awk '$0 == "--group-by" { getline; print }' "$TMP/restic-arguments")" = host,tags ] ||
+  die "retention does not group snapshots by stable host and tag identity"
+if grep --quiet --fixed-strings 'host,paths,tags' "$TMP/restic-arguments"; then
+  die "retention still groups snapshots by unique staging paths"
+fi
+
+eval "$(extract_host_function cleanup_successful_backup_staging)"
+eval "$(extract_host_function cleanup_stale_backup_staging)"
+eval "$(extract_host_function finalize_backup_success)"
+eval "$(extract_backup_function backup_write_state_file)"
+
+S12_BACKUP_DIR="$TMP/backups"
+mkdir -p "$S12_BACKUP_DIR/.offsite-staging.failed"
+printf '%s\n' previous-snapshot >"$S12_BACKUP_DIR/latest.offsite.snapshot"
+printf '%s\n' 100 >"$S12_BACKUP_DIR/latest.completed-at"
+if (finalize_backup_success "$S12_BACKUP_DIR/.offsite-staging.failed" \
+  "$SNAPSHOT_ID" 23) >"$TMP/finalize-failed.stdout" 2>"$TMP/finalize-failed.stderr"; then
+  die "retention failure was finalized as a successful backup"
+fi
+[ -d "$S12_BACKUP_DIR/.offsite-staging.failed" ] ||
+  die "retention failure removed protected staging"
+[ "$(cat "$S12_BACKUP_DIR/latest.offsite.snapshot")" = previous-snapshot ] ||
+  die "retention failure changed the latest snapshot marker"
+[ "$(cat "$S12_BACKUP_DIR/latest.completed-at")" = 100 ] ||
+  die "retention failure refreshed the completion marker"
+
+mkdir -p "$S12_BACKUP_DIR/.offsite-staging.success"
+S12_BACKUP_STAGING_DIR="$S12_BACKUP_DIR/.offsite-staging.success"
+finalize_backup_success "$S12_BACKUP_STAGING_DIR" "$SNAPSHOT_ID" 0 \
+  >"$TMP/finalize-success.stdout" 2>"$TMP/finalize-success.stderr"
+[ ! -e "$S12_BACKUP_DIR/.offsite-staging.success" ] ||
+  die "successful backup retained current plaintext staging"
+[ ! -e "$S12_BACKUP_DIR/.offsite-staging.failed" ] ||
+  die "successful backup retained stale plaintext staging"
+[ "$(cat "$S12_BACKUP_DIR/latest.offsite.snapshot")" = "$SNAPSHOT_ID" ] ||
+  die "successful backup did not update the snapshot marker"
+[[ "$(cat "$S12_BACKUP_DIR/latest.completed-at")" =~ ^[0-9]+$ ]] ||
+  die "successful backup did not update the completion marker"
+
+note 'snapshot stdout, diagnostics, stable retention, retention failure, and success finalization passed'

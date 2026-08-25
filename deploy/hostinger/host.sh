@@ -35,7 +35,7 @@ trap cleanup_backup_staging_notice EXIT
 
 require_tools() {
   local tool
-  for tool in awk curl date docker flock grep jq mktemp openssl readlink restic sed sha256sum stat timeout; do
+  for tool in awk curl date docker flock grep jq mktemp openssl readlink sed sha256sum stat timeout; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
@@ -578,12 +578,12 @@ apply_backup_retention() {
 
 finalize_backup_success() {
   local staging_dir="$1" snapshot_id="$2" retention_status="$3"
+  [ "$retention_status" -eq 0 ] ||
+    die "encrypted offsite backup succeeded but retention needs operator attention"
   cleanup_successful_backup_staging "$staging_dir"
   cleanup_stale_backup_staging
   backup_write_state_file "$S12_BACKUP_DIR/latest.offsite.snapshot" "$snapshot_id"
   backup_write_state_file "$S12_BACKUP_DIR/latest.completed-at" "$(date +%s)"
-  [ "$retention_status" -eq 0 ] ||
-    die "encrypted offsite backup succeeded but retention needs operator attention"
   note "successful offsite backup marker updated for snapshot $snapshot_id"
 }
 

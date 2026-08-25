@@ -264,7 +264,7 @@ backup_prune_repository() {
     --keep-hourly "$GRADEX_BACKUP_RETENTION_HOURLY" \
     --keep-daily "$GRADEX_BACKUP_RETENTION_DAILY" \
     --keep-weekly "$GRADEX_BACKUP_RETENTION_WEEKLY" \
-    --group-by host,paths,tags --prune
+    --group-by host,tags --prune
 }
 
 backup_assert_repository_has_snapshot() {
