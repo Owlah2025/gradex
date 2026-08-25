@@ -363,6 +363,10 @@ sudo systemctl start gradex-monitor.service
 sudo systemctl start gradex-backup.service
 ```
 
+`gradex-monitor.service` is a oneshot: after a successful run, `systemctl status` can show
+`inactive (dead)` with `Result=success`. That is healthy completion, not a failed monitor. Inspect the
+most recent report in `journalctl -u gradex-monitor.service --since '15 minutes ago' --no-pager`.
+
 Disable future scheduling without stopping Gradex application containers:
 
 ```bash
@@ -373,9 +377,24 @@ The protected runtime file supplies `GRADEX_ALERT_WEBHOOK_URL`, optional
 `GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_MONITOR_CA_FILE`, and the configurable
 `GRADEX_MONITOR_EMAIL_STALE_SECONDS`, `GRADEX_MONITOR_DISK_WARN_PERCENT`,
 `GRADEX_MONITOR_DISK_CRITICAL_PERCENT`, `GRADEX_MONITOR_DISK_MIN_FREE_BYTES`, and optional
-`GRADEX_MONITOR_DISK_PATHS`. `host.sh monitor` derives health/readiness URLs from `PUBLIC_ORIGIN`,
-resolves the exact Compose worker/PostgreSQL services, derives Docker's data-root when disk paths are
-not explicit, and points freshness monitoring at `/var/lib/gradex/backups/latest.completed-at`.
+`GRADEX_MONITOR_DISK_PATHS`. `host.sh monitor` derives root, health, and readiness URLs from
+`PUBLIC_ORIGIN`, resolves the exact Compose worker/PostgreSQL services, derives Docker's data-root when
+disk paths are not explicit, and points freshness monitoring at
+`/var/lib/gradex/backups/latest.completed-at`.
+
+Founder Beta is a non-canonical Compose topology. Configure its monitor-only source contract in the protected
+runtime file with `GRADEX_MONITOR_COMPOSE_PROJECT=gradex-founder-beta`,
+`GRADEX_MONITOR_WORKER_CONTAINER=gradex-founder-beta-worker-1`, and
+`GRADEX_MONITOR_POSTGRES_CONTAINER=gradex-founder-beta-postgres-1`. This does not change application
+Compose configuration. The monitor validates each selected container's project/service labels before querying
+it; invalid, missing, stopped, or mismatched containers fail the check.
+
+The monitor requires HTTPS for public probes and configured webhooks. Leave the optional external webhook
+configuration blank when no destination exists; health monitoring still runs and reports check failures locally.
+Configure an optional custom CA only through `GRADEX_MONITOR_CA_FILE`. Use the repository's disposable
+monitor tests to test alert behavior; do not create a staging outage to test a destination. Disk warning begins
+at 85% used; critical is 95% used or under 5368709120 free bytes. Email outbox failures cover terminal
+delivery states, queued messages due for over 3600 seconds, and expired sending leases.
 The hourly schedule uses a two-hour freshness threshold: this allows one delayed or missed run and
 detects stale backup state before a third hourly opportunity. It does not prove an RPO. Successful
 scheduled backups, real external alert delivery, and an isolated provider restore drill remain
