@@ -521,7 +521,7 @@ cleanup_stale_restore_staging() {
 source_schema_state() {
   local postgres_id="$1"
   docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
-    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text;"
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;"
 }
 
 write_backup_metadata() {

@@ -10,14 +10,21 @@ die() {
   exit 1
 }
 
-source_schema_state() {
-  printf '%s\n' '28|false'
-}
-
 docker() {
   case "${1:-} ${2:-}" in
     "exec fake-postgres")
-      printf '%s\n' 'fake-postgres-custom-dump'
+      case "$*" in
+        *"psql "*"FROM schema_migrations;"*)
+          printf '%s\n' '28|false'
+          ;;
+        *"pg_dump "*)
+          printf '%s\n' 'fake-postgres-custom-dump'
+          ;;
+        *)
+          printf 'unexpected PostgreSQL command: %s\n' "$*" >&2
+          exit 98
+          ;;
+      esac
       ;;
     *)
       printf 'unexpected docker call: %s\n' "$*" >&2
@@ -33,6 +40,14 @@ write_backup_metadata() {
   [ "$(cat "$schema_file")" = '28|false' ] ||
     die "schema metadata is incorrect"
 }
+
+eval "$(
+  awk '
+    /^source_schema_state\(\)/ { capture=1 }
+    capture { print }
+    capture && /^}/ { exit }
+  ' "$ROOT/deploy/hostinger/host.sh"
+)"
 
 eval "$(
   awk '
