@@ -165,6 +165,21 @@ prepare() {
 
 service_id() { compose --profile restore ps --all --quiet "$1"; }
 
+backup_postgres_id() {
+  local configured="${GRADEX_BACKUP_POSTGRES_CONTAINER:-}" container_id
+  if [ -z "$configured" ]; then
+    service_id postgres
+    return
+  fi
+  [[ "$configured" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]] ||
+    die "GRADEX_BACKUP_POSTGRES_CONTAINER is invalid"
+  container_id="$(docker inspect --type container --format '{{.Id}}' "$configured" 2>/dev/null)" ||
+    die "configured backup PostgreSQL container is absent"
+  [ "$(docker inspect --format '{{.State.Running}}' "$container_id")" = true ] ||
+    die "configured backup PostgreSQL container is not running"
+  printf '%s\n' "$container_id"
+}
+
 wait_for_status() {
   local service="$1" wanted="$2" attempts=0 container status
   container="$(service_id "$service")"
@@ -580,7 +595,7 @@ create_backup() {
   chmod 700 "$S12_BACKUP_DIR"
   acquire_backup_lock
 
-  postgres_id="$(service_id postgres)"
+  postgres_id="$(backup_postgres_id)"
   [ -n "$postgres_id" ] || die "source PostgreSQL is absent"
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
   staging_dir="$(mktemp -d "$S12_BACKUP_DIR/.offsite-staging.XXXXXX")"
