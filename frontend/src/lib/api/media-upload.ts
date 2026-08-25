@@ -266,17 +266,36 @@ function isStrongQuotedETag(etag: string): boolean {
   return true;
 }
 
+function isCloudflareR2UploadURL(uploadURL: string): boolean {
+  try {
+    return new URL(uploadURL).hostname.endsWith(".r2.cloudflarestorage.com");
+  } catch {
+    return false;
+  }
+}
+
 /** Chooses the immutable provider identity returned by a direct browser PUT. */
 export function storageObjectVersionFromUploadHeaders(
   versionIDHeader: string | null,
   etagHeader: string | null,
+  preferETag = false,
 ): string {
   const versionID = (versionIDHeader || "").trim();
+  const etag = (etagHeader || "").trim();
+
+  if (preferETag) {
+    if (!isStrongQuotedETag(etag)) {
+      throw new Error(
+        "The storage provider did not return the strong ETag required for immutable R2 object identity.",
+      );
+    }
+    return `etag:${etag}`;
+  }
+
   if (versionID) {
     return versionID;
   }
 
-  const etag = (etagHeader || "").trim();
   if (!isStrongQuotedETag(etag)) {
     throw new Error(
       "The storage provider did not return a usable object identity (x-amz-version-id or a strong ETag).",
@@ -321,6 +340,7 @@ export function uploadFileToStorage(
         const storageObjectVersion = storageObjectVersionFromUploadHeaders(
           request.getResponseHeader("x-amz-version-id"),
           request.getResponseHeader("etag"),
+          isCloudflareR2UploadURL(uploadURL),
         );
         resolve({ storageObjectVersion });
       } catch (error) {

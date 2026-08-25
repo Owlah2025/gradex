@@ -48,34 +48,50 @@ class HeaderResponseXMLHttpRequest {
   }
 }
 
-async function directUploadIdentity(responseHeaders: Record<string, string>) {
+async function directUploadIdentity(
+  responseHeaders: Record<string, string>,
+  uploadURL = "https://storage.test/put",
+) {
   const originalXMLHttpRequest = globalThis.XMLHttpRequest;
   HeaderResponseXMLHttpRequest.responseHeaders = Object.fromEntries(
     Object.entries(responseHeaders).map(([name, value]) => [name.toLowerCase(), value]),
   );
   globalThis.XMLHttpRequest = HeaderResponseXMLHttpRequest as unknown as typeof XMLHttpRequest;
   try {
-    return await uploadFileToStorage("https://storage.test/put", pickedFile("source.mp4", "video/mp4", 12), "video/mp4");
+    return await uploadFileToStorage(uploadURL, pickedFile("source.mp4", "video/mp4", 12), "video/mp4");
   } finally {
     globalThis.XMLHttpRequest = originalXMLHttpRequest;
   }
 }
 
-test("direct uploads prefer VersionId and otherwise preserve a valid quoted ETag", async () => {
-  const cases: Array<{ name: string; headers: Record<string, string>; expected: string }> = [
+test("direct uploads choose provider-compatible immutable object identity", async () => {
+  const cases: Array<{
+    name: string;
+    headers: Record<string, string>;
+    uploadURL?: string;
+    expected: string;
+  }> = [
     {
-      name: "legacy VersionId",
-      headers: { "x-amz-version-id": "minio-version-1", etag: '"r2-etag-1"' },
+      name: "legacy S3 or MinIO prefers VersionId",
+      headers: { "x-amz-version-id": "minio-version-1", etag: '"legacy-etag-1"' },
       expected: "minio-version-1",
     },
     {
       name: "R2 ETag-only",
       headers: { etag: '"r2-etag-1"' },
+      uploadURL: "https://account.r2.cloudflarestorage.com/bucket/source",
       expected: 'etag:"r2-etag-1"',
     },
+    {
+      name: "R2 ignores unusable historical VersionId and prefers strong ETag",
+      headers: { "x-amz-version-id": "7e5fc59e57d9b68912790e90f788f217", etag: '"r2-etag-2"' },
+      uploadURL: "https://account.r2.cloudflarestorage.com/bucket/source",
+      expected: 'etag:"r2-etag-2"',
+    },
   ];
+
   for (const testCase of cases) {
-    const result = await directUploadIdentity(testCase.headers);
+    const result = await directUploadIdentity(testCase.headers, testCase.uploadURL);
     assert.equal(result.storageObjectVersion, testCase.expected, testCase.name);
   }
 });
