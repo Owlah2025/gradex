@@ -554,9 +554,10 @@ capture_backup_dump() {
 upload_backup_snapshot() {
   local staging_dir="$1" snapshot_log="$2" snapshot_check_log="$3" snapshot_id
   snapshot_id="$(backup_snapshot_directory "$staging_dir" "$snapshot_log")"
+  validate_snapshot_id "$snapshot_id"
   backup_snapshot_exists "$snapshot_id" "$snapshot_check_log" ||
     die "encrypted offsite snapshot was not visible after upload"
-  backup_check_repository || die "encrypted offsite repository integrity check failed"
+  backup_check_repository >&2 || die "encrypted offsite repository integrity check failed"
   printf '%s\n' "$snapshot_id"
 }
 
@@ -607,6 +608,7 @@ create_backup() {
   snapshot_check_log="$S12_BACKUP_DIR/.offsite-check-$stamp.log"
   capture_backup_dump "$postgres_id" "$staging_dir" "$stamp"
   snapshot_id="$(upload_backup_snapshot "$staging_dir" "$snapshot_log" "$snapshot_check_log")"
+  validate_snapshot_id "$snapshot_id"
   if apply_backup_retention "$snapshot_id" "$snapshot_check_log"; then
     retention_status=0
   else
