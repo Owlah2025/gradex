@@ -49,15 +49,27 @@ import (
 // slot*repeats + repeat, so slots 0-23 keep indices 0-239 unchanged and the new
 // slots occupy 240-299; no existing execution is reassigned.
 //
+// T8A / MVP-F24A adds four Entitlement lifecycle slots (30-33), one per BR-026
+// operation, so no case observes another's mutated Entitlement:
+//
+//	30  expiry extension
+//	31  expiry shortening while access stays open
+//	32  expiry moved into the past, ending access immediately
+//	33  revocation
+//
+// By the same allocation identity slots 0-29 keep indices 0-299 unchanged and the
+// four new slots occupy 300-339.
+// AD-14 adds one report-resolution Student slot (34), occupying index 340-349.
+//
 // Per-Student consumption stays far inside the production limits rather than near them: at most
 // two playback issuances of the thirty allowed per ten minutes, and at most four Progress writes
 // of the twelve allowed per minute for a Lesson.
 const (
 	// rotatingStudentPoolSize is the provisioned active pool. It must be at least
 	// rotatingTestSlots * rotatingMaxRepeats.
-	rotatingStudentPoolSize = 300
+	rotatingStudentPoolSize = 350
 	// rotatingTestSlots is the number of registered active-Student test identities.
-	rotatingTestSlots = 30
+	rotatingTestSlots = 35
 	// rotatingMaxRepeats is the greatest `--repeat-each` the pool supports.
 	rotatingMaxRepeats = 10
 
@@ -65,7 +77,28 @@ const (
 	rotatingExpiredPoolSize = 100
 	// rotatingExpiredSlots is the number of registered expired-Student test identities.
 	rotatingExpiredSlots = 8
+
+	// The Admin Course Access queue reads `ORDER BY created_at DESC LIMIT 100`. Left at the
+	// column default every pool Invitation would carry the single transaction timestamp, so
+	// which hundred the Admin sees would be decided arbitrarily by the plan rather than by the
+	// fixture — and the highest active slots, which the T8A Entitlement lifecycle journey owns,
+	// would normally fall outside the page. Each Invitation therefore gets an explicit
+	// created_at derived from its pool index: strictly in the past, strictly ordered, highest
+	// index newest. The two pools occupy disjoint windows so their orderings never interleave.
+	//
+	// rotatingActiveQueueOffsetSeconds is how far behind the seed instant the newest active
+	// Invitation sits.
+	rotatingActiveQueueOffsetSeconds = 60
+	// rotatingExpiredQueueOffsetSeconds is the same for the expired pool, chosen so every
+	// expired Invitation is older than every active one.
+	rotatingExpiredQueueOffsetSeconds = 600
 )
+
+// rotatingInvitationCreatedAt places pool slot `index` in the Admin queue's ordering. Higher
+// indices are newer, so growing a pool never reorders the rows already provisioned below it.
+func rotatingInvitationCreatedAt(now time.Time, index, poolSize, offsetSeconds int) time.Time {
+	return now.Add(-time.Duration(offsetSeconds+(poolSize-1-index)) * time.Second)
+}
 
 // rotatingStudentID is the deterministic account identifier for pool slot `index`. Identifiers
 // and credentials are generated for the isolated per-run database only and exist nowhere else.
@@ -146,9 +179,11 @@ func seedRotatingStudents(
 
 		invID := uuid.NewString()
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
-			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED')
-		`, invID, courseID, accountID, email); err != nil {
+			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state, created_at)
+			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED', $5)
+		`, invID, courseID, accountID, email,
+			rotatingInvitationCreatedAt(now, index, rotatingStudentPoolSize, rotatingActiveQueueOffsetSeconds),
+		); err != nil {
 			return fmt.Errorf("insert rotating student %d invitation: %w", index, err)
 		}
 
@@ -209,9 +244,11 @@ func seedRotatingExpiredStudents(
 
 		expiredInvID := uuid.NewString()
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state)
-			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED')
-		`, expiredInvID, courseID, accountID, email); err != nil {
+			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state, created_at)
+			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED', $5)
+		`, expiredInvID, courseID, accountID, email,
+			rotatingInvitationCreatedAt(now, index, rotatingExpiredPoolSize, rotatingExpiredQueueOffsetSeconds),
+		); err != nil {
 			return fmt.Errorf("insert rotating expired student %d invitation: %w", index, err)
 		}
 

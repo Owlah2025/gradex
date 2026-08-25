@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 30;
+export const ROTATING_TEST_SLOTS = 35;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 300;
+export const ROTATING_POOL_SIZE = 350;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -40,9 +40,11 @@ export const ROTATING_EXPIRED_POOL_SIZE = 100;
 //   18-21  rendered viewport evid.  4 viewports
 //   22-23  Dashboard resume (F15)   English and Arabic, one Student each
 //   24-29  Student academic profile 6 T3 journeys, one Student each
+//   30-33  Entitlement lifecycle    4 T8A BR-026 operations, one Student each
 //
 // Growing the map never reassigns an existing execution: allocation is
-// slot * repeats + repeat, so slots 0-23 keep indices 0-239.
+// slot * repeats + repeat, so slots 0-23 keep indices 0-239 and slots 0-29 keep
+// indices 0-299.
 //
 // Expired pool: 0-3, the expired-access matrix's 4 viewports.
 
@@ -82,6 +84,20 @@ export const ACADEMIC_UNDECLARED_TEST_SLOT = 26;
 export const ACADEMIC_SKIP_TEST_SLOT = 27;
 export const ACADEMIC_INVITATION_TEST_SLOT = 28;
 export const ACADEMIC_ACCESS_PRESERVED_TEST_SLOT = 29;
+
+/**
+ * The T8A / MVP-F24A Entitlement lifecycle journeys occupy active slots 30-33.
+ *
+ * Each BR-026 operation gets its own Student because each mutates the Entitlement it acts on:
+ * sharing one Student would mean a later case observing an earlier case's expiry or revocation
+ * rather than the seeded ACTIVE grant its Admin journey starts from.
+ */
+export const ENTITLEMENT_EXTEND_TEST_SLOT = 30;
+export const ENTITLEMENT_SHORTEN_TEST_SLOT = 31;
+export const ENTITLEMENT_PAST_DATE_TEST_SLOT = 32;
+export const ENTITLEMENT_REVOKE_TEST_SLOT = 33;
+/** AD-14 Student report submission and Admin resolution. */
+export const ADMIN_REPORTED_CONTENT_TEST_SLOT = 34;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

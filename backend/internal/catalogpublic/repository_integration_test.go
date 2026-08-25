@@ -64,6 +64,48 @@ func TestDetailSecondaryReadsRecheckPublishedOnly(t *testing.T) {
 	}
 }
 
+func TestPublishedOnlyHidesSuspendedAndRetiredCourses(t *testing.T) {
+	freshCatalogPublicSchema(t)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, catalogPublicTestDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	courseID := seedVisibleDetailCourse(t, pool, ctx)
+	repository, err := NewRepository(pool, PublishedOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertVisible := func(label string, wantVisible bool) {
+		t.Helper()
+		detail, err := repository.Detail(ctx, courseID, false)
+		if err != nil {
+			t.Fatalf("%s public detail error: %v", label, err)
+		}
+		if got := detail != nil; got != wantVisible {
+			t.Fatalf("%s public detail visible=%t, want %t", label, got, wantVisible)
+		}
+	}
+
+	assertVisible("published", true)
+	if _, err := pool.Exec(ctx, `UPDATE courses SET access_suspended_at = now(), access_suspension_reason = 'MED-01 fixture' WHERE id = $1::uuid`, courseID); err != nil {
+		t.Fatalf("suspending Course access: %v", err)
+	}
+	assertVisible("access-suspended", false)
+
+	if _, err := pool.Exec(ctx, `UPDATE courses SET access_suspended_at = NULL, access_suspension_reason = NULL WHERE id = $1::uuid`, courseID); err != nil {
+		t.Fatalf("restoring Course access: %v", err)
+	}
+	assertVisible("restored", true)
+
+	if _, err := pool.Exec(ctx, `UPDATE courses SET retired_at = now() WHERE id = $1::uuid`, courseID); err != nil {
+		t.Fatalf("retiring Course: %v", err)
+	}
+	assertVisible("retired", false)
+}
+
 func TestPublicProjectionExposesOnlyReadyLiveRevisionPreview(t *testing.T) {
 	freshCatalogPublicSchema(t)
 	ctx := context.Background()

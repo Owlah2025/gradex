@@ -1,7 +1,7 @@
 # Decision Log
 
 > Status: Active
-> Last Updated: 2026-08-21 (real calendar)
+> Last Updated: 2026-08-24 (real calendar)
 
 Central record of significant product/technical decisions for Gradex — what was decided, why, and what alternatives were rejected. This is the single source of truth for decisions; [PROJECT_VISION.md](PROJECT_VISION.md) §21 points here rather than keeping its own copy.
 
@@ -3221,6 +3221,40 @@ retained principle — that Instructors select from an Admin-controlled vocabula
 research and design report at
 [docs/superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md](superpowers/specs/2026-08-21-academic-catalog-taxonomy-redesign.md).
 
+**Amendment — T5 legacy cutover, 2026-08-23.** Clause 13 says the legacy vocabulary stays operational
+"until the new catalog is proven on a dual path". It did not say what happens to a legacy record whose
+canonical identity cannot be established at all. It is now settled: **a legacy record may remain
+intentionally unresolved, indefinitely, and that is a terminal accepted state rather than outstanding
+work.**
+
+The real corpus produced exactly one such record. Its legacy SUBJECT term is *Software Engineering*
+with code `SWE101`; the Course it classifies is titled *Introduction to Algorithms*; no canonical
+Kuwait University Subject carries the normalized code `SWE101`; and four canonical Subjects are each
+defensible. The Course is published and a Student already holds an Entitlement against it. Choosing
+would mean ruling that either the legacy Subject label or the Course title is the real academic
+identity, and neither is — both are prose. The Founder reviewed all four candidates on 2026-08-23 and
+decided **KEEP_UNRESOLVED**.
+
+Consequences, which are deliberately narrow:
+
+- The Course keeps `LEGACY_TAXONOMY` classification, no `institution_id`, and no `subject_id`. No
+  migration is applied, no Program target inferred, no revision fabricated, and the Course is never
+  deleted or recreated.
+- It stays fully operational: published, publicly listed, priced, purchasable, and unchanged in every
+  respect except that it carries no canonical academic identity.
+- It continues to appear in every `catalog-migrate --report` run with an explicit reason, and
+  `--apply` continues to write nothing for it. A decision to keep a record unresolved is still a
+  decision not to migrate it, so the fail-closed behaviour is identical to when the question was open.
+- The decision is recorded in the Founder mapping data itself, dated, and carries the authoritative
+  evidence that would legitimately reopen it: the university's own official subject code, the Course
+  syllabus, historical Course documentation, or an explicit Founder mapping supported by one of those.
+  Until such evidence exists the mapping must not change.
+- Legacy schema removal remains gated by clause 13 as written. An intentionally unresolved record
+  keeps the legacy vocabulary in use, so the removal migration is not authorized by this amendment.
+
+The distinction this amendment adds is between *the Founder has not answered* and *the Founder
+answered, and the answer is to wait for evidence*. Both are fail-closed; only the second is finished.
+
 ## D-092 — The Student academic profile persists academic-unit context for Program-less states and records onboarding as an explicit three-state decision
 
 **Date:** 2026-08-22
@@ -3285,6 +3319,41 @@ launch data. Implementation proceeds only through `MVP-F19` in
 [FUNCTIONAL_COMPLETION.md](mvp/FUNCTIONAL_COMPLETION.md).
 
 **Source:** Founder product decision supplied 2026-08-22 for the T3 Student Academic Profile tranche.
+
+**Amendment — T6 catalogue discovery, 2026-08-23.** Clause 1 states that the profile "personalises
+catalogue ranking and filtering" while the Boundary defers all catalogue filtering and ranking to a
+later slice. That deferral is now **discharged**: T6 implemented it, and the exact contract is
+recorded here because clause 1's one word "personalises" is too weak to govern it.
+
+**Profile-aware relevance is ordering, and only ordering.** It reorders Courses that are already
+visible; it never determines which Courses are visible. Specifically:
+
+- **Ordering only.** The profile-derived term appears in `ORDER BY` and nowhere else — not in the
+  visibility predicate, not in any filter clause, and not in the result count. A ranked request
+  returns exactly the same set of Courses as an unranked one.
+- **The Student's own profile only.** The input is the Program the signed-in Student's own profile
+  names, resolved server-side against their own account. No other Student's data, no aggregate, and
+  no inferred cohort participates.
+- **Request-scoped and opt-in.** Ranking applies only when the request asks for it. It is not a
+  stored preference, not a server-side default, and not attached to the session.
+- **Anonymous browsing is never personalized.** A visitor with no profile receives the ordinary
+  deterministic order.
+- **No authority whatsoever.** It creates no Entitlement, grants no access, hides no Course whose
+  Program does not match, and changes no publication, pricing, purchase, invitation, enrollment, or
+  learning behaviour. Clause 1's prohibition is unchanged and is strengthened, not relaxed, by this
+  amendment: ordering is the *only* thing the profile is permitted to influence.
+- **Deterministic and inspectable.** Four named tiers — explicit Program target, inferred Curriculum
+  match, same Institution, every other public Course — then a stable tie-break. No learned weights,
+  no stored relevance score, no ranking whose correctness depends on machine learning.
+- **No paid promotion or sponsored ranking**, and no recommendation presented as relevance.
+
+Because a ranked response is personalised, it is returned uncacheable; an unranked response remains
+publicly cacheable. This amendment also supersedes the older
+[SCREENS.md](SCREENS.md) ST01 sentence "Ranking is relevance only — no recommendations, promotion, or
+personalization", which predates the Academic Catalog and read "personalization" as covering
+own-profile ordering. ST01 now states the contract above. The prohibitions that sentence existed to
+protect — no paid promotion, no sponsored ranking, no recommendations disguised as relevance, no
+access or eligibility personalization — are all retained verbatim.
 
 ## D-093 — Course academic identity is an explicit classification model, and an official Subject code is permanently reserved
 
@@ -3405,3 +3474,104 @@ amended text. Enforcement is both domain and database (migration 0026), proven i
 **Source:** Builder architecture trace of 2026-08-22 accepted by the Founder, with one Founder
 correction: official Subject code permanence, clause 7. Clause 7 amended the same day by a second
 Founder decision after T4-A.1 verification exposed the active-Subject renumbering path.
+
+## D-094 — Limited paid beta scope narrows GAP-06 without cancelling post-beta MVP features
+
+**Date:** 2026-08-24
+
+**Status:** Active for the limited paid beta only. This is a time-bounded beta-scope decision, not a
+permanent product cancellation and not an authorization to implement any feature in this decision.
+
+**Decision:** For the limited paid beta, defer the dedicated Student Notification Center surface,
+general Student Profile/Account enhancements beyond the existing academic profile and proven
+authentication/password/account-security flows, all Office Hours functionality, and Instructor
+Analytics.
+
+Existing transactional and security notifications remain required, including verification,
+password-reset, invitation, and other existing outbox/worker behavior. The deferral does not disable,
+remove, weaken, or reinterpret those flows.
+
+The limited paid beta still requires:
+
+1. A minimal Course-scoped Instructor Roster. This preserves [D-045](#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)'s
+   restored Course-scoped roster authority.
+2. A minimal Admin Reported-Content Resolution surface, including safe report inspection and
+   resolution through the existing audited Course/Account lifecycle authority where applicable.
+
+ST-18 is therefore beta-deferred. IN-11 is partial and Founder-scoped: roster is required while
+Analytics and Office Hours are beta-deferred. AD-14 remains not implemented and is required before
+the limited paid beta. None of these rows is E2E_PROVEN, and no denominator row is removed.
+
+**Authority precedence:** This decision governs limited paid beta scope as of 2026-08-24. Earlier
+D-013 and PRD Office Hours wording remains historically accurate and remains the post-beta product
+record unless amended later; it does not require Office Hours for this limited beta. The earlier
+GAP-06 ambiguity is resolved for beta planning, not erased from historical documents.
+
+**Boundary:** No roster, moderation, Notification Center, Profile, Office Hours, or Analytics
+implementation is authorized by this decision. The next product tranches are, in order, the
+minimal Instructor Course Roster and the minimal Admin Reported-Content Resolution surface.
+SY-01, SY-02, SY-03, SY-08, SY-09, INF-01, MED-01, MED-04, MED-05, and deferred MED findings are
+unchanged.
+
+**Source:** Founder authorization and limited paid beta scope decision issued on 2026-08-24.
+
+## D-095 — Founder approves the limited paid beta capacity envelope and SY-09 harness preparation
+
+**Date:** 2026-08-24
+
+**Status:** Active for the limited paid beta capacity contract only. This decision authorizes
+recording the envelope and preparing disposable harness tooling; it does not authorize executing a
+capacity test, deploying the beta stack, tuning the application, or closing SY-09.
+
+**Decision:** The Founder approves the following temporary envelope for the initial approximately
+20–50 paid Student beta:
+
+- 110 total registered Accounts, including 50 entitled paid Students;
+- 50 simultaneous authenticated Student sessions;
+- 100 distinct successful Student logins within 60 seconds;
+- 20 total application RPS for 10 minutes after warm-up, with at least 18 RPS authenticated Student
+  traffic;
+- 30 total application RPS for 60 seconds, with at least 27 RPS authenticated Student traffic;
+- anonymous/public catalogue at 10 RPS for 10 minutes and approximately 10% of mixed traffic;
+- learning/progress at 15% of mixed traffic: approximately 3 RPS at sustained load and 4.5 RPS at
+  burst load;
+- 100 protected playback authorization-plus-manifest starts within 60 seconds across the 50 Student
+  cohort, at most two starts per Student;
+- five concurrent privileged operators: one Admin and four active Instructors;
+- three concurrent direct Instructor uploads during Student traffic;
+- no more than two active transcodes per worker, with additional work queued safely;
+- read/control-plane p95 under 300 ms, transactional-write p95 under 800 ms, and healthy entitled
+  video time-to-first-frame p95 under three seconds through a separate small browser/edge check;
+- zero expected valid-workload transport failures, unexpected statuses, 4xx, 429, 5xx, 503,
+  authentication failures, entitlement failures, manifest/version failures, dropped iterations,
+  upload-storage failures, and terminal worker failures; and
+- two clean repetitions of every required scenario.
+
+The resource gates are host CPU p95 at or below 85% with no sustained value above 90% for 60 seconds,
+memory at or below 80% of the representative KVM2 budget, no swap/OOM/unexpected restart, disk below
+the existing 85% warning threshold with at least 5 GiB free, and safe PostgreSQL, Redis, and worker
+queue state. Missing required evidence is a failure, not an implicit pass. Playback authorization and
+manifest are Founder-approved as read/control-plane latency even though authorization is a POST;
+password login remains transactional-write latency.
+
+The beta fixture is exactly 104 Student Accounts (50 entitled and 54 non-entitled), one Admin, five
+Instructors, and eight representative published Courses with READY media fixtures. The fixture is
+synthetic, disposable, non-PII, and must use exact run-owned database, session, and storage-prefix
+cleanup. Admission and rate limits remain unchanged, and future login proof must use the supported
+shared public IPv4/NAT topology when available.
+
+**Boundary:** This beta contract is separate from the future/full-launch LG-019 target. LG-019 remains
+unchanged at 5,000 registered Accounts, 500 simultaneous active sessions, 500 Students beginning
+within one minute, 250 API RPS for 60 seconds, 250 playback starts per minute, 20 concurrent uploads,
+no more than two transcodes per worker, and its original NFR, recovery, budget, region, and availability
+requirements. This decision does not lower, replace, supersede, delete, or rewrite that target or its
+historical evidence.
+
+**SY-09 state:** SY-09 remains `BLOCKED`; Founder approval of the envelope and harness readiness are
+not capacity proof. Closure still requires representative KVM2 execution on the actual beta
+storage/edge topology, two clean repetitions of every required scenario, sanitized capacity evidence,
+and tracker reconciliation. Admission or growth beyond the approved beta envelope requires a new
+capacity re-test and authority reconciliation before expansion.
+
+**Source:** Founder authorization supplied for SY-09 on 2026-08-24, reconciled against
+[`PRD.md`](PRD.md), [`LAUNCH_GATES.md`](LAUNCH_GATES.md), and the existing LG-019 launch evidence.

@@ -32,6 +32,7 @@ import { isAcademicCourse } from "@/lib/api/catalog";
 import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { createSubjectRequest } from "@/lib/api/subject-requests";
+import { CourseRoster } from "./course-roster";
 
 /**
  * Instructor Course Authoring Studio.
@@ -58,6 +59,7 @@ export function CourseBuilder() {
 
   const [courses, setCourses] = useState<CourseWire[]>([]);
   const [selectedCourseID, setSelectedCourseID] = useState<string | null>(null);
+  const [showRoster, setShowRoster] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -106,6 +108,11 @@ export function CourseBuilder() {
   const sections = revision?.sections ?? [];
   const workflow = revisionWorkflow(selectedCourse);
   const editingPublished = editsPublishedCourse(selectedCourse);
+
+  const selectCourse = (courseID: string) => {
+    setSelectedCourseID(courseID);
+    setShowRoster(false);
+  };
 
   const loadCourses = useCallback(
     async (preferCourseID?: string) => {
@@ -652,7 +659,7 @@ export function CourseBuilder() {
               <button
                 key={course.id}
                 type="button"
-                onClick={() => setSelectedCourseID(course.id)}
+                onClick={() => selectCourse(course.id)}
                 data-testid={`owned-course-${course.id}`}
                 className={`w-full text-start p-4 rounded-lg border transition ${
                   selectedCourseID === course.id
@@ -687,7 +694,18 @@ export function CourseBuilder() {
                 data-course-id={selectedCourse.id}
                 data-revision-id={revision?.id ?? ""}
               >
-                <h2 className="text-xl font-bold mt-0.5">{courseTitle(selectedCourse)}</h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="text-xl font-bold mt-0.5">{courseTitle(selectedCourse)}</h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowRoster((current) => !current)}
+                    aria-expanded={showRoster}
+                    data-testid="course-roster-toggle"
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-700 dark:hover:bg-slate-800"
+                  >
+                    {showRoster ? t.instructor.roster.close : t.instructor.roster.open}
+                  </button>
+                </div>
               </div>
               {isAcademicCourse(selectedCourse) && (
                 <AcademicCourseContextPanel
@@ -707,6 +725,8 @@ export function CourseBuilder() {
                 {stateLabel(revision?.state, selectedCourse.lifecycle)}
               </span>
             </div>
+
+            {showRoster ? <CourseRoster courseID={selectedCourse.id} /> : null}
 
             {/* Standing notice, not a toast: the Instructor usually returns in a later session. */}
             <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />

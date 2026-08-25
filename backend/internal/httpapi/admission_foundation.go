@@ -8,27 +8,37 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
-var requiredAdmissionPolicyEndpoints = [...]string{
+var requiredStudentAdmissionPolicyEndpoints = [...]string{
 	"session-bootstrap",
 	"registration-policy-set",
 	"student-registrations",
 	"email-verification-requests",
 	"email-verifications",
-	"password-reset-requests",
-	"password-resets",
 	"purchase-requests",
 }
 
-// AdmissionFoundation is the fail-closed dependency set shared by every
-// public Identity command. Construction validates the complete set before the
-// bootstrap route is mounted; Student mutation routes are added separately.
+var requiredRecoveryPolicyEndpoints = [...]string{
+	"password-reset-requests",
+	"password-resets",
+}
+
+// AdmissionFoundation owns the canonical anonymous browser boundary and the
+// Student-registration dependencies. Recovery deliberately composes through a
+// separate RecoveryFoundation so closing registration cannot close recovery.
 type AdmissionFoundation struct {
 	security         *anonymousSecurity
 	service          admissionCommands
-	recovery         recoveryCommands
 	policies         identity.PolicySetResolver
 	limiter          *ratelimit.Limiter
 	endpointPolicies map[string]ratelimit.Policy
+}
+
+// RecoveryFoundation mounts credential recovery through the same anonymous
+// security, CSRF, and rate-limit boundary as other public Identity commands.
+// It has no registration dependency or authority.
+type RecoveryFoundation struct {
+	admission *AdmissionFoundation
+	recovery  recoveryCommands
 }
 
 type AdmissionFoundationOptions struct {
@@ -38,7 +48,6 @@ type AdmissionFoundationOptions struct {
 	AnonymousSessionTTL time.Duration
 	Policies            identity.PolicySetResolver
 	Service             admissionCommands
-	Recovery            recoveryCommands
 	Limiter             *ratelimit.Limiter
 	EndpointPolicies    map[string]ratelimit.Policy
 }
@@ -54,7 +63,12 @@ type PurchaseAdmissionFoundationOptions struct {
 	CSRFKey             []byte
 	AnonymousSessionTTL time.Duration
 	Limiter             *ratelimit.Limiter
-	PurchasePolicy      ratelimit.Policy
+	EndpointPolicies    map[string]ratelimit.Policy
+}
+
+type RecoveryFoundationOptions struct {
+	Admission *AdmissionFoundation
+	Recovery  recoveryCommands
 }
 
 func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFoundation, error) {
@@ -67,41 +81,25 @@ func NewAdmissionFoundation(options AdmissionFoundationOptions) (*AdmissionFound
 	if err != nil {
 		return nil, err
 	}
-	if options.Policies == nil || options.Service == nil ||
-		options.Recovery == nil || options.Limiter == nil {
+	if options.Policies == nil || options.Service == nil || options.Limiter == nil {
 		return nil, errors.New("admission foundation dependencies are required")
 	}
-	if len(options.EndpointPolicies) == 0 {
-		return nil, errors.New("admission endpoint policies are required")
-	}
-	endpointPolicies := make(map[string]ratelimit.Policy, len(options.EndpointPolicies))
-	for endpoint, policy := range options.EndpointPolicies {
-		if endpoint == "" || endpoint != policy.Endpoint {
-			return nil, errors.New("admission endpoint policy key does not match its endpoint")
-		}
-		if err := policy.Validate(); err != nil {
-			return nil, err
-		}
-		endpointPolicies[endpoint] = policy
-	}
-	for _, endpoint := range requiredAdmissionPolicyEndpoints {
-		if _, configured := endpointPolicies[endpoint]; !configured {
-			return nil, errors.New("required admission endpoint policy is missing")
-		}
+	endpointPolicies, err := validatedEndpointPolicies(options.EndpointPolicies, requiredStudentAdmissionPolicyEndpoints[:])
+	if err != nil {
+		return nil, err
 	}
 	return &AdmissionFoundation{
 		security:         security,
 		service:          options.Service,
-		recovery:         options.Recovery,
 		policies:         options.Policies,
 		limiter:          options.Limiter,
 		endpointPolicies: endpointPolicies,
 	}, nil
 }
 
-// NewPurchaseAdmissionFoundation creates the minimal fail-closed anonymous
-// write boundary for purchase requests. Registration commands require the
-// fuller AdmissionFoundationOptions constructor above.
+// NewPurchaseAdmissionFoundation creates the canonical anonymous boundary for
+// public purchase requests and any separately composed anonymous capability.
+// It never carries Student-registration dependencies or mounts their routes.
 func NewPurchaseAdmissionFoundation(options PurchaseAdmissionFoundationOptions) (*AdmissionFoundation, error) {
 	security, err := newAnonymousSecurity(
 		options.PublicOrigin,
@@ -115,17 +113,55 @@ func NewPurchaseAdmissionFoundation(options PurchaseAdmissionFoundationOptions) 
 	if options.Limiter == nil {
 		return nil, errors.New("purchase admission limiter is required")
 	}
-	if options.PurchasePolicy.Endpoint != "purchase-requests" {
-		return nil, errors.New("purchase admission policy must target purchase-requests")
-	}
-	if err := options.PurchasePolicy.Validate(); err != nil {
+	endpointPolicies, err := validatedEndpointPolicies(options.EndpointPolicies, []string{"purchase-requests"})
+	if err != nil {
 		return nil, err
 	}
 	return &AdmissionFoundation{
 		security:         security,
 		limiter:          options.Limiter,
-		endpointPolicies: map[string]ratelimit.Policy{"purchase-requests": options.PurchasePolicy},
+		endpointPolicies: endpointPolicies,
 	}, nil
+}
+
+// NewRecoveryFoundation validates that recovery can only be mounted through a
+// complete anonymous boundary with both recovery endpoint policies. A missing
+// dependency is a construction error, never a silent route omission.
+func NewRecoveryFoundation(options RecoveryFoundationOptions) (*RecoveryFoundation, error) {
+	if options.Admission == nil || options.Recovery == nil {
+		return nil, errors.New("recovery foundation dependencies are required")
+	}
+	for _, endpoint := range requiredRecoveryPolicyEndpoints {
+		if _, configured := options.Admission.endpointPolicies[endpoint]; !configured {
+			return nil, errors.New("required recovery endpoint policy is missing")
+		}
+	}
+	return &RecoveryFoundation{admission: options.Admission, recovery: options.Recovery}, nil
+}
+
+func validatedEndpointPolicies(
+	policies map[string]ratelimit.Policy,
+	required []string,
+) (map[string]ratelimit.Policy, error) {
+	if len(policies) == 0 {
+		return nil, errors.New("admission endpoint policies are required")
+	}
+	endpointPolicies := make(map[string]ratelimit.Policy, len(policies))
+	for endpoint, policy := range policies {
+		if endpoint == "" || endpoint != policy.Endpoint {
+			return nil, errors.New("admission endpoint policy key does not match its endpoint")
+		}
+		if err := policy.Validate(); err != nil {
+			return nil, err
+		}
+		endpointPolicies[endpoint] = policy
+	}
+	for _, endpoint := range required {
+		if _, configured := endpointPolicies[endpoint]; !configured {
+			return nil, errors.New("required admission endpoint policy is missing")
+		}
+	}
+	return endpointPolicies, nil
 }
 
 // RateLimiter exposes the already composed public-rate boundary to another

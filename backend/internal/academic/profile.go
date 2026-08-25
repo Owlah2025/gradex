@@ -80,6 +80,12 @@ type StudentAcademicProfile struct {
 
 	ProgramID   *string `json:"program_id,omitempty"`
 	ProgramName *string `json:"program_name,omitempty"`
+	// ProgramSlug is the Program's public, shareable identifier. It is reported
+	// so the public catalogue can rank results for this Student's Program
+	// without the client ever handling an internal identifier, and without a
+	// public page having to call an authenticated academic lookup to translate
+	// one. It is a discovery hint and carries no authority whatsoever.
+	ProgramSlug *string `json:"program_slug,omitempty"`
 	// DepartmentName and CollegeName are derived context for display. The
 	// Student is never asked to choose a Department.
 	DepartmentName *string `json:"department_name,omitempty"`
@@ -140,7 +146,7 @@ func (r *Repository) loadProfile(ctx context.Context, q rowQuerier, accountID st
 		SELECT sp.setup_state::text, sp.enrollment_status::text,
 			sp.institution_id::text, i.name_en, i.max_academic_level, i.has_foundation_stage,
 			sp.academic_unit_id::text, unit.name_en,
-			sp.program_id::text, prog.name_en,
+			sp.program_id::text, prog.name_en, prog.slug,
 			department.name_en, college.name_en,
 			sp.curriculum_id::text, cur.version_label,
 			sp.current_level, sp.updated_at
@@ -155,7 +161,7 @@ func (r *Repository) loadProfile(ctx context.Context, q rowQuerier, accountID st
 	`, accountID).Scan(&setup, &status,
 		&p.InstitutionID, &p.InstitutionName, &p.MaxAcademicLevel, &p.HasFoundationStage,
 		&p.AcademicUnitID, &p.AcademicUnitName,
-		&p.ProgramID, &p.ProgramName,
+		&p.ProgramID, &p.ProgramName, &p.ProgramSlug,
 		&p.DepartmentName, &p.CollegeName,
 		&p.CurriculumID, &p.CurriculumLabel,
 		&p.CurrentLevel, &p.UpdatedAt)

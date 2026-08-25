@@ -632,12 +632,20 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
-func TestMaxSchemaVersionTracksSubjectCodeIdentitySchema(t *testing.T) {
+func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
-	if MaxSchemaVersion != SubjectCodeIdentitySchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want SubjectCodeIdentitySchemaVersion %d",
-			MaxSchemaVersion, SubjectCodeIdentitySchemaVersion)
+	if TransactionalEmailMonitorTerminalSchemaVersion != SubjectCodeIdentitySchemaVersion+1 {
+		t.Fatalf("transactional email monitor schema = %d, want one past subject code identity %d",
+			TransactionalEmailMonitorTerminalSchemaVersion, SubjectCodeIdentitySchemaVersion)
+	}
+	if ReportModerationSchemaVersion != TransactionalEmailMonitorTerminalSchemaVersion+1 {
+		t.Fatalf("report moderation schema = %d, want one past transactional email monitor %d",
+			ReportModerationSchemaVersion, TransactionalEmailMonitorTerminalSchemaVersion)
+	}
+	if MaxSchemaVersion != ReportModerationSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
+			MaxSchemaVersion, ReportModerationSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -683,6 +691,75 @@ func TestMaxSchemaVersionTracksSubjectCodeIdentitySchema(t *testing.T) {
 		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
 			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
 	}
+}
+
+func TestTransactionalEmailMonitorTerminalMigrationIsAdditiveAndReversible(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	assertStateAndIndex := func(label string, wantVersion int64, wantIndex bool) {
+		t.Helper()
+		state, err := ReadSchemaState(ctx, pool)
+		if err != nil {
+			t.Fatalf("%s: reading schema state: %v", label, err)
+		}
+		if state.Version != wantVersion || state.Dirty {
+			t.Fatalf("%s: schema state = %+v, want clean version %d", label, state, wantVersion)
+		}
+
+		var indexDefinition string
+		if err := pool.QueryRow(ctx, `
+			SELECT COALESCE((
+				SELECT indexdef
+				FROM pg_indexes
+				WHERE schemaname = 'public'
+				  AND tablename = 'transactional_email_deliveries'
+				  AND indexname = 'transactional_email_monitor_terminal_idx'
+			), '')
+		`).Scan(&indexDefinition); err != nil {
+			t.Fatalf("%s: reading terminal monitor index: %v", label, err)
+		}
+		if !wantIndex {
+			if indexDefinition != "" {
+				t.Fatalf("%s: terminal monitor index still exists: %q", label, indexDefinition)
+			}
+			return
+		}
+		for _, fragment := range []string{
+			"transactional_email_deliveries",
+			"terminal_at",
+			"event_id",
+			"PERMANENT_FAILED",
+			"EXHAUSTED",
+		} {
+			if !strings.Contains(indexDefinition, fragment) {
+				t.Fatalf("%s: terminal monitor index = %q, missing %q", label, indexDefinition, fragment)
+			}
+		}
+	}
+
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrating to current schema: %v", err)
+	}
+	assertStateAndIndex("after up", MaxSchemaVersion, true)
+
+	if err := m.Up(); !errors.Is(err, migrate.ErrNoChange) {
+		t.Fatalf("reapplying current migrations: %v, want ErrNoChange", err)
+	}
+	assertStateAndIndex("after repeated up", MaxSchemaVersion, true)
+
+	if err := m.Migrate(uint(SubjectCodeIdentitySchemaVersion)); err != nil {
+		t.Fatalf("rolling back migration 0027: %v", err)
+	}
+	assertStateAndIndex("after 0027 down", SubjectCodeIdentitySchemaVersion, false)
+
+	if err := m.Migrate(uint(TransactionalEmailMonitorTerminalSchemaVersion)); err != nil {
+		t.Fatalf("reapplying migration 0027: %v", err)
+	}
+	assertStateAndIndex("after 0027 reapply", TransactionalEmailMonitorTerminalSchemaVersion, true)
 }
 
 func TestManualPurchaseRollbackGuardRefusesLivePurchaseEntitlementWithoutDirtyingSchema(t *testing.T) {

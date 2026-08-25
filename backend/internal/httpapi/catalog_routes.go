@@ -81,6 +81,7 @@ func mountCatalogRoutes(
 	)
 	{
 		ownedGetGroup.GET("", h.getOwnedCourse)
+		ownedGetGroup.GET("/students", h.listCourseRoster)
 	}
 
 	// Owned candidate mutation routes under /courses/:id
@@ -163,6 +164,15 @@ func mountCatalogRoutes(
 	{
 		adminPricingMutationGroup.PUT("/price", pricingH.setCoursePrice)
 		adminPricingMutationGroup.PUT("/sections/:sectionId/price", pricingH.setSectionPrice)
+	}
+
+	adminLifecycleGetGroup := v1.Group("/admin/courses")
+	adminLifecycleGetGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+	)
+	{
+		adminLifecycleGetGroup.GET("", lifecycleH.directory)
 	}
 
 	adminLifecycleMutationGroup := v1.Group("/admin/courses/:id")

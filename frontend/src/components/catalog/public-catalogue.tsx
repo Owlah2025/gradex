@@ -19,6 +19,17 @@ import {
   type PublicCourse,
   type PublicCourseDetail,
 } from "@/lib/api/public-catalog";
+import { getAcademicProfile } from "@/lib/api/academic-profile";
+import { AcademicFilters } from "./academic-filters";
+import {
+  clearedSelection,
+  emptyStateKind,
+  hasSelection,
+  readSelection,
+  requestFilters,
+  selectionSearch,
+  type CatalogueSelection,
+} from "./academic-filter-state";
 import { ProblemError } from "@/lib/api/problem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +69,13 @@ const copy = {
     previewFailed: "تعذّر تشغيل المعاينة. حاول مرة أخرى.",
     clearSearch: "مسح البحث",
     retry: "إعادة المحاولة",
+    clearFilters: "مسح التصفية",
+    audience: "مناسب لتخصصات",
+    emptyForInstitution: "لا توجد دورات منشورة لهذه الجامعة بعد.",
+    emptyForProgram: "لا توجد دورات منشورة لهذا التخصص بعد.",
+    emptyForLevel: "لا توجد دورات منشورة لهذا المستوى بعد.",
+    emptyForSubject: "لا توجد دورات منشورة لهذا المقرر بعد.",
+    relevanceNote: "الدورات المناسبة لتخصصك تظهر أولاً.",
   },
   en: {
     catalogue: "Catalogue",
@@ -83,6 +101,13 @@ const copy = {
     previewFailed: "The preview could not be played. Try again.",
     clearSearch: "Clear search",
     retry: "Retry",
+    clearFilters: "Clear filters",
+    audience: "Relevant to",
+    emptyForInstitution: "No published courses for this university yet.",
+    emptyForProgram: "No published courses for this program yet.",
+    emptyForLevel: "No published courses for this academic level yet.",
+    emptyForSubject: "No published courses for this subject yet.",
+    relevanceNote: "Courses relevant to your program appear first.",
   },
 };
 
@@ -229,23 +254,70 @@ export function CatalogueList() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParameters = useSearchParams();
-  const query = searchParameters.get("q") ?? "";
+
+  // The URL is the single owner of the selection. Nothing is mirrored into
+  // component state, so refresh, a shared link, and browser back/forward are
+  // all the same code path rather than three behaviours to keep in step.
+  const selection = readSelection(searchParameters.toString());
+  const query = selection.query;
+
   const [state, setState] = useState<{
     items?: PublicCourse[];
     error?: string;
   }>({});
   const [retryCount, setRetryCount] = useState(0);
 
+  // The Student's own Program, read from their own profile, used only to order
+  // results. An anonymous visitor simply has none: a 401 here is an ordinary
+  // state on a public page and never surfaces as an error or hides a Course.
+  const [relevantProgram, setRelevantProgram] = useState("");
   useEffect(() => {
-    setState({});
-    getPublicCourses(locale, query)
-      .then((result) => setState({ items: result.items }))
-      .catch(() => setState({ error: t.failed }));
-  }, [locale, query, t.failed, retryCount]);
+    let cancelled = false;
+    getAcademicProfile(locale)
+      .then((profile) => {
+        if (!cancelled) setRelevantProgram(profile?.program_slug ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setRelevantProgram("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
 
-  function clearSearch() {
-    router.push(pathname);
+  const filters = requestFilters(selection, relevantProgram);
+  // Serialised so the effect re-runs when the filters change by value rather
+  // than by the identity of a freshly built object.
+  const filterKey = JSON.stringify(filters);
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({});
+    getPublicCourses(locale, query, JSON.parse(filterKey))
+      .then((result) => {
+        if (!cancelled) setState({ items: result.items });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ error: t.failed });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, query, filterKey, t.failed, retryCount]);
+
+  function navigate(next: CatalogueSelection) {
+    const suffix = selectionSearch(next);
+    router.push(`${pathname}${suffix}`);
   }
+
+  const emptyMessage = {
+    "no-courses": t.empty,
+    "no-search-results": t.noResults,
+    "no-courses-for-institution": t.emptyForInstitution,
+    "no-courses-for-program": t.emptyForProgram,
+    "no-courses-for-level": t.emptyForLevel,
+    "no-courses-for-subject": t.emptyForSubject,
+  }[emptyStateKind(selection)];
 
   return (
     <>
@@ -255,6 +327,16 @@ export function CatalogueList() {
         <Container>
           <DisplayHeading as="h1">{t.catalogue}</DisplayHeading>
           <CatalogueSearch key={query} initialQuery={query} />
+
+          <AcademicFilters
+            locale={locale as "ar" | "en"}
+            selection={selection}
+            onChange={navigate}
+          />
+
+          {relevantProgram !== "" && selection.program === "" && (
+            <p className="mt-4 text-sm text-slate-600">{t.relevanceNote}</p>
+          )}
 
           {!state.items && !state.error && (
             <Prose className="mt-8" aria-live="polite">
@@ -279,11 +361,22 @@ export function CatalogueList() {
           {state.items?.length === 0 && (
             <div className="mt-8">
               <EmptyState
-                title={query === "" ? t.empty : t.noResults}
+                title={emptyMessage}
                 action={
-                  query !== "" ? (
-                    <Button variant="outline" onClick={clearSearch}>
-                      {t.clearSearch}
+                  hasSelection(selection) ? (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        navigate(
+                          query !== "" && !hasAcademicSelection(selection)
+                            ? { ...selection, query: "" }
+                            : clearedSelection(),
+                        )
+                      }
+                    >
+                      {hasAcademicSelection(selection)
+                        ? t.clearFilters
+                        : t.clearSearch}
                     </Button>
                   ) : undefined
                 }
@@ -304,7 +397,12 @@ export function CatalogueList() {
                 <Card interactive className="flex h-full flex-col">
                   <CardHeader>
                     <div className="flex flex-wrap gap-2 text-sm">
-                      {[course.university, course.major, course.subject, course.study_year]
+                      {[
+                        course.university,
+                        course.major,
+                        course.subject,
+                        course.study_year,
+                      ]
                         .filter(Boolean)
                         .map((term) => (
                           <Badge key={term!.label} variant="neutral">
@@ -344,6 +442,14 @@ export function CatalogueList() {
       </main>
       <Footer />
     </>
+  );
+}
+
+function hasAcademicSelection(selection: CatalogueSelection): boolean {
+  return (
+    selection.institution !== "" ||
+    selection.program !== "" ||
+    selection.subject !== ""
   );
 }
 
@@ -418,6 +524,15 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
         {state.course && (
           <article>
             <Taxonomy course={state.course} />
+            {state.course.program_audience &&
+              state.course.program_audience.length > 0 && (
+                <p className="mt-3 text-sm text-slate-600">
+                  {t.audience}:{" "}
+                  {state.course.program_audience.join(
+                    locale === "ar" ? "، " : ", ",
+                  )}
+                </p>
+              )}
             <h1 className="mt-4 font-display text-4xl font-bold">
               {state.course.title}
             </h1>
@@ -426,9 +541,13 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
             </p>
             <Price course={state.course} label={t.price} />
             {state.course.has_preview ? (
-              <section className="mt-5" aria-labelledby="public-preview-heading">
+              <section
+                className="mt-5"
+                aria-labelledby="public-preview-heading"
+              >
                 <h2 id="public-preview-heading" className="sr-only">
-                  {t.previewHeading}{state.course.title}
+                  {t.previewHeading}
+                  {state.course.title}
                 </h2>
                 <button
                   type="button"
@@ -439,7 +558,11 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
                   {t.watchPreview}
                 </button>
                 {previewError ? (
-                  <div className="mt-3" role="alert" data-testid="public-preview-error">
+                  <div
+                    className="mt-3"
+                    role="alert"
+                    data-testid="public-preview-error"
+                  >
                     <Failure>{previewError}</Failure>
                     <button
                       type="button"

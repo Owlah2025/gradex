@@ -391,8 +391,12 @@ func TestRunningReadModelStalePageReportsWhatItRendered(t *testing.T) {
 		learning.ReportContent{Reason: learning.ReasonInaccurate}, clock); !errors.Is(err, learning.ErrReportDuplicate) {
 		t.Fatalf("expected a duplicate refusal while the first COURSE report is open, got %v", err)
 	}
-	if _, err := f.pool.Exec(ctx,
-		`UPDATE content_reports SET resolved_at = now() WHERE target_kind = 'COURSE'`); err != nil {
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE content_reports
+		SET resolved_at = now(), resolved_by_account_id = $1::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE target_kind = 'COURSE'
+	`, f.studentID); err != nil {
 		t.Fatalf("resolving the first report: %v", err)
 	}
 	second, err := reportRepository.CreateReport(ctx, freshBinding,

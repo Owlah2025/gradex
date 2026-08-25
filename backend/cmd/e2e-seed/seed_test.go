@@ -59,7 +59,9 @@ func TestMain(m *testing.M) {
 	var courseIDParam string
 	var issueSessionFlag bool
 	var issueLoadtestSessionsFlag bool
+	var issueBetaLoadtestSessionsFlag bool
 	var loadtestFixtures bool
+	var betaLoadtestFixtures bool
 	var useRegistrationPassword bool
 	var emailParam string
 	var accessMutationParam string
@@ -80,13 +82,18 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&invitationIDParam, "invitation", "", "Invitation ID for query")
 	flag.BoolVar(&issueSessionFlag, "issue-session", false, "Issue a production-valid session for a seeded Student and emit its cookie and CSRF token")
 	flag.BoolVar(&issueLoadtestSessionsFlag, "issue-loadtest-sessions", false, "Issue production-valid sessions for the disposable load-test Students")
+	flag.BoolVar(&issueBetaLoadtestSessionsFlag, "issue-beta-loadtest-sessions", false, "Issue production-valid sessions for the limited-paid-beta fixture")
 	flag.BoolVar(&loadtestFixtures, "loadtest", false, "Add the disposable LG-019 load-test population and emit its non-secret manifest")
+	flag.BoolVar(&betaLoadtestFixtures, "beta-loadtest", false, "Seed the exact disposable limited-paid-beta fixture and emit its non-secret manifest")
 	flag.BoolVar(&useRegistrationPassword, "use-registration-password", false, "Authenticate session issuance with the run-scoped registration password")
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
 	flag.Parse()
-	if loadtestFixtures && issueLoadtestSessionsFlag {
-		log.Fatalf("-loadtest and -issue-loadtest-sessions are separate operations")
+	if loadtestFixtures && issueLoadtestSessionsFlag || betaLoadtestFixtures && issueBetaLoadtestSessionsFlag {
+		log.Fatalf("fixture creation and session issuance are separate operations")
+	}
+	if loadtestFixtures && betaLoadtestFixtures || issueLoadtestSessionsFlag && issueBetaLoadtestSessionsFlag {
+		log.Fatalf("the LG-019 and limited-paid-beta profiles are separate operations")
 	}
 
 	// Is this the seeding tool, or an ordinary repository-wide `go test ./...`?
@@ -259,6 +266,17 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if issueBetaLoadtestSessionsFlag {
+		password := os.Getenv("GRADEX_LOADTEST_PASSWORD")
+		fixturePath := os.Getenv("GRADEX_LOADTEST_FIXTURE_FILE")
+		outputPath := os.Getenv("GRADEX_LOADTEST_SESSION_FILE")
+		if err := issueBetaLoadtestSessions(ctx, targetDSN, password, fixturePath, outputPath); err != nil {
+			log.Fatalf("issuing beta load-test sessions: %v", err)
+		}
+		log.Printf("issued limited-paid-beta sessions into a mode-0600 manifest")
+		os.Exit(0)
+	}
+
 	if queryLearningState {
 		if studentIDParam == "" || courseIDParam == "" {
 			log.Fatalf("-query-learning-state requires -student and -course flags")
@@ -377,8 +395,24 @@ func TestMain(m *testing.M) {
 	}
 	defer pool.Close()
 
-	if err := seedFixtures(ctx, pool); err != nil {
-		log.Fatalf("seeding fixtures: %v", err)
+	if betaLoadtestFixtures {
+		password := os.Getenv("GRADEX_LOADTEST_PASSWORD")
+		if password == "" {
+			log.Fatalf("-beta-loadtest requires GRADEX_LOADTEST_PASSWORD")
+		}
+		manifest, err := seedBetaLoadtestFixtures(ctx, pool, password)
+		if err != nil {
+			log.Fatalf("seeding limited-paid-beta fixtures: %v", err)
+		}
+		encoded, err := json.Marshal(manifest)
+		if err != nil {
+			log.Fatalf("encoding limited-paid-beta manifest: %v", err)
+		}
+		fmt.Printf("%s", encoded)
+	} else {
+		if err := seedFixtures(ctx, pool); err != nil {
+			log.Fatalf("seeding fixtures: %v", err)
+		}
 	}
 	if loadtestFixtures {
 		password := os.Getenv("GRADEX_LOADTEST_PASSWORD")
@@ -1069,6 +1103,12 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	// its own Student so no execution inherits another's playback or Progress budget — or its
 	// Progress rows.
 	if err := seedRotatingStudents(ctx, tx, courseID, passwordHash.Expose(), now, activeExpiry, expiredExpiry); err != nil {
+		return err
+	}
+
+	// T8C / AD-12 Course lifecycle fixtures: four published Courses, one per lifecycle action,
+	// plus one entitled Student for the Course-access suspension contract.
+	if err := seedT8CLifecycleFixtures(ctx, tx, instructorID, adminAccountID, passwordHash.Expose(), now, activeExpiry); err != nil {
 		return err
 	}
 

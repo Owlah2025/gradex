@@ -92,6 +92,16 @@ export function StaffInvitationAcceptance() {
     }
     previewStaffInvitation(bearer.current, locale)
       .then((preview) => {
+        // Only a still-open invitation gets a form. The preview route answers 200 for an
+        // invitation that is consumed, revoked, superseded, or expired, and offering the form
+        // anyway asked the invitee to choose a password before telling them the link was
+        // already used — the refusal came from the server either way, but only after the work.
+        if (preview.state !== "PENDING") {
+          bearer.current = null;
+          releaseFragmentToken("STAFF_INVITATION");
+          setState("invalid");
+          return;
+        }
         setRole(preview.invited_role);
         setState("ready");
       })

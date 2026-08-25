@@ -438,8 +438,12 @@ func TestStaleAndFreshAcknowledgementsAreIndistinguishable(t *testing.T) {
 	}
 
 	// D-066 holds the target closed until the first report resolves.
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE content_reports SET resolved_at = now() WHERE target_kind = 'COURSE'`); err != nil {
+	if _, err := f.pool.Exec(context.Background(), `
+		UPDATE content_reports
+		SET resolved_at = now(), resolved_by_account_id = $1::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE target_kind = 'COURSE'
+	`, f.studentID); err != nil {
 		t.Fatalf("resolving as fixture setup: %v", err)
 	}
 

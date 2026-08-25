@@ -55,13 +55,84 @@ type MajorMapping struct {
 	ProgramSlugs []string `yaml:"program_slugs"`
 }
 
+// SubjectCandidate is one canonical Subject a Founder may choose for a legacy
+// term that cannot be resolved automatically.
+type SubjectCandidate struct {
+	SubjectCode string `yaml:"subject_code"`
+	// Note records why this candidate is plausible. It is documentation for the
+	// Founder, never an input to any decision.
+	Note string `yaml:"note"`
+}
+
+// Disposition records what the Founder has said about a pending term.
+//
+// The distinction is real and the report must not blur it: a term nobody has
+// looked at yet and a term the Founder has examined and deliberately left
+// unresolved are different states of the product, even though both are equally
+// fail-closed. Only the second one is finished.
+type Disposition string
+
+const (
+	// DispositionAwaitingDecision is the default: the question is recorded and
+	// no one has answered it.
+	DispositionAwaitingDecision Disposition = "AWAITING_FOUNDER_DECISION"
+	// DispositionKeepUnresolved is a Founder decision, not an absence of one.
+	// The Founder has examined the candidates and determined that none may be
+	// chosen without authoritative evidence, so the legacy record keeps its
+	// legacy identity indefinitely. This is a terminal, accepted state.
+	DispositionKeepUnresolved Disposition = "KEEP_UNRESOLVED"
+)
+
+// PendingDecision records a legacy SUBJECT term whose canonical identity is
+// genuinely undecidable by this tool.
+//
+// It exists because "unmapped" and "the tool found several defensible answers"
+// are different facts. A legacy code with no canonical counterpart and several
+// plausible canonical Subjects is not missing from the mapping by oversight;
+// it is a recorded product question. Declaring it here makes the report say so
+// explicitly and, critically, keeps the Course out of the MIGRATE set — the
+// mapping file never contains a guess.
+//
+// Decision records what the Founder concluded. It changes what the report SAYS
+// and nothing about what the migrator DOES: an entry is fail-closed under every
+// disposition, because a decision to keep a record unresolved is still a
+// decision not to migrate it.
+type PendingDecision struct {
+	TermCode    string `yaml:"term_code"`
+	TermLabelEn string `yaml:"term_label_en"`
+	// CourseTitleEn is carried only so the Founder recognises the record. It is
+	// never matched on: a Course title is prose, not academic identity.
+	CourseTitleEn string             `yaml:"course_title_en"`
+	Why           string             `yaml:"why"`
+	Candidates    []SubjectCandidate `yaml:"candidates"`
+	// Decision defaults to AWAITING_FOUNDER_DECISION when the file omits it, so
+	// an entry can never silently claim to have been decided.
+	Decision Disposition `yaml:"decision"`
+	// DecidedOn dates the decision. Required whenever Decision is set, because a
+	// decision no one can date is not auditable.
+	DecidedOn string `yaml:"decided_on"`
+	// ResolutionRequires states the authoritative evidence that would permit the
+	// mapping to change later. It is what stops a terminal "unresolved" from
+	// reading as "unresolvable".
+	ResolutionRequires []string `yaml:"resolution_requires"`
+}
+
+// Disposition reports the recorded disposition, defaulting to awaiting.
+func (p PendingDecision) Disposition() Disposition {
+	if strings.TrimSpace(string(p.Decision)) == "" {
+		return DispositionAwaitingDecision
+	}
+	return p.Decision
+}
+
 // Mapping is one Institution's complete legacy translation.
 type Mapping struct {
-	ID              string           `yaml:"id"`
-	Version         string           `yaml:"version"`
-	InstitutionSlug string           `yaml:"institution_slug"`
-	Subjects        []SubjectMapping `yaml:"subjects"`
-	Majors          []MajorMapping   `yaml:"majors"`
+	ID               string            `yaml:"id"`
+	Version          string            `yaml:"version"`
+	InstitutionSlug  string            `yaml:"institution_slug"`
+	Subjects         []SubjectMapping  `yaml:"subjects"`
+	Majors           []MajorMapping    `yaml:"majors"`
+	PendingDecisions []PendingDecision `yaml:"pending_decisions"`
 }
 
 // NormalizeCode mirrors the SQL academic_normalize_code so the planner can key a
@@ -122,6 +193,59 @@ func (m *Mapping) Validate() error {
 			}
 		}
 	}
+	seenPending := map[string]struct{}{}
+	for _, pending := range m.PendingDecisions {
+		term := NormalizeCode(pending.TermCode)
+		if term == "" {
+			return fmt.Errorf("mapping %s: a pending decision has no usable term_code", m.ID)
+		}
+		// A term cannot be both resolved and pending: that would make the file
+		// itself say two different things about one legacy identity.
+		if _, resolved := seenTerm[term]; resolved {
+			return fmt.Errorf(
+				"mapping %s: legacy term %s is both mapped and pending a Founder decision",
+				m.ID, pending.TermCode)
+		}
+		if _, exists := seenPending[term]; exists {
+			return fmt.Errorf("mapping %s: legacy term %s is pending more than once", m.ID, pending.TermCode)
+		}
+		seenPending[term] = struct{}{}
+		if len(pending.Candidates) == 0 {
+			return fmt.Errorf(
+				"mapping %s: pending term %s lists no candidates; use omission for a genuinely unknown term",
+				m.ID, pending.TermCode)
+		}
+		if strings.TrimSpace(pending.Why) == "" {
+			return fmt.Errorf("mapping %s: pending term %s must state why the choice is unsafe", m.ID, pending.TermCode)
+		}
+		for _, candidate := range pending.Candidates {
+			if NormalizeCode(candidate.SubjectCode) == "" {
+				return fmt.Errorf("mapping %s: pending term %s has a candidate with no usable subject_code",
+					m.ID, pending.TermCode)
+			}
+		}
+		switch pending.Disposition() {
+		case DispositionAwaitingDecision, DispositionKeepUnresolved:
+		default:
+			return fmt.Errorf("mapping %s: pending term %s has an unknown decision %q",
+				m.ID, pending.TermCode, pending.Decision)
+		}
+		// A recorded decision must be datable and must say what would reopen it.
+		// Without both, "the Founder decided to leave this alone" is
+		// indistinguishable from "nobody has looked at it", which is the exact
+		// confusion this field exists to remove.
+		if pending.Disposition() != DispositionAwaitingDecision {
+			if strings.TrimSpace(pending.DecidedOn) == "" {
+				return fmt.Errorf("mapping %s: pending term %s records a decision with no decided_on date",
+					m.ID, pending.TermCode)
+			}
+			if len(pending.ResolutionRequires) == 0 {
+				return fmt.Errorf(
+					"mapping %s: pending term %s records a decision but no resolution_requires evidence",
+					m.ID, pending.TermCode)
+			}
+		}
+	}
 	return nil
 }
 
@@ -137,6 +261,31 @@ func (m *Mapping) SubjectFor(termCode string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// PendingFor reports whether a legacy term is a recorded, unresolved Founder
+// decision. Matching is on the normalized code only, exactly as SubjectFor.
+func (m *Mapping) PendingFor(termCode string) (PendingDecision, bool) {
+	key := NormalizeCode(termCode)
+	if key == "" {
+		return PendingDecision{}, false
+	}
+	for _, pending := range m.PendingDecisions {
+		if NormalizeCode(pending.TermCode) == key {
+			return pending, true
+		}
+	}
+	return PendingDecision{}, false
+}
+
+// CandidateCodes lists a pending decision's candidate Subject codes in file
+// order, which is the order the Founder wrote them.
+func (p PendingDecision) CandidateCodes() []string {
+	codes := make([]string, 0, len(p.Candidates))
+	for _, candidate := range p.Candidates {
+		codes = append(codes, candidate.SubjectCode)
+	}
+	return codes
 }
 
 // ProgramsFor returns the Program slugs a legacy Major translates to. A Major

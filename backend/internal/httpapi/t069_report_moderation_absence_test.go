@@ -4,17 +4,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 )
 
-// T069: S5 mounts no way to act on a report (FR-035, BR-146).
+// T069: S5 owns report creation; AD-14 owns the separate Admin resolution surface (FR-035, BR-146).
 //
-// A report is a signal, not a decision. Resolution, dismissal, delisting, retirement, and
-// suspension are S8's, and until S8 exists the honest state of this system is that a report can be
-// created and then nothing at all can be done to it through the API.
+// A report is a signal, not an automatic decision. Student creation remains under /learn, while
+// Admin resolution is mounted separately behind ADMIN_OPERATIONS and the existing lifecycle command.
 //
 // Proving that needs care, because the router genuinely does mount routes that delist, retire, and
 // suspend — `POST /api/v1/admin/courses/:id/delist`, `/retire`, `/access-suspension`, the taxonomy
@@ -71,7 +71,7 @@ func mountedRoutes(t *testing.T) []string {
 
 // TestOnlyOneMountedRouteMentionsAReportAndItOnlyCreatesOne is the inventory at its narrowest: the
 // whole production route table is searched for anything report-shaped.
-func TestOnlyOneMountedRouteMentionsAReportAndItOnlyCreatesOne(t *testing.T) {
+func TestMountedReportRoutesSeparateStudentCreationFromAdminResolution(t *testing.T) {
 	reportRoutes := make([]string, 0)
 	for _, route := range mountedRoutes(t) {
 		if strings.Contains(strings.ToLower(route), "report") {
@@ -79,15 +79,21 @@ func TestOnlyOneMountedRouteMentionsAReportAndItOnlyCreatesOne(t *testing.T) {
 		}
 	}
 
-	if len(reportRoutes) != 1 || reportRoutes[0] != theOnlyReportRoute {
-		t.Fatalf("routes mentioning a report = %v, want exactly [%s]", reportRoutes, theOnlyReportRoute)
+	want := []string{
+		"GET /api/v1/admin/reports",
+		"GET /api/v1/admin/reports/:id",
+		"POST /api/v1/admin/reports/:id/resolve",
+		theOnlyReportRoute,
+	}
+	sort.Strings(want)
+	if !reflect.DeepEqual(reportRoutes, want) {
+		t.Fatalf("routes mentioning a report = %v, want %v", reportRoutes, want)
 	}
 
-	// It creates; it does not act on an existing one. A route that could moderate would need a
-	// report identifier to moderate, and no route has one.
+	// The only report identifier routes are the Admin detail and terminal resolution routes.
 	for _, route := range mountedRoutes(t) {
-		if reportIdentifierPattern.MatchString(route) && route != theOnlyReportRoute {
-			t.Fatalf("route %s accepts a report identifier; S5 exposes no operation on a report", route)
+		if reportIdentifierPattern.MatchString(route) && route != "GET /api/v1/admin/reports/:id" && route != "POST /api/v1/admin/reports/:id/resolve" {
+			t.Fatalf("route %s accepts an unapproved report identifier", route)
 		}
 	}
 
@@ -99,7 +105,10 @@ func TestOnlyOneMountedRouteMentionsAReportAndItOnlyCreatesOne(t *testing.T) {
 		}
 		for _, verb := range moderationVerbs {
 			if strings.Contains(lowered, verb) {
-				t.Fatalf("route %s is a report %s route; resolution is S8's (FR-035)", route, verb)
+				if route == "POST /api/v1/admin/reports/:id/resolve" {
+					continue
+				}
+				t.Fatalf("route %s is an unapproved report %s route", route, verb)
 			}
 		}
 	}
@@ -215,13 +224,12 @@ func productionSources(t *testing.T) map[string]string {
 	return sources
 }
 
-// TestNoProductionCodeResolvesUpdatesOrDeletesAReport is the source half of FR-035: even if a route
-// were reachable some other way, there is no code behind it. A report is written once and never
-// touched again.
-func TestNoProductionCodeResolvesUpdatesOrDeletesAReport(t *testing.T) {
+// TestReportResolutionCodeIsBoundedToTheAdminRepository is the source half of FR-035: only the
+// report repository may update terminal resolution fields, and no production code deletes a report.
+func TestReportResolutionCodeIsBoundedToTheAdminRepository(t *testing.T) {
 	sources := productionSources(t)
 
-	// Exactly one production file speaks to the table at all.
+	// Report creation and the Admin repository are the only production files that speak to the table.
 	touching := make([]string, 0)
 	for file, source := range sources {
 		if strings.Contains(source, "content_reports") {
@@ -229,26 +237,29 @@ func TestNoProductionCodeResolvesUpdatesOrDeletesAReport(t *testing.T) {
 		}
 	}
 	sort.Strings(touching)
-	if len(touching) != 1 || touching[0] != filepath.Join("internal", "learning", "report.go") {
-		t.Fatalf("production files touching content_reports = %v, want only internal/learning/report.go", touching)
+	wantTouching := []string{filepath.Join("internal", "learning", "report.go"), filepath.Join("internal", "learning", "report_admin.go")}
+	sort.Strings(wantTouching)
+	if !reflect.DeepEqual(touching, wantTouching) {
+		t.Fatalf("production files touching content_reports = %v, want %v", touching, wantTouching)
 	}
 
-	// And it only inserts. `resolved_at` is S8's column and no production statement writes it.
+	// No production statement deletes a report or clears its terminal state.
 	for file, source := range sources {
 		lowered := strings.ToLower(source)
 		for _, forbidden := range []string{
 			"update content_reports",
 			"delete from content_reports",
-			"resolved_at =",
-			"set resolved_at",
 		} {
+			if file == filepath.Join("internal", "learning", "report_admin.go") && forbidden == "update content_reports" {
+				continue
+			}
 			if strings.Contains(lowered, forbidden) {
-				t.Fatalf("%s contains %q; S5 never resolves, reopens, or removes a report", file, forbidden)
+				t.Fatalf("%s contains %q; report history must remain immutable", file, forbidden)
 			}
 		}
 	}
 
-	// The one statement present is the insert.
+	// The Student writer still only inserts.
 	reportSource := sources[filepath.Join("internal", "learning", "report.go")]
 	if !strings.Contains(reportSource, "INSERT INTO content_reports") {
 		t.Fatal("report.go no longer inserts; this audit is stale")
@@ -256,6 +267,10 @@ func TestNoProductionCodeResolvesUpdatesOrDeletesAReport(t *testing.T) {
 	if strings.Count(strings.ToUpper(reportSource), "CONTENT_REPORTS") != 1 {
 		t.Fatalf("report.go references content_reports more than once; only the insert is permitted:\n%s",
 			reportSource)
+	}
+	adminReportSource := sources[filepath.Join("internal", "learning", "report_admin.go")]
+	if !strings.Contains(adminReportSource, "UPDATE content_reports") || !strings.Contains(adminReportSource, "resolved_at") {
+		t.Fatal("report_admin.go no longer owns the terminal resolution update")
 	}
 }
 

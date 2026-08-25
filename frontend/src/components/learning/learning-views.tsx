@@ -1,13 +1,21 @@
 import Link from "next/link";
 import type {
-  CourseHome,
+  CourseHomeSection,
   LearningCourseProgress,
   LearningMaterial,
   LearningProgress,
   LearningStatus,
-  LessonReadModel,
+  LessonNavigation as LessonNavigationModel,
 } from "@/lib/api/learning";
-import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import type {
+  AccessLabels,
+  LessonProgressLabels,
+  MaterialsLabels,
+  NavigationLabels,
+  OutlineLabels,
+  ProgressLabels,
+  UnavailableLabels,
+} from "./learning-label-sets";
 import {
   formatLearningExpiry,
   formatLearningInteger,
@@ -16,7 +24,14 @@ import {
 } from "@/lib/formatters/learning";
 import { MaterialDownload } from "./material-download";
 
-type LearningLabels = Dictionary["learning"];
+/**
+ * Every component here takes the narrowest data it renders (T7).
+ *
+ * These are server components, and in development React publishes each server component's props in
+ * its owner stack, so an oversized prop reaches the page exactly as a client prop would. Taking a
+ * read-model slice rather than the whole model, and a label subset rather than the dictionary, is
+ * what keeps `report_context` and unrendered status copy out of the payload in every build mode.
+ */
 
 export function LessonMaterials({
   resources,
@@ -26,7 +41,7 @@ export function LessonMaterials({
 }: {
   resources: LearningMaterial[];
   labMaterials: LearningMaterial[];
-  labels: LearningLabels;
+  labels: MaterialsLabels;
   locale: "ar" | "en";
 }) {
   if (resources.length === 0 && labMaterials.length === 0) return null;
@@ -51,7 +66,7 @@ function MaterialList({
   title: string;
   items: LearningMaterial[];
   locale: "ar" | "en";
-  labels: LearningLabels;
+  labels: MaterialsLabels;
 }) {
   return (
     <section aria-label={title}>
@@ -89,7 +104,7 @@ function formatMaterialSize(bytes: number, locale: "ar" | "en"): string {
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(size)} ${units[unit]}`;
 }
 
-export function LearningUnavailable({ labels }: { labels: LearningLabels }) {
+export function LearningUnavailable({ labels }: { labels: UnavailableLabels }) {
   return (
     <section role="alert" aria-labelledby="learning-unavailable-title" className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
       <h1 id="learning-unavailable-title" className="font-display text-3xl font-bold text-foreground">
@@ -100,8 +115,13 @@ export function LearningUnavailable({ labels }: { labels: LearningLabels }) {
   );
 }
 
-export function LearningStatusBadge({ status, labels }: { status: LearningStatus; labels: LearningLabels }) {
-  const text = status === "expired" ? labels.expired : labels.active;
+/**
+ * The badge receives its resolved text, not both strings to choose between. Choosing here would
+ * publish the copy the page deliberately does not display — which is precisely how an expired
+ * Lesson came to carry active-state copy (GAP-04).
+ */
+export function LearningStatusBadge({ status, label }: { status: LearningStatus; label: string }) {
+  const text = label;
   return (
     <span
       data-learning-status={status}
@@ -112,7 +132,7 @@ export function LearningStatusBadge({ status, labels }: { status: LearningStatus
   );
 }
 
-export function LearningProgressSummary({ progress, labels, locale }: { progress: LearningCourseProgress; labels: LearningLabels; locale: "ar" | "en" }) {
+export function LearningProgressSummary({ progress, labels, locale }: { progress: LearningCourseProgress; labels: ProgressLabels; locale: "ar" | "en" }) {
   const percent = formatLearningPercent(progress.percent, locale);
   const completed = formatLearningInteger(progress.completed_lessons, locale);
   const total = formatLearningInteger(progress.total_lessons, locale);
@@ -125,7 +145,7 @@ export function LearningProgressSummary({ progress, labels, locale }: { progress
   );
 }
 
-export function AccessUntil({ expiresAt, labels, locale }: { expiresAt: string | null; labels: LearningLabels; locale: "ar" | "en" }) {
+export function AccessUntil({ expiresAt, labels, locale }: { expiresAt: string | null; labels: AccessLabels; locale: "ar" | "en" }) {
   if (expiresAt === null) {
     return <p className="text-sm text-muted-foreground">{labels.accessUntil}: {labels.noExpiry}</p>;
   }
@@ -138,14 +158,31 @@ export function AccessUntil({ expiresAt, labels, locale }: { expiresAt: string |
   );
 }
 
-function lessonProgressText(progress: LearningProgress, labels: LearningLabels, locale: "ar" | "en"): string {
+function lessonProgressText(progress: LearningProgress, labels: LessonProgressLabels, locale: "ar" | "en"): string {
   return `${formatLearningPositionSeconds(progress.position_seconds, locale)} ${labels.positionSeconds} · ${progress.completed ? labels.completed : labels.notCompleted}`;
 }
 
-export function CourseOutline({ course, locale, labels }: { course: CourseHome; locale: "ar" | "en"; labels: LearningLabels }) {
+/**
+ * The outline renders sections, lesson links, and per-lesson materials. It therefore takes exactly
+ * those, never the whole CourseHome: the read model also carries the opaque report context, and a
+ * component that accepts the whole model publishes the whole model (GAP-03).
+ */
+export function CourseOutline({
+  courseId,
+  learningStatus,
+  sections,
+  locale,
+  labels,
+}: {
+  courseId: string;
+  learningStatus: LearningStatus;
+  sections: CourseHomeSection[];
+  locale: "ar" | "en";
+  labels: OutlineLabels;
+}) {
   return (
     <nav aria-label={labels.courseOutline} className="space-y-6">
-      {course.sections.map((section) => (
+      {sections.map((section) => (
         <section key={section.section_id} aria-labelledby={`section-${section.section_id}`}>
           <h2 id={`section-${section.section_id}`} className="font-display text-xl font-bold text-foreground">
             {section.title}
@@ -155,13 +192,13 @@ export function CourseOutline({ course, locale, labels }: { course: CourseHome; 
               <li key={lesson.lesson_id}>
                 <div className="rounded-lg border border-border bg-card px-4 py-3">
                   <Link
-                    href={`/${locale}/learn/courses/${course.course_id}/lessons/${lesson.lesson_id}`}
+                    href={`/${locale}/learn/courses/${courseId}/lessons/${lesson.lesson_id}`}
                     className="flex items-center justify-between gap-4 transition-colors hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     <span className="min-w-0 truncate font-medium text-foreground">{lesson.title}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">{lessonProgressText(lesson.progress, labels, locale)}</span>
                   </Link>
-                  {course.learning_status === "active" ? <LessonMaterials resources={lesson.resources} labMaterials={lesson.lab_materials} locale={locale} labels={labels} /> : null}
+                  {learningStatus === "active" ? <LessonMaterials resources={lesson.resources} labMaterials={lesson.lab_materials} locale={locale} labels={labels} /> : null}
                 </div>
               </li>
             ))}
@@ -172,13 +209,27 @@ export function CourseOutline({ course, locale, labels }: { course: CourseHome; 
   );
 }
 
-export function LessonNavigation({ lesson, locale, labels }: { lesson: LessonReadModel; locale: "ar" | "en"; labels: LearningLabels }) {
-  const basePath = `/${locale}/learn/courses/${lesson.course_id}/lessons`;
+/**
+ * Navigation renders two links. It takes the two pointers, not the whole LessonReadModel, which
+ * also carries the per-target report contexts.
+ */
+export function LessonNavigation({
+  courseId,
+  navigation,
+  locale,
+  labels,
+}: {
+  courseId: string;
+  navigation: LessonNavigationModel;
+  locale: "ar" | "en";
+  labels: NavigationLabels;
+}) {
+  const basePath = `/${locale}/learn/courses/${courseId}/lessons`;
   return (
     <nav aria-label={labels.lessonNavigation} className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
-      {lesson.navigation.previous_lesson_id ? (
+      {navigation.previous_lesson_id ? (
         <Link
-          href={`${basePath}/${lesson.navigation.previous_lesson_id}`}
+          href={`${basePath}/${navigation.previous_lesson_id}`}
           className="rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           {labels.previousLesson}
@@ -186,9 +237,9 @@ export function LessonNavigation({ lesson, locale, labels }: { lesson: LessonRea
       ) : (
         <span className="text-sm font-medium text-foreground/80">{labels.firstLesson}</span>
       )}
-      {lesson.navigation.next_lesson_id ? (
+      {navigation.next_lesson_id ? (
         <Link
-          href={`${basePath}/${lesson.navigation.next_lesson_id}`}
+          href={`${basePath}/${navigation.next_lesson_id}`}
           className="rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           {labels.nextLesson}

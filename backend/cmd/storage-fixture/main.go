@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Owlah2025/gradex/backend/internal/storage"
@@ -22,6 +24,8 @@ var allowedFixtures = map[string]string{
 	"test/segment000.ts": "video/mp2t",
 }
 
+var capacityPrefixPattern = regexp.MustCompile(`^capacity/[A-Za-z0-9][A-Za-z0-9._-]{2,63}/$`)
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "storage-fixture: provider fixture write failed")
@@ -31,10 +35,15 @@ func main() {
 
 func run() error {
 	key := flag.String("key", "", "fixed provider smoke object key")
+	prefix := flag.String("prefix", "", "exact disposable capacity prefix; empty keeps the fixed key")
 	flag.Parse()
 	contentType, allowed := allowedFixtures[*key]
 	if !allowed || flag.NArg() != 0 {
 		return errors.New("unsupported fixture key")
+	}
+	objectKey, err := prefixedFixtureKey(*key, *prefix)
+	if err != nil {
+		return err
 	}
 
 	endpoint, err := requiredEnvironment("S3_ENDPOINT")
@@ -74,7 +83,20 @@ func run() error {
 	if err := client.CheckBucket(ctx); err != nil {
 		return err
 	}
-	return client.PutObject(ctx, *key, body, contentType)
+	return client.PutObject(ctx, objectKey, body, contentType)
+}
+
+func prefixedFixtureKey(key, prefix string) (string, error) {
+	if prefix == "" {
+		return key, nil
+	}
+	if !capacityPrefixPattern.MatchString(prefix) {
+		return "", errors.New("fixture prefix must be an exact capacity/<run-id>/ prefix")
+	}
+	if strings.Contains(key, "..") {
+		return "", errors.New("fixture key contains an unsafe path")
+	}
+	return prefix + key, nil
 }
 
 func requiredEnvironment(name string) (string, error) {

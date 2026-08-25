@@ -13,6 +13,13 @@ type CatalogFoundation struct {
 	assetValidator catalog.AssetVersionValidator
 }
 
+func (f *CatalogFoundation) Repository() *catalog.Repository {
+	if f == nil {
+		return nil
+	}
+	return f.repository
+}
+
 type CatalogFoundationOptions struct {
 	Repository     *catalog.Repository
 	Ownership      CourseOwnershipChecker

@@ -70,15 +70,29 @@ func NewRouter(
 	if routerConfig.staff != nil && routerConfig.sessions == nil {
 		return nil, fmt.Errorf("staff foundation requires a session foundation")
 	}
+	if routerConfig.moderation != nil && routerConfig.sessions == nil {
+		return nil, fmt.Errorf("moderation foundation requires a session foundation")
+	}
+	if routerConfig.recovery != nil {
+		if routerConfig.admission == nil {
+			return nil, fmt.Errorf("recovery foundation requires an anonymous admission boundary")
+		}
+		if routerConfig.recovery.admission != routerConfig.admission {
+			return nil, fmt.Errorf("recovery foundation must share the configured anonymous admission boundary")
+		}
+	}
 
 	v1 := r.Group("/api/v1")
 	if routerConfig.sessions != nil {
 		mountSessionRoutes(v1, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.admission != nil && routerConfig.mountAdmissionRoutes {
-		mountAdmissionRoutesWithBootstrap(
+		mountStudentAdmissionRoutesWithBootstrap(
 			v1, routerConfig.admission, routerConfig.sessions == nil,
 		)
+	}
+	if routerConfig.recovery != nil {
+		mountRecoveryRoutes(v1, routerConfig.recovery, routerConfig.sessions == nil && !routerConfig.mountAdmissionRoutes)
 	}
 	if routerConfig.staff != nil {
 		mountStaffRoutes(v1, routerConfig.staff, routerConfig.sessions, authenticator, principals, logger)
@@ -87,6 +101,9 @@ func NewRouter(
 		if err := mountCatalogRoutes(v1, routerConfig.catalog, routerConfig.media, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting catalog routes: %w", err)
 		}
+	}
+	if routerConfig.moderation != nil {
+		mountAdminReportRoutes(v1, routerConfig.moderation, routerConfig.sessions, authenticator, principals, logger)
 	}
 	if routerConfig.publicCatalog != nil {
 		if err := mountPublicCatalogRoutes(v1, routerConfig.publicCatalog); err != nil {
@@ -116,18 +133,20 @@ func NewRouter(
 	return r, nil
 }
 
-func mountAdmissionRoutes(v1 *gin.RouterGroup, foundation *AdmissionFoundation) {
-	mountAdmissionRoutesWithBootstrap(v1, foundation, true)
+func mountStudentAdmissionRoutes(
+	v1 *gin.RouterGroup,
+	foundation *AdmissionFoundation,
+) {
+	mountStudentAdmissionRoutesWithBootstrap(v1, foundation, true)
 }
 
-func mountAdmissionRoutesWithBootstrap(
+func mountStudentAdmissionRoutesWithBootstrap(
 	v1 *gin.RouterGroup,
 	foundation *AdmissionFoundation,
 	includeBootstrap bool,
 ) {
 	handlers := &identityHandlers{
-		service: foundation.service, recovery: foundation.recovery,
-		policies: foundation.policies,
+		service: foundation.service, policies: foundation.policies,
 	}
 	if includeBootstrap {
 		v1.GET(
@@ -163,18 +182,34 @@ func mountAdmissionRoutesWithBootstrap(
 		foundation.requireRateDecision("email-verifications", verificationTokenIdentifier),
 		handlers.consumeBoundVerification,
 	)
+}
+
+func mountRecoveryRoutes(
+	v1 *gin.RouterGroup,
+	foundation *RecoveryFoundation,
+	includeBootstrap bool,
+) {
+	handlers := &identityHandlers{recovery: foundation.recovery}
+	boundary := foundation.admission
+	if includeBootstrap {
+		v1.GET(
+			"/session/bootstrap",
+			boundary.requireRateDecision("session-bootstrap", nil),
+			boundary.security.bootstrapHandler(),
+		)
+	}
 	v1.POST(
 		"/password-reset-requests",
 		strictJSONMiddleware(func() any { return &passwordResetRequestBody{} }, passwordResetRequestBodyLimit),
-		foundation.security.requireAdmission(),
-		foundation.requireRateDecision("password-reset-requests", passwordResetIdentifier),
+		boundary.security.requireAdmission(),
+		boundary.requireRateDecision("password-reset-requests", passwordResetIdentifier),
 		handlers.requestBoundPasswordReset,
 	)
 	v1.POST(
 		"/password-resets",
 		strictJSONMiddleware(func() any { return &passwordResetCompletionBody{} }, passwordResetCompletionBodyLimit),
-		foundation.security.requireAdmission(),
-		foundation.requireRateDecision("password-resets", passwordResetTokenIdentifier),
+		boundary.security.requireAdmission(),
+		boundary.requireRateDecision("password-resets", passwordResetTokenIdentifier),
 		handlers.completeBoundPasswordReset,
 	)
 }
@@ -182,6 +217,7 @@ func mountAdmissionRoutesWithBootstrap(
 type routerOptions struct {
 	admission            *AdmissionFoundation
 	mountAdmissionRoutes bool
+	recovery             *RecoveryFoundation
 	sessions             *SessionFoundation
 	staff                *StaffFoundation
 	catalog              *CatalogFoundation
@@ -190,6 +226,7 @@ type routerOptions struct {
 	learning             *LearningFoundation
 	access               *AccessFoundation
 	academic             *AcademicFoundation
+	moderation           *ModerationFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
@@ -209,9 +246,9 @@ func WithStaffFoundation(foundation *StaffFoundation) RouterOption {
 	}
 }
 
-// WithAdmissionFoundation mounts the anonymous bootstrap, policy read, and
-// Student admission commands only after their complete fail-closed dependency
-// set and ordered middleware chain have been constructed.
+// WithAdmissionFoundation mounts only the anonymous bootstrap, policy read,
+// and Student-registration commands after their complete fail-closed
+// dependency set and ordered middleware chain have been constructed.
 func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
 	return func(options *routerOptions) error {
 		if foundation == nil {
@@ -222,6 +259,21 @@ func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
 		}
 		options.admission = foundation
 		options.mountAdmissionRoutes = true
+		return nil
+	}
+}
+
+// WithRecoveryFoundation mounts password recovery independently from Student
+// registration. NewRouter verifies it shares the one anonymous boundary.
+func WithRecoveryFoundation(foundation *RecoveryFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("recovery foundation is required")
+		}
+		if options.recovery != nil {
+			return fmt.Errorf("password recovery is already configured")
+		}
+		options.recovery = foundation
 		return nil
 	}
 }

@@ -6,9 +6,10 @@
 > Supersedes ad-hoc completion claims elsewhere for the purpose of "is the MVP functionally done".
 > It does not supersede [DECISIONS.md](../DECISIONS.md) (scope authority) or
 > [launch/STATUS.md](../launch/STATUS.md) (delivery/authority state).
-> Last measured: 2026-08-22 (MVP-F20 T4 Instructor Academic Context regression, §23).
-> **Score is unchanged at 37 / 53 = 69.8%.** MVP-F17 through MVP-F20 are implementation tranches:
-> they add no canonical feature row, promote none, and do not move the denominator.
+> Last measured: 2026-08-24 (AD-14 Minimal Admin Reported-Content Resolution, §32).
+> **Score is 47 / 53 = 88.7%** after AD-14 promoted the beta-scoped Admin resolution surface. MVP-F17 through MVP-F21 are
+> implementation tranches: they add no canonical feature row, promote none, and do not move the
+> denominator. MVP-F22 is the first of the D-091 series to promote a canonical row.
 
 ## 0. Why this exists
 
@@ -28,7 +29,7 @@ what was actually *demonstrated to run*, separately from what was reviewed.
 | `NOT_IMPLEMENTED` | Absent. |
 | `BLOCKED` | Cannot proceed; blocker recorded. |
 | `FOUNDER_DECISION_REQUIRED` | Genuinely unresolved product/architecture question. |
-| `DEFERRED` / `OUT_OF_MVP` | Explicit decision removed it; decision cited. |
+| `DEFERRED` / `OUT_OF_MVP` | Explicit decision removed it or time-bounds it outside the current release; for a beta-only deferral, the canonical row and denominator remain and the decision is cited. |
 
 **Rule: `E2E_PROVEN` is never assigned from source-code inspection.**
 
@@ -201,7 +202,7 @@ marked `UNAUDITED` in the Evidence column rather than guessed.
 |---|---|---|---|---|---|---|---|
 | ST-01 | Register → verify → sign in | ✔ | ✔ | ✔ | Driven inside `s6` 30-step journey; observed green in isolation | `E2E_PROVEN` | — |
 | ST-02 | Public catalogue list + search | ✔ | ✔ | public | **`s3-public-catalogue` 28/28 green after MVP-F05.** F03 proved a newly published Course is found by title from an anonymous context and that `DRAFT` and pending revisions are excluded server-side; F05 proved bilingual locale navigation, query preservation, and keyboard operation | `E2E_PROVEN` | — |
-| ST-03 | Catalogue academic **filters** (University/Program/Level/Subject) | ✖ | ✖ | — | `SCREENS.md` ST01 requires; backend accepts only `q` + paging (`catalogpublic/repository.go:91-121`). **Re-pointed to MVP-F22 (T6) by [D-091](../DECISIONS.md#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)**; the legacy Major/Subject/Study Year filter set is superseded. Blocked until MVP-F17→F21 land. | `BACKEND_MISSING` | MEDIUM |
+| ST-03 | Catalogue academic **filters** (University/Program/Level/Subject) | ✔ | ✔ | public | **MVP-F22 (T6).** The canonical Academic Catalog now drives public discovery: University, Program, academic level, and Subject filters compose over `PublishedOnly`, explicit `course_program_targets` override curriculum-inferred audience, a Subject in several curricula never duplicates a Course, and retired academic entities are never offered. Proven by 6 real-browser journeys creating and publishing a Course through the real Instructor and Admin lifecycle over the real Kuwait University manifest, in English and Arabic, plus real-PostgreSQL backend integration and 371 frontend unit tests ([evidence](../launch/evidence/2026-08-23-t6-academic-discovery.md)). | `E2E_PROVEN` | — |
 | ST-04 | Course detail page | ✔ | ✔ | public | **MVP-F14.** A separately uploaded, revision-scoped preview follows the Course publication pointer; real Instructor upload → READY → Admin approval → anonymous Course Details playback is retained, with live/candidate isolation, removal, no-entitlement/progress proof, bilingual UI, and protected-Lesson denial ([evidence](../launch/evidence/2026-08-21-mvp-f14-public-preview.md)). | `E2E_PROVEN` | — |
 | ST-05 | Receive + accept Course Access Invitation | ✔ | ✔ | ✔ BR-166 | `s6` steps 1–14 green in isolation | `E2E_PROVEN` | — |
 | ST-06 | Pending-approval state grants nothing | ✔ | ✔ | ✔ | `s6` asserts 0 entitlements, 0 enrollments pre-approval | `E2E_PROVEN` | — |
@@ -211,12 +212,12 @@ marked `UNAUDITED` in the Evidence column rather than guessed.
 | ST-10 | Lesson player, HLS, controls, keyboard, WCAG AA | ✔ | ✔ | ✔ | `s5-lesson-player` **21/21 green after MVP-F01** | `E2E_PROVEN` | — |
 | ST-11 | Progress persistence + resume position | ✔ | ✔ | ✔ | `s5-lesson-player` progress-persistence test green; `s6` progress POST 200/204 | `E2E_PROVEN` | — |
 | ST-12 | Continue-learning / resume pointer on dashboard | ✔ | ✔ | ✔ | **MVP-F15.** Derived server-side from existing `progress.last_watched_at` — one bounded query, live-revision-only, filtered through the entitlement evaluator. `s15-dashboard-resume` drives a real player Progress write, then the Dashboard pointer and its click-through to the correct Lesson, in English and Arabic; 12 selection cases proved at `internal/httpapi` integration level (§17.1) | `E2E_PROVEN` | — |
-| ST-13 | Expired entitlement authorises nothing | ✔ | ✔ | ✔ | `s5-expired-entitlement` **12/13 green after MVP-F01**; 1 fail RC-4 | `PARTIAL` | MEDIUM |
+| ST-13 | Expired entitlement authorises nothing | ✔ | ✔ | ✔ | **MVP-F23 (T7).** `s5-expired-entitlement` **13/13 green**; RC-4 closed — the expired render no longer carries active-state copy because no component is handed the label catalogue to choose from — [evidence](../launch/evidence/2026-08-23-t7-student-learning-payload-contract.md) | `E2E_PROVEN` | — |
 | ST-14 | Access ending mid-session denies next issuance + progress write | ✔ | ✔ | ✔ | `s5-access-ends` **2/2 green after MVP-F01** | `E2E_PROVEN` | — |
 | ST-15 | Protected Resource/Lab download | ✔ | ✔ | ✔ | Separate real-storage browser proof covers D-088 PDF Resource authoring, Admin publication, protected Resource and existing Lab Material presentation, authorized private byte retrieval, and A→B→remove isolation; canonical row evidence is retained ([record](../launch/evidence/2026-08-21-st15-protected-resource-lab-download.md)). | `E2E_PROVEN` | — |
-| ST-16 | Content reporting | ✔ | ✔ | ✔ | `s5-viewport-evidence` **fails (RC-3)** | `INTEGRATION_BROKEN` | HIGH |
-| ST-17 | RTL/LTR viewport evidence across 4 breakpoints | ✔ | — | — | `s5-viewport-evidence` 0/4 (RC-3) | `PARTIAL` | HIGH |
-| ST-18 | Notifications / Profile / Office Hours | ✖ | ✖ | — | No route, no endpoint | `FOUNDER_DECISION_REQUIRED` (scope) | see GAP-06 |
+| ST-16 | Content reporting | ✔ | ✔ | ✔ | **MVP-F23 (T7).** `s5-viewport-evidence` **green at all four breakpoints**, driving the Report Content modal in both scripts; RC-3 closed — the opaque D-065 context no longer reaches the markup — [evidence](../launch/evidence/2026-08-23-t7-student-learning-payload-contract.md) | `E2E_PROVEN` | — |
+| ST-17 | RTL/LTR viewport evidence across 4 breakpoints | ✔ | — | — | **MVP-F23 (T7).** `s5-viewport-evidence` **4/4 green** (phone, tablet, laptop, desktop) in EN and AR — [evidence](../launch/evidence/2026-08-23-t7-student-learning-payload-contract.md) | `E2E_PROVEN` | — |
+| ST-18 | Notifications / Profile / Office Hours | ✖ | ✖ | — | D-094 defers the dedicated Notification Center, general Profile expansion, and Office Hours for limited beta; existing transactional/security delivery, academic profile, and account/security flows remain required | `DEFERRED` | D-094 — beta only |
 | ST-19 | **Automated manual Course Purchase Request** — Student intent → WhatsApp → Admin confirmation → purchase-backed Invitation → automatic access | ✔ | ✔ | admitted public write / Admin-only commands / intended Student only | **MVP-F16 remediation.** `manual-purchase-flow` 3/3 drives a real `PUBLISHED` Course through persisted, server-priced intent and intercepted WhatsApp handoff; Admin confirmation/outbox invitation; new-account registration/verification/login return; one `PURCHASE_REQUEST` Entitlement/Enrollment; Course Home and a positive protected-`video` assertion. It also proves existing-Student access and Admin cancellation/recovery. The full suite is 114/6/3 with only the six retained non-ST-19 failures ([evidence](../launch/evidence/2026-08-21-st19-manual-purchase-flow.md)). This remains one combined Student/Admin capability, not a second denominator row. | `E2E_PROVEN` | — |
 
 ### 4.2 Instructor
@@ -233,7 +234,7 @@ marked `UNAUDITED` in the Evidence column rather than guessed.
 | IN-08 | Revise + resubmit after CHANGES_REQUESTED | **MVP-F02.** Instructor edits the title and resubmits **through the studio UI**; notice clears; Admin sees `PENDING_REVIEW` again | `E2E_PROVEN` | — |
 | IN-09 | Video upload → processing → READY | `playwright.media-authoring.config.ts` 1/1 green 2026-08-21: real protected Lesson MP4 and separate PREVIEW MP4 each traverse private upload → scanner/worker → READY; both remain distinct in the same retained journey. | `E2E_PROVEN` | — |
 | IN-10 | Revise an already-**published** Course from the UI | **MVP-F11.** Start-revision action driven by clicking the studio (never by the spec calling the endpoint); candidate cloned; published version keeps serving through `DRAFT` and `PENDING_REVIEW`; re-click does not fork; Admin receives it by title; owner/other-Instructor/Student/anonymous boundaries asserted | `E2E_PROVEN` | — |
-| IN-11 | Analytics / roster / office hours | No route found | `FOUNDER_DECISION_REQUIRED` (scope) | see GAP-06 |
+| IN-11 | Analytics / roster / office hours | **IN-11 evidence.** The minimal Course-scoped Instructor Roster is implemented and E2E-proven; Instructor Analytics and Office Hours remain beta-deferred | `E2E_PROVEN` | D-094 — analytics/office hours deferred |
 
 ### 4.3 Admin
 
@@ -247,12 +248,12 @@ marked `UNAUDITED` in the Evidence column rather than guessed.
 | AD-06 | Create invitation by Student email | `s6` green | `E2E_PROVEN` | — |
 | AD-07 | Approve → exactly one ACTIVE Entitlement + Enrollment, idempotent | `s6` asserts count 1, `grant_source=MANUAL_INVITATION`, and identical ids on re-approve | `E2E_PROVEN` | — |
 | AD-08 | Reject with reason / cancel / resend | `s6` second test "Rejection & Expired Link UI Coverage" green | `E2E_PROVEN` | — |
-| AD-09 | Entitlement extend / shorten / revoke | UI + API exist (`admin/course-access/page.tsx:290-345`); no E2E drives them | `IMPLEMENTED_NOT_PROVEN` | MEDIUM |
+| AD-09 | Entitlement extend / shorten / revoke | Browser journey proves all four BR-026 operations end to end (`e2e/t8a-entitlement-lifecycle.spec.ts`, MVP-F24A §26) | `E2E_PROVEN` | MEDIUM |
 | AD-10 | **Publish** a reviewed Course | **MVP-F03.** Admin approves from the inspector; approval and publication are one transaction; the Course leaves the review queue **and reaches the public catalogue**, verified from an anonymous context | `E2E_PROVEN` | — |
 | AD-11 | **Request changes** with reason | **MVP-F02.** Driven through the Admin inspector with a verbatim reason; the 200 and the Instructor-visible result are both asserted | `E2E_PROVEN` | — |
-| AD-12 | Delist / relist / retire / archive / suspend / restore | `lifecycle-controls.tsx` present; no E2E | `IMPLEMENTED_NOT_PROVEN` | MEDIUM |
-| AD-13 | Staff invitation lifecycle + suspension | `t108_staff_lifecycle_integration_test.go` green in `go test`; `s13` green | `PARTIAL` (backend proven, browser path partly) | MEDIUM |
-| AD-14 | Reported-content resolution surface | No route, no component | `NOT_IMPLEMENTED` | see GAP-06 |
+| AD-12 | Delist / relist / retire / archive / suspend / restore | Browser journey proves all six commands with their public-catalogue and entitled-Student effects (`e2e/t8c-course-lifecycle.spec.ts`, MVP-F24C §28); `lifecycle_directory_integration_test.go` + the retained lifecycle/audit integration tests green | `E2E_PROVEN` | MEDIUM |
+| AD-13 | Staff invitation lifecycle + suspension | Browser journey proves invite → real Mailpit email → completion → login → capability → Admin state, replay refusal, and suspend/reinstate (`e2e/t8b-staff-invitation-lifecycle.spec.ts`, MVP-F24B §27); `t108_staff_lifecycle_integration_test.go` green | `E2E_PROVEN` | MEDIUM |
+| AD-14 | Reported-content resolution surface | [AD-14 evidence](../launch/evidence/2026-08-24-ad-14-admin-reported-content-resolution.md): real PostgreSQL/HTTP proof covers bounded Admin queue/detail, dismissal, audit, concurrency, unavailable targets, authorization, and canonical Course delist delegation; Admin E2E submits a Student report and dismisses it | `E2E_PROVEN` | D-094 — minimal beta contract |
 
 ### 4.4 Shared / system
 
@@ -264,9 +265,9 @@ marked `UNAUDITED` in the Evidence column rather than guessed.
 | SY-04 | Migrations + schema | `go test ./internal/db` green; schema version 22 adds revision-scoped public preview provenance while preserving migration rollback guards | `E2E_PROVEN` | — |
 | SY-05 | Health / readiness | `/healthz` `/readyz` 200 on staging (2026-08-17 record) | `E2E_PROVEN` | — |
 | SY-06 | Mandatory password change in the browser | `s13` 2/2 green in isolation | `E2E_PROVEN` | — |
-| SY-07 | Whole-suite E2E runnability | 4 specs pass alone, fail together | `INTEGRATION_BROKEN` | HIGH |
+| SY-07 | Whole-suite E2E runnability | **MVP-F25.** One canonical command (`npm run test:e2e:canonical`) runs both runtime-mode lanes and aggregates: **168 passed / 0 failed / 0 skipped**, twice, from a verified clean start (§29) | `E2E_PROVEN` | — |
 | SY-08 | Backup + monitoring timers | 2026-08-17 record: `gradex-backup.timer` / `gradex-monitor.timer` not installed | `BLOCKED` | HIGH |
-| SY-09 | Load/capacity (LG-019) | Canonical 250 RPS FAIL; no rate met the contract twice | `BLOCKED` | (launch gate) |
+| SY-09 | Load/capacity (LG-019) | Founder-approved limited-paid-beta envelope and harness preparation recorded; representative KVM2 execution + two clean repetitions pending; original LG-019 target unchanged | `BLOCKED` | (launch gate) |
 
 ### 4.5 Completion score — 53 canonical MVP features
 
@@ -304,15 +305,36 @@ Ordered by severity. Only items that stop Gradex being a complete MVP.
 |---|---|---|---|---|---|---|
 | ~~GAP-01~~ | ~~Instructor cannot see why a Course was rejected~~ | Instructor | **CLOSED by MVP-F02 on 2026-08-20** | — | — | — |
 | ~~GAP-02~~ | ~~Published Course reaching the public catalogue is unproven~~ | All | **CLOSED by MVP-F03 on 2026-08-20.** The whole chain is now driven end to end and the publication was never seeded | — | — | — |
-| GAP-03 | `report_context` is serialised into the DOM | Student | D-065 forbids the context entering the DOM; it is present in the Course Home flight payload | RSC serialises all client-component props; the context is passed as a prop to `ReportTargetActions` | FE architecture | **BLOCKER** (contract) |
-| GAP-04 | Active-state copy present on expired pages | Student | `s5-expired-entitlement.spec.ts:730` fails on `"Active access"` in the flight payload | Whole `dictionary.learning` reaches the client | FE | HIGH |
+| ~~GAP-03~~ | ~~`report_context` is serialised into the DOM~~ | Student | **CLOSED by MVP-F23 on 2026-08-23.** The recorded root cause was wrong: `ReportTargetActions` never received the field. The context reached the markup through React's **development server-component owner stack**, which serialises every *server* component's props — `CourseOutline` was handed the whole `CourseHome`. Components now take read-model slices, so the context is absent in every build mode | — | — | — |
+| ~~GAP-04~~ | ~~Active-state copy present on expired pages~~ | Student | **CLOSED by MVP-F23 on 2026-08-23.** Same channel as GAP-03: the whole `dictionary.learning` was passed to server components and published in their owner stacks. Copy is now resolved on the server and passed as narrow label sets, so an expired render never holds the active string | — | — | — |
 | ~~GAP-05~~ | ~~E2E suite unusable as a suite~~ | — | **CLOSED by MVP-F06 on 2026-08-20.** Three consecutive full-suite runs now produce identical outcomes and identical failure identities. Original finding: specs passed alone but failed in the full run because file-level parallelism ran 6 workers against one shared seeded database while several specs mutated shared authority rows by fixed id | — | — | — |
-| GAP-06 | Scope of 7 screens unresolved | All | Notifications, Profile, Office Hours, Analytics, Reported Content, Entitlement Detail, Public Preview Manager are in `SCREENS.md` but have no implementation and no post-D-045 confirmation | `SCREENS.md` predates later decisions | scope | **FOUNDER_DECISION_REQUIRED** |
+| GAP-06 | Limited paid beta scope of seven screens | All | **Resolved for limited beta by [D-094](../DECISIONS.md#d-094--limited-paid-beta-scope-narrows-gap-06-without-cancelling-post-beta-mvp-features) on 2026-08-24:** dedicated Notification Center, expanded Profile, Office Hours, and Instructor Analytics are deferred; minimal Instructor Roster and Admin Reported-Content Resolution are required | Founder beta-scope authority now controls disposition; historical D-013/PRD wording remains unchanged | governance | **CLOSED FOR LIMITED PAID BETA** |
 | ~~GAP-07~~ | ~~Catalogue language switch does not change the route~~ | **CLOSED by MVP-F05 on 2026-08-20.** Original finding: Student | On `/ar/catalog` the toggle updates `<html lang>` but the URL stays `/ar/catalog`; accessible name mismatched | Uncommitted partial shell migration; canonical `LanguageToggle` lacks the `withLocale` rewrite the other two toggles have | FE | HIGH |
 | GAP-08 | No production Admin/Instructor identity, no email provider | All | The founder could not complete any role journey on Founder Beta | No approved Resend credential; bootstrap needs a human password | ops | **BLOCKER** (launch) |
-| GAP-09 | Catalogue has no taxonomy filters | Student | `SCREENS.md` ST01 requires Major/Subject/Study Year filters; API accepts only `q` | Never built | BE + FE | MEDIUM |
+| ~~GAP-09~~ | ~~Catalogue has no taxonomy filters~~ | Student | **CLOSED by MVP-F22 on 2026-08-23**, which promoted ST-03. Under D-091 the filter set is University / Program / academic level / Subject rather than the legacy Major/Subject/Study Year | — | — | — |
 | ~~GAP-10~~ | ~~No Continue-learning resume pointer~~ | Student | **CLOSED 2026-08-21 by MVP-F15 (§17.1).** `dashboardResumeResponse` ships on `GET /learn/dashboard`; proved by `s15-dashboard-resume` (EN + AR) and 12 backend selection cases | — | — |
 | ~~GAP-11~~ | ~~Instructor cannot start a revision of a **published** Course from the UI~~ | Instructor | **CLOSED by MVP-F11 on 2026-08-20.** Original finding: Once a Course is `PUBLISHED` the studio shows the Course lifecycle and no editable revision. `ListOwnedCourses` only returns `editable_revision` when one already exists (`catalog/authoring.go:594`); it never mints one. The endpoint that does — `PUT /api/v1/courses/:id/candidate` (`catalog_routes.go:95`) — is referenced nowhere in `course-builder.tsx` or `lib/api/authoring.ts`. A published Course is a dead end for its own Instructor | `BACKEND_WITHOUT_UI` | FE | HIGH |
+
+## 5.1 Founder limited paid beta scope — D-094
+
+D-094 resolves GAP-06 for limited paid beta planning without changing the 53-row denominator or
+historical product authority.
+
+- ST-18 is DEFERRED for beta: dedicated Notification Center, general Profile expansion, and Office
+  Hours are deferred; existing transactional/security notifications, outbox/worker behavior,
+  academic profile, and account/security flows remain required.
+- IN-11 is `E2E_PROVEN` for its Founder-scoped beta contract: the minimal Course-scoped Instructor
+  Roster is proven; Instructor Analytics and Office Hours remain deferred.
+- AD-14 is `E2E_PROVEN` for the minimal Admin Reported-Content Resolution contract; advanced
+  moderation tooling remains outside the limited paid beta scope.
+- Entitlement Detail and Public Preview Manager are not among the remaining 8 rows and remain
+  unchanged.
+- The required IN-11 roster and AD-14 resolution slices are E2E_PROVEN. The score is 47 / 53 = 88.7%.
+- Required product tranches are ordered: minimal Instructor Course Roster, then minimal Admin
+  Reported-Content Resolution.
+
+See [D-094](../DECISIONS.md#d-094--limited-paid-beta-scope-narrows-gap-06-without-cancelling-post-beta-mvp-features)
+and [the governance evidence](../launch/evidence/2026-08-24-gap-06-limited-paid-beta-scope.md).
 
 ## 6. Non-blocking debt (do **not** mix with §5)
 
@@ -336,7 +358,7 @@ Refund Policy route exists; `/onboard` has no `SCREENS.md` contract.
 | **MVP-F04** | Decide + fix report-context DOM exposure | GAP-03, ST-16, ST-17 | blocked on decision |
 | **MVP-F05** | Unify the language toggle; restore the language-addressable route contract | GAP-07, ST-02 | **DONE 2026-08-20** — see §13 |
 | **MVP-F06** | Make the E2E suite deterministic | GAP-05 | **DONE 2026-08-20** — see §14 |
-| **MVP-F07** | Resolve the scope of the 7 unconfirmed screens | GAP-06 | blocked on decision |
+| **MVP-F07** | Resolve the scope of the 7 unconfirmed screens | GAP-06 | **DONE FOR LIMITED PAID BETA 2026-08-24** — D-094 freezes beta scope; minimal Instructor Roster and Admin Reported-Content Resolution remain separate implementation tranches |
 | **MVP-F08** | Catalogue taxonomy filters (API + UI) | GAP-09 | **superseded** — replaced by MVP-F22 under D-091 |
 | **MVP-F09** | Dashboard resume pointer | GAP-10 | **superseded** — delivered by MVP-F15 (§17.1) |
 | **MVP-F10** | Trim client-serialised localisation | GAP-04 | queued |
@@ -349,8 +371,13 @@ Refund Policy route exists; `/onboard` has no `SCREENS.md` contract.
 | **MVP-F18** | **T2** — Launch Catalog Data (Kuwait University manifest + importer) | D-091 §11 | **DONE 2026-08-21**; launch data realigned to Founder scope 2026-08-22 (T2.1, T2.2) — see §21 |
 | **MVP-F19** | **T3** — Student Academic Profile (onboarding + profile edit) | D-091 §10, D-092 | **DONE 2026-08-22** — implementation tranche, see §22 |
 | **MVP-F20** | **T4** — Instructor Academic Context (`courses.subject_id`, Subject picker, Subject requests) | D-091 §7–9, D-093 | **PROVEN 2026-08-22** — T4-A/A.1/B/C/D/E proven together; [retained evidence](../launch/evidence/2026-08-22-mvp-f20-t4-completion.md), see §23 |
-| **MVP-F21** | **T5** — Existing Taxonomy Migration (dual path, then legacy removal) | D-091 §13 | **PARTIAL 2026-08-22** — migration mechanism proven; cutover pending a Founder mapping, legacy removal deferred — [retained evidence](../launch/evidence/2026-08-22-mvp-f21-t5-legacy-taxonomy-migration.md) |
-| **MVP-F22** | **T6** — ST-03 Catalogue Discovery (academic filters + personalisation) | GAP-09, ST-03 | queued — not started |
+| **MVP-F21** | **T5** — Existing Taxonomy Migration (dual path, then legacy removal) | D-091 §13 | **PARTIAL 2026-08-23** — mechanism `PROVEN` against every real corpus; **no Founder decision remains** — the one unmappable Course is intentionally unresolved by Founder decision of 2026-08-23 (D-091 §13 amendment). `PARTIAL` because a legacy Course stays unmigrated and legacy removal is still gated, not because work is outstanding — [2026-08-23 completion](../launch/evidence/2026-08-23-t5-legacy-academic-migration.md), [2026-08-22 design](../launch/evidence/2026-08-22-mvp-f21-t5-legacy-taxonomy-migration.md) |
+| **MVP-F22** | **T6** — ST-03 Catalogue Discovery (academic filters + personalisation) | GAP-09, ST-03 | **DONE 2026-08-23** — promotes ST-03, see §24 — [evidence](../launch/evidence/2026-08-23-t6-academic-discovery.md) |
+| **MVP-F23** | **T7** — Student Learning Payload Contract Remediation | D-065, GAP-03, GAP-04 | **DONE 2026-08-23** — promotes ST-13, ST-16, ST-17; closes GAP-03 and GAP-04, see §25 — [evidence](../launch/evidence/2026-08-23-t7-student-learning-payload-contract.md) |
+| **MVP-F25** | **T9** — SY-07 Whole-suite E2E runnability (two runtime-mode lanes behind one canonical command) | SY-07 | **DONE 2026-08-24** — promotes SY-07; new canonical baseline `168 / 0 / 0`, see §29 — [evidence](../launch/evidence/2026-08-24-t9-whole-suite-e2e-runnability.md) |
+
+> MVP-F24A (T8A / AD-09), MVP-F24B (T8B / AD-13) and MVP-F24C (T8C / AD-12) were recorded directly in
+> §26, §27 and §28 without a queue row; their promotions are reflected in §4.3 and in the score.
 
 > **MVP-F17–MVP-F22 are implementation tranches, not canonical denominator features.**
 > Authorized by [D-091](../DECISIONS.md#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy)
@@ -874,6 +901,11 @@ evidence, so no row was promoted and the denominator stays 52.
 `backend/docker-compose.yml` stack. The six failures above are the registered set. Every subsequent
 tranche compares against this, **by failure identity**, not by count. A run that differs in identity
 is a regression; a run that differs in count without explanation means the harness was disturbed.
+
+> **Superseded by §29 (MVP-F25 / T9).** The canonical baseline is now **`168 passed / 0 failed /
+> 0 skipped`** from `cd frontend && npm run test:e2e:canonical`, which runs both runtime-mode lanes.
+> `npx playwright test` alone is now the **development lane only** (164 tests) and is no longer the
+> whole-suite verdict. No accepted failure identity remains.
 
 ## 15. MVP-F12 — completed 2026-08-20
 
@@ -1703,3 +1735,578 @@ gates were green. See the [completion record](../launch/evidence/2026-08-22-mvp-
 **Matrix impact — none.** MVP-F20 is an implementation tranche. It creates no canonical denominator
 row, promotes none, and the denominator stays **53**. `E2E_PROVEN` remains **37 / 53 = 69.8%**.
 ST-03 stays `BACKEND_MISSING`, pointed at MVP-F22.
+
+
+## 24. MVP-F21 (T5) + MVP-F22 (T6) — Legacy migration completion and Academic Discovery — 2026-08-23
+
+### MVP-F21 (T5) — `PARTIAL — FOUNDER_MAPPING_REQUIRED`
+
+The migration mechanism shipped on 2026-08-22 carried a reporting hole: `loadLegacyCourses` joined
+`course_revisions` with an INNER JOIN, so a legacy Course with **no** revision produced no row — it
+did not merely fail to migrate, it never appeared in the report and was not counted. Measured against
+the real `backend-postgres-1 / gradex` corpus, which holds exactly one such Course, the old query saw
+**0** of **1** legacy Courses. The join is now a LEFT JOIN and the Course is classified `NO_REVISION`:
+reported, explained, never marked as something `--apply` writes, and skipped by `--apply` without a
+revision being fabricated.
+
+Two further outcomes were added because the real corpus needed them. `FOUNDER_MAPPING_REQUIRED`
+distinguishes "the tool found several defensible answers and must not choose" from `UNMAPPED`'s "the
+tool found nothing"; `DRIFT` reports an already-Academic Course whose legacy code the current mapping
+now sends elsewhere, and never repairs it. The report now names already-academic Courses by id rather
+than counting them, carries `would_mutate` per row, emits `total`, and refuses to print a summary
+whose counts disagree with its rows.
+
+**The entire real legacy corpus is two Courses**, across every persistent database on this machine:
+one with no revision, one awaiting a Founder decision. The schema-20 corpus was migrated on a
+disposable clone; the original was never mutated. `--apply` against that clone left a 24-field
+invariant snapshot byte-identical.
+
+**No migration 0027.** Schema 26 expresses the whole contract.
+
+### MVP-F22 (T6) — `DONE`, promotes ST-03
+
+The public catalogue is no longer a flat list disconnected from academic structure. University,
+Program, academic level, and Subject filters compose over the single `PublishedOnly` authority;
+explicit `course_program_targets` define audience where present and curriculum mappings imply it where
+absent; `EXISTS` predicates keep a Subject mapped into several curricula from duplicating its Course.
+Student profile relevance orders results and never appears in a `WHERE` clause — a ranked request
+returns every Course an unranked one does. No academic filter can create an Entitlement or reach a
+non-public Course.
+
+Two real defects were found by the tests and fixed: an empty catalogue serialised as `"items": null`
+and rendered as a permanent loading state, and the public Program option reported a Department as a
+College.
+
+**No migration, no index, no schema change.** T6 is query and application code on schema 26.
+
+### Matrix impact
+
+**ST-03 is promoted from `BACKEND_MISSING` to `E2E_PROVEN`.** It is the first canonical row the D-091
+series moves. The denominator stays **53**.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 37 / 53 = 69.8% | **38 / 53 = 71.7%** |
+
+MVP-F21 remains `PARTIAL` and promotes no row: it is an implementation tranche, and the one legacy
+Course that stays unmigrated is intentionally unresolved rather than pending.
+
+### Amendment — Founder decision recorded, 2026-08-23
+
+The SWE101 record is decided: **`KEEP_UNRESOLVED`**. The Founder reviewed all four canonical candidates
+and determined that none can be chosen without authoritative evidence — the university's own subject
+code, the syllabus, historical Course documentation, or an explicit Founder mapping supported by one of
+those. The decision is recorded in the Founder mapping data, dated, and carries its reopening
+conditions; `--report` states it and `--apply` writes nothing for it, exactly as before.
+
+The tracker distinction this changes is **`FOUNDER_DECISION_REQUIRED` → accepted state**. MVP-F21 stays
+`PARTIAL` under the vocabulary in §1, because a legacy Course remains unmigrated and the legacy-removal
+migration stays gated by D-091 §13. What it no longer carries is a pending Founder action.
+
+`SCREENS.md` ST01 was also brought into line with the profile-aware relevance ordering T6 already
+implements, recorded as an amendment to D-092. No T6 behaviour changed.
+
+**Matrix impact — none.** No canonical row is promoted or demoted by this governance work.
+`E2E_PROVEN` remains **38 / 53 = 71.7%**; denominator 53.
+
+
+## 25. MVP-F23 — T7 Student Learning Payload Contract Remediation — 2026-08-23
+
+**Founder-authorized** 2026-08-23 as the next remediation tranche, under D-065 and the existing
+GAP-03 / GAP-04 / ST-13 / ST-16 / ST-17 register entries.
+
+### The recorded root cause was wrong
+
+GAP-03 attributed the leak to *"RSC serialises all client-component props; the context is passed as a
+prop to `ReportTargetActions`"*. Measurement disproved it: that component receives
+`targets: [{kind, context}]` and the string `report_context` never appears in it. The context reached
+the markup through React's **development server-component owner stack**, which serialises every
+*server* component's props — and `CourseOutline` had been handed the whole `CourseHome`. GAP-04 was
+the same channel: every learning view received the whole `dictionary.learning`, so an expired Lesson
+carried `"Active access"`.
+
+Acting on the recorded cause would have produced no fix at all. The register entries are corrected in
+§5.
+
+### Production was never affected — and switching modes was not the fix
+
+Against a production build of the same commit the context is absent from the HTML entirely
+(payload 34.5 KB versus 95.2 KB), and the three affected specs pass. That is recorded as a fact about
+the shipped artifact, **not** adopted as the remediation: relabelling the evidence to the mode where
+the assertion happens to pass would leave the defect in place, which D-089 §4 forbids. The code was
+fixed and the proof below is in development mode, where the leak was real.
+
+### The contract
+
+**A component receives the narrowest data it renders — never a catalogue to choose from, nor a read
+model wider than it displays.** `LearningStatusBadge` takes a resolved string rather than both status
+labels; `CourseOutline` takes `courseId`/`learningStatus`/`sections` rather than `CourseHome`;
+`LessonNavigation` takes `courseId`/`navigation` rather than `LessonReadModel`; and the Lesson page
+hands its child no dictionary at all. `learning-label-sets.ts` holds the narrow types as `Pick`s and
+the builders that make the narrowing real at runtime.
+
+No business rule, authorization, lifecycle, entitlement, API, or backend line changed. D-065 is
+unchanged and now honoured in both build modes.
+
+### Canonical regression
+
+| | Before (after T6) | After T7 |
+|---|---|---|
+| passed | 148 | **153** |
+| failed | 6 | **1** |
+| did not run | 3 | 3 |
+
+Five of the six accepted historical failure identities are eliminated and **no new identity
+appeared**. `s5-viewport-evidence:223` ×4 and `s5-expired-entitlement:712` now pass with their
+assertions exactly as written; no test was weakened, skipped, or rewritten.
+
+The one remaining failure, `s5-playback-performance.spec.ts:157`, is not a gap-register item and not
+a defect: the spec asserts its own precondition — it measures the built frontend — and passes under
+`GRADEX_E2E_FRONTEND_MODE=production` (3382/3374/3338/3344 ms against a 5000 ms threshold, 4/4,
+measured this tranche). Whether the canonical suite should measure the production build is a
+governance question beyond T7's authority.
+
+Frontend unit: **378 passed** (was 371). Backend untouched and re-verified: build, vet, vet-integration
+clean; 28 packages ok.
+
+### Matrix impact
+
+**ST-13**, **ST-16**, and **ST-17** are promoted to `E2E_PROVEN`. **GAP-03** and **GAP-04** are closed.
+The denominator stays **53**.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 38 / 53 = 71.7% | **41 / 53 = 77.4%** |
+
+Bookkeeping also corrected: **GAP-09** was closed by MVP-F22 on 2026-08-23 but had not been struck
+through in §5.
+
+
+## 26. MVP-F24A — T8A AD-09 Admin Entitlement Lifecycle — 2026-08-23
+
+**Founder-authorized** 2026-08-23 as a continuation of the already-opened T8A tranche. Full evidence:
+[`docs/launch/evidence/2026-08-23-t8a-entitlement-lifecycle.md`](../launch/evidence/2026-08-23-t8a-entitlement-lifecycle.md).
+
+### Classification held: already implemented, needing browser proof
+
+The prior implementation audit classified AD-09 `A — ALREADY_IMPLEMENTED_NEEDS_E2E`, and that held.
+**No production code was changed by this tranche.** The Entitlement operations, the Kuwait date
+boundary (`ConvertKuwaitDateToUTCBoundary`), past-dating, and the Admin's identifier-free discovery
+path from the queue row were all already correct.
+
+### Two handoff facts proved incomplete
+
+1. AD-09 was not entirely unproven in the browser. `s6-course-access-grant-launch.spec.ts` already
+   drove extension, shortening and revocation through the real modal. What was missing was the
+   **past-date immediate ending**, the **Student's rendered access surface**, and a **genuinely
+   refetched** Admin record. T8A adds all three, on isolated fixtures, for all four operations.
+
+2. Expanding the rotating slot map was necessary but not sufficient. The Admin Course Access queue
+   reads `ORDER BY created_at DESC LIMIT 100`, and every rotating-pool invitation carried the single
+   seed-transaction timestamp — so their order was decided arbitrarily by the query plan and the new
+   high-index T8A slots would normally have fallen off the first page. The seed now assigns each
+   invitation a `created_at` derived from its pool index: strictly past, strictly ordered, higher
+   index newer, with the two pools in disjoint windows. This is a **fixture** correction; it changes
+   no product behaviour.
+
+### Slot expansion, with the allocation invariant proved rather than asserted
+
+`ROTATING_TEST_SLOTS` 30 → 34 and `ROTATING_POOL_SIZE` 300 → 340, mirrored in
+`backend/cmd/e2e-seed/rotating_students_test.go` and `frontend/src/lib/api/e2e-students.ts`. Slots
+30–33 are one per BR-026 operation — extend, shorten, past-date, revoke — because each case mutates
+the Entitlement it acts on and would otherwise be observed by the next.
+
+Allocation stays `slot * repeats + repeat`, so slots 0–29 keep indices 0–299 exactly. A new test,
+`rotating pool: the T8A expansion reassigns no existing execution`, walks every pre-existing slot at
+every supported repeat and pins its index.
+
+### Results
+
+Four new browser cases, all green:
+
+```
+✓ A: an Admin extends an active grant and the Student keeps access
+✓ B: an Admin shortens an active grant to a future date and access continues
+✓ C: an Admin moves expiry into the past and the Student loses access at once
+✓ D: an Admin revokes a grant and the Student is refused
+```
+
+Case C re-audits the T7 payload boundary on the surface MVP-F23 remediated — no `Active access` on
+an expired render, no `report_context`, no read-model internals, no whole-dictionary leak.
+
+Audit rows, outbox events (`access.entitlement_adjusted`, `access.entitlement_revoked`), the revision
+counter, the unauthorized-actor refusal and the stale-revision refusal stay proved where they already
+were, by the five green PostgreSQL integration tests in
+`backend/internal/httpapi/entitlement_operations_integration_test.go`. They are deliberately **not**
+duplicated in the browser: no Admin screen exposes them, so a browser duplicate would move a proof to
+a weaker layer rather than add one.
+
+Canonical Playwright: **157 passed / 1 failed / 3 did not run** (was 153 / 1 / 3). 153 + 4 = 157. The
+single failure is the unchanged, pre-existing `s5-playback-performance.spec.ts:157` precondition,
+which asserts the suite is measuring the built frontend; it is not a gap-register item and no new
+failure identity appeared.
+
+Backend: build, vet, vet-integration clean; 28 packages ok. Frontend unit: **379 passed** (was 378).
+
+Manual acceptance was **not** separately performed — the E2E runtime is destroyed by `globalTeardown`
+and standing up a persistent stack would have required manufacturing credentials, which the
+authorization forbids. The four cases are real-browser journeys, but they are automated evidence and
+are not recorded as a human walk.
+
+### Matrix impact
+
+**AD-09** is promoted to `E2E_PROVEN`. The denominator stays **53**. No other row moved; **AD-12**,
+**AD-13**, **GAP-06** and **GAP-08** are untouched, and the slot-map change closes no gap of its own.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 41 / 53 = 77.4% | **42 / 53 = 79.2%** |
+
+
+---
+
+## 27. MVP-F24B — T8B, AD-13 Staff invitation lifecycle (2026-08-24)
+
+Authorized as a fresh-session continuation tranche under D-089. Scope: close **AD-13** — the tracker
+row in §4.3, *not* a `SCREENS.md` identifier — through a real browser journey. The row names both
+obligations, invitation lifecycle **and** suspension, so suspend/reinstate is in-row here; AD-12's
+Course suspend/restore stays untouched.
+
+Going in the classification was `ALREADY_IMPLEMENTED_NEEDS_E2E`, and it held for the backend: the
+invitation secret, protected outbox payload, replay refusal, compromised-password 422, capability
+binding, and suspension audit were already proved by `TestT108ProductionStaffLifecycle`,
+`TestInvitationInvariants`, `TestStaffInvitationEmailReachesTheInviteeAndCompletes`, and the httpapi
+staff contract tests. None of that was duplicated in the browser.
+
+What no test had observed was the human path — and the E2E harness could not observe it, because it
+started no worker. `e2e/global-setup.ts` now owns a real `cmd/worker` with
+`EMAIL_ENABLED=true`/`EMAIL_PROVIDER=mailpit` (refused by configuration outside development), so the
+chain under test is the production one: Admin action → API → outbox → worker → renderer → SMTP →
+Mailpit. No test constructs an invitation link or reads a token from PostgreSQL; the recipient
+consumes the link from the delivered message, and it is never logged or recorded.
+
+Three browser cases, all green:
+
+```
+✓ A Admin invites → pending → real email → completion → login → INSTRUCTOR capability →
+    Admin sees the account Active
+✓ B a consumed invitation link cannot be used a second time
+✓ C Admin suspends → capability refused → reinstates → the same identity works again
+```
+
+Case A also proves the invited Instructor is refused Admin staff authority, and that the invitation
+list carries no bearer or secret. Case C proves suspension preserves identity rather than deleting
+the account, and respects the re-authentication contract instead of bypassing it.
+
+**One real defect, remediated.** `T8B-REMEDIATION-01`: reopening an already-consumed invitation
+rendered the full account-creation form, and only revealed the invitation was used after a password
+was chosen and submitted. `StaffInvitationPreview.state` was typed `"PENDING"` even though the route
+answers 200 with `PENDING | CONSUMED | SUPERSEDED | EXPIRED | REVOKED`, and the acceptance screen
+treated only a `TOKEN_INVALID` error as invalid. Fix: widen the type, treat any non-`PENDING` state as
+invalid. Two frontend files; no server behaviour changed — completion of a consumed invitation was
+refused before and after. Case B is its regression test.
+
+**Recorded, not acted on:** the Admin screen renders no pending-invitations list, so an outstanding
+invitation cannot be seen or revoked from the product, even though `GET /v1/staff-invitations` and the
+EN strings exist. The invite capability is fully reachable, so this does not meet the bar for UI
+remediation in the current phase. It is an observation for founder decision, not part of AD-13.
+
+Canonical Playwright: **160 passed / 1 failed / 3 did not run** (was 157 / 1 / 3). 157 + 3 = 160. The
+single failure is the unchanged, pre-existing `s5-playback-performance.spec.ts:157` production-build
+precondition; no new failure identity appeared and T5/T6/T7/T8A stayed green.
+
+Backend: build, vet, vet-integration clean; `go test ./...` green. Frontend unit: **379 passed**
+(unchanged — the remediation is proved in the browser, and the repository has no React component test
+harness).
+
+Manual acceptance was **not** separately performed: `globalTeardown` destroys the API, worker, and
+database, and a persistent stack would have required manufacturing credentials the authorization does
+not grant. The three cases are real-browser evidence, not a human walk.
+
+Evidence: [`docs/launch/evidence/2026-08-24-t8b-staff-invitation-lifecycle.md`](../launch/evidence/2026-08-24-t8b-staff-invitation-lifecycle.md).
+
+### Matrix impact
+
+**AD-13** is promoted from `PARTIAL` to `E2E_PROVEN`. The denominator stays **53**. No other row
+moved; **AD-12**, **GAP-06** and **GAP-08** are untouched.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 42 / 53 = 79.2% | **43 / 53 = 81.1%** |
+
+
+---
+
+## 28. MVP-F24C — T8C, AD-12 Course lifecycle (2026-08-24)
+
+Authorized as a fresh-session continuation tranche under D-089. Scope: close **AD-12** — the tracker
+row in §4.3, *not* a `SCREENS.md` identifier — through a real browser journey. The suspension in this
+row is **Course access** suspension; Staff suspension is AD-13 and stayed untouched.
+
+The going-in classification `ALREADY_IMPLEMENTED_NEEDS_E2E` held for the backend and **failed at the
+product surface**. Every command (delist, relist, retire, archive, access suspend, access restore)
+existed, was audited, and was proved against PostgreSQL — but `lifecycle-controls.tsx` was mounted on
+no page at all, and no endpoint could list a Course in a non-published state, so a delisted Course
+could not even be found in order to relist it. The capability was unreachable through the product.
+Under the current phase's rule for otherwise-unreachable capabilities, the minimum surface was built:
+`GET /api/v1/admin/courses` (a lifecycle directory under `CapCatalogPublish`), an
+`/admin/course-lifecycle` workspace that finds a Course **by title** and refetches after every
+command, and an Admin navigation item. **No lifecycle policy, refusal or audit was changed.**
+
+Four browser cases on four independent Course fixtures — retirement and archival are terminal, so
+sharing one Course would have made case order load-bearing — all green:
+
+```
+✓ A delist → the Course leaves the public catalogue → relist → it returns as exactly one listing
+✓ B Course access suspend → public removal + entitled Student blocked → restore → access returns
+✓ C retire → publicly undiscoverable, lifecycle untouched → a second retirement is refused
+✓ D archive → publicly undiscoverable → ARCHIVED is terminal; relisting it is refused
+```
+
+Case B is the only action that touches an existing Student, and PostgreSQL was read at each step: the
+same Entitlement id, still `ACTIVE`, un-revoked, with the same `access_ends_at`, the same Enrollment
+and the same Progress rows before, during and after suspension. Suspension denies a read; it rewrites
+no grant. Retirement is governed by BR-027 at the Entitlement, not by a precondition on the Course —
+`RetireCourse` requires only `PUBLISHED`/`DELISTED` with a null `retired_at`, and nothing there was
+relaxed. New PostgreSQL proof (`lifecycle_directory_integration_test.go`) carries one Course through
+published → delisted → suspended → restored → retired → archived and asserts the Admin directory
+reports each state correctly and refuses to un-archive.
+
+**No production defects were found.** The two gaps closed were reachability, not behaviour; no
+`T8C-REMEDIATION-nn` was required.
+
+Canonical Playwright: **164 passed / 1 failed / 3 did not run** (was 160 / 1 / 3). 160 + 4 = 164. The
+single failure is the unchanged, pre-existing `s5-playback-performance.spec.ts:157` production-build
+precondition; no new failure identity appeared and T5/T6/T7/T8A/T8B stayed green.
+
+Backend: build, vet, vet-integration clean; `go test ./...` green; the Course-lifecycle and
+privileged-audit integration suites green against real PostgreSQL. Frontend unit: **379 passed**
+(unchanged — the new surface is proved in the browser, and the repository has no React component test
+harness).
+
+Manual acceptance was **not** separately performed: `globalTeardown` destroys the API, worker and
+database, and a persistent stack would have required manufacturing credentials the authorization does
+not grant. The four cases are real-browser evidence, not a human walk.
+
+**Recorded, not acted on:** the `default_access_ends_at IS NULL` → 500 purchase-confirmation defect,
+the still-absent pending Staff-invitation list from T8B, and `handleLifecycleError` answering a
+permanently illegal transition with `state-conflict` rather than `unsupported-state-transition` (both
+409; the Admin surface stays coherent).
+
+Evidence: [`docs/launch/evidence/2026-08-24-t8c-course-lifecycle.md`](../launch/evidence/2026-08-24-t8c-course-lifecycle.md).
+
+### Matrix impact
+
+**AD-12** is promoted from `IMPLEMENTED_NOT_PROVEN` to `E2E_PROVEN`. The denominator stays **53**. No
+other row moved; **GAP-06** and **GAP-08** are untouched.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 43 / 53 = 81.1% | **44 / 53 = 83.0%** |
+
+
+## 29. MVP-F25 — T9, SY-07 Whole-suite E2E runnability (2026-08-24)
+
+Authorized as a fresh-session reliability/infrastructure tranche under D-089. Scope: make the
+canonical suite reproducibly runnable in full, each test in the runtime mode its contract requires.
+Explicitly prohibited by the authorization: weakening the performance assertion, skipping the
+production-only spec, or accepting `164 / 1 / 3` as green.
+
+**The `164 / 1 / 3` baseline was a harness execution-mode defect, not a product failure.**
+`s5-playback-performance.spec.ts` asserts in `beforeAll` that it is measuring a production build —
+D-069 requires exactly that, because measured against `next dev` the SC-001 figure is dominated by
+on-demand compilation. The canonical command launched only the development frontend, so the first
+viewport failed the precondition (**1 failed**) and Playwright never ran the other three viewports of
+that describe (**3 did not run**). The suite contained two valid runtime-mode classes and the harness
+exposed one execution path.
+
+Production mode, the origin proxy and the fail-closed build check all already existed from T076. What
+did not exist was a supported path that runs **both** modes and returns one verdict.
+
+**Lane classification is now machine-readable, declared once.** `playwright.config.ts` holds
+`PRODUCTION_MODE_SPECS` and derives the two lanes from it as exact complements — `testMatch` in
+production mode, `testIgnore` in development mode. The runner restates no filename and greps nothing.
+
+**One canonical command:**
+
+```
+cd frontend && npm run test:e2e:canonical
+```
+
+Pre-flight (refuses to start if a prior run still owns live processes, and never kills what it did
+not start) → `next build` from the current worktree → production lane → development lane → aggregate
+→ exit `0` only if both lanes pass. `npm run test:e2e:development` and `npm run test:e2e:production`
+exist for iterating on a single lane; neither is the authoritative verdict.
+
+| lane | tests | result |
+|---|---:|---|
+| production (built frontend behind the run-owned origin proxy) | 4 | 4 passed |
+| development (`next dev`) | 164 | 164 passed |
+| **aggregate** | **168** | **168 passed / 0 failed / 0 skipped** |
+
+164 + 4 = 168 — exactly the pre-T9 discovered total, so no test was lost, none runs twice, and there
+is no residual skip. Run twice, sequentially, each from a verified clean start, both exit `0`.
+
+The five harness defects found are recorded as `T9-HARNESS-01`…`05` in the evidence: the wrong-mode
+execution itself, plus a shared `outputDir` that would have deleted the first lane's traces, a shared
+HTML report, a lane order that would have let `next dev` invalidate the production build, and the
+absence of any clean-start check.
+
+**Threshold and profile unchanged.** T076 measured 3597/3381/3386/3421 ms (run 1) and
+3412/3365/3353/3356 ms (run 2) against the untouched 5000 ms threshold, `"frontend_mode":
+"production"`, all-loopback, zero public dependencies.
+
+**No production code changed.** Three files: `frontend/playwright.config.ts`,
+`frontend/scripts/e2e-canonical.mjs` (new), `frontend/package.json`. `global-setup.ts`,
+`global-teardown.ts`, `e2e-infrastructure.ts` and `next.config.mjs` are untouched, so T8B's worker and
+Mailpit path, the disposable per-run database, `workers: 1` and the MVP-F06 concurrency gate all stand
+exactly as they were.
+
+Backend: build, vet, vet-integration clean; `go test ./...` 28 packages ok. Frontend: `tsc --noEmit`
+clean, unit **379 passed** (unchanged). No unit test was added for the lane globs: the only thing such
+a test could assert is Playwright's own matcher, while the invariant that matters — `164 + 4 = 168` —
+is proved against the real matcher by `--list` and by every canonical run's `summary.json`.
+
+**Recorded, not acted on:** the `default_access_ends_at IS NULL` → 500 purchase-confirmation defect
+and the still-absent pending Staff-invitation list. Neither affects the suite, which is fully green.
+
+Evidence: [`docs/launch/evidence/2026-08-24-t9-whole-suite-e2e-runnability.md`](../launch/evidence/2026-08-24-t9-whole-suite-e2e-runnability.md).
+
+### Matrix impact
+
+**SY-07** is promoted from `INTEGRATION_BROKEN` to `E2E_PROVEN`. The denominator stays **53**. No
+other row moved; **GAP-06** and **GAP-08** are untouched, and SY-01/SY-02/SY-03/SY-08/SY-09 keep their
+current state and authority.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 44 / 53 = 83.0% | **45 / 53 = 84.9%** |
+
+`INTEGRATION_BROKEN` drops from 2 rows to 1. Per persona, counted from §4.1–§4.4: Student 18/19,
+Instructor 10/11, Admin 13/14, **Shared 4/9** — 18 + 10 + 13 + 4 = **45**.
+
+### New canonical E2E baseline
+
+**`168 passed / 0 failed / 0 skipped`** — `cd frontend && npm run test:e2e:canonical`, one worker per
+lane, against the local `backend/docker-compose.yml` stack. This supersedes the `164 / 1 / 3` baseline
+recorded in §28 and the `107 / 6 / 3` baseline recorded in §14. There is no accepted failure identity
+left; every subsequent tranche compares against a fully green suite, and any failure is a regression.
+
+## 30. KNOWN-BASELINE-01 — Payment confirmation with a NULL Course default access expiry (2026-08-24)
+
+Founder authorization, 2026-08-24: a fresh, narrow remediation tranche against KNOWN-BASELINE-01
+only — the `default_access_ends_at IS NULL` → 500 purchase-confirmation defect this tracker recorded
+under both §28 and §29 as *"Recorded, not acted on."* Explicitly prohibited: redesigning Course Access
+or Entitlements, changing Course publication rules, fabricating an expiry, and touching any other Ox
+Alpha finding.
+
+### Root cause
+
+`courses.default_access_ends_at` is nullable (`0015_course_access_grant.up.sql:62`, no `NOT NULL`), but
+`ConfirmPurchaseRequest` scanned it into a non-nullable `time.Time`. On `NULL`, pgx returns a scan
+error rather than `pgx.ErrNoRows`, so the value fell past the `ErrNoRows` branch into the generic
+unexpected-error wrapper and the HTTP layer could only answer `problem.Internal("")` — a 500. The
+domain error `ErrExpiryRequired` and its 409 mapping already existed; the value never reached them.
+
+### Fix
+
+`backend/internal/access/purchase.go` now scans a `*time.Time` — the convention adjacent access code
+already uses, including the analogous Course lock in `ApproveInvitation` — and returns
+`ErrExpiryRequired` when it is `NULL`. `NULL` and a real timestamp stay explicitly distinguishable: no
+`COALESCE` sentinel, no zero-time fallthrough, no fabricated or inferred expiry. The pre-existing
+"expiry not in the future" branch is unchanged.
+
+`backend/internal/httpapi/access_routes.go` keeps the same canonical 409 status but gives
+`ErrExpiryRequired` its own problem code, because sharing `purchase-request-state-conflict` told the
+Admin the request was *"no longer eligible"* — actively wrong here, since the request is eligible and
+the Course is what needs configuring. The detail is now *"Set the Course access expiry before
+confirming payment."* No consumer depended on the old code.
+
+### Results
+
+Two new real-PostgreSQL tests in
+`backend/internal/httpapi/purchase_confirmation_expiry_integration_test.go`, written before the fix and
+observed failing with the exact defect (`cannot scan NULL into *time.Time`; `status = 500, want 409`),
+then passing after it:
+
+✓ `TestConfirmPurchaseRequestRequiresDefaultAccessExpiry` — the domain contract: `ErrExpiryRequired`,
+zero partial mutation, successful retry after `SetCourseDefaultAccessExpiry`
+✓ `TestConfirmPaymentReturnsConflictWhenDefaultExpiryMissing` — the production HTTP mapping: 409,
+actionable detail, no internal leak, request id preserved, zero partial mutation, successful retry
+
+Zero partial mutation is asserted, not argued: after the refusal the Purchase Request is still
+`WAITING_PAYMENT` with `payment_confirmed_at`, `invitation_id` and `access_ends_at_snapshot` all
+`NULL`, and the invitation, entitlement, whole-table outbox and payment-confirmed audit counts are all
+`0`.
+
+**Frontend unchanged.** `purchase-requests.tsx` already renders `problem.detail` for any
+`ProblemError`; it now shows the actionable expiry guidance through code that was already there. The
+existing Course Access expiry control remains the single canonical configuration path.
+
+Backend: build, vet, vet-integration clean; `go test ./...` 28 packages ok; `internal/access` and the
+whole `internal/httpapi` integration suite green — including the retained manual-purchase journey, so
+the successful path is proved unregressed. Frontend gates not run: no frontend source changed, and the
+**379 passed** unit baseline is untouched.
+
+Evidence: [`docs/launch/evidence/2026-08-24-payment-confirmation-expiry-null-remediation.md`](../launch/evidence/2026-08-24-payment-confirmation-expiry-null-remediation.md).
+
+### Matrix impact
+
+**None. No counted row closes; the score stays `45 / 53 = 84.9%` and the denominator stays 53.**
+
+This defect was never a counted 53-row item — it was recorded twice as *"Recorded, not acted on"*
+alongside the §28 and §29 matrix-impact sections, explicitly outside those tranches' row sets. The two
+rows this flow touches, **AD-05 — Configure Course default access expiry** and **AD-09 — Confirm
+manual payment**, were already `E2E_PROVEN` and are unaffected.
+
+The distinction to record: the **counted MVP score is unchanged**, while the **paid-beta blocker is
+resolved**. An Admin can no longer be shown a 500 for a supported product state.
+
+The canonical E2E baseline is unchanged at **`168 passed / 0 failed / 0 skipped`**; this tranche adds
+no canonical E2E case.
+
+**Still recorded, not acted on:** the absent pending Staff-invitation list from T8B, and
+`handleLifecycleError` answering a permanently illegal transition with `state-conflict` rather than
+`unsupported-state-transition` (both 409).
+
+## 31. IN-11 — Minimal Instructor Course Roster (2026-08-24)
+
+Authorized by Founder tranche IN-11 under [D-045](../DECISIONS.md#d-045--mvp-launches-without-in-platform-payments-course-access-is-granted-by-admin-approved-course-access-invitation)
+and [D-094](../DECISIONS.md#d-094--limited-paid-beta-scope-narrows-gap-06-without-cancelling-post-beta-mvp-features).
+The beta contract is the minimal Course-scoped roster only; Instructor Analytics and Office Hours remain
+deferred.
+
+The roster uses durable `enrollments` for membership and the latest Course-scoped `entitlements` record
+for access state. The owner-only `GET /api/v1/courses/:id/students` route is paginated, deterministic,
+and returns only display name, access status, enrollment date, access start, and access expiry. Real
+PostgreSQL HTTP integration proves active, expired, revoked, suspended, archived-Course, empty, duplicate
+history, pagination, owner/non-owner/Student/anonymous/suspended-principal boundaries, and serialized
+data minimization.
+
+Canonical E2E after the tranche: production **4 passed**, development **165 passed**, aggregate
+**169 passed / 0 failed / 0 skipped**, exit `0`, from `cd frontend && npm run test:e2e:canonical`.
+
+### Matrix impact
+
+**IN-11** promotes from `PARTIAL` to `E2E_PROVEN` for the D-094 beta-scoped contract. The denominator
+stays **53**; **ST-18** remains beta-deferred and **AD-14** remains `NOT_IMPLEMENTED` and required
+before beta.
+
+| | Before | After |
+|---|---|---|
+| `E2E_PROVEN` | 46 / 53 = 86.8% | **47 / 53 = 88.7%** |
+
+## 32. AD-14 — Minimal Admin Reported-Content Resolution (2026-08-24)
+
+AD-14 promotes from `NOT_IMPLEMENTED` to `E2E_PROVEN` for the D-094 limited-paid-beta contract.
+The real PostgreSQL/HTTP proof covers queue pagination, safe detail inspection, dismissal,
+immutable resolution history, audit events, target-unavailable closure, concurrent resolution,
+Admin authorization boundaries, and canonical Course DELIST delegation. The browser proof submits
+a Student report and dismisses it through the Admin Reported Content workspace.
+
+Canonical E2E after the tranche: production **4 passed**, development **166 passed**, aggregate
+**170 passed / 0 failed / 0 skipped**, exit `0`, from `cd frontend && npm run test:e2e:canonical`.
+
+The denominator remains **53**; ST-18 remains beta-deferred. Advanced moderation tooling,
+automation, AI moderation, and bulk moderation are outside this beta tranche. See the
+[AD-14 evidence](../launch/evidence/2026-08-24-ad-14-admin-reported-content-resolution.md).

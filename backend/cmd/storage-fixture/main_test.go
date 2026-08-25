@@ -59,3 +59,27 @@ func TestBooleanEnvironmentRejectsInvalidValue(t *testing.T) {
 		})
 	}
 }
+
+func TestPrefixedFixtureKeyUsesExactCapacityScope(t *testing.T) {
+	got, err := prefixedFixtureKey("test/master.m3u8", "capacity/run-20260824/")
+	if err != nil {
+		t.Fatalf("prefixedFixtureKey: %v", err)
+	}
+	if got != "capacity/run-20260824/test/master.m3u8" {
+		t.Fatalf("prefixed key = %q", got)
+	}
+}
+
+func TestPrefixedFixtureKeyRejectsBroadOrTraversalPrefixes(t *testing.T) {
+	for _, prefix := range []string{"", "capacity/*/", "bucket/", "capacity/run/test/"} {
+		if prefix == "" {
+			continue
+		}
+		if _, err := prefixedFixtureKey("test/master.m3u8", prefix); err == nil {
+			t.Fatalf("unsafe prefix %q was accepted", prefix)
+		}
+	}
+	if _, err := prefixedFixtureKey("../master.m3u8", "capacity/run-20260824/"); err == nil {
+		t.Fatal("fixture key traversal was accepted")
+	}
+}

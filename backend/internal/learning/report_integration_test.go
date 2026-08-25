@@ -449,8 +449,12 @@ func TestDuplicateOpenReportFollowsVersionIndependentPolicy(t *testing.T) {
 
 	// 4. Once the first report is resolved — S8's behaviour, simulated here as fixture setup only —
 	// the partial index no longer covers it and the Student may report B.
-	if _, err := fixture.repository.pool.Exec(ctx,
-		`UPDATE content_reports SET resolved_at = now() WHERE id = $1::uuid`, first.ID); err != nil {
+	if _, err := fixture.repository.pool.Exec(ctx, `
+		UPDATE content_reports
+		SET resolved_at = now(), resolved_by_account_id = $2::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE id = $1::uuid
+	`, first.ID, fixture.studentID); err != nil {
 		t.Fatalf("resolving the first report: %v", err)
 	}
 	second, err := fixture.repository.CreateReport(ctx, bindingB,

@@ -164,3 +164,56 @@ alerts and scheduled backups have production evidence, a provider backup is rest
 RPO/RTO are approved, and budget/region/sizing/security sign-off is complete. The approved 20 direct
 uploads and no-more-than-two transcodes per worker also require their separate representative
 validation; these three Student control-plane scenarios do not claim to test them.
+
+## Limited paid beta profile — SY-09 preparation
+
+`limited-paid-beta` is a separate, Founder-approved launch stage for approximately 20–50 paid
+Students. Its machine-readable contract is [`limited-paid-beta.json`](limited-paid-beta.json). It does
+not alter the historical LG-019 profile or promote KVM2 from `B — plausibly sufficient but needs
+beta-envelope proof`.
+
+The beta fixture is created with `prepare-beta-fixtures.sh`, which selects the isolated
+`-beta-loadtest` seed path rather than the canonical acceptance seed. It contains exactly 110
+Accounts: 104 Students (50 entitled and 54 registered without entitlement), one Admin, and five
+Instructors. It creates eight published Courses with two Sections, four Lessons, and one READY video
+control-plane fixture per Course. The identifiers, `.test` emails, password hash, database, sessions,
+and storage prefix are synthetic and run-owned.
+
+The Student mixed profile is 20 RPS for 10 minutes after warm-up and 30 RPS for 60 seconds, with at
+least 18 and 27 authenticated Student RPS respectively. Its request-level mix is 5% catalogue list,
+5% catalogue detail, 5% session check, 7.5% dashboard, 7.5% access-status, 20% Course Home, 25%
+Lesson metadata, 5% playback authorization, 5% playback manifest, and 15% Progress writes. The two
+catalogue operations deliberately use anonymous headers; they never carry a Student session cookie,
+auth token, or CSRF token. Playback authorization and manifest are the real protected
+`/api/v1/media/playback-authorizations` and `/api/v1/media/playback-manifests/:session/index.m3u8`
+control-plane routes; segment bytes are never followed.
+
+Additional prepared scenarios are:
+
+- anonymous public catalogue at 10 RPS for 10 minutes, with a deterministic list/detail split;
+- 100 distinct Student bootstrap/login flows in 60 seconds;
+- 100 protected playback authorization-plus-manifest starts in 60 seconds across 50 Students, at
+  most two starts per Student;
+- five low-frequency privileged read operators (one Admin and four Instructors);
+- three direct-to-storage Instructor upload intent → object PUT → completion flows overlapping Student
+  traffic; and
+- a separate worker procedure for two active transcodes and a third queued job, with the drain bound
+  derived from the actual approved media fixture rather than hard-coded here.
+
+The beta runner requires explicit HTTPS target, run ID, repetition (`1` or `2`), release/image/
+Compose/host/storage provenance, and the external-generator acknowledgement. No automatic retry is
+allowed. `validate-profile.mjs --list` and `--dry-run` only parse and print the contract; they do not
+open a target connection. `evaluate-result.mjs` fails closed when any required artifact or counter is
+missing.
+
+Capture helpers are intentionally separate and bounded:
+
+- `capture-server.sh` retains host/container CPU, memory, swap, disk, network, block I/O, PIDs,
+  restarts, OOM-related state, and bounded service logs;
+- `capture-generator.sh` records the exact generator PID's CPU, memory, open FDs, and FD limit;
+- `capture-services.sh` runs bounded read-only PostgreSQL and Redis aggregate diagnostics; and
+- `backend/cmd/loadtest-capture` emits PostgreSQL pool/wait, Redis aggregate, and Asynq queue/worker
+  metrics without dumping rows, keys, payloads, or secrets.
+
+The beta path is preparation only. It must not be invoked against a retained database, production
+stack, or real provider without the exact disposable run scope and future capacity authorization.

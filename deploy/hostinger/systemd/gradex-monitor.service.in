@@ -1,5 +1,5 @@
 [Unit]
-Description=Gradex public health, readiness, and backup freshness check
+Description=Gradex API, worker, email, backup, and disk monitoring check
 Wants=network-online.target docker.service
 After=network-online.target docker.service
 

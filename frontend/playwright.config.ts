@@ -31,6 +31,31 @@ const apiPort = externalDeployment ? 0 : runPort(API_PORT_ENV);
  */
 const productionFrontend = !externalDeployment && process.env.GRADEX_E2E_FRONTEND_MODE === "production";
 
+/**
+ * Runtime-mode ownership for the canonical suite — the one machine-readable classification.
+ *
+ * A spec listed here is a claim about the **built** application and refuses to run against
+ * `next dev`; `s5-playback-performance` asserts that precondition itself, in the spec, from the
+ * runtime configuration rather than from a comment. Every other canonical spec exercises the
+ * development harness the rest of this file describes.
+ *
+ * The two lanes are exact complements *in this single file*: production mode runs precisely this
+ * list, development mode ignores precisely this list. So their union is the whole canonical suite,
+ * no spec can be claimed by both, and adding or moving a production-mode spec is a one-line change
+ * here rather than a shell pattern duplicated in a runner script.
+ *
+ * `scripts/e2e-canonical.mjs` runs both lanes and aggregates them into one verdict.
+ */
+const PRODUCTION_MODE_SPECS = ["**/s5-playback-performance.spec.ts"];
+
+/**
+ * Specs owned by a *different* config entirely, so neither canonical lane runs them: the media
+ * authoring journey needs real object storage, a running worker and ffmpeg
+ * (`playwright.media-authoring.config.ts`), and the catalogue performance suite has its own
+ * (`playwright.s3-performance.config.ts`).
+ */
+const SEPARATE_CONFIG_SPECS = ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**"];
+
 if (productionFrontend) {
   const buildManifest = path.join(__dirname, ".next", "BUILD_ID");
   if (!fs.existsSync(buildManifest)) {
@@ -63,9 +88,10 @@ const frontendCommand = productionFrontend
 
 export default defineConfig({
   testDir: "./e2e",
-  // The media authoring journey needs real object storage, a running worker,
-  // and ffmpeg, so it has its own config and environment.
-  testIgnore: ["**/s3-public-catalogue-performance.spec.ts", "**/media-authoring/**"],
+  testIgnore: productionFrontend ? SEPARATE_CONFIG_SPECS : [...SEPARATE_CONFIG_SPECS, ...PRODUCTION_MODE_SPECS],
+  // Production mode narrows discovery to the production-mode specs themselves; development mode
+  // keeps Playwright's default `testMatch` and simply excludes them above.
+  ...(productionFrontend ? { testMatch: PRODUCTION_MODE_SPECS } : {}),
   fullyParallel: false,
   /**
    * One worker, because this harness is single-tenant by construction.
@@ -95,6 +121,10 @@ export default defineConfig({
    * Pinning the worker count restores the model the harness already documents.
    */
   workers: 1,
+  // Traces, screenshots and error contexts. Overridable so the canonical runner gives each lane its
+  // own directory: Playwright clears `outputDir` when a run starts, so two lanes sharing the default
+  // would mean the second silently deleting the first one's failure artifacts.
+  outputDir: process.env.GRADEX_PLAYWRIGHT_OUTPUT_DIR || "test-results",
   globalSetup: externalDeployment ? undefined : "./e2e/global-setup.ts",
   globalTeardown: externalDeployment ? undefined : "./e2e/global-teardown.ts",
   // The HTML report is the retained artifact of record, so its destination is overridable: the CI
@@ -103,6 +133,13 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: process.env.GRADEX_PLAYWRIGHT_HTML_DIR || "playwright-report", open: "never" }],
+    // Machine-readable lane result, written only when a caller asks for one. The canonical runner
+    // sets a distinct path per lane so neither lane's result can overwrite the other's, and reads
+    // the counts back rather than parsing console output. Unset — every existing invocation —
+    // behaves exactly as before.
+    ...(process.env.GRADEX_PLAYWRIGHT_JSON_FILE
+      ? ([["json", { outputFile: process.env.GRADEX_PLAYWRIGHT_JSON_FILE }]] as const)
+      : []),
   ],
   use: {
     baseURL: frontendOrigin(),

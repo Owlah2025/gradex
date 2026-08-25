@@ -262,6 +262,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 		"GET /api/v1/media/lessons/:lessonId/materials/resource",
 		"GET /api/v1/media/lessons/:lessonId/materials/lab-material",
 		"GET /api/v1/media/previews/:id",
+		"GET /api/v1/media/courses/:courseID/preview",
 	} {
 		mounted := false
 		for _, actual := range router.Routes() {
@@ -285,6 +286,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	// ErrProtectedUnavailable. These requests prove the live router maps the
 	// resulting cases — including the absent target case — to fixed wire bytes.
 	cases := []requestCase{
+		{"course-preview-ineligible", http.MethodGet, "/api/v1/media/courses/00000000-0000-0000-0000-000000000001/preview", ""},
 		{"invalid-playback-session", http.MethodGet, "/api/v1/media/playback-manifests/invalid/index.m3u8", ""},
 		{"non-existent", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000001","asset_version_id":"00000000-0000-0000-0000-000000000001"}`},
 		{"expired", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000002","asset_version_id":"00000000-0000-0000-0000-000000000002"}`},

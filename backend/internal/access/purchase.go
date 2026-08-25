@@ -328,20 +328,28 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 		return ConfirmPurchaseRequestResult{}, ErrPurchaseRequestTransition
 	}
 
-	var expiry time.Time
+	// courses.default_access_ends_at is nullable: a Course may be published and
+	// purchasable before an Admin has configured its default access expiry. That
+	// is an expected business state, so it is scanned as a nullable instant and
+	// refused as ErrExpiryRequired rather than surfacing as an internal error.
+	var defaultAccessEndsAt *time.Time
 	err = tx.QueryRow(ctx, `
 		SELECT c.default_access_ends_at
 		  FROM courses c
 		  JOIN course_revisions cr ON cr.id = c.live_revision_id
 		 WHERE c.id = $1::uuid AND `+catalogpublic.PublishedOnly("c", "cr")+`
 		 FOR SHARE
-	`, request.CourseID).Scan(&expiry)
+	`, request.CourseID).Scan(&defaultAccessEndsAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ConfirmPurchaseRequestResult{}, ErrCourseNotPurchasable
 	}
 	if err != nil {
 		return ConfirmPurchaseRequestResult{}, fmt.Errorf("locking purchasable course: %w", err)
 	}
+	if defaultAccessEndsAt == nil || defaultAccessEndsAt.IsZero() {
+		return ConfirmPurchaseRequestResult{}, ErrExpiryRequired
+	}
+	expiry := *defaultAccessEndsAt
 	if !expiry.After(now.UTC()) {
 		return ConfirmPurchaseRequestResult{}, ErrExpiryRequired
 	}

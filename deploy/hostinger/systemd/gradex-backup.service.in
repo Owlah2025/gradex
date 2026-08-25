@@ -6,6 +6,7 @@ After=network-online.target docker.service
 [Service]
 Type=oneshot
 User=@GRADEX_USER@
+TimeoutStartSec=360s
 Group=@GRADEX_GROUP@
 WorkingDirectory=@GRADEX_REPO@
 ExecStart=@GRADEX_REPO@/deploy/hostinger/host.sh backup
@@ -14,5 +15,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 StandardOutput=journal
+ReadWritePaths=/var/lib/gradex
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 StandardError=journal
 SyslogIdentifier=gradex-backup

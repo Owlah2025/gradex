@@ -206,7 +206,12 @@ func TestReportRouteRecordsTheRenderedInstanceForEveryTargetKind(t *testing.T) {
 	if response := submitReport(f, freshCourse, "inaccurate"); response.Code != http.StatusConflict {
 		t.Fatalf("duplicate while the first COURSE report is open = %d %s", response.Code, response.Body.String())
 	}
-	if _, err := f.pool.Exec(ctx, `UPDATE content_reports SET resolved_at = now() WHERE target_kind = 'COURSE'`); err != nil {
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE content_reports
+		SET resolved_at = now(), resolved_by_account_id = $1::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE target_kind = 'COURSE'
+	`, f.studentID); err != nil {
 		t.Fatalf("resolving the first report as fixture setup: %v", err)
 	}
 	if response := submitReport(f, freshCourse, "inaccurate"); response.Code != http.StatusCreated {
@@ -539,9 +544,12 @@ func TestReportDuplicateGranularityFollowsD066(t *testing.T) {
 	}
 
 	// Once the first report is resolved, the Student may report the target again.
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE content_reports SET resolved_at = now() WHERE reporter_account_id = $1::uuid AND target_kind = 'LESSON'`,
-		f.studentID); err != nil {
+	if _, err := f.pool.Exec(context.Background(), `
+		UPDATE content_reports
+		SET resolved_at = now(), resolved_by_account_id = $1::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE reporter_account_id = $1::uuid AND target_kind = 'LESSON'
+	`, f.studentID); err != nil {
 		t.Fatalf("resolving as fixture setup: %v", err)
 	}
 	if response := submitReport(f, contexts.Lesson, "inaccurate"); response.Code != http.StatusCreated {

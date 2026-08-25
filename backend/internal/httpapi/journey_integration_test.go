@@ -114,11 +114,17 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	admissionFoundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
 		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
-		Policies: policies, Service: admissionService, Recovery: recoveryService,
+		Policies: policies, Service: admissionService,
 		Limiter: limiter, EndpointPolicies: admissionPolicies,
 	})
 	if err != nil {
 		t.Fatalf("constructing admission foundation: %v", err)
+	}
+	recoveryFoundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: admissionFoundation, Recovery: recoveryService,
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery foundation: %v", err)
 	}
 
 	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{
@@ -146,7 +152,8 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 		sessionFoundation.authenticator, identity.NewDBPrincipalResolver(pool),
 		logging.New(io.Discard, "gradex-api-test", "development", logging.LevelFromString("info")),
 	)
-	mountAdmissionRoutesWithBootstrap(v1, admissionFoundation, false)
+	mountStudentAdmissionRoutesWithBootstrap(v1, admissionFoundation, false)
+	mountRecoveryRoutes(v1, recoveryFoundation, false)
 	return router
 }
 

@@ -22,7 +22,7 @@ assert_line() {
 }
 
 main() {
-  local tool file operator group fake_bin backup_marker curl_args_log monitor_log monitor_status now
+  local tool file operator group fake_bin backup_marker runtime_report curl_args_log monitor_log monitor_status now
   for tool in cat chmod date grep id mkdir mktemp systemd-analyze; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
@@ -61,12 +61,19 @@ main() {
   assert_line "$S12_TEMPORARY/gradex-monitor.timer" 'Persistent=true'
 
   assert_line "$S12_TEMPORARY/gradex-backup.service" 'Type=oneshot'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'TimeoutStartSec=360s'
   assert_line "$S12_TEMPORARY/gradex-backup.service" "User=$operator"
   assert_line "$S12_TEMPORARY/gradex-backup.service" "Group=$group"
   assert_line "$S12_TEMPORARY/gradex-backup.service" "WorkingDirectory=$S12_ROOT"
   assert_line "$S12_TEMPORARY/gradex-backup.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh backup"
   assert_line "$S12_TEMPORARY/gradex-backup.timer" 'OnCalendar=hourly'
   assert_line "$S12_TEMPORARY/gradex-backup.timer" 'Persistent=true'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'UMask=0077'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'NoNewPrivileges=true'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'PrivateTmp=true'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'ProtectSystem=full'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'ReadWritePaths=/var/lib/gradex'
+  assert_line "$S12_TEMPORARY/gradex-backup.service" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
 
   if grep --ignore-case --extended-regexp \
     '(runtime\.env|webhook|token|password|database_url|secret|Environment(File)?=)' \
@@ -80,7 +87,17 @@ main() {
   assert_line "$S12_ROOT/deploy/monitoring/monitor.env.example" 'GRADEX_BACKUP_MAX_AGE_SECONDS=7200'
   grep --quiet --fixed-strings 'maximum_age_seconds: 7200' "$S12_ROOT/deploy/monitoring/rules.yml" ||
     die "monitoring rules do not match the two-hour freshness contract"
+  grep --quiet --fixed-strings 'stale_due_seconds: 3600' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not match the one-hour email staleness contract"
+  grep --quiet --fixed-strings 'warning_used_percent: 85' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not match the disk warning contract"
+  grep --quiet --fixed-strings 'critical_used_percent: 95' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not match the disk critical contract"
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_BACKUP_MAX_AGE_SECONDS=7200'
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_EMAIL_STALE_SECONDS=3600'
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_WARN_PERCENT=85'
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_CRITICAL_PERCENT=95'
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_MIN_FREE_BYTES=5368709120'
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_CA_FILE='
   grep --quiet --fixed-strings 'optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN' \
     "$S12_ROOT/deploy/monitoring/rules.yml" ||
@@ -88,6 +105,7 @@ main() {
 
   fake_bin="$S12_TEMPORARY/fake-bin"
   backup_marker="$S12_TEMPORARY/latest.completed-at"
+  runtime_report="$S12_TEMPORARY/runtime-report"
   curl_args_log="$S12_TEMPORARY/curl.args"
   monitor_log="$S12_TEMPORARY/monitor.log"
   mkdir -p "$fake_bin"
@@ -108,6 +126,8 @@ done
 [ "$write_status" = 0 ] || printf '200'
 EOF
   chmod 0755 "$fake_bin/curl"
+  printf 'version=1\nworker|PASS|fixture worker\nemail_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1\ndisk_roots|PASS|fixture paths\n' >"$runtime_report"
+  chmod 600 "$runtime_report"
 
   now="$(date +%s)"
   printf '%s\n' "$((now - 7199))" >"$backup_marker"
@@ -117,6 +137,9 @@ EOF
     GRADEX_ENVIRONMENT=systemd-proof \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
     GRADEX_BACKUP_MAX_AGE_SECONDS= \
+    GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
+    GRADEX_MONITOR_DISK_PATHS=/tmp \
+    GRADEX_MONITOR_DISK_MIN_FREE_BYTES=1 \
     "$S12_ROOT/deploy/monitoring/monitor-once.sh" >"$monitor_log" 2>&1 ||
     die "a backup younger than two hours was reported stale"
 
@@ -128,6 +151,9 @@ EOF
     GRADEX_ENVIRONMENT=systemd-proof \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
     GRADEX_BACKUP_MAX_AGE_SECONDS= \
+    GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
+    GRADEX_MONITOR_DISK_PATHS=/tmp \
+    GRADEX_MONITOR_DISK_MIN_FREE_BYTES=1 \
     GRADEX_ALERT_WEBHOOK_URL=https://alerts.example/systemd-proof-url-secret-sentinel \
     GRADEX_ALERT_WEBHOOK_TOKEN=systemd-proof-secret-sentinel \
     FAKE_CURL_ARGS_LOG="$curl_args_log" \

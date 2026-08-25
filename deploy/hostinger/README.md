@@ -138,13 +138,44 @@ After the controlled public S5/S6 smoke has created provenance-bearing records:
 
 The source database is never destroyed. Backup accepts only a clean schema, records its
 `version|false` state before the dump, rejects a schema change during the dump, and checksum-protects
-both the dump and schema metadata. Restore verifies both checksums, invalidates stale restored-source
-evidence before replacing the isolated target, provisions a fresh separate volume/database, and
-restores without `--clean`. Only a successful restore records the exact backup filename in
-`restored-source`. Verification follows that immutable identity rather than the mutable `latest.dump`
-pointer, rechecks both checksums, requires the restored schema to match the recorded backup schema,
-checks Account, Course, invitation, ACTIVE Entitlement with `source_invitation_id`, and Enrollment
-records, and then requires the separate restore API to become healthy.
+both the temporary custom-format dump and schema metadata before restic encrypts the snapshot. Restore
+selects the latest or an explicit snapshot ID, verifies the encrypted snapshot files and both checksums,
+invalidates stale restored evidence before replacing the isolated target, provisions a fresh separate
+volume/database, and restores without `--clean`. Only a successful restore records the exact restic
+snapshot ID in `restored-source`; verification follows that remote identity, performs a deep repository
+check, requires the restored schema to match the remote schema metadata, checks Account, Course,
+invitation, ACTIVE Entitlement with `source_invitation_id`, and Enrollment records, and then requires
+the separate restore API to become healthy.
+
+### Encrypted offsite backup setup
+
+Install the pinned restic binary once on the VPS; this command verifies the architecture-specific SHA-256 before installing a root-owned binary:
+
+```bash
+sudo ./deploy/hostinger/install-restic.sh
+```
+
+Create a private, backup-only S3-compatible bucket or prefix separate from the application media bucket. Grant the backup credential only list access to that prefix plus object read, write, delete, and multipart-upload permissions required by the provider. Do not reuse the application media credential.
+
+Create a strong restic password, copy it to `/var/lib/gradex/backup-restic-password` with mode `0600`, and store a recovery copy in an operator-controlled off-host password manager or offline encrypted store. The password is not stored in the repository.
+
+Populate the `GRADEX_BACKUP_*` entries in `/var/lib/gradex/runtime.env` with the HTTPS endpoint, dedicated bucket/prefix, region, backup credential, password-file path, and retention values. Production rejects missing values and non-HTTPS endpoints; HTTP is accepted only for an explicit localhost disposable proof.
+
+Initialize the repository once, then exercise the same command used by systemd:
+
+```bash
+./deploy/hostinger/host.sh backup-init
+./deploy/hostinger/host.sh backup
+./deploy/hostinger/host.sh restore              # latest encrypted snapshot
+./deploy/hostinger/host.sh restore <snapshot-id>
+./deploy/hostinger/host.sh verify-restore
+```
+
+The launch policy keeps at least two latest snapshots, 48 hourly generations, 14 daily generations, and 8 weekly generations. `latest.completed-at` is written only after the encrypted snapshot is visible, repository verification passes, retention has been attempted, and the temporary plaintext staging is removed. A retention failure returns non-zero and is journaled even when the newly-created encrypted snapshot remains successful.
+If encryption or remote access fails, the uniquely named staging directory remains mode 0700 with dump files mode 0600 for retry/diagnosis; the next successful encrypted run removes stale pipeline staging. This is lifecycle control, not a claim of cryptographic SSD erasure.
+
+The installer does not enable or start timers. After configuration and manual restore proof, enable the existing timers explicitly with `systemctl enable --now gradex-monitor.timer gradex-backup.timer`. Existing historical plaintext files in `/var/lib/gradex/backups` are not removed by this change; retire them only after Founder/operator approval and a successful encrypted restore drill.
+The restic command timeout defaults to 300 seconds and is bounded by the backup service's 360-second start timeout; a timed-out remote operation is a failed run and does not refresh freshness.
 
 ## 7. Public smoke, rollback, and alerts
 
@@ -268,9 +299,12 @@ sudo systemctl disable --now gradex-monitor.timer gradex-backup.timer
 ```
 
 The protected runtime file supplies `GRADEX_ALERT_WEBHOOK_URL`, optional
-`GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_MONITOR_CA_FILE`, and
-`GRADEX_BACKUP_MAX_AGE_SECONDS`. `host.sh monitor` derives health/readiness URLs from
-`PUBLIC_ORIGIN` and points freshness monitoring at `/var/lib/gradex/backups/latest.completed-at`.
+`GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_MONITOR_CA_FILE`, and the configurable
+`GRADEX_MONITOR_EMAIL_STALE_SECONDS`, `GRADEX_MONITOR_DISK_WARN_PERCENT`,
+`GRADEX_MONITOR_DISK_CRITICAL_PERCENT`, `GRADEX_MONITOR_DISK_MIN_FREE_BYTES`, and optional
+`GRADEX_MONITOR_DISK_PATHS`. `host.sh monitor` derives health/readiness URLs from `PUBLIC_ORIGIN`,
+resolves the exact Compose worker/PostgreSQL services, derives Docker's data-root when disk paths are
+not explicit, and points freshness monitoring at `/var/lib/gradex/backups/latest.completed-at`.
 The hourly schedule uses a two-hour freshness threshold: this allows one delayed or missed run and
 detects stale backup state before a third hourly opportunity. It does not prove an RPO. Successful
 scheduled backups, real external alert delivery, and an isolated provider restore drill remain

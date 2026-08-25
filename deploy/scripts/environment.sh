@@ -87,6 +87,14 @@ prepare() {
       } >>"$S12_ENV_FILE"
       note "upgraded existing ignored environment state for media proof"
     fi
+    # ST-19 introduced a required sales contact number in the Compose model, but
+    # this generator was never taught to produce one, so a fresh environment
+    # could not interpolate and refused to start. The local value is a
+    # placeholder: this environment is disposable and never contacts anyone.
+    if ! grep -q '^SALES_WHATSAPP_NUMBER=' "$S12_ENV_FILE"; then
+      printf 'SALES_WHATSAPP_NUMBER=15550000000\n' >>"$S12_ENV_FILE"
+      note "upgraded existing ignored environment state for the sales contact number"
+    fi
     if ! grep -q '^REDIS_PASSWORD=' "$S12_ENV_FILE"; then
       printf 'REDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)" >>"$S12_ENV_FILE"
     fi
@@ -135,6 +143,16 @@ prepare() {
     printf 'ANONYMOUS_CSRF_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'ADMISSION_LIMITER_HMAC_KEY=%s\n' "$(openssl rand -hex 32)"
     printf 'OUTBOX_PROTECTED_PAYLOAD_KEY=%s\n' "$(openssl rand -hex 16)"
+    # A placeholder sales contact: this environment is disposable and never
+    # contacts anyone, but the Compose model requires the variable to interpolate.
+    printf 'SALES_WHATSAPP_NUMBER=15550000000\n'
+    # The API builds its compromised-password source unconditionally at startup
+    # and refuses to boot on the compose default of `unavailable`, so this local
+    # environment names a real mode. LOCAL ONLY: this is the disposable s12
+    # stack. It deliberately does not touch deploy/hostinger/compose.yml, where
+    # approving the adapter is LG-021 and a Founder decision.
+    printf 'PASSWORD_SCREEN_MODE=adapter\n'
+    printf 'COMPROMISED_PASSWORD_ADAPTER_APPROVED=true\n'
     printf 'EMAIL_API_KEY=re_production_like_noncredential\n'
     printf 'GRADEX_BACKEND_IMAGE=gradex-backend:s12-local\n'
     printf 'GRADEX_FRONTEND_IMAGE=gradex-frontend:s12-local\n'

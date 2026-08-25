@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -53,6 +55,11 @@ type DetailCourse struct {
 	Course
 	Description string    `json:"description"`
 	Sections    []Section `json:"sections"`
+	// ProgramAudience names the Programs this Course is relevant to, in the
+	// visitor's language. It is the same explicit-or-inferred rule discovery
+	// filters on, rendered as names — a reader sees "Computer Engineering", never
+	// a target row, a curriculum, or an identifier.
+	ProgramAudience []string `json:"program_audience,omitempty"`
 }
 
 type ListResult struct {
@@ -85,12 +92,59 @@ func NewRepository(pool *pgxpool.Pool, visibility VisibilityPredicate) (*Reposit
 	return &Repository{pool: pool, visibility: visibility}, nil
 }
 
-// List validates the public visibility boundary for the list route. T010 owns
-// the list projection, so this foundation deliberately returns no catalogue
-// fields yet.
+// List validates the public visibility boundary for the list route.
 func (r *Repository) List(ctx context.Context, arabic bool, page, pageSize int) (ListResult, error) {
-	query := r.projectionQuery(r.visibility("c", "cr"), ``, `ORDER BY c.id LIMIT $2 OFFSET $3`)
-	rows, err := r.pool.Query(ctx, query, arabic, pageSize, (page-1)*pageSize)
+	return r.Browse(ctx, arabic, page, pageSize, "", false, Filters{})
+}
+
+func (r *Repository) Search(ctx context.Context, arabic bool, page, pageSize int, searchQuery string) (ListResult, error) {
+	return r.Browse(ctx, arabic, page, pageSize, searchQuery, true, Filters{})
+}
+
+// queryArguments numbers placeholders as they are bound.
+//
+// The academic filters are optional and independent, so the parameter positions
+// are not knowable when the SQL is written. Binding through this accumulator is
+// what keeps every value a real bind parameter: no filter value is ever
+// concatenated into the statement text.
+type queryArguments struct{ values []any }
+
+func (a *queryArguments) add(value any) string {
+	a.values = append(a.values, value)
+	return "$" + strconv.Itoa(len(a.values))
+}
+
+// Browse is the one public catalogue read. Search and academic filtering compose
+// here rather than in separate query builders, so a Course cannot be visible
+// through one path and hidden through another.
+//
+// PublishedOnly is applied first and unconditionally. Every academic filter is
+// ANDed onto it, so no combination of query parameters can widen the visible set
+// past the publication rule — a filter can only ever remove Courses.
+func (r *Repository) Browse(
+	ctx context.Context, arabic bool, page, pageSize int,
+	searchQuery string, searching bool, filters Filters,
+) (ListResult, error) {
+	// The locale flag is bound first because the projection reads it as $1.
+	arguments := &queryArguments{}
+	arguments.add(arabic)
+	visibility := r.visibility("c", "cr")
+
+	conditions := r.academicConditions(arguments, filters, searchQuery, searching)
+
+	// Relevance is an ORDER BY term only. It never appears in the WHERE clause,
+	// so a Student's academic profile cannot remove a Course from the catalogue.
+	order := "ORDER BY "
+	if slug := strings.TrimSpace(filters.RelevantProgramSlug); slug != "" {
+		order += RelevanceExpression("c", "cr", arguments.add(slug)) + ", "
+	}
+	order += "c.id"
+
+	limit := arguments.add(pageSize)
+	offset := arguments.add((page - 1) * pageSize)
+
+	query := r.projectionQuery(visibility, conditions, order+" LIMIT "+limit+" OFFSET "+offset)
+	rows, err := r.pool.Query(ctx, query, arguments.values...)
 	if err != nil {
 		return ListResult{}, fmt.Errorf("listing public courses: %w", err)
 	}
@@ -99,33 +153,68 @@ func (r *Repository) List(ctx context.Context, arabic bool, page, pageSize int) 
 	if err != nil {
 		return ListResult{}, err
 	}
+
+	// The count repeats the same predicate against the same joins, so the total
+	// can never describe a different set than the page. It numbers its own
+	// parameters from $1: the count projects no localized column, so binding the
+	// locale flag here would leave an unreferenced parameter Postgres cannot
+	// type.
+	countArguments := &queryArguments{}
+	countConditions := r.academicConditions(countArguments, filters, searchQuery, searching)
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM (`+r.visibleCourseQuery()+`) visible`).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx,
+		r.countQuery(visibility, countConditions), countArguments.values...).Scan(&total); err != nil {
 		return ListResult{}, fmt.Errorf("counting public courses: %w", err)
 	}
 	return ListResult{Items: items, Page: page, PageSize: pageSize, Total: total}, nil
 }
 
-func (r *Repository) Search(ctx context.Context, arabic bool, page, pageSize int, searchQuery string) (ListResult, error) {
-	visibility := r.visibility("c", "cr")
-	query := r.projectionQuery(visibility, ``, `AND `+SearchMatchPredicate("$2")+` ORDER BY c.id LIMIT $3 OFFSET $4`)
-	rows, err := r.pool.Query(ctx, query, arabic, searchQuery, pageSize, (page-1)*pageSize)
-	if err != nil {
-		return ListResult{}, fmt.Errorf("searching public courses: %w", err)
+// academicConditions renders the optional narrowing clauses. An absent filter
+// contributes nothing at all rather than a permissive clause, so "no filter" and
+// "a filter that matches everything" are not the same statement.
+func (r *Repository) academicConditions(
+	arguments *queryArguments, filters Filters, searchQuery string, searching bool,
+) string {
+	var clauses []string
+	if slug := strings.TrimSpace(filters.InstitutionSlug); slug != "" {
+		clauses = append(clauses, InstitutionPredicate("c", arguments.add(slug)))
 	}
-	defer rows.Close()
-	items, err := scanCourses(rows, arabic)
-	if err != nil {
-		return ListResult{}, err
+	if slug := strings.TrimSpace(filters.ProgramSlug); slug != "" {
+		clauses = append(clauses, ProgramAudiencePredicate("c", "cr", arguments.add(slug)))
 	}
-	var total int
-	if err := r.pool.QueryRow(ctx, r.searchCountQuery(visibility), searchQuery).Scan(&total); err != nil {
-		return ListResult{}, fmt.Errorf("counting public search results: %w", err)
+	if level := parseLevel(filters.Level); level > 0 {
+		// The Program parameter is rebound rather than reused so the level
+		// clause is self-contained and cannot depend on clause ordering.
+		programParameter := ""
+		if slug := strings.TrimSpace(filters.ProgramSlug); slug != "" {
+			programParameter = arguments.add(slug)
+		}
+		clauses = append(clauses, LevelPredicate("c", arguments.add(level), programParameter))
 	}
-	return ListResult{Items: items, Page: page, PageSize: pageSize, Total: total}, nil
+	if subject := strings.TrimSpace(filters.Subject); subject != "" {
+		clauses = append(clauses, SubjectPredicate("c", arguments.add(subject)))
+	}
+	if searching {
+		clauses = append(clauses, SearchMatchPredicate(arguments.add(searchQuery)))
+	}
+	if len(clauses) == 0 {
+		return ""
+	}
+	return "AND " + strings.Join(clauses, " AND ")
 }
 
-func (r *Repository) searchCountQuery(visibility string) string {
+// parseLevel accepts only a small positive integer. Anything else is not a
+// level and contributes no clause at all, so a malformed query parameter is an
+// unfiltered catalogue rather than an error or a SQL surprise.
+func parseLevel(value string) int {
+	level, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || level < 1 || level > 12 {
+		return 0
+	}
+	return level
+}
+
+func (r *Repository) countQuery(visibility, conditions string) string {
 	return `SELECT count(*)
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
@@ -134,7 +223,7 @@ func (r *Repository) searchCountQuery(visibility string) string {
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
 		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
-		WHERE ` + visibility + ` AND ` + SearchMatchPredicate("$1")
+		WHERE ` + visibility + ` ` + conditions
 }
 
 // SearchMatchPredicate is the exact three-way predicate used by Search. It
@@ -170,7 +259,55 @@ func (r *Repository) Detail(ctx context.Context, identifier string, arabic bool)
 	if !found {
 		return nil, nil
 	}
-	return &DetailCourse{Course: items[0], Description: description, Sections: sections}, nil
+	audience, err := r.programAudience(ctx, items[0].ID, arabic)
+	if err != nil {
+		return nil, err
+	}
+	return &DetailCourse{
+		Course: items[0], Description: description, Sections: sections, ProgramAudience: audience,
+	}, nil
+}
+
+// programAudience resolves the Programs a Course reaches, by exactly the rule
+// ProgramAudiencePredicate applies: explicit revision targets when there are
+// any, and the Subject's active curriculum mappings when there are none.
+//
+// The two branches are a UNION of two disjoint sets rather than a join, so a
+// Subject mapped into several curricula of the same Program yields one name.
+func (r *Repository) programAudience(ctx context.Context, courseID string, arabic bool) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT CASE WHEN $1 THEN p.name_ar ELSE p.name_en END AS name
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = c.live_revision_id
+		JOIN course_program_targets cpt ON cpt.revision_id = cr.id
+		JOIN programs p ON p.id = cpt.program_id AND p.retired_at IS NULL
+		WHERE c.id = $2::uuid
+		UNION
+		SELECT DISTINCT CASE WHEN $1 THEN p.name_ar ELSE p.name_en END AS name
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = c.live_revision_id
+		JOIN curriculum_subjects cs ON cs.subject_id = c.subject_id
+		JOIN curricula cu ON cu.id = cs.curriculum_id
+			AND cu.retired_at IS NULL AND cu.status = 'ACTIVE'
+		JOIN programs p ON p.id = cu.program_id AND p.retired_at IS NULL
+		WHERE c.id = $2::uuid
+		  AND NOT EXISTS (
+		    SELECT 1 FROM course_program_targets cpt WHERE cpt.revision_id = cr.id
+		  )
+		ORDER BY name ASC`, arabic, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("loading public course audience: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scanning public course audience: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
 }
 
 func (r *Repository) detailContent(ctx context.Context, courseID string, arabic bool) (string, []Section, bool, error) {
@@ -250,7 +387,11 @@ func scanCourses(rows interface {
 	Scan(...any) error
 	Err() error
 }, arabic bool) ([]Course, error) {
-	var items []Course
+	// Initialised, never nil. A nil slice serialises to `"items": null`, which a
+	// client cannot tell apart from a response it has not received yet — an
+	// empty catalogue would render as a permanent loading state. An empty
+	// result is a valid answer and must be shaped like one.
+	items := []Course{}
 	for rows.Next() {
 		var item Course
 		var universityLabel, universityCode, majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
@@ -357,11 +498,4 @@ func scanPublicSection(row interface{ Scan(...any) error }) (Section, bool, erro
 	section.Title = *title
 	section.Position = *position
 	return section, true, nil
-}
-
-func (r *Repository) visibleCourseQuery() string {
-	return `SELECT 1
-		FROM courses c
-		JOIN course_revisions cr ON cr.course_id = c.id
-		WHERE ` + r.visibility("c", "cr")
 }

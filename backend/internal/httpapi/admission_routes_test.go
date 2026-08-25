@@ -75,12 +75,17 @@ func mountedAdmissionRouterWithObserver(
 		AnonymousSessionTTL: time.Hour,
 		Policies:            policies,
 		Service:             &fakeAdmissionService{},
-		Recovery:            &fakeRecoveryService{},
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})
 	if err != nil {
 		t.Fatalf("constructing admission foundation: %v", err)
+	}
+	recoveryFoundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: foundation, Recovery: &fakeRecoveryService{},
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery foundation: %v", err)
 	}
 	router := gin.New()
 	if observe != nil {
@@ -89,7 +94,9 @@ func mountedAdmissionRouterWithObserver(
 			observe(c)
 		})
 	}
-	mountAdmissionRoutes(router.Group("/api/v1"), foundation)
+	v1 := router.Group("/api/v1")
+	mountStudentAdmissionRoutes(v1, foundation)
+	mountRecoveryRoutes(v1, recoveryFoundation, false)
 	return router
 }
 

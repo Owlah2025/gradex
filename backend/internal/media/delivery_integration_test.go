@@ -768,3 +768,87 @@ func TestD8PublicPreviewIsExactPublishedReadyAndPrivateOutsideSigning(t *testing
 	}
 	f.t.Logf("signed keys: %s", fmt.Sprint(f.store.requestedKeys()))
 }
+
+func TestMED01PublicPreviewFollowsCanonicalCourseEligibility(t *testing.T) {
+	f := newDeliveryFixture(t)
+
+	assertAllowed := func(label string) {
+		t.Helper()
+		before := len(f.store.requestedKeys())
+		for _, tc := range []struct {
+			name  string
+			issue func() (PreviewAuthorization, error)
+		}{
+			{"asset", func() (PreviewAuthorization, error) {
+				return f.delivery.IssuePreview(f.ctx, f.preview)
+			}},
+			{"course", func() (PreviewAuthorization, error) {
+				return f.delivery.IssueCoursePreview(f.ctx, f.courseID)
+			}},
+		} {
+			issued, err := tc.issue()
+			if err != nil || issued.AssetVersionID != f.preview || issued.URL == "" {
+				t.Fatalf("%s %s preview=%+v err=%v; want signed current preview", label, tc.name, issued, err)
+			}
+			if got := issued.ExpiresAt.Sub(f.now); got != 5*time.Minute {
+				t.Fatalf("%s %s preview lifetime=%s, want 5m", label, tc.name, got)
+			}
+		}
+		if got := len(f.store.requestedKeys()); got != before+2 {
+			t.Fatalf("%s preview signing calls=%d, want %d", label, got-before, 2)
+		}
+	}
+
+	assertDenied := func(label string) {
+		t.Helper()
+		before := len(f.store.requestedKeys())
+		for _, tc := range []struct {
+			name  string
+			issue func() (PreviewAuthorization, error)
+		}{
+			{"asset", func() (PreviewAuthorization, error) {
+				return f.delivery.IssuePreview(f.ctx, f.preview)
+			}},
+			{"course", func() (PreviewAuthorization, error) {
+				return f.delivery.IssueCoursePreview(f.ctx, f.courseID)
+			}},
+		} {
+			issued, err := tc.issue()
+			if !errors.Is(err, ErrProtectedUnavailable) {
+				t.Fatalf("%s %s preview error=%v, want %v", label, tc.name, err, ErrProtectedUnavailable)
+			}
+			if issued.URL != "" || !issued.ExpiresAt.IsZero() {
+				t.Fatalf("%s %s preview returned authorization on denial: %+v", label, tc.name, issued)
+			}
+		}
+		if got := len(f.store.requestedKeys()); got != before {
+			t.Fatalf("%s preview denial reached storage signing: before=%d after=%d", label, before, got)
+		}
+	}
+
+	assertAllowed("published")
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET access_suspended_at = $1, access_suspension_reason = 'MED-01 integration fixture' WHERE id = $2::uuid`, f.now, f.courseID); err != nil {
+		t.Fatalf("suspending Course access: %v", err)
+	}
+	assertDenied("access-suspended")
+
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET access_suspended_at = NULL, access_suspension_reason = NULL WHERE id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("restoring Course access: %v", err)
+	}
+	assertAllowed("restored")
+
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET retired_at = $1 WHERE id = $2::uuid`, f.now, f.courseID); err != nil {
+		t.Fatalf("retiring Course: %v", err)
+	}
+	assertDenied("retired")
+
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET lifecycle = 'DELISTED' WHERE id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("delisting Course: %v", err)
+	}
+	assertDenied("delisted")
+
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET lifecycle = 'ARCHIVED' WHERE id = $1::uuid`, f.courseID); err != nil {
+		t.Fatalf("archiving Course: %v", err)
+	}
+	assertDenied("archived")
+}

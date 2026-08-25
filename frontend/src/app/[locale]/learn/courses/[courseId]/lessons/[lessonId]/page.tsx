@@ -14,6 +14,13 @@ import { LearningLocaleToggle } from "@/components/learning/learning-locale-togg
 import { ReportTargetActions } from "@/components/learning/report-content-dialog";
 import { lessonReportTargets } from "@/components/learning/report-targets";
 import { reportLabels } from "@/components/learning/report-labels";
+import {
+  accessLabels,
+  learningStatusLabel,
+  materialsLabels,
+  navigationLabels,
+  unavailableLabels,
+} from "@/components/learning/learning-label-sets";
 import { formatLearningPositionSeconds } from "@/lib/formatters/learning";
 
 export const dynamic = "force-dynamic";
@@ -27,24 +34,33 @@ export default async function LessonPage({
   const { locale: requestedLocale, courseId, lessonId } = await params;
   const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
-  return <LessonContent courseID={courseId} lessonID={lessonId} locale={locale} labels={dictionary.learning} playerLabels={dictionary.player} localeSwitchLabel={dictionary.meta.switchToAria} />;
+  // No dictionary crosses this boundary. The status label can only be resolved once the read model
+  // says which status it is, and passing both strings so the child could choose is exactly the
+  // defect (GAP-04) — so the child selects its own dictionary from the locale and narrows after the
+  // fetch instead.
+  return (
+    <LessonContent
+      courseID={courseId}
+      lessonID={lessonId}
+      locale={locale}
+      localeSwitchLabel={dictionary.meta.switchToAria}
+    />
+  );
 }
 
 async function LessonContent({
   courseID,
   lessonID,
   locale,
-  labels,
-  playerLabels,
   localeSwitchLabel,
 }: {
   courseID: string;
   lessonID: string;
   locale: "ar" | "en";
-  labels: typeof ar.learning;
-  playerLabels: typeof ar.player;
   localeSwitchLabel: string;
 }) {
+  const labels = locale === "ar" ? ar.learning : en.learning;
+  const playerLabels = locale === "ar" ? ar.player : en.player;
   try {
     const lesson = await requestLessonReadModelServer(courseID, lessonID, locale);
     const playbackPlan = lessonPlaybackPlan(lesson.learning_status);
@@ -56,14 +72,14 @@ async function LessonContent({
               <p className="text-sm font-semibold text-foreground/80">{lesson.section.title}</p>
               <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
                 <h1 className="font-display text-4xl font-bold text-foreground">{lesson.title}</h1>
-                <LearningStatusBadge status={lesson.learning_status} labels={labels} />
+                <LearningStatusBadge status={lesson.learning_status} label={learningStatusLabel(lesson.learning_status, labels)} />
               </div>
             </div>
             <LearningLocaleToggle locale={locale} label={localeSwitchLabel} />
           </div>
           <div className="mt-5 space-y-2">
             <p className="text-sm text-foreground/80">{labels.progress}: {formatLearningPositionSeconds(lesson.progress.position_seconds, locale)} {labels.positionSeconds} · {lesson.progress.completed ? labels.completed : labels.notCompleted}</p>
-            <AccessUntil expiresAt={lesson.expires_at} labels={labels} locale={locale} />
+            <AccessUntil expiresAt={lesson.expires_at} labels={accessLabels(labels)} locale={locale} />
           </div>
         </header>
         {lesson.learning_status === "active" ? (
@@ -71,7 +87,7 @@ async function LessonContent({
             resources={lesson.resources}
             labMaterials={lesson.lab_materials}
             locale={locale}
-            labels={labels}
+            labels={materialsLabels(labels)}
           />
         ) : null}
         {playbackPlan.mountPlayer ? (
@@ -93,7 +109,12 @@ async function LessonContent({
             />
           </div>
         ) : null}
-        <LessonNavigation lesson={lesson} locale={locale} labels={labels} />
+        <LessonNavigation
+          courseId={lesson.course_id}
+          navigation={lesson.navigation}
+          locale={locale}
+          labels={navigationLabels(labels)}
+        />
       </main>
     );
   } catch {
@@ -101,7 +122,7 @@ async function LessonContent({
       <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto min-h-screen max-w-3xl px-5 py-10 sm:px-6">
         <div className="space-y-5">
           <div className="flex justify-end"><LearningLocaleToggle locale={locale} label={localeSwitchLabel} /></div>
-          <LearningUnavailable labels={labels} />
+          <LearningUnavailable labels={unavailableLabels(labels)} />
         </div>
       </main>
     );

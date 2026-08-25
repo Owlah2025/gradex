@@ -1,0 +1,180 @@
+{
+  "schema_version": 1,
+  "profile": "limited-paid-beta",
+  "fixture": {
+    "registered_accounts": 110,
+    "student_accounts": 104,
+    "entitled_students": 50,
+    "non_entitled_students": 54,
+    "login_identities": 100,
+    "admin_accounts": 1,
+    "instructor_accounts": 5,
+    "operator_instructors": 4,
+    "published_courses": 8,
+    "ready_video_fixtures": 8,
+    "representative_sections_per_course": 2,
+    "representative_lessons_per_course": 4
+  },
+  "run": {
+    "warmup_seconds": 120,
+    "idle_baseline_seconds": 120,
+    "repeat_count": 2,
+    "cold_start_smoke": true,
+    "warmup_excluded_from_measured_totals": true,
+    "no_automatic_retry": true
+  },
+  "workload_mix": {
+    "catalog_list": 0.05,
+    "catalog_detail": 0.05,
+    "session_check": 0.05,
+    "dashboard": 0.075,
+    "access_status": 0.075,
+    "course_home": 0.20,
+    "lesson_metadata": 0.25,
+    "playback_authorization": 0.05,
+    "playback_manifest": 0.05,
+    "progress_write": 0.15
+  },
+  "workflow_slots": 380,
+  "scenarios": {
+    "mixed_student_sustained": {
+      "kind": "authenticated_student_mixed",
+      "total_rps": 20,
+      "authenticated_student_rps": 18,
+      "duration_seconds": 600,
+      "warmup_seconds": 120,
+      "workload_mix": "student_mixed"
+    },
+    "mixed_student_burst": {
+      "kind": "authenticated_student_mixed",
+      "total_rps": 30,
+      "authenticated_student_rps": 27,
+      "duration_seconds": 60,
+      "warmup_seconds": 120,
+      "workload_mix": "student_mixed"
+    },
+    "public_catalogue": {
+      "kind": "anonymous_public_catalogue",
+      "rps": 10,
+      "duration_seconds": 600,
+      "list_share": 0.70,
+      "detail_share": 0.30,
+      "session_cookie": false,
+      "auth_token": false
+    },
+    "login_surge": {
+      "kind": "distinct_student_login",
+      "distinct_students": 100,
+      "successful_bootstraps": 100,
+      "successful_logins": 100,
+      "window_seconds": 60,
+      "shared_nat_source_required": true
+    },
+    "playback_surge": {
+      "kind": "protected_playback_control_plane",
+      "starts": 100,
+      "entitled_students": 50,
+      "max_starts_per_student": 2,
+      "window_seconds": 60,
+      "segments_followed": false
+    },
+    "privileged_operators": {
+      "kind": "privileged_reads",
+      "concurrent_operators": 5,
+      "rps": 5,
+      "duration_seconds": 60,
+      "admin_operators": 1,
+      "instructor_operators": 4,
+      "mutations": "low_frequency_disposable_only"
+    },
+    "upload_contention": {
+      "kind": "direct_storage_upload_contention",
+      "concurrent_uploads": 3,
+      "duration_seconds": 60,
+      "student_load_overlap": true,
+      "proxy_media_through_api": false,
+      "requires_provider_version_id": true
+    },
+    "transcode_contention": {
+      "kind": "worker_transcode_contention",
+      "max_active_transcodes_per_worker": 2,
+      "third_job": "queue",
+      "drain_bound_seconds": null,
+      "drain_bound_requires_fixture_authority": true
+    },
+    "cold_start_smoke": {
+      "kind": "post_restart_readiness_smoke",
+      "measured_capacity": false,
+      "meaningful_load": false
+    }
+  },
+  "latency_classes": {
+    "read_control_plane": {
+      "p95_ms_exclusive": 300
+    },
+    "transactional_write": {
+      "p95_ms_exclusive": 800
+    },
+    "healthy_video_first_frame": {
+      "p95_seconds_exclusive": 3,
+      "proof_mode": "separate_browser_edge_check"
+    },
+    "password_login": "transactional_write",
+    "playback_authorization": "read_control_plane",
+    "playback_manifest": "read_control_plane",
+    "progress_write": "transactional_write",
+    "upload_intent": "transactional_write",
+    "upload_completion": "transactional_write"
+  },
+  "resource_gates": {
+    "host_cpu_p95_percent_max": 85,
+    "host_cpu_over_90_max_seconds": 60,
+    "memory_used_fraction_max": 0.80,
+    "swap_used_bytes_max": 0,
+    "oom_events_max": 0,
+    "unexpected_container_restarts_max": 0,
+    "disk_used_fraction_max_exclusive": 0.85,
+    "disk_free_bytes_min": 5368709120,
+    "postgres_safe_required": true,
+    "redis_safe_required": true,
+    "worker_queue_safe_required": true
+  },
+  "error_counters": [
+    "transport_failures",
+    "unexpected_http_statuses",
+    "http_4xx",
+    "http_429",
+    "http_5xx",
+    "http_503",
+    "authentication_failures",
+    "entitlement_failures",
+    "response_shape_failures",
+    "manifest_failures",
+    "dropped_iterations",
+    "upload_failures",
+    "worker_terminal_failures"
+  ],
+  "storage": {
+    "provider_mode": "s3-compatible-provider",
+    "provider_env": "GRADEX_LOADTEST_STORAGE_PROVIDER",
+    "prefix_template": "capacity/{run_id}/",
+    "provider_logic_must_not_assume": ["MinIO", "R2"]
+  },
+  "cleanup": {
+    "database_prefix": "gradex_playwright_e2e_",
+    "storage_prefix": "capacity/",
+    "session_fixture_scope": "exact-run",
+    "result_scope": "exact-run",
+    "forbidden_operations": ["wildcard_database_drop", "bucket_wide_delete", "docker_system_prune", "docker_volume_prune"]
+  },
+  "provenance_required": [
+    "run_id",
+    "release_identity",
+    "container_image_identity",
+    "compose_project_identity",
+    "host_class",
+    "kvm2_cpu_ram_disk",
+    "storage_provider_mode",
+    "environment_profile"
+  ]
+}

@@ -346,9 +346,12 @@ func TestDuplicateIsRefusedByThePartialUniqueIndexItself(t *testing.T) {
 	// The index is deliberately partial: resolving the first row lifts it (S8's behaviour, used
 	// here only as fixture setup).
 	resolved := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
-	if _, err := fixture.repository.pool.Exec(ctx,
-		`UPDATE content_reports SET resolved_at = $1 WHERE reporter_account_id = $2::uuid`,
-		resolved, fixture.studentID); err != nil {
+	if _, err := fixture.repository.pool.Exec(ctx, `
+		UPDATE content_reports
+		SET resolved_at = $1, resolved_by_account_id = $2::uuid,
+		    resolution_action = 'DISMISSED', resolution_reason = 'fixture setup'
+		WHERE reporter_account_id = $2::uuid
+	`, resolved, fixture.studentID); err != nil {
 		t.Fatalf("resolving as fixture setup: %v", err)
 	}
 	if err := insertReportDirectly(ctx, fixture, fixture.studentID, "LESSON", fixture.lessonID, "inaccurate", nil, nil); err != nil {
@@ -591,7 +594,7 @@ func TestReportCreationDisclosesNoQueueOrModerationState(t *testing.T) {
 		t.Fatalf("returned report = %+v", report)
 	}
 
-	// The table itself has no moderation or queue surface for S5 to publish — S8 adds those.
+	// Resolution metadata is server-only; the Student route still publishes no queue or moderation state.
 	rows, err := fixture.repository.pool.Query(ctx, `
 		SELECT column_name FROM information_schema.columns
 		WHERE table_name = 'content_reports' ORDER BY column_name
@@ -613,7 +616,8 @@ func TestReportCreationDisclosesNoQueueOrModerationState(t *testing.T) {
 	}
 	want := []string{
 		"created_at", "explanation", "id", "reason", "reporter_account_id",
-		"resolved_at", "target_id", "target_kind", "target_revision_ref",
+		"resolution_action", "resolution_reason", "resolved_at", "resolved_by_account_id",
+		"target_id", "target_kind", "target_revision_ref",
 	}
 	if strings.Join(columns, ",") != strings.Join(want, ",") {
 		t.Fatalf("content_reports columns = %v, want exactly %v", columns, want)

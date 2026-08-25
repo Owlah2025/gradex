@@ -40,6 +40,12 @@ export const RUN_STATE_FILE_PATH = `${E2E_TMP_DIR}/gradex-s5-e2e-run-state.json`
 export const API_BINARY_PATH = `${E2E_TMP_DIR}/gradex-s5-playwright-api`;
 export const SEED_BINARY_PATH = `${E2E_TMP_DIR}/gradex-s5-e2e-seed`;
 
+// T8B: the staff-invitation journey is only real if the transactional email leaves the product
+// the way production sends it — outbox row, worker dispatcher, renderer, SMTP. That requires the
+// run to own a worker process as well as an API process, so it gets its own run-owned binary path
+// and the same ownership-verified termination the API already has.
+export const WORKER_BINARY_PATH = `${E2E_TMP_DIR}/gradex-s5-playwright-worker`;
+
 // External staging runs keep using the same safety-gated seed/query binary,
 // but their PostgreSQL endpoint is supplied by the deployment harness rather
 // than assumed to be the local developer Compose port.
@@ -74,6 +80,9 @@ export type RunState = {
   /** The per-run Next.js port. A port number is run-owned, non-secret state. */
   frontendPort: number;
   processStartTime: string;
+  /** PID of the run-owned worker process, when the run started one. */
+  workerPid?: number | null;
+  workerExecPath?: string;
   dbName: string;
   lockOwner: string;
   startedAt: string;
@@ -85,12 +94,14 @@ export type CleanupResources = {
   stateFilePath?: string;
   dbName?: string | null;
   apiPid?: number | null;
+  workerPid?: number | null;
   seedBinaryPath?: string;
   adminDSN?: string;
 };
 
 export type CleanupOutcome = {
   apiTerminated: boolean;
+  workerTerminated: boolean;
   dbDropped: boolean;
   stateFileRemoved: boolean;
   lockReleased: boolean;
@@ -364,6 +375,7 @@ export function safeTerminateApiProcess(pid: number, apiExecPath: string = API_B
 export async function cleanupRunResources(resources: CleanupResources): Promise<CleanupOutcome> {
   const outcome: CleanupOutcome = {
     apiTerminated: false,
+    workerTerminated: false,
     dbDropped: false,
     stateFileRemoved: false,
     lockReleased: false,
@@ -381,6 +393,15 @@ export async function cleanupRunResources(resources: CleanupResources): Promise<
       outcome.apiTerminated = safeTerminateApiProcess(resources.apiPid);
     } catch (e: any) {
       outcome.errors.push(`API termination error: ${e.message}`);
+    }
+  }
+
+  // 1b. Terminate the run-owned worker, before the database it polls is dropped.
+  if (resources.workerPid) {
+    try {
+      outcome.workerTerminated = safeTerminateApiProcess(resources.workerPid, WORKER_BINARY_PATH);
+    } catch (e: any) {
+      outcome.errors.push(`Worker termination error: ${e.message}`);
     }
   }
 

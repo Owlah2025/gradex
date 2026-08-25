@@ -107,6 +107,25 @@ type ReassignCourseOwnerRequest struct {
 // TransitionCourseLifecycle applies only the BR-090 presentation graph. It never changes a
 // revision, price, access fixture, or retirement/suspension state.
 func (r *Repository) TransitionCourseLifecycle(ctx context.Context, req LifecycleMutation) (*Course, error) {
+	var result Course
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		updated, err := r.TransitionCourseLifecycleTx(ctx, tx, req)
+		if err != nil {
+			return err
+		}
+		result = *updated
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// TransitionCourseLifecycleTx is the canonical lifecycle command on a caller-owned transaction.
+// The ordinary command above uses the same implementation and commits it in its own transaction;
+// moderation uses this form to keep a report resolution and its delegated Course action atomic.
+func (r *Repository) TransitionCourseLifecycleTx(ctx context.Context, tx pgx.Tx, req LifecycleMutation) (*Course, error) {
 	if req.CourseID == "" {
 		return nil, ErrCourseNotFound
 	}
@@ -116,32 +135,23 @@ func (r *Repository) TransitionCourseLifecycle(ctx context.Context, req Lifecycl
 	if !req.Target.Valid() {
 		return nil, ErrInvalidLifecycle
 	}
-
-	var result Course
-	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
-		row, err := r.LockCourse(ctx, tx, req.CourseID)
-		if err != nil {
-			return err
-		}
-		if !allowsLifecycleTransition(CourseLifecycle(row.Lifecycle), req.Target) {
-			return &LifecycleConflictError{CourseID: req.CourseID, Actual: row.Lifecycle, Expected: allowedLifecycleTargets(CourseLifecycle(row.Lifecycle))}
-		}
-
-		now := time.Now().UTC()
-		if _, err := tx.Exec(ctx, `UPDATE courses SET lifecycle = $1, updated_at = $2 WHERE id = $3::uuid`, req.Target, now, req.CourseID); err != nil {
-			return fmt.Errorf("updating course lifecycle: %w", err)
-		}
-		if err := writeAdminCourseAudit(ctx, tx, req.AdminAccountID, req.ActorDescriptor, lifecycleAuditAction(req.Target), req.CourseID, lifecycleAuditReason(req.Target), map[string]any{"from": row.Lifecycle, "to": req.Target}); err != nil {
-			return err
-		}
-		result = courseFromRow(row)
-		result.Lifecycle = req.Target
-		result.UpdatedAt = now
-		return nil
-	})
+	row, err := r.LockCourse(ctx, tx, req.CourseID)
 	if err != nil {
 		return nil, err
 	}
+	if !allowsLifecycleTransition(CourseLifecycle(row.Lifecycle), req.Target) {
+		return nil, &LifecycleConflictError{CourseID: req.CourseID, Actual: row.Lifecycle, Expected: allowedLifecycleTargets(CourseLifecycle(row.Lifecycle))}
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `UPDATE courses SET lifecycle = $1, updated_at = $2 WHERE id = $3::uuid`, req.Target, now, req.CourseID); err != nil {
+		return nil, fmt.Errorf("updating course lifecycle: %w", err)
+	}
+	if err := writeAdminCourseAudit(ctx, tx, req.AdminAccountID, req.ActorDescriptor, lifecycleAuditAction(req.Target), req.CourseID, lifecycleAuditReason(req.Target), map[string]any{"from": row.Lifecycle, "to": req.Target}); err != nil {
+		return nil, err
+	}
+	result := courseFromRow(row)
+	result.Lifecycle = req.Target
+	result.UpdatedAt = now
 	return &result, nil
 }
 

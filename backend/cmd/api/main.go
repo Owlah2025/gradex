@@ -281,7 +281,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 }
 
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.ProtectedLearningSchemaVersion
+	return db.ReportModerationSchemaVersion
 }
 
 func buildLearningFoundation(
@@ -408,15 +408,15 @@ func buildAdmissionFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
-) (*httpapi.AdmissionFoundation, *redis.Client, error) {
+) (*httpapi.AdmissionFoundation, *httpapi.RecoveryFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
 	compromisedSource, err := buildCompromisedPasswordSource(cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	policies, err := buildPolicySetResolver(cfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// These are deliberate signer/encryption boundaries. The values go
@@ -426,7 +426,7 @@ func buildAdmissionFoundation(
 		[]byte(admission.ProtectedPayloadKey().Expose()),
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
@@ -436,7 +436,7 @@ func buildAdmissionFoundation(
 	)
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	endpoints := []string{
@@ -467,7 +467,7 @@ func buildAdmissionFoundation(
 	})
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
@@ -480,7 +480,7 @@ func buildAdmissionFoundation(
 	})
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	foundation, err := httpapi.NewAdmissionFoundation(httpapi.AdmissionFoundationOptions{
@@ -490,26 +490,46 @@ func buildAdmissionFoundation(
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Policies:            policies,
 		Service:             service,
-		Recovery:            recovery,
 		Limiter:             limiter,
 		EndpointPolicies:    endpointPolicies,
 	})
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return foundation, redisClient, nil
+	recoveryFoundation, err := httpapi.NewRecoveryFoundation(httpapi.RecoveryFoundationOptions{
+		Admission: foundation, Recovery: recovery,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+	return foundation, recoveryFoundation, redisClient, nil
 }
 
 // buildPurchaseAdmissionFoundation keeps public purchase intent protected in
 // deployments where Student registration is intentionally disabled. It uses
 // the same anonymous admission and rate-limit primitives without requiring
-// registration policy, password-screening, or email dependencies.
+// registration policy dependencies. Recovery remains independently composed:
+// an existing Account must never lose credential recovery because public
+// Student creation is closed.
 func buildPurchaseAdmissionFoundation(
 	cfg *config.Config,
+	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
-) (*httpapi.AdmissionFoundation, *redis.Client, error) {
+) (*httpapi.AdmissionFoundation, *httpapi.RecoveryFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
+	compromisedSource, err := buildCompromisedPasswordSource(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	redisClient := redisConnection.NewRedisClient()
 	limiter, err := ratelimit.New(
 		ratelimit.NewRedisStore(redisClient),
@@ -518,7 +538,13 @@ func buildPurchaseAdmissionFoundation(
 	)
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	endpointPolicies := map[string]ratelimit.Policy{
+		"purchase-requests":       ratelimit.PurchaseRequestsPolicy(),
+		"password-reset-requests": ratelimit.DevelopmentAdmissionPolicy("password-reset-requests"),
+		"password-resets":         ratelimit.DevelopmentPasswordResetCompletionPolicy(),
+		"session-bootstrap":       sessionPolicies(cfg.Environment())["session-bootstrap"],
 	}
 	foundation, err := httpapi.NewPurchaseAdmissionFoundation(httpapi.PurchaseAdmissionFoundationOptions{
 		PublicOrigin:        cfg.PublicOrigin(),
@@ -526,13 +552,32 @@ func buildPurchaseAdmissionFoundation(
 		CSRFKey:             []byte(admission.AnonymousCSRFKey().Expose()),
 		AnonymousSessionTTL: admission.AnonymousSessionTTL(),
 		Limiter:             limiter,
-		PurchasePolicy:      ratelimit.PurchaseRequestsPolicy(),
+		EndpointPolicies:    endpointPolicies,
 	})
 	if err != nil {
 		_ = redisClient.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return foundation, redisClient, nil
+	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
+		Pool:        pool,
+		Outbox:      writer,
+		Compromised: compromisedSource,
+		ResetTTL:    admission.PasswordResetTokenTTL(),
+		Now:         time.Now,
+		Random:      rand.Reader,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+	recoveryFoundation, err := httpapi.NewRecoveryFoundation(httpapi.RecoveryFoundationOptions{
+		Admission: foundation, Recovery: recovery,
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return nil, nil, nil, err
+	}
+	return foundation, recoveryFoundation, redisClient, nil
 }
 
 func buildPolicySetResolver(cfg *config.Config) (identity.PolicySetResolver, error) {
@@ -815,12 +860,13 @@ func buildProductionFoundationsWithStaffSource(
 	// security primitives required for purchase intent; registration services
 	// and routes remain absent.
 	var admissionFoundation *httpapi.AdmissionFoundation
+	var recoveryFoundation *httpapi.RecoveryFoundation
 	var limiterClient *redis.Client
 	var err error
 	if cfg.Admission().Enabled() {
-		admissionFoundation, limiterClient, err = buildAdmissionFoundation(cfg, pool, redisConnection)
+		admissionFoundation, recoveryFoundation, limiterClient, err = buildAdmissionFoundation(cfg, pool, redisConnection)
 	} else {
-		admissionFoundation, limiterClient, err = buildPurchaseAdmissionFoundation(cfg, redisConnection)
+		admissionFoundation, recoveryFoundation, limiterClient, err = buildPurchaseAdmissionFoundation(cfg, pool, redisConnection)
 	}
 	if err != nil {
 		pf.Close()
@@ -833,6 +879,7 @@ func buildProductionFoundationsWithStaffSource(
 	} else {
 		pf.Options = append(pf.Options, httpapi.WithAdmissionSecurityFoundation(admissionFoundation))
 	}
+	pf.Options = append(pf.Options, httpapi.WithRecoveryFoundation(recoveryFoundation))
 
 	// Staff invitation and onboarding is an Admin capability, not part of public
 	// Student admission. Gating it on cfg.Admission().Enabled() coupled the two:
@@ -871,6 +918,20 @@ func buildProductionFoundationsWithStaffSource(
 		return nil, err
 	}
 	pf.Options = append(pf.Options, httpapi.WithCatalogFoundation(catalogFoundation))
+	reportRepository, err := learning.NewRepository(pool)
+	if err != nil {
+		pf.Close()
+		return nil, fmt.Errorf("composing moderation reports: %w", err)
+	}
+	moderationFoundation, err := httpapi.NewModerationFoundation(httpapi.ModerationFoundationOptions{
+		Reports: reportRepository,
+		Catalog: catalogFoundation.Repository(),
+	})
+	if err != nil {
+		pf.Close()
+		return nil, fmt.Errorf("composing moderation: %w", err)
+	}
+	pf.Options = append(pf.Options, httpapi.WithModerationFoundation(moderationFoundation))
 
 	publicCatalogFoundation, err := buildPublicCatalogFoundation(pool)
 	if err != nil {

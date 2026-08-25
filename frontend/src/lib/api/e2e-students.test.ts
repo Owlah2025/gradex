@@ -16,6 +16,10 @@ import {
   ROTATING_TEST_SLOTS,
   DASHBOARD_RESUME_AR_TEST_SLOT,
   DASHBOARD_RESUME_EN_TEST_SLOT,
+  ENTITLEMENT_EXTEND_TEST_SLOT,
+  ENTITLEMENT_PAST_DATE_TEST_SLOT,
+  ENTITLEMENT_REVOKE_TEST_SLOT,
+  ENTITLEMENT_SHORTEN_TEST_SLOT,
 } from "./e2e-students";
 
 const VIEWPORTS = 4;
@@ -36,6 +40,10 @@ function activeSlotsPerRepeat(): { label: string; slot: number }[] {
   slots.push({ label: "progress", slot: PROGRESS_TEST_SLOT });
   slots.push({ label: "dashboard-resume:en", slot: DASHBOARD_RESUME_EN_TEST_SLOT });
   slots.push({ label: "dashboard-resume:ar", slot: DASHBOARD_RESUME_AR_TEST_SLOT });
+  slots.push({ label: "entitlement:extend", slot: ENTITLEMENT_EXTEND_TEST_SLOT });
+  slots.push({ label: "entitlement:shorten", slot: ENTITLEMENT_SHORTEN_TEST_SLOT });
+  slots.push({ label: "entitlement:past-date", slot: ENTITLEMENT_PAST_DATE_TEST_SLOT });
+  slots.push({ label: "entitlement:revoke", slot: ENTITLEMENT_REVOKE_TEST_SLOT });
   for (let viewport = 0; viewport < VIEWPORTS; viewport += 1) {
     slots.push({ label: `evidence:v${viewport}`, slot: viewportEvidenceTestSlot(viewport) });
   }
@@ -44,7 +52,7 @@ function activeSlotsPerRepeat(): { label: string; slot: number }[] {
 
 test("rotating pool: the declared sizes cover the matrix at the greatest supported repeat count", () => {
   const active = activeSlotsPerRepeat();
-  assert.equal(active.length, 23, "the active matrix generates 23 executions per repetition");
+  assert.equal(active.length, 27, "the active matrix generates 27 executions per repetition");
   assert.ok(ROTATING_TEST_SLOTS >= active.length, "declared active slots must cover the matrix");
   assert.ok(
     ROTATING_POOL_SIZE >= ROTATING_TEST_SLOTS * ROTATING_MAX_REPEATS,
@@ -76,7 +84,7 @@ test("rotating pool: no two executions in a run share a Student", () => {
       seen.set(key, `expired:v${viewport}#${repeat}`);
     }
   }
-  assert.equal(seen.size, 23 * ROTATING_MAX_REPEATS + VIEWPORTS * ROTATING_MAX_REPEATS);
+  assert.equal(seen.size, 27 * ROTATING_MAX_REPEATS + VIEWPORTS * ROTATING_MAX_REPEATS);
 });
 
 test("rotating pool: the active and expired pools never overlap", () => {
@@ -134,4 +142,28 @@ test("rotating pool: identifiers and emails match the seeded fixtures", () => {
   assert.equal(student.accountID, "a1000000-0000-0000-0000-000000000164");
   assert.equal(student.email, "student-rotating-164@example.test");
   assert.equal(student.access, "active");
+});
+
+/**
+ * Growing the map is only safe because allocation is `slot * repeats + repeat` and never depends
+ * on how many slots exist. This pins that property against the T8A expansion: every slot declared
+ * before it keeps the exact Student indices it already had, and the four new slots take the range
+ * beyond them.
+ */
+test("rotating pool: the T8A expansion reassigns no existing execution", () => {
+  for (let slot = 0; slot < 30; slot += 1) {
+    for (let repeat = 0; repeat < ROTATING_MAX_REPEATS; repeat += 1) {
+      assert.equal(
+        studentFor({ repeatEachIndex: repeat }, slot).index,
+        slot * ROTATING_MAX_REPEATS + repeat,
+        `slot ${slot} repeat ${repeat} moved`
+      );
+    }
+  }
+  assert.equal(studentFor({ repeatEachIndex: 0 }, ENTITLEMENT_EXTEND_TEST_SLOT).index, 300);
+  assert.equal(studentFor({ repeatEachIndex: 0 }, ENTITLEMENT_SHORTEN_TEST_SLOT).index, 310);
+  assert.equal(studentFor({ repeatEachIndex: 0 }, ENTITLEMENT_PAST_DATE_TEST_SLOT).index, 320);
+  assert.equal(studentFor({ repeatEachIndex: 0 }, ENTITLEMENT_REVOKE_TEST_SLOT).index, 330);
+  assert.equal(studentFor({ repeatEachIndex: ROTATING_MAX_REPEATS - 1 }, ENTITLEMENT_REVOKE_TEST_SLOT).index, 339);
+  assert.ok(ROTATING_POOL_SIZE > 339, "the pool must provision the T8A slots at every repeat");
 });

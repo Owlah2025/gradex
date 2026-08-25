@@ -147,8 +147,15 @@ Route hierarchy is in [NAVIGATION_MAP.md](NAVIGATION_MAP.md), navigation behavio
   the filter set becomes University / Program / academic level / Subject; the Major/Subject/Study
   Year set below is the legacy model and is retained until cutover.** Filters are exact-match on one
   value per dimension; taxonomy labels render in the selected language while search matches Arabic and English
-  at once with diacritic/alef/digit normalization (BR-162). Ranking is relevance only — no
-  recommendations, promotion, or personalization.
+  at once with diacritic/alef/digit normalization (BR-162). **Ranking is relevance only, and may use
+  the signed-in Student's own academic profile to order otherwise-visible Courses** under
+  [D-092](DECISIONS.md#d-092--the-student-academic-profile-persists-academic-unit-context-for-program-less-states-and-records-onboarding-as-an-explicit-three-state-decision)
+  §1: the ordering is request-scoped, reads only that Student's own profile, and is deterministic —
+  explicit Program target, then inferred Curriculum match, then same Institution, then every other
+  public Course. It reorders results and nothing else. **It never changes which Courses are eligible,
+  visible, published, purchasable, invitable, entitled, or reachable for learning; it never hides a
+  Course whose Program does not match; and anonymous catalogue browsing is never personalized.**
+  There is no paid promotion, no sponsored ranking, and no recommendation presented as relevance.
 - **Responsive:** Filter sheet on small screens; rail where space allows.
 
 ## ST02 — Course Details

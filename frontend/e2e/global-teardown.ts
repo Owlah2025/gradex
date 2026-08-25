@@ -33,6 +33,7 @@ export default async function globalTeardown() {
     runId: state.runId,
     dbName: state.dbName,
     apiPid: state.pid,
+    workerPid: state.workerPid ?? null,
   });
 
   // Close the drain before archiving: the descriptor is released with the run that opened it,

@@ -69,35 +69,35 @@ func loadPrograms(ctx context.Context, tx pgx.Tx, institutionID string) (map[str
 	return out, rows.Err()
 }
 
-func countAlreadyAcademic(ctx context.Context, tx pgx.Tx, institutionID string) (int, error) {
-	var count int
-	if err := tx.QueryRow(ctx, `
-		SELECT count(*) FROM courses
-		WHERE classification_model = 'ACADEMIC_CATALOG' AND institution_id = $1::uuid`,
-		institutionID).Scan(&count); err != nil {
-		return 0, fmt.Errorf("counting migrated courses: %w", err)
-	}
-	return count, nil
-}
-
-// loadLegacyCourses is the workset: every Course still on the legacy
+// loadLegacyCourses is the workset: EVERY Course still on the legacy
 // classification, with the distinct legacy Subject codes and Major labels its
 // revisions carry.
 //
 // Aggregating across ALL revisions is deliberate. A Course whose revisions
 // disagree about their legacy Subject has no single identity to migrate to, and
 // the planner must be able to see that rather than silently taking the live one.
+//
+// The join to course_revisions is a LEFT JOIN, and that is the entire point of
+// this comment. It was an INNER JOIN, which meant a Course carrying no revision
+// at all did not merely fail to migrate — it vanished from the report, so the
+// summary counted a corpus smaller than the corpus. A migration tool that
+// cannot see a record cannot be trusted to say the migration is complete. With
+// the LEFT JOIN such a Course produces one all-NULL revision row, has_revision
+// is false, and the planner classifies it NO_REVISION.
 func loadLegacyCourses(ctx context.Context, tx pgx.Tx) ([]legacyCourse, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT c.id::text,
 		       COALESCE(live.title_en, latest.title_en, '') AS title_en,
 		       COALESCE(array_agg(DISTINCT subject_term.academic_code)
 		                FILTER (WHERE subject_term.academic_code IS NOT NULL), '{}') AS subject_codes,
+		       COALESCE(array_agg(DISTINCT subject_term.label_en)
+		                FILTER (WHERE subject_term.label_en IS NOT NULL), '{}') AS subject_labels,
 		       COALESCE(array_agg(DISTINCT major_term.label_en)
 		                FILTER (WHERE major_term.label_en IS NOT NULL), '{}') AS major_labels,
-		       bool_or(r.subject_term_id IS NOT NULL) AS has_subject
+		       COALESCE(bool_or(r.subject_term_id IS NOT NULL), FALSE) AS has_subject,
+		       COALESCE(bool_or(r.id IS NOT NULL), FALSE) AS has_revision
 		FROM courses c
-		JOIN course_revisions r ON r.course_id = c.id
+		LEFT JOIN course_revisions r ON r.course_id = c.id
 		LEFT JOIN taxonomy_terms subject_term ON subject_term.id = r.subject_term_id
 		LEFT JOIN taxonomy_terms major_term ON major_term.id = r.major_term_id
 		LEFT JOIN course_revisions live ON live.id = c.live_revision_id
@@ -117,8 +117,64 @@ func loadLegacyCourses(ctx context.Context, tx pgx.Tx) ([]legacyCourse, error) {
 	for rows.Next() {
 		var course legacyCourse
 		if err := rows.Scan(&course.id, &course.titleEn,
-			&course.subjectCodes, &course.majorLabels, &course.hasSubject); err != nil {
+			&course.subjectCodes, &course.subjectLabels, &course.majorLabels,
+			&course.hasSubject, &course.hasRevision); err != nil {
 			return nil, fmt.Errorf("scanning legacy course: %w", err)
+		}
+		out = append(out, course)
+	}
+	return out, rows.Err()
+}
+
+// academicCourse is one Course a previous run (or ordinary Instructor authoring
+// since T4-B) already placed on the Academic Catalog.
+type academicCourse struct {
+	id           string
+	titleEn      string
+	subjectCode  string
+	subjectTitle string
+	// legacySubjectCodes are the legacy codes the Course's revisions still
+	// carry. The cutover never clears them, so they remain available for drift
+	// detection: a mapping that now points somewhere else than where the Course
+	// actually landed is a fact the Founder must see, not a write to perform.
+	legacySubjectCodes []string
+}
+
+// loadAlreadyAcademic replaces a bare count with the real rows.
+//
+// A count told a rerun "5 already academic" without saying which five, so the
+// report could not be diffed against the corpus and drift was invisible. Every
+// Course now appears in the report by id, exactly like a legacy one.
+func loadAlreadyAcademic(ctx context.Context, tx pgx.Tx, institutionID string) ([]academicCourse, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT c.id::text,
+		       COALESCE(live.title_en, latest.title_en, '') AS title_en,
+		       COALESCE(s.official_code, '') AS subject_code,
+		       COALESCE(s.title_en, '') AS subject_title,
+		       COALESCE(array_agg(DISTINCT subject_term.academic_code)
+		                FILTER (WHERE subject_term.academic_code IS NOT NULL), '{}') AS legacy_subject_codes
+		FROM courses c
+		LEFT JOIN subjects s ON s.id = c.subject_id
+		LEFT JOIN course_revisions r ON r.course_id = c.id
+		LEFT JOIN taxonomy_terms subject_term ON subject_term.id = r.subject_term_id
+		LEFT JOIN course_revisions live ON live.id = c.live_revision_id
+		LEFT JOIN LATERAL (
+			SELECT title_en FROM course_revisions
+			WHERE course_id = c.id ORDER BY revision_number DESC LIMIT 1
+		) latest ON TRUE
+		WHERE c.classification_model = 'ACADEMIC_CATALOG' AND c.institution_id = $1::uuid
+		GROUP BY c.id, live.title_en, latest.title_en, s.official_code, s.title_en
+		ORDER BY c.id`, institutionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading migrated courses: %w", err)
+	}
+	defer rows.Close()
+	var out []academicCourse
+	for rows.Next() {
+		var course academicCourse
+		if err := rows.Scan(&course.id, &course.titleEn, &course.subjectCode,
+			&course.subjectTitle, &course.legacySubjectCodes); err != nil {
+			return nil, fmt.Errorf("scanning migrated course: %w", err)
 		}
 		out = append(out, course)
 	}

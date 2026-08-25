@@ -15,6 +15,9 @@ import (
 const (
 	publicCatalogCacheControl  = "public, max-age=60"
 	maxPublicCatalogQueryBytes = 10 * 1024
+	// Filter values are slugs and Subject codes, never prose, so they are held
+	// to a far tighter bound than the free-text search query.
+	maxPublicCatalogFilterBytes = 200
 )
 
 type publicCatalogHandlers struct {
@@ -31,7 +34,54 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 	catalog.Use(publicCatalogCache())
 	catalog.GET("/courses", handlers.list)
 	catalog.GET("/courses/:idOrSlug", handlers.detail)
+
+	// The smallest read-only academic surface a public filter needs. It is a
+	// separate group from the Admin and Student academic endpoints on purpose:
+	// those are authenticated and expose retired rows and audit metadata, and
+	// none of that may reach an anonymous visitor.
+	catalog.GET("/academic-options/institutions", handlers.institutionOptions)
+	catalog.GET("/academic-options/institutions/:slug/programs", handlers.programOptions)
+	catalog.GET("/academic-options/institutions/:slug/subjects", handlers.subjectOptions)
+	catalog.GET("/academic-options/institutions/:slug/levels", handlers.levelOptions)
 	return nil
+}
+
+func (h *publicCatalogHandlers) institutionOptions(c *gin.Context) {
+	options, err := h.repository.ListInstitutionFilters(c.Request.Context())
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": options})
+}
+
+func (h *publicCatalogHandlers) programOptions(c *gin.Context) {
+	options, err := h.repository.ListProgramFilters(c.Request.Context(), c.Param("slug"))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": options})
+}
+
+func (h *publicCatalogHandlers) levelOptions(c *gin.Context) {
+	levels, err := h.repository.ListLevelFilters(
+		c.Request.Context(), c.Param("slug"), publicCatalogFilterValue(c, "program"))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": levels})
+}
+
+func (h *publicCatalogHandlers) subjectOptions(c *gin.Context) {
+	options, err := h.repository.ListSubjectFilters(
+		c.Request.Context(), c.Param("slug"), publicCatalogFilterValue(c, "program"))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": options})
 }
 
 func publicCatalogCache() gin.HandlerFunc {
@@ -63,18 +113,49 @@ func appendVary(c *gin.Context, value string) {
 func (h *publicCatalogHandlers) list(c *gin.Context) {
 	page, pageSize := publicCatalogPagination(c)
 	query, searching := publicCatalogSearchQuery(c)
-	var result catalogpublic.ListResult
-	var err error
-	if searching {
-		result, err = h.repository.Search(c.Request.Context(), publicCatalogArabic(c), page, pageSize, query)
-	} else {
-		result, err = h.repository.List(c.Request.Context(), publicCatalogArabic(c), page, pageSize)
+	filters := publicCatalogFilters(c)
+
+	// A ranked response is personalised, so the shared 60-second public cache
+	// entry set by the group middleware would leak one Student's ordering to
+	// every other visitor. Ranking flips the response to private.
+	if filters.Ranked() {
+		c.Header("Cache-Control", "private, no-store")
 	}
+
+	result, err := h.repository.Browse(
+		c.Request.Context(), publicCatalogArabic(c), page, pageSize, query, searching, filters)
 	if err != nil {
 		writeProblem(c, problem.Internal(""))
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+// publicCatalogFilters reads the academic narrowing from the query string.
+//
+// Every value is treated as opaque text and bound as a parameter. An unknown,
+// retired, or malformed value therefore matches nothing and yields an empty
+// catalogue — which is the correct answer to a stale shared link, and is why no
+// validation error is raised here.
+func publicCatalogFilters(c *gin.Context) catalogpublic.Filters {
+	return catalogpublic.Filters{
+		InstitutionSlug:     publicCatalogFilterValue(c, "institution"),
+		ProgramSlug:         publicCatalogFilterValue(c, "program"),
+		Level:               publicCatalogFilterValue(c, "level"),
+		Subject:             publicCatalogFilterValue(c, "subject"),
+		RelevantProgramSlug: publicCatalogFilterValue(c, "relevant_to_program"),
+	}
+}
+
+// publicCatalogFilterValue bounds one filter value. The cap is the same one the
+// search query already uses, so no query parameter can be used to push an
+// oversized string into a statement.
+func publicCatalogFilterValue(c *gin.Context, name string) string {
+	value := strings.TrimSpace(c.Query(name))
+	if len(value) > maxPublicCatalogFilterBytes {
+		return ""
+	}
+	return value
 }
 
 func publicCatalogSearchQuery(c *gin.Context) (string, bool) {

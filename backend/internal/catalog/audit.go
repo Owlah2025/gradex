@@ -9,11 +9,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const (
+	AuditModuleCatalog    = "CATALOG_AND_AUTHORING"
+	AuditModuleModeration = "MODERATION"
+)
+
 type AuditEvent struct {
 	ActorAccountID  *string
 	ActorRole       string
 	ActorDescriptor string
 	Action          string
+	Module          string
 	TargetType      string
 	TargetID        string
 	TargetRevision  *int
@@ -23,8 +29,8 @@ type AuditEvent struct {
 	OperationID     *string
 }
 
-// WriteAuditEvent writes an audit event to audit_events table inside an existing transaction tx.
-// It is mandatory and executes within the same transaction as the change under module = CATALOG_AND_AUTHORING.
+// WriteAuditEvent writes an audit event to audit_events inside the caller's transaction. An empty
+// module preserves the catalog default; cross-domain callers set their own existing audit module.
 func WriteAuditEvent(ctx context.Context, tx pgx.Tx, event AuditEvent) error {
 	if tx == nil {
 		return errors.New("transaction is required for audit writing")
@@ -47,6 +53,9 @@ func WriteAuditEvent(ctx context.Context, tx pgx.Tx, event AuditEvent) error {
 	if event.Reason == "" {
 		return errors.New("audit reason is required")
 	}
+	if event.Module == "" {
+		event.Module = AuditModuleCatalog
+	}
 
 	metadataJSON := []byte("{}")
 	if len(event.Metadata) > 0 {
@@ -64,13 +73,13 @@ func WriteAuditEvent(ctx context.Context, tx pgx.Tx, event AuditEvent) error {
 			reason, metadata, correlation_id, operation_id
 		) VALUES (
 			$1, $2, $3,
-			$4, 'CATALOG_AND_AUTHORING', $5, $6, $7,
-			$8, $9, $10, $11
+			$4, $5, $6, $7, $8,
+			$9, $10, $11, $12
 		)
 	`
 	_, err := tx.Exec(ctx, query,
 		event.ActorAccountID, event.ActorRole, event.ActorDescriptor,
-		event.Action, event.TargetType, event.TargetID, event.TargetRevision,
+		event.Action, event.Module, event.TargetType, event.TargetID, event.TargetRevision,
 		event.Reason, metadataJSON, event.CorrelationID, event.OperationID,
 	)
 	if err != nil {

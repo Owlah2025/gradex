@@ -193,9 +193,24 @@ export function listInstructorStaffAccounts(locale: "ar" | "en") {
   ) as Promise<{ instructors: InstructorStaffAccount[] }>;
 }
 
+/**
+ * The preview answers with a state, not only with a success status.
+ *
+ * A consumed, revoked, superseded, or expired invitation is a well-formed question with a
+ * negative answer, so the route returns 200 and names the state. Declaring the field as
+ * `"PENDING"` said the opposite — that reaching this type at all meant the invitation was
+ * still open — and the acceptance screen believed it.
+ */
+export type StaffInvitationState =
+  | "PENDING"
+  | "CONSUMED"
+  | "SUPERSEDED"
+  | "EXPIRED"
+  | "REVOKED";
+
 export type StaffInvitationPreview = {
   invited_role: "INSTRUCTOR" | "ADMIN";
-  state: "PENDING";
+  state: StaffInvitationState;
 };
 
 export function previewStaffInvitation(

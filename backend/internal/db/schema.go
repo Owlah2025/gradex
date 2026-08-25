@@ -20,6 +20,8 @@ import (
 // Protected requests now resolve principals through the Account and credential
 // tables added by version 2, so serving against version 1 would turn every
 // authorization decision into an infrastructure fault.
+const TransactionalEmailMonitorTerminalSchemaVersion = 27
+
 const (
 	MinSchemaVersion                    = 2
 	SessionSchemaVersion                = 4
@@ -45,7 +47,8 @@ const (
 	StudentAcademicProfileSchemaVersion = 24
 	CourseAcademicIdentitySchemaVersion = 25
 	SubjectCodeIdentitySchemaVersion    = 26
-	MaxSchemaVersion                    = SubjectCodeIdentitySchemaVersion
+	ReportModerationSchemaVersion       = TransactionalEmailMonitorTerminalSchemaVersion + 1
+	MaxSchemaVersion                    = ReportModerationSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

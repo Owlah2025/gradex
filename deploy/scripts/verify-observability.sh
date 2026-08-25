@@ -57,8 +57,11 @@ main() {
   local monitor_log="$S12_TEMPORARY/monitor.log"
   local worker_log="$S12_TEMPORARY/worker.log"
   local headers="$S12_TEMPORARY/request.headers"
+  local runtime_report="$S12_TEMPORARY/runtime-report"
   touch "$port_file" "$alerts_file" "$monitor_log" "$worker_log" "$headers"
   chmod 600 "$port_file" "$alerts_file" "$monitor_log" "$worker_log" "$headers"
+  printf 'version=1\nworker|PASS|production-like worker fixture\nemail_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1\ndisk_roots|PASS|production-like disk fixture\n' >"$runtime_report"
+  chmod 600 "$runtime_report"
 
   local proof_token="s12-disposable-alert-token"
   SINK_EXPECTED_TOKEN="$proof_token" \
@@ -85,6 +88,9 @@ main() {
     GRADEX_ENVIRONMENT="production-like" \
     GRADEX_MONITOR_CA_FILE="$S12_CA_FILE" \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
+    GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
+    GRADEX_MONITOR_DISK_PATHS=/tmp \
+    GRADEX_MONITOR_DISK_MIN_FREE_BYTES=1 \
     GRADEX_ALERT_WEBHOOK_URL="http://127.0.0.1:$sink_port/alerts" \
     GRADEX_ALERT_WEBHOOK_TOKEN="$proof_token" \
     "$S12_ROOT/deploy/monitoring/monitor-once.sh" >"$monitor_log" 2>&1
@@ -140,6 +146,9 @@ main() {
     GRADEX_ENVIRONMENT="production-like" \
     GRADEX_MONITOR_CA_FILE="$S12_CA_FILE" \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
+    GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
+    GRADEX_MONITOR_DISK_PATHS=/tmp \
+    GRADEX_MONITOR_DISK_MIN_FREE_BYTES=1 \
     "$S12_ROOT/deploy/monitoring/monitor-once.sh" >/dev/null
   [ "$(wc -l <"$alerts_file" | tr -d '[:space:]')" = "1" ] ||
     die "healthy recovery emitted another alert"

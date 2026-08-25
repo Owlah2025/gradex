@@ -183,11 +183,17 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 	admissionFoundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte{0x31}, 32),
 		CSRFKey: bytes.Repeat([]byte{0x32}, 32), AnonymousSessionTTL: time.Hour,
-		Policies: policies, Service: &fakeAdmissionService{}, Recovery: &fakeRecoveryService{},
+		Policies: policies, Service: &fakeAdmissionService{},
 		Limiter: limiter, EndpointPolicies: admissionPolicies,
 	})
 	if err != nil {
 		t.Fatalf("NewAdmissionFoundation: %v", err)
+	}
+	recoveryFoundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: admissionFoundation, Recovery: &fakeRecoveryService{},
+	})
+	if err != nil {
+		t.Fatalf("NewRecoveryFoundation: %v", err)
 	}
 
 	principals := dbPrincipalResolver{pool: p}
@@ -195,6 +201,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, principals,
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
+		WithRecoveryFoundation(recoveryFoundation),
 		WithAccessFoundation(accessFoundation),
 	)
 	if err != nil {

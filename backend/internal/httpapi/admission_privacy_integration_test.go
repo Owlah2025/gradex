@@ -131,16 +131,166 @@ func realAdmissionRouter(
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
 		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
-		Policies: policies, Service: service, Recovery: recovery,
+		Policies: policies, Service: service,
 		Limiter: limiter, EndpointPolicies: endpointPolicies,
 	})
 	if err != nil {
 		t.Fatalf("constructing foundation: %v", err)
 	}
+	recoveryFoundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: foundation, Recovery: recovery,
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery foundation: %v", err)
+	}
 	router := gin.New()
 	router.Use(requestIDMiddleware())
-	mountAdmissionRoutes(router.Group("/api/v1"), foundation)
+	v1 := router.Group("/api/v1")
+	mountStudentAdmissionRoutes(v1, foundation)
+	mountRecoveryRoutes(v1, recoveryFoundation, false)
 	return router
+}
+
+// realRecoveryOnlyRouter composes the production-shaped anonymous boundary
+// without Student registration. It intentionally uses the dedicated recovery
+// foundation rather than mounting the broader admission surface.
+func realRecoveryOnlyRouter(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	rateStore admissionRateStore,
+) *gin.Engine {
+	t.Helper()
+	compromised, err := identity.NewDeterministicCompromisedSource()
+	if err != nil {
+		t.Fatalf("constructing password source: %v", err)
+	}
+	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("constructing outbox writer: %v", err)
+	}
+	randomness := make([]byte, 0, 32*4)
+	for fill := byte(0xA1); fill < 0xA5; fill++ {
+		randomness = append(randomness, bytes.Repeat([]byte{fill}, 32)...)
+	}
+	recovery, err := identity.NewRecoveryService(identity.RecoveryServiceOptions{
+		Pool: pool, Outbox: writer, Compromised: compromised,
+		ResetTTL: time.Hour, Now: time.Now, Random: bytes.NewReader(randomness),
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery service: %v", err)
+	}
+	limiter, err := ratelimit.New(rateStore, bytes.Repeat([]byte{0x31}, 32), time.Second)
+	if err != nil {
+		t.Fatalf("constructing limiter: %v", err)
+	}
+	policies := map[string]ratelimit.Policy{
+		"purchase-requests":       ratelimit.PurchaseRequestsPolicy(),
+		"password-reset-requests": ratelimit.DevelopmentAdmissionPolicy("password-reset-requests"),
+		"password-resets":         ratelimit.DevelopmentPasswordResetCompletionPolicy(),
+		"session-bootstrap":       ratelimit.DevelopmentAnonymousBootstrapPolicy(),
+	}
+	boundary, err := NewPurchaseAdmissionFoundation(PurchaseAdmissionFoundationOptions{
+		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
+		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
+		Limiter: limiter, EndpointPolicies: policies,
+	})
+	if err != nil {
+		t.Fatalf("constructing anonymous boundary: %v", err)
+	}
+	foundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: boundary, Recovery: recovery,
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery foundation: %v", err)
+	}
+	router := gin.New()
+	router.Use(requestIDMiddleware())
+	mountRecoveryRoutes(router.Group("/api/v1"), foundation, true)
+	return router
+}
+
+func seedRecoverableRole(t *testing.T, pool *pgxpool.Pool, email string, role identity.Role) {
+	t.Helper()
+	hash, err := identity.HashPassword("an original recovery passphrase")
+	if err != nil {
+		t.Fatalf("hashing fixture credential: %v", err)
+	}
+	_, err = pool.Exec(context.Background(), `
+		WITH account AS (
+			INSERT INTO accounts (normalized_email, email, role, status, display_name, email_verified_at)
+			VALUES ($1, $1, $2, 'ACTIVE', $1, now())
+			RETURNING id
+		)
+		INSERT INTO password_credentials (account_id, password_hash, state)
+		SELECT id, $3, 'ACTIVE' FROM account`, email, role, hash.Expose())
+	if err != nil {
+		t.Fatalf("seeding %s recovery fixture: %v", role, err)
+	}
+}
+
+func TestRecoveryFoundationWorksForEligibleRolesWithRegistrationDisabled(t *testing.T) {
+	pool := freshHTTPAdmissionPool(t)
+	router := realRecoveryOnlyRouter(t, pool, admissionRateStore{allowed: true})
+
+	for _, account := range []struct {
+		email string
+		role  identity.Role
+	}{
+		{"recovery-admin@example.com", identity.RoleAdmin},
+		{"recovery-instructor@example.com", identity.RoleInstructor},
+		{"recovery-student@example.com", identity.RoleStudent},
+	} {
+		seedRecoverableRole(t, pool, account.email, account.role)
+	}
+
+	cookie, csrf := bootstrapAdmissionBrowser(t, router)
+	for _, email := range []string{
+		"recovery-admin@example.com",
+		"recovery-instructor@example.com",
+		"recovery-student@example.com",
+	} {
+		response := postAdmission(router, "/api/v1/password-reset-requests", `{"email":"`+email+`"}`, cookie, csrf)
+		if response.status != http.StatusAccepted {
+			t.Fatalf("recovery request for %s = %d: %s", email, response.status, response.body)
+		}
+	}
+
+	// The first deterministic secret belongs to the Admin. Completing it through
+	// the recovery-only router proves route mounting, token consumption, password
+	// screening, and credential replacement without reopening registration.
+	adminToken := "oaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaGhoaE"
+	completion := postAdmission(
+		router,
+		"/api/v1/password-resets",
+		`{"token":"`+adminToken+`","password":"a completely different long passphrase"}`,
+		cookie,
+		csrf,
+	)
+	if completion.status != http.StatusOK || completion.body != `{"status":"PASSWORD_RESET"}` {
+		t.Fatalf("recovery completion = %d %s", completion.status, completion.body)
+	}
+	if completion.setCookie != "" {
+		t.Fatalf("recovery completion unexpectedly issued a browser session: %q", completion.setCookie)
+	}
+	var credentialState string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT c.state::text
+		FROM password_credentials c
+		JOIN accounts a ON a.id = c.account_id
+		WHERE a.normalized_email = 'recovery-admin@example.com'`,
+	).Scan(&credentialState); err != nil {
+		t.Fatalf("reading recovered credential: %v", err)
+	}
+	if credentialState != "ACTIVE" {
+		t.Fatalf("recovered credential state = %s, want ACTIVE", credentialState)
+	}
+
+	registration := httptest.NewRequest(http.MethodPost, "/api/v1/student-registrations", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, registration)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("Student registration while recovery-only = %d, want 404: %s", response.Code, response.Body.String())
+	}
 }
 
 type privacyResponse struct {

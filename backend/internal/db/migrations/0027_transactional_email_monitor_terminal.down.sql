@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS transactional_email_monitor_terminal_idx;

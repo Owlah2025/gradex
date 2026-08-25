@@ -1,6 +1,7 @@
 import { execSync, spawn } from "child_process";
 import { createHash } from "crypto";
 import path from "path";
+import fs from "fs";
 import http from "http";
 import {
   acquireEnvironmentLock,
@@ -10,6 +11,7 @@ import {
   startApiLogDrain,
   API_BINARY_PATH,
   SEED_BINARY_PATH,
+  WORKER_BINARY_PATH,
   RUN_STATE_FILE_PATH,
   RunState,
 } from "../src/lib/api/e2e-infrastructure";
@@ -65,6 +67,7 @@ export default async function globalSetup(config?: { workers?: number }) {
 
   let dbCreated = false;
   let apiProcess: any = null;
+  let workerProcess: any = null;
   let stateWritten = false;
 
   try {
@@ -85,6 +88,9 @@ export default async function globalSetup(config?: { workers?: number }) {
 
     console.log("[E2E Setup] Compiling Go API binary to external output path...");
     execSync(`go build -o ${API_BINARY_PATH} ./cmd/api`, { cwd: backendDir, stdio: "inherit" });
+
+    console.log("[E2E Setup] Compiling Go worker binary to external output path...");
+    execSync(`go build -o ${WORKER_BINARY_PATH} ./cmd/worker`, { cwd: backendDir, stdio: "inherit" });
 
     console.log("[E2E Setup] Compiling E2E seeder binary to external output path...");
     execSync(`go test -c -o ${SEED_BINARY_PATH} ./cmd/e2e-seed`, { cwd: backendDir, stdio: "inherit" });
@@ -176,9 +182,52 @@ export default async function globalSetup(config?: { workers?: number }) {
     const apiLogPath = startApiLogDrain(apiProcess, runId);
     console.log(`[E2E Setup] Draining Go API output to ${apiLogPath}`);
 
+    // The transactional email path is a product capability, not a test fixture: the API writes an
+    // outbox row and a worker renders and sends it. A run that never starts a worker can only prove
+    // the row was written, so the run owns a worker whose SMTP target is the development Mailpit
+    // instance. `EMAIL_PROVIDER=mailpit` is refused outside `APP_ENV=development` by configuration,
+    // so this cannot select a development sender in production.
+    //
+    // Redis and object storage are the worker's other dependencies. The bucket check runs against
+    // the developer MinIO because the run-local media server serves fixture bytes rather than an S3
+    // API; no media work is exercised here, and the email dispatcher touches neither.
+    const workerEnv = {
+      ...env,
+      SERVICE_ROLE: "worker",
+      PORT: String(port + 1),
+      S3_ENDPOINT: process.env.GRADEX_E2E_WORKER_S3_ENDPOINT || "http://127.0.0.1:9000",
+      S3_BUCKET: process.env.GRADEX_E2E_WORKER_S3_BUCKET || "gradex-video",
+      S3_ACCESS_KEY: "gradexminio",
+      S3_SECRET_KEY: "gradexminio",
+      S3_USE_PATH_STYLE: "true",
+      MEDIA_OPERATING_MODE: "SCANNER",
+      MEDIA_SCANNER_MODE: "DEVELOPMENT_NO_OP",
+      EMAIL_ENABLED: "true",
+      EMAIL_PROVIDER: "mailpit",
+      EMAIL_SMTP_ADDR: process.env.GRADEX_E2E_MAILPIT_SMTP || "127.0.0.1:1025",
+      EMAIL_FROM_ADDRESS: "no-reply@gradex.test",
+      EMAIL_FROM_NAME: "Gradex",
+    };
+
+    console.log("[E2E Setup] Starting Go worker (transactional email dispatcher)...");
+    workerProcess = spawn(WORKER_BINARY_PATH, [], { env: workerEnv, stdio: "pipe" });
+    if (!workerProcess.pid) {
+      throw new Error("[E2E Setup] Failed to spawn Go worker process");
+    }
+    const workerLogPath = `${API_BINARY_PATH}-worker-${runId}.log`;
+    const workerLog = fs.createWriteStream(workerLogPath, { flags: "a" });
+    workerProcess.stdout.pipe(workerLog);
+    workerProcess.stderr.pipe(workerLog);
+    workerProcess.on("exit", (code: number | null) => {
+      console.warn(`[E2E Setup] Worker process exited with code ${code}. See ${workerLogPath}`);
+    });
+    console.log(`[E2E Setup] Draining worker output to ${workerLogPath}`);
+
     const runState: RunState = {
       runId,
       pid: apiProcess.pid,
+      workerPid: workerProcess.pid,
+      workerExecPath: WORKER_BINARY_PATH,
       port,
       apiExecPath: API_BINARY_PATH,
       apiListenAddr: `127.0.0.1:${port}`,
@@ -205,6 +254,7 @@ export default async function globalSetup(config?: { workers?: number }) {
       runId,
       dbName: dbCreated ? dbName : null,
       apiPid: apiProcess?.pid || null,
+      workerPid: workerProcess?.pid || null,
       stateFilePath: stateWritten ? RUN_STATE_FILE_PATH : undefined,
     });
     throw err;

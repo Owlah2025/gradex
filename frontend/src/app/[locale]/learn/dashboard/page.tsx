@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { LearningProgressSummary, LearningStatusBadge, AccessUntil, LearningUnavailable } from "@/components/learning/learning-views";
+import {
+  accessLabels,
+  learningStatusLabel,
+  progressLabels,
+  unavailableLabels,
+} from "@/components/learning/learning-label-sets";
 import { requestLearningDashboardServer, requestStudentCourseAccessServer } from "@/lib/api/learning-server";
 import { hasPendingAccess, pendingAccessSummary } from "@/components/learning/pending-access-summary";
 import { ar } from "@/lib/i18n/dictionaries/ar";
@@ -127,11 +133,11 @@ export default async function LearningDashboardPage({ params }: { params: Promis
               <article key={course.course_id} className="rounded-2xl border border-border bg-card p-6 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <h2 className="font-display text-2xl font-bold text-foreground">{course.title}</h2>
-                  <LearningStatusBadge status={course.learning_status} labels={dictionary.learning} />
+                  <LearningStatusBadge status={course.learning_status} label={learningStatusLabel(course.learning_status, dictionary.learning)} />
                 </div>
                 <div className="mt-5 space-y-2">
-                  <LearningProgressSummary progress={course.progress} labels={dictionary.learning} locale={locale} />
-                  <AccessUntil expiresAt={course.expires_at} labels={dictionary.learning} locale={locale} />
+                  <LearningProgressSummary progress={course.progress} labels={progressLabels(dictionary.learning)} locale={locale} />
+                  <AccessUntil expiresAt={course.expires_at} labels={accessLabels(dictionary.learning)} locale={locale} />
                 </div>
                 <Link
                   href={`/${locale}/learn/courses/${course.course_id}`}
@@ -150,7 +156,7 @@ export default async function LearningDashboardPage({ params }: { params: Promis
       <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto min-h-screen max-w-3xl px-5 py-10 sm:px-6">
         <div className="space-y-5">
           <div className="flex justify-end"><LearningLocaleToggle locale={locale} label={dictionary.meta.switchToAria} /></div>
-          <LearningUnavailable labels={dictionary.learning} />
+          <LearningUnavailable labels={unavailableLabels(dictionary.learning)} />
         </div>
       </main>
     );

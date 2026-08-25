@@ -14,7 +14,8 @@ import { authenticatedRequest } from "./http";
 
 export type SetupState = "NOT_STARTED" | "SKIPPED" | "COMPLETED";
 
-export type EnrollmentStatus = "ENROLLED" | "UNDECLARED" | "FOUNDATION" | "NON_DEGREE";
+export type EnrollmentStatus =
+  "ENROLLED" | "UNDECLARED" | "FOUNDATION" | "NON_DEGREE";
 
 export type AcademicProfile = {
   setup_state: SetupState;
@@ -29,6 +30,12 @@ export type AcademicProfile = {
   academic_unit_name?: string;
   program_id?: string;
   program_name?: string;
+  /**
+   * The Program's public slug. Supplied so the public catalogue can rank
+   * results for this Student's Program without the client ever handling an
+   * internal identifier. It is a discovery hint and grants nothing.
+   */
+  program_slug?: string;
   /** Derived context for display. The Student never chooses a Department. */
   department_name?: string;
   college_name?: string;
@@ -83,7 +90,11 @@ export function listCollegeOptions(institutionID: string, locale: "ar" | "en") {
   ) as Promise<CollegeOption[]>;
 }
 
-export function listProgramOptions(institutionID: string, collegeID: string, locale: "ar" | "en") {
+export function listProgramOptions(
+  institutionID: string,
+  collegeID: string,
+  locale: "ar" | "en",
+) {
   return authenticatedRequest<ProgramOption[]>(
     `${base}/academic-options/institutions/${encodeURIComponent(institutionID)}` +
       `/programs?college_id=${encodeURIComponent(collegeID)}`,
@@ -136,20 +147,41 @@ export function skipAcademicOnboarding(input: Auth) {
  * Whether to invite a Student to complete their profile. Only NOT_STARTED
  * qualifies: a Student who chose to defer is not asked again on every visit.
  */
-export function shouldPromptOnboarding(profile: AcademicProfile | null): boolean {
+export function shouldPromptOnboarding(
+  profile: AcademicProfile | null,
+): boolean {
   return profile?.setup_state === "NOT_STARTED";
 }
 
 /** Localised level labels, generated from the institution's own bound. */
-export function academicLevelLabels(maxLevel: number, locale: "ar" | "en"): { value: number; label: string }[] {
-  const ordinalsAr = ["الأول", "الثاني", "الثالث", "الرابع", "الخامس", "السادس",
-    "السابع", "الثامن", "التاسع", "العاشر", "الحادي عشر", "الثاني عشر"];
-  const safeMax = Number.isFinite(maxLevel) && maxLevel > 0 ? Math.min(maxLevel, ordinalsAr.length) : 0;
+export function academicLevelLabels(
+  maxLevel: number,
+  locale: "ar" | "en",
+): { value: number; label: string }[] {
+  const ordinalsAr = [
+    "الأول",
+    "الثاني",
+    "الثالث",
+    "الرابع",
+    "الخامس",
+    "السادس",
+    "السابع",
+    "الثامن",
+    "التاسع",
+    "العاشر",
+    "الحادي عشر",
+    "الثاني عشر",
+  ];
+  const safeMax =
+    Number.isFinite(maxLevel) && maxLevel > 0
+      ? Math.min(maxLevel, ordinalsAr.length)
+      : 0;
   return Array.from({ length: safeMax }, (_, index) => {
     const value = index + 1;
     return {
       value,
-      label: locale === "ar" ? `المستوى ${ordinalsAr[index]}` : `Level ${value}`,
+      label:
+        locale === "ar" ? `المستوى ${ordinalsAr[index]}` : `Level ${value}`,
     };
   });
 }

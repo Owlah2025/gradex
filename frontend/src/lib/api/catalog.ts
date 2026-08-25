@@ -161,6 +161,23 @@ export function isAcademicCourse(course: Pick<OwnedCourseSummary, "classificatio
 
 export type OwnedCourseDetail = OwnedCourseSummary;
 
+export type CourseRosterAccessStatus = "ACTIVE" | "EXPIRED" | "REVOKED" | "SUSPENDED" | "DENIED";
+
+export type CourseRosterEntry = {
+  display_name: string;
+  access_status: CourseRosterAccessStatus;
+  enrolled_at: string;
+  access_started_at?: string;
+  access_ends_at?: string;
+};
+
+export type CourseRosterPage = {
+  items: CourseRosterEntry[];
+  page: number;
+  page_size: number;
+  has_next: boolean;
+};
+
 export type CourseLifecycle = "PUBLISHED" | "DELISTED" | "ARCHIVED";
 export type SuspensionCause = "LEGAL" | "SECURITY" | "MALWARE" | "SEVERE_MODERATION";
 
@@ -189,6 +206,41 @@ async function lifecycleRequest(
   if (res === null && method !== "DELETE") {
     throw new Error(input.locale === "ar" ? "لم يرجع الخادم نتيجة" : "Server returned an empty result");
   }
+}
+
+export type CourseLifecycleSummary = {
+  id: string;
+  title_ar: string;
+  title_en: string;
+  owner_display_name: string;
+  lifecycle: "DRAFT" | "PENDING_REVIEW" | "CHANGES_REQUESTED" | CourseLifecycle;
+  access_suspended_at?: string;
+  access_suspension_reason?: string;
+  retired_at?: string;
+  updated_at: string;
+};
+
+/**
+ * The Admin lifecycle directory. Unlike the public catalogue it returns Courses in every
+ * lifecycle state, which is what makes a delisted, retired or archived Course reachable by the
+ * Admin who owns the decision about it.
+ */
+export async function getCourseLifecycleDirectory(
+  locale: "ar" | "en",
+  search?: string,
+): Promise<CourseLifecycleSummary[]> {
+  const query = search && search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
+  const res = await authenticatedRequest<{ items: CourseLifecycleSummary[] }>(
+    `/admin/courses${query}`,
+    "GET",
+    locale,
+  );
+  if (res === null) {
+    throw new Error(
+      locale === "ar" ? "لم يتم استلام قائمة الدورات" : "No Course lifecycle directory returned",
+    );
+  }
+  return res.items ?? [];
 }
 
 export function delistCourse(input: LifecycleRequest) { return lifecycleRequest(input, "/delist", "POST"); }
@@ -307,6 +359,26 @@ export async function getOwnedCourseDetail(
     );
   }
 	return res;
+}
+
+export async function getCourseRoster(
+  courseID: string,
+  locale: "ar" | "en",
+  page = 1,
+  pageSize = 20,
+): Promise<CourseRosterPage> {
+  const query = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  const res = await authenticatedRequest<CourseRosterPage>(
+    `/courses/${encodeURIComponent(courseID)}/students?${query.toString()}`,
+    "GET",
+    locale,
+  );
+  if (res === null) {
+    throw new Error(
+      locale === "ar" ? "لم يتم استلام قائمة الطلبة" : "No course roster returned from server",
+    );
+  }
+  return res;
 }
 
 export async function getTaxonomyTerms(locale: "ar" | "en"): Promise<TaxonomyTerm[]> {

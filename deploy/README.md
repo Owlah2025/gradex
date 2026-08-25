@@ -83,6 +83,12 @@ then restores Redis and proves healthy monitoring emits no second alert. The pro
 and webhook contract live in `deploy/monitoring/`; a real external alert destination remains a
 separate staging/production configuration action.
 
+`verify-med-monitoring.sh` uses only disposable report, filesystem-stat, and Docker-control fixtures. It
+proves worker ownership/down/recovery, normal retry versus stale/terminal transactional email, database
+probe failure, secret-free output, disk warning/critical thresholds, minimum-free-space handling,
+filesystem-device deduplication, invalid paths, aggregate failures, and recovery. It never stops a
+retained service or fills a filesystem.
+
 For the isolated database recovery drill after the environment is up:
 
 ```bash

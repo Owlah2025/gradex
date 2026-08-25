@@ -21,6 +21,26 @@
 # A legacy term absent from this file is reported UNMAPPED and its Course is left
 # on the legacy classification, fully operational. Absence is never permission to
 # guess.
+#
+# A term listed under `pending_decisions` is reported FOUNDER_MAPPING_REQUIRED.
+# That is a stronger statement than UNMAPPED: it means the term HAS plausible
+# canonical answers that this tool may not choose between. Listing the candidates
+# records the question, and the migrator refuses to migrate such a Course under
+# any flag.
+#
+# `decision` records what the Founder concluded about the question:
+#
+#   AWAITING_FOUNDER_DECISION  (default)  nobody has answered it yet
+#   KEEP_UNRESOLVED                       the Founder examined the candidates and
+#                                         determined none may be chosen without
+#                                         authoritative evidence
+#
+# KEEP_UNRESOLVED is a decision, not the absence of one, and it is a terminal
+# accepted state rather than outstanding work. It changes nothing the migrator
+# does — the record was already fail-closed and stays fail-closed — only what the
+# report says about it. `decided_on` and `resolution_requires` are mandatory
+# whenever a decision is recorded, so a closed question is always datable and
+# always states what would legitimately reopen it.
 
 id: kuwait-university-legacy-v1
 version: "1.0.0"
@@ -42,3 +62,53 @@ subjects: []
 # Major with no entry is not an error — the migrated Course simply keeps the
 # automatic audience its canonical Subject already implies.
 majors: []
+
+# Legacy SUBJECT terms whose canonical identity is a genuine, open product
+# question. Recorded, never guessed.
+pending_decisions:
+  - term_code: SWE101
+    term_label_en: Software Engineering
+    course_title_en: Introduction to Algorithms
+    decision: KEEP_UNRESOLVED
+    decided_on: "2026-08-23"
+    resolution_requires:
+      - the official Kuwait University subject code for this Course, from the university's own records
+      - the Course syllabus naming the subject it teaches
+      - historical Course documentation from the Instructor or the original catalogue
+      - an explicit Founder mapping supported by one of the above
+    why: >-
+      FOUNDER DECISION, 2026-08-23: keep this legacy identity unresolved. The
+      legacy record contradicts itself. Its SUBJECT term is "Software
+      Engineering" with code SWE101, but the Course it classifies is titled
+      "Introduction to Algorithms" — a different subject area. No canonical
+      Kuwait University Subject carries the normalized code SWE101, so the code,
+      which is the only authority this migrator is allowed to match on, resolves
+      to nothing. Choosing between the candidates below would mean deciding that
+      either the legacy Subject label or the Course title is the real identity,
+      and neither is: both are prose. The Course is published and already has an
+      Entitlement against it, so an invented Subject would misclassify a Course a
+      Student has bought. The Founder reviewed all four candidates and
+      determined that none of them can be selected from the evidence that
+      exists, so the Course intentionally keeps its legacy classification until
+      an authoritative source settles it. The unresolved record is deliberate and
+      safe: the Course remains fully operational, publicly listed, purchasable,
+      and unchanged in every respect except that it carries no canonical
+      academic identity.
+    candidates:
+      - subject_code: 0418-390
+        note: >-
+          Matches the legacy SUBJECT label "Software Engineering" exactly.
+          Choose this if the legacy Subject term is the intended identity.
+      - subject_code: 0418-301
+        note: >-
+          Algorithm Design and Analysis. Choose this if the Course title
+          "Introduction to Algorithms" is the intended identity and the Course
+          is an upper-level algorithms course.
+      - subject_code: 0418-201
+        note: >-
+          Data Structures & Algorithms, Computer Engineering. Choose this if the
+          Course title is the intended identity and the Course is introductory.
+      - subject_code: 1830-245
+        note: >-
+          Data Structures and Algorithms, a distinct Subject under a different
+          owning unit. Choose this only if the Course belongs to that unit.

@@ -141,12 +141,17 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		AnonymousSessionTTL: 24 * time.Hour,
 		Policies:            policies,
 		Service:             &fakeAdmissionService{},
-		Recovery:            &fakeRecoveryService{},
 		Limiter:             limiter,
 		EndpointPolicies:    admissionPolicies,
 	})
 	if err != nil {
 		t.Fatalf("constructing admission foundation: %v", err)
+	}
+	recoveryFoundation, err := NewRecoveryFoundation(RecoveryFoundationOptions{
+		Admission: admissionFoundation, Recovery: &fakeRecoveryService{},
+	})
+	if err != nil {
+		t.Fatalf("constructing recovery foundation: %v", err)
 	}
 
 	outboxWriter, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
@@ -186,6 +191,13 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	if err != nil {
 		t.Fatalf("constructing learning foundation: %v", err)
 	}
+	moderationFoundation, err := NewModerationFoundation(ModerationFoundationOptions{
+		Reports: learningRepository,
+		Catalog: catalogRepository,
+	})
+	if err != nil {
+		t.Fatalf("constructing moderation foundation: %v", err)
+	}
 
 	accessRepo, err := access.NewRepository(pool, outboxWriter)
 	if err != nil {
@@ -202,8 +214,10 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 		WithStaffFoundation(staffFoundation),
 		WithSessionFoundation(sessionFoundation),
 		WithAdmissionFoundation(admissionFoundation),
+		WithRecoveryFoundation(recoveryFoundation),
 		WithCatalogFoundation(catalogFoundation),
 		WithLearningFoundation(learningFoundation),
+		WithModerationFoundation(moderationFoundation),
 		WithAccessFoundation(accessFoundation),
 	)
 	if err != nil {
@@ -347,7 +361,11 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/learn/lessons/:lessonId/playback":                              {Method: http.MethodPost, Path: "/api/v1/learn/lessons/:lessonId/playback", Class: ClassCapabilityProtected},
 	"PUT /api/v1/learn/lessons/:lessonId/progress":                               {Method: http.MethodPut, Path: "/api/v1/learn/lessons/:lessonId/progress", Class: ClassCapabilityProtected},
 	"POST /api/v1/learn/reports":                                                 {Method: http.MethodPost, Path: "/api/v1/learn/reports", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/reports":                                                  {Method: http.MethodGet, Path: "/api/v1/admin/reports", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/reports/:id":                                              {Method: http.MethodGet, Path: "/api/v1/admin/reports/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/reports/:id/resolve":                                     {Method: http.MethodPost, Path: "/api/v1/admin/reports/:id/resolve", Class: ClassCapabilityProtected},
 	"GET /api/v1/courses/:id":                                                    {Method: http.MethodGet, Path: "/api/v1/courses/:id", Class: ClassOwnershipProtected},
+	"GET /api/v1/courses/:id/students":                                           {Method: http.MethodGet, Path: "/api/v1/courses/:id/students", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/candidate":                                          {Method: http.MethodPut, Path: "/api/v1/courses/:id/candidate", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/subject":                                            {Method: http.MethodPut, Path: "/api/v1/courses/:id/subject", Class: ClassOwnershipProtected},
 	"PATCH /api/v1/courses/:id/revisions/:revisionId":                            {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId", Class: ClassOwnershipProtected},
@@ -376,6 +394,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PUT /api/v1/admin/courses/:id/price":                     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/price", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/default-access-expiry":     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/default-access-expiry", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/sections/:sectionId/price": {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/sections/:sectionId/price", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/courses":                               {Method: http.MethodGet, Path: "/api/v1/admin/courses", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/courses/:id/price-history":             {Method: http.MethodGet, Path: "/api/v1/admin/courses/:id/price-history", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/courses/:id/delist":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/delist", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/courses/:id/relist":                   {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/relist", Class: ClassCapabilityProtected},

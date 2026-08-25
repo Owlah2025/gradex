@@ -111,8 +111,8 @@ func TestProductionRegistrationFoundationsStartWithHIBPAndApprovedPolicySet(t *t
 // be gated on cfg.Admission().Enabled(), so the intended posture — sessions on,
 // STUDENT_REGISTRATION_ENABLED=false — dropped the whole Admin staff surface and
 // POST /api/v1/staff-invitations answered 404/unmatched. The two admissions are
-// independent, and this test holds them apart in both directions: staff routes
-// mounted, Student admission routes still absent.
+// independent, and this test holds them apart in both directions: staff and
+// recovery routes mounted, Student registration routes still absent.
 func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T) {
 	freshAPISchema(t)
 	pool, _ := apiPool(t)
@@ -191,22 +191,66 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 		}
 	}
 
-	// The fix must not re-open Student admission as a side effect.
+	// Closing Student registration must not re-open its routes.
 	forbiddenAdmissionRoutes := []string{
 		"POST /api/v1/student-registrations",
 		"POST /api/v1/email-verification-requests",
 		"POST /api/v1/email-verifications",
-		"POST /api/v1/password-reset-requests",
-		"POST /api/v1/password-resets",
 		"GET /api/v1/registration-policy-set",
 	}
 	for _, route := range forbiddenAdmissionRoutes {
 		if mounted[route] {
-			t.Fatalf("Student admission route %q was mounted while registration is disabled", route)
+			t.Fatalf("Student registration route %q was mounted while registration is disabled", route)
 		}
 	}
-	if !mounted["POST /api/v1/purchase-requests"] {
-		t.Fatal("rate-limited public purchase request route was not mounted while registration is disabled")
+	for _, route := range []string{
+		"POST /api/v1/password-reset-requests",
+		"POST /api/v1/password-resets",
+		"POST /api/v1/purchase-requests",
+	} {
+		if !mounted[route] {
+			t.Fatalf("required anonymous route %q is not mounted while registration is disabled", route)
+		}
+	}
+
+	// A real request through the production-composed router proves recovery is
+	// not merely listed in Gin's route table. Roles are deliberately mixed: the
+	// service operates on eligible Accounts, not Student-only identities.
+	for _, account := range []struct {
+		email string
+		role  identity.Role
+	}{
+		{"admin-recovery@example.com", identity.RoleAdmin},
+		{"instructor-recovery@example.com", identity.RoleInstructor},
+		{"student-recovery@example.com", identity.RoleStudent},
+	} {
+		t108Seed(t, pool, account.email, account.role)
+	}
+	browser := &t108Client{h: r}
+	bootstrap := browser.call(http.MethodGet, "/api/v1/session/bootstrap", nil, false)
+	if bootstrap.Code != http.StatusOK {
+		t.Fatalf("anonymous bootstrap = %d: %s", bootstrap.Code, bootstrap.Body.String())
+	}
+	var bootstrapBody struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(bootstrap.Body.Bytes(), &bootstrapBody); err != nil {
+		t.Fatalf("decoding anonymous bootstrap: %v", err)
+	}
+	browser.csrf = bootstrapBody.CSRFToken
+	for _, email := range []string{
+		"admin-recovery@example.com",
+		"instructor-recovery@example.com",
+		"student-recovery@example.com",
+	} {
+		response := browser.call(http.MethodPost, "/api/v1/password-reset-requests", map[string]string{"email": email}, true)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("password recovery request for %s = %d: %s", email, response.Code, response.Body.String())
+		}
+	}
+	unknown := browser.call(http.MethodPost, "/api/v1/password-reset-requests", map[string]string{"email": "unknown-recovery@example.com"}, true)
+	if unknown.Code != http.StatusAccepted {
+		t.Fatalf("unknown password recovery request = %d: %s", unknown.Code, unknown.Body.String())
 	}
 
 	// The Admin surface is composed, not exposed: the staff mutation boundary
@@ -459,6 +503,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	requiredSurfaces := map[string]string{
 		"Sessions":          "/api/v1/sessions",
 		"StudentAdmission":  "/api/v1/student-registrations",
+		"PasswordRecovery":  "/api/v1/password-reset-requests",
 		"Staff":             "/api/v1/staff",
 		"CatalogAuthoring":  "/api/v1/courses",
 		"ProtectedLearning": "/api/v1/learn/lessons/:lessonId/progress",

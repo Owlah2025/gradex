@@ -10,8 +10,19 @@ checks:
     expected_status: 200
     covers: [postgresql, redis, schema]
   - id: worker_process
-    source: platform_process
-    expected_running_replicas: 1
+    source: host_runtime_report
+    expected_status: PASS
+    identity: compose_project_and_service_labels
+  - id: transactional_email_outbox
+    source: postgres_transactional_email_deliveries
+    terminal_states: [PERMANENT_FAILED, EXHAUSTED]
+    stale_due_seconds: 3600
+    expired_lease: unhealthy
+  - id: disk_capacity
+    source: statvfs
+    warning_used_percent: 85
+    critical_used_percent: 95
+    critical_min_free_bytes: 5368709120
   - id: backup_freshness
     source: backup_completed_at
     maximum_age_seconds: 7200

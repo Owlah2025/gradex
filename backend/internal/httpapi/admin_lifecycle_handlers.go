@@ -116,3 +116,15 @@ func (h *adminLifecycleHandlers) restoreAccess(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, course)
 }
+
+// directory is the Admin lifecycle read surface. Without it the lifecycle commands are
+// unreachable through the product for every state the public catalogue hides — a delisted Course
+// cannot be relisted from a catalogue that, correctly, no longer lists it.
+func (h *adminLifecycleHandlers) directory(c *gin.Context) {
+	summaries, err := h.repo.ListCourseLifecycleDirectory(c.Request.Context(), c.Query("q"))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": summaries})
+}

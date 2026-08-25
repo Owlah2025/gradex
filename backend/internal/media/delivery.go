@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/entitlement"
 )
 
@@ -588,7 +589,7 @@ func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, tar
 			AND scan.storage_object_version = mav.storage_object_version
 			AND scan.outcome = 'PASSED'
 		WHERE `+targetPredicate+`
-		  AND c.lifecycle = 'PUBLISHED'
+		  AND `+catalogpublic.PublishedOnly("c", "cr")+`
 		  AND cr.state = 'APPROVED'
 		  AND mav.kind = 'PREVIEW'
 		  AND ma.kind = 'PREVIEW'
