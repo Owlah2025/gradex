@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 var r2ProviderHTTPClient = &http.Client{
@@ -26,7 +28,7 @@ var r2ProviderHTTPClient = &http.Client{
 	},
 }
 
-func TestCloudflareR2PreservesPrivateVersionBoundMediaContract(t *testing.T) {
+func TestCloudflareR2PreservesPrivateImmutableObjectIdentityContract(t *testing.T) {
 	t.Parallel()
 
 	endpoint := requiredProviderEnvironment(t, "S3_ENDPOINT")
@@ -50,7 +52,8 @@ func TestCloudflareR2PreservesPrivateVersionBoundMediaContract(t *testing.T) {
 	}
 
 	prefix := "provider-proof/" + randomProviderSuffix(t) + "/"
-	key := prefix + "source.mp4"
+	firstKey := prefix + "asset-version-a/source.mp4"
+	secondKey := prefix + "asset-version-b/source.mp4"
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
@@ -60,40 +63,35 @@ func TestCloudflareR2PreservesPrivateVersionBoundMediaContract(t *testing.T) {
 	}()
 
 	first := []byte("A")
-	firstUpload := putPresignedProviderObject(t, ctx, store, key, first, publicOrigin)
+	firstUpload := putPresignedProviderObject(t, ctx, store, firstKey, first, publicOrigin)
 	assertProviderCORS(t, ctx, firstUpload.objectURL, publicOrigin)
 	assertUnsignedProviderReadDenied(t, ctx, firstUpload.objectURL)
-	assertProviderVersion(t, ctx, store, key, firstUpload, first)
-	t.Log("upload A: success; ETag present; provider VersionId present; exact HEAD and GET returned A")
+	assertProviderIdentity(t, ctx, store, firstKey, firstUpload, first)
+	t.Log("upload A: success; ETag identity recorded; exact HEAD, GET, hash, and file read returned A")
 
 	second := []byte("B")
-	secondUpload := putPresignedProviderObject(t, ctx, store, key, second, publicOrigin)
-	if firstUpload.versionID == secondUpload.versionID {
-		t.Fatal("R2 returned the same object version after replacement")
-	}
-	if firstUpload.etag == secondUpload.etag {
-		t.Fatal("R2 returned the same ETag for distinct object bytes")
-	}
-	current, err := store.DownloadPrefix(ctx, key, int64(len(second)+1))
+	secondUpload := putPresignedProviderObject(t, ctx, store, secondKey, second, publicOrigin)
+	assertProviderIdentity(t, ctx, store, secondKey, secondUpload, second)
+	current, err := store.DownloadPrefix(ctx, secondKey, int64(len(second)+1))
 	if err != nil || !bytes.Equal(current, second) {
-		t.Fatal("current provider object did not resolve to replacement bytes B")
+		t.Fatal("separate asset-version key did not return its current bytes")
 	}
-	assertProviderVersion(t, ctx, store, key, secondUpload, second)
-	t.Log("upload B: success; distinct ETag and VersionId present; current and exact-version GET returned B")
 
-	old, err := store.DownloadPrefixVersion(ctx, key, firstUpload.versionID, int64(len(first)+1))
-	if err != nil {
-		t.Fatal("R2 could not retrieve historical version A after the same key was replaced")
+	// A replacement at the same key is intentionally a failed proof for the old
+	// identity; separate Asset Version keys remain independently addressable.
+	replacement := []byte("replacement")
+	_ = putPresignedProviderObject(t, ctx, store, firstKey, replacement, publicOrigin)
+	assertProviderIdentityRejected(t, ctx, store, firstKey, objectIdentityETagPrefix+firstUpload.etag)
+	current, err = store.DownloadPrefix(ctx, firstKey, int64(len(replacement)+1))
+	if err != nil || !bytes.Equal(current, replacement) {
+		t.Fatal("current provider object did not resolve to replacement bytes")
 	}
-	if !bytes.Equal(old, first) {
-		t.Fatal("R2 silently substituted current bytes for the requested historical object version")
-	}
-	assertProviderHeadMetadata(t, ctx, store, key, firstUpload)
-	t.Log("historical retrieval: exact VersionId A remained addressable and returned A after overwrite")
+	assertProviderIdentity(t, ctx, store, secondKey, secondUpload, second)
+	t.Log("overwrite at one key failed the old ETag identity; separate asset-version key remained readable")
+
 }
 
 type providerUpload struct {
-	versionID string
 	etag      string
 	objectURL string
 }
@@ -152,10 +150,6 @@ func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client
 		_, _ = io.Copy(io.Discard, response.Body)
 		t.Fatalf("provider upload returned HTTP %d", response.StatusCode)
 	}
-	version := strings.TrimSpace(response.Header.Get("x-amz-version-id"))
-	if version == "" {
-		t.Fatal("R2 upload omitted x-amz-version-id required by the frozen media provenance contract")
-	}
 	etag := strings.TrimSpace(response.Header.Get("ETag"))
 	if etag == "" {
 		t.Fatal("R2 upload omitted ETag metadata")
@@ -172,39 +166,80 @@ func putPresignedProviderObject(t *testing.T, ctx context.Context, store *Client
 		t.Fatal("parsing provider upload URL")
 	}
 	parsed.RawQuery = ""
-	return providerUpload{versionID: version, etag: etag, objectURL: parsed.String()}
+	return providerUpload{etag: etag, objectURL: parsed.String()}
 }
 
-func assertProviderVersion(t *testing.T, ctx context.Context, store *Client, key string, upload providerUpload, expected []byte) {
+func assertProviderIdentity(t *testing.T, ctx context.Context, store *Client, key string, upload providerUpload, expected []byte) {
 	t.Helper()
-	size, exists, err := store.HeadObjectVersion(ctx, key, upload.versionID)
+	identity := objectIdentityETagPrefix + upload.etag
+	size, exists, err := store.HeadObjectVersion(ctx, key, identity)
 	if err != nil || !exists || size != int64(len(expected)) {
-		t.Fatalf("exact provider object version HEAD failed: exists=%t size=%d", exists, size)
+		t.Fatalf("exact ETag identity HEAD failed: exists=%t size=%d error=%v", exists, size, err)
 	}
-	assertProviderHeadMetadata(t, ctx, store, key, upload)
-	got, err := store.DownloadPrefixVersion(ctx, key, upload.versionID, int64(len(expected)+1))
+	got, err := store.DownloadPrefixVersion(ctx, key, identity, int64(len(expected)+1))
 	if err != nil {
-		t.Fatal("reading exact provider object version failed")
+		t.Fatalf("reading exact ETag identity failed: %v", err)
 	}
 	if !bytes.Equal(got, expected) {
-		t.Fatal("exact provider object version bytes differ")
+		t.Fatal("exact ETag identity bytes differ")
+	}
+	actualHash, err := store.HashObjectVersion(ctx, key, identity)
+	if err != nil {
+		t.Fatalf("hashing exact ETag identity failed: %v", err)
+	}
+	digest := sha256.Sum256(expected)
+	if actualHash != hex.EncodeToString(digest[:]) {
+		t.Fatalf("exact ETag identity hash = %q, want %q", actualHash, hex.EncodeToString(digest[:]))
+	}
+	path, cleanup, err := store.DownloadToFileVersion(ctx, key, identity)
+	if err != nil {
+		t.Fatalf("downloading exact ETag identity to file failed: %v", err)
+	}
+	defer cleanup()
+	contents, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(contents, expected) {
+		t.Fatalf("exact ETag identity file bytes = %q, want %q (error=%v)", contents, expected, err)
 	}
 }
 
-func assertProviderHeadMetadata(t *testing.T, ctx context.Context, store *Client, key string, upload providerUpload) {
+func assertProviderIdentityRejected(t *testing.T, ctx context.Context, store *Client, key, identity string) {
 	t.Helper()
-	out, err := store.s3.HeadObject(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(store.bucket), Key: aws.String(key), VersionId: aws.String(upload.versionID),
-	})
-	if err != nil {
-		t.Fatal("provider exact-version HEAD metadata request failed")
+	checks := []struct {
+		name string
+		read func() error
+	}{
+		{name: "HEAD", read: func() error { _, _, err := store.HeadObjectVersion(ctx, key, identity); return err }},
+		{name: "prefix GET", read: func() error { _, err := store.DownloadPrefixVersion(ctx, key, identity, 1024); return err }},
+		{name: "hash GET", read: func() error { _, err := store.HashObjectVersion(ctx, key, identity); return err }},
+		{name: "file GET", read: func() error {
+			_, cleanup, err := store.DownloadToFileVersion(ctx, key, identity)
+			if cleanup != nil {
+				cleanup()
+			}
+			return err
+		}},
 	}
-	if strings.TrimSpace(aws.ToString(out.VersionId)) != upload.versionID {
-		t.Fatal("provider exact-version HEAD did not return the requested VersionId")
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			assertProviderPreconditionFailed(t, check.read())
+		})
 	}
-	if strings.TrimSpace(aws.ToString(out.ETag)) != upload.etag {
-		t.Fatal("provider exact-version HEAD did not return the upload ETag")
+}
+
+func assertProviderPreconditionFailed(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("stale ETag identity unexpectedly succeeded")
 	}
+	var responseError *smithyhttp.ResponseError
+	if errors.As(err, &responseError) && responseError.HTTPStatusCode() == http.StatusPreconditionFailed {
+		return
+	}
+	var apiError smithy.APIError
+	if errors.As(err, &apiError) && apiError.ErrorCode() == "PreconditionFailed" {
+		return
+	}
+	t.Fatalf("stale ETag identity error = %v, want PreconditionFailed", err)
 }
 
 func headerContainsToken(header, want string) bool {

@@ -105,9 +105,10 @@ Frontend: `npm ci`, `npm run typecheck`, `npm test` (171 passed), `npm run lint`
   `MEDIA_OPERATING_MODE=ADMIN_CATALOGUE`, where Instructor uploads are refused by design and Admin
   catalogue loading with out-of-band scan evidence is the only path. The Instructor browser journey
   proved here is complete in software and blocked in production solely by that gate.
-- Storage must have object versioning enabled and must expose `x-amz-version-id` to the browser. The
-  developer Compose bucket now enables versioning; Cloudflare R2's exposure is already asserted by
-  `internal/storage/r2_provider_integration_test.go`.
+- Storage must expose an exact immutable object identity to the browser. Legacy MinIO/S3 uploads use
+  `x-amz-version-id`; Cloudflare R2 uploads use the returned ETag as `etag:<provider-etag>` and exact
+  backend reads send it as `If-Match`. The developer Compose bucket remains version-enabled for its
+  legacy path, while the R2 behavior is asserted by `internal/storage/r2_provider_integration_test.go`.
 
 ## 6. Local manual acceptance environment
 

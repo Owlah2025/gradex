@@ -1,6 +1,9 @@
 // Package storage wraps an S3-compatible object store (MinIO locally, S3/R2 in
 // production) and exposes presigned PUT/GET URL generation. Nothing outside
-// this package should construct S3 keys or talk to the SDK directly.
+// this package should construct S3 keys or talk to the SDK directly. Stored
+// object identities are opaque: legacy values are provider VersionIds, while
+// etag:<quoted-etag> values use If-Match for providers without historical
+// VersionId reads.
 package storage
 
 import (
@@ -172,19 +175,21 @@ func (c *Client) HeadObject(ctx context.Context, key string) (sizeBytes int64, e
 	return c.HeadObjectVersion(ctx, key, "")
 }
 
-// HeadObjectVersion verifies the exact provider object version. A non-empty
-// version is never silently replaced by the current object at the same key.
+// HeadObjectVersion verifies the exact provider object identity. A non-empty
+// identity is never silently replaced by the current object at the same key.
 func (c *Client) HeadObjectVersion(ctx context.Context, key, objectVersion string) (sizeBytes int64, exists bool, err error) {
+	identity, err := parseObjectIdentity(objectVersion)
+	if err != nil {
+		return 0, false, fmt.Errorf("parsing object identity for %q: %w", key, err)
+	}
 	input := &s3.HeadObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
 	}
-	if objectVersion != "" {
-		input.VersionId = aws.String(objectVersion)
-	}
+	identity.applyHead(input)
 	out, err := c.s3.HeadObject(ctx, input)
 	if err != nil {
-		return 0, false, fmt.Errorf("heading object %q version %q: %w", key, objectVersion, err)
+		return 0, false, fmt.Errorf("heading object %q with %s identity: %w", key, identity.kind, err)
 	}
 	return aws.ToInt64(out.ContentLength), true, nil
 }
@@ -260,37 +265,41 @@ func (c *Client) DownloadPrefixVersion(ctx context.Context, key, objectVersion s
 	if maxBytes <= 0 {
 		return nil, fmt.Errorf("prefix size must be positive")
 	}
+	identity, err := parseObjectIdentity(objectVersion)
+	if err != nil {
+		return nil, fmt.Errorf("parsing object identity for %q: %w", key, err)
+	}
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
 		Range:  aws.String(fmt.Sprintf("bytes=0-%d", maxBytes-1)),
 	}
-	if objectVersion != "" {
-		input.VersionId = aws.String(objectVersion)
-	}
+	identity.applyGet(input)
 	out, err := c.s3.GetObject(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("getting object prefix %q: %w", key, err)
+		return nil, fmt.Errorf("getting object prefix %q with %s identity: %w", key, identity.kind, err)
 	}
 	defer out.Body.Close()
 	return io.ReadAll(io.LimitReader(out.Body, maxBytes))
 }
 
-// HashObjectVersion computes evidence over the exact stored version rather
+// HashObjectVersion computes evidence over the exact stored object identity rather
 // than accepting a client-provided digest as proof of the bytes received.
 func (c *Client) HashObjectVersion(ctx context.Context, key, objectVersion string) (string, error) {
-	input := &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}
-	if objectVersion != "" {
-		input.VersionId = aws.String(objectVersion)
+	identity, err := parseObjectIdentity(objectVersion)
+	if err != nil {
+		return "", fmt.Errorf("parsing object identity for %q: %w", key, err)
 	}
+	input := &s3.GetObjectInput{Bucket: aws.String(c.bucket), Key: aws.String(key)}
+	identity.applyGet(input)
 	out, err := c.s3.GetObject(ctx, input)
 	if err != nil {
-		return "", fmt.Errorf("getting object %q version %q for hashing: %w", key, objectVersion, err)
+		return "", fmt.Errorf("getting object %q with %s identity for hashing: %w", key, identity.kind, err)
 	}
 	defer out.Body.Close()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, out.Body); err != nil {
-		return "", fmt.Errorf("hashing object %q version %q: %w", key, objectVersion, err)
+		return "", fmt.Errorf("hashing object %q with %s identity: %w", key, identity.kind, err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -303,20 +312,22 @@ func (c *Client) DownloadToFile(ctx context.Context, key string) (path string, c
 	return c.DownloadToFileVersion(ctx, key, "")
 }
 
-// DownloadToFileVersion streams the exact provider object version to a temp
-// file. A non-empty version is never replaced by the current object at the
+// DownloadToFileVersion streams the exact provider object identity to a temp
+// file. A non-empty identity is never replaced by the current object at the
 // same key.
 func (c *Client) DownloadToFileVersion(ctx context.Context, key, objectVersion string) (path string, cleanup func(), err error) {
+	identity, err := parseObjectIdentity(objectVersion)
+	if err != nil {
+		return "", nil, fmt.Errorf("parsing object identity for %q: %w", key, err)
+	}
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
 	}
-	if objectVersion != "" {
-		input.VersionId = aws.String(objectVersion)
-	}
+	identity.applyGet(input)
 	out, err := c.s3.GetObject(ctx, input)
 	if err != nil {
-		return "", nil, fmt.Errorf("getting object %q version %q: %w", key, objectVersion, err)
+		return "", nil, fmt.Errorf("getting object %q with %s identity: %w", key, identity.kind, err)
 	}
 	defer out.Body.Close()
 
@@ -329,11 +340,11 @@ func (c *Client) DownloadToFileVersion(ctx context.Context, key, objectVersion s
 	if _, err := io.Copy(f, out.Body); err != nil {
 		f.Close()
 		cleanup()
-		return "", nil, fmt.Errorf("streaming object %q version %q to disk: %w", key, objectVersion, err)
+		return "", nil, fmt.Errorf("streaming object %q with %s identity to disk: %w", key, identity.kind, err)
 	}
 	if err := f.Close(); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("closing temp file for %q version %q: %w", key, objectVersion, err)
+		return "", nil, fmt.Errorf("closing temp file for %q with %s identity: %w", key, identity.kind, err)
 	}
 	return f.Name(), cleanup, nil
 }

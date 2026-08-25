@@ -9,6 +9,8 @@ import {
   describeAssetState,
   isTerminalState,
   resourceContentType,
+  storageObjectVersionFromUploadHeaders,
+  uploadFileToStorage,
   validateSelectedResource,
 } from "./media-upload";
 import { addLessonFile, deleteLessonFile } from "./authoring";
@@ -24,6 +26,65 @@ const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingm
 function pickedFile(name: string, type: string, size: number): File {
   return { name, type, size } as File;
 }
+
+class HeaderResponseXMLHttpRequest {
+  static responseHeaders: Record<string, string> = {};
+  upload = { onprogress: null };
+  status = 200;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+
+  open(): void {}
+
+  setRequestHeader(): void {}
+
+  getResponseHeader(name: string): string | null {
+    return HeaderResponseXMLHttpRequest.responseHeaders[name.toLowerCase()] || null;
+  }
+
+  send(): void {
+    this.onload?.();
+  }
+}
+
+async function directUploadIdentity(responseHeaders: Record<string, string>) {
+  const originalXMLHttpRequest = globalThis.XMLHttpRequest;
+  HeaderResponseXMLHttpRequest.responseHeaders = Object.fromEntries(
+    Object.entries(responseHeaders).map(([name, value]) => [name.toLowerCase(), value]),
+  );
+  globalThis.XMLHttpRequest = HeaderResponseXMLHttpRequest as unknown as typeof XMLHttpRequest;
+  try {
+    return await uploadFileToStorage("https://storage.test/put", pickedFile("source.mp4", "video/mp4", 12), "video/mp4");
+  } finally {
+    globalThis.XMLHttpRequest = originalXMLHttpRequest;
+  }
+}
+
+test("direct uploads prefer VersionId and otherwise preserve a valid quoted ETag", async () => {
+  const cases: Array<{ name: string; headers: Record<string, string>; expected: string }> = [
+    {
+      name: "legacy VersionId",
+      headers: { "x-amz-version-id": "minio-version-1", etag: '"r2-etag-1"' },
+      expected: "minio-version-1",
+    },
+    {
+      name: "R2 ETag-only",
+      headers: { etag: '"r2-etag-1"' },
+      expected: 'etag:"r2-etag-1"',
+    },
+  ];
+  for (const testCase of cases) {
+    const result = await directUploadIdentity(testCase.headers);
+    assert.equal(result.storageObjectVersion, testCase.expected, testCase.name);
+  }
+});
+
+test("direct uploads reject missing or malformed provider identity", async () => {
+  await assert.rejects(() => directUploadIdentity({}), /usable object identity/);
+  assert.throws(() => storageObjectVersionFromUploadHeaders(null, "unquoted-etag"), /usable object identity/);
+  assert.throws(() => storageObjectVersionFromUploadHeaders(null, '""'), /usable object identity/);
+});
 
 test("the accepted Lesson Resource types are exactly PDF and DOCX", () => {
   assert.deepEqual([...ACCEPTED_RESOURCE_CONTENT_TYPES], ["application/pdf", DOCX_TYPE]);

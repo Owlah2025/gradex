@@ -151,8 +151,14 @@ T047 can be checked.
   `S3_PRESIGN_ENDPOINT` is the optional browser-facing origin used when signing direct uploads and
   downloads; it defaults to `S3_ENDPOINT`, and must be an exact HTTPS origin outside development.
   The private bucket must allow credential-free CORS `PUT`/`GET`/`HEAD` from only `PUBLIC_ORIGIN`
-  for presigned requests and expose `x-amz-version-id`. CORS does not make objects public; every
-  object request still requires a valid signature.
+  for presigned requests and expose `etag` plus `x-amz-version-id`. Gradex records an opaque exact
+  object identity: a returned VersionId for legacy S3/MinIO, or `etag:<provider-etag>` for R2 when
+  exact reads use `If-Match`. CORS does not make objects public; every object request still requires
+  a valid signature.
+
+Source uploads use `quarantine/<courseID>/<assetVersionID>/source`, so each Asset Version has its own
+object key. If a provider object is later overwritten at that key, the recorded ETag identity fails
+the `If-Match` check; Gradex never substitutes the current bytes for the recorded source.
 
 Every secret entry in the committed examples is blank. Supply real values through the deployment
 platform's managed secret/environment facility. Do not pass secrets as image build arguments, bake them

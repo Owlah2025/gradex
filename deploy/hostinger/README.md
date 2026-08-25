@@ -88,15 +88,17 @@ Before deploying application traffic, run the explicit provider contract test fr
 
 ```bash
 cd backend
-go test -tags=provider -run '^TestCloudflareR2PreservesPrivateVersionBoundMediaContract$' ./internal/storage
+go test -tags=provider -run '^TestCloudflareR2PreservesPrivateImmutableObjectIdentityContract$' ./internal/storage
 ```
 
 Export only `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `PUBLIC_ORIGIN` into that
 shell. `S3_PRESIGN_ENDPOINT` is optional and defaults to `S3_ENDPOINT`, so the existing R2 deployment
 continues to sign with its configured R2 endpoint. The test uploads disposable objects, proves
-private/CORS behavior and exact version-bound reads, then removes its prefix. A missing
-`x-amz-version-id` or silent current-object substitution is a hard
-S4 compatibility failure; do not work around it by weakening media provenance.
+private/CORS behavior, records the returned ETag identity, reads exact bytes with `If-Match`, proves
+that an overwrite at the same key fails the old identity with `PreconditionFailed`, and removes its
+prefix. R2 historical `VersionId` retrieval is not part of this contract; an ETag identity is required
+when no usable VersionId is returned. A missing ETag identity or silent current-object substitution is
+a hard S4 compatibility failure; do not work around it by weakening media provenance.
 
 ## 4. DNS, origin TLS, and Cloudflare
 

@@ -253,11 +253,43 @@ export async function beginPublicPreviewUpload(
 
 export type DirectUploadResult = { storageObjectVersion: string };
 
+function isStrongQuotedETag(etag: string): boolean {
+  if (etag.length < 3 || etag[0] !== '"' || etag[etag.length - 1] !== '"') {
+    return false;
+  }
+  for (const character of etag.slice(1, -1)) {
+    const codePoint = character.charCodeAt(0);
+    if (codePoint <= 0x20 || codePoint === 0x7f || character === '"') {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Chooses the immutable provider identity returned by a direct browser PUT. */
+export function storageObjectVersionFromUploadHeaders(
+  versionIDHeader: string | null,
+  etagHeader: string | null,
+): string {
+  const versionID = (versionIDHeader || "").trim();
+  if (versionID) {
+    return versionID;
+  }
+
+  const etag = (etagHeader || "").trim();
+  if (!isStrongQuotedETag(etag)) {
+    throw new Error(
+      "The storage provider did not return a usable object identity (x-amz-version-id or a strong ETag).",
+    );
+  }
+  return `etag:${etag}`;
+}
+
 /**
  * PUTs the file to the presigned storage URL.
  *
  * XMLHttpRequest rather than fetch, because the upload needs byte progress and
- * the response's `x-amz-version-id` header. The request carries no cookies and
+ * the response's provider identity headers. The request carries no cookies and
  * no CSRF token: it is a cross-origin call to storage authorized solely by the
  * signature already in the URL.
  */
@@ -285,19 +317,16 @@ export function uploadFileToStorage(
         reject(new Error(`The storage upload was rejected (HTTP ${request.status}).`));
         return;
       }
-      const version = (request.getResponseHeader("x-amz-version-id") || "").trim();
-      if (!version) {
-        // Provenance is version-exact by design: without the stored object's
-        // version there is nothing to prove the API later scanned and
-        // processed these exact bytes.
-        reject(
-          new Error(
-            "The storage provider did not return an object version. Object versioning must be enabled and x-amz-version-id exposed to the browser.",
-          ),
+      try {
+        const storageObjectVersion = storageObjectVersionFromUploadHeaders(
+          request.getResponseHeader("x-amz-version-id"),
+          request.getResponseHeader("etag"),
         );
+        resolve({ storageObjectVersion });
+      } catch (error) {
+        reject(error);
         return;
       }
-      resolve({ storageObjectVersion: version });
     };
     request.send(file);
   });

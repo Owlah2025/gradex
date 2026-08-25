@@ -171,7 +171,11 @@ Entrypoints: `cmd/api`, `cmd/worker`, `cmd/migrate`, `cmd/bootstrap-admin`
 
 ### Storage / media operating modes
 
-Private object storage via S3-compatible client with exact-version addressing (`storage.go:114,200,215,246` set `input.VersionId`). Two operating modes: `SCANNER` (Instructor `BeginUpload` permitted, worker scans and transcodes) and `ADMIN_CATALOGUE` (Instructor `BeginUpload` returns `ErrNotAuthorized`; Admin catalogue-load path plus immutable out-of-band scan evidence).
+Private object storage via an S3-compatible client with opaque exact-object identities: legacy values
+set `input.VersionId`, while `etag:<provider-etag>` values set `If-Match`; both fail closed on a
+mismatch. Two operating modes: `SCANNER` (Instructor `BeginUpload` permitted, worker scans and
+transcodes) and `ADMIN_CATALOGUE` (Instructor `BeginUpload` returns `ErrNotAuthorized`; Admin
+catalogue-load path plus immutable out-of-band scan evidence).
 
 ### Transactional email composition
 

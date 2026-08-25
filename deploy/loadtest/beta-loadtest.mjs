@@ -282,21 +282,33 @@ function runUpload() {
   const direct = recordNoBody("direct_upload", http.put(intent.body.upload_url, fixtureBody, { headers: { "Content-Type": "video/mp4" }, redirects: 0, timeout: "60s", tags: { name: "direct_upload" } }), [200, 201, 204]);
   if (!direct.ok) return;
   counters.direct_upload_successes.add(1);
-  const version = direct.response.headers["X-Amz-Version-Id"] || direct.response.headers["x-amz-version-id"];
-  if (!version) {
+  const objectIdentity = directUploadObjectIdentity(direct.response.headers);
+  if (!objectIdentity) {
     counters.upload_failures.add(1);
     return;
   }
   const completion = recordJSON("upload_completion", http.post(`${TARGET}/api/v1/media/uploads/${intent.body.asset_version_id}/completions`, JSON.stringify({
     provider_event_id: `${RUN_ID}-upload-${exec.scenario.iterationInTest}`,
     storage_object_key: intent.body.storage_object_key,
-    storage_object_version: version,
+    storage_object_version: objectIdentity,
     content_type: "video/mp4",
     size_bytes: fixtureBody.byteLength,
     sha256_hex: UPLOAD_SHA256,
   }), requestParams("upload_completion", operator, { "Content-Type": "application/json", "X-CSRF-Token": operator.csrf_token, Origin: TARGET })), 200,
     (body) => body.asset_version_id === intent.body.asset_version_id && typeof body.state === "string");
   if (completion.ok) counters.upload_successes.add(1);
+}
+
+function directUploadObjectIdentity(headers) {
+  const versionID = String(headers["X-Amz-Version-Id"] || headers["x-amz-version-id"] || "").trim();
+  if (versionID) return versionID;
+  const etag = String(headers.ETag || headers.etag || "").trim();
+  if (etag.length < 3 || etag[0] !== '"' || etag[etag.length - 1] !== '"') return "";
+  for (const character of etag.slice(1, -1)) {
+    const codePoint = character.charCodeAt(0);
+    if (codePoint <= 0x20 || codePoint === 0x7f || character === '"') return "";
+  }
+  return `etag:${etag}`;
 }
 
 function entitledSession(iteration, playback = false) {

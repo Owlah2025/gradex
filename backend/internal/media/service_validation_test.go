@@ -46,3 +46,25 @@ func TestContentValidationUsesBytesAndKeepsAcceptedTargetInQuarantine(t *testing
 		t.Fatal("completion outside quarantine was accepted")
 	}
 }
+
+func TestCompletionFingerprintBindsTheFullOpaqueObjectIdentity(t *testing.T) {
+	base := CompleteUploadRequest{
+		AssetVersionID:       "00000000-0000-0000-0000-000000000001",
+		StorageObjectKey:     "quarantine/course/version/source",
+		StorageObjectVersion: "object-v1",
+		ContentType:          "video/mp4",
+		SizeBytes:            42,
+		SHA256Hex:            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	if completionFingerprint(base) != completionFingerprint(base) {
+		t.Fatal("identical completion evidence produced different fingerprints")
+	}
+
+	for _, replacementIdentity := range []string{"object-v2", `etag:"r2-etag-v1"`} {
+		request := base
+		request.StorageObjectVersion = replacementIdentity
+		if completionFingerprint(base) == completionFingerprint(request) {
+			t.Fatalf("object identity %q did not change the completion fingerprint", replacementIdentity)
+		}
+	}
+}

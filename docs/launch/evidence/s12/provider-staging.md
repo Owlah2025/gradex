@@ -11,8 +11,9 @@ Status: **provider execution pending; T047 remains open**
 - Hostinger KVM 2 Compose topology with only edge HTTP/HTTPS ports published.
 - Separate frontend, API, worker, migration, proof, PostgreSQL, isolated-restore PostgreSQL, TLS-only
   authenticated Redis, and Caddy processes.
-- Cloudflare R2 endpoint/CORS configuration plus an explicit credential-gated private/version-bound
-  provider compatibility test.
+- Cloudflare R2 endpoint/CORS configuration plus an explicit credential-gated private/exact-identity
+  provider compatibility test. The contract records R2 ETags and uses `If-Match`; it does not claim
+  historical S3 VersionId retrieval.
 - Host baseline audit, public DNS/TLS/Cloudflare probe, protected provider smoke runner, bounded
   loopback-only database proof tunnel, backup/isolated restore, alert invocation, and persistent
   application release selection.
@@ -72,9 +73,10 @@ make the following available through protected local/provider configuration, nev
 1. Hostinger VPS address plus an SSH-configured non-root operational user whose public key is authorized.
 2. The controlled Gradex domain/Cloudflare zone and the chosen staging hostname.
 3. A private R2 bucket plus a bucket-scoped object read/write/delete token. Apply the rendered exact-origin
-   CORS policy, then run the provider test. R2 must return usable `x-amz-version-id` values and must never
-   silently substitute current bytes for a requested historical version; otherwise the frozen S4 media
-   provenance contract blocks R2 use.
+   CORS policy, then run the provider test. R2 must expose a usable ETag, and an exact read with the
+   recorded `etag:<ETag>` identity must use `If-Match` and fail with `PreconditionFailed` after an
+   overwrite at the same key; otherwise the frozen S4 media provenance contract blocks R2 use. R2
+   historical S3 VersionId retrieval is not required or claimed.
 4. A protected external alert webhook URL/token if real alert delivery is to be closed in this run.
 
 After those inputs exist, follow `deploy/hostinger/README.md` and capture actual host audit, public DNS,
