@@ -163,6 +163,13 @@ Create a strong restic password, copy it to `/var/lib/gradex/backup-restic-passw
 
 Populate the `GRADEX_BACKUP_*` entries in `/var/lib/gradex/runtime.env` with the HTTPS endpoint, dedicated bucket/prefix, region, backup credential, password-file path, and retention values. Production rejects missing values and non-HTTPS endpoints; HTTP is accepted only for an explicit localhost disposable proof.
 
+The canonical Hostinger deployment leaves `GRADEX_BACKUP_POSTGRES_CONTAINER` empty and resolves the
+Compose `postgres` service. A backup-only checkout for an existing deployment, such as Founder Beta,
+sets it to the exact running PostgreSQL container name. The override is validated and inspected as a
+running container; it does not replace, restart, or recreate that container. Keep the backup runtime
+file and restic password owned by the scheduled non-root operator with mode `0600`, and keep the
+state and backup directories mode `0700`.
+
 Initialize the repository once, then exercise the same command used by systemd:
 
 ```bash
@@ -173,10 +180,50 @@ Initialize the repository once, then exercise the same command used by systemd:
 ./deploy/hostinger/host.sh verify-restore
 ```
 
-The launch policy keeps at least two latest snapshots, 48 hourly generations, 14 daily generations, and 8 weekly generations. `latest.completed-at` is written only after the encrypted snapshot is visible, repository verification passes, retention has been attempted, and the temporary plaintext staging is removed. A retention failure returns non-zero and is journaled even when the newly-created encrypted snapshot remains successful.
+The launch policy keeps at least two latest snapshots, 48 hourly generations, 14 daily generations, and 8 weekly generations. `latest.completed-at` is written only after the encrypted snapshot is visible, repository verification and retention succeed, and the temporary plaintext staging is removed. A retention failure returns non-zero and is journaled even when the newly-created encrypted snapshot remains available remotely.
 If encryption or remote access fails, the uniquely named staging directory remains mode 0700 with dump files mode 0600 for retry/diagnosis; the next successful encrypted run removes stale pipeline staging. This is lifecycle control, not a claim of cryptographic SSD erasure.
 
-The installer does not enable or start timers. After configuration and manual restore proof, enable the existing timers explicitly with `systemctl enable --now gradex-monitor.timer gradex-backup.timer`. Existing historical plaintext files in `/var/lib/gradex/backups` are not removed by this change; retire them only after Founder/operator approval and a successful encrypted restore drill.
+Retention groups snapshots by stable host and tags rather than the unique plaintext staging path.
+The completion marker and plaintext cleanup occur only after retention succeeds; a retention failure
+leaves the previous success markers and failed staging unchanged for diagnosis. Inspect retained
+staging by name, ownership, mode, type, and size without reading dump contents. Do not delete wildcard
+paths or unknown directories; after inspection, prefer the next successful backup's guarded cleanup.
+
+List snapshots and run structural or deep repository checks from a protected shell without printing
+the runtime file or password:
+
+```bash
+(
+  set -a
+  . /var/lib/gradex/runtime.env
+  set +a
+  . ./deploy/hostinger/backup-restic.sh
+  backup_validate_configuration
+  backup_restic snapshots --tag "$GRADEX_BACKUP_SNAPSHOT_TAG"
+  backup_check_repository
+  backup_deep_check_repository                 # reads every encrypted pack
+)
+```
+
+Run repository maintenance only when no backup or restore is active. The host entrypoints share
+`/var/lib/gradex/backups/.backup.lock`; do not run `restic unlock` until every local and remote client
+using the repository is proven stopped.
+
+For the canonical topology, `host.sh restore` and `verify-restore` use the isolated restore Compose
+profile. For a backup-only Founder Beta checkout, perform a separate exact-equivalence proof instead:
+
+1. Select a full 64-hex snapshot carrying both the configured snapshot and `postgresql-custom` tags.
+2. Download its dump, schema metadata, and checksum files from restic into a new protected directory;
+   verify both checksums and run `pg_restore --list`.
+3. Start a disposable PostgreSQL container from the live image digest with no application network and
+   no persistent production volume, then restore with `--exit-on-error --single-transaction`.
+4. Compare the remote schema state and every current public table name/count against the live source.
+   Do not require a positive invitation-provenance Entitlement count when the live source legitimately
+   has zero; require exact source-to-restore equality instead.
+5. Run `backup_deep_check_repository`, then remove the disposable container and protected plaintext
+   restore directory. Never attach the proof container to the live database volume.
+
+The installer does not enable or start timers. After configuration, manual backup, service, and restore proof, enable the backup timer explicitly; enable monitoring separately only after its own configuration and proof. Existing historical plaintext files in `/var/lib/gradex/backups` are not removed by installation; retire them only after Founder/operator approval and a successful encrypted restore drill.
 The restic command timeout defaults to 300 seconds and is bounded by the backup service's 360-second start timeout; a timed-out remote operation is a failed run and does not refresh freshness.
 
 ## 7. Public smoke, rollback, and alerts
@@ -250,6 +297,7 @@ Before installation, verify the chosen operator can read the protected state and
 
 ```bash
 sudo -u <operator> test -r /var/lib/gradex/runtime.env
+sudo -u <operator> test -r /var/lib/gradex/backup-restic-password
 sudo -u <operator> docker info >/dev/null
 ```
 
@@ -266,12 +314,33 @@ The installer requires the protected runtime file to be owned by that non-root o
 the rendered units with `systemd-analyze verify`, installs them under `/etc/systemd/system`, and runs
 `daemon-reload`. It deliberately leaves both timers disabled so installation cannot immediately run a
 monitor or provider backup. After the application, Docker access, runtime configuration, and external
-destinations are ready, enable both timers explicitly:
+destinations are ready, first validate and run the backup service itself:
 
 ```bash
-sudo systemctl enable --now gradex-monitor.timer gradex-backup.timer
-systemctl list-timers gradex-monitor.timer gradex-backup.timer
+systemd-analyze verify \
+  /etc/systemd/system/gradex-backup.service \
+  /etc/systemd/system/gradex-backup.timer
+sudo systemctl start gradex-backup.service
+systemctl show gradex-backup.service \
+  --property=Result --property=ExecMainStatus --property=ActiveState --property=SubState
+journalctl -u gradex-backup.service --since '10 minutes ago' --no-pager -o cat \
+  | grep --extended-regexp \
+    'no errors were found|created and retention applied|successful offsite backup marker updated'
 ```
+
+Do not use `set -x`, print the protected files, inspect a service's environment, or paste an unfiltered
+journal. Before enabling the timer, confirm the journal does not contain credential-variable names or
+the restic password. Then enable only the configured scheduler:
+
+```bash
+sudo systemctl enable --now gradex-backup.timer
+systemctl is-enabled gradex-backup.timer
+systemctl is-active gradex-backup.timer
+systemctl list-timers --all gradex-backup.timer
+```
+
+Enable `gradex-monitor.timer` separately only after its Founder/deployment topology, runtime metrics,
+health targets, and alert destination have been configured and proved.
 
 `gradex-monitor.timer` runs at exact five-minute calendar boundaries.
 `gradex-backup.timer` runs hourly. Both use `Persistent=true`, so a missed event is run after the VPS
