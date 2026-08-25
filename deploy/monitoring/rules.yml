@@ -1,5 +1,9 @@
 version: 1
 checks:
+  - id: api_root
+    source: http
+    path: /
+    expected_status: 200
   - id: api_health
     source: http
     path: /healthz
@@ -13,6 +17,11 @@ checks:
     source: host_runtime_report
     expected_status: PASS
     identity: compose_project_and_service_labels
+  - id: postgresql_schema
+    source: host_runtime_report
+    expected_status: PASS
+    identity: compose_project_and_service_labels
+    expected_schema: selected_backend_image_maximum
   - id: transactional_email_outbox
     source: postgres_transactional_email_deliveries
     terminal_states: [PERMANENT_FAILED, EXHAUSTED]
@@ -26,6 +35,7 @@ checks:
   - id: backup_freshness
     source: backup_completed_at
     maximum_age_seconds: 7200
+    maximum_future_seconds: 300
 log_alerts:
   - id: unexpected_server_error
     event: http_request
@@ -43,5 +53,6 @@ log_alerts:
     condition: phase in [permanent_failure, exhausted]
 delivery:
   type: webhook
-  required_environment: GRADEX_ALERT_WEBHOOK_URL
+  optional_environment: GRADEX_ALERT_WEBHOOK_URL
   optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN
+  https_required_outside_monitor_test: true

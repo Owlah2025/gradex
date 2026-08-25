@@ -60,7 +60,7 @@ main() {
   local runtime_report="$S12_TEMPORARY/runtime-report"
   touch "$port_file" "$alerts_file" "$monitor_log" "$worker_log" "$headers"
   chmod 600 "$port_file" "$alerts_file" "$monitor_log" "$worker_log" "$headers"
-  printf 'version=1\nworker|PASS|production-like worker fixture\nemail_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1\ndisk_roots|PASS|production-like disk fixture\n' >"$runtime_report"
+  printf 'version=1\nworker|PASS|production-like worker fixture\npostgres_schema|PASS|production-like PostgreSQL schema fixture\nemail_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1\ndisk_roots|PASS|production-like disk fixture\n' >"$runtime_report"
   chmod 600 "$runtime_report"
 
   local proof_token="s12-disposable-alert-token"
@@ -83,9 +83,12 @@ main() {
   S12_REDIS_STOPPED=1
 
   set +e
-  GRADEX_HEALTH_URL="https://gradex.localhost:18443/healthz" \
+  # The disposable loopback sink is intentionally HTTP, which monitor-once only
+  # permits under monitor-test; the public probes remain TLS-verified HTTPS.
+  GRADEX_PUBLIC_URL="https://gradex.localhost:18443/" \
+    GRADEX_HEALTH_URL="https://gradex.localhost:18443/healthz" \
     GRADEX_READY_URL="https://gradex.localhost:18443/readyz" \
-    GRADEX_ENVIRONMENT="production-like" \
+    GRADEX_ENVIRONMENT="monitor-test" \
     GRADEX_MONITOR_CA_FILE="$S12_CA_FILE" \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
     GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
@@ -109,7 +112,7 @@ main() {
   fi
   jq --exit-status --slurp '
     length == 1 and .[0].event == "gradex_monitor_failure" and
-    .[0].environment == "production-like" and
+    .[0].environment == "monitor-test" and
     (. [0].failures | index("api_readiness") != null) and
     (. [0].correlation_id | startswith("monitor-"))
   ' "$alerts_file" >/dev/null || die "delivered alert did not match the fixed contract"
@@ -141,9 +144,10 @@ main() {
   S12_REDIS_STOPPED=0
   "$S12_ROOT/deploy/scripts/environment.sh" verify
 
-  GRADEX_HEALTH_URL="https://gradex.localhost:18443/healthz" \
+  GRADEX_PUBLIC_URL="https://gradex.localhost:18443/" \
+    GRADEX_HEALTH_URL="https://gradex.localhost:18443/healthz" \
     GRADEX_READY_URL="https://gradex.localhost:18443/readyz" \
-    GRADEX_ENVIRONMENT="production-like" \
+    GRADEX_ENVIRONMENT="monitor-test" \
     GRADEX_MONITOR_CA_FILE="$S12_CA_FILE" \
     GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" \
     GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \

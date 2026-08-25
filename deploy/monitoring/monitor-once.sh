@@ -16,11 +16,15 @@ done
 
 require_value GRADEX_HEALTH_URL
 require_value GRADEX_READY_URL
+require_value GRADEX_PUBLIC_URL
 require_value GRADEX_ENVIRONMENT
 
 GRADEX_BACKUP_MAX_AGE_SECONDS="${GRADEX_BACKUP_MAX_AGE_SECONDS:-7200}"
 [[ "$GRADEX_BACKUP_MAX_AGE_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
   die "GRADEX_BACKUP_MAX_AGE_SECONDS must be a positive integer"
+GRADEX_BACKUP_MAX_FUTURE_SECONDS="${GRADEX_BACKUP_MAX_FUTURE_SECONDS:-300}"
+[[ "$GRADEX_BACKUP_MAX_FUTURE_SECONDS" =~ ^[0-9]+$ ]] ||
+  die "GRADEX_BACKUP_MAX_FUTURE_SECONDS must be a non-negative integer"
 
 GRADEX_MONITOR_EMAIL_STALE_SECONDS="${GRADEX_MONITOR_EMAIL_STALE_SECONDS:-3600}"
 GRADEX_MONITOR_DISK_WARN_PERCENT="${GRADEX_MONITOR_DISK_WARN_PERCENT:-85}"
@@ -45,6 +49,34 @@ require_value GRADEX_MONITOR_RUNTIME_REPORT
 require_value GRADEX_MONITOR_DISK_PATHS
 [ -f "$GRADEX_MONITOR_RUNTIME_REPORT" ] || die "GRADEX_MONITOR_RUNTIME_REPORT is not a regular file"
 [ ! -L "$GRADEX_MONITOR_RUNTIME_REPORT" ] || die "GRADEX_MONITOR_RUNTIME_REPORT must not be a symlink"
+
+require_https_url() {
+  local name value
+  name="$1"
+  value="${!name:-}"
+  case "$value" in
+    https://?*) ;;
+    *) die "$name must be an HTTPS URL" ;;
+  esac
+}
+
+validate_alert_configuration() {
+  local url="${GRADEX_ALERT_WEBHOOK_URL:-}"
+  [ -z "$url" ] && return
+  case "$url" in
+    https://?*) ;;
+    http://?*) [ "$GRADEX_ENVIRONMENT" = monitor-test ] || die "GRADEX_ALERT_WEBHOOK_URL must be an HTTPS URL outside monitor-test" ;;
+    *) die "GRADEX_ALERT_WEBHOOK_URL must be an HTTP(S) URL" ;;
+  esac
+  case "$url" in
+    *$'\r'*|*$'\n'*|*'"'*) die "GRADEX_ALERT_WEBHOOK_URL contains a character unsafe for curl configuration" ;;
+  esac
+}
+
+require_https_url GRADEX_PUBLIC_URL
+require_https_url GRADEX_HEALTH_URL
+require_https_url GRADEX_READY_URL
+validate_alert_configuration
 
 declare -A runtime_status=()
 declare -A runtime_detail=()
@@ -74,7 +106,7 @@ record_warning() {
 validate_runtime_report_line() {
   local check="$1" status="$2" detail="$3" extra="$4"
   [ -z "$extra" ] || die "GRADEX_MONITOR_RUNTIME_REPORT has too many fields"
-  case "$check" in worker|email_outbox|disk_roots) ;; *) die "GRADEX_MONITOR_RUNTIME_REPORT has an unknown check: $check" ;; esac
+  case "$check" in worker|postgres_schema|email_outbox|disk_roots) ;; *) die "GRADEX_MONITOR_RUNTIME_REPORT has an unknown check: $check" ;; esac
   [ -z "${runtime_status[$check]:-}" ] || die "GRADEX_MONITOR_RUNTIME_REPORT duplicates $check"
   case "$status" in PASS|FAIL|METRICS) ;; *) die "GRADEX_MONITOR_RUNTIME_REPORT has an invalid status" ;; esac
   case "$detail" in *$'\r'*|*$'\n'*) die "GRADEX_MONITOR_RUNTIME_REPORT contains an invalid line break" ;; esac
@@ -82,7 +114,7 @@ validate_runtime_report_line() {
 
 require_runtime_checks() {
   local check
-  for check in worker email_outbox disk_roots; do
+  for check in worker postgres_schema email_outbox disk_roots; do
     [ -n "${runtime_status[$check]:-}" ] || die "GRADEX_MONITOR_RUNTIME_REPORT is missing $check"
   done
 }
@@ -109,6 +141,14 @@ evaluate_worker_report() {
     note "PASS worker: ${runtime_detail[worker]}"
   else
     record_failure worker "${runtime_detail[worker]}"
+  fi
+}
+
+evaluate_postgres_schema_report() {
+  if [ "${runtime_status[postgres_schema]}" = PASS ]; then
+    note "PASS postgres_schema: ${runtime_detail[postgres_schema]}"
+  else
+    record_failure postgres_schema "${runtime_detail[postgres_schema]}"
   fi
 }
 
@@ -165,6 +205,7 @@ evaluate_email_outbox() {
 
 evaluate_runtime_report() {
   evaluate_worker_report
+  evaluate_postgres_schema_report
   evaluate_disk_root_report
   evaluate_email_outbox
 }
@@ -287,11 +328,15 @@ temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 chmod 700 "$temporary"
 
-curl_args=(--silent --show-error --connect-timeout 5 --max-time 10)
+probe_tls_args=(--proto '=https' --proto-redir '=https')
+webhook_tls_args=("${probe_tls_args[@]}")
+[ "$GRADEX_ENVIRONMENT" != monitor-test ] || webhook_tls_args=()
 if [ -n "${GRADEX_MONITOR_CA_FILE:-}" ]; then
   [ -s "$GRADEX_MONITOR_CA_FILE" ] || die "GRADEX_MONITOR_CA_FILE is unreadable"
-  curl_args+=(--cacert "$GRADEX_MONITOR_CA_FILE")
+  probe_tls_args+=(--cacert "$GRADEX_MONITOR_CA_FILE")
+  webhook_tls_args+=(--cacert "$GRADEX_MONITOR_CA_FILE")
 fi
+curl_args=(--silent --show-error --connect-timeout 5 --max-time 10 "${probe_tls_args[@]}")
 
 probe() {
   local name="$1" url="$2" body status
@@ -305,22 +350,35 @@ probe() {
 }
 
 load_runtime_report
+probe api_root "$GRADEX_PUBLIC_URL"
 probe api_health "$GRADEX_HEALTH_URL"
 probe api_readiness "$GRADEX_READY_URL"
 evaluate_runtime_report
 check_disk_filesystems
 
 if [ -n "${GRADEX_BACKUP_COMPLETED_AT_FILE:-}" ]; then
-  if [ ! -s "$GRADEX_BACKUP_COMPLETED_AT_FILE" ]; then
+  if [ ! -e "$GRADEX_BACKUP_COMPLETED_AT_FILE" ]; then
+    record_failure backup "completion marker is missing"
+  elif [ ! -r "$GRADEX_BACKUP_COMPLETED_AT_FILE" ]; then
+    record_failure backup "completion marker cannot be read"
+  elif [ ! -s "$GRADEX_BACKUP_COMPLETED_AT_FILE" ]; then
     record_failure backup "completion marker is missing"
   else
-    completed_at="$(tr -d '[:space:]' <"$GRADEX_BACKUP_COMPLETED_AT_FILE")"
-    now="$(date +%s)"
-    if ! [[ "$completed_at" =~ ^[0-9]+$ ]] || [ "$completed_at" -gt "$now" ] ||
-      [ $((now - completed_at)) -gt "$GRADEX_BACKUP_MAX_AGE_SECONDS" ]; then
-      record_failure backup "completion marker is stale or invalid"
+    if ! completed_at="$(tr -d '[:space:]' <"$GRADEX_BACKUP_COMPLETED_AT_FILE")"; then
+      record_failure backup "completion marker cannot be read"
+    elif ! [[ "$completed_at" =~ ^[0-9]{1,10}$ ]]; then
+      record_failure backup "completion marker is malformed"
     else
-      note "PASS backup: completion marker age=$((now - completed_at))s"
+      now="$(date +%s)"
+      if [ "$completed_at" -gt $((now + GRADEX_BACKUP_MAX_FUTURE_SECONDS)) ]; then
+      record_failure backup "completion marker is too far in the future"
+      elif [ $((now - completed_at)) -gt "$GRADEX_BACKUP_MAX_AGE_SECONDS" ]; then
+      record_failure backup "completion marker is stale"
+      else
+        backup_age=$((now - completed_at))
+        [ "$backup_age" -ge 0 ] || backup_age=0
+        note "PASS backup: completion marker age=${backup_age}s"
+      fi
     fi
   fi
 fi
@@ -359,7 +417,7 @@ webhook_url_config="$temporary/webhook-url.curl-config"
 printf 'url = "%s"\n' "$GRADEX_ALERT_WEBHOOK_URL" >"$webhook_url_config"
 chmod 600 "$webhook_url_config"
 
-webhook_args=(--fail --silent --show-error --connect-timeout 5 --max-time 10
+webhook_args=(--fail --silent --show-error --connect-timeout 5 --max-time 10 "${webhook_tls_args[@]}"
   --header 'Content-Type: application/json' --data "$payload")
 if [ -n "${GRADEX_ALERT_WEBHOOK_TOKEN:-}" ]; then
   case "$GRADEX_ALERT_WEBHOOK_TOKEN" in

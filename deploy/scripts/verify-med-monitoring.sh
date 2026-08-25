@@ -36,6 +36,7 @@ write_report() {
   local worker_status="$1" worker_detail="$2" email_mode="$3" email_detail="$4" disk_status="$5" disk_detail="$6"
   printf 'version=1\n' >"$runtime_report"
   printf 'worker|%s|%s\n' "$worker_status" "$worker_detail" >>"$runtime_report"
+  printf 'postgres_schema|PASS|fixture PostgreSQL schema\n' >>"$runtime_report"
   if [ "$email_mode" = FAIL ]; then
     printf 'email_outbox|FAIL|%s\n' "$email_detail" >>"$runtime_report"
   else
@@ -58,18 +59,22 @@ run_direct_monitor() {
   local expected_status="$1"
   set +e
   PATH="$fake_bin:$PATH" \
+    FAKE_ROOT_STATUS="${FAKE_ROOT_STATUS:-200}" \
     FAKE_HEALTH_STATUS="${FAKE_HEALTH_STATUS:-200}" \
     FAKE_READY_STATUS="${FAKE_READY_STATUS:-200}" \
+    GRADEX_PUBLIC_URL=https://monitor.test/ \
     GRADEX_HEALTH_URL=https://monitor.test/healthz \
     GRADEX_READY_URL=https://monitor.test/readyz \
     GRADEX_ENVIRONMENT=monitor-test \
     GRADEX_MONITOR_RUNTIME_REPORT="$runtime_report" \
     GRADEX_MONITOR_DISK_PATHS="$disk_paths" \
     GRADEX_MONITOR_DISK_FIXTURE="$disk_fixture" \
-    GRADEX_MONITOR_EMAIL_STALE_SECONDS=3600 \
-    GRADEX_MONITOR_DISK_WARN_PERCENT=85 \
-    GRADEX_MONITOR_DISK_CRITICAL_PERCENT=95 \
+    GRADEX_MONITOR_EMAIL_STALE_SECONDS="${GRADEX_MONITOR_EMAIL_STALE_SECONDS:-3600}" \
+    GRADEX_MONITOR_DISK_WARN_PERCENT="${GRADEX_MONITOR_DISK_WARN_PERCENT:-85}" \
+    GRADEX_MONITOR_DISK_CRITICAL_PERCENT="${GRADEX_MONITOR_DISK_CRITICAL_PERCENT:-95}" \
     GRADEX_MONITOR_DISK_MIN_FREE_BYTES="$disk_min_free_bytes" \
+    GRADEX_BACKUP_COMPLETED_AT_FILE="${GRADEX_BACKUP_COMPLETED_AT_FILE:-}" \
+    GRADEX_BACKUP_MAX_FUTURE_SECONDS="${GRADEX_BACKUP_MAX_FUTURE_SECONDS:-300}" \
     GRADEX_ALERT_WEBHOOK_URL= \
     "$S12_MONITOR" >"$monitor_log" 2>&1
   monitor_status=$?
@@ -98,6 +103,7 @@ done
 [ -z "$output" ] || : >"$output"
 if [ "$write_status" = 1 ]; then
   case "$url" in
+    https://monitor.test/) printf '%s' "${FAKE_ROOT_STATUS:-200}" ;;
     */healthz) printf '%s' "${FAKE_HEALTH_STATUS:-200}" ;;
     */readyz) printf '%s' "${FAKE_READY_STATUS:-200}" ;;
     *) printf '200' ;;
@@ -122,27 +128,47 @@ case "${1:-}" in
     service=""
     for argument in "$@"; do service="$argument"; done
     case "$service" in
-      worker) printf 'workercontainer\n' ;;
-      postgres) printf 'postgrescontainer\n' ;;
+      worker) [ -z "${FAKE_WORKER_ID-workercontainer}" ] || printf '%s\n' "${FAKE_WORKER_ID-workercontainer}" ;;
+      postgres) [ -z "${FAKE_POSTGRES_ID-postgrescontainer}" ] || printf '%s\n' "${FAKE_POSTGRES_ID-postgrescontainer}" ;;
       *) exit 1 ;;
     esac
     ;;
   inspect)
     format=""
+    target=""
     while [ "$#" -gt 0 ]; do
-      if [ "$1" = --format ]; then format="$2"; shift 2; else shift; fi
+      if [ "$1" = --format ]; then format="$2"; shift 2; else target="$1"; shift; fi
     done
-    if [[ "$format" == *Config.Labels* ]]; then
-      cat "$FAKE_DOCKER_LABELS_FILE"
-    elif [[ "$format" == *State.Status* ]]; then
-      cat "$FAKE_DOCKER_STATUS_FILE"
+    [ "$target" = "${FAKE_ABSENT_CONTAINER:-}" ] && exit 1
+    if [ "$format" = '{{.Id}}' ]; then
+      case "$target" in
+        *postgres*) printf 'postgrescontainer\n' ;;
+        *) printf 'workercontainer\n' ;;
+      esac
+    elif [[ "$format" == *Config.Labels* ]]; then
+      case "$target" in
+        *postgres*) cat "$FAKE_DOCKER_POSTGRES_LABELS_FILE" ;;
+        *) cat "$FAKE_DOCKER_WORKER_LABELS_FILE" ;;
+      esac
     else
       exit 1
     fi
     ;;
   exec)
-    [ "${FAKE_DOCKER_EMAIL_FAILURE:-0}" = 1 ] && exit 1
-    printf '0|-1|-1\n'
+    case "$*" in
+      *schema_migrations*)
+        [ "${FAKE_DOCKER_SCHEMA_FAILURE:-0}" = 1 ] && exit 1
+        printf '%s\n' "${FAKE_DOCKER_SCHEMA_STATE:-28|false}"
+        ;;
+      *)
+        [ "${FAKE_DOCKER_EMAIL_FAILURE:-0}" = 1 ] && exit 1
+        printf '%s\n' "${FAKE_DOCKER_EMAIL_METRICS:-0|-1|-1}"
+        ;;
+    esac
+    ;;
+  run)
+    [ "${FAKE_DOCKER_SCHEMA_VERSION_FAILURE:-0}" = 1 ] && exit 1
+    printf '%s\n' "${FAKE_DOCKER_SCHEMA_VERSION:-28}"
     ;;
   *) exit 1 ;;
 esac
@@ -154,14 +180,25 @@ run_host_monitor() {
   local expected_status="$1"
   set +e
   PATH="$fake_bin:$PATH" \
-    FAKE_DOCKER_ROOT="$host_state" \
-    FAKE_DOCKER_LABELS_FILE="$docker_labels_file" \
+    FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT-$host_state}" \
+    FAKE_DOCKER_WORKER_LABELS_FILE="$docker_labels_file" \
+    FAKE_DOCKER_POSTGRES_LABELS_FILE="$postgres_labels_file" \
     FAKE_DOCKER_STATUS_FILE="$docker_status_file" \
     FAKE_DOCKER_LOG="$fake_docker_log" \
     FAKE_DOCKER_EMAIL_FAILURE="${FAKE_DOCKER_EMAIL_FAILURE:-0}" \
+    FAKE_DOCKER_SCHEMA_FAILURE="${FAKE_DOCKER_SCHEMA_FAILURE:-0}" \
+    FAKE_DOCKER_SCHEMA_STATE="${FAKE_DOCKER_SCHEMA_STATE:-28|false}" \
+    FAKE_DOCKER_SCHEMA_VERSION="${FAKE_DOCKER_SCHEMA_VERSION:-28}" \
+    FAKE_DOCKER_SCHEMA_VERSION_FAILURE="${FAKE_DOCKER_SCHEMA_VERSION_FAILURE:-0}" \
+    FAKE_WORKER_ID="${FAKE_WORKER_ID-workercontainer}" \
+    FAKE_POSTGRES_ID="${FAKE_POSTGRES_ID-postgrescontainer}" \
+    FAKE_ABSENT_CONTAINER="${FAKE_ABSENT_CONTAINER:-}" \
     GRADEX_HOST_STATE_DIR="$host_state" \
     GRADEX_HOST_ENV_FILE="$host_runtime_env" \
     GRADEX_HOST_PROJECT=gradex-monitor-test \
+    GRADEX_MONITOR_COMPOSE_PROJECT="${GRADEX_MONITOR_COMPOSE_PROJECT:-}" \
+    GRADEX_MONITOR_WORKER_CONTAINER="${GRADEX_MONITOR_WORKER_CONTAINER:-}" \
+    GRADEX_MONITOR_POSTGRES_CONTAINER="${GRADEX_MONITOR_POSTGRES_CONTAINER:-}" \
     "$S12_HOST" monitor >"$host_monitor_log" 2>&1
   monitor_status=$?
   set -e
@@ -198,8 +235,18 @@ main() {
   write_report PASS "fixture owned worker" metrics "terminal=0;oldest_due_age=-1;stale_lease_age=-1" PASS "fixture paths"
   write_disk_fixture '/gradex|dev-a|30|100'
   run_direct_monitor 0
+  assert_log_contains 'PASS api_root'
   assert_log_contains 'PASS worker: fixture owned worker'
   assert_log_contains 'PASS email_outbox: terminal_failures=0 oldest_due_age=-1s stale_lease_age=-1s'
+
+  FAKE_ROOT_STATUS=500 run_direct_monitor 1
+  assert_log_contains 'FAIL api_root: HTTP status 500'
+  assert_log_contains 'checks failed and no alert webhook is configured'
+  unset FAKE_ROOT_STATUS
+
+  FAKE_READY_STATUS=503 run_direct_monitor 1
+  assert_log_contains 'FAIL api_readiness: HTTP status 503'
+  unset FAKE_READY_STATUS
 
   write_report FAIL "owned Compose worker state=exited" metrics "terminal=0;oldest_due_age=-1;stale_lease_age=-1" PASS "fixture paths"
   run_direct_monitor 1
@@ -215,6 +262,10 @@ main() {
   write_report PASS "fixture owned worker" metrics "terminal=1;oldest_due_age=-1;stale_lease_age=-1" PASS "fixture paths"
   run_direct_monitor 1
   assert_log_contains 'FAIL email_outbox: terminal_failures=1'
+
+  write_report PASS "fixture owned worker" metrics "terminal=0;oldest_due_age=-1;stale_lease_age=1" PASS "fixture paths"
+  run_direct_monitor 1
+  assert_log_contains 'FAIL email_outbox: oldest_stale_lease_age=1s'
 
   write_report PASS "fixture owned worker" FAIL "PostgreSQL transactional email query failed" PASS "fixture paths"
   run_direct_monitor 1
@@ -260,41 +311,102 @@ main() {
 
   write_report PASS "fixture owned worker" metrics "terminal=0;oldest_due_age=-1;stale_lease_age=-1" PASS "fixture paths"
   write_disk_fixture '/gradex|dev-a|30|100'
+  backup_marker="$S12_TEMPORARY/direct-backup-marker"
+  GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" run_direct_monitor 1
+  assert_log_contains 'FAIL backup: completion marker is missing'
+
+  printf 'not-a-timestamp\n' >"$backup_marker"
+  GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" run_direct_monitor 1
+  assert_log_contains 'FAIL backup: completion marker is malformed'
+
+  printf '%s\n' "$(( $(date +%s) + 301 ))" >"$backup_marker"
+  GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" run_direct_monitor 1
+  assert_log_contains 'FAIL backup: completion marker is too far in the future'
+
+  printf '%s\n' "$(( $(date +%s) - 7201 ))" >"$backup_marker"
+  GRADEX_BACKUP_COMPLETED_AT_FILE="$backup_marker" run_direct_monitor 1
+  assert_log_contains 'FAIL backup: completion marker is stale'
+
+  GRADEX_MONITOR_DISK_WARN_PERCENT=95 GRADEX_MONITOR_DISK_CRITICAL_PERCENT=95 run_direct_monitor 2
+  assert_log_contains 'GRADEX_MONITOR_DISK_WARN_PERCENT must be lower than GRADEX_MONITOR_DISK_CRITICAL_PERCENT'
+
+  write_report PASS "fixture owned worker" metrics "terminal=0;oldest_due_age=-1;stale_lease_age=-1" PASS "fixture paths"
+  write_disk_fixture '/gradex|dev-a|30|100'
   run_direct_monitor 0
 
   host_state="$S12_TEMPORARY/gradex-monitor"
   host_runtime_env="$host_state/runtime.env"
   docker_labels_file="$S12_TEMPORARY/docker-labels"
+  postgres_labels_file="$S12_TEMPORARY/postgres-labels"
   docker_status_file="$S12_TEMPORARY/docker-status"
   mkdir -p "$host_state/backups"
   chmod 700 "$host_state" "$host_state/backups"
-  printf 'GRADEX_MONITOR_DISK_PATHS=\nGRADEX_MONITOR_EMAIL_STALE_SECONDS=3600\nGRADEX_MONITOR_DISK_WARN_PERCENT=85\nGRADEX_MONITOR_DISK_CRITICAL_PERCENT=95\nGRADEX_MONITOR_DISK_MIN_FREE_BYTES=1\nPUBLIC_ORIGIN=https://monitor.test\nPOSTGRES_DB=gradex_test\n' >"$host_runtime_env"
+  printf 'GRADEX_MONITOR_DISK_PATHS=\nGRADEX_MONITOR_EMAIL_STALE_SECONDS=3600\nGRADEX_MONITOR_DISK_WARN_PERCENT=85\nGRADEX_MONITOR_DISK_CRITICAL_PERCENT=95\nGRADEX_MONITOR_DISK_MIN_FREE_BYTES=1\nPUBLIC_ORIGIN=https://monitor.test\nPOSTGRES_DB=gradex_test\nGRADEX_BACKEND_IMAGE=fixture-backend\n' >"$host_runtime_env"
   chmod 600 "$host_runtime_env"
   printf '%s\n' "$(date +%s)" >"$host_state/backups/latest.completed-at"
-  printf 'gradex-monitor-test|worker\n' >"$docker_labels_file"
+  printf 'gradex-monitor-test|worker|running\n' >"$docker_labels_file"
+  printf 'gradex-monitor-test|postgres|running\n' >"$postgres_labels_file"
   printf 'running\n' >"$docker_status_file"
   run_host_monitor 0
+
+  FAKE_WORKER_ID= run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL worker: owned Compose worker container is absent' "$host_monitor_log" ||
+    die "missing worker was not reported"
 
   FAKE_DOCKER_EMAIL_FAILURE=1 run_host_monitor 1
   grep --fixed-strings --quiet 'FAIL email_outbox: PostgreSQL transactional email query failed' "$host_monitor_log" ||
     die "database query failure was not reported"
   unset FAKE_DOCKER_EMAIL_FAILURE
 
-  printf 'other-stack|worker\n' >"$docker_labels_file"
+  FAKE_DOCKER_SCHEMA_FAILURE=1 run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL postgres_schema: PostgreSQL schema query failed' "$host_monitor_log" ||
+    die "schema query failure was not reported"
+  unset FAKE_DOCKER_SCHEMA_FAILURE
+
+  FAKE_DOCKER_SCHEMA_STATE=not-a-schema-state run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL postgres_schema: PostgreSQL returned malformed schema state' "$host_monitor_log" ||
+    die "malformed schema state was not reported"
+  unset FAKE_DOCKER_SCHEMA_STATE
+
+  printf 'other-stack|worker|running\n' >"$docker_labels_file"
   run_host_monitor 1
   grep --fixed-strings --quiet 'FAIL worker: owned Compose labels do not match the configured project' "$host_monitor_log" ||
     die "unrelated Compose project was not rejected"
 
-  printf 'gradex-monitor-test|worker\n' >"$docker_labels_file"
+  printf 'gradex-monitor-test|worker|exited\n' >"$docker_labels_file"
   printf 'exited\n' >"$docker_status_file"
   run_host_monitor 1
   grep --fixed-strings --quiet 'FAIL worker: owned Compose worker state=exited' "$host_monitor_log" ||
     die "owned worker-down state was not rejected"
 
+  printf 'gradex-monitor-test|worker|running\n' >"$docker_labels_file"
   printf 'running\n' >"$docker_status_file"
   run_host_monitor 0
 
-  note "MED-04 worker/email and MED-05 disk monitoring fixtures passed"
+  : >"$fake_docker_log"
+  printf 'gradex-founder-beta|worker|running\n' >"$docker_labels_file"
+  printf 'gradex-founder-beta|postgres|running\n' >"$postgres_labels_file"
+  GRADEX_MONITOR_COMPOSE_PROJECT=gradex-founder-beta \
+    GRADEX_MONITOR_WORKER_CONTAINER=founder-worker \
+    GRADEX_MONITOR_POSTGRES_CONTAINER=founder-postgres \
+    run_host_monitor 0
+  if grep --fixed-strings --quiet 'docker compose' "$fake_docker_log"; then
+    die "explicit Founder Beta monitor sources unexpectedly used canonical Compose lookup"
+  fi
+
+  GRADEX_MONITOR_WORKER_CONTAINER='invalid;worker' run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL worker: configured monitor worker container name is invalid' "$host_monitor_log" ||
+    die "invalid worker override was accepted"
+
+  GRADEX_MONITOR_WORKER_CONTAINER=missing-worker FAKE_ABSENT_CONTAINER=missing-worker run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL worker: configured monitor worker container is absent' "$host_monitor_log" ||
+    die "absent explicit worker was not reported"
+
+  FAKE_DOCKER_ROOT=not-an-absolute-path run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL disk: Docker data-root is invalid' "$host_monitor_log" ||
+    die "invalid Docker data root was not reported"
+
+  note "monitor health, topology, schema, backup, email, and disk fixtures passed"
 }
 
 main "$@"

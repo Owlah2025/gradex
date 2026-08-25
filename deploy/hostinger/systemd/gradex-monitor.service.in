@@ -9,6 +9,7 @@ User=@GRADEX_USER@
 Group=@GRADEX_GROUP@
 WorkingDirectory=@GRADEX_REPO@
 ExecStart=@GRADEX_REPO@/deploy/hostinger/host.sh monitor
+TimeoutStartSec=120s
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

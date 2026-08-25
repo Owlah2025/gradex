@@ -285,31 +285,114 @@ monitor_append_report() {
   printf '%s|%s|%s\n' "$check" "$status" "$detail" >>"$report"
 }
 
-monitor_probe_worker() {
-  local report="$1" worker_id identity worker_status
+MONITOR_CONTAINER_ID=""
+MONITOR_CONTAINER_ERROR=""
+
+monitor_resolve_container() {
+  local service="$1" override_name="$2" configured expected_project candidate identity
+  local actual_project actual_service actual_state extra
+  MONITOR_CONTAINER_ID=""
+  MONITOR_CONTAINER_ERROR=""
   if ! command -v docker >/dev/null 2>&1; then
-    monitor_append_report "$report" worker FAIL "Docker runtime is unavailable"
-    return 0
+    MONITOR_CONTAINER_ERROR="Docker runtime is unavailable"
+    return 1
   fi
   if ! docker info >/dev/null 2>&1; then
-    monitor_append_report "$report" worker FAIL "Docker runtime is unreachable"
-    return 0
+    MONITOR_CONTAINER_ERROR="Docker runtime is unreachable"
+    return 1
   fi
-  worker_id="$(service_id worker 2>/dev/null || true)"
-  if ! [[ "$worker_id" =~ ^[[:alnum:]]+$ ]]; then
-    monitor_append_report "$report" worker FAIL "owned Compose worker container is absent"
-    return 0
+  expected_project="${GRADEX_MONITOR_COMPOSE_PROJECT:-$S12_PROJECT}"
+  if ! [[ "$expected_project" =~ ^[a-z0-9][a-z0-9_-]{2,62}$ ]]; then
+    MONITOR_CONTAINER_ERROR="monitor Compose project is invalid"
+    return 1
   fi
-  identity="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}' \
-    "$worker_id" 2>/dev/null || true)"
-  worker_status="$(docker inspect --format '{{.State.Status}}' "$worker_id" 2>/dev/null || true)"
-  if [ "$identity" != "$S12_PROJECT|worker" ]; then
-    monitor_append_report "$report" worker FAIL "owned Compose labels do not match the configured project"
-  elif [ "$worker_status" != running ]; then
-    monitor_append_report "$report" worker FAIL "owned Compose worker state=${worker_status:-unavailable}"
+  configured="${!override_name:-}"
+  if [ -n "$configured" ]; then
+    if ! [[ "$configured" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
+      MONITOR_CONTAINER_ERROR="configured monitor $service container name is invalid"
+      return 1
+    fi
+    candidate="$(docker inspect --type container --format '{{.Id}}' "$configured" 2>/dev/null || true)"
   else
-    monitor_append_report "$report" worker PASS "owned Compose worker is running"
+    candidate="$(service_id "$service" 2>/dev/null || true)"
   fi
+  if ! [[ "$candidate" =~ ^[[:alnum:]]+$ ]]; then
+    if [ -n "$configured" ]; then
+      MONITOR_CONTAINER_ERROR="configured monitor $service container is absent"
+    else
+      MONITOR_CONTAINER_ERROR="owned Compose $service container is absent"
+    fi
+    return 1
+  fi
+  identity="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}' "$candidate" 2>/dev/null || true)"
+  IFS='|' read -r actual_project actual_service actual_state extra <<<"$identity"
+  if [ -n "${extra:-}" ] || [ "$actual_project" != "$expected_project" ] || [ "$actual_service" != "$service" ]; then
+    if [ -n "$configured" ]; then
+      MONITOR_CONTAINER_ERROR="configured monitor $service labels do not match the configured project/service"
+    else
+      MONITOR_CONTAINER_ERROR="owned Compose labels do not match the configured project"
+    fi
+    return 1
+  fi
+  if [ "$actual_state" != running ]; then
+    if [ -n "$configured" ]; then
+      MONITOR_CONTAINER_ERROR="configured monitor $service state=${actual_state:-unavailable}"
+    else
+      MONITOR_CONTAINER_ERROR="owned Compose $service state=${actual_state:-unavailable}"
+    fi
+    return 1
+  fi
+  MONITOR_CONTAINER_ID="$candidate"
+}
+
+monitor_probe_worker() {
+  local report="$1"
+  if monitor_resolve_container worker GRADEX_MONITOR_WORKER_CONTAINER; then
+    monitor_append_report "$report" worker PASS "intended Compose worker is running"
+  else
+    monitor_append_report "$report" worker FAIL "$MONITOR_CONTAINER_ERROR"
+  fi
+}
+
+monitor_expected_schema_version() {
+  local image="$1" version
+  version="$(timeout 30 docker run --rm --entrypoint gradex-migrate "$image" max-version 2>/dev/null)" || return 1
+  [[ "$version" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$version"
+}
+
+monitor_probe_postgres_schema() {
+  local report="$1" schema_state expected_schema
+  if ! monitor_resolve_container postgres GRADEX_MONITOR_POSTGRES_CONTAINER; then
+    monitor_append_report "$report" postgres_schema FAIL "$MONITOR_CONTAINER_ERROR"
+    return 0
+  fi
+  if [ -z "${POSTGRES_DB:-}" ]; then
+    monitor_append_report "$report" postgres_schema FAIL "PostgreSQL database name is not configured"
+    return 0
+  fi
+  if [ -z "${GRADEX_BACKEND_IMAGE:-}" ]; then
+    monitor_append_report "$report" postgres_schema FAIL "backend image is not configured"
+    return 0
+  fi
+  if ! schema_state="$(timeout 15 docker exec "$MONITOR_CONTAINER_ID" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;" 2>/dev/null)"; then
+    monitor_append_report "$report" postgres_schema FAIL "PostgreSQL schema query failed"
+    return 0
+  fi
+  if ! [[ "$schema_state" =~ ^[0-9]+\|(true|false)$ ]]; then
+    monitor_append_report "$report" postgres_schema FAIL "PostgreSQL returned malformed schema state"
+    return 0
+  fi
+  if ! expected_schema="$(monitor_expected_schema_version "$GRADEX_BACKEND_IMAGE")"; then
+    monitor_append_report "$report" postgres_schema FAIL "selected backend schema version is unavailable"
+    return 0
+  fi
+  if [ "$schema_state" != "$expected_schema|false" ]; then
+    monitor_append_report "$report" postgres_schema FAIL "PostgreSQL schema does not match the selected backend image"
+    return 0
+  fi
+  monitor_append_report "$report" postgres_schema PASS "intended Compose PostgreSQL schema is clean"
 }
 
 monitor_email_health_query() {
@@ -335,7 +418,7 @@ monitor_email_health_query() {
 SELECT CASE WHEN EXISTS (SELECT 1 FROM terminal) THEN '1' ELSE '0' END || '|' ||
        COALESCE((SELECT age::text FROM due), '-1') || '|' ||
        COALESCE((SELECT age::text FROM stale), '-1');"
-  docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$database_name" \
+  timeout 15 docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$database_name" \
     --tuples-only --no-align --command "$query" 2>/dev/null
 }
 
@@ -355,21 +438,16 @@ monitor_record_email_metrics() {
 }
 
 monitor_probe_email_outbox() {
-  local report="$1" postgres_id metrics
-  if ! command -v docker >/dev/null 2>&1; then
-    monitor_append_report "$report" email_outbox FAIL "Docker runtime is unavailable"
-    return 0
-  fi
+  local report="$1" metrics
   if [ -z "${POSTGRES_DB:-}" ]; then
     monitor_append_report "$report" email_outbox FAIL "PostgreSQL database name is not configured"
     return 0
   fi
-  postgres_id="$(service_id postgres 2>/dev/null || true)"
-  if ! [[ "$postgres_id" =~ ^[[:alnum:]]+$ ]]; then
-    monitor_append_report "$report" email_outbox FAIL "owned Compose PostgreSQL container is absent"
+  if ! monitor_resolve_container postgres GRADEX_MONITOR_POSTGRES_CONTAINER; then
+    monitor_append_report "$report" email_outbox FAIL "$MONITOR_CONTAINER_ERROR"
     return 0
   fi
-  if ! metrics="$(monitor_email_health_query "$postgres_id" "$POSTGRES_DB")"; then
+  if ! metrics="$(monitor_email_health_query "$MONITOR_CONTAINER_ID" "$POSTGRES_DB")"; then
     monitor_append_report "$report" email_outbox FAIL "PostgreSQL transactional email query failed"
     return 0
   fi
@@ -411,6 +489,7 @@ collect_monitor_runtime_report() {
   umask 077
   printf 'version=1\n' >"$report"
   monitor_probe_worker "$report"
+  monitor_probe_postgres_schema "$report"
   monitor_probe_email_outbox "$report"
   monitor_probe_disk_paths "$report"
 }
@@ -418,6 +497,7 @@ collect_monitor_runtime_report() {
 run_monitor() {
   load_environment
   export GRADEX_ENVIRONMENT=staging
+  export GRADEX_PUBLIC_URL="$PUBLIC_ORIGIN/"
   export GRADEX_HEALTH_URL="$PUBLIC_ORIGIN/healthz"
   export GRADEX_READY_URL="$PUBLIC_ORIGIN/readyz"
   export GRADEX_BACKUP_COMPLETED_AT_FILE="$S12_BACKUP_DIR/latest.completed-at"
