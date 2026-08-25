@@ -37,7 +37,7 @@ architecture_asset() {
     x86_64|amd64)
       printf '%s %s\n' \
         restic_0.19.1_linux_amd64.bz2 \
-        f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c2
+        f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c
       ;;
     aarch64|arm64)
       printf '%s %s\n' \
