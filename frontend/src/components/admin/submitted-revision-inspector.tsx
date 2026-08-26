@@ -90,7 +90,7 @@ function lessonFileKindLabel(kind: "RESOURCE" | "LAB_MATERIAL", locale: "ar" | "
  * the fetched Course and revision prove they match the queue row that opened it.
  */
 export function SubmittedRevisionInspector({ item, onClose, onReviewed }: SubmittedRevisionInspectorProps) {
-  const { locale, dir } = useLocale();
+  const { locale, dir, t } = useLocale();
   const isAr = locale === "ar";
   const [loaded, setLoaded] = useState<LoadedRevision | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -105,6 +105,10 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
   const [reviewed, setReviewed] = useState(false);
   const [requestReason, setRequestReason] = useState("");
   const [requestingChanges, setRequestingChanges] = useState(false);
+  // Read from the price history the pricing panel already loads. `null` means "not known yet",
+  // which must not be rendered as "no price" — an unread history is not a missing price.
+  const [launchPriced, setLaunchPriced] = useState<boolean | null>(null);
+  const noteLaunchPrice = useCallback((known: boolean | null) => setLaunchPriced(known), []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -317,11 +321,27 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
             ) : (
               <TaxonomyOverrideForm courseID={item.course_id} revisionID={item.revision_id} terms={terms} />
             )}
-            <PricingPanel courseID={item.course_id} sections={revision.sections} />
+            <PricingPanel
+              courseID={item.course_id}
+              sections={revision.sections}
+              onLaunchPriceKnown={noteLaunchPrice}
+            />
           </section>
 
           {actionSuccess && <p role="status" data-testid="review-action-success" className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{actionSuccess}</p>}
           {actionError && <p role="alert" data-testid="review-action-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{actionError}</p>}
+
+          {/* The approval blocker the Admin owns, named before Approve is pressed rather than only
+              as a refusal afterwards. The server remains authoritative: this reports what the price
+              history says and never decides whether publication is permitted. */}
+          {launchPriced === false && (
+            <p
+              data-testid="review-launch-price-required"
+              className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              {t.adminReview.priceRequired}
+            </p>
+          )}
 
           <section className="flex flex-wrap gap-3 border-t border-indigo-200 pt-4 dark:border-indigo-900">
             <button type="button" disabled={busy || reviewed} onClick={() => void completeReview((token) => approveCourseRevision({ courseID: item.course_id, revisionID: item.revision_id, locale, csrf: token }).then(() => undefined), isAr ? "تم نشر الدورة بنجاح" : "Course published successfully")} data-testid="approve-inspected-revision" className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "موافقة ونشر" : "Approve & Publish"}</button>
