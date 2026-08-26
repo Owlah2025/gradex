@@ -887,8 +887,8 @@ export const ar: Dictionary = {
     curriculum: {
       title: "محتوى الدورة",
       lead: "تضم الأقسام الدروس. يحتاج كل درس إلى فيديو قبل إرسال الدورة للمراجعة.",
-      sectionCount: "أقسام",
-      lessonCount: "دروس",
+      sectionCount: "الأقسام",
+      lessonCount: "الدروس",
       emptyTitle: "لا توجد أقسام بعد",
       emptyBody:
         "تُبنى الدورة من أقسام، ويضم كل قسم دروسه. أضف القسم الأول للبدء.",

@@ -952,8 +952,8 @@ export const en = {
     curriculum: {
       title: "Curriculum",
       lead: "Sections hold lessons. Every lesson needs a video before the course can be submitted.",
-      sectionCount: "sections",
-      lessonCount: "lessons",
+      sectionCount: "Sections",
+      lessonCount: "Lessons",
       emptyTitle: "No sections yet",
       emptyBody:
         "A course is built from sections, and each section holds its lessons. Add the first section to begin.",

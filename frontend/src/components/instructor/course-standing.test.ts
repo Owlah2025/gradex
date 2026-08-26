@@ -95,13 +95,23 @@ test("the wire enum is carried for support but is never a stage", () => {
   assert.notEqual(standing.stage, standing.wire);
 });
 
-test("every stage has a tone, and no two obligations share the published tone", () => {
-  assert.equal(standingTone("PUBLISHED"), "success");
+test("a standing's tone never reaches for the success token, which fails AA", () => {
+  // gx-success is #178a50: 4.39:1 on white and 3.94:1 on its own soft ground. The Instructor
+  // standing must not add a new instance of that defect, so no stage maps to it.
+  const stages = [
+    "DRAFT",
+    "DRAFT_UPDATE",
+    "IN_REVIEW",
+    "CHANGES_REQUESTED",
+    "PUBLISHED",
+    "UNAVAILABLE",
+  ] as const;
+  for (const stage of stages) {
+    assert.notEqual(standingTone(stage), "success", stage);
+  }
+  assert.equal(standingTone("PUBLISHED"), "default");
   assert.equal(standingTone("CHANGES_REQUESTED"), "accent");
-  assert.equal(standingTone("IN_REVIEW"), "default");
   assert.equal(standingTone("DRAFT"), "neutral");
-  assert.equal(standingTone("DRAFT_UPDATE"), "neutral");
-  assert.equal(standingTone("UNAVAILABLE"), "neutral");
 });
 
 test("a Course title is never a UUID", () => {

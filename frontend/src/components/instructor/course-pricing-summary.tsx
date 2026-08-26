@@ -47,17 +47,24 @@ export function CoursePricingSummary({
       headingLevel="h3"
       testID="course-pricing-summary"
     >
-      <dl className="rounded-lg border border-border bg-card p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <dt className="text-sm text-muted-foreground">{labels.courseLabel}</dt>
-          <dd
-            className="font-display text-base font-bold text-foreground"
-            data-testid="course-price-value"
-          >
-            {/* Arabic copy beside Latin numerals: isolated so the dinar suffix does not jump. */}
-            <bdi>{formatFils(course.price_minor_units, locale)}</bdi>
-          </dd>
-        </div>
+      {/*
+        A `<dl>` may only contain `dt`, `dd`, and `div` wrapping a pair. The note and the
+        section list were sitting directly inside one, which axe reports as `definition-list`,
+        and left the section rows' own `dt`/`dd` orphaned. Each list now holds only pairs.
+      */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <dl>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <dt className="text-sm text-muted-foreground">{labels.courseLabel}</dt>
+            <dd
+              className="font-display text-base font-bold text-foreground"
+              data-testid="course-price-value"
+            >
+              {/* Arabic copy beside Latin numerals: isolated so the dinar suffix does not jump. */}
+              <bdi>{formatFils(course.price_minor_units, locale)}</bdi>
+            </dd>
+          </div>
+        </dl>
         {!priced ? (
           <p className="mt-1 text-xs text-muted-foreground" data-testid="course-price-unset">
             {labels.unset}
@@ -69,7 +76,7 @@ export function CoursePricingSummary({
             <p className="font-display text-xs font-bold uppercase tracking-wide text-muted-foreground">
               {labels.sectionsLabel}
             </p>
-            <div className="mt-2 space-y-1.5">
+            <dl className="mt-2 space-y-1.5">
               {sections.map((section) => (
                 <div
                   key={section.id}
@@ -84,10 +91,10 @@ export function CoursePricingSummary({
                   </dd>
                 </div>
               ))}
-            </div>
+            </dl>
           </div>
         ) : null}
-      </dl>
+      </div>
     </WorkspaceSection>
   );
 }

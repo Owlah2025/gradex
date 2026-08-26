@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { Check, CircleDashed } from "lucide-react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import type { CourseRevisionWire, LessonWire, SectionWire } from "@/lib/api/catalog";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
@@ -99,7 +100,11 @@ export function CurriculumBuilder({
         <p className="mt-1 text-sm text-muted-foreground">{labels.lead}</p>
         {sections.length > 0 ? (
           <p className="mt-1 text-xs text-muted-foreground" data-testid="curriculum-counts">
-            {sections.length} {labels.sectionCount} · {lessonCount} {labels.lessonCount}
+            {/*
+              Label then number, rather than "1 sections". English needs one/other and Arabic needs
+              six plural forms; picking one form for both is how "١ أقسام" gets shipped.
+            */}
+            {labels.sectionCount}: {sections.length} · {labels.lessonCount}: {lessonCount}
           </p>
         ) : null}
       </div>
@@ -360,11 +365,21 @@ function LessonRow({
             }
             data-video-attached={hasVideo ? "true" : "false"}
             className={
+              /*
+                Not the `gx-success` token: at 12px it measures 4.39:1 on this card, under AA. The
+                icon carries the distinction visually and the words carry it outright, so the ink
+                does not have to.
+              */
               hasVideo
-                ? "text-xs font-semibold text-gx-success"
-                : "text-xs font-semibold text-muted-foreground"
+                ? "inline-flex items-center gap-1 text-xs font-semibold text-foreground"
+                : "inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground"
             }
           >
+            {hasVideo ? (
+              <Check className="size-3.5 shrink-0" aria-hidden />
+            ) : (
+              <CircleDashed className="size-3.5 shrink-0" aria-hidden />
+            )}
             {hasVideo ? labels.videoAttached : labels.videoMissing}
           </span>
           <Button

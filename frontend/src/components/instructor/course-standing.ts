@@ -158,12 +158,15 @@ export function standingTone(
 ): "default" | "accent" | "success" | "neutral" {
   switch (stage) {
     case "PUBLISHED":
-      return "success";
+      // Deliberately not the `success` tone. That variant paints gx-success (#178a50) on its own
+      // soft ground, which measures 3.94:1 — under AA, and 4.39:1 even on white. The shared token
+      // is a known defect scheduled elsewhere; this surface does not add a new instance of it.
+      return "default";
     case "CHANGES_REQUESTED":
       return "accent";
-    case "IN_REVIEW":
-      return "default";
     default:
+      // Draft, in review, and unavailable are all neutral. Tone is decoration here — the actor
+      // line beside the badge is what separates "waiting on me" from "waiting on them".
       return "neutral";
   }
 }

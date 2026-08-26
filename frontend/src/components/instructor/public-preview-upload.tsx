@@ -162,6 +162,8 @@ export function PublicPreviewUpload({
         ref={input}
         type="file"
         accept={ACCEPTED_VIDEO_CONTENT_TYPES.join(",")}
+        // Visually hidden and driven by the button below it, so it carries its own name.
+        aria-label={hasPreview ? t.replace : t.choose}
         className="sr-only"
         disabled={busy}
         onChange={(event) => {

@@ -47,6 +47,17 @@ export function ConfirmDialog({
   const titleID = React.useId();
   const bodyID = React.useId();
 
+  /*
+    Radix restores focus to its own `Trigger`. This dialog is opened from controlled state instead
+    — the curriculum's delete controls are ordinary buttons inside rows — so there is no trigger for
+    it to return to, and closing dropped focus on the document body. A keyboard user who opened the
+    confirmation on lesson nine and cancelled it landed back at the top of the page.
+  */
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (open) openerRef.current = document.activeElement as HTMLElement | null;
+  }, [open]);
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -55,6 +66,12 @@ export function ConfirmDialog({
           aria-labelledby={titleID}
           aria-describedby={bodyID}
           data-testid={testID}
+          onCloseAutoFocus={(event) => {
+            const opener = openerRef.current;
+            if (!opener?.isConnected) return;
+            event.preventDefault();
+            opener.focus();
+          }}
           className={cn(
             "fixed start-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-6 shadow-lg rtl:translate-x-1/2",
             "data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
