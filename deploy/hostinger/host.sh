@@ -287,6 +287,7 @@ monitor_append_report() {
 
 MONITOR_CONTAINER_ID=""
 MONITOR_CONTAINER_ERROR=""
+MONITOR_BACKEND_IMAGE=""
 
 monitor_resolve_container() {
   local service="$1" override_name="$2" configured expected_project candidate identity
@@ -361,6 +362,19 @@ monitor_expected_schema_version() {
   printf '%s' "$version"
 }
 
+monitor_resolve_backend_image() {
+  MONITOR_BACKEND_IMAGE="${GRADEX_BACKEND_IMAGE:-}"
+  [ -n "$MONITOR_BACKEND_IMAGE" ] && return
+  if ! monitor_resolve_container api GRADEX_MONITOR_API_CONTAINER; then
+    return 1
+  fi
+  MONITOR_BACKEND_IMAGE="$(docker inspect --format '{{.Config.Image}}' "$MONITOR_CONTAINER_ID" 2>/dev/null || true)"
+  if [ -z "$MONITOR_BACKEND_IMAGE" ]; then
+    MONITOR_CONTAINER_ERROR="selected backend image is unavailable"
+    return 1
+  fi
+}
+
 monitor_probe_postgres_schema() {
   local report="$1" schema_state expected_schema
   if ! monitor_resolve_container postgres GRADEX_MONITOR_POSTGRES_CONTAINER; then
@@ -371,8 +385,8 @@ monitor_probe_postgres_schema() {
     monitor_append_report "$report" postgres_schema FAIL "PostgreSQL database name is not configured"
     return 0
   fi
-  if [ -z "${GRADEX_BACKEND_IMAGE:-}" ]; then
-    monitor_append_report "$report" postgres_schema FAIL "backend image is not configured"
+  if ! monitor_resolve_backend_image; then
+    monitor_append_report "$report" postgres_schema FAIL "$MONITOR_CONTAINER_ERROR"
     return 0
   fi
   if ! schema_state="$(timeout 15 docker exec "$MONITOR_CONTAINER_ID" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
@@ -384,7 +398,7 @@ monitor_probe_postgres_schema() {
     monitor_append_report "$report" postgres_schema FAIL "PostgreSQL returned malformed schema state"
     return 0
   fi
-  if ! expected_schema="$(monitor_expected_schema_version "$GRADEX_BACKEND_IMAGE")"; then
+  if ! expected_schema="$(monitor_expected_schema_version "$MONITOR_BACKEND_IMAGE")"; then
     monitor_append_report "$report" postgres_schema FAIL "selected backend schema version is unavailable"
     return 0
   fi

@@ -385,9 +385,11 @@ disk paths are not explicit, and points freshness monitoring at
 Founder Beta is a non-canonical Compose topology. Configure its monitor-only source contract in the protected
 runtime file with `GRADEX_MONITOR_COMPOSE_PROJECT=gradex-founder-beta`,
 `GRADEX_MONITOR_WORKER_CONTAINER=gradex-founder-beta-worker-1`, and
-`GRADEX_MONITOR_POSTGRES_CONTAINER=gradex-founder-beta-postgres-1`. This does not change application
-Compose configuration. The monitor validates each selected container's project/service labels before querying
-it; invalid, missing, stopped, or mismatched containers fail the check.
+`GRADEX_MONITOR_POSTGRES_CONTAINER=gradex-founder-beta-postgres-1`. When the protected tooling runtime does
+not hold `GRADEX_BACKEND_IMAGE`, also set
+`GRADEX_MONITOR_API_CONTAINER=gradex-founder-beta-api-1`. This does not change application Compose
+configuration. The monitor validates each selected container's project/service labels before querying it;
+invalid, missing, stopped, or mismatched containers fail the check.
 
 The monitor requires HTTPS for public probes and configured webhooks. Leave the optional external webhook
 configuration blank when no destination exists; health monitoring still runs and reports check failures locally.

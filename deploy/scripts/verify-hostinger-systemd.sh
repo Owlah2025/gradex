@@ -106,6 +106,7 @@ main() {
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_COMPOSE_PROJECT='
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_WORKER_CONTAINER='
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_POSTGRES_CONTAINER='
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_API_CONTAINER='
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_EMAIL_STALE_SECONDS=3600'
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_WARN_PERCENT=85'
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_CRITICAL_PERCENT=95'

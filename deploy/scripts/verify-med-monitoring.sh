@@ -130,6 +130,7 @@ case "${1:-}" in
     case "$service" in
       worker) [ -z "${FAKE_WORKER_ID-workercontainer}" ] || printf '%s\n' "${FAKE_WORKER_ID-workercontainer}" ;;
       postgres) [ -z "${FAKE_POSTGRES_ID-postgrescontainer}" ] || printf '%s\n' "${FAKE_POSTGRES_ID-postgrescontainer}" ;;
+      api) [ -z "${FAKE_API_ID-apicontainer}" ] || printf '%s\n' "${FAKE_API_ID-apicontainer}" ;;
       *) exit 1 ;;
     esac
     ;;
@@ -143,13 +144,17 @@ case "${1:-}" in
     if [ "$format" = '{{.Id}}' ]; then
       case "$target" in
         *postgres*) printf 'postgrescontainer\n' ;;
+        *api*) printf 'apicontainer\n' ;;
         *) printf 'workercontainer\n' ;;
       esac
     elif [[ "$format" == *Config.Labels* ]]; then
       case "$target" in
         *postgres*) cat "$FAKE_DOCKER_POSTGRES_LABELS_FILE" ;;
+        *api*) cat "$FAKE_DOCKER_API_LABELS_FILE" ;;
         *) cat "$FAKE_DOCKER_WORKER_LABELS_FILE" ;;
       esac
+    elif [ "$format" = '{{.Config.Image}}' ]; then
+      printf '%s\n' "${FAKE_DOCKER_BACKEND_IMAGE:-fixture-backend}"
     else
       exit 1
     fi
@@ -183,6 +188,7 @@ run_host_monitor() {
     FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT-$host_state}" \
     FAKE_DOCKER_WORKER_LABELS_FILE="$docker_labels_file" \
     FAKE_DOCKER_POSTGRES_LABELS_FILE="$postgres_labels_file" \
+    FAKE_DOCKER_API_LABELS_FILE="$api_labels_file" \
     FAKE_DOCKER_STATUS_FILE="$docker_status_file" \
     FAKE_DOCKER_LOG="$fake_docker_log" \
     FAKE_DOCKER_EMAIL_FAILURE="${FAKE_DOCKER_EMAIL_FAILURE:-0}" \
@@ -192,13 +198,16 @@ run_host_monitor() {
     FAKE_DOCKER_SCHEMA_VERSION_FAILURE="${FAKE_DOCKER_SCHEMA_VERSION_FAILURE:-0}" \
     FAKE_WORKER_ID="${FAKE_WORKER_ID-workercontainer}" \
     FAKE_POSTGRES_ID="${FAKE_POSTGRES_ID-postgrescontainer}" \
+    FAKE_API_ID="${FAKE_API_ID-apicontainer}" \
+    FAKE_DOCKER_BACKEND_IMAGE="${FAKE_DOCKER_BACKEND_IMAGE:-fixture-backend}" \
     FAKE_ABSENT_CONTAINER="${FAKE_ABSENT_CONTAINER:-}" \
     GRADEX_HOST_STATE_DIR="$host_state" \
-    GRADEX_HOST_ENV_FILE="$host_runtime_env" \
+    GRADEX_HOST_ENV_FILE="${GRADEX_HOST_ENV_FILE-$host_runtime_env}" \
     GRADEX_HOST_PROJECT=gradex-monitor-test \
     GRADEX_MONITOR_COMPOSE_PROJECT="${GRADEX_MONITOR_COMPOSE_PROJECT:-}" \
     GRADEX_MONITOR_WORKER_CONTAINER="${GRADEX_MONITOR_WORKER_CONTAINER:-}" \
     GRADEX_MONITOR_POSTGRES_CONTAINER="${GRADEX_MONITOR_POSTGRES_CONTAINER:-}" \
+    GRADEX_MONITOR_API_CONTAINER="${GRADEX_MONITOR_API_CONTAINER:-}" \
     "$S12_HOST" monitor >"$host_monitor_log" 2>&1
   monitor_status=$?
   set -e
@@ -338,6 +347,7 @@ main() {
   host_runtime_env="$host_state/runtime.env"
   docker_labels_file="$S12_TEMPORARY/docker-labels"
   postgres_labels_file="$S12_TEMPORARY/postgres-labels"
+  api_labels_file="$S12_TEMPORARY/api-labels"
   docker_status_file="$S12_TEMPORARY/docker-status"
   mkdir -p "$host_state/backups"
   chmod 700 "$host_state" "$host_state/backups"
@@ -346,8 +356,16 @@ main() {
   printf '%s\n' "$(date +%s)" >"$host_state/backups/latest.completed-at"
   printf 'gradex-monitor-test|worker|running\n' >"$docker_labels_file"
   printf 'gradex-monitor-test|postgres|running\n' >"$postgres_labels_file"
+  printf 'gradex-monitor-test|api|running\n' >"$api_labels_file"
   printf 'running\n' >"$docker_status_file"
   run_host_monitor 0
+
+  host_runtime_without_backend="$host_state/runtime-without-backend.env"
+  grep --invert-match '^GRADEX_BACKEND_IMAGE=' "$host_runtime_env" >"$host_runtime_without_backend"
+  chmod 600 "$host_runtime_without_backend"
+  GRADEX_HOST_ENV_FILE="$host_runtime_without_backend" run_host_monitor 0
+  grep --fixed-strings --quiet 'postgres_schema: intended Compose PostgreSQL schema is clean' "$host_monitor_log" ||
+    die "backend image fallback through the owned API container was not accepted"
 
   FAKE_WORKER_ID= run_host_monitor 1
   grep --fixed-strings --quiet 'FAIL worker: owned Compose worker container is absent' "$host_monitor_log" ||
@@ -386,9 +404,12 @@ main() {
   : >"$fake_docker_log"
   printf 'gradex-founder-beta|worker|running\n' >"$docker_labels_file"
   printf 'gradex-founder-beta|postgres|running\n' >"$postgres_labels_file"
-  GRADEX_MONITOR_COMPOSE_PROJECT=gradex-founder-beta \
+  printf 'gradex-founder-beta|api|running\n' >"$api_labels_file"
+  GRADEX_HOST_ENV_FILE="$host_runtime_without_backend" \
+    GRADEX_MONITOR_COMPOSE_PROJECT=gradex-founder-beta \
     GRADEX_MONITOR_WORKER_CONTAINER=founder-worker \
     GRADEX_MONITOR_POSTGRES_CONTAINER=founder-postgres \
+    GRADEX_MONITOR_API_CONTAINER=founder-api \
     run_host_monitor 0
   if grep --fixed-strings --quiet 'docker compose' "$fake_docker_log"; then
     die "explicit Founder Beta monitor sources unexpectedly used canonical Compose lookup"

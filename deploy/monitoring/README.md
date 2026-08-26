@@ -8,12 +8,15 @@ PostgreSQL, Redis, and schema compatibility; `/healthz` remains dependency-indep
 `host.sh monitor` collects the exact Compose `worker` and `postgres` service containers into a mode-0600
 temporary runtime report. Canonical Hostinger deployments resolve those services through Compose. A
 non-canonical deployment can set `GRADEX_MONITOR_COMPOSE_PROJECT` and either or both of
-`GRADEX_MONITOR_WORKER_CONTAINER` and `GRADEX_MONITOR_POSTGRES_CONTAINER`; Founder Beta sets all three.
+`GRADEX_MONITOR_WORKER_CONTAINER` and `GRADEX_MONITOR_POSTGRES_CONTAINER`. When a tooling-only runtime
+does not provide `GRADEX_BACKEND_IMAGE`, it may also set `GRADEX_MONITOR_API_CONTAINER` so the monitor can
+derive the selected image from a validated API container. Founder Beta sets all four.
 Every selected container name is syntax-checked, must exist and be running, and must carry the configured Compose project
 and expected service label. It never searches by process name.
 
 The PostgreSQL schema check is read-only: it compares `schema_migrations` with the selected backend image's
-`gradex-migrate max-version` output and requires a clean state. The outbox check is also read-only and
+`gradex-migrate max-version` output and requires a clean state. When no image is configured, it reads the
+image only from the validated API container described above. The outbox check is also read-only and
 selects only terminal-failure presence, oldest due age, and oldest expired lease age. A failed Docker,
 schema, or PostgreSQL probe is unhealthy.
 

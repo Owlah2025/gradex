@@ -21,7 +21,7 @@ checks:
     source: host_runtime_report
     expected_status: PASS
     identity: compose_project_and_service_labels
-    expected_schema: selected_backend_image_maximum
+    expected_schema: selected_backend_image_or_validated_api_container_maximum
   - id: transactional_email_outbox
     source: postgres_transactional_email_deliveries
     terminal_states: [PERMANENT_FAILED, EXHAUSTED]
