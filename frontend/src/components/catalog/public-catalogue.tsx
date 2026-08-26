@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { switchLocalePath } from "@/lib/i18n/locale-path";
 import { getStudentCourseAccessHistory } from "@/lib/api/access";
@@ -19,17 +26,33 @@ import {
   type PublicCourse,
   type PublicCourseDetail,
 } from "@/lib/api/public-catalog";
-import { getAcademicProfile } from "@/lib/api/academic-profile";
 import { AcademicFilters } from "./academic-filters";
 import {
   clearedSelection,
   emptyStateKind,
   hasSelection,
+  institutionName,
+  programName,
   readSelection,
   requestFilters,
   selectionSearch,
   type CatalogueSelection,
 } from "./academic-filter-state";
+import type {
+  InstitutionOption,
+  ProgramOption,
+} from "@/lib/api/public-catalog";
+import { useAcademicContext } from "@/components/academic/academic-context-provider";
+import { AcademicContextSummary } from "@/components/academic/academic-context-summary";
+import {
+  catalogueHrefForContext,
+  contextForSelection,
+  selectionForContext,
+} from "@/components/academic/catalogue-context";
+import {
+  academicContextNames,
+  sameAcademicContext,
+} from "@/lib/academic/anonymous-context";
 import { ProblemError } from "@/lib/api/problem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -249,7 +272,7 @@ function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
 }
 
 export function CatalogueList() {
-  const { locale } = useLocale();
+  const { locale, t: dictionary } = useLocale();
   const t = copy[locale as keyof typeof copy];
   const pathname = usePathname();
   const router = useRouter();
@@ -267,23 +290,115 @@ export function CatalogueList() {
   }>({});
   const [retryCount, setRetryCount] = useState(0);
 
+  const {
+    status: contextStatus,
+    anonymous,
+    profile,
+    source: contextSource,
+    setAnonymous,
+    reconcile,
+  } = useAcademicContext();
+
   // The Student's own Program, read from their own profile, used only to order
-  // results. An anonymous visitor simply has none: a 401 here is an ordinary
+  // results. An anonymous visitor simply has none: a 401 there is an ordinary
   // state on a public page and never surfaces as an error or hides a Course.
-  const [relevantProgram, setRelevantProgram] = useState("");
+  // The profile is read once by the shared academic-context provider rather
+  // than a second time here.
+  const relevantProgram = profile?.program_slug ?? "";
+
+  // The live option lists, reported by the filter row. Held so the context bar can name the current
+  // selection from real catalogue data rather than from the display cache alone.
+  const [institutionOptions, setInstitutionOptions] = useState<
+    InstitutionOption[] | null
+  >(null);
+  const [programOptions, setProgramOptions] = useState<ProgramOption[] | null>(
+    null,
+  );
+
+  // The selection as of this render, reachable from callbacks that must stay referentially stable
+  // for the effects inside AcademicFilters. Reading it through a ref is what keeps those callbacks
+  // from re-firing the option requests on every keystroke.
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+
+  /**
+   * Keeps the remembered academic context and the address bar in agreement.
+   *
+   * A catalogue URL that names an institution is what the visitor is actually looking at — whether
+   * it came from the filter row, a shared link, or the back button — so it is adopted as the
+   * remembered context. A URL that names nothing academic is seeded from the remembered context
+   * instead, which is what stops a Student re-picking their university every time they come back.
+   *
+   * `replace`, not `push`: restoring a remembered preference is not a place the visitor navigated
+   * to, and putting it in history would make Back appear to do nothing.
+   *
+   * Clearing is deliberately not handled here. `navigate` forgets the context in the same update
+   * that pushes the emptied URL, so by the time this effect sees a bare address there is nothing
+   * left to restore from — which is exactly why "Show all courses" is not undone a moment later by
+   * the context it just dropped.
+   */
   useEffect(() => {
-    let cancelled = false;
-    getAcademicProfile(locale)
-      .then((profile) => {
-        if (!cancelled) setRelevantProgram(profile?.program_slug ?? "");
-      })
-      .catch(() => {
-        if (!cancelled) setRelevantProgram("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [locale]);
+    if (contextStatus !== "ready") return;
+    if (selection.institution !== "") {
+      const adopted = contextForSelection(selection, anonymous);
+      if (!sameAcademicContext(adopted, anonymous)) setAnonymous(adopted);
+      return;
+    }
+    // A profile-backed Student is never auto-filtered: their profile ranks the catalogue, it does
+    // not narrow it, and pretending otherwise would hide Courses their account never asked to hide.
+    if (contextSource !== "anonymous" || anonymous === null) return;
+    const restored = { ...selectionForContext(anonymous), query };
+    router.replace(`${pathname}${selectionSearch(restored)}`);
+  }, [
+    contextStatus,
+    contextSource,
+    anonymous,
+    selection,
+    query,
+    pathname,
+    router,
+    setAnonymous,
+  ]);
+
+  /**
+   * Drops a remembered university the catalogue no longer offers.
+   *
+   * Only the invalid part goes, and it goes from the URL as well as from storage — a selection the
+   * filter row cannot render is a filter the visitor can neither see nor remove.
+   */
+  const handleInstitutions = useCallback(
+    (items: InstitutionOption[] | null) => {
+      setInstitutionOptions(items);
+      if (items === null) return;
+      const slugs = items.map((item) => item.slug);
+      reconcile(slugs, null);
+      const current = selectionRef.current;
+      if (current.institution !== "" && !slugs.includes(current.institution)) {
+        router.replace(
+          `${pathname}${selectionSearch({ ...clearedSelection(), query: current.query })}`,
+        );
+      }
+    },
+    [pathname, reconcile, router],
+  );
+
+  const handlePrograms = useCallback(
+    (items: ProgramOption[] | null) => {
+      setProgramOptions(items);
+      if (items === null) return;
+      const slugs = items.map((item) => item.slug);
+      reconcile(null, slugs);
+      const current = selectionRef.current;
+      // The university stays: it is still real, and only the program beneath it has gone. Level and
+      // Subject go with the program, because both are read from the study plan it names.
+      if (current.program !== "" && !slugs.includes(current.program)) {
+        router.replace(
+          `${pathname}${selectionSearch({ ...current, program: "", level: "", subject: "" })}`,
+        );
+      }
+    },
+    [pathname, reconcile, router],
+  );
 
   const filters = requestFilters(selection, relevantProgram);
   // Serialised so the effect re-runs when the filters change by value rather
@@ -305,10 +420,39 @@ export function CatalogueList() {
     };
   }, [locale, query, filterKey, t.failed, retryCount]);
 
+  /**
+   * The single funnel for every change the catalogue makes to its own address.
+   *
+   * Forgetting the context here, in the same update that pushes the emptied URL, is what makes
+   * "Clear filters" and "Show all courses" actually stick: the restore effect re-reads the context
+   * on the very next render, and if it were still stored it would immediately put the filters back.
+   */
   function navigate(next: CatalogueSelection) {
-    const suffix = selectionSearch(next);
-    router.push(`${pathname}${suffix}`);
+    setAnonymous(contextForSelection(next, anonymous));
+    router.push(`${pathname}${selectionSearch(next)}`);
   }
+
+  /** The localized names for whatever is selected right now, so the bar can never describe something else. */
+  const selectedInstitutionName =
+    institutionOptions?.find((item) => item.slug === selection.institution)
+      ? institutionName(
+          institutionOptions.find((item) => item.slug === selection.institution)!,
+          locale as "ar" | "en",
+        )
+      : anonymous?.institutionSlug === selection.institution
+        ? academicContextNames(anonymous, locale as "ar" | "en").institution
+        : "";
+  const selectedProgramName =
+    selection.program === ""
+      ? ""
+      : programOptions?.find((item) => item.slug === selection.program)
+        ? programName(
+            programOptions.find((item) => item.slug === selection.program)!,
+            locale as "ar" | "en",
+          )
+        : anonymous?.programSlug === selection.program
+          ? academicContextNames(anonymous, locale as "ar" | "en").program
+          : "";
 
   const emptyMessage = {
     "no-courses": t.empty,
@@ -326,12 +470,32 @@ export function CatalogueList() {
       <main id="main" tabIndex={-1} className="py-10 outline-none">
         <Container>
           <DisplayHeading as="h1">{t.catalogue}</DisplayHeading>
+
+          {/* Only rendered when the catalogue is genuinely narrowed. A profile-backed Student is
+              told their results are *ordered* around their program — see the relevance note below —
+              because that is what actually happened to this list. */}
+          {selection.institution !== "" && (
+            <AcademicContextSummary
+              testID="catalogue-academic-context"
+              className="mt-6"
+              institution={selectedInstitutionName || selection.institution}
+              program={selectedProgramName}
+              provenance={dictionary.academicContext.savedOnDevice}
+              onChange={() => {
+                document.getElementById("catalogue-institution")?.focus();
+              }}
+              onClear={() => navigate(clearedSelection())}
+            />
+          )}
+
           <CatalogueSearch key={query} initialQuery={query} />
 
           <AcademicFilters
             locale={locale as "ar" | "en"}
             selection={selection}
             onChange={navigate}
+            onInstitutionsLoaded={handleInstitutions}
+            onProgramsLoaded={handlePrograms}
           />
 
           {relevantProgram !== "" && selection.program === "" && (
@@ -362,6 +526,11 @@ export function CatalogueList() {
             <div className="mt-8">
               <EmptyState
                 title={emptyMessage}
+                description={
+                  hasAcademicSelection(selection)
+                    ? dictionary.academicContext.emptyBody
+                    : undefined
+                }
                 action={
                   hasSelection(selection) ? (
                     <Button
@@ -456,6 +625,13 @@ function hasAcademicSelection(selection: CatalogueSelection): boolean {
 export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
   const { locale, t: dictionary } = useLocale();
   const t = copy[locale];
+  // Minimal Tranche C integration only: this page keeps the visitor's academic context reachable on
+  // the way back. The Course Detail redesign is Tranche D and nothing else here is touched.
+  const { anonymous, source: contextSource } = useAcademicContext();
+  const backHref =
+    contextSource === "anonymous" && anonymous
+      ? catalogueHrefForContext(locale as "ar" | "en", anonymous)
+      : `/${locale}/catalog`;
   const [state, setState] = useState<{
     course?: PublicCourseDetail;
     error?: string;
@@ -516,6 +692,13 @@ export function CatalogueDetail({ idOrSlug }: { idOrSlug: string }) {
   return (
     <Shell>
       <main id="catalogue-main" className="mx-auto max-w-4xl px-5 py-10">
+        <Link
+          href={backHref}
+          data-testid="course-detail-back"
+          className="inline-flex items-center gap-2 rounded-md text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          {dictionary.academicContext.backToCatalogue}
+        </Link>
         {!state.course && !state.error && !state.missing && (
           <p aria-live="polite">{t.loading}</p>
         )}

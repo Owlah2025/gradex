@@ -12,6 +12,12 @@ import { getPublicCourses, type PublicCourse } from "@/lib/api/public-catalog";
 import { formatFils } from "@/lib/formatters/currency";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { routes } from "@/components/layout/nav-items";
+import { useAcademicContext } from "@/components/academic/academic-context-provider";
+import {
+  catalogueHrefForContext,
+  selectionForContext,
+} from "@/components/academic/catalogue-context";
+import { requestFilters } from "@/components/catalog/academic-filter-state";
 
 const copy = {
   ar: {
@@ -70,11 +76,24 @@ function PublicCourseCard({ course }: { course: PublicCourse }) {
 export function FeaturedCourses() {
   const { locale, t } = useLocale();
   const [state, setState] = useState<FeaturedState>({ kind: "loading" });
+  const { status, anonymous, source } = useAcademicContext();
+
+  // Narrowed by the visitor's own academic context, through the same anonymous catalogue API the
+  // catalogue itself uses. A profile-backed Student is left alone here: their profile orders the
+  // catalogue rather than narrowing it, and this strip is too small to be worth misrepresenting.
+  const filters =
+    source === "anonymous" && anonymous
+      ? requestFilters(selectionForContext(anonymous))
+      : {};
+  const filterKey = JSON.stringify(filters);
 
   useEffect(() => {
+    // Waiting for the stored context avoids fetching the unfiltered list first and then visibly
+    // replacing it a moment later with the personalised one.
+    if (status !== "ready") return;
     let active = true;
     setState({ kind: "loading" });
-    getPublicCourses(locale)
+    getPublicCourses(locale, "", JSON.parse(filterKey))
       .then((result) => {
         if (active) setState({ kind: "ready", courses: result.items.slice(0, 3) });
       })
@@ -84,7 +103,14 @@ export function FeaturedCourses() {
     return () => {
       active = false;
     };
-  }, [locale]);
+  }, [locale, status, filterKey]);
+
+  // Carries the context into the catalogue, so "Browse all courses" continues the list the reader
+  // is looking at instead of resetting it.
+  const browseAllHref =
+    source === "anonymous" && anonymous
+      ? catalogueHrefForContext(locale, anonymous)
+      : routes.catalogue(locale);
 
   return (
     <Section id="courses" aria-labelledby="courses-title">
@@ -106,7 +132,7 @@ export function FeaturedCourses() {
           </ul>
           <div className="mt-9 flex justify-center">
             <Button asChild variant="outline">
-              <Link href={routes.catalogue(locale)}>{t.courses.browseAll}</Link>
+              <Link href={browseAllHref}>{t.courses.browseAll}</Link>
             </Button>
           </div>
         </>

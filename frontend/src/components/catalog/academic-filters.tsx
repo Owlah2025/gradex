@@ -120,10 +120,22 @@ export function AcademicFilters({
   locale,
   selection,
   onChange,
+  onInstitutionsLoaded,
+  onProgramsLoaded,
 }: {
   locale: "ar" | "en";
   selection: CatalogueSelection;
   onChange: (next: CatalogueSelection) => void;
+  /**
+   * Reports the option lists this row has just read, so a caller holding a remembered selection can
+   * check it against what the catalogue actually offers.
+   *
+   * `null` means "could not be read", which is deliberately not the same as an empty array: a
+   * failed request is no evidence that a university has been retired, and treating it as such would
+   * discard a valid remembered context every time the network hiccuped.
+   */
+  onInstitutionsLoaded?: (items: InstitutionOption[] | null) => void;
+  onProgramsLoaded?: (items: ProgramOption[] | null) => void;
 }) {
   const t = copy[locale];
   const [institutions, setInstitutions] = useState<InstitutionOption[] | null>(
@@ -138,20 +150,22 @@ export function AcademicFilters({
     let cancelled = false;
     getPublicInstitutions(locale)
       .then((items) => {
-        if (!cancelled) setInstitutions(items);
+        if (cancelled) return;
+        setInstitutions(items);
+        onInstitutionsLoaded?.(items);
       })
       .catch(() => {
         // Academic data being unavailable must not take the catalogue with it:
         // browsing and search stay usable and the filters simply say so.
-        if (!cancelled) {
-          setInstitutions([]);
-          setUnavailable(true);
-        }
+        if (cancelled) return;
+        setInstitutions([]);
+        setUnavailable(true);
+        onInstitutionsLoaded?.(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [locale]);
+  }, [locale, onInstitutionsLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,15 +175,19 @@ export function AcademicFilters({
     }
     getPublicPrograms(selection.institution, locale)
       .then((items) => {
-        if (!cancelled) setPrograms(items);
+        if (cancelled) return;
+        setPrograms(items);
+        onProgramsLoaded?.(items);
       })
       .catch(() => {
-        if (!cancelled) setPrograms([]);
+        if (cancelled) return;
+        setPrograms([]);
+        onProgramsLoaded?.(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [locale, selection.institution]);
+  }, [locale, selection.institution, onProgramsLoaded]);
 
   // Only the levels a study plan actually records are offered. A level nothing
   // is recorded at would be a study plan the university does not have.
