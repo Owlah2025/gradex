@@ -152,10 +152,10 @@ export default async function LearningDashboardPage({ params }: { params: Promis
             </section>
           ) : null}
 
-          <section aria-labelledby="my-courses-title" className="mt-10">
-            <h2 id="my-courses-title" className="font-display text-lg font-bold text-foreground">
-              {dictionary.learning.myCourses}
-            </h2>
+          {/* The Courses are the page's own second level, so each card's title is its `h2` and the
+              region is named rather than headed. A separate "My courses" heading above them would
+              claim the same rank as the Courses it introduces. */}
+          <section aria-label={dictionary.learning.myCourses} className="mt-10">
             {dashboard.courses.length === 0 ? (
               <EmptyState
                 className="mt-4"
@@ -169,20 +169,21 @@ export default async function LearningDashboardPage({ params }: { params: Promis
                 }
               />
             ) : (
-              <ul className="mt-4 grid gap-4 md:grid-cols-2">
+              <ul className="grid gap-4 md:grid-cols-2">
                 {dashboard.courses.map((course) => (
                   <li key={course.course_id}>
-                    <Card interactive className="flex h-full flex-col p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <h3 className="min-w-0 flex-1 font-display text-lg font-bold text-foreground">
-                          {course.title}
-                        </h3>
-                      </div>
+                    <Card asChild interactive>
+                      <article className="flex h-full flex-col p-5">
+                      <h2 className="font-display text-lg font-bold text-foreground">
+                        {course.title}
+                      </h2>
+                      <div className="mt-2">
                       <LearningStatusBadge
                         status={course.learning_status}
                         label={learningStatusLabel(course.learning_status, dictionary.learning)}
                         detail={learningStatusDetail(course.learning_status, dictionary.learning)}
                       />
+                      </div>
                       <LearningProgressSummary
                         className="mt-4"
                         progress={course.progress}
@@ -201,6 +202,7 @@ export default async function LearningDashboardPage({ params }: { params: Promis
                           <ArrowRight aria-hidden className={locale === "ar" ? "rotate-180" : undefined} />
                         </Link>
                       </Button>
+                      </article>
                     </Card>
                   </li>
                 ))}

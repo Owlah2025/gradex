@@ -129,7 +129,10 @@ export function LearningShell({
         </div>
       </header>
 
-      <main id="main" tabIndex={-1} className="flex-1 outline-none">
+      {/* The direction is declared on the reading surface as well as on the frame. `main` is what
+          the learning suites read it from, and it is the element whose contents the value is
+          actually about. */}
+      <main id="main" dir={dir} tabIndex={-1} className="flex-1 outline-none">
         {children}
       </main>
     </div>
