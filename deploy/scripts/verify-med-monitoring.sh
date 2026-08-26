@@ -363,9 +363,12 @@ main() {
   host_runtime_without_backend="$host_state/runtime-without-backend.env"
   grep --invert-match '^GRADEX_BACKEND_IMAGE=' "$host_runtime_env" >"$host_runtime_without_backend"
   chmod 600 "$host_runtime_without_backend"
+  : >"$fake_docker_log"
   GRADEX_HOST_ENV_FILE="$host_runtime_without_backend" run_host_monitor 0
   grep --fixed-strings --quiet 'postgres_schema: intended Compose PostgreSQL schema is clean' "$host_monitor_log" ||
     die "backend image fallback through the owned API container was not accepted"
+  grep --fixed-strings --quiet 'docker exec postgrescontainer psql' "$fake_docker_log" ||
+    die "schema query did not remain on the selected PostgreSQL container"
 
   FAKE_WORKER_ID= run_host_monitor 1
   grep --fixed-strings --quiet 'FAIL worker: owned Compose worker container is absent' "$host_monitor_log" ||

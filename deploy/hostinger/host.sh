@@ -376,11 +376,12 @@ monitor_resolve_backend_image() {
 }
 
 monitor_probe_postgres_schema() {
-  local report="$1" schema_state expected_schema
+  local report="$1" postgres_id schema_state expected_schema
   if ! monitor_resolve_container postgres GRADEX_MONITOR_POSTGRES_CONTAINER; then
     monitor_append_report "$report" postgres_schema FAIL "$MONITOR_CONTAINER_ERROR"
     return 0
   fi
+  postgres_id="$MONITOR_CONTAINER_ID"
   if [ -z "${POSTGRES_DB:-}" ]; then
     monitor_append_report "$report" postgres_schema FAIL "PostgreSQL database name is not configured"
     return 0
@@ -389,7 +390,7 @@ monitor_probe_postgres_schema() {
     monitor_append_report "$report" postgres_schema FAIL "$MONITOR_CONTAINER_ERROR"
     return 0
   fi
-  if ! schema_state="$(timeout 15 docker exec "$MONITOR_CONTAINER_ID" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+  if ! schema_state="$(timeout 15 docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
     --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;" 2>/dev/null)"; then
     monitor_append_report "$report" postgres_schema FAIL "PostgreSQL schema query failed"
     return 0
