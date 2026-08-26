@@ -1084,6 +1084,31 @@ export const en = {
           "Part of the course classification is no longer available. Choose it again.",
       },
     },
+    /**
+     * The standing block that heads a selected course, and the read-only view of a course that is
+     * with an administrator.
+     *
+     * A pill said "In review" and the studio then rendered the full editable form beneath it, with
+     * a live Submit button, for a revision the server would refuse every write to.
+     */
+    standingBanner: {
+      whoActsNext: "Who acts next",
+      nothingRequired: "Nothing is required from you right now.",
+      editingClosed: "This course cannot be edited while it is being reviewed.",
+      editingOpen: "You can keep editing until you submit.",
+      studentsUnaffected: "Students keep seeing the published course meanwhile.",
+    },
+    submitted: {
+      title: "Submitted for review",
+      body:
+        "An administrator has it. They will either approve it or send it back with a reason, and it appears here either way. Nothing is required from you until then.",
+      whatWasSent: "What you submitted",
+      sections: "Sections",
+      lessons: "Lessons",
+      preview: "Public preview",
+      previewYes: "Attached",
+      previewNo: "Not attached",
+    },
     academic: {
       title: "Academic identity",
       lead: "The university and subject this course is taught for. Students find it through them.",

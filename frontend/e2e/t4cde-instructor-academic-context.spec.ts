@@ -186,7 +186,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const originalSubject = SHARED_SUBJECT_CODE;
 
     // C1/C2 — automatic inference, then an explicit valid subset.
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Automatic audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Programs that see this course");
     await page.getByTestId("academic-course-customize-audience").click();
     const options = page.getByTestId("academic-course-audience-option");
     expect(await options.count()).toBeGreaterThan(1);
@@ -194,7 +194,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
       await options.nth(index).uncheck();
     }
     await page.getByTestId("academic-course-save-audience").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Customized audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Chosen programs");
 
     const detailResponse = await instructorAPI.get(`/api/v1/courses/${courseID}`);
     expect(detailResponse.status()).toBe(200);
@@ -263,7 +263,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("start-revision").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Customized audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Chosen programs");
     await page.getByTestId("academic-course-edit-audience").click();
     const checked = page.locator('[data-testid="academic-course-audience-option"]:checked');
     await expect(checked).toHaveCount(2);
@@ -289,7 +289,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("start-revision").click();
     await page.getByTestId("academic-course-use-automatic-audience").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Automatic audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Programs that see this course");
     owned = await (await instructorAPI.get(`/api/v1/courses/${courseID}`)).json() as any;
     expect(owned.live_revision.audience.mode).toBe("CUSTOMIZED");
     expect(owned.live_revision.audience.programs).toHaveLength(1);

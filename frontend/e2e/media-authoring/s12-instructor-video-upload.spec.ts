@@ -349,7 +349,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // The state is explained in the Instructor's language; the wire enum is
   // still available for support, but it is not the explanation.
   await expect(page.getByTestId("revision-state")).toHaveText("Changes requested");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "CHANGES_REQUESTED");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "CHANGES_REQUESTED");
 
   // 10b. Another Instructor and a Student are refused the reason outright.
   // The reason travels with the owned-Course read, so refusing that read is
@@ -405,7 +405,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // that rendered on the reason instead of the state would still be telling
   // the Instructor to fix something they already fixed.
   await expect(page.getByTestId("revision-state")).toHaveText("In review");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
   await expect(page.getByTestId("change-request-notice")).toHaveCount(0);
 
   await otherInstructorAPI.dispose();
@@ -516,7 +516,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const draftCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(draftCourseID).toMatch(UUID_PATTERN);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
 
   // The public API itself excludes it — this is the guarantee that matters.
   // `catalogpublic.PublishedOnly` is applied in SQL and the repository refuses
@@ -600,7 +600,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("start-revision").click();
 
   // The studio moved into the new candidate, and says plainly that these edits are not live yet.
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await expect(page.getByTestId("editing-published-notice")).toContainText(
     "Students still see the published version",
   );
@@ -637,13 +637,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("submit-for-review").click();
   await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
 
   // In review, the studio says so and offers no second revision.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
 
   // Authorization: only the owning Instructor may begin a revision.
   const otherStart = await (await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR))).put(
@@ -670,7 +670,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId(`owned-course-${draftCourseID}`).click();
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
   await expect(page.getByTestId("editing-published-notice")).toHaveCount(0);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await page.getByTestId(`owned-course-${courseID}`).click();
 
   // Revision B is now PENDING_REVIEW while A stays live.

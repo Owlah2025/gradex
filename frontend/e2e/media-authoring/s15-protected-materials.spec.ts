@@ -158,7 +158,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await instructorPage.getByTestId(`owned-course-${COURSE_ID}`).click();
   await expect(instructorPage.getByTestId("start-revision-panel")).toBeVisible();
   await instructorPage.getByTestId("start-revision").click();
-  await expect(instructorPage.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(instructorPage.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
 
   const removeA = instructorPage.locator(`[data-testid^="remove-lesson-resource-"]`).first();
   await expect(removeA).toBeVisible();

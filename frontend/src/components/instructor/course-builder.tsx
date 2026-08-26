@@ -33,10 +33,12 @@ import { currentCSRFToken } from "@/lib/identity/session";
 import { createSubjectRequest } from "@/lib/api/subject-requests";
 import { CourseRoster } from "./course-roster";
 import { InstructorCourseList } from "./instructor-course-list";
-import { courseDisplayTitle } from "./course-standing";
+import { courseDisplayTitle, courseStanding } from "./course-standing";
 import { CoursePricingSummary } from "./course-pricing-summary";
 import { NewCourseForm } from "./new-course-form";
 import { SubmissionPanel } from "./submission-panel";
+import { CourseStandingBanner } from "./course-standing-banner";
+import { SubmittedCourseSummary } from "./submitted-course-summary";
 import { describeSubmissionRejection } from "./submission-readiness";
 import { CurriculumBuilder } from "./curriculum-builder";
 import { ErrorState } from "@/components/common/error-state";
@@ -64,17 +66,6 @@ const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
 
 export function CourseBuilder() {
   const { locale, t } = useLocale();
-
-  /**
-   * Wire enum → the Instructor's language. The raw enum stays on `data-revision-state` for tests
-   * and support, but it is never what the Instructor is asked to interpret.
-   */
-  const stateLabel = (state: string | undefined, lifecycle: string | undefined): string => {
-    const wire = state ?? lifecycle;
-    if (!wire) return "";
-    const labels = t.instructor.revisionState as Record<string, string | undefined>;
-    return labels[wire] ?? wire;
-  };
 
   const [courses, setCourses] = useState<CourseWire[]>([]);
   const [selectedCourseID, setSelectedCourseID] = useState<string | null>(null);
@@ -127,6 +118,7 @@ export function CourseBuilder() {
   const revision = selectedCourse?.editable_revision ?? null;
   const sections = revision?.sections ?? [];
   const workflow = revisionWorkflow(selectedCourse);
+  const standing = courseStanding(selectedCourse);
   const editingPublished = editsPublishedCourse(selectedCourse);
 
   const selectCourse = (courseID: string) => {
@@ -616,13 +608,6 @@ export function CourseBuilder() {
                 <bdi>{courseTitle(selectedCourse)}</bdi>
               </h2>
               <div className="flex flex-wrap items-center gap-2">
-                <span
-                  data-testid="revision-state"
-                  data-revision-state={revision?.state ?? selectedCourse.lifecycle ?? ""}
-                  className="rounded-pill bg-muted px-3 py-1 font-display text-xs font-bold text-muted-foreground"
-                >
-                  {stateLabel(revision?.state, selectedCourse.lifecycle)}
-                </span>
                 <Button
                   type="button"
                   variant="outline"
@@ -635,6 +620,12 @@ export function CourseBuilder() {
                 </Button>
               </div>
             </div>
+
+            <CourseStandingBanner
+              standing={standing}
+              labels={instructor.standing}
+              bannerLabels={instructor.standingBanner}
+            />
 
             {showRoster ? <CourseRoster courseID={selectedCourse.id} /> : null}
 
@@ -660,7 +651,12 @@ export function CourseBuilder() {
             {/* Edits to a candidate behind a live revision reach nobody until an Admin approves. */}
             {editingPublished ? <EditingPublishedNotice labels={t.instructor.revision} /> : null}
 
-            {revision?.id ? (
+            {/*
+              Gated on whether the revision *can* be edited, not on whether one exists. A submitted
+              revision still exists, so this used to render the whole authoring form — every input
+              live, Submit underneath — for a revision the server refuses every write to.
+            */}
+            {revision?.id && standing.editable ? (
               <>
                 <form
                   onSubmit={handleSaveRevision}
@@ -798,6 +794,8 @@ export function CourseBuilder() {
                   onSubmit={handleSubmit}
                 />
               </>
+            ) : standing.stage === "IN_REVIEW" && revision ? (
+              <SubmittedCourseSummary revision={revision} labels={instructor.submitted} />
             ) : (
               <RevisionWorkflowPanel
                 workflow={workflow}
