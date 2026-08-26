@@ -62,7 +62,6 @@ export function AcademicContextPanel() {
     return (
       <Section
         id="academic-context"
-        tone="muted"
         spacing="tight"
         aria-labelledby="academic-context-title"
       >
@@ -79,7 +78,6 @@ export function AcademicContextPanel() {
     return (
       <Section
         id="academic-context"
-        tone="muted"
         spacing="tight"
         aria-labelledby="academic-context-title"
       >
@@ -104,7 +102,6 @@ export function AcademicContextPanel() {
     return (
       <Section
         id="academic-context"
-        tone="muted"
         spacing="tight"
         aria-labelledby="academic-context-title"
       >
@@ -128,12 +125,23 @@ export function AcademicContextPanel() {
   return (
     <Section
       id="academic-context"
-      tone="muted"
       spacing="tight"
       aria-labelledby="academic-context-title"
     >
       {heading}
-      <div className="max-w-2xl">
+      {/**
+       * On the base surface, not the muted section tone.
+       *
+       * `muted-foreground` measures 4.2:1 against `gx-blue-50` — below AA — so every secondary line
+       * here (the lead, the "Optional" hint, the "no account needed" note) failed contrast on the
+       * washed background. It meets AA on the page background, so the separation comes from a
+       * bordered card instead of a background wash and all three lines pass.
+       *
+       * The same measurement applies to the existing muted-tone sections, which is a design-system
+       * question rather than one this panel can answer; it is recorded for that work rather than
+       * fixed by changing a shared token from here.
+       */}
+      <div className="max-w-2xl rounded-2xl border border-border bg-card p-6 sm:p-7">
         <AcademicContextPicker
           idPrefix="landing-academic"
           initial={anonymous}
