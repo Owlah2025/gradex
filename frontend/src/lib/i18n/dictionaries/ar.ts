@@ -954,6 +954,57 @@ export const ar: Dictionary = {
         failed: "تعذّر تحديث المعاينة العامة. حاول مرة أخرى.",
       },
     },
+    submission: {
+      title: "جاهز للإرسال؟",
+      leadIncomplete: "يلزم إكمال ما يلي قبل إرسال هذه الدورة.",
+      leadReady: "اكتمل كل ما يمكن للمنصة التحقق منه.",
+      progress: "مكتمل",
+      adminOwnsPrice:
+        "أنت لا تحدد السعر. يحدده المشرف أثناء مراجعة الدورة.",
+      serverNote:
+        "يجري المشرف الفحص النهائي، وقد يطلب تعديلات رغم ذلك.",
+      submitAction: "إرسال للمراجعة",
+      submitting: "جارٍ الإرسال…",
+      confirmTitle: "إرسال هذه الدورة للمراجعة؟",
+      confirmBody:
+        "ستنتقل الدورة إلى المشرف ولا يمكن تعديلها حتى يصدر قراره. سيعتمدها أو يعيدها إليك مع سبب.",
+      confirmAccept: "إرسال",
+      confirmCancel: "متابعة التعديل",
+      submitted: "تم الإرسال. سيراجعها المشرف.",
+      rejectedTitle: "تعذّر إرسال الدورة بعد",
+      requirement: {
+        ACADEMIC_INSTITUTION: "اختر الجامعة التي تُدرَّس فيها هذه الدورة",
+        ACADEMIC_SUBJECT: "اختر المادة التي تُدرِّسها هذه الدورة",
+        LEGACY_MAJOR: "اختر التخصص الذي تنتمي إليه هذه الدورة",
+        LEGACY_SUBJECT: "اختر المادة التي تنتمي إليها هذه الدورة",
+        LEGACY_STUDY_YEAR: "اختر السنة الدراسية التي تستهدفها هذه الدورة",
+        SECTIONS: "أضف قسماً واحداً على الأقل",
+        SECTION_LESSONS: "أضف درساً واحداً على الأقل لكل قسم",
+        LESSON_VIDEOS: "ارفع فيديو لكل درس",
+      },
+      untitledSection: "القسم",
+      untitledLesson: "الدرس",
+      offenders: "ما زال مطلوباً في:",
+      offenderMore: "وغيرها",
+      violation: {
+        COURSE_EMPTY: "تحتاج الدورة إلى قسم واحد على الأقل يحتوي على دروس.",
+        SECTION_EMPTY: "يحتاج كل قسم إلى درس واحد على الأقل.",
+        LESSON_VIDEO_MISSING: "يحتاج كل درس إلى فيديو.",
+        ASSET_VERSION_UNAVAILABLE:
+          "أحد الملفات المرفوعة لم يعد متاحاً. ارفعه مرة أخرى.",
+        ACADEMIC_INSTITUTION_MISSING: "تحتاج هذه الدورة إلى جامعة.",
+        ACADEMIC_SUBJECT_MISSING: "تحتاج هذه الدورة إلى مادة.",
+        ACADEMIC_SUBJECT_UNAVAILABLE:
+          "المادة المختارة لم تعد متاحة في هذه الجامعة. اختر مادة أخرى.",
+        ACADEMIC_SUBJECT_RETIRED:
+          "المادة المختارة لم تعد تُدرَّس، فلا يمكن نشر دورة جديدة تحتها.",
+        ACADEMIC_AUDIENCE_TARGET_UNAVAILABLE:
+          "أحد التخصصات التي اخترتها لم يعد مرتبطاً بهذه المادة. راجع اختياراتك.",
+        TAXONOMY_DIMENSION_MISSING: "تصنيف الدورة غير مكتمل.",
+        TAXONOMY_TERM_UNAVAILABLE:
+          "جزء من تصنيف الدورة لم يعد متاحاً. اختره مرة أخرى.",
+      },
+    },
     academic: {
       title: "الهوية الأكاديمية",
       lead: "الجامعة والمادة التي تُدرَّس لها هذه الدورة. عبرهما يجدها الطلبة.",

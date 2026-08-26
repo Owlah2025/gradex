@@ -259,6 +259,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     await createCourse(page, `Incomplete Course ${Date.now()}`, "دورة غير مكتملة");
 
     await page.getByTestId("submit-for-review").click();
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
 
     // The Course has a canonical Subject but no Sections and no Lesson video,
     // so the server refuses it. The Instructor is shown which requirements
@@ -269,10 +270,15 @@ test.describe("S12 Instructor authoring persistence", () => {
     // does not carry and must never be asked for — the property is unchanged,
     // the dimension that fails is. The legacy gate itself stays proven for
     // legacy Courses in the backend suite until T5.
-    const failure = page.getByTestId("authoring-error");
+    //
+    // The refusal is reported beside Submit, in words. It used to arrive in the page-level error
+    // region as `COURSE_EMPTY · course:<uuid>`; the wire code and the identifier are both gone.
+    const failure = page.getByTestId("submit-error");
     await expect(failure).toBeVisible();
-    await expect(failure).toContainText("COURSE_EMPTY");
+    await expect(failure).toContainText("at least one section");
+    await expect(failure).not.toContainText("COURSE_EMPTY");
     await expect(failure).not.toContainText("TAXONOMY_DIMENSION_MISSING");
+    await expect(page.getByTestId("authoring-error")).toHaveCount(0);
 
     await context.close();
   });

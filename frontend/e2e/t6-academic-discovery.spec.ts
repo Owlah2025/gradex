@@ -137,7 +137,8 @@ async function publishAcademicCourse(
   expect(videoResponse.status(), await videoResponse.text()).toBe(200);
 
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("An administrator will review it");
 
   const adminContext = await browser.newContext({ locale: "en-US" });
   await signIn(adminContext, ADMIN);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
 import type { AcademicSubjectSelection } from "./academic-subject-picker";
@@ -36,6 +36,8 @@ import { InstructorCourseList } from "./instructor-course-list";
 import { courseDisplayTitle } from "./course-standing";
 import { CoursePricingSummary } from "./course-pricing-summary";
 import { NewCourseForm } from "./new-course-form";
+import { SubmissionPanel } from "./submission-panel";
+import { describeSubmissionRejection } from "./submission-readiness";
 import { CurriculumBuilder } from "./curriculum-builder";
 import { ErrorState } from "@/components/common/error-state";
 import { EmptyState } from "@/components/common/empty-state";
@@ -62,7 +64,6 @@ const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
 
 export function CourseBuilder() {
   const { locale, t } = useLocale();
-  const isAr = locale === "ar";
 
   /**
    * Wire enum → the Instructor's language. The raw enum stays on `data-revision-state` for tests
@@ -89,8 +90,9 @@ export function CourseBuilder() {
   // and read the click as a no-op — the server's reason was rendered far
   // above the viewport. The second region is focused on failure so the reason
   // is where the click was.
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const submitErrorRef = useRef<HTMLParagraphElement | null>(null);
+  const [submitRejection, setSubmitRejection] = useState<
+    { reasons: string[]; detail?: string | null } | null
+  >(null);
 
   const [isCreating, setIsCreating] = useState(false);
   const [newTitleAr, setNewTitleAr] = useState("");
@@ -188,7 +190,7 @@ export function CourseBuilder() {
   const requireCSRF = (): string | null => {
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      setError(instructor.media.csrfMissing);
       return null;
     }
     return csrf;
@@ -197,7 +199,7 @@ export function CourseBuilder() {
   /** Runs one authoring command with a single busy flag, so a double click cannot issue it twice. */
   const command = async (
     action: (csrf: string) => Promise<void>,
-    options?: { onFailure?: (message: string) => void },
+    options?: { onFailure?: (message: string, cause: unknown) => boolean | void },
   ) => {
     const csrf = requireCSRF();
     if (!csrf || busy) return;
@@ -207,11 +209,14 @@ export function CourseBuilder() {
     try {
       await action(csrf);
     } catch (cause) {
-      // The server's own reason, verbatim from `describeApiError`, including
-      // every submission violation code. Nothing is suppressed or reworded.
+      // The server's own reason, verbatim from `describeApiError`, including every submission
+      // violation code. A handler may claim the failure by returning true — submission does,
+      // because it renders the same refusal in the Instructor's language beside the control that
+      // produced it, and showing the raw `CODE · lesson:<uuid>` join as well would put back
+      // exactly the identifiers this surface no longer asks anyone to read.
       const message = describeApiError(cause, locale);
-      setError(message);
-      options?.onFailure?.(message);
+      const handled = options?.onFailure?.(message, cause) === true;
+      if (!handled) setError(message);
     } finally {
       setBusy(false);
     }
@@ -443,7 +448,7 @@ export function CourseBuilder() {
 
   const handleSubmit = () => {
     if (!selectedCourse || !revision?.id) return;
-    setSubmitError(null);
+    setSubmitRejection(null);
     void command(
       async (csrf) => {
         await submitCourseRevision({
@@ -454,18 +459,33 @@ export function CourseBuilder() {
         });
         await loadCourses(selectedCourse.id);
         await refreshSelectedCourse();
-        setNotice(isAr ? "تم إرسال الدورة إلى مراجعة الإدارة." : "Course submitted for Admin review.");
+        setNotice(instructor.submission.submitted);
       },
       {
-        onFailure: (message) => {
-          setSubmitError(message);
-          // The rejection is brought to the click, not left at the top of the
-          // page: the region beside Submit is scrolled into view and focused,
-          // so a keyboard or screen-reader user lands on it too.
-          window.requestAnimationFrame(() => {
-            submitErrorRef.current?.scrollIntoView({ block: "center" });
-            submitErrorRef.current?.focus();
-          });
+        /*
+          A submission rejection is the one server failure an Instructor is expected to act on
+          themselves, so it is translated rather than passed through. `describeApiError` renders
+          each violation as `CODE · lesson:<uuid>`, which names an object by an identifier that
+          appears nowhere in the product.
+        */
+        onFailure: (message, cause): boolean => {
+          const translated = describeSubmissionRejection(
+            cause,
+            (code) =>
+              instructor.submission.violation[
+                code as keyof typeof instructor.submission.violation
+              ],
+          );
+          setSubmitRejection(
+            translated
+              ? {
+                  reasons: translated.reasons,
+                  // The raw server text is kept only when something in it was not understood.
+                  detail: translated.hasUntranslated ? message : null,
+                }
+              : { reasons: [], detail: message },
+          );
+          return true;
         },
       },
     );
@@ -770,33 +790,13 @@ export function CourseBuilder() {
                   onContentChanged={refreshSelectedCourse}
                 />
 
-                <div className="border-t pt-4">
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={handleSubmit}
-                    data-testid="submit-for-review"
-                    className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-                  >
-                    {isAr ? "إرسال للمراجعة" : "Submit for Review"}
-                  </button>
-                  {submitError && (
-                    <p
-                      ref={submitErrorRef}
-                      role="alert"
-                      tabIndex={-1}
-                      data-testid="submit-error"
-                      className="mt-3 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
-                    >
-                      {submitError}
-                    </p>
-                  )}
-                  <p className="mt-2 text-xs text-slate-500">
-                    {isAr
-                      ? "يتحقق الخادم من اكتمال الدورة، ويعرض سبب الرفض كما هو."
-                      : "The server validates completeness; its rejection reason is shown as-is."}
-                  </p>
-                </div>
+                <SubmissionPanel
+                  course={selectedCourse}
+                  labels={instructor.submission}
+                  busy={busy}
+                  rejection={submitRejection}
+                  onSubmit={handleSubmit}
+                />
               </>
             ) : (
               <RevisionWorkflowPanel

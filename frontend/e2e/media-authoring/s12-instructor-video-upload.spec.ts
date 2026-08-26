@@ -212,7 +212,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 6. Submission uses the Course-level canonical Subject; Academic Courses
   // never populate the legacy Major/Subject/Study-Year vocabulary.
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   // 7. The Admin review surface sees the submitted revision.
   const queue = await admin.get("/api/v1/admin/review/queue");
@@ -396,7 +397,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("saved");
 
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   // 10d. The resolved change request must not linger. The server keeps
   // `review_reason` on the revision row after a resubmission, so a surface
@@ -633,7 +635,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   // Submitted through the studio, not the API.
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
   await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
 
   // In review, the studio says so and offers no second revision.

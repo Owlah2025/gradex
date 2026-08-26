@@ -1026,6 +1026,64 @@ export const en = {
         failed: "The public preview could not be updated. Try again.",
       },
     },
+    /**
+     * Submission: the checklist, the transition, and the server's refusals in words.
+     *
+     * `violation` maps the codes `catalog/validation.go` returns. The target that accompanies each
+     * one on the wire â `lesson:<uuid>` â is dropped: the checklist above already names the same
+     * objects by the titles the Instructor wrote.
+     */
+    submission: {
+      title: "Ready to submit?",
+      leadIncomplete: "These need finishing before this course can be submitted.",
+      leadReady: "Everything the studio can check is done.",
+      progress: "done",
+      adminOwnsPrice:
+        "You do not set the price. An administrator sets it while reviewing the course.",
+      serverNote:
+        "An administrator makes the final check, so they may still ask for changes.",
+      submitAction: "Submit for review",
+      submitting: "Submitting…",
+      confirmTitle: "Submit this course for review?",
+      confirmBody:
+        "The course goes to an administrator and cannot be edited until they decide. They will either approve it or send it back with a reason.",
+      confirmAccept: "Submit",
+      confirmCancel: "Keep editing",
+      submitted: "Submitted. An administrator will review it.",
+      rejectedTitle: "This could not be submitted yet",
+      requirement: {
+        ACADEMIC_INSTITUTION: "Choose the university this course is taught at",
+        ACADEMIC_SUBJECT: "Choose the subject this course teaches",
+        LEGACY_MAJOR: "Choose the major this course belongs to",
+        LEGACY_SUBJECT: "Choose the subject this course belongs to",
+        LEGACY_STUDY_YEAR: "Choose the study year this course is for",
+        SECTIONS: "Add at least one section",
+        SECTION_LESSONS: "Give every section at least one lesson",
+        LESSON_VIDEOS: "Upload a video for every lesson",
+      },
+      untitledSection: "Section",
+      untitledLesson: "Lesson",
+      offenders: "Still needed in:",
+      offenderMore: "and more",
+      violation: {
+        COURSE_EMPTY: "The course needs at least one section with lessons in it.",
+        SECTION_EMPTY: "Every section needs at least one lesson.",
+        LESSON_VIDEO_MISSING: "Every lesson needs a video.",
+        ASSET_VERSION_UNAVAILABLE:
+          "One of the uploaded files is no longer available. Upload it again.",
+        ACADEMIC_INSTITUTION_MISSING: "This course needs a university.",
+        ACADEMIC_SUBJECT_MISSING: "This course needs a subject.",
+        ACADEMIC_SUBJECT_UNAVAILABLE:
+          "The chosen subject is no longer available at this university. Choose another.",
+        ACADEMIC_SUBJECT_RETIRED:
+          "The chosen subject is no longer offered, so a new course cannot be published under it.",
+        ACADEMIC_AUDIENCE_TARGET_UNAVAILABLE:
+          "One of the programs you chose is no longer linked to this subject. Review your program choices.",
+        TAXONOMY_DIMENSION_MISSING: "The course classification is incomplete.",
+        TAXONOMY_TERM_UNAVAILABLE:
+          "Part of the course classification is no longer available. Choose it again.",
+      },
+    },
     academic: {
       title: "Academic identity",
       lead: "The university and subject this course is taught for. Students find it through them.",

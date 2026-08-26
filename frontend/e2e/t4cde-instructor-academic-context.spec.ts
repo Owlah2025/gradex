@@ -223,7 +223,8 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("submit-for-review").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("submitted for Admin review");
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+    await expect(page.getByTestId("authoring-notice")).toContainText("An administrator will review it");
 
     const firstReview = await openAdminReview(browser, courseID);
     const inspector = firstReview.page.getByTestId("submitted-revision-inspector");
@@ -273,6 +274,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     expect(owned.live_revision.audience.programs).toHaveLength(2);
     expect(owned.editable_revision.audience.programs).toHaveLength(1);
     await page.getByTestId("submit-for-review").click();
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
     const secondReview = await openAdminReview(browser, courseID);
     await expect(secondReview.page.getByTestId("submitted-academic-audience").locator("li")).toHaveCount(1);
     await approveInspected(secondReview.page, false);

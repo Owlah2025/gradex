@@ -247,7 +247,8 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await entitledAPI.dispose();
 
   await instructorPage.getByTestId("submit-for-review").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
   await inspectAndApprove(browser, REPLACEMENT_RESOURCE_NAME);
 
   // Publication atomically switches the Student's projection to B. The
@@ -269,7 +270,8 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await expect(removeB).toBeVisible();
   await removeB.click();
   await instructorPage.getByTestId("submit-for-review").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toBeVisible();

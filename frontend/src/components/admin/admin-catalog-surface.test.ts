@@ -350,17 +350,26 @@ test("the Instructor surface calls no Admin taxonomy mutation", () => {
 });
 
 test("an Instructor submission failure is reported at the Submit control", () => {
-  const source = readSource("src/components/instructor/course-builder.tsx");
+  // Submission moved into its own panel alongside the readiness checklist, so the guarantee the
+  // founder's manual test produced is asserted where it now lives. It is unchanged: the reason
+  // renders beside the control, is scrolled to, takes focus, and is announced.
+  const panel = readSource("src/components/instructor/submission-panel.tsx");
 
-  const submitIndex = source.indexOf('data-testid="submit-for-review"');
-  const errorIndex = source.indexOf('data-testid="submit-error"');
+  const submitIndex = panel.indexOf('data-testid="submit-for-review"');
+  const errorIndex = panel.indexOf('data-testid="submit-error"');
   assert.ok(submitIndex > 0, "the Submit control must be present");
   assert.ok(errorIndex > submitIndex, "the failure region must render beside the Submit control, not only at the top");
 
-  assert.match(source, /submitErrorRef\.current\?\.scrollIntoView/, "the failure must be brought into view");
-  assert.match(source, /submitErrorRef\.current\?\.focus\(\)/, "the failure must take focus");
-  assert.match(source, /role="alert"/, "the failure must be announced");
-  // The server's reason is what is shown: it is never replaced by local wording.
-  assert.match(source, /const message = describeApiError\(cause, locale\)/);
-  assert.match(source, /setSubmitError\(message\)/);
+  assert.match(panel, /rejectionRef\.current\?\.scrollIntoView/, "the failure must be brought into view");
+  assert.match(panel, /rejectionRef\.current\?\.focus\(\)/, "the failure must take focus");
+  assert.match(panel, /role="alert"/, "the failure must be announced");
+
+  // The server's reason is still never replaced by invented wording. Codes it publishes are
+  // translated one-for-one from `catalog/validation.go`; anything unrecognised keeps the server's
+  // own text rather than being dropped.
+  const builder = readSource("src/components/instructor/course-builder.tsx");
+  assert.match(builder, /describeSubmissionRejection\(/);
+  assert.match(builder, /detail: translated\.hasUntranslated \? message : null/);
+  const readiness = readSource("src/components/instructor/submission-readiness.ts");
+  assert.match(readiness, /hasUntranslated = true/, "an unmapped violation code must not be swallowed");
 });
