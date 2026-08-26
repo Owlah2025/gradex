@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import {
   listReviewQueue,
@@ -167,7 +168,7 @@ export function ReviewQueue() {
   );
 }
 
-type QueueCopy = ReturnType<typeof useLocale>["t"]["adminReviewQueue"];
+type QueueCopy = Dictionary["adminReviewQueue"];
 
 function QueueTableHead({ copy }: { copy: QueueCopy }) {
   return (
