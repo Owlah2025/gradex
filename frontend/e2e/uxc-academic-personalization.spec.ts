@@ -439,6 +439,12 @@ test.describe("UX-C anonymous academic personalisation", () => {
     await expect(page.getByLabel("University", { exact: true })).toBeVisible();
     await expect(page.getByLabel(/Program/)).toBeVisible();
 
+    // The university is chosen explicitly rather than left to the single-institution shortcut. That
+    // shortcut is real product behaviour, but it is conditional on the catalogue holding exactly one
+    // institution — and earlier specs in this suite create more — so a keyboard test that depended
+    // on it was asserting the fixture rather than the control.
+    await university.selectOption({ label: UNIVERSITY_EN });
+
     // The program chooser is disabled until its options exist, and a disabled control is correctly
     // skipped by Tab. Wait for it to become operable rather than racing the request that fills it.
     const program = page.getByTestId("academic-picker-program");
