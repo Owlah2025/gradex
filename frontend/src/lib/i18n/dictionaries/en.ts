@@ -978,6 +978,54 @@ export const en = {
       confirmDelete: "Delete",
       cancel: "Cancel",
     },
+    /**
+     * Upload vocabulary, shared by the three media surfaces.
+     *
+     * The phases are the real ones the client passes through â there is no invented progress and
+     * no state the server did not report. `UPLOADING` is the only phase with a percentage, because
+     * it is the only one the browser can actually measure.
+     */
+    media: {
+      phase: {
+        IDLE: "No upload in progress",
+        PREPARING: "Preparing",
+        UPLOADING: "Uploading",
+        PROCESSING: "Processing",
+        CHECKING: "Checking the file",
+        ATTACHING: "Attaching",
+        READY: "Ready",
+        FAILED: "Upload failed",
+      },
+      videoLabel: "Lesson video",
+      videoHint: "MP4 video. Every lesson needs one before the course can be submitted.",
+      videoSelect: "Choose an MP4 file",
+      videoAttached: "Video attached to this lesson.",
+      resourceLabel: "Lesson resource",
+      resourceHint: "PDF or DOCX. Optional â attach handouts, problem sets or slides.",
+      resourceSelect: "Choose a PDF or DOCX file",
+      resourceAttached: "File attached to this lesson.",
+      resourceRemoved: "File removed from this lesson.",
+      attachedFiles: "Attached files",
+      remove: "Remove",
+      removing: "Removing…",
+      retry: "Try again",
+      csrfMissing: "Your session expired. Reload the page and sign in again.",
+      preview: {
+        title: "Public preview",
+        description:
+          "A separate short video students can watch before buying. It is not a lesson, and stays private until an administrator approves this revision.",
+        selected: "A public preview is attached to this revision.",
+        absent: "No public preview is attached to this revision.",
+        choose: "Upload public preview",
+        replace: "Replace public preview",
+        remove: "Remove public preview",
+        processing: "Preparing your public preview…",
+        upload: "Uploading public preview",
+        ready: "Public preview is ready for review.",
+        removed: "The public preview was removed from this revision.",
+        failed: "The public preview could not be updated. Try again.",
+      },
+    },
     academic: {
       title: "Academic identity",
       lead: "The university and subject this course is taught for. Students find it through them.",

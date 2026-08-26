@@ -17,18 +17,14 @@ import {
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
+import { useLocale } from "@/lib/i18n/locale-provider";
+import { Button } from "@/components/ui/button";
+import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
 
-type Phase = "IDLE" | "PREPARING" | "UPLOADING" | "CHECKING" | "ATTACHING" | "READY" | "FAILED";
-
-const PHASE_LABELS: Record<Phase, { en: string; ar: string }> = {
-  IDLE: { en: "No upload in progress", ar: "لا يوجد رفع جارٍ" },
-  PREPARING: { en: "Preparing", ar: "جارٍ التحضير" },
-  UPLOADING: { en: "Uploading", ar: "جارٍ الرفع" },
-  CHECKING: { en: "Checking the file", ar: "جارٍ فحص الملف" },
-  ATTACHING: { en: "Attaching", ar: "جارٍ الإرفاق" },
-  READY: { en: "Attached", ar: "تم الإرفاق" },
-  FAILED: { en: "Failed", ar: "فشل" },
-};
+type Phase = Extract<
+  UploadPhase,
+  "IDLE" | "PREPARING" | "UPLOADING" | "CHECKING" | "ATTACHING" | "READY" | "FAILED"
+>;
 
 export type LessonResourceUploadProps = {
   courseID: string;
@@ -55,6 +51,8 @@ export function LessonResourceUpload({
   files,
   onChanged,
 }: LessonResourceUploadProps) {
+  const { t } = useLocale();
+  const media = t.instructor.media;
   const isAr = locale === "ar";
   const [phase, setPhase] = useState<Phase>("IDLE");
   const [progress, setProgress] = useState(0);
@@ -62,8 +60,7 @@ export function LessonResourceUpload({
   const [removing, setRemoving] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
-  const busy =
-    phase === "PREPARING" || phase === "UPLOADING" || phase === "CHECKING" || phase === "ATTACHING";
+  const busy = isUploadBusy(phase);
   const resources = files.filter((file) => file.kind === "RESOURCE");
 
   const fail = (text: string) => {
@@ -79,7 +76,7 @@ export function LessonResourceUpload({
     }
     const csrf = currentCSRFToken();
     if (!csrf) {
-      fail(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      fail(media.csrfMissing);
       return;
     }
 
@@ -150,7 +147,7 @@ export function LessonResourceUpload({
       });
 
       setPhase("READY");
-      setMessage(isAr ? "تمت إضافة الملف إلى الدرس." : "File attached to this Lesson.");
+      setMessage(media.resourceAttached);
       await onChanged();
     } catch (error) {
       fail(describeApiError(error, locale));
@@ -160,7 +157,7 @@ export function LessonResourceUpload({
   const remove = async (fileID: string) => {
     const csrf = currentCSRFToken();
     if (!csrf) {
-      fail(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      fail(media.csrfMissing);
       return;
     }
     setRemoving(fileID);
@@ -168,7 +165,7 @@ export function LessonResourceUpload({
     try {
       await deleteLessonFile({ courseID, revisionID, lessonID, fileID, locale, csrf });
       setPhase("IDLE");
-      setMessage(isAr ? "تمت إزالة الملف من الدرس." : "File removed from this Lesson.");
+      setMessage(media.resourceRemoved);
       await onChanged();
     } catch (error) {
       fail(describeApiError(error, locale));
@@ -177,96 +174,85 @@ export function LessonResourceUpload({
     }
   };
 
-  const label = PHASE_LABELS[phase];
-
   return (
-    <div className="mt-2 flex flex-col gap-1" data-testid={`lesson-resource-upload-${lessonID}`}>
+    <div className="space-y-2" data-testid={`lesson-resource-upload-${lessonID}`}>
       {resources.length > 0 && (
-        <ul className="flex flex-col gap-1" data-testid={`lesson-resource-list-${lessonID}`}>
-          {resources.map((file) => (
-            <li
-              key={file.id}
-              data-testid={`lesson-resource-${file.id}`}
-              className="flex flex-wrap items-center gap-2 text-[11px]"
-            >
-              <span className="rounded bg-slate-100 px-1.5 py-0.5 dark:bg-slate-800">
-                {isAr ? file.display_name_ar : file.display_name_en}
-              </span>
-              <button
-                type="button"
-                disabled={busy || removing === file.id}
-                onClick={() => void remove(file.id)}
-                data-testid={`remove-lesson-resource-${file.id}`}
-                className="text-red-700 underline disabled:opacity-50 dark:text-red-400"
+        <div>
+          <p className="font-display text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+            {media.attachedFiles}
+          </p>
+          <ul className="mt-1 space-y-1" data-testid={`lesson-resource-list-${lessonID}`}>
+            {resources.map((file) => (
+              <li
+                key={file.id}
+                data-testid={`lesson-resource-${file.id}`}
+                className="flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1"
               >
-                {removing === file.id
-                  ? isAr
-                    ? "جارٍ الإزالة…"
-                    : "Removing…"
-                  : isAr
-                    ? "إزالة"
-                    : "Remove"}
-              </button>
-            </li>
-          ))}
-        </ul>
+                {/*
+                  A file name is arbitrary, user-supplied, and frequently long in both scripts.
+                  It was rendered in a bare span that pushed the row — and the lesson card
+                  around it — past the edge of the viewport. It truncates now, and keeps its
+                  full value in `title` so nothing is actually lost.
+                */}
+                <span
+                  className="min-w-0 flex-1 truncate text-xs text-foreground"
+                  title={isAr ? file.display_name_ar : file.display_name_en}
+                >
+                  <bdi>{isAr ? file.display_name_ar : file.display_name_en}</bdi>
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy || removing === file.id}
+                  onClick={() => void remove(file.id)}
+                  data-testid={`remove-lesson-resource-${file.id}`}
+                  className="h-7 shrink-0 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                >
+                  {removing === file.id ? media.removing : media.remove}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="text-[11px] font-medium text-slate-700 dark:text-slate-300">
-          {isAr ? "مرفق الدرس (PDF أو DOCX)" : "Lesson resource (PDF or DOCX)"}
-          <input
-            ref={fileInput}
-            type="file"
-            accept={[...ACCEPTED_RESOURCE_CONTENT_TYPES, ...ACCEPTED_RESOURCE_EXTENSIONS].join(",")}
-            disabled={busy}
-            aria-label={isAr ? "اختر ملف PDF أو DOCX" : "Select a PDF or DOCX file"}
-            data-testid={`lesson-resource-file-${lessonID}`}
-            className="ms-2 text-[11px]"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void run(file);
-              // Clearing the input lets the same file be retried after a failure.
-              event.target.value = "";
-            }}
-          />
-        </label>
-        <span
-          data-testid={`lesson-resource-phase-${lessonID}`}
-          className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-        >
-          {isAr ? label.ar : label.en}
-          {phase === "UPLOADING" ? ` ${Math.round(progress * 100)}%` : ""}
-        </span>
-      </div>
-
-      {message && (
-        <p
-          role={phase === "FAILED" ? "alert" : "status"}
-          data-testid={`lesson-resource-message-${lessonID}`}
-          className={
-            phase === "FAILED"
-              ? "text-[11px] text-red-700 dark:text-red-400"
-              : "text-[11px] text-slate-700 dark:text-slate-300"
-          }
-        >
-          {message}
-        </p>
-      )}
-      {phase === "FAILED" && (
-        <button
-          type="button"
-          className="self-start rounded border border-slate-300 px-2 py-1 text-[11px] dark:border-slate-700"
-          onClick={() => {
-            setPhase("IDLE");
-            setMessage(null);
-            setProgress(0);
-            fileInput.current?.click();
-          }}
-        >
-          {isAr ? "إعادة المحاولة" : "Retry upload"}
-        </button>
-      )}
+      <label
+        htmlFor={`lesson-resource-file-${lessonID}`}
+        className="block font-display text-xs font-bold text-foreground"
+      >
+        {media.resourceLabel}
+      </label>
+      <p className="text-xs text-muted-foreground">{media.resourceHint}</p>
+      <input
+        id={`lesson-resource-file-${lessonID}`}
+        ref={fileInput}
+        type="file"
+        accept={[...ACCEPTED_RESOURCE_CONTENT_TYPES, ...ACCEPTED_RESOURCE_EXTENSIONS].join(",")}
+        disabled={busy}
+        data-testid={`lesson-resource-file-${lessonID}`}
+        className="block w-full max-w-full text-xs text-muted-foreground file:me-3 file:rounded-pill file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:font-display file:text-xs file:font-bold file:text-secondary-foreground hover:file:bg-secondary/80"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void run(file);
+          // Clearing the input lets the same file be retried after a failure.
+          event.target.value = "";
+        }}
+      />
+      <UploadStatus
+        phase={phase}
+        progress={progress}
+        message={message}
+        labels={media}
+        phaseTestID={`lesson-resource-phase-${lessonID}`}
+        messageTestID={`lesson-resource-message-${lessonID}`}
+        onRetry={() => {
+          setPhase("IDLE");
+          setMessage(null);
+          setProgress(0);
+          fileInput.current?.click();
+        }}
+      />
     </div>
   );
 }

@@ -151,10 +151,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // Instructor UI cannot be selecting or reusing protected Lesson media.
   const mp4Path = makeSampleMP4();
   const publicPreviewAuthoring = page.getByTestId("public-preview-authoring");
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is selected");
+  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is attached");
   await publicPreviewAuthoring.locator('input[type="file"]').setInputFiles(mp4Path);
   await expect(publicPreviewAuthoring.getByTestId("public-preview-message")).toContainText("Public preview is ready for review", { timeout: 4 * 60 * 1000 });
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("A public preview is selected");
+  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("A public preview is attached");
 
   // 2. Section
   await page.getByTestId("section-title-ar").fill("القسم");

@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { clearPublicPreview, setPublicPreview } from "@/lib/api/authoring";
 import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
+import { useLocale } from "@/lib/i18n/locale-provider";
+import { Button } from "@/components/ui/button";
 import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
   beginPublicPreviewUpload,
@@ -18,41 +20,6 @@ import {
 } from "@/lib/api/media-upload";
 
 type Phase = "IDLE" | "PREPARING" | "UPLOADING" | "PROCESSING" | "ATTACHING" | "READY" | "FAILED";
-
-const copy = {
-  en: {
-    title: "Public preview",
-    description:
-      "Upload a separate short video for this revision. It is not a Lesson and stays private until an administrator approves this revision.",
-    selected: "A public preview is selected for this revision.",
-    absent: "No public preview is selected for this revision.",
-    choose: "Upload public preview",
-    replace: "Replace public preview",
-    remove: "Remove public preview",
-    processing: "Preparing your public preview…",
-    upload: "Uploading public preview…",
-    ready: "Public preview is ready for review.",
-    removed: "The public preview was removed from this revision.",
-    failed: "The public preview could not be updated. Try again.",
-    csrf: "Session CSRF token is missing",
-  },
-  ar: {
-    title: "المعاينة العامة",
-    description:
-      "ارفع فيديو قصيراً منفصلاً لهذه المراجعة. لا يُعد درساً ويبقى خاصاً حتى يعتمد المشرف هذه المراجعة.",
-    selected: "تم اختيار معاينة عامة لهذه المراجعة.",
-    absent: "لا توجد معاينة عامة مختارة لهذه المراجعة.",
-    choose: "رفع معاينة عامة",
-    replace: "استبدال المعاينة العامة",
-    remove: "إزالة المعاينة العامة",
-    processing: "جارٍ تجهيز المعاينة العامة…",
-    upload: "جارٍ رفع المعاينة العامة…",
-    ready: "أصبحت المعاينة العامة جاهزة للمراجعة.",
-    removed: "أُزيلت المعاينة العامة من هذه المراجعة.",
-    failed: "تعذّر تحديث المعاينة العامة. حاول مرة أخرى.",
-    csrf: "رمز CSRF للجلسة مفقود",
-  },
-} as const;
 
 type PublicPreviewUploadProps = {
   courseID: string;
@@ -75,7 +42,9 @@ export function PublicPreviewUpload({
   locale,
   onChanged,
 }: PublicPreviewUploadProps) {
-  const t = copy[locale];
+  const { t: dictionary } = useLocale();
+  const media = dictionary.instructor.media;
+  const t = media.preview;
   const input = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>("IDLE");
   const [progress, setProgress] = useState(0);
@@ -92,7 +61,7 @@ export function PublicPreviewUpload({
     const csrf = currentCSRFToken();
     if (!csrf) {
       setPhase("FAILED");
-      setMessage(t.csrf);
+      setMessage(media.csrfMissing);
       return;
     }
 
@@ -147,7 +116,7 @@ export function PublicPreviewUpload({
     const csrf = currentCSRFToken();
     if (!csrf) {
       setPhase("FAILED");
-      setMessage(t.csrf);
+      setMessage(media.csrfMissing);
       return;
     }
     setMessage(null);
@@ -175,14 +144,18 @@ export function PublicPreviewUpload({
   return (
     <section
       data-testid="public-preview-authoring"
-      className="rounded-md border border-teal-200 bg-teal-50/50 p-4 dark:border-teal-900/70 dark:bg-teal-950/20"
+      className="rounded-lg border border-border bg-card p-4"
       aria-labelledby="public-preview-title"
     >
-      <h3 id="public-preview-title" className="text-sm font-semibold">
+      <h3 id="public-preview-title" className="font-display text-base font-bold text-foreground">
         {t.title}
       </h3>
-      <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">{t.description}</p>
-      <p data-testid="public-preview-state" className="mt-2 text-xs font-medium">
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.description}</p>
+      <p
+        data-testid="public-preview-state"
+        data-preview-attached={hasPreview ? "true" : "false"}
+        className="mt-3 text-sm font-semibold text-foreground"
+      >
         {hasPreview ? t.selected : t.absent}
       </p>
       <input
@@ -197,30 +170,42 @@ export function PublicPreviewUpload({
           if (file) void upload(file);
         }}
       />
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button
           type="button"
+          size="sm"
           disabled={busy}
           onClick={() => input.current?.click()}
           data-testid="upload-public-preview"
-          className="rounded-md bg-teal-700 px-3 py-2 text-xs font-medium text-white hover:bg-teal-800 disabled:opacity-50"
         >
           {hasPreview ? t.replace : t.choose}
-        </button>
+        </Button>
         {hasPreview ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             disabled={busy}
             onClick={() => void remove()}
             data-testid="remove-public-preview"
-            className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium hover:bg-white disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-900"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             {t.remove}
-          </button>
+          </Button>
         ) : null}
       </div>
       {status ? (
-        <p role={phase === "FAILED" ? "alert" : "status"} className="mt-3 text-xs" data-testid="public-preview-message">
+        /* A failure must not read like a success: different role, different ink. */
+        <p
+          role={phase === "FAILED" ? "alert" : "status"}
+          data-testid="public-preview-message"
+          data-upload-phase={phase}
+          className={
+            phase === "FAILED"
+              ? "mt-3 text-sm font-medium text-destructive"
+              : "mt-3 text-sm text-muted-foreground"
+          }
+        >
           {status}
         </p>
       ) : null}
