@@ -22,11 +22,20 @@ const AccordionItem = React.forwardRef<
 ));
 AccordionItem.displayName = "AccordionItem";
 
+/**
+ * `headingLevel` exists because a disclosure is a heading, and which heading depends on where the
+ * accordion stands. Radix wraps every trigger in an `h3`, which is right for a FAQ sitting directly
+ * under an `h2`, and wrong for a Course curriculum whose sections are the page's own second level —
+ * and wrong again for the same curriculum rendered beside a Lesson, where they are its third.
+ * Leaving it unset keeps Radix's `h3` exactly as every existing caller already gets it.
+ */
 const AccordionTrigger = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Header className="flex">
+  React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger> & {
+    headingLevel?: "h2" | "h3" | "h4";
+  }
+>(({ className, children, headingLevel, ...props }, ref) => {
+  const trigger = (
     <AccordionPrimitive.Trigger
       ref={ref}
       className={cn(
@@ -41,8 +50,16 @@ const AccordionTrigger = React.forwardRef<
         aria-hidden
       />
     </AccordionPrimitive.Trigger>
-  </AccordionPrimitive.Header>
-));
+  );
+  if (!headingLevel) {
+    return <AccordionPrimitive.Header className="flex">{trigger}</AccordionPrimitive.Header>;
+  }
+  return (
+    <AccordionPrimitive.Header asChild>
+      {React.createElement(headingLevel, { className: "flex" }, trigger)}
+    </AccordionPrimitive.Header>
+  );
+});
 AccordionTrigger.displayName = "AccordionTrigger";
 
 const AccordionContent = React.forwardRef<
