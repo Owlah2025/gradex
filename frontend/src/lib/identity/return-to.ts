@@ -69,18 +69,38 @@ export function safeReturnTo(value: unknown): string | null {
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
-/** The stable existing application surface for a role and locale. */
+/**
+ * The stable existing application surface for a role and locale.
+ *
+ * The `default` is not unreachable defensive padding. `SessionRole` is a closed union, so the
+ * compiler accepted this switch without one — but the role arriving here is read off
+ * `GET /session` and cast to `AuthenticatedSession` without validation, so nothing at runtime
+ * guarantees it is a member of that union. A server that grows a fourth role, or any response the
+ * frontend does not recognise, fell straight through this switch and returned `undefined` from a
+ * function declared to return `string`.
+ *
+ * That undefined then reached three places: the workspace link in the header, which React rendered
+ * as `<Link href={undefined}>` — a dead control with no `href` at all, and the source of the
+ * development-overlay warning on every route — the workspace navigation's home entry, and
+ * `postLoginDestination`, which would have pushed the router at `undefined`.
+ *
+ * An unrecognised principal goes to the Student dashboard: it is the least-privileged surface of
+ * the three, it is a route that exists, and the server still refuses whatever that principal is
+ * not entitled to. The alternative — guessing at a workspace — would point an unknown role at an
+ * administrative screen.
+ */
 export function roleRoot(
   role: SessionRole,
   locale: "ar" | "en",
 ): string {
   switch (role) {
-    case "STUDENT":
-      return `/${locale}/learn/dashboard`;
     case "INSTRUCTOR":
       return `/${locale}/instructor/courses`;
     case "ADMIN":
       return `/${locale}/admin/catalog`;
+    case "STUDENT":
+    default:
+      return `/${locale}/learn/dashboard`;
   }
 }
 

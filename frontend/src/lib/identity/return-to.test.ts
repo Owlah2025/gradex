@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { SessionRole } from "./return-to";
 import {
   passwordChangePath,
   postAuthenticationDestination,
@@ -203,4 +204,45 @@ test("a completed change still honours the destination the visitor was interrupt
     postPasswordChangeDestination("ADMIN", "https://evil.example", "en"),
     "/en/admin/catalog",
   );
+});
+
+/**
+ * Regression: every navigation destination this module hands out is a string.
+ *
+ * `roleRoot` was an exhaustive switch over `SessionRole` with no `default`. The compiler accepted
+ * it because the union is closed, but the role reaching it is read off `GET /session` and cast
+ * without validation, so an unrecognised role fell through and the function returned `undefined`
+ * from a signature declaring `string`.
+ *
+ * The visible consequence was in the shared header: `roleHomeNavigation` put that `undefined` on
+ * the workspace `<Link>`, which React rendered as an anchor carrying no `href` — a dead control,
+ * and the "prop `href` … got `undefined`" development-overlay warning that appeared on every route
+ * in both locales.
+ *
+ * These assertions fail against the previous behaviour: each one received `undefined`.
+ */
+const UNKNOWN_ROLE = "SUPPORT" as unknown as SessionRole;
+
+test("an unrecognised session role still resolves to a real destination", () => {
+  for (const locale of ["en", "ar"] as const) {
+    assert.equal(roleRoot(UNKNOWN_ROLE, locale), `/${locale}/learn/dashboard`);
+    // Least privilege: an unknown principal is never pointed at a workspace.
+    assert.ok(!roleRoot(UNKNOWN_ROLE, locale).includes("/admin/"));
+    assert.ok(!roleRoot(UNKNOWN_ROLE, locale).includes("/instructor/"));
+  }
+});
+
+test("every known role still resolves to its own surface", () => {
+  assert.equal(roleRoot("STUDENT", "en"), "/en/learn/dashboard");
+  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
+  assert.equal(roleRoot("ADMIN", "en"), "/en/admin/catalog");
+  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin/catalog");
+});
+
+test("post-login navigation never resolves to undefined for any role", () => {
+  for (const role of ["STUDENT", "INSTRUCTOR", "ADMIN", UNKNOWN_ROLE] as SessionRole[]) {
+    for (const locale of ["en", "ar"] as const) {
+      assert.equal(typeof postLoginDestination(role, undefined, locale), "string");
+    }
+  }
 });
