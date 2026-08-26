@@ -30,7 +30,7 @@ const localized = {
     outline: "محتوى الدورة",
     loading: "جارٍ تحميل الدورات…",
     empty: "لا توجد دورات منشورة الآن.",
-    unavailable: "هذه الدورة غير متاحة.",
+    unavailable: "هذه الدورة غير متاحة",
     failed: "تعذر تحميل الكتالوج. حاول مرة أخرى.",
     language: "التبديل إلى الإنجليزية",
   },
@@ -42,7 +42,7 @@ const localized = {
     outline: "Course outline",
     loading: "Loading courses…",
     empty: "No published courses are available yet.",
-    unavailable: "This course is unavailable.",
+    unavailable: "This course is not available",
     failed: "The catalogue could not be loaded. Try again.",
     language: "Switch to Arabic",
   },
@@ -327,7 +327,9 @@ test("catalogue maps a public not-found problem to the anonymous state", async (
     },
   }));
   await page.goto("/en/catalog/course-unknown");
-  await expect(page.getByText(localized.en.unavailable, { exact: true })).toBeVisible();
+  await expect(page.getByTestId("course-detail-unavailable")).toContainText(
+    localized.en.unavailable,
+  );
 });
 
 test("catalogue renders an empty published collection", async ({ page }) => {
