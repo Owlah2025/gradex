@@ -1,18 +1,15 @@
 import Link from "next/link";
+import { ArrowLeft, ArrowRight, Download, FileText } from "lucide-react";
 import type {
-  CourseHomeSection,
   LearningCourseProgress,
   LearningMaterial,
-  LearningProgress,
   LearningStatus,
   LessonNavigation as LessonNavigationModel,
 } from "@/lib/api/learning";
 import type {
   AccessLabels,
-  LessonProgressLabels,
   MaterialsLabels,
   NavigationLabels,
-  OutlineLabels,
   ProgressLabels,
   UnavailableLabels,
 } from "./learning-label-sets";
@@ -20,9 +17,11 @@ import {
   formatLearningExpiry,
   formatLearningInteger,
   formatLearningPercent,
-  formatLearningPositionSeconds,
 } from "@/lib/formatters/learning";
+import { StatusBadge } from "@/components/common/status-badge";
+import { Card } from "@/components/ui/card";
 import { MaterialDownload } from "./material-download";
+import { cn } from "@/lib/utils";
 
 /**
  * Every component here takes the narrowest data it renders (T7).
@@ -38,15 +37,17 @@ export function LessonMaterials({
   labMaterials,
   labels,
   locale,
+  className,
 }: {
   resources: LearningMaterial[];
   labMaterials: LearningMaterial[];
   labels: MaterialsLabels;
   locale: "ar" | "en";
+  className?: string;
 }) {
   if (resources.length === 0 && labMaterials.length === 0) return null;
   return (
-    <section aria-label={labels.materials} className="mt-4 space-y-4 rounded-lg border border-border bg-card p-4">
+    <section aria-label={labels.materials} className={cn("space-y-5", className)}>
       {resources.length > 0 ? (
         <MaterialList title={labels.resources} items={resources} locale={locale} labels={labels} />
       ) : null}
@@ -70,21 +71,33 @@ function MaterialList({
 }) {
   return (
     <section aria-label={title}>
-      <h2 className="font-display text-lg font-bold text-foreground">{title}</h2>
+      <h3 className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </h3>
       <ul className="mt-2 space-y-2">
         {items.map((item) => (
-          <li key={item.download_authorization_path} className="rounded-md border border-border px-3 py-2">
-            <MaterialDownload
-              authorizationPath={item.download_authorization_path}
-              title={item.title}
-              locale={locale}
-              downloadLabel={labels.download}
-              preparingLabel={labels.preparingDownload}
-              unavailableLabel={labels.downloadUnavailable}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {item.file_type} · {formatMaterialSize(item.size_bytes, locale)}
-            </p>
+          <li
+            key={item.download_authorization_path}
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-card px-3 py-2.5"
+          >
+            <FileText aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <MaterialDownload
+                authorizationPath={item.download_authorization_path}
+                title={item.title}
+                locale={locale}
+                downloadLabel={labels.download}
+                preparingLabel={labels.preparingDownload}
+                unavailableLabel={labels.downloadUnavailable}
+              />
+              {/* The type and size are the file's own description, not a storage key: a Student
+                  decides whether to spend the download on a phone connection from these two facts.
+                  Isolated so a Latin-script extension beside an Arabic file name cannot reorder the
+                  line it sits on. */}
+              <p className="mt-1 text-xs text-muted-foreground">
+                <bdi>{item.file_type}</bdi> · <bdi>{formatMaterialSize(item.size_bytes, locale)}</bdi>
+              </p>
+            </div>
           </li>
         ))}
       </ul>
@@ -106,11 +119,15 @@ function formatMaterialSize(bytes: number, locale: "ar" | "en"): string {
 
 export function LearningUnavailable({ labels }: { labels: UnavailableLabels }) {
   return (
-    <section role="alert" aria-labelledby="learning-unavailable-title" className="rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+    <section
+      role="alert"
+      aria-labelledby="learning-unavailable-title"
+      className="rounded-lg border border-border bg-card p-8 text-center shadow-sm"
+    >
       <h1 id="learning-unavailable-title" className="font-display text-3xl font-bold text-foreground">
         {labels.unavailableTitle}
       </h1>
-      <p className="mx-auto mt-3 max-w-xl text-foreground/80">{labels.unavailableBody}</p>
+      <p className="mx-auto mt-3 max-w-xl text-muted-foreground">{labels.unavailableBody}</p>
     </section>
   );
 }
@@ -119,134 +136,238 @@ export function LearningUnavailable({ labels }: { labels: UnavailableLabels }) {
  * The badge receives its resolved text, not both strings to choose between. Choosing here would
  * publish the copy the page deliberately does not display — which is precisely how an expired
  * Lesson came to carry active-state copy (GAP-04).
+ *
+ * `detail` is what the state *means* for the Student, said in words beside the pill. A tone alone
+ * distinguishes the two states only for a reader who can separate the two tones; the sentence
+ * distinguishes them for everyone, and is the half a screen reader conveys.
+ *
+ * Neither tone is the success token. `gx-success` on `gx-success-soft` measures 3.94:1, which is
+ * below AA for text this size, and an access state is not a place to spend a known contrast defect.
  */
-export function LearningStatusBadge({ status, label }: { status: LearningStatus; label: string }) {
-  const text = label;
+export function LearningStatusBadge({
+  status,
+  label,
+  detail,
+}: {
+  status: LearningStatus;
+  label: string;
+  detail?: string;
+}) {
   return (
-    <span
-      data-learning-status={status}
-      className="inline-flex rounded-full border border-border px-3 py-1 text-sm font-semibold text-foreground/80"
-    >
-      {text}
+    <span data-learning-status={status} className="inline-flex">
+      <StatusBadge tone={status === "expired" ? "neutral" : "default"} label={label} detail={detail} />
     </span>
   );
 }
 
-export function LearningProgressSummary({ progress, labels, locale }: { progress: LearningCourseProgress; labels: ProgressLabels; locale: "ar" | "en" }) {
+/**
+ * The one progress representation in the product.
+ *
+ * Every figure here is the server's: it counts completed Lessons over the qualifying graph and
+ * sends the percentage with them. Nothing is recomputed on the client, so the Dashboard, the Course
+ * page and the Lesson cannot disagree about how far a Student has got.
+ *
+ * The bar is `aria-hidden` and the numbers are the accessible content — a progress bar that only
+ * draws is a progress bar that says nothing.
+ */
+export function LearningProgressSummary({
+  progress,
+  labels,
+  locale,
+  className,
+}: {
+  progress: LearningCourseProgress;
+  labels: ProgressLabels;
+  locale: "ar" | "en";
+  className?: string;
+}) {
   const percent = formatLearningPercent(progress.percent, locale);
   const completed = formatLearningInteger(progress.completed_lessons, locale);
   const total = formatLearningInteger(progress.total_lessons, locale);
+  const filled = Math.min(100, Math.max(0, Math.round(progress.percent)));
   return (
-    <div aria-label={`${labels.progress}: ${percent}`} className="text-sm text-foreground/80">
-      <p>
-        <span className="font-semibold text-foreground">{percent}</span> · {completed}/{total} {labels.completedLessons}
+    <div className={cn("space-y-1.5", className)}>
+      <p className="text-sm text-foreground">
+        <span className="font-display font-bold">{percent}</span>
+        <span className="text-muted-foreground">
+          {" · "}
+          {completed}/{total} {labels.completedLessons}
+        </span>
       </p>
+      <div
+        role="progressbar"
+        aria-label={labels.progress}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={filled}
+        aria-valuetext={percent}
+        className="h-1.5 w-full overflow-hidden rounded-pill bg-muted"
+      >
+        {/* Inline width because the value is data, not a design decision; the track carries the
+            shape and the tokens carry the colour. */}
+        <div className="h-full rounded-pill bg-primary" style={{ width: `${filled}%` }} />
+      </div>
     </div>
   );
 }
 
-export function AccessUntil({ expiresAt, labels, locale }: { expiresAt: string | null; labels: AccessLabels; locale: "ar" | "en" }) {
+export function AccessUntil({
+  expiresAt,
+  labels,
+  locale,
+  className,
+}: {
+  expiresAt: string | null;
+  labels: AccessLabels;
+  locale: "ar" | "en";
+  className?: string;
+}) {
   if (expiresAt === null) {
-    return <p className="text-sm text-muted-foreground">{labels.accessUntil}: {labels.noExpiry}</p>;
+    return (
+      <p className={cn("text-sm text-muted-foreground", className)}>
+        {labels.accessUntil}: {labels.noExpiry}
+      </p>
+    );
   }
   const formatted = formatLearningExpiry(expiresAt, locale);
   if (!formatted) return null;
   return (
-    <p className="text-sm text-foreground/80">
+    <p className={cn("text-sm text-muted-foreground", className)}>
       {labels.accessUntil}: <time dateTime={formatted.dateTime}>{formatted.text}</time>
     </p>
-  );
-}
-
-function lessonProgressText(progress: LearningProgress, labels: LessonProgressLabels, locale: "ar" | "en"): string {
-  return `${formatLearningPositionSeconds(progress.position_seconds, locale)} ${labels.positionSeconds} · ${progress.completed ? labels.completed : labels.notCompleted}`;
-}
-
-/**
- * The outline renders sections, lesson links, and per-lesson materials. It therefore takes exactly
- * those, never the whole CourseHome: the read model also carries the opaque report context, and a
- * component that accepts the whole model publishes the whole model (GAP-03).
- */
-export function CourseOutline({
-  courseId,
-  learningStatus,
-  sections,
-  locale,
-  labels,
-}: {
-  courseId: string;
-  learningStatus: LearningStatus;
-  sections: CourseHomeSection[];
-  locale: "ar" | "en";
-  labels: OutlineLabels;
-}) {
-  return (
-    <nav aria-label={labels.courseOutline} className="space-y-6">
-      {sections.map((section) => (
-        <section key={section.section_id} aria-labelledby={`section-${section.section_id}`}>
-          <h2 id={`section-${section.section_id}`} className="font-display text-xl font-bold text-foreground">
-            {section.title}
-          </h2>
-          <ol className="mt-3 space-y-2">
-            {section.lessons.map((lesson) => (
-              <li key={lesson.lesson_id}>
-                <div className="rounded-lg border border-border bg-card px-4 py-3">
-                  <Link
-                    href={`/${locale}/learn/courses/${courseId}/lessons/${lesson.lesson_id}`}
-                    className="flex items-center justify-between gap-4 transition-colors hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  >
-                    <span className="min-w-0 truncate font-medium text-foreground">{lesson.title}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">{lessonProgressText(lesson.progress, labels, locale)}</span>
-                  </Link>
-                  {learningStatus === "active" ? <LessonMaterials resources={lesson.resources} labMaterials={lesson.lab_materials} locale={locale} labels={labels} /> : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ))}
-    </nav>
   );
 }
 
 /**
  * Navigation renders two links. It takes the two pointers, not the whole LessonReadModel, which
  * also carries the per-target report contexts.
+ *
+ * The neighbouring titles are optional and are looked up *by the server's pointer* rather than by
+ * recomputing an order here. The pointers stay authoritative; the titles only say where they lead,
+ * so a Student moving through a Course can see the next Lesson without opening the contents.
+ *
+ * The arrows are `ArrowLeft`/`ArrowRight` chosen by reading direction, because "previous" is behind
+ * the reader in Arabic and in English alike. Playback controls are not treated this way — a media
+ * timeline runs the same way in both languages — which is why no icon here is shared with the
+ * player.
  */
 export function LessonNavigation({
   courseId,
   navigation,
   locale,
   labels,
+  previousTitle,
+  nextTitle,
+  className,
 }: {
   courseId: string;
   navigation: LessonNavigationModel;
   locale: "ar" | "en";
   labels: NavigationLabels;
+  previousTitle?: string | null;
+  nextTitle?: string | null;
+  className?: string;
 }) {
   const basePath = `/${locale}/learn/courses/${courseId}/lessons`;
+  const Backward = locale === "ar" ? ArrowRight : ArrowLeft;
+  const Forward = locale === "ar" ? ArrowLeft : ArrowRight;
   return (
-    <nav aria-label={labels.lessonNavigation} className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+    <nav
+      aria-label={labels.lessonNavigation}
+      className={cn("grid gap-3 border-t border-border pt-5 sm:grid-cols-2", className)}
+    >
       {navigation.previous_lesson_id ? (
-        <Link
+        <LessonNavigationLink
           href={`${basePath}/${navigation.previous_lesson_id}`}
-          className="rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        >
-          {labels.previousLesson}
-        </Link>
+          direction={labels.previousLesson}
+          title={previousTitle}
+          icon={<Backward aria-hidden className="size-4 shrink-0 text-muted-foreground" />}
+          align="start"
+        />
       ) : (
-        <span className="text-sm font-medium text-foreground/80">{labels.firstLesson}</span>
+        <p className="rounded-md border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+          {labels.firstLesson}
+        </p>
       )}
       {navigation.next_lesson_id ? (
-        <Link
+        <LessonNavigationLink
           href={`${basePath}/${navigation.next_lesson_id}`}
-          className="rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        >
-          {labels.nextLesson}
-        </Link>
+          direction={labels.nextLesson}
+          title={nextTitle}
+          icon={<Forward aria-hidden className="size-4 shrink-0 text-muted-foreground" />}
+          align="end"
+        />
       ) : (
-        <span className="text-sm font-medium text-foreground/80">{labels.lastLesson}</span>
+        <p className="rounded-md border border-dashed border-border px-4 py-3 text-end text-sm text-muted-foreground">
+          {labels.lastLesson}
+        </p>
       )}
     </nav>
+  );
+}
+
+function LessonNavigationLink({
+  href,
+  direction,
+  title,
+  icon,
+  align,
+}: {
+  href: string;
+  direction: string;
+  title?: string | null;
+  icon: React.ReactNode;
+  align: "start" | "end";
+}) {
+  return (
+    <Link
+      href={href}
+      // The accessible name is the direction *and* the destination, so two links in the same
+      // navigation are never announced as the same control.
+      aria-label={title ? `${direction}: ${title}` : direction}
+      className={cn(
+        "flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        align === "end" && "sm:flex-row-reverse sm:text-end",
+      )}
+    >
+      {icon}
+      <span className="min-w-0">
+        <span className="block text-xs font-semibold text-muted-foreground">{direction}</span>
+        {title ? (
+          <span className="mt-0.5 block truncate font-display text-[15px] font-bold text-foreground">
+            {title}
+          </span>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+/** A single downloadable item's row, used where materials sit inside the Course contents. */
+export function MaterialsInline({
+  resources,
+  labMaterials,
+  labels,
+  locale,
+}: {
+  resources: LearningMaterial[];
+  labMaterials: LearningMaterial[];
+  labels: MaterialsLabels;
+  locale: "ar" | "en";
+}) {
+  if (resources.length === 0 && labMaterials.length === 0) return null;
+  return (
+    <Card className="mt-2 border-dashed p-3 shadow-none">
+      <p className="mb-2 flex items-center gap-2 font-display text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <Download aria-hidden className="size-3.5" />
+        {labels.materials}
+      </p>
+      <LessonMaterials
+        resources={resources}
+        labMaterials={labMaterials}
+        labels={labels}
+        locale={locale}
+      />
+    </Card>
   );
 }
