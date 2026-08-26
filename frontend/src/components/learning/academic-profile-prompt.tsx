@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getAcademicProfile, shouldPromptOnboarding } from "@/lib/api/academic-profile";
 import { useLocale } from "@/lib/i18n/locale-provider";
@@ -20,11 +20,22 @@ export function AcademicProfilePrompt() {
   const isAr = locale === "ar";
   const [prompt, setPrompt] = useState(false);
 
+  /**
+   * The locale reaches the read as a header for its error copy, and changes nothing about the
+   * answer: whether a Student has decided about their academic profile is the same fact in either
+   * language. Keying the effect on it meant the Dashboard read the profile twice — once at the
+   * provider's default and again the moment the route's locale replaced it on hydration — for a
+   * result that could not differ. A ref carries the current value in without making the read
+   * depend on it.
+   */
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const profile = await getAcademicProfile(locale);
+        const profile = await getAcademicProfile(localeRef.current);
         if (!cancelled) setPrompt(shouldPromptOnboarding(profile));
       } catch {
         // Personalisation is optional. A Student's dashboard must never degrade
@@ -35,7 +46,7 @@ export function AcademicProfilePrompt() {
     return () => {
       cancelled = true;
     };
-  }, [locale]);
+  }, []);
 
   if (!prompt) return null;
 

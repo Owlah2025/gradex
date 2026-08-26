@@ -258,6 +258,43 @@ for (const locale of ["en", "ar"] as const) {
   });
 }
 
+/* ------------------------------------------------------------------ requests */
+
+test("the learning routes issue one media authorization and no duplicate reads", async ({ page }) => {
+  const calls: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (!url.includes("/api/v1/")) return;
+    calls.push(`${request.method()} ${url.split("/api/v1")[1].split("?")[0]}`);
+  });
+
+  const count = (predicate: (call: string) => boolean) => calls.filter(predicate).length;
+
+  // The Course page reads nothing about media at all.
+  await page.goto(`/en/learn/courses/${COURSE_ID}`);
+  await expect(page.locator("main")).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(count((call) => call.includes("/playback"))).toBe(0);
+  expect(count((call) => call.includes("/materials/"))).toBe(0);
+
+  calls.length = 0;
+  await page.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ONE}`);
+  await expect(page.locator("main")).toBeVisible();
+  await page.waitForTimeout(2500);
+
+  // Exactly one authorization for exactly one Lesson's media.
+  expect(count((call) => call.startsWith("POST /learn/lessons/") && call.endsWith("/playback"))).toBe(1);
+
+  // The Course's contents are read on the server, beside the Lesson. Neither read may reach the
+  // browser as a second round trip on top of the page it already delivered.
+  expect(count((call) => call.startsWith("GET /learn/courses/"))).toBe(0);
+  expect(count((call) => call.startsWith("GET /learn/dashboard"))).toBe(0);
+
+  // The academic profile is read once per consumer, never again because the route's locale
+  // replaced the provider's default during hydration.
+  expect(count((call) => call.includes("/me/academic-profile"))).toBeLessThanOrEqual(1);
+});
+
 /* ------------------------------------------------------------------ mobile */
 
 test.describe("the learning experience at 390px", () => {
