@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Download, FileText } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText } from "lucide-react";
 import type {
   LearningCourseProgress,
   LearningMaterial,
@@ -19,7 +19,6 @@ import {
   formatLearningPercent,
 } from "@/lib/formatters/learning";
 import { StatusBadge } from "@/components/common/status-badge";
-import { Card } from "@/components/ui/card";
 import { MaterialDownload } from "./material-download";
 import { cn } from "@/lib/utils";
 
@@ -32,27 +31,48 @@ import { cn } from "@/lib/utils";
  * what keeps `report_context` and unrendered status copy out of the payload in every build mode.
  */
 
+/**
+ * A Lesson's downloadable items, split the way the product splits them.
+ *
+ * `headingLevel` is a prop because the same list appears in two places at two depths: beside the
+ * Lesson it belongs to, where Resources and Lab materials are the page's second level, and inside
+ * the Course contents, where they sit under a section heading that is already an `h2`.
+ */
 export function LessonMaterials({
   resources,
   labMaterials,
   labels,
   locale,
+  headingLevel = "h3",
   className,
 }: {
   resources: LearningMaterial[];
   labMaterials: LearningMaterial[];
   labels: MaterialsLabels;
   locale: "ar" | "en";
+  headingLevel?: "h2" | "h3" | "h4";
   className?: string;
 }) {
   if (resources.length === 0 && labMaterials.length === 0) return null;
   return (
     <section aria-label={labels.materials} className={cn("space-y-5", className)}>
       {resources.length > 0 ? (
-        <MaterialList title={labels.resources} items={resources} locale={locale} labels={labels} />
+        <MaterialList
+          title={labels.resources}
+          items={resources}
+          locale={locale}
+          labels={labels}
+          headingLevel={headingLevel}
+        />
       ) : null}
       {labMaterials.length > 0 ? (
-        <MaterialList title={labels.labMaterials} items={labMaterials} locale={locale} labels={labels} />
+        <MaterialList
+          title={labels.labMaterials}
+          items={labMaterials}
+          locale={locale}
+          labels={labels}
+          headingLevel={headingLevel}
+        />
       ) : null}
     </section>
   );
@@ -63,17 +83,19 @@ function MaterialList({
   items,
   locale,
   labels,
+  headingLevel: Heading,
 }: {
   title: string;
   items: LearningMaterial[];
   locale: "ar" | "en";
   labels: MaterialsLabels;
+  headingLevel: "h2" | "h3" | "h4";
 }) {
   return (
     <section aria-label={title}>
-      <h3 className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
+      <Heading className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
         {title}
-      </h3>
+      </Heading>
       <ul className="mt-2 space-y-2">
         {items.map((item) => (
           <li
@@ -94,8 +116,9 @@ function MaterialList({
                   decides whether to spend the download on a phone connection from these two facts.
                   Isolated so a Latin-script extension beside an Arabic file name cannot reorder the
                   line it sits on. */}
-              <p className="mt-1 text-xs text-muted-foreground">
-                <bdi>{item.file_type}</bdi> · <bdi>{formatMaterialSize(item.size_bytes, locale)}</bdi>
+              <p className="mt-1 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+                <bdi>{item.file_type}</bdi>
+                <bdi>{formatMaterialSize(item.size_bytes, locale)}</bdi>
               </p>
             </div>
           </li>
@@ -187,10 +210,12 @@ export function LearningProgressSummary({
   const filled = Math.min(100, Math.max(0, Math.round(progress.percent)));
   return (
     <div className={cn("space-y-1.5", className)}>
-      <p className="text-sm text-foreground">
+      {/* The two facts are separated by space rather than by a middle dot. In Arabic the dot sits
+          beside Arabic-Indic digits and is all but indistinguishable from ٠, so "· ٢ ملفات" read as
+          twenty files. Nothing is lost by spacing them instead. */}
+      <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-foreground">
         <span className="font-display font-bold">{percent}</span>
         <span className="text-muted-foreground">
-          {" · "}
           {completed}/{total} {labels.completedLessons}
         </span>
       </p>
@@ -327,7 +352,9 @@ function LessonNavigationLink({
       aria-label={title ? `${direction}: ${title}` : direction}
       className={cn(
         "flex items-center gap-3 rounded-md border border-border bg-card px-4 py-3 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        align === "end" && "sm:flex-row-reverse sm:text-end",
+        // The forward link puts its arrow on the side it travels towards, at every width — an
+        // arrow leading a "next" control points back at the reader.
+        align === "end" && "flex-row-reverse text-end",
       )}
     >
       {icon}
@@ -343,7 +370,14 @@ function LessonNavigationLink({
   );
 }
 
-/** A single downloadable item's row, used where materials sit inside the Course contents. */
+/**
+ * The same materials, compacted for a row inside the Course contents.
+ *
+ * The full list carries a heading per kind. Nested inside a Lesson row that is itself inside a
+ * section disclosure, that produced three headings and two bordered cards for two files, and at
+ * 390px the downloads took more vertical space than the Lesson they belonged to. Here the kind is a
+ * word on the row instead, so the same information costs one line each.
+ */
 export function MaterialsInline({
   resources,
   labMaterials,
@@ -355,19 +389,33 @@ export function MaterialsInline({
   labels: MaterialsLabels;
   locale: "ar" | "en";
 }) {
-  if (resources.length === 0 && labMaterials.length === 0) return null;
+  const items = [
+    ...resources.map((item) => ({ item, kind: labels.resource })),
+    ...labMaterials.map((item) => ({ item, kind: labels.labMaterial })),
+  ];
+  if (items.length === 0) return null;
   return (
-    <Card className="mt-2 border-dashed p-3 shadow-none">
-      <p className="mb-2 flex items-center gap-2 font-display text-xs font-bold uppercase tracking-wide text-muted-foreground">
-        <Download aria-hidden className="size-3.5" />
-        {labels.materials}
-      </p>
-      <LessonMaterials
-        resources={resources}
-        labMaterials={labMaterials}
-        labels={labels}
-        locale={locale}
-      />
-    </Card>
+    <ul aria-label={labels.materials} className="mt-1 space-y-1 ps-9">
+      {items.map(({ item, kind }) => (
+        <li key={item.download_authorization_path} className="flex items-start gap-2 px-2 py-1.5">
+          <FileText aria-hidden className="mt-1 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <MaterialDownload
+              authorizationPath={item.download_authorization_path}
+              title={item.title}
+              locale={locale}
+              downloadLabel={labels.download}
+              preparingLabel={labels.preparingDownload}
+              unavailableLabel={labels.downloadUnavailable}
+            />
+            <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+              <span>{kind}</span>
+              <bdi>{item.file_type}</bdi>
+              <bdi>{formatMaterialSize(item.size_bytes, locale)}</bdi>
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

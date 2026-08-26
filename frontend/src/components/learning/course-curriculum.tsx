@@ -180,16 +180,17 @@ function CurriculumRow({
         >
           {lesson.title}
         </span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">
+        {/* Spaced, not dot-separated: beside Arabic-Indic digits a middle dot is indistinguishable
+            from ٠, and "· ٢ ملفات" read as twenty files rather than two. */}
+        <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
           <span>{stateText}</span>
           {lesson.materialCount > 0 ? (
             <span>
-              {" · "}
               {formatLearningInteger(lesson.materialCount, locale)} {labels.files}
             </span>
           ) : null}
           {current ? (
-            <span className="ms-2 font-display font-bold text-primary">{labels.currentLessonLabel}</span>
+            <span className="font-display font-bold text-primary">{labels.currentLessonLabel}</span>
           ) : null}
         </span>
       </span>

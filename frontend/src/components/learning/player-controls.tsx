@@ -69,12 +69,23 @@ export function PlayerControls({
         >
           {playing ? labels.pause : labels.play}
         </button>
-        <span className="text-sm tabular-nums text-muted-foreground" aria-label={`${labels.elapsed}: ${formatMediaTime(safeTime)}; ${labels.duration}: ${formatMediaTime(safeDuration)}`}>
+        {/* Elapsed over duration is a media reading, not a sentence: in Arabic the neutral "/"
+            between two numbers let the pair reorder, so a Lesson five seconds in read "0:30 / 0:05".
+            The pair is isolated and laid out left-to-right in both languages, because playback
+            direction is not language direction. */}
+        <span
+          dir="ltr"
+          className="text-sm tabular-nums text-muted-foreground"
+          aria-label={`${labels.elapsed}: ${formatMediaTime(safeTime)}; ${labels.duration}: ${formatMediaTime(safeDuration)}`}
+        >
           {formatMediaTime(safeTime)} / {formatMediaTime(safeDuration)}
         </span>
       </div>
 
-      <label className="block text-sm text-muted-foreground">
+      {/* The timeline runs the way time runs, in both languages. Mirroring it in Arabic would put
+          the start of the Lesson on the right of a control whose meaning is the passage of time,
+          not the reading order of a paragraph. */}
+      <label dir="ltr" className="block text-sm text-muted-foreground">
         <span className="sr-only">{labels.seek}</span>
         <input
           type="range"

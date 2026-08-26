@@ -80,13 +80,13 @@ export function CurriculumSheet(props: PanelProps) {
 /** The same contents as a standing column, from `lg` up, where there is room for one. */
 export function CurriculumSidebar(props: PanelProps) {
   return (
-    <aside aria-label={props.labels.courseOutline} data-testid="course-contents-sidebar">
+    <nav aria-label={props.labels.courseOutline} data-testid="course-contents-sidebar">
       <h2 className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
         {props.labels.courseOutline}
       </h2>
       {/* The column scrolls on its own so a long Course cannot make the page taller than the
           Lesson it belongs to. */}
       <div className="mt-3 max-h-[calc(100vh-11rem)] overflow-y-auto pe-1">{contentsFor(props)}</div>
-    </aside>
+    </nav>
   );
 }

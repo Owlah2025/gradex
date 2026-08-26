@@ -75,7 +75,10 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
 
     return (
       <LearningShell locale={locale} dir={locale === "ar" ? "rtl" : "ltr"} labels={shell}>
-        <div className="mx-auto max-w-container px-5 py-8 sm:px-6 sm:py-10">
+        {/* A reading measure rather than the full container. The Course page is a list of Lesson
+            titles and their state: run across 1200px, a section heading and its own chevron end up
+            a hand's width apart, and a file name and its download control further still. */}
+        <div className="mx-auto max-w-4xl px-5 py-8 sm:px-6 sm:py-10">
           <Button asChild variant="ghost" size="sm" className="-ms-3">
             <Link href={`/${locale}/learn/dashboard`}>
               <Backward aria-hidden />
@@ -128,13 +131,13 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
             </Card>
           ) : null}
 
-          {/* The contents are a landmark named by the region, and the sections are the page's own
-              second level — so the disclosure triggers are `h2` and there is no separate heading
-              above them competing for the same rank. */}
-          <section aria-label={dictionary.learning.courseOutline} className="mt-8">
-            <p className="text-xs text-muted-foreground">{dictionary.learning.completionAutomatic}</p>
+          {/* The contents are a navigation landmark — they are a named list of routes into the
+              Course, which is what a Student uses them for — and the sections are the page's own
+              second level, so the disclosure triggers are `h2` with no separate heading above them
+              competing for the same rank. */}
+          <p className="mt-8 text-xs text-muted-foreground">{dictionary.learning.completionAutomatic}</p>
+          <nav aria-label={dictionary.learning.courseOutline} className="mt-4">
             <CourseCurriculum
-              className="mt-4"
               courseID={course.course_id}
               locale={locale}
               sections={sections}
@@ -142,7 +145,7 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
               headingLevel="h2"
               materialsByLesson={materialsByLesson}
             />
-          </section>
+          </nav>
 
           {/* Offered only when this active read issued a COURSE context (D-065). With no target the
               client component is not mounted at all, so no report copy enters the payload either. */}

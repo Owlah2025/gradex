@@ -79,7 +79,9 @@ export default async function LearningDashboardPage({ params }: { params: Promis
           {/* Academic profile invitation. A card on a page the Student already
               reached, never a redirect: onboarding is personalisation, not a gate,
               and it renders only for a Student who has made no decision yet. */}
-          <AcademicProfilePrompt />
+          <div className="mt-8">
+            <AcademicProfilePrompt />
+          </div>
 
           {/* Continue learning. The server chooses the target from Progress and only returns one the
               Student may currently open, so this can never point somewhere they would be refused.

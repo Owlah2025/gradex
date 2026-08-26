@@ -144,12 +144,14 @@ export function ReportContentDialog({
           type="button"
           className="inline-flex min-h-11 items-center rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground/80 hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
-          {labels.reportAction}
-          <span className="sr-only"> — {reportTargetActionLabel(target.kind, labels)}</span>
+          {/* Four triggers stood in a row reading "Report", told apart only by copy no sighted
+              Student could see. The target is now part of the visible label, which is also the
+              accessible name — one string doing both jobs rather than two disagreeing. */}
+          {reportTargetActionLabel(target.kind, labels)}
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-gx-navy/45 backdrop-blur-sm" />
         <Dialog.Content
           dir={locale === "ar" ? "rtl" : "ltr"}
           aria-describedby={`${fieldPrefix}-description`}

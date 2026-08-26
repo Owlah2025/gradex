@@ -211,6 +211,7 @@ async function LessonContent({
               {lesson.learning_status === "active" ? (
                 <LessonMaterials
                   className="mt-8"
+                  headingLevel="h2"
                   resources={lesson.resources}
                   labMaterials={lesson.lab_materials}
                   locale={locale}

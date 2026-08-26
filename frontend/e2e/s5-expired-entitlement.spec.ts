@@ -423,7 +423,10 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
           await expect(sectionHeadings.nth(1)).toContainText(t.sectionTwo);
 
           // Lessons in authored order within their Section.
-          const firstSectionLessons = page.locator("main section").first().locator("ol li");
+          // The contents are a navigation landmark rather than a bare section, and the ordered
+          // lists inside it are the only ones on the page — so the Lessons are still addressed by
+          // their authored order, and still only theirs.
+          const firstSectionLessons = page.locator("main ol li");
           await expect(firstSectionLessons.nth(0)).toContainText(t.lessonPartial);
           await expect(firstSectionLessons.nth(1)).toContainText(t.lessonCompleted);
           await expect(page.getByText(t.lessonThird)).toBeVisible();
