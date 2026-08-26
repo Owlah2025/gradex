@@ -578,11 +578,13 @@ export default function AdminCourseAccessPage() {
               <tbody className="divide-y">
                 {invitations.map((inv) => (
                   <tr key={inv.id} className="hover:bg-gray-50">
-                    <td className="p-3 font-mono text-xs">
+                    <td className="p-3 text-xs">
+                      {/* The invitation is identified to the Admin by the person it was sent to.
+                          Its identifier stays internal — it was never something an Admin acted on,
+                          and rendering it only invited manual identifier handling. */}
                       <div className="font-semibold text-gray-900">
                         {inv.email}
                       </div>
-                      <div className="text-gray-400">{inv.id}</div>
                     </td>
                     <td
                       className="p-3 text-xs text-gray-700"

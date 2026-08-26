@@ -137,7 +137,10 @@ export function ServerPricingPanel() {
                 <div className="font-semibold text-slate-900 dark:text-slate-100">
                   {getCourseDisplayTitle(c, isAr)}
                 </div>
-                <div className="text-[11px] font-mono text-slate-400">{c.id}</div>
+                {/* The Course identifier is deliberately not rendered. It carried no meaning for
+                    the Instructor and became the clipboard source for an Admin workflow that
+                    should never have needed one: every Admin surface now finds a Course by its
+                    title and owner. */}
                 <div className="mt-1 font-semibold text-emerald-600 dark:text-emerald-400">
                   {isAr ? "سعر الدورة: " : "Course Price: "}
                   {formatFils(c.price_minor_units, locale)}
@@ -183,7 +186,6 @@ export function ServerPricingPanel() {
                           <span className="font-semibold text-slate-900 dark:text-slate-100">
                             {isAr ? sec.title_ar : sec.title_en}
                           </span>
-                          <span className="text-[10px] font-mono block text-slate-400">{sec.id}</span>
                         </div>
                         <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
                           {formatFils(sec.price_minor_units, locale)}
