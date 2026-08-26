@@ -18,6 +18,8 @@ import {
 } from "@/lib/api/academic-profile";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { useAcademicContext } from "@/components/academic/academic-context-provider";
+import { academicContextNames } from "@/lib/academic/anonymous-context";
 
 /**
  * Student academic onboarding and profile editing (D-092, T3).
@@ -71,10 +73,13 @@ function copy(isAr: boolean) {
 }
 
 export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
-  const { locale } = useLocale();
+  const { locale, t: dictionary } = useLocale();
   const isAr = locale === "ar";
   const t = useMemo(() => copy(isAr), [isAr]);
   const router = useRouter();
+  // What the Student chose while browsing, shown here as guidance and nothing more. See the
+  // handoff note below the form for why it cannot become a preselection.
+  const { anonymous } = useAcademicContext();
 
   const [profile, setProfile] = useState<AcademicProfile | null>(null);
   const [institutions, setInstitutions] = useState<InstitutionOption[]>([]);
@@ -292,6 +297,48 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
       </h2>
       {mode === "onboarding" ? (
         <p className="mt-2 text-muted-foreground">{t.onboardingIntro}</p>
+      ) : null}
+
+      {/**
+       * The handoff from anonymous browsing to a real account.
+       *
+       * This is guidance, deliberately. The public catalogue names academic entities by **slug**;
+       * `PUT /me/academic-profile` requires the internal identifier its own option lists return,
+       * and those lists carry no slug. There is no contract that turns one into the other, so
+       * there is no deterministic mapping to preselect from.
+       *
+       * The one bridge available without a contract — comparing the localized names on the two
+       * lists — is exactly the bridge that must not be built. Display names are editable,
+       * translated prose that two different programs can legitimately share, and matching on them
+       * would write the wrong program onto a real account while telling the Student it was theirs.
+       *
+       * So the Student is shown what they chose and asked to confirm it against the real options.
+       * The copy says the earlier choice lived on their device, because it did, and nothing here
+       * claims it was ever saved to the account.
+       */}
+      {mode === "onboarding" && anonymous ? (
+        <div
+          data-testid="academic-profile-handoff"
+          className="mt-5 rounded-lg border border-gx-blue-200 bg-gx-blue-50 p-4 text-gx-navy"
+        >
+          <p className="font-display font-bold">
+            {dictionary.academicContext.handoffTitle}
+          </p>
+          <p className="mt-1 text-sm">{dictionary.academicContext.handoffLead}</p>
+          <p
+            className="mt-1 font-display text-sm font-bold"
+            data-testid="academic-profile-handoff-context"
+          >
+            {(() => {
+              const names = academicContextNames(anonymous, locale);
+              const institution = names.institution || anonymous.institutionSlug;
+              return names.program === ""
+                ? institution
+                : `${institution} · ${names.program}`;
+            })()}
+          </p>
+          <p className="mt-2 text-sm">{dictionary.academicContext.handoffNote}</p>
+        </div>
       ) : null}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
