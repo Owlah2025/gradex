@@ -74,6 +74,24 @@ async function protectedMutationStatuses(page: Page, csrf: string) {
   );
 }
 
+/**
+ * Reads one invitation's identifier from the row's existing test hook.
+ *
+ * The Admin surface identifies an invitation by its invitee, and no longer renders the identifier
+ * as readable text. The id is still needed here to look the delivery token up in the outbox, so it
+ * is taken from the attribute the row already carries rather than from anything a human reads.
+ */
+async function invitationIdFromRow(page: Page, email: string): Promise<string> {
+  const hook = page
+    .locator(`tr:has(td:has-text("${email}")) [data-testid^="invitation-course-"]`)
+    .first();
+  await expect(hook).toBeVisible();
+  const testid = await hook.getAttribute("data-testid");
+  const id = (testid ?? "").replace("invitation-course-", "");
+  expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  return id;
+}
+
 test.describe("S11 release acceptance", () => {
   test("registration to protected learning is denial-safe and replay-safe", async ({ browser }) => {
     test.setTimeout(120_000);
@@ -180,12 +198,9 @@ test.describe("S11 release acceptance", () => {
       await adminPage.getByRole("button", { name: "Create Invitation" }).click();
       await expect(adminPage.locator("table")).toContainText(STUDENT_EMAIL);
 
-      const invitationCell = await adminPage.locator(`td:has-text("${STUDENT_EMAIL}")`).first().innerText();
-      const invitationMatch = invitationCell.match(
-        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
-      );
-      expect(invitationMatch).not.toBeNull();
-      const invitationID = invitationMatch![1];
+      // Taken from the row's own test hook: the Admin queue identifies an invitation by its
+      // invitee and no longer prints the identifier as readable text.
+      const invitationID = await invitationIdFromRow(adminPage, STUDENT_EMAIL);
       const invitationToken = queryInvitationToken(invitationID);
 
       // Invalid acceptance is refused, then the valid link recovers without a premature grant.
@@ -230,7 +245,8 @@ test.describe("S11 release acceptance", () => {
       // Admin Approval is the sole grant trigger.
       await adminPage.getByRole("button", { name: "Refresh Queue" }).click();
       const approveButton = adminPage.locator(
-        `tr:has-text("${invitationID}") button:has-text("Approve")`,
+        // Addressed by the invitee, which is how the queue identifies an invitation to an Admin.
+        `tr:has(td:has-text("${STUDENT_EMAIL}")) button:has-text("Approve")`,
       );
       const approvalResponsePromise = adminPage.waitForResponse(
         (response) =>

@@ -76,6 +76,24 @@ async function expectNoCommerce(page: import("@playwright/test").Page): Promise<
   ).toHaveCount(0);
 }
 
+/**
+ * Reads one invitation's identifier from the row's existing test hook.
+ *
+ * The Admin surface identifies an invitation by its invitee, and no longer renders the identifier
+ * as readable text. The id is still needed here to look the delivery token up in the outbox, so it
+ * is taken from the attribute the row already carries rather than from anything a human reads.
+ */
+async function invitationIdFromRow(page: import("@playwright/test").Page, email: string): Promise<string> {
+  const hook = page
+    .locator(`tr:has(td:has-text("${email}")) [data-testid^="invitation-course-"]`)
+    .first();
+  await expect(hook).toBeVisible();
+  const testid = await hook.getAttribute("data-testid");
+  const id = (testid ?? "").replace("invitation-course-", "");
+  expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  return id;
+}
+
 test.describe.configure({ timeout: 120_000 });
 
 test.describe("S6 Course Access Grant — Real Production Launch Journey", () => {
@@ -137,11 +155,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(adminPage.locator("table")).toContainText("PENDING_STUDENT_ACCEPTANCE");
     await expect(adminPage.locator("table")).toContainText("CS101");
 
-    // Extract invitation ID from queue table cell
-    const invitationIdText = await adminPage.locator(`td:has-text("${STUDENT_A_EMAIL}")`).first().innerText();
-    const invIdMatch = invitationIdText.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-    expect(invIdMatch).not.toBeNull();
-    const invitationId = invIdMatch![1];
+    // The invitation identity comes from the row's own test hook, not from text on screen.
+    // The queue deliberately no longer prints the identifier to the Admin — an invitation is
+    // identified to a human by who it was sent to — so scraping it from the rendered cell would
+    // be asserting the presence of exactly the leak the product removed.
+    const invitationId = await invitationIdFromRow(adminPage, STUDENT_A_EMAIL);
 
     // 7. Obtain actual invitation delivery/link token from outbox via E2E outbox helper
     const verificationToken = queryInvitationToken(invitationId);
@@ -270,7 +288,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(adminPage.locator("table")).toContainText("PENDING_ADMIN_APPROVAL");
 
     // 15. Admin approves invitation
-    const approveButton = adminPage.locator(`tr:has-text("${invitationId}") button:has-text("Approve")`);
+    // Addressed by the invitee, which is how the queue identifies an invitation to an Admin. The
+    // row used to be found by its identifier only because the identifier was printed in it.
+    const approveButton = adminPage.locator(
+      `tr:has(td:has-text("${STUDENT_A_EMAIL}")) button:has-text("Approve")`,
+    );
     await approveButton.click();
     await expect(adminPage.locator('[role="status"]')).toContainText("Invitation approved!");
 
@@ -498,10 +520,8 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await emailInput.fill(rejectTargetEmail);
     await adminPage.click('button:has-text("Create Invitation")');
 
-    // Extract invitation ID
     await expect(adminPage.locator("table")).toContainText(rejectTargetEmail);
-    const textCell = await adminPage.locator(`td:has-text("${rejectTargetEmail}")`).first().innerText();
-    const invId = textCell.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)![1];
+    const invId = await invitationIdFromRow(adminPage, rejectTargetEmail);
 
     // Invalid token returns 403, 404 or 410
     const badAccept = await request.post(`/api/v1/me/course-access-invitations/${invId}/accept`, {
