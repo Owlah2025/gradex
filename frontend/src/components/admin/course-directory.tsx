@@ -10,6 +10,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { LoadingState } from "@/components/common/loading-state";
+import { StatusBadge } from "@/components/common/status-badge";
 import { Alert } from "@/components/ui/alert";
 import {
   WorkspacePage,
@@ -181,25 +184,24 @@ export function CourseDirectory() {
       )}
 
       {error && (
-        <div className="mt-5" data-testid="admin-course-error">
-          <Alert tone="error" title={copy.loadFailed}>
-            <p className="mb-3">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>
-              {copy.retry}
-            </Button>
-          </Alert>
-        </div>
+        <ErrorState
+          className="mt-5"
+          testID="admin-course-error"
+          title={copy.loadFailed}
+          detail={error}
+          retryLabel={copy.retry}
+          onRetry={() => setAttempt((value) => value + 1)}
+        />
       )}
 
       {!rows && !error && (
-        <p className="mt-8 text-muted-foreground" aria-live="polite" data-testid="admin-course-loading">
-          {copy.loading}
-        </p>
+        <LoadingState className="mt-2" testID="admin-course-loading" label={copy.loading} />
       )}
 
       {rows && visible.length === 0 && (
         <div className="mt-8" data-testid="admin-course-empty">
           <EmptyState
+            density="compact"
             title={appliedSearch === "" ? copy.empty[filter] : copy.emptySearch}
             action={
               appliedSearch === "" ? undefined : (
@@ -261,13 +263,14 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={view.tone} data-testid="admin-course-status">
-              {copy.status[view.state]}
-            </Badge>
             {/* Never colour alone: the actor is stated in words next to the state. */}
-            <span className="text-xs font-semibold text-muted-foreground" data-testid="admin-course-awaiting">
-              {copy.awaiting[view.awaiting]}
-            </span>
+            <StatusBadge
+              tone={view.tone}
+              label={copy.status[view.state]}
+              labelTestID="admin-course-status"
+              detail={copy.awaiting[view.awaiting]}
+              detailTestID="admin-course-awaiting"
+            />
             {view.accessSuspended && <Badge variant="neutral">{copy.flags.accessSuspended}</Badge>}
             {view.retired && <Badge variant="neutral">{copy.flags.retired}</Badge>}
           </div>
