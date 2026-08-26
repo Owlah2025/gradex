@@ -12,6 +12,11 @@ import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/common/empty-state";
 import { Alert } from "@/components/ui/alert";
 import {
+  WorkspacePage,
+  WorkspacePageHeader,
+  WorkspaceToolbar,
+} from "@/components/layout/workspace-page";
+import {
   DIRECTORY_FILTERS,
   DIRECTORY_PAGE_LIMIT,
   buildDirectory,
@@ -47,7 +52,7 @@ import {
  * what it knows.
  */
 export function CourseDirectory() {
-  const { locale, dir, t } = useLocale();
+  const { locale, t } = useLocale();
   const copy = t.adminCourses;
 
   const [searchInput, setSearchInput] = useState("");
@@ -98,13 +103,23 @@ export function CourseDirectory() {
   const visible = rows?.filter((row) => matchesFilter(row, filter)) ?? [];
 
   return (
-    <div dir={dir} className="mx-auto max-w-container px-5 py-8 sm:px-6">
-      <header className="border-b border-border pb-6">
-        <h1 className="font-display text-3xl font-bold text-foreground">{copy.title}</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">{copy.intro}</p>
-      </header>
+    <WorkspacePage>
+      <WorkspacePageHeader
+        title={copy.title}
+        description={copy.intro}
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAttempt((value) => value + 1)}
+            data-testid="admin-course-refresh"
+          >
+            {copy.refresh}
+          </Button>
+        }
+      />
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
+      <WorkspaceToolbar>
         <form role="search" onSubmit={submitSearch} className="flex flex-1 gap-2 sm:max-w-md">
           <label className="sr-only" htmlFor="admin-course-search">
             {copy.searchLabel}
@@ -121,15 +136,7 @@ export function CourseDirectory() {
             {copy.searchSubmit}
           </Button>
         </form>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setAttempt((value) => value + 1)}
-          data-testid="admin-course-refresh"
-        >
-          {copy.refresh}
-        </Button>
-      </div>
+      </WorkspaceToolbar>
 
       {/* A single-select filter group rather than navigation: these change what the current screen
           shows, they do not go anywhere, so the active one is announced with aria-pressed. */}
@@ -226,7 +233,7 @@ export function CourseDirectory() {
           </ul>
         </>
       )}
-    </div>
+    </WorkspacePage>
   );
 }
 
