@@ -8,7 +8,7 @@ import {
   learningStatusLabel,
   materialsLabels,
   navigationLabels,
-  outlineLabels,
+  curriculumLabels,
   progressLabels,
   unavailableLabels,
 } from "./learning-label-sets";
@@ -42,6 +42,8 @@ const COURSE_HOME = "src/app/[locale]/learn/courses/[courseId]/page.tsx";
 const LESSON = "src/app/[locale]/learn/courses/[courseId]/lessons/[lessonId]/page.tsx";
 const DASHBOARD = "src/app/[locale]/learn/dashboard/page.tsx";
 const VIEWS = "src/components/learning/learning-views.tsx";
+const CURRICULUM = "src/components/learning/course-curriculum.tsx";
+const CURRICULUM_MODEL = "src/components/learning/curriculum-model.ts";
 
 // --- The narrowing is real at runtime, not merely a type ------------------
 
@@ -60,7 +62,7 @@ test("each label set carries only its own keys", () => {
   // The dictionary is far larger than any set built from it; if a set ever approached its size the
   // narrowing would have stopped being narrowing.
   assert.ok(Object.keys(en.learning).length > 40);
-  assert.ok(Object.keys(outlineLabels(en.learning)).length < Object.keys(en.learning).length / 2);
+  assert.ok(Object.keys(curriculumLabels(en.learning)).length < Object.keys(en.learning).length / 2);
 });
 
 test("no label set carries status copy the page does not display", () => {
@@ -70,7 +72,7 @@ test("no label set carries status copy the page does not display", () => {
     unavailableLabels(en.learning),
     navigationLabels(en.learning),
     materialsLabels(en.learning),
-    outlineLabels(en.learning),
+    curriculumLabels(en.learning),
   ]) {
     const serialised = JSON.stringify(set);
     assert.equal(
@@ -112,31 +114,62 @@ test("the status badge receives a resolved label, not a catalogue", () => {
   }
   const views = shipped(VIEWS);
   assert.ok(
-    /LearningStatusBadge\(\{ status, label \}/.test(views),
-    "LearningStatusBadge must take a resolved label",
+    /export function LearningStatusBadge\(\{\s*status,\s*label,\s*detail,?\s*\}/.test(views),
+    "LearningStatusBadge must take resolved strings, never a catalogue to choose from",
   );
+  // The sentence beside the pill is resolved on the server for the same reason the pill's own text
+  // is: an expired render must not carry the active wording it does not display.
+  for (const file of [COURSE_HOME, LESSON, DASHBOARD]) {
+    const source = shipped(file);
+    if (!source.includes("LearningStatusBadge")) continue;
+    assert.ok(
+      source.includes("detail={learningStatusDetail("),
+      `${file} does not resolve the status detail on the server`,
+    );
+  }
 });
 
-test("the outline and navigation take read-model slices, never the whole model", () => {
+test("the contents and navigation take read-model slices, never the whole model", () => {
   const views = shipped(VIEWS);
   // The whole CourseHome is what carried report_context into the payload (GAP-03).
-  assert.equal(
-    /export function CourseOutline\([\s\S]{0,400}course: CourseHome/.test(views),
-    false,
-    "CourseOutline must not accept the whole CourseHome",
-  );
   assert.equal(
     /export function LessonNavigation\([\s\S]{0,400}lesson: LessonReadModel/.test(views),
     false,
     "LessonNavigation must not accept the whole LessonReadModel",
   );
-  const courseHome = shipped(COURSE_HOME);
+
+  // The contents are now a client component, so an oversized prop would be serialised into the
+  // page in *every* build mode rather than only in development. It therefore takes the narrowed
+  // curriculum, and the narrowing happens on the server before the boundary is crossed.
+  const curriculum = shipped(CURRICULUM);
   assert.equal(
-    courseHome.includes("<CourseOutline course={course}"),
+    /CourseHome|report_context|LessonReadModel/.test(curriculum),
     false,
-    "Course Home must not pass the whole read model to the outline",
+    "the contents component must not know the read model at all",
   );
-  assert.ok(courseHome.includes("sections={course.sections}"));
+
+  for (const file of [COURSE_HOME, LESSON]) {
+    const source = shipped(file);
+    assert.equal(
+      /<CourseCurriculum[\s\S]{0,400}sections=\{course\.sections\}/.test(source),
+      false,
+      `${file} must not hand the raw read-model sections to the contents`,
+    );
+    assert.ok(
+      source.includes("courseCurriculum("),
+      `${file} must narrow the sections through courseCurriculum() first`,
+    );
+  }
+});
+
+test("the narrowed curriculum carries no report context and no material paths", () => {
+  const model = shipped(CURRICULUM_MODEL);
+  assert.equal(/report_context/.test(model), false);
+  assert.equal(
+    /download_authorization_path/.test(model),
+    false,
+    "a curriculum row counts materials; it must not carry their authorization paths",
+  );
 });
 
 test("the Lesson page hands its child no dictionary at all", () => {
