@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import {
   archiveCourse,
   delistCourse,
@@ -15,6 +16,7 @@ import {
 import { ProblemError } from "@/lib/api/problem";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { courseStatusView } from "./course-status";
 
 /**
  * AD-12 — the Admin Course lifecycle surface.
@@ -30,8 +32,9 @@ import { useLocale } from "@/lib/i18n/locale-provider";
  * optimistic guess. A refused transition renders the server's refusal.
  */
 export function CourseLifecycleWorkspace() {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   const isAr = locale === "ar";
+  const labels = t.adminCourses;
 
   const [search, setSearch] = useState("");
   const [courses, setCourses] = useState<CourseLifecycleSummary[]>([]);
@@ -146,7 +149,7 @@ export function CourseLifecycleWorkspace() {
           >
             <span className="text-sm">
               {isAr ? course.title_ar : course.title_en}
-              <span className="ms-2 text-xs text-slate-500">{lifecycleLabel(course, isAr)}</span>
+              <span className="ms-2 text-xs text-slate-500">{lifecycleLabel(course, labels)}</span>
             </span>
             <button
               onClick={() => {
@@ -174,7 +177,7 @@ export function CourseLifecycleWorkspace() {
             {isAr ? selected.title_ar : selected.title_en}
           </h2>
           <p className="text-xs text-slate-500" data-testid="lifecycle-selected-state">
-            {lifecycleLabel(selected, isAr)}
+            {lifecycleLabel(selected, labels)}
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -303,14 +306,21 @@ export function CourseLifecycleWorkspace() {
   );
 }
 
-/** The rendered state names every authority that is currently acting on the Course, not just one. */
-function lifecycleLabel(course: CourseLifecycleSummary, isAr: boolean): string {
-  const parts: string[] = [course.lifecycle];
+/**
+ * The rendered state names every authority currently acting on the Course, not just one.
+ *
+ * The state word itself comes from the shared Admin course vocabulary rather than from the raw
+ * `lifecycle` enum this screen used to print verbatim: `PENDING_REVIEW` is a database value, not
+ * something a reader is owed. The enum stays the server's, and only its presentation changes.
+ */
+function lifecycleLabel(course: CourseLifecycleSummary, labels: Dictionary["adminCourses"]): string {
+  const view = courseStatusView({ summary: course, pendingReview: null });
+  const parts: string[] = [labels.status[view.state]];
   if (course.retired_at) {
-    parts.push(isAr ? "متقاعدة" : "Retired");
+    parts.push(labels.flags.retired);
   }
   if (course.access_suspended_at) {
-    parts.push(isAr ? "الوصول موقوف" : "Access suspended");
+    parts.push(labels.flags.accessSuspended);
   }
   return parts.join(" · ");
 }
