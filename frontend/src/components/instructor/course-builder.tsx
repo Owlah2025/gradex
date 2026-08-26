@@ -533,7 +533,9 @@ export function CourseBuilder() {
         Academic Course regardless of what is rendered, so this is presentation,
         not the control.
       */}
-      {courses.some((course) => !isAcademicCourse(course)) && <TaxonomyAssignmentPanel />}
+      {courses.some((course) => !isAcademicCourse(course)) && (
+        <TaxonomyAssignmentPanel courses={courses} labels={instructor.legacyTaxonomy} />
+      )}
 
       {isCreating && (
         <NewCourseForm

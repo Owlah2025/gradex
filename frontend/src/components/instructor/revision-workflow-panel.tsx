@@ -2,6 +2,7 @@
 
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import type { RevisionWorkflow } from "./revision-workflow";
+import { Button } from "@/components/ui/button";
 
 type RevisionLabels = Dictionary["instructor"]["revision"];
 
@@ -34,15 +35,16 @@ export function RevisionWorkflowPanel({
           {labels.startTitle}
         </h3>
         <p className="mt-2 leading-6 text-muted-foreground">{labels.startBody}</p>
-        <button
+        <Button
           type="button"
+          size="sm"
           data-testid="start-revision"
           onClick={onStart}
           disabled={busy}
-          className="mt-4 rounded-md bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
+          className="mt-4"
         >
           {busy ? labels.starting : labels.startAction}
-        </button>
+        </Button>
       </section>
     );
   }

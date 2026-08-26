@@ -30,6 +30,9 @@ function frontendRoot(): string {
   return process.cwd().endsWith("/frontend") ? process.cwd() : path.join(process.cwd(), "frontend");
 }
 
+const EN_DICTIONARY = "src/lib/i18n/dictionaries/en.ts";
+const AR_DICTIONARY = "src/lib/i18n/dictionaries/ar.ts";
+
 function readSource(relativePath: string): string {
   const full = path.join(frontendRoot(), relativePath);
   assert.ok(fs.existsSync(full), `${relativePath} is missing; this detector would pass vacuously`);
@@ -337,11 +340,19 @@ test("the empty search state offers the live missing-Subject request action", ()
   assert.match(picker, /subject-empty/, "an empty search must have a visible state");
   const emptyRegion = picker.slice(picker.indexOf("subject-empty"));
   assert.match(emptyRegion, /request-subject/);
-  assert.match(emptyRegion, /I can't find my Subject/);
-  assert.match(emptyRegion, /لم أجد مادتي/);
+  // The action is still offered in both languages; its words moved to the dictionaries.
+  assert.match(emptyRegion, /copy\.requestMissing/);
+  assert.match(readSource(EN_DICTIONARY), /requestMissing: "I cannot find my subject"/);
+  assert.match(readSource(AR_DICTIONARY), /requestMissing: "لم أجد مادتي"/);
   const requestState = readCode(REQUEST_STATE);
-  assert.match(requestState, /Pending review/);
+  // A pending request is still explained as pending, and a declined one still shows the
+  // administrator's reason. Both now read their words from the dictionaries.
+  assert.match(requestState, /subject-request-pending/);
+  assert.match(requestState, /copy\.pendingTitle/);
   assert.match(requestState, /subject-request-rejected/);
+  assert.match(requestState, /latest\.resolution_reason/);
+  assert.match(readSource(EN_DICTIONARY), /pendingTitle: "Subject request under review"/);
+  assert.match(readSource(AR_DICTIONARY), /pendingTitle: "طلب المادة قيد المراجعة"/);
 });
 
 test("the published Subject is read-only context, not a disabled selector", () => {
@@ -359,12 +370,22 @@ test("the published Subject is read-only context, not a disabled selector", () =
 
 test("Arabic and English product vocabulary is used, and identifiers are not", () => {
   const sources = [readSource(PICKER), readSource(CONTEXT), readSource(AUDIENCE), readSource(REQUEST_STATE)].join("\n");
-  for (const term of ["الجامعة", "المادة", "التخصصات المرتبطة", "الجمهور التلقائي"]) {
-    assert.ok(sources.includes(term), `Arabic product vocabulary must include ${term}`);
+
+  // The academic surfaces read their words from the dictionaries rather than branching in place,
+  // so the vocabulary is asserted there — and that both languages carry all of it.
+  const arabic = readSource(AR_DICTIONARY);
+  for (const term of ["الجامعة", "المادة", "التخصصات التي تنتمي إليها هذه المادة"]) {
+    assert.ok(arabic.includes(term), `Arabic product vocabulary must include ${term}`);
   }
-  for (const english of ["University", "Subject", "Associated Programs", "Automatic audience"]) {
-    assert.ok(sources.includes(english), `English vocabulary must include ${english}`);
+  const english = readSource(EN_DICTIONARY);
+  for (const term of ["University", "Subject", "Programs this subject belongs to"]) {
+    assert.ok(english.includes(term), `English vocabulary must include ${term}`);
   }
+  assert.ok(
+    !/isAr \? "/.test(sources),
+    "the academic surfaces must not carry bilingual UI copy in place",
+  );
+
   for (const leak of ["UUID", "Revision ID", "Course ID", "معرّف"]) {
     assert.ok(!sources.includes(leak), `${leak} must never be product copy`);
   }

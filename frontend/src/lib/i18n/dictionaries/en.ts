@@ -1140,6 +1140,59 @@ export const en = {
         legend: "Programs this course is for",
       },
     },
+    /**
+     * University â Subject selection. Deliberately two steps, not five: an Instructor knows the
+     * subject they teach, and the Academic Catalog derives the college and department from it.
+     */
+    picker: {
+      universityLabel: "University",
+      universityPlaceholder: "Select a university",
+      universityFailed: "Universities could not be loaded.",
+      subjectLabel: "Subject",
+      subjectSearchPlaceholder: "Search by subject name or code",
+      searchFailed: "Subjects could not be searched.",
+      searching: "Searching…",
+      change: "Change subject",
+      noMatch: "No matching subject. Try the subject code, or another name.",
+      requestMissing: "I cannot find my subject",
+      audienceTitle: "Programs this subject belongs to",
+      audienceEmpty:
+        "The catalog links no program to this subject yet. Students still reach the course through the subject itself.",
+      level: "Level",
+    },
+    /** A subject the catalog does not carry yet, requested from the administrators who own it. */
+    request: {
+      loadFailed: "The status of your subject request could not be loaded.",
+      sentButStale: "Your request was sent, but its status could not be refreshed. Reload to see it.",
+      pendingTitle: "Subject request under review",
+      pendingBody:
+        "Keep building the course. It cannot be submitted until an administrator links it to an official subject.",
+      rejectedTitle: "Subject request declined",
+      open: "I cannot find my subject",
+      code: "Official code (optional)",
+      titleAr: "Subject name (Arabic)",
+      titleEn: "Subject name (English)",
+      note: "Note for the administrator (optional)",
+      send: "Send request",
+    },
+    /**
+     * Legacy taxonomy compatibility (D-093 Â§6), removed at T5.
+     *
+     * It stays reachable only while an Instructor still owns a LEGACY_TAXONOMY course, and is
+     * deliberately named as the older way of classifying one rather than dressed up as current.
+     */
+    legacyTaxonomy: {
+      title: "Explicit Draft Taxonomy",
+      lead: "Saves to the displayed editable revision only; no latest-revision lookup is used.",
+      courseLabel: "Course",
+      coursePlaceholder: "Select a course",
+      save: "Save Taxonomy",
+      saving: "Saving…",
+      saved: "Taxonomy saved for the named revision.",
+      incomplete: "Select an editable draft, a major, and a subject.",
+      loadFailed: "The classification vocabulary could not be loaded.",
+      saveFailed: "The classification could not be saved.",
+    },
     roster: {
       title: "Students",
       open: "View students",
