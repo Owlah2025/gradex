@@ -122,6 +122,39 @@ async function attachSession(
   ]);
 }
 
+/** Saves a real academic profile through the real authenticated surface, with real identifiers. */
+async function saveComputerScienceProfile(api: APIRequestContext): Promise<void> {
+  const institutions = await (await api.get("/api/v1/me/academic-options/institutions")).json();
+  const institution = institutions.find(
+    (item: { name_en: string }) => item.name_en === UNIVERSITY_EN,
+  );
+  expect(institution, "the launch catalog must expose Kuwait University").toBeTruthy();
+  const colleges = await (
+    await api.get(`/api/v1/me/academic-options/institutions/${institution.id}/colleges`)
+  ).json();
+  const science = colleges.find(
+    (item: { name_en: string }) => item.name_en === "College of Science",
+  );
+  expect(science, "the launch catalog must expose the College of Science").toBeTruthy();
+  const programs = await (
+    await api.get(
+      `/api/v1/me/academic-options/institutions/${institution.id}/programs?college_id=${science.id}`,
+    )
+  ).json();
+  const chosen = programs.find((item: { name_en: string }) => item.name_en === PROGRAM_EN);
+  expect(chosen, "the launch catalog must expose Computer Science").toBeTruthy();
+  const saved = await api.put("/api/v1/me/academic-profile", {
+    data: {
+      institution_id: institution.id,
+      enrollment_status: "ENROLLED",
+      program_id: chosen.id,
+      academic_unit_id: "",
+      current_level: 2,
+    },
+  });
+  expect(saved.status(), await saved.text()).toBe(200);
+}
+
 async function seedLocale(context: BrowserContext, locale: "ar" | "en") {
   await context.addInitScript((selected) => {
     window.localStorage.setItem("gradex.locale", selected);
@@ -647,6 +680,200 @@ test.describe("UX-C anonymous academic personalisation", () => {
       ).toEqual([]);
       await context.close();
     }
+  });
+
+  /**
+   * The anonymous steady state: no request that can only ever be refused.
+   *
+   * `/me/academic-profile` is scoped to the signed-in principal, so for a visitor the browser has
+   * already resolved as anonymous there is no answer it could return. Issuing it anyway and reading
+   * the 401 is using a refusal as control flow: it costs a round trip on the busiest public page,
+   * puts an expected error in every visitor's network log, and — because precedence could not be
+   * decided until it landed — held the landing page's courses behind it.
+   */
+  test("P a confirmed anonymous visitor never asks for an academic profile", async ({ browser }) => {
+    const context = await browser.newContext({ locale: "en-US" });
+    await seedLocale(context, "en");
+    await context.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      [
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          institutionSlug: UNIVERSITY_SLUG,
+          programSlug: PROGRAM_SLUG,
+          names: {
+            institutionAr: UNIVERSITY_AR,
+            institutionEn: UNIVERSITY_EN,
+            programAr: PROGRAM_AR,
+            programEn: PROGRAM_EN,
+          },
+        }),
+      ] as const,
+    );
+    const page = await context.newPage();
+
+    const profileRequests: string[] = [];
+    const refusals: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/me/academic-profile"))
+        profileRequests.push(`${request.method()} ${request.url()}`);
+    });
+    // Scoped to the principal-scoped surfaces, which is the class this tranche is responsible for.
+    // `/api/v1/session` answering 401 for a visitor is the pre-existing identity contract — it is
+    // how the application learns it is anonymous in the first place, it predates this work, and it
+    // is the very signal the profile read is now gated on. Widening this to every 401 would assert
+    // that contract rather than this one.
+    page.on("response", (response) => {
+      if (response.status() === 401 && response.url().includes("/api/v1/me/"))
+        refusals.push(response.url());
+    });
+
+    // The landing page, where the cost of a wasted round trip is highest.
+    await page.goto("/");
+    await expect(page.getByTestId("academic-context-panel-summary")).toBeVisible();
+    // Personalisation still happens, from the stored preference alone.
+    await expect(
+      page.getByTestId("academic-context-panel-summary").getByTestId("academic-context-names"),
+    ).toContainText(UNIVERSITY_EN);
+    // And the courses resolved without waiting on a profile that cannot exist.
+    await expect(page.getByTestId("featured-courses-loading")).toHaveCount(0);
+
+    // And the catalogue, which reads the same context.
+    await page.goto(`/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`);
+    await expect(page.getByTestId("catalogue-academic-context")).toBeVisible();
+
+    expect(
+      profileRequests,
+      "an anonymous visitor asked for an academic profile that cannot exist",
+    ).toEqual([]);
+    expect(
+      refusals,
+      `a principal-scoped request was made for a visitor and refused: ${refusals.join(" | ")}`,
+    ).toEqual([]);
+    await context.close();
+  });
+
+  /**
+   * The window before `/session` answers.
+   *
+   * Being unclassified is not being anonymous. While the session is unresolved the application
+   * knows nothing about who this is, and acting on the stored preference then is how a Student with
+   * a real saved profile can have it silently outranked by a browser.
+   */
+  test("Q an unresolved session is not treated as an anonymous one", async ({
+    browser,
+  }, testInfo) => {
+    const student = studentFor(testInfo, ACADEMIC_ONBOARDING_TEST_SLOT);
+    const session = issueRotatingSession(student);
+    const api = await apiFor(session);
+    await saveComputerScienceProfile(api);
+
+    const context = await browser.newContext({ locale: "en-US" });
+    await seedLocale(context, "en");
+    await attachSession(context, session);
+    await context.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      [
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          institutionSlug: UNIVERSITY_SLUG,
+          programSlug: OTHER_PROGRAM_SLUG,
+          names: {},
+        }),
+      ] as const,
+    );
+    const page = await context.newPage();
+
+    // The session resolves late, which is the condition under test rather than an accident of
+    // timing. Nothing may conclude "anonymous" from the delay.
+    let sessionResolved = false;
+    await page.route("**/api/v1/session", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      sessionResolved = true;
+      await route.continue();
+    });
+
+    const ordering: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/me/academic-profile"))
+        ordering.push(sessionResolved ? "profile-after-session" : "profile-before-session");
+    });
+
+    await page.goto("/en/catalog");
+    await expect(page.getByTestId("academic-filters")).toBeVisible();
+
+    // The stale preference never became a filter, at any point, including during the delay.
+    await expect(page).toHaveURL(/\/en\/catalog$/);
+    await expect(page.getByTestId("catalogue-academic-context")).toHaveCount(0);
+    await expect(page.getByText("Courses relevant to your program appear first.")).toBeVisible();
+    // The profile was asked for only once authentication was confirmed.
+    expect(ordering.every((entry) => entry === "profile-after-session")).toBe(true);
+
+    const after = await (await api.get("/api/v1/me/academic-profile")).json();
+    expect(after.program_slug).toBe(PROGRAM_SLUG);
+    await api.dispose();
+    await context.close();
+  });
+
+  /**
+   * The transition. Signing in is what makes the profile read legitimate, and it is still not what
+   * turns the anonymous slugs into account state.
+   */
+  test("R once authentication is confirmed the profile is read, and still binds nothing", async ({
+    browser,
+  }, testInfo) => {
+    const student = studentFor(testInfo, ACADEMIC_SKIP_TEST_SLOT);
+    const session = issueRotatingSession(student);
+    const context = await browser.newContext({ locale: "en-US" });
+    await seedLocale(context, "en");
+    await context.addInitScript(
+      ([key, value]) => window.localStorage.setItem(key, value),
+      [
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          institutionSlug: UNIVERSITY_SLUG,
+          programSlug: PROGRAM_SLUG,
+          names: {
+            institutionAr: UNIVERSITY_AR,
+            institutionEn: UNIVERSITY_EN,
+            programAr: PROGRAM_AR,
+            programEn: PROGRAM_EN,
+          },
+        }),
+      ] as const,
+    );
+    const page = await context.newPage();
+
+    const reads: string[] = [];
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (!request.url().includes("/api/v1/me/academic-profile")) return;
+      (request.method() === "GET" ? reads : writes).push(request.method());
+    });
+
+    // Anonymous first: the preference personalises, and nothing is asked of any account.
+    await page.goto("/");
+    await expect(page.getByTestId("academic-context-panel-summary")).toBeVisible();
+    expect(reads, "an anonymous visitor read a profile").toEqual([]);
+
+    // Then the same browser becomes authenticated.
+    await attachSession(context, session);
+    await page.goto("/en/learn/academic-profile");
+    await expect(page.getByTestId("academic-profile-form")).toBeVisible();
+    await expect
+      .poll(() => reads.length, { message: "an authenticated visitor never read its own profile" })
+      .toBeGreaterThan(0);
+
+    // The earlier choice is guidance. It is not an answer, and it was not written.
+    await expect(page.getByTestId("academic-profile-handoff")).toBeVisible();
+    await expect(page.getByTestId("profile-program")).toHaveValue("");
+    expect(writes, "an anonymous slug was bound to an account").toEqual([]);
+    const stored = await readStored(page);
+    expect(JSON.stringify(stored)).not.toMatch(UUID_PATTERN);
+    await context.close();
   });
 
   for (const viewport of [

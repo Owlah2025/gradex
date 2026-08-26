@@ -144,6 +144,34 @@ test("the onboarding form never preselects an authenticated field from the anony
   assert.match(form, /academic-profile-handoff/);
 });
 
+/**
+ * The profile read is gated on a session existing, and on nothing else.
+ *
+ * Both neighbouring mistakes have been made here, so both are guarded. Gating on the *role* skips
+ * the read while the session is still rehydrating, and precedence gets decided without the profile
+ * that should have won it. Gating on nothing issues the read for every anonymous visitor on the
+ * landing page, where it can only be refused, and turns a 401 into control flow.
+ */
+test("the shared provider asks for a profile only when a session exists", () => {
+  const provider = read("components/academic/academic-context-provider.tsx");
+  assert.match(
+    provider,
+    /sessionResolution !== "AUTHENTICATED"/,
+    "the profile read is no longer gated on the session existing",
+  );
+  // Comments stripped first: this module's documentation is largely *about* the difference between
+  // authentication and role classification, and a guard that cannot tell prose from code would
+  // report that explanation as the mistake it exists to prevent.
+  const code = provider
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(
+    code,
+    /\brole\b/,
+    "the provider is branching on a classified role again",
+  );
+});
+
 /** Browser storage holds discovery preferences. It never holds anything that authenticates anyone. */
 test("no credential material goes near the stored context", () => {
   // Comments stripped first: this module's own documentation explains why `sessionStorage` was

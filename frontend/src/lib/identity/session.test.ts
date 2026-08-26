@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   clearSession,
   currentCSRFToken,
+  getSessionResolution,
   getSessionView,
   resetSessionForTest,
   setSession,
@@ -108,4 +109,61 @@ test("never touches browser storage", () => {
     delete globals.sessionStorage;
     delete globals.document;
   }
+});
+
+/**
+ * The session resolution, which is a different question from who the principal is.
+ *
+ * These cases exist because two real defects came from conflating them. Gating work on a
+ * *classified role* skips it while the session is still rehydrating; gating it on `view === null`
+ * performs it for visitors it can never apply to, because `null` means both "nobody" and "not asked
+ * yet".
+ */
+test("a page that has not asked yet says so, rather than reporting nobody", () => {
+  assert.equal(getSessionResolution(), "UNRESOLVED");
+  assert.equal(getSessionView(), null);
+});
+
+test("learning there is no session is an answer, and moves off UNRESOLVED", () => {
+  clearSession();
+  assert.equal(getSessionResolution(), "ANONYMOUS");
+  // The view is null on both sides of that transition, which is exactly why it cannot carry it.
+  assert.equal(getSessionView(), null);
+});
+
+test("a session makes the resolution authenticated", () => {
+  setSession(sample);
+  assert.equal(getSessionResolution(), "AUTHENTICATED");
+});
+
+test("signing out resolves to anonymous rather than back to unknown", () => {
+  setSession(sample);
+  clearSession();
+  assert.equal(getSessionResolution(), "ANONYMOUS");
+});
+
+/**
+ * Authentication and role classification are separate axes. A principal whose role is absent or
+ * outside the known set is still authenticated — callers decide what such a principal may do, and
+ * must not be told it is anonymous.
+ */
+test("an unclassifiable role is still an authenticated session", () => {
+  setSession({ ...sample, role: "SOMETHING_NEW" as AuthenticatedSession["role"] });
+  assert.equal(getSessionResolution(), "AUTHENTICATED");
+});
+
+test("the resolution reaches subscribers even when the view does not change", () => {
+  const seen: string[] = [];
+  const unsubscribe = subscribeToSession(() => seen.push(getSessionResolution()));
+  // A subscriber comparing snapshots by identity sees null before and null after; only the
+  // resolution distinguishes them, so the notification has to carry it.
+  clearSession();
+  unsubscribe();
+  assert.deepEqual(seen, ["ANONYMOUS"]);
+});
+
+test("a test reset returns the store to having asked nobody", () => {
+  setSession(sample);
+  resetSessionForTest();
+  assert.equal(getSessionResolution(), "UNRESOLVED");
 });

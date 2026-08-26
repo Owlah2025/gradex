@@ -22,6 +22,7 @@ import {
   getPublicInstitutions,
   getPublicPrograms,
 } from "@/lib/api/public-catalog";
+import { useSessionResolution } from "@/lib/identity/use-session";
 
 /**
  * The visitor's academic context, held once for the whole application.
@@ -68,13 +69,17 @@ import {
 
 export type AcademicContextValue = {
   /**
-   * `"loading"` until *both* questions are settled: what this browser has stored, and whether the
-   * visitor has an academic profile of their own.
+   * `"loading"` until precedence is decided: what this browser has stored, and — only where it
+   * could change the answer — whether the visitor has an academic profile that outranks it.
    *
-   * Both, deliberately. The stored value arrives in a mount effect and the profile arrives over the
-   * network, so a status that meant only "storage read" let the catalogue decide precedence while
-   * the profile was still in flight — and a Student with a real saved profile had their browsing
-   * preference applied as filters a moment before the profile that outranks it turned up.
+   * Deliberately not "storage read". The stored value arrives in a mount effect and the profile
+   * arrives over the network, so a status meaning only the former let the catalogue decide
+   * precedence while the profile was still in flight, and a Student with a real saved profile had
+   * their browsing preference applied as filters a moment before it turned up.
+   *
+   * Equally deliberately not "profile read". A visitor the session has resolved as anonymous has no
+   * profile to wait for, and neither does a browser holding no preference for one to outrank —
+   * waiting in those cases meant a request that could only be refused, on the busiest public page.
    */
   status: "loading" | "ready";
   /** The preference this browser is holding, or `null`. Never an account fact. */
@@ -120,8 +125,9 @@ export function AcademicContextProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const sessionResolution = useSessionResolution();
   const [storageRead, setStorageRead] = React.useState(false);
-  const [profileSettled, setProfileSettled] = React.useState(false);
+  const [profileRead, setProfileRead] = React.useState(false);
   const [anonymous, setAnonymousState] =
     React.useState<AnonymousAcademicContext | null>(null);
   const [profile, setProfile] = React.useState<AcademicProfile | null>(null);
@@ -134,39 +140,69 @@ export function AcademicContextProvider({
   }, []);
 
   /**
-   * Asks for the visitor's own academic profile, once per page load.
+   * Asks for the visitor's own academic profile — only once there is a principal to ask about.
    *
-   * Deliberately not gated on the session's role. `useSessionView` reports `null` both for "not
-   * signed in" and for "not rehydrated yet", and those are not the same answer: gating on it meant
-   * the profile request was skipped during the rehydration window, precedence was decided without
-   * it, and a Student's saved profile lost to a browsing preference it should have outranked.
+   * Gated on whether a session **exists**, which is not the same question as which role it holds.
+   * Gating on the role skipped the read during rehydration, so precedence was decided without the
+   * profile and a Student's saved profile lost to a browser preference it should have outranked.
+   * Gating on nothing at all issued the request for every anonymous visitor on the landing page,
+   * where it can only ever be refused, and made a 401 part of the control flow.
    *
-   * A 401 is the ordinary answer here for an anonymous visitor, exactly as it already is for the
-   * access history the public Course page reads. It is one request per load — the same one the
-   * catalogue used to make on its own — and it never surfaces as an error or hides a Course.
+   * `AUTHENTICATED` is the whole condition. A principal whose role is missing or outside the known
+   * set is still authenticated, and `/me/academic-profile` is scoped to the principal by the server
+   * rather than by anything decided here — so the read stays legitimate and nothing infers that an
+   * unclassifiable principal is a Student. A non-Student simply has no profile, which arrives as a
+   * refusal and is recorded as "no profile" rather than as an error.
    */
   React.useEffect(() => {
+    if (sessionResolution !== "AUTHENTICATED") {
+      // Signing out drops the account's answer along with the account. Leaving the profile behind
+      // would let it go on outranking a preference for a visitor who no longer has it.
+      setProfile(null);
+      setProfileRead(false);
+      return;
+    }
     let cancelled = false;
     getAcademicProfile("en")
       .then((loaded) => {
         if (cancelled) return;
         setProfile(loaded);
-        setProfileSettled(true);
+        setProfileRead(true);
       })
       .catch(() => {
         // A profile that cannot be read is not a profile that says something. Falling back to the
         // browsing preference is the safe direction: it narrows discovery and nothing else.
         if (cancelled) return;
         setProfile(null);
-        setProfileSettled(true);
+        setProfileRead(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessionResolution]);
 
+  /**
+   * When precedence is decided, stated as the dependency graph rather than as a request outcome.
+   *
+   * Three ways to be settled, and no request is needed for two of them:
+   *
+   *  - `ANONYMOUS` — there is no principal, so no profile can exist to outrank anything. Settled by
+   *    the session resolve the page already performs, with no `/me` call and no refusal.
+   *  - no stored preference — a profile has nothing to outrank, and the answer is the same either
+   *    way, so the landing page is not held behind a session resolve it does not need.
+   *  - `AUTHENTICATED` and a stored preference — the only case where the profile genuinely decides
+   *    the outcome, and the only case that waits for it.
+   *
+   * `UNRESOLVED` with a stored preference is deliberately *not* settled. Being unclassified is not
+   * being anonymous, and acting on the preference during that window is exactly the regression this
+   * replaces.
+   */
+  const precedenceSettled =
+    (storageRead && anonymous === null) ||
+    sessionResolution === "ANONYMOUS" ||
+    profileRead;
   const status: "loading" | "ready" =
-    storageRead && profileSettled ? "ready" : "loading";
+    storageRead && precedenceSettled ? "ready" : "loading";
 
   const setAnonymous = React.useCallback(
     (next: AnonymousAcademicContext | null) => {

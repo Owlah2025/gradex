@@ -42,9 +42,28 @@ export type SessionView = Omit<
   "csrf_token" | "password_change_required"
 > & { password_change_required: boolean };
 
+/**
+ * Whether this page load has learned yet whether anyone is signed in.
+ *
+ * `SessionView | null` cannot say this. `null` means both "no session" and "not asked yet", and a
+ * caller that treats the second as the first acts on an answer nobody has given. That distinction
+ * is the difference between two real defects: gating work on a *classified role* skips it during
+ * rehydration, and gating it on `view === null` performs it for visitors it can never apply to.
+ *
+ * This is deliberately not the same axis as `role`. It says only that the question was asked and
+ * answered, never who the principal turned out to be — so a session whose role is missing or
+ * outside the known set is still `AUTHENTICATED` here, and callers decide for themselves what an
+ * unclassifiable principal may do.
+ *
+ * It carries no secret and adds no authority: it is an observation about a request that has already
+ * happened.
+ */
+export type SessionResolution = "UNRESOLVED" | "ANONYMOUS" | "AUTHENTICATED";
+
 type Listener = (view: SessionView | null) => void;
 
 let current: AuthenticatedSession | null = null;
+let resolution: SessionResolution = "UNRESOLVED";
 // Cached so repeated reads return the same reference. React's
 // useSyncExternalStore compares snapshots by identity and would loop forever
 // if this rebuilt an equal object on every call.
@@ -83,17 +102,36 @@ function publish(session: AuthenticatedSession | null) {
 
 /** Replaces the in-memory session and notifies subscribers. */
 export function setSession(session: AuthenticatedSession): void {
+  resolution = "AUTHENTICATED";
   publish(session);
 }
 
-/** Drops the in-memory session, including its CSRF token. */
+/**
+ * Drops the in-memory session, including its CSRF token.
+ *
+ * Every caller of this reaches it having *learned* that there is no session: the rehydrator whose
+ * resolve call came back without one, and sign-out. So it is the moment the question is answered
+ * in the negative, and the resolution moves off `UNRESOLVED` even though the view was already null.
+ */
 export function clearSession(): void {
+  resolution = "ANONYMOUS";
   publish(null);
 }
 
 /** The current session without its secret, or null when signed out. */
 export function getSessionView(): SessionView | null {
   return currentView;
+}
+
+/**
+ * Whether the session question has been answered, and how.
+ *
+ * Returned as a plain string so `useSyncExternalStore` can compare snapshots by value. That matters
+ * for the `UNRESOLVED` → `ANONYMOUS` transition specifically: the view is `null` on both sides of
+ * it, so a subscriber watching only the view sees an identical snapshot and never re-renders.
+ */
+export function getSessionResolution(): SessionResolution {
+  return resolution;
 }
 
 /**
@@ -118,5 +156,6 @@ export function subscribeToSession(listener: Listener): () => void {
 export function resetSessionForTest(): void {
   current = null;
   currentView = null;
+  resolution = "UNRESOLVED";
   listeners.clear();
 }
