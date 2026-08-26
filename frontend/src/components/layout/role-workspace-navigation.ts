@@ -7,6 +7,7 @@ export type WorkspaceRole = Extract<SessionRole, "ADMIN" | "INSTRUCTOR">;
 
 export type WorkspaceNavigationKey =
   | "courseReview"
+  | "adminCourses"
   | "academicCatalog"
   | "courseAccess"
   | "courseLifecycle"
@@ -45,6 +46,11 @@ export function roleWorkspaceNavigation(
   const home = roleRoot(role, locale);
   if (role === "ADMIN") {
     return [
+      // Courses leads, because it is the surface an Admin can start from without already knowing
+      // which Course they are looking for. The review queue remains its own entry: it is the exact
+      // set of pending decisions, and narrowing to it is a different job from browsing the
+      // catalogue.
+      { key: "adminCourses", href: `/${locale}/admin/courses` },
       { key: "courseReview", href: home },
       { key: "academicCatalog", href: `/${locale}/admin/academic-catalog` },
       { key: "courseAccess", href: `/${locale}/admin/course-access` },

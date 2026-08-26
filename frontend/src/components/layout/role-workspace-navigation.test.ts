@@ -5,8 +5,12 @@ import {
   roleWorkspaceNavigation,
 } from "./role-workspace-navigation";
 
+// Courses leads the Admin workspace: it is the only entry an Admin can use without already knowing
+// which Course they want. The review queue keeps its own entry — it is the exact set of pending
+// decisions, which is a different job from browsing the catalogue.
 test("Admin workspace navigation exposes the existing launch operations", () => {
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "en"), [
+    { key: "adminCourses", href: "/en/admin/courses" },
     { key: "courseReview", href: "/en/admin/catalog" },
     { key: "academicCatalog", href: "/en/admin/academic-catalog" },
     { key: "courseAccess", href: "/en/admin/course-access" },
@@ -15,6 +19,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "staffOperations", href: "/staff" },
   ]);
   assert.deepEqual(roleWorkspaceNavigation("ADMIN", "ar"), [
+    { key: "adminCourses", href: "/ar/admin/courses" },
     { key: "courseReview", href: "/ar/admin/catalog" },
     { key: "academicCatalog", href: "/ar/admin/academic-catalog" },
     { key: "courseAccess", href: "/ar/admin/course-access" },
