@@ -18,7 +18,7 @@ import {
   formatLearningInteger,
   formatLearningPercent,
 } from "@/lib/formatters/learning";
-import { StatusBadge } from "@/components/common/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { MaterialDownload } from "./material-download";
 import { cn } from "@/lib/utils";
 
@@ -177,8 +177,19 @@ export function LearningStatusBadge({
   detail?: string;
 }) {
   return (
-    <span data-learning-status={status} className="inline-flex">
-      <StatusBadge tone={status === "expired" ? "neutral" : "default"} label={label} detail={detail} />
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {/* `data-learning-status` sits on the pill, not on a wrapper around it. The attribute names
+          the state, and the element it names must be the one whose text *is* the state — the S5 and
+          T8A suites read both from it, and a wrapper that also contains the explanatory sentence
+          makes "the badge says Active access" false while nothing is actually wrong. */}
+      <Badge
+        data-learning-status={status}
+        variant={status === "expired" ? "neutral" : "default"}
+        className="whitespace-nowrap"
+      >
+        {label}
+      </Badge>
+      {detail ? <span className="text-xs font-semibold text-muted-foreground">{detail}</span> : null}
     </span>
   );
 }

@@ -386,7 +386,9 @@ test("the learning statuses a Student reads clear AA against what they are drawn
       const [light, dark] = a > b ? [a, b] : [b, a];
       return (light + 0.05) / (dark + 0.05);
     };
-    const statusPill = document.querySelector("[data-learning-status] span");
+    // The state attribute is on the pill itself, which is also the element whose colour pairing
+    // this measures.
+    const statusPill = document.querySelector("[data-learning-status]");
     const lessonState = document.querySelector('[href*="/lessons/"] span span');
     return {
       status: statusPill ? ratio(statusPill) : null,
