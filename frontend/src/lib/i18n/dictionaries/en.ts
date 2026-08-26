@@ -832,6 +832,60 @@ export const en = {
       cancelNewCourse: "Cancel",
       actionFailed: "That could not be completed.",
     },
+    /**
+     * The Instructor's course directory vocabulary.
+     *
+     * `standing` is deliberately a label *and* a meaning. A pill on its own said only that a
+     * word applied; it never said whether the Instructor had to do anything about it.
+     */
+    courses: {
+      heading: "Your courses",
+      loading: "Loading your courses…",
+      untitled: "Untitled course",
+      open: "Open",
+      emptyTitle: "You have not created a course yet",
+      emptyBody:
+        "A course begins with the university and the subject it is taught for. Create one and it appears here.",
+      emptyAction: "Create your first course",
+      academicUnset: "University and subject not chosen yet",
+    },
+    standing: {
+      actor: {
+        INSTRUCTOR: "Your turn",
+        ADMIN: "With an administrator",
+        NOBODY: "Nothing to do",
+      },
+      DRAFT: {
+        label: "Draft",
+        meaning: "Not submitted yet. Nobody outside Gradex can see it.",
+        action: "Continue building",
+      },
+      DRAFT_UPDATE: {
+        label: "Draft update",
+        meaning: "Students keep seeing the published course while you work on this update.",
+        action: "Continue this update",
+      },
+      IN_REVIEW: {
+        label: "In review",
+        meaning: "An administrator is reviewing it. It cannot be edited until they decide.",
+        action: "View submitted course",
+      },
+      CHANGES_REQUESTED: {
+        label: "Changes requested",
+        meaning: "An administrator sent it back with a reason. Address it, then submit again.",
+        action: "See what to change",
+      },
+      PUBLISHED: {
+        label: "Published",
+        meaning: "Students can find and study this course.",
+        action: "View course",
+      },
+      UNAVAILABLE: {
+        label: "No open revision",
+        meaning: "There is nothing to edit on this course right now.",
+        action: "View course",
+      },
+    },
     roster: {
       title: "Students",
       open: "View students",

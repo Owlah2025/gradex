@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { formatFils } from "@/lib/formatters/currency";
+import { courseDisplayTitle } from "./course-standing";
 import {
   getOwnedCourses,
   getOwnedCourseDetail,
@@ -14,17 +15,14 @@ function getDisplayRevision(c: OwnedCourseSummary) {
   return c.editable_revision || c.live_revision || null;
 }
 
-function getCourseDisplayTitle(c: OwnedCourseSummary, isAr: boolean) {
-  const rev = getDisplayRevision(c);
-  if (rev) {
-    return isAr ? rev.title_ar : rev.title_en;
-  }
-  return c.id;
+function getCourseDisplayTitle(c: OwnedCourseSummary, isAr: boolean, untitled: string) {
+  return courseDisplayTitle(c, isAr ? "ar" : "en", untitled);
 }
 
 export function ServerPricingPanel() {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   const isAr = locale === "ar";
+  const untitled = t.instructor.courses.untitled;
 
   const [ownedCourses, setOwnedCourses] = useState<OwnedCourseSummary[]>([]);
   const [isLoadingOwned, setIsLoadingOwned] = useState(false);
@@ -135,7 +133,7 @@ export function ServerPricingPanel() {
                 }`}
               >
                 <div className="font-semibold text-slate-900 dark:text-slate-100">
-                  {getCourseDisplayTitle(c, isAr)}
+                  {getCourseDisplayTitle(c, isAr, untitled)}
                 </div>
                 {/* The Course identifier is deliberately not rendered. It carried no meaning for
                     the Instructor and became the clipboard source for an Admin workflow that
@@ -160,7 +158,7 @@ export function ServerPricingPanel() {
               <div className="space-y-3">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                    {getCourseDisplayTitle(serverCourseDetail, isAr)}
+                    {getCourseDisplayTitle(serverCourseDetail, isAr, untitled)}
                   </h3>
                   <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
                     {isAr ? "سعر الدورة الحالي: " : "Current Course Price: "}

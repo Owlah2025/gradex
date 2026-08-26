@@ -33,6 +33,8 @@ import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { createSubjectRequest } from "@/lib/api/subject-requests";
 import { CourseRoster } from "./course-roster";
+import { InstructorCourseList } from "./instructor-course-list";
+import { courseDisplayTitle } from "./course-standing";
 import { ErrorState } from "@/components/common/error-state";
 import {
   WorkspacePage,
@@ -464,13 +466,15 @@ export function CourseBuilder() {
     );
   };
 
-  const courseTitle = (course: CourseWire) => {
-    const rev = course.editable_revision ?? course.live_revision;
-    if (!rev) return course.id;
-    return isAr ? rev.title_ar : rev.title_en;
-  };
+  /**
+   * A Course's name, never its database key. The previous fallback printed `course.id` when no
+   * revision was expanded, which put a bare UUID in the heading of the Instructor's own studio.
+   */
+  const courseTitle = (course: CourseWire) =>
+    courseDisplayTitle(course, locale, t.instructor.courses.untitled);
 
-  const studio = t.instructor.studio;
+  const instructor = t.instructor;
+  const studio = instructor.studio;
 
   return (
     <WorkspacePage className="space-y-8">
@@ -648,47 +652,18 @@ export function CourseBuilder() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="space-y-3">
-          <h2 className="text-md font-semibold text-slate-700 dark:text-slate-300">
-            {isAr ? "دوراتي على الخادم" : "My Courses"}
+          <h2 className="font-display text-base font-bold text-foreground">
+            {instructor.courses.heading}
           </h2>
-          <div className="space-y-2" data-testid="owned-course-list">
-            {loading && (
-              <p className="text-sm text-slate-500">{isAr ? "جارٍ التحميل..." : "Loading..."}</p>
-            )}
-            {!loading && courses.length === 0 && (
-              <p className="text-sm text-slate-500 italic">
-                {isAr ? "لا توجد دورات بعد." : "No courses yet."}
-              </p>
-            )}
-            {courses.map((course) => (
-              <button
-                key={course.id}
-                type="button"
-                onClick={() => selectCourse(course.id)}
-                data-testid={`owned-course-${course.id}`}
-                className={`w-full text-start p-4 rounded-lg border transition ${
-                  selectedCourseID === course.id
-                    ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20"
-                    : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="font-semibold text-sm">{courseTitle(course)}</h3>
-                  <span
-                    data-revision-state={course.editable_revision?.state ?? course.lifecycle ?? ""}
-                    className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  >
-                    {stateLabel(course.editable_revision?.state, course.lifecycle)}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
-                  {isAr
-                    ? course.editable_revision?.description_ar
-                    : course.editable_revision?.description_en}
-                </p>
-              </button>
-            ))}
-          </div>
+          <InstructorCourseList
+            courses={courses}
+            selectedCourseID={selectedCourseID}
+            loading={loading}
+            onSelect={selectCourse}
+            onCreate={() => setIsCreating(true)}
+            labels={instructor.courses}
+            standingLabels={instructor.standing}
+          />
         </div>
 
         {selectedCourse ? (
