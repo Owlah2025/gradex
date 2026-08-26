@@ -33,20 +33,45 @@ export type CourseAction = "REVIEW" | "MANAGE" | "VIEW";
 export type StatusTone = "default" | "accent" | "success" | "neutral";
 
 /**
- * One Course as the Admin directory understands it: the lifecycle row the server returned, plus the
- * submitted revision when — and only when — the review queue actually contains one for it.
+ * One Course as the Admin directory understands it.
+ *
+ * The fields are normalised rather than holding a raw directory row, because a Course can reach
+ * this surface from either of two server reads. The lifecycle directory is bounded
+ * (`DIRECTORY_PAGE_LIMIT`); the review queue is not, and it is the authority on pending decisions.
+ * A Course awaiting review that falls outside the directory's page still has to appear, so it is
+ * built from its queue entry instead.
+ *
+ * Nothing here is synthesised. A queue entry carries the Course's titles and its
+ * `course_lifecycle`, so a queue-only row states read state from a different endpoint, not invented
+ * state. The two fields the queue genuinely does not carry — the owner's display name and the last
+ * update stamp — are left absent and omitted from the render rather than filled with a placeholder
+ * that would read as data.
  */
 export type AdminCourseRow = {
-  summary: CourseLifecycleSummary;
+  id: string;
+  titleAr: string;
+  titleEn: string;
+  /** Empty when this Course is known only from the review queue, which carries no owner name. */
+  ownerDisplayName: string;
+  lifecycle: string;
+  /** Absent when this Course is known only from the review queue, which carries no update stamp. */
+  updatedAt: string | null;
+  accessSuspendedAt?: string;
+  retiredAt?: string;
   /**
    * The submitted revision awaiting a decision.
    *
    * Present exactly when `GET /admin/review/queue` carries this Course. It is deliberately not
-   * derived from `summary.lifecycle`: an Instructor revising an already-published Course produces a
+   * derived from the lifecycle: an Instructor revising an already-published Course produces a
    * `PENDING_REVIEW` *revision* while the Course lifecycle stays `PUBLISHED`, so reading the
    * lifecycle would hide that Course from review entirely.
    */
   pendingReview: ReviewQueueItem | null;
+  /**
+   * True when this Course was outside the bounded directory page and is shown from its queue entry.
+   * The row then knows less about the Course, and says less, rather than guessing the rest.
+   */
+  fromQueueOnly: boolean;
 };
 
 export type CourseStatusView = {
@@ -120,7 +145,7 @@ function action(state: AdminCourseState, needsReview: boolean): CourseAction {
 }
 
 export function courseStatusView(row: AdminCourseRow): CourseStatusView {
-  const state = normalizeState(row.summary.lifecycle);
+  const state = normalizeState(row.lifecycle);
   const needsReview = row.pendingReview !== null;
   return {
     state,
@@ -128,8 +153,8 @@ export function courseStatusView(row: AdminCourseRow): CourseStatusView {
     awaiting: awaitingActor(state, needsReview),
     needsReview,
     action: action(state, needsReview),
-    accessSuspended: Boolean(row.summary.access_suspended_at),
-    retired: Boolean(row.summary.retired_at),
+    accessSuspended: Boolean(row.accessSuspendedAt),
+    retired: Boolean(row.retiredAt),
   };
 }
 
@@ -197,12 +222,20 @@ export function filterCounts(rows: AdminCourseRow[]): Record<DirectoryFilter, nu
 }
 
 /**
- * Joins the lifecycle directory to the review queue.
+ * Combines the two server reads into one set of rows.
  *
- * Both reads are the server's; this only pairs them by Course so one row can state both what the
- * Course is and whether a decision is waiting. A queue entry with no matching directory row is
- * dropped rather than synthesised — the directory read is what defines the visible set, and
- * inventing a row would mean rendering a Course whose state we never actually read.
+ * The lifecycle directory is bounded by `DIRECTORY_PAGE_LIMIT` and ordered by recency, so it is a
+ * page of the catalogue rather than all of it. The review queue is the server's complete set of
+ * pending decisions and is not bounded by that page.
+ *
+ * "Needs review" must therefore never be a subset of the directory page. Every queue entry produces
+ * a row: joined onto its directory row when the page happens to contain it, and built from the
+ * queue entry itself when it does not. Otherwise a Course awaiting a decision would silently vanish
+ * from the Admin's work list as soon as fifty other Courses were touched more recently — the queue
+ * would still hold it, and nothing on screen would say so.
+ *
+ * Directory order is preserved, and queue-only Courses are appended, so browsing stays ordered by
+ * recency while the actionable set stays complete.
  */
 export function buildDirectory(
   summaries: CourseLifecycleSummary[],
@@ -217,19 +250,46 @@ export function buildDirectory(
       pendingByCourse.set(item.course_id, item);
     }
   }
-  return summaries.map((summary) => ({
-    summary,
+
+  const rows: AdminCourseRow[] = summaries.map((summary) => ({
+    id: summary.id,
+    titleAr: summary.title_ar,
+    titleEn: summary.title_en,
+    ownerDisplayName: summary.owner_display_name,
+    lifecycle: summary.lifecycle,
+    updatedAt: summary.updated_at,
+    accessSuspendedAt: summary.access_suspended_at,
+    retiredAt: summary.retired_at,
     pendingReview: pendingByCourse.get(summary.id) ?? null,
+    fromQueueOnly: false,
   }));
+
+  const listed = new Set(summaries.map((summary) => summary.id));
+  for (const item of pendingByCourse.values()) {
+    if (listed.has(item.course_id)) continue;
+    rows.push({
+      id: item.course_id,
+      titleAr: item.title_ar,
+      titleEn: item.title_en,
+      // The queue carries no owner name and no update stamp. Both stay absent.
+      ownerDisplayName: "",
+      lifecycle: item.course_lifecycle,
+      updatedAt: null,
+      pendingReview: item,
+      fromQueueOnly: true,
+    });
+  }
+
+  return rows;
 }
 
 /** The title a human knows the Course by, in the reader's language, with the other as support. */
 export function courseTitles(
-  summary: CourseLifecycleSummary,
+  row: Pick<AdminCourseRow, "titleAr" | "titleEn">,
   locale: "ar" | "en",
 ): { primary: string; secondary: string } {
-  const primary = locale === "ar" ? summary.title_ar : summary.title_en;
-  const secondary = locale === "ar" ? summary.title_en : summary.title_ar;
+  const primary = locale === "ar" ? row.titleAr : row.titleEn;
+  const secondary = locale === "ar" ? row.titleEn : row.titleAr;
   // A revision may legitimately carry only one language filled in so far.
   return { primary: primary || secondary, secondary: primary ? secondary : "" };
 }

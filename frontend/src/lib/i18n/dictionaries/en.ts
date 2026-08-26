@@ -35,7 +35,8 @@ export const en = {
     intro:
       "Every course on Gradex, with the ones waiting on you first. Open a course to review it — you never need its identifier.",
     filterGroupLabel: "Filter courses by state",
-    capped: "Showing the most recently updated courses. Search by title to find one that is not listed.",
+    capped:
+      "Showing the most recently updated courses. Courses awaiting review are always listed in full; search by title to find any other course that is not shown.",
     searchLabel: "Search courses by title",
     searchPlaceholder: "Search by course title",
     searchSubmit: "Search",

@@ -53,6 +53,9 @@ export function CourseDirectory() {
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [rows, setRows] = useState<AdminCourseRow[] | null>(null);
+  // Whether the lifecycle directory returned a full page. Tracked from the directory read itself
+  // rather than from the row count, which now also carries Courses found only in the review queue.
+  const [directoryCapped, setDirectoryCapped] = useState(false);
   const [filter, setFilter] = useState<DirectoryFilter>("NEEDS_REVIEW");
   const [error, setError] = useState<string | null>(null);
   const [queueUnavailable, setQueueUnavailable] = useState(false);
@@ -74,6 +77,7 @@ export function CourseDirectory() {
         return;
       }
       if (queue.status === "rejected") setQueueUnavailable(true);
+      setDirectoryCapped(directory.value.length >= DIRECTORY_PAGE_LIMIT);
       setRows(
         buildDirectory(directory.value, queue.status === "fulfilled" ? queue.value : []),
       );
@@ -157,7 +161,7 @@ export function CourseDirectory() {
         })}
       </div>
 
-      {rows && rows.length >= DIRECTORY_PAGE_LIMIT && (
+      {rows && directoryCapped && (
         <p className="mt-5 text-sm text-muted-foreground" data-testid="admin-course-capped">
           {copy.capped}
         </p>
@@ -217,7 +221,7 @@ export function CourseDirectory() {
               upward without a separate mobile representation to keep in step. */}
           <ul className="mt-3 space-y-3" data-testid="admin-course-list">
             {visible.map((row) => (
-              <CourseRow key={row.summary.id} row={row} locale={locale} />
+              <CourseRow key={row.id} row={row} locale={locale} />
             ))}
           </ul>
         </>
@@ -230,17 +234,19 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
   const { t } = useLocale();
   const copy = t.adminCourses;
   const view = courseStatusView(row);
-  const { primary, secondary } = courseTitles(row.summary, locale);
+  const { primary, secondary } = courseTitles(row, locale);
 
   // Only a Course with a pending decision has a review workspace to open. Everything else routes to
   // the lifecycle surface, which is where the remaining Admin commands actually live.
   const href = view.needsReview
-    ? `/${locale}/admin/courses/${row.summary.id}/review`
+    ? `/${locale}/admin/courses/${row.id}/review`
     : `/${locale}/admin/course-lifecycle`;
 
   return (
     <li
       data-testid="admin-course-row"
+      data-course-id={row.id}
+      data-from-queue-only={row.fromQueueOnly ? "true" : "false"}
       data-course-state={view.state}
       data-needs-review={view.needsReview ? "true" : "false"}
       className="rounded-lg border border-border bg-card p-4 shadow-sm"
@@ -269,18 +275,25 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
           ) : null}
 
           <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
-            <div className="flex gap-1.5">
-              <dt>{copy.instructor}:</dt>
-              <dd className="font-medium text-foreground">{row.summary.owner_display_name}</dd>
-            </div>
-            <div className="flex gap-1.5">
-              <dt>{copy.lastUpdated}:</dt>
-              <dd>
-                <time dateTime={row.summary.updated_at}>
-                  {new Date(row.summary.updated_at).toLocaleDateString(locale)}
-                </time>
-              </dd>
-            </div>
+            {/* Owner and last-update are omitted rather than filled in when this Course is known
+                only from the review queue, which does not carry them. An empty value says less; a
+                placeholder would read as data. */}
+            {row.ownerDisplayName ? (
+              <div className="flex gap-1.5">
+                <dt>{copy.instructor}:</dt>
+                <dd className="font-medium text-foreground">{row.ownerDisplayName}</dd>
+              </div>
+            ) : null}
+            {row.updatedAt ? (
+              <div className="flex gap-1.5">
+                <dt>{copy.lastUpdated}:</dt>
+                <dd>
+                  <time dateTime={row.updatedAt}>
+                    {new Date(row.updatedAt).toLocaleDateString(locale)}
+                  </time>
+                </dd>
+              </div>
+            ) : null}
             {row.pendingReview ? (
               <div className="flex gap-1.5">
                 <dt>{copy.revision}:</dt>
@@ -296,7 +309,7 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
         </div>
 
         <Button asChild variant={view.needsReview ? "default" : "outline"}>
-          <Link href={href} data-testid={`admin-course-action-${row.summary.id}`}>
+          <Link href={href} data-testid={`admin-course-action-${row.id}`}>
             {copy.actions[view.action]}
           </Link>
         </Button>

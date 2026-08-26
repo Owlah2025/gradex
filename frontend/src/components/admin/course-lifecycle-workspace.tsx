@@ -314,7 +314,20 @@ export function CourseLifecycleWorkspace() {
  * something a reader is owed. The enum stays the server's, and only its presentation changes.
  */
 function lifecycleLabel(course: CourseLifecycleSummary, labels: Dictionary["adminCourses"]): string {
-  const view = courseStatusView({ summary: course, pendingReview: null });
+  // This screen reads only the lifecycle directory, so it never knows about a pending review; the
+  // Courses directory is the surface that joins the two.
+  const view = courseStatusView({
+    id: course.id,
+    titleAr: course.title_ar,
+    titleEn: course.title_en,
+    ownerDisplayName: course.owner_display_name,
+    lifecycle: course.lifecycle,
+    updatedAt: course.updated_at,
+    accessSuspendedAt: course.access_suspended_at,
+    retiredAt: course.retired_at,
+    pendingReview: null,
+    fromQueueOnly: false,
+  });
   const parts: string[] = [labels.status[view.state]];
   if (course.retired_at) {
     parts.push(labels.flags.retired);
