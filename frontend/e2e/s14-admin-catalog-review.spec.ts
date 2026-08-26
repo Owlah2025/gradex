@@ -253,7 +253,7 @@ test.describe("S14 Admin Catalog review surface", () => {
     await page.getByTestId("new-course-description-ar").fill("وصف");
     await page.getByTestId("new-course-description-en").fill("Incomplete");
     await page.getByTestId("create-course").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
     const submit = page.getByTestId("submit-for-review");
     await submit.click();

@@ -187,9 +187,13 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // direct database construction. Taxonomy terms are Admin-owned, so their
   // canonical command is exercised with an Admin session before the Instructor
   // assigns them.
+  // Deleting a Lesson or a Section destroys uploaded media the server cannot return, so both now
+  // ask before doing it.
   await instructorPage.getByTestId(`delete-lesson-${MISSING_VIDEO_LESSON_ID}`).click();
+  await instructorPage.getByTestId("curriculum-delete-confirm").getByTestId("confirm-accept").click();
   await expect(instructorPage.getByTestId(`lesson-${MISSING_VIDEO_LESSON_ID}`)).toHaveCount(0);
   await instructorPage.getByTestId(`delete-section-${EMPTY_SECTION_ID}`).click();
+  await instructorPage.getByTestId("curriculum-delete-confirm").getByTestId("confirm-accept").click();
   await expect(instructorPage.getByTestId(`section-${EMPTY_SECTION_ID}`)).toHaveCount(0);
   const taxonomyAdmin = await apiContextFor(issueRotatingSession(ADMIN));
   const major = await taxonomyAdmin.post("/api/v1/admin/taxonomy/terms", {
@@ -215,7 +219,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await expect(instructorPage.getByText("Taxonomy saved for the named revision")).toBeVisible();
   await instructorPage.getByTestId("revision-study-year").selectOption("YEAR_1");
   await instructorPage.getByTestId("save-revision").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Revision details saved");
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course details saved");
 
   // Candidate B is not yet live: A remains visible/downloadable, B cannot be
   // probed by an entitled Student, anonymous caller, unentitled Student, a

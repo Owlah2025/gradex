@@ -88,7 +88,7 @@ async function createCourse(page: Page, titleEn: string, titleAr: string): Promi
   await page.getByTestId("new-course-description-en").fill("Acceptance test description");
   await page.getByTestId("create-course").click();
 
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
   expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
   return courseID!;

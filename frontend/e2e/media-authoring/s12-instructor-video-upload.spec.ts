@@ -143,7 +143,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-ar").fill("وصف");
   await page.getByTestId("new-course-description-en").fill("Real media journey");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
   // The public preview is a second, separately uploaded PREVIEW Asset Version.
@@ -189,9 +189,22 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId(`owned-course-${courseID}`).click();
   const attached = page.getByTestId(`lesson-video-ref-${lessonID}`);
   await expect(attached).toBeVisible();
-  const assetVersionID = (await attached.innerText()).match(UUID_PATTERN)![0];
+  await expect(attached).toHaveAttribute("data-video-attached", "true");
 
+  // The asset version id comes from the API, which is the only place it was ever meaningful. The
+  // studio used to print it beside the words "Video attached" and this spec scraped it back out of
+  // the rendered text; an Instructor has no use for a media identifier, so it is no longer there.
   const instructorAPI = await apiContextFor(instructorSession);
+  const authoredCourse = await instructorAPI.get(`/api/v1/courses/${courseID}`);
+  expect(authoredCourse.status()).toBe(200);
+  const authoredGraph = (await authoredCourse.json()) as {
+    editable_revision?: { sections?: Array<{ lessons?: Array<{ id: string; video_asset_version_id?: string }> }> };
+  };
+  const authoredLesson = (authoredGraph.editable_revision?.sections ?? [])
+    .flatMap((section) => section.lessons ?? [])
+    .find((lesson) => lesson.id === lessonID);
+  const assetVersionID = authoredLesson?.video_asset_version_id;
+  expect(assetVersionID, "the submitted Lesson must carry its video Asset Version").toMatch(UUID_PATTERN);
   const assetStatus = await instructorAPI.get(`/api/v1/media/assets/${assetVersionID}`);
   expect(assetStatus.status()).toBe(200);
   expect((await assetStatus.json()).state).toBe("READY");
@@ -498,7 +511,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-ar").fill("مسودة");
   await page.getByTestId("new-course-description-en").fill("Draft that must stay private");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const draftCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(draftCourseID).toMatch(UUID_PATTERN);
   await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");

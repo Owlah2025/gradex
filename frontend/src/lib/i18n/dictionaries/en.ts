@@ -942,6 +942,42 @@ export const en = {
       subjectRequestNote: "Context for the administrator (optional)",
       subjectRequestSent: "Your subject request was sent for review.",
     },
+    /**
+     * Curriculum vocabulary.
+     *
+     * `videoAttached` replaces a line that printed the asset-version UUID beside the words "Video
+     * attached". Whether a lesson has its video is the whole question; which row in the media
+     * table holds it is not something an instructor can act on.
+     */
+    curriculum: {
+      title: "Curriculum",
+      lead: "Sections hold lessons. Every lesson needs a video before the course can be submitted.",
+      sectionCount: "sections",
+      lessonCount: "lessons",
+      emptyTitle: "No sections yet",
+      emptyBody:
+        "A course is built from sections, and each section holds its lessons. Add the first section to begin.",
+      noLessons: "This section has no lessons yet.",
+      addSection: "Add section",
+      addSectionTitleAr: "Section title (Arabic)",
+      addSectionTitleEn: "Section title (English)",
+      addLesson: "Add lesson",
+      addLessonTitleAr: "Lesson title (Arabic)",
+      addLessonTitleEn: "Lesson title (English)",
+      deleteSection: "Delete section",
+      deleteLesson: "Delete lesson",
+      videoAttached: "Video attached",
+      videoMissing: "No video yet",
+      labMaterials: "Lab materials",
+      confirmDeleteSectionTitle: "Delete this section?",
+      confirmDeleteSectionBody:
+        "The section and every lesson inside it are removed, including any video already uploaded to those lessons. This cannot be undone.",
+      confirmDeleteLessonTitle: "Delete this lesson?",
+      confirmDeleteLessonBody:
+        "The lesson is removed, along with the video and any resources attached to it. This cannot be undone.",
+      confirmDelete: "Delete",
+      cancel: "Cancel",
+    },
     academic: {
       title: "Academic identity",
       lead: "The university and subject this course is taught for. Students find it through them.",

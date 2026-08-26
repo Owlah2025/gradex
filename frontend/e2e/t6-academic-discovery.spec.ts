@@ -112,7 +112,7 @@ async function publishAcademicCourse(
   await page.getByTestId("new-course-description-ar").fill("وصف الاكتشاف الأكاديمي");
   await page.getByTestId("new-course-description-en").fill("Academic discovery journey course.");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;

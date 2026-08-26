@@ -36,6 +36,7 @@ import { InstructorCourseList } from "./instructor-course-list";
 import { courseDisplayTitle } from "./course-standing";
 import { CoursePricingSummary } from "./course-pricing-summary";
 import { NewCourseForm } from "./new-course-form";
+import { CurriculumBuilder } from "./curriculum-builder";
 import { ErrorState } from "@/components/common/error-state";
 import { EmptyState } from "@/components/common/empty-state";
 import {
@@ -747,178 +748,27 @@ export function CourseBuilder() {
                   onChanged={refreshSelectedCourse}
                 />
 
-                <div className="space-y-4">
-                  <h3 className="text-md font-semibold">
-                    {isAr ? "أقسام الدورة والدروس" : "Sections & Lessons"}
-                  </h3>
-
-                  {sections.length === 0 ? (
-                    <p className="text-sm text-slate-500 italic">
-                      {isAr ? "لا يوجد أقسام مضافة بعد." : "No sections added yet."}
-                    </p>
-                  ) : (
-                    <div className="space-y-4">
-                      {sections.map((section, index) => (
-                        <div
-                          key={section.id}
-                          data-testid={`section-${section.id}`}
-                          className="border border-slate-200 dark:border-slate-800 rounded-md p-4 bg-slate-50/50 dark:bg-slate-950/30"
-                        >
-                          <div className="flex items-center justify-between gap-2 mb-3">
-                            <span className="font-semibold text-sm">
-                              {index + 1}. {isAr ? section.title_ar : section.title_en}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => handleDeleteSection(section.id)}
-                              data-testid={`delete-section-${section.id}`}
-                              className="text-[11px] text-red-700 underline disabled:opacity-50 dark:text-red-400"
-                            >
-                              {isAr ? "حذف القسم" : "Delete section"}
-                            </button>
-                          </div>
-
-                          <div className="space-y-2 ps-4 border-s-2 border-slate-300 dark:border-slate-700">
-                            {(section.lessons ?? []).map((lesson, lessonIndex) => (
-                              <div
-                                key={lesson.id}
-                                data-testid={`lesson-${lesson.id}`}
-                                className="bg-white dark:bg-slate-900 p-3 rounded border text-xs flex flex-col gap-1"
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2 font-medium">
-                                  <span>
-                                    {lessonIndex + 1}. {isAr ? lesson.title_ar : lesson.title_en}
-                                  </span>
-                                  {lesson.video_asset_version_id ? (
-                                    <span
-                                      data-testid={`lesson-video-ref-${lesson.id}`}
-                                      className="text-emerald-600 dark:text-emerald-400 font-mono text-[10px]"
-                                    >
-                                      {isAr ? "فيديو مرفق" : "Video attached"}: {lesson.video_asset_version_id}
-                                    </span>
-                                  ) : (
-                                    <span data-testid={`lesson-video-none-${lesson.id}`} className="text-slate-400">
-                                      {isAr ? "لا يوجد فيديو" : "No video"}
-                                    </span>
-                                  )}
-                                  <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => handleDeleteLesson(lesson.id)}
-                                    data-testid={`delete-lesson-${lesson.id}`}
-                                    className="text-[11px] text-red-700 underline disabled:opacity-50 dark:text-red-400"
-                                  >
-                                    {isAr ? "حذف الدرس" : "Delete lesson"}
-                                  </button>
-                                </div>
-                                {/* Lab Materials are shown but not editable here: D-088
-                                    covers Lesson video and Lesson Resources only. */}
-                                {(lesson.files ?? []).some((file) => file.kind === "LAB_MATERIAL") && (
-                                  <div className="text-[11px] text-slate-500 mt-1">
-                                    {(lesson.files ?? [])
-                                      .filter((file) => file.kind === "LAB_MATERIAL")
-                                      .map((file) => (
-                                        <span
-                                          key={file.id}
-                                          className="me-2 inline-block bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded"
-                                        >
-                                          [{file.kind}] {isAr ? file.display_name_ar : file.display_name_en}
-                                        </span>
-                                      ))}
-                                  </div>
-                                )}
-                                <LessonVideoUpload
-                                  courseID={selectedCourse.id}
-                                  revisionID={revision.id!}
-                                  lessonID={lesson.id}
-                                  locale={locale}
-                                  onAttached={refreshSelectedCourse}
-                                />
-                                <LessonResourceUpload
-                                  courseID={selectedCourse.id}
-                                  revisionID={revision.id!}
-                                  lessonID={lesson.id}
-                                  locale={locale}
-                                  files={lesson.files ?? []}
-                                  onChanged={refreshSelectedCourse}
-                                />
-                              </div>
-                            ))}
-
-                            <form
-                              onSubmit={(event) => handleAddLesson(event, section.id)}
-                              data-testid={`add-lesson-form-${section.id}`}
-                              className="flex flex-col gap-2 pt-2 lg:flex-row"
-                            >
-                              <input
-                                type="text"
-                                placeholder={isAr ? "عنوان الدرس بالعربية" : "Lesson Title (Arabic)"}
-                                value={lessonDrafts[section.id]?.ar ?? ""}
-                                onChange={(event) =>
-                                  setLessonDrafts((current) => ({
-                                    ...current,
-                                    [section.id]: { ar: event.target.value, en: current[section.id]?.en ?? "" },
-                                  }))
-                                }
-                                data-testid={`lesson-title-ar-${section.id}`}
-                                className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
-                              />
-                              <input
-                                type="text"
-                                placeholder={isAr ? "عنوان الدرس بالإنجليزية" : "Lesson Title (English)"}
-                                value={lessonDrafts[section.id]?.en ?? ""}
-                                onChange={(event) =>
-                                  setLessonDrafts((current) => ({
-                                    ...current,
-                                    [section.id]: { ar: current[section.id]?.ar ?? "", en: event.target.value },
-                                  }))
-                                }
-                                data-testid={`lesson-title-en-${section.id}`}
-                                className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
-                              />
-                              <button
-                                type="submit"
-                                disabled={busy}
-                                data-testid={`add-lesson-${section.id}`}
-                                className="rounded-md bg-slate-700 px-3 py-2 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                              >
-                                {isAr ? "إضافة درس" : "Add Lesson"}
-                              </button>
-                            </form>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleAddSection} data-testid="add-section-form" className="flex flex-col gap-2 pt-2 lg:flex-row">
-                    <input
-                      type="text"
-                      placeholder={isAr ? "عنوان القسم بالعربية" : "Section Title (Arabic)"}
-                      value={secTitleAr}
-                      onChange={(event) => setSecTitleAr(event.target.value)}
-                      data-testid="section-title-ar"
-                      className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
-                    />
-                    <input
-                      type="text"
-                      placeholder={isAr ? "عنوان القسم بالإنجليزية" : "Section Title (English)"}
-                      value={secTitleEn}
-                      onChange={(event) => setSecTitleEn(event.target.value)}
-                      data-testid="section-title-en"
-                      className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs"
-                    />
-                    <button
-                      type="submit"
-                      disabled={busy}
-                      data-testid="add-section"
-                      className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      {isAr ? "إضافة قسم" : "Add Section"}
-                    </button>
-                  </form>
-                </div>
+                <CurriculumBuilder
+                  revision={revision}
+                  courseID={selectedCourse.id}
+                  busy={busy}
+                  labels={instructor.curriculum}
+                  lessonDrafts={lessonDrafts}
+                  sectionTitleAr={secTitleAr}
+                  sectionTitleEn={secTitleEn}
+                  onSectionTitleChange={(patch) => {
+                    if (patch.ar !== undefined) setSecTitleAr(patch.ar);
+                    if (patch.en !== undefined) setSecTitleEn(patch.en);
+                  }}
+                  onLessonDraftChange={(sectionID, draft) =>
+                    setLessonDrafts((current) => ({ ...current, [sectionID]: draft }))
+                  }
+                  onAddSection={handleAddSection}
+                  onAddLesson={handleAddLesson}
+                  onDeleteSection={handleDeleteSection}
+                  onDeleteLesson={handleDeleteLesson}
+                  onContentChanged={refreshSelectedCourse}
+                />
 
                 <div className="border-t pt-4">
                   <button

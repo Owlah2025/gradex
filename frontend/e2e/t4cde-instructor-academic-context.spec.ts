@@ -85,7 +85,7 @@ async function createAcademicCourse(page: Page, title: string): Promise<{ course
   await page.getByTestId("new-course-description-ar").fill("وصف أكاديمي");
   await page.getByTestId("new-course-description-en").fill("Academic context journey");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;
   const revisionID = (await selected.getAttribute("data-revision-id"))!;
@@ -161,7 +161,7 @@ async function createMissingSubjectCourse(
   await page.getByTestId("new-course-title-en").fill(title);
   await page.getByTestId("new-course-description-en").fill("Continue drafting while pending");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Subject request sent for review");
+  await expect(page.getByTestId("authoring-notice")).toContainText("subject request was sent for review");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   await expect(page.getByTestId("subject-request-pending")).toContainText("Pending review", { timeout: 15_000 });
   return courseID;
