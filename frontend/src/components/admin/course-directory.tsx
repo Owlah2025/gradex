@@ -279,8 +279,8 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
             {primary}
           </h2>
           {secondary ? (
-            <p className="text-sm text-muted-foreground" dir="auto">
-              {secondary}
+            <p className="text-sm text-muted-foreground">
+              <bdi>{secondary}</bdi>
             </p>
           ) : null}
 

@@ -201,12 +201,15 @@ function QueueRow({
       {/* The Course title is the row's own header, so a screen reader announces which Course each
           following cell belongs to instead of reading five unattached values. */}
       <TableHeaderCell scope="row" className="min-w-48">
-        <span className="block text-foreground" dir="auto">
-          {primary}
+        {/* `<bdi>` rather than `dir="auto"`: on a block element `dir="auto"` resolves the block's
+            own direction, which pushed an Arabic title to the far edge of an otherwise
+            left-aligned cell. This isolates the run without moving the box. */}
+        <span className="block text-foreground">
+          <bdi>{primary}</bdi>
         </span>
         {secondary ? (
-          <span className="mt-0.5 block text-xs font-normal text-muted-foreground" dir="auto">
-            {secondary}
+          <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+            <bdi>{secondary}</bdi>
           </span>
         ) : null}
       </TableHeaderCell>

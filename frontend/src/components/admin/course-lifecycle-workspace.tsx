@@ -230,7 +230,7 @@ export function CourseLifecycleWorkspace() {
                       data-lifecycle-state={course.lifecycle}
                     >
                       <TableHeaderCell scope="row" className="min-w-48">
-                        <span dir="auto">{title}</span>
+                        <bdi>{title}</bdi>
                       </TableHeaderCell>
                       <TableCell>
                         <LifecycleState course={course} labels={courseLabels} />
@@ -275,9 +275,8 @@ export function CourseLifecycleWorkspace() {
             id="lifecycle-selected-title"
             className="mt-1 font-display text-xl font-bold text-foreground"
             data-testid="lifecycle-selected-title"
-            dir="auto"
           >
-            {locale === "ar" ? selected.title_ar : selected.title_en}
+            <bdi>{locale === "ar" ? selected.title_ar : selected.title_en}</bdi>
           </h2>
           <div className="mt-3" data-testid="lifecycle-selected-state">
             <LifecycleState course={selected} labels={courseLabels} />
