@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import {
@@ -8,7 +9,6 @@ import {
 } from "@/lib/api/review";
 import { describeApiError } from "@/lib/api/api-error";
 import { TaxonomyVocabularyPanel } from "./taxonomy-vocabulary-panel";
-import { SubmittedRevisionInspector } from "./submitted-revision-inspector";
 
 export type { ReviewQueueItem } from "@/lib/api/review";
 
@@ -20,8 +20,12 @@ export type { ReviewQueueItem } from "@/lib/api/review";
  * content: an empty response renders an empty queue, because a Course the
  * founder never submitted must never appear as if it were waiting.
  *
- * Selecting one queue row establishes the Course and exact submitted revision
- * context for inspection, taxonomy override, pricing, preview, and decision.
+ * Selecting one queue row opens the review workspace for that Course at its own
+ * address (`/<locale>/admin/courses/<id>/review`), which is where inspection,
+ * taxonomy override, pricing, preview and the decision live. The workspace used
+ * to be component state here, so a review could not be linked, reloaded or
+ * returned to with Back; the route is what makes it addressable, and what lets
+ * the Courses directory send an Admin straight to the right Course.
  */
 export function ReviewQueue() {
   const { locale, dir } = useLocale();
@@ -30,9 +34,6 @@ export function ReviewQueue() {
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [queueError, setQueueError] = useState<string | null>(null);
-  const [reviewNotice, setReviewNotice] = useState("");
-
-  const [inspectedItem, setInspectedItem] = useState<ReviewQueueItem | null>(null);
 
   const loadQueue = useCallback(async () => {
     setQueueError(null);
@@ -96,12 +97,6 @@ export function ReviewQueue() {
         </p>
       )}
 
-      {reviewNotice && (
-        <p role="status" data-testid="review-action-success" className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
-          {reviewNotice}
-        </p>
-      )}
-
       {loading ? (
         <div data-testid="review-queue-loading" className="text-center py-12 border rounded-lg text-slate-500 dark:text-slate-400">
           {isAr ? "جارٍ تحميل قائمة المراجعة..." : "Loading the review queue..."}
@@ -153,17 +148,15 @@ export function ReviewQueue() {
                   </td>
                   <td className="p-3">
                     <div className="flex justify-center items-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReviewNotice("");
-                          setInspectedItem(item);
-                        }}
+                      {/* A link, not in-page state: the review workspace has its own address, so a
+                          decision can be reloaded, shared and returned to with Back. */}
+                      <Link
+                        href={`/${locale}/admin/courses/${item.course_id}/review`}
                         data-testid={`inspect-review-item-${item.course_id}`}
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       >
                         {isAr ? "فتح مساحة المراجعة" : "Open review workspace"}
-                      </button>
+                      </Link>
                     </div>
                   </td>
                 </tr>
@@ -171,19 +164,6 @@ export function ReviewQueue() {
             </tbody>
           </table>
         </div>
-      )}
-
-      {inspectedItem && (
-        <SubmittedRevisionInspector
-          key={inspectedItem.revision_id}
-          item={inspectedItem}
-          onClose={() => setInspectedItem(null)}
-          onReviewed={async (notice) => {
-            await loadQueue();
-            setReviewNotice(notice);
-            setInspectedItem(null);
-          }}
-        />
       )}
 
       <TaxonomyVocabularyPanel />
