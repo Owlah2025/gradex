@@ -65,7 +65,7 @@ async function apiContext(session: Session): Promise<APIRequestContext> {
 
 async function openAdminCatalog(page: Page): Promise<void> {
   await page.goto("/en/admin/catalog");
-  await expect(page.locator("h1")).toContainText("Course Review & Pricing Admin");
+  await expect(page.locator("h1")).toContainText("Course review & administration");
   // The queue resolves against the server before anything is asserted about it.
   await expect(page.getByTestId("review-queue-loading")).toHaveCount(0);
 }
