@@ -374,7 +374,8 @@ sudo systemctl disable --now gradex-monitor.timer gradex-backup.timer
 ```
 
 The protected runtime file supplies `GRADEX_ALERT_WEBHOOK_URL`, optional
-`GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_MONITOR_CA_FILE`, and the configurable
+`GRADEX_ALERT_WEBHOOK_TOKEN`, optional `GRADEX_ALERT_RESEND_API_KEY`, optional
+`GRADEX_ALERT_EMAIL_TO`, optional `GRADEX_MONITOR_CA_FILE`, and the configurable
 `GRADEX_MONITOR_EMAIL_STALE_SECONDS`, `GRADEX_MONITOR_DISK_WARN_PERCENT`,
 `GRADEX_MONITOR_DISK_CRITICAL_PERCENT`, `GRADEX_MONITOR_DISK_MIN_FREE_BYTES`, and optional
 `GRADEX_MONITOR_DISK_PATHS`. `host.sh monitor` derives root, health, and readiness URLs from
@@ -397,6 +398,11 @@ Configure an optional custom CA only through `GRADEX_MONITOR_CA_FILE`. Use the r
 monitor tests to test alert behavior; do not create a staging outage to test a destination. Disk warning begins
 at 85% used; critical is 95% used or under 5368709120 free bytes. Email outbox failures cover terminal
 delivery states, queued messages due for over 3600 seconds, and expired sending leases.
+Resend alert delivery is independent of the application email outbox. Configure its dedicated monitoring key in
+`GRADEX_ALERT_RESEND_API_KEY` and its recipient in `GRADEX_ALERT_EMAIL_TO`; it reuses the existing
+`EMAIL_FROM_NAME` and `EMAIL_FROM_ADDRESS` sender identity. A failed monitor delivers to every configured
+destination. For a safe live proof without a service outage, run `./deploy/hostinger/host.sh monitor-alert-test`;
+its email subject identifies the message as a synthetic delivery test.
 The hourly schedule uses a two-hour freshness threshold: this allows one delayed or missed run and
 detects stale backup state before a third hourly opportunity. It does not prove an RPO. Successful
 scheduled backups, real external alert delivery, and an isolated provider restore drill remain

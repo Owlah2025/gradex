@@ -53,6 +53,18 @@ capability. The monitor supplies both to `curl` through mode-0600 temporary file
 exit, rather than exposing either value in process arguments. `GRADEX_MONITOR_CA_FILE` optionally
 selects a CA bundle for both probes and webhook TLS.
 
+`GRADEX_ALERT_RESEND_API_KEY` and `GRADEX_ALERT_EMAIL_TO` select an optional Resend destination using the
+existing `EMAIL_FROM_NAME` and `EMAIL_FROM_ADDRESS` sender settings. Either destination may be configured,
+or both may receive the same failure. With neither destination configured, the monitor records that explicit
+condition locally and still exits non-zero for the failed check. Resend delivery accepts only a 2xx response
+carrying an `id`; HTTP failures, connection failures, timeouts, and invalid email configuration are reported
+as delivery failures without exposing response bodies or credentials. It uses the same HTTPS-only TLS policy
+and optional `GRADEX_MONITOR_CA_FILE` trust bundle as the monitor probes.
+
+Run `./deploy/scripts/verify-monitor-resend-alerts.sh` for the disposable Resend delivery contract. For an
+operator-approved live delivery proof, run `./deploy/hostinger/host.sh monitor-alert-test`: it performs normal
+checks, then sends one clearly labeled synthetic alert through configured destinations without creating an outage.
+
 Public probes accept only HTTPS and use certificate verification. Outside `monitor-test`, webhook URLs must
 also be HTTPS; `monitor-test` alone permits an HTTP loopback sink for disposable alert proof.
 

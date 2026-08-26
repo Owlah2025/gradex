@@ -78,6 +78,12 @@ require_https_url GRADEX_HEALTH_URL
 require_https_url GRADEX_READY_URL
 validate_alert_configuration
 
+GRADEX_MONITOR_SYNTHETIC_ALERT_TEST="${GRADEX_MONITOR_SYNTHETIC_ALERT_TEST:-}"
+case "$GRADEX_MONITOR_SYNTHETIC_ALERT_TEST" in
+  ""|1) ;;
+  *) die "GRADEX_MONITOR_SYNTHETIC_ALERT_TEST must be empty or 1" ;;
+esac
+
 declare -A runtime_status=()
 declare -A runtime_detail=()
 declare -A seen_devices=()
@@ -383,6 +389,10 @@ if [ -n "${GRADEX_BACKUP_COMPLETED_AT_FILE:-}" ]; then
   fi
 fi
 
+if [ "$GRADEX_MONITOR_SYNTHETIC_ALERT_TEST" = 1 ]; then
+  record_failure synthetic_alert_test "operator-requested synthetic alert delivery test"
+fi
+
 if [ "${#failures[@]}" -eq 0 ]; then
   if [ "${#warnings[@]}" -gt 0 ]; then
     note "all configured checks passed with warnings"
@@ -405,10 +415,8 @@ payload="$(jq --compact-output --null-input \
   --argjson failures "$failures_json" \
   '{event:"gradex_monitor_failure",environment:$environment,correlation_id:$correlation_id,observed_at:$observed_at,failures:$failures}')"
 
-if [ -z "${GRADEX_ALERT_WEBHOOK_URL:-}" ]; then
-  note "checks failed and no alert webhook is configured (correlation_id=$correlation_id)"
-  exit 1
-fi
+deliver_webhook() {
+  [ -n "${GRADEX_ALERT_WEBHOOK_URL:-}" ] || return 2
 
 case "$GRADEX_ALERT_WEBHOOK_URL" in
   *$'\r'*|*$'\n'*|*'"'*|*'\'*) die "GRADEX_ALERT_WEBHOOK_URL contains a character unsafe for curl configuration" ;;
@@ -429,8 +437,112 @@ if [ -n "${GRADEX_ALERT_WEBHOOK_TOKEN:-}" ]; then
   webhook_args+=(--header "@$authorization_header")
 fi
 if ! curl "${webhook_args[@]}" --config "$webhook_url_config" >/dev/null; then
-  note "checks failed and alert delivery failed (correlation_id=$correlation_id)"
-  exit 1
+  return 1
 fi
-note "checks failed and alert delivery succeeded (correlation_id=$correlation_id)"
+return 0
+}
+
+resend_alert_requested() {
+  [ -n "${GRADEX_ALERT_RESEND_API_KEY:-}" ] || [ -n "${GRADEX_ALERT_EMAIL_TO:-}" ]
+}
+
+validate_resend_alert_configuration() {
+  local value
+  [ -n "${GRADEX_ALERT_RESEND_API_KEY:-}" ] || { RESEND_ALERT_ERROR="Resend API key is missing"; return 1; }
+  [ -n "${GRADEX_ALERT_EMAIL_TO:-}" ] || { RESEND_ALERT_ERROR="Resend recipient is missing"; return 1; }
+  [ -n "${EMAIL_FROM_ADDRESS:-}" ] || { RESEND_ALERT_ERROR="Resend sender address is missing"; return 1; }
+  [ -n "${EMAIL_FROM_NAME:-}" ] || { RESEND_ALERT_ERROR="Resend sender name is missing"; return 1; }
+  for value in "$GRADEX_ALERT_RESEND_API_KEY" "$GRADEX_ALERT_EMAIL_TO" "$EMAIL_FROM_ADDRESS" "$EMAIL_FROM_NAME"; do
+    case "$value" in *$'\r'*|*$'\n'*) RESEND_ALERT_ERROR="Resend configuration contains an invalid line break"; return 1 ;; esac
+  done
+  [[ "$GRADEX_ALERT_EMAIL_TO" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { RESEND_ALERT_ERROR="Resend recipient is invalid"; return 1; }
+  [[ "$EMAIL_FROM_ADDRESS" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { RESEND_ALERT_ERROR="Resend sender address is invalid"; return 1; }
+}
+
+alert_email_text() {
+  local failure
+  if [ "$GRADEX_MONITOR_SYNTHETIC_ALERT_TEST" = 1 ]; then
+    printf 'This is a synthetic Gradex monitoring alert delivery test. No outage is implied.\n\n'
+  else
+    printf 'Gradex Founder Beta monitoring detected a failure.\n\n'
+  fi
+  printf 'Correlation ID: %s\nDetected at: %s\n\nFailed checks:\n' \
+    "$correlation_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  for failure in "${failures[@]}"; do
+    printf -- '- %s: %s\n' "$failure" "${failure_detail[$failure]}"
+  done
+}
+
+deliver_resend_email() {
+  local response status curl_status subject text from authorization_header resend_payload
+  RESEND_ALERT_ERROR=""
+  validate_resend_alert_configuration || return 2
+  if [ "$GRADEX_MONITOR_SYNTHETIC_ALERT_TEST" = 1 ]; then
+    subject='[Gradex] Monitoring alert delivery test'
+  else
+    subject="[Gradex] Monitoring failure — ${failures[0]}"
+  fi
+  text="$(alert_email_text)"
+  from="$EMAIL_FROM_NAME <$EMAIL_FROM_ADDRESS>"
+  resend_payload="$(jq --compact-output --null-input \
+    --arg from "$from" \
+    --arg to "$GRADEX_ALERT_EMAIL_TO" \
+    --arg subject "$subject" \
+    --arg text "$text" \
+    '{from:$from,to:[$to],subject:$subject,text:$text}')"
+  authorization_header="$temporary/resend-authorization.header"
+  printf 'Authorization: Bearer %s\n' "$GRADEX_ALERT_RESEND_API_KEY" >"$authorization_header"
+  chmod 600 "$authorization_header"
+  response="$temporary/resend-response.json"
+  if status="$(curl --silent --show-error --connect-timeout 5 --max-time 10 \
+    "${probe_tls_args[@]}" \
+    --header 'Content-Type: application/json' --header "@$authorization_header" \
+    --data "$resend_payload" --output "$response" --write-out '%{http_code}' \
+    https://api.resend.com/emails)"; then
+    curl_status=0
+  else
+    curl_status=$?
+  fi
+  case "$curl_status" in
+    0) ;;
+    28) RESEND_ALERT_ERROR="Resend request timed out"; return 1 ;;
+    *) RESEND_ALERT_ERROR="Resend connection failed"; return 1 ;;
+  esac
+  [[ "$status" =~ ^2[0-9][0-9]$ ]] || { RESEND_ALERT_ERROR="Resend HTTP status ${status:-unavailable}"; return 1; }
+  jq --exit-status --raw-output '.id | strings | select(length > 0)' "$response" >/dev/null || {
+    RESEND_ALERT_ERROR="Resend response is missing an id"
+    return 1
+  }
+}
+
+deliver_alerts() {
+  local attempted=0 successful=0
+  if [ -n "${GRADEX_ALERT_WEBHOOK_URL:-}" ]; then
+    attempted=$((attempted + 1))
+    if deliver_webhook; then
+      successful=$((successful + 1))
+      note "webhook alert delivery succeeded (correlation_id=$correlation_id)"
+    else
+      note "webhook alert delivery failed (correlation_id=$correlation_id)"
+    fi
+  fi
+  if resend_alert_requested; then
+    attempted=$((attempted + 1))
+    if deliver_resend_email; then
+      successful=$((successful + 1))
+      note "Resend alert delivery succeeded (correlation_id=$correlation_id)"
+    else
+      note "Resend alert delivery failed: $RESEND_ALERT_ERROR (correlation_id=$correlation_id)"
+    fi
+  fi
+  if [ "$attempted" -eq 0 ]; then
+    note "checks failed and no alert destination is configured (correlation_id=$correlation_id)"
+  elif [ "$successful" -gt 0 ]; then
+    note "checks failed and alert delivery succeeded (correlation_id=$correlation_id)"
+  else
+    note "checks failed and all configured alert deliveries failed (correlation_id=$correlation_id)"
+  fi
+}
+
+deliver_alerts
 exit 1

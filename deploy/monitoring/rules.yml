@@ -52,7 +52,13 @@ log_alerts:
     event: transactional_email
     condition: phase in [permanent_failure, exhausted]
 delivery:
-  type: webhook
-  optional_environment: GRADEX_ALERT_WEBHOOK_URL
-  optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN
-  https_required_outside_monitor_test: true
+  destinations:
+    - type: webhook
+      optional_environment: GRADEX_ALERT_WEBHOOK_URL
+      optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN
+      https_required_outside_monitor_test: true
+    - type: resend_email
+      endpoint: https://api.resend.com/emails
+      optional_api_key: GRADEX_ALERT_RESEND_API_KEY
+      recipient: GRADEX_ALERT_EMAIL_TO
+      sender: [EMAIL_FROM_NAME, EMAIL_FROM_ADDRESS]

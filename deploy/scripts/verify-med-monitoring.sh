@@ -182,7 +182,7 @@ EOF
 }
 
 run_host_monitor() {
-  local expected_status="$1"
+  local expected_status="$1" host_monitor_command="${MONITOR_COMMAND:-monitor}"
   set +e
   PATH="$fake_bin:$PATH" \
     FAKE_DOCKER_ROOT="${FAKE_DOCKER_ROOT-$host_state}" \
@@ -208,7 +208,7 @@ run_host_monitor() {
     GRADEX_MONITOR_WORKER_CONTAINER="${GRADEX_MONITOR_WORKER_CONTAINER:-}" \
     GRADEX_MONITOR_POSTGRES_CONTAINER="${GRADEX_MONITOR_POSTGRES_CONTAINER:-}" \
     GRADEX_MONITOR_API_CONTAINER="${GRADEX_MONITOR_API_CONTAINER:-}" \
-    "$S12_HOST" monitor >"$host_monitor_log" 2>&1
+    "$S12_HOST" "$host_monitor_command" >"$host_monitor_log" 2>&1
   monitor_status=$?
   set -e
   [ "$monitor_status" = "$expected_status" ] || {
@@ -250,7 +250,7 @@ main() {
 
   FAKE_ROOT_STATUS=500 run_direct_monitor 1
   assert_log_contains 'FAIL api_root: HTTP status 500'
-  assert_log_contains 'checks failed and no alert webhook is configured'
+  assert_log_contains 'checks failed and no alert destination is configured'
   unset FAKE_ROOT_STATUS
 
   FAKE_READY_STATUS=503 run_direct_monitor 1
@@ -359,6 +359,10 @@ main() {
   printf 'gradex-monitor-test|api|running\n' >"$api_labels_file"
   printf 'running\n' >"$docker_status_file"
   run_host_monitor 0
+
+  MONITOR_COMMAND=monitor-alert-test run_host_monitor 1
+  grep --fixed-strings --quiet 'FAIL synthetic_alert_test: operator-requested synthetic alert delivery test' "$host_monitor_log" ||
+    die "synthetic monitor alert test command was not reported"
 
   host_runtime_without_backend="$host_state/runtime-without-backend.env"
   grep --invert-match '^GRADEX_BACKEND_IMAGE=' "$host_runtime_env" >"$host_runtime_without_backend"

@@ -531,6 +531,18 @@ run_monitor() {
   return "$monitor_status"
 }
 
+run_monitor_alert_test() {
+  local monitor_status
+  export GRADEX_MONITOR_SYNTHETIC_ALERT_TEST=1
+  if run_monitor; then
+    monitor_status=0
+  else
+    monitor_status=$?
+  fi
+  unset GRADEX_MONITOR_SYNTHETIC_ALERT_TEST
+  return "$monitor_status"
+}
+
 open_db_tunnel() {
   require_tools
   validate_local_targets
@@ -918,7 +930,7 @@ apply_release() {
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|verify|seed-smoke|monitor|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|verify|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -928,6 +940,7 @@ case "${1:-}" in
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
   seed-smoke) [ "$#" = 1 ] || usage; seed_smoke ;;
   monitor) [ "$#" = 1 ] || usage; run_monitor ;;
+  monitor-alert-test) [ "$#" = 1 ] || usage; run_monitor_alert_test ;;
   open-db-tunnel) [ "$#" = 1 ] || usage; open_db_tunnel ;;
   close-db-tunnel) [ "$#" = 1 ] || usage; close_db_tunnel ;;
   backup-init) [ "$#" = 1 ] || usage; initialize_backup_repository ;;

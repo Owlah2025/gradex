@@ -112,9 +112,15 @@ main() {
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_CRITICAL_PERCENT=95'
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_DISK_MIN_FREE_BYTES=5368709120'
   assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_MONITOR_CA_FILE='
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_ALERT_RESEND_API_KEY='
+  assert_line "$S12_ROOT/deploy/hostinger/runtime.env.example" 'GRADEX_ALERT_EMAIL_TO='
   grep --quiet --fixed-strings 'optional_environment: GRADEX_ALERT_WEBHOOK_URL' \
     "$S12_ROOT/deploy/monitoring/rules.yml" ||
     die "monitoring rules do not describe the optional webhook accurately"
+  grep --quiet --fixed-strings 'type: resend_email' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not describe the optional Resend destination"
+  grep --quiet --fixed-strings 'endpoint: https://api.resend.com/emails' "$S12_ROOT/deploy/monitoring/rules.yml" ||
+    die "monitoring rules do not document the Resend endpoint"
   grep --quiet --fixed-strings 'optional_bearer_secret: GRADEX_ALERT_WEBHOOK_TOKEN' \
     "$S12_ROOT/deploy/monitoring/rules.yml" ||
     die "monitoring rules do not describe the optional bearer credential accurately"
