@@ -1,6 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { controlVariants, type ControlSize } from "./control";
+import { controlClasses, type ControlSize } from "./control";
 
 /**
  * A native `<select>`, wearing the design system.
@@ -17,7 +17,7 @@ export const Select = React.forwardRef<
   HTMLSelectElement,
   React.SelectHTMLAttributes<HTMLSelectElement> & { controlSize?: ControlSize }
 >(({ className, controlSize = "default", children, ...props }, ref) => (
-  <select ref={ref} className={cn(controlVariants({ controlSize }), "pe-8", className)} {...props}>
+  <select ref={ref} className={cn(controlClasses(controlSize), "pe-8", className)} {...props}>
     {children}
   </select>
 ));

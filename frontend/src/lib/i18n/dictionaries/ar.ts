@@ -749,7 +749,7 @@ export const ar: Dictionary = {
   },
   instructor: {
     studio: {
-      title: "Course Authoring Studio",
+      title: "منصة إعداد الدورات التعليمية",
       intro:
         "أنشئ مسوّدات دوراتك وأدرها من هنا. لا يصل شيء إلى الطلاب حتى ترسل مراجعة ويعتمدها مسؤول.",
       newCourse: "دورة جديدة",

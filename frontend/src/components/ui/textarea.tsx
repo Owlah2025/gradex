@@ -1,6 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { controlVariants } from "./control";
+import { controlClasses } from "./control";
 
 export const Textarea = React.forwardRef<
   HTMLTextAreaElement,
@@ -9,7 +9,7 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     rows={rows}
-    className={cn(controlVariants({ controlSize: "auto" }), "min-h-24 py-3 leading-6", className)}
+    className={cn(controlClasses("auto"), "min-h-24 py-3 leading-6", className)}
     {...props}
   />
 ));
