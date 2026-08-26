@@ -39,7 +39,11 @@ export function StatusBadge({
 }) {
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-2", className)}>
-      <Badge variant={tone} size={size} data-testid={labelTestID}>
+      {/* A status pill is a short, fixed vocabulary and must stay on one line: inside a table the
+          container scrolls, and a pill that breaks mid-word ("Updat / a publis / cours") reads as
+          damage. `Badge` itself stays wrappable — the public catalogue puts whole taxonomy labels
+          in one, and those must be allowed to break. */}
+      <Badge variant={tone} size={size} className="whitespace-nowrap" data-testid={labelTestID}>
         {label}
       </Badge>
       {detail ? (
