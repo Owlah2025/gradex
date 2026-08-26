@@ -72,9 +72,15 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
             <Bell className="size-5" aria-hidden />
           </Button>
         )}
-        <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
-          <Link href={authenticatedHome.href}>{t.nav[authenticatedHome.key]}</Link>
-        </Button>
+        {/* No workspace control at all when the session names no role this application knows.
+            There is no honest destination to offer — every candidate either invents a role for the
+            visitor or is a link the server refuses — and an anchor with no `href` is a control that
+            looks operable and does nothing. Sign out stays, which is the action that applies. */}
+        {authenticatedHome && (
+          <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
+            <Link href={authenticatedHome.href}>{t.nav[authenticatedHome.key]}</Link>
+          </Button>
+        )}
         <Button
           variant="outline"
           size={stacked ? "default" : "sm"}

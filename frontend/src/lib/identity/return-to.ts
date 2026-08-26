@@ -70,47 +70,60 @@ export function safeReturnTo(value: unknown): string | null {
 }
 
 /**
- * The stable existing application surface for a role and locale.
+ * Where a signed-in visitor with no identifiable role is sent.
  *
- * The `default` is not unreachable defensive padding. `SessionRole` is a closed union, so the
- * compiler accepted this switch without one — but the role arriving here is read off
- * `GET /session` and cast to `AuthenticatedSession` without validation, so nothing at runtime
- * guarantees it is a member of that union. A server that grows a fourth role, or any response the
- * frontend does not recognise, fell straight through this switch and returned `undefined` from a
- * function declared to return `string`.
+ * The public landing page: it exists, it is not a role workspace, and it asserts nothing about who
+ * the visitor is. The shared header still offers Sign out there, which is the one action that is
+ * unambiguously correct for a session the application cannot classify.
+ */
+export const neutralRoot = "/";
+
+/**
+ * The stable existing application surface for a role and locale, or `null` when there is none.
  *
- * That undefined then reached three places: the workspace link in the header, which React rendered
- * as `<Link href={undefined}>` — a dead control with no `href` at all, and the source of the
- * development-overlay warning on every route — the workspace navigation's home entry, and
- * `postLoginDestination`, which would have pushed the router at `undefined`.
+ * `SessionRole` is a closed union, so the compiler accepted an exhaustive switch here without a
+ * `default` — but the role arriving here is read off `GET /session` and cast to
+ * `AuthenticatedSession` without validation, so nothing at runtime guarantees membership. Any role
+ * outside the union fell through and this function returned `undefined` from a signature declaring
+ * `string`. That undefined reached the shared header, which rendered `<Link href={undefined}>`: an
+ * anchor carrying no `href` at all.
  *
- * An unrecognised principal goes to the Student dashboard: it is the least-privileged surface of
- * the three, it is a route that exists, and the server still refuses whatever that principal is
- * not entitled to. The alternative — guessing at a workspace — would point an unknown role at an
- * administrative screen.
+ * The return type is now honest. `null` states "this principal has no role workspace", which no
+ * path this function could return is able to say, and it forces each caller to decide what to do
+ * about that instead of receiving a destination never derived from the role.
+ *
+ * An unrecognised role is deliberately NOT mapped onto the least-privileged workspace. Being
+ * unclassifiable is not evidence of being a Student — `/learn` is a Student surface, and sending an
+ * unknown principal there asserts something about them the session never said.
  */
 export function roleRoot(
   role: SessionRole,
   locale: "ar" | "en",
-): string {
+): string | null {
   switch (role) {
+    case "STUDENT":
+      return `/${locale}/learn/dashboard`;
     case "INSTRUCTOR":
       return `/${locale}/instructor/courses`;
     case "ADMIN":
       return `/${locale}/admin/catalog`;
-    case "STUDENT":
     default:
-      return `/${locale}/learn/dashboard`;
+      return null;
   }
 }
 
-/** Prefers a validated caller destination, else the role root. */
+/**
+ * Prefers a validated caller destination, else the role root.
+ *
+ * This one must produce a path — the browser is mid-navigation and has to land somewhere — so an
+ * unidentifiable role falls back to the neutral root rather than to any role's workspace.
+ */
 export function postLoginDestination(
   role: SessionRole,
   requested: unknown,
   locale: "ar" | "en",
 ): string {
-  return safeReturnTo(requested) ?? roleRoot(role, locale);
+  return safeReturnTo(requested) ?? roleRoot(role, locale) ?? neutralRoot;
 }
 
 /**

@@ -26,17 +26,28 @@ export type RoleHomeNavigationKey =
   | "instructorStudio"
   | "adminWorkspace";
 
+/**
+ * The one workspace entry the shared header offers a signed-in visitor, or `null` when the session
+ * names no role this application recognises.
+ *
+ * `null` rather than a fallback destination: the header's job here is to offer the visitor *their*
+ * workspace, and there is no honest answer to that for an unclassifiable principal. Naming one
+ * would either invent a role or hand out a link the server refuses. The caller renders no workspace
+ * control at all in that case — Sign out remains, which is the action that actually applies.
+ */
 export function roleHomeNavigation(
   role: SessionRole,
   locale: "ar" | "en",
-): { key: RoleHomeNavigationKey; href: string } {
+): { key: RoleHomeNavigationKey; href: string } | null {
+  const href = roleRoot(role, locale);
+  if (href === null) return null;
   const key: RoleHomeNavigationKey =
     role === "ADMIN"
       ? "adminWorkspace"
       : role === "INSTRUCTOR"
         ? "instructorStudio"
         : "dashboard";
-  return { key, href: roleRoot(role, locale) };
+  return { key, href };
 }
 
 export function roleWorkspaceNavigation(
@@ -44,6 +55,10 @@ export function roleWorkspaceNavigation(
   locale: "ar" | "en",
 ): WorkspaceNavigationItem[] {
   const home = roleRoot(role, locale);
+  // `WorkspaceRole` narrows to ADMIN | INSTRUCTOR, both of which have a root — but the value is
+  // still a runtime string off the session, and an empty navigation is the correct answer to "which
+  // workspace entries does an unrecognised role get" rather than a row of links built on `null`.
+  if (home === null) return [];
   if (role === "ADMIN") {
     return [
       // Courses leads, because it is the surface an Admin can start from without already knowing
