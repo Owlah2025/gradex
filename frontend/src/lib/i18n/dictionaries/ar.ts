@@ -747,6 +747,42 @@ export const ar: Dictionary = {
       failed: "تعذّر قبول الدعوة.",
     },
   },
+  /**
+   * صفحة تفاصيل الدورة العامة. كل عنوان هنا يصف حقلاً يعيده عقد الكتالوج العام فعلاً.
+   */
+  courseDetail: {
+    taughtBy: "يدرّسها",
+    aboutHeading: "عن هذه الدورة",
+    academicHeading: "موقع هذه الدورة في خطتك",
+    academicLead:
+      "الخطة الدراسية التي تنتمي إليها هذه الدورة، لتعرف بنظرة واحدة إن كانت موجهة إليك.",
+    university: "الجامعة",
+    major: "التخصص",
+    subject: "المقرر",
+    subjectCode: "رمز المقرر",
+    level: "المستوى الدراسي",
+    audience: "تُدرَّس ضمن هذه التخصصات",
+    sectionsLabel: "الأقسام",
+    lessonsLabel: "الدروس",
+    sectionNumber: "القسم",
+    showAllSections: "اعرض كل الأقسام",
+    showFewerSections: "اعرض أقساماً أقل",
+    emptyCurriculum: "لم يُنشر محتوى هذه الدورة بعد.",
+    previewHeading: "معاينة الدورة",
+    previewLead:
+      "مقطع قصير نشره المدرّس للجميع. تُفتح بقية الدورة عند حصولك على صلاحية الوصول.",
+    instructorHeading: "مدرّس الدورة",
+    instructorRole: "مؤلف الدورة",
+    instructorNote: "كتب هذه الدورة ويدرّسها هذا المدرّس على منصة جراديكس.",
+    accessRegion: "الوصول إلى هذه الدورة",
+    accessJump: "خيارات الوصول",
+    unavailableTitle: "هذه الدورة غير متاحة",
+    unavailableBody:
+      "قد تكون قد سُحبت، أو قد يكون الرابط غير صحيح. تصفّح الكتالوج للعثور على دورة أخرى.",
+    loadFailedTitle: "تعذّر تحميل هذه الدورة",
+    loadFailedBody: "حدث خطأ أثناء قراءة الكتالوج. حاول مرة أخرى بعد قليل.",
+    loading: "جارٍ تحميل الدورة…",
+  },
   instructor: {
     studio: {
       title: "منصة إعداد الدورات التعليمية",

@@ -780,6 +780,49 @@ export const en = {
       failed: "The invitation could not be accepted.",
     },
   },
+  /**
+   * The public Course Details page.
+   *
+   * Every label here describes a field the public catalogue contract actually returns. There is no
+   * copy for ratings, reviews, enrolment counts, course duration, or learning outcomes, because
+   * `GET /api/v1/catalog/courses/{idOrSlug}` carries none of them and a label with nothing true
+   * behind it is worse than an absent section.
+   */
+  courseDetail: {
+    taughtBy: "Taught by",
+    aboutHeading: "About this course",
+    academicHeading: "Where this course fits",
+    academicLead:
+      "The study plan this course belongs to, so you can tell at a glance whether it is meant for you.",
+    university: "University",
+    major: "Major",
+    subject: "Subject",
+    subjectCode: "Course code",
+    level: "Academic level",
+    audience: "Studied in these programs",
+    sectionsLabel: "Sections",
+    lessonsLabel: "Lessons",
+    sectionNumber: "Section",
+    showAllSections: "Show every section",
+    showFewerSections: "Show fewer sections",
+    emptyCurriculum: "The outline for this course has not been published yet.",
+    previewHeading: "Course preview",
+    previewLead:
+      "A short excerpt the instructor published openly. The rest of the course opens once you have access.",
+    instructorHeading: "Your instructor",
+    instructorRole: "Course author",
+    instructorNote:
+      "This course was written and is taught by this instructor on Gradex.",
+    accessRegion: "Access to this course",
+    accessJump: "Access options",
+    unavailableTitle: "This course is not available",
+    unavailableBody:
+      "It may have been withdrawn, or the link may be wrong. Browse the catalogue to find another course.",
+    loadFailedTitle: "This course could not be loaded",
+    loadFailedBody:
+      "Something went wrong while reading the catalogue. Try again in a moment.",
+    loading: "Loading this course…",
+  },
   instructor: {
     studio: {
       title: "Course Authoring Studio",
