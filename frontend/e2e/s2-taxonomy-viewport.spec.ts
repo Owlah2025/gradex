@@ -47,8 +47,8 @@ function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | 
       : ["Course Authoring Studio", "Official Server Prices (Read-only Server State)", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["قائمة مراجعة وتسعير الدورات", "إدارة قاموس التصنيف", "قاموس التصنيف"]
-    : ["Course Review & Pricing Admin", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
+    ? ["مراجعة الدورات وإدارتها", "إدارة قاموس التصنيف", "قاموس التصنيف"]
+    : ["Course review & administration", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
 }
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
@@ -61,8 +61,12 @@ for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
         await page.goto(path);
 
         await expect(page.locator("html")).toHaveAttribute("dir", direction);
+        // Scoped to the page content rather than the whole document: the workspace navigation
+        // entry that leads to a screen now carries the same words as that screen's own heading,
+        // which is the intent, but leaves a bare document-wide text match ambiguous.
+        const content = page.locator("#main");
         for (const heading of expectedScreenHeadings(surfaceName, locale)) {
-          await expect(page.getByText(heading, { exact: true })).toBeVisible();
+          await expect(content.getByText(heading, { exact: true })).toBeVisible();
         }
         await expect(page.locator("button, input, select").first()).toBeVisible();
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBe(true);
