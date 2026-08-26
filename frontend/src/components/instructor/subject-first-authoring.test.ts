@@ -295,11 +295,22 @@ test("T4-C customization and reset use the revision-scoped API", async () => {
   assert.equal(calls[1].method, "DELETE");
   assert.match(calls[0].url, /\/courses\/course-1\/revisions\/revision-1\/audience$/);
 
+  // The controls are still offered and still bilingual; the copy now lives in the dictionaries
+  // rather than as a pair of literals inside the component, so that is where it is asserted.
   const audience = readCode(AUDIENCE);
-  assert.match(audience, /Customize Audience/);
-  assert.match(audience, /تخصيص الجمهور/);
-  assert.match(audience, /Use automatic audience/);
   assert.match(audience, /type="checkbox"/);
+  assert.match(audience, /labels\.customize/);
+  assert.match(audience, /labels\.useAutomatic/);
+  assert.ok(
+    !/isAr \?/.test(audience),
+    "the audience editor must not branch its UI copy on the locale in place",
+  );
+  for (const dictionary of ["src/lib/i18n/dictionaries/en.ts", "src/lib/i18n/dictionaries/ar.ts"]) {
+    const source = readSource(dictionary);
+    for (const key of ["customize:", "useAutomatic:", "legend:"]) {
+      assert.ok(source.includes(key), `${dictionary} is missing the audience ${key} vocabulary`);
+    }
+  }
 });
 
 test("T4-D Instructor request create/read are scoped to the Instructor routes", async () => {

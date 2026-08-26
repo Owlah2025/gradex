@@ -2,9 +2,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { ServerPricingPanel } from "./server-pricing-panel";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
-import { AcademicSubjectPicker, type AcademicSubjectSelection } from "./academic-subject-picker";
+import type { AcademicSubjectSelection } from "./academic-subject-picker";
 import { AcademicCourseContextPanel } from "./academic-course-context";
 import { LessonVideoUpload } from "./lesson-video-upload";
 import { PublicPreviewUpload } from "./public-preview-upload";
@@ -35,13 +34,20 @@ import { createSubjectRequest } from "@/lib/api/subject-requests";
 import { CourseRoster } from "./course-roster";
 import { InstructorCourseList } from "./instructor-course-list";
 import { courseDisplayTitle } from "./course-standing";
+import { CoursePricingSummary } from "./course-pricing-summary";
+import { NewCourseForm } from "./new-course-form";
 import { ErrorState } from "@/components/common/error-state";
+import { EmptyState } from "@/components/common/empty-state";
 import {
   WorkspacePage,
   WorkspacePageHeader,
 } from "@/components/layout/workspace-page";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 /**
  * Instructor Course Authoring Studio.
@@ -51,6 +57,8 @@ import { Button } from "@/components/ui/button";
  * after each successful command it re-reads the owned-Course graph, so what the
  * Instructor sees is what a page reload would show.
  */
+const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
+
 export function CourseBuilder() {
   const { locale, t } = useLocale();
   const isAr = locale === "ar";
@@ -269,11 +277,7 @@ export function CourseBuilder() {
       setRequestedTitleEn("");
       setRequestedNote("");
       setIsCreating(false);
-      setNotice(
-        academic
-          ? (isAr ? "تم إنشاء الكورس على الخادم." : "Course created on the server.")
-          : (isAr ? "تم إنشاء مسودة الكورس وإرسال طلب المادة للمراجعة." : "Course draft created and Subject request sent for review."),
-      );
+      setNotice(academic ? details.created : details.createdWithRequest);
     });
   };
 
@@ -287,7 +291,7 @@ export function CourseBuilder() {
     void command(async (csrf) => {
       await setCourseSubject({ courseID: selectedCourse.id, subjectID, locale, csrf });
       await refreshSelectedCourse();
-      setNotice(isAr ? "تم تحديث مادة الكورس." : "Course Subject updated.");
+      setNotice(instructor.academic.changed);
     });
   };
 
@@ -312,7 +316,7 @@ export function CourseBuilder() {
         csrf,
       });
       await refreshSelectedCourse();
-      setNotice(isAr ? "تم إرسال طلب المادة للمراجعة." : "Subject request sent for review.");
+      setNotice(details.subjectRequestSent);
       return true;
     } catch (cause) {
       setError(describeApiError(cause, locale));
@@ -333,7 +337,7 @@ export function CourseBuilder() {
         csrf,
       });
       await refreshSelectedCourse();
-      setNotice(isAr ? "تم تخصيص جمهور الكورس." : "Course audience customized.");
+      setNotice(instructor.academic.audienceCustomized);
     });
   };
 
@@ -342,7 +346,7 @@ export function CourseBuilder() {
     void command(async (csrf) => {
       await resetRevisionAudience({ courseID: selectedCourse.id, revisionID: revision.id!, locale, csrf });
       await refreshSelectedCourse();
-      setNotice(isAr ? "تمت استعادة الجمهور التلقائي." : "Automatic audience restored.");
+      setNotice(instructor.academic.audienceReset);
     });
   };
 
@@ -366,7 +370,7 @@ export function CourseBuilder() {
         csrf,
       });
       await refreshSelectedCourse();
-      setNotice(isAr ? "تم حفظ تفاصيل المراجعة." : "Revision details saved.");
+      setNotice(details.saved);
     });
   };
 
@@ -475,6 +479,7 @@ export function CourseBuilder() {
 
   const instructor = t.instructor;
   const studio = instructor.studio;
+  const details = instructor.details;
 
   return (
     <WorkspacePage className="space-y-8">
@@ -505,8 +510,6 @@ export function CourseBuilder() {
         </div>
       )}
 
-      <ServerPricingPanel />
-
       {/*
         Legacy taxonomy compatibility (D-093 §6).
 
@@ -520,134 +523,43 @@ export function CourseBuilder() {
       {courses.some((course) => !isAcademicCourse(course)) && <TaxonomyAssignmentPanel />}
 
       {isCreating && (
-        <form
-          id="new-course-form"
+        <NewCourseForm
+          draft={{
+            titleAr: newTitleAr,
+            titleEn: newTitleEn,
+            descriptionAr: newDescAr,
+            descriptionEn: newDescEn,
+            requestedCode,
+            requestedTitleAr,
+            requestedTitleEn,
+            requestedNote,
+          }}
+          onDraftChange={(patch) => {
+            if (patch.titleAr !== undefined) setNewTitleAr(patch.titleAr);
+            if (patch.titleEn !== undefined) setNewTitleEn(patch.titleEn);
+            if (patch.descriptionAr !== undefined) setNewDescAr(patch.descriptionAr);
+            if (patch.descriptionEn !== undefined) setNewDescEn(patch.descriptionEn);
+            if (patch.requestedCode !== undefined) setRequestedCode(patch.requestedCode);
+            if (patch.requestedTitleAr !== undefined) setRequestedTitleAr(patch.requestedTitleAr);
+            if (patch.requestedTitleEn !== undefined) setRequestedTitleEn(patch.requestedTitleEn);
+            if (patch.requestedNote !== undefined) setRequestedNote(patch.requestedNote);
+          }}
+          academic={newAcademic}
+          onAcademicChange={(selection) => {
+            setNewAcademic(selection);
+            if (selection) setRequestingMissingSubject(false);
+          }}
+          onInstitutionChange={(institutionID) => {
+            setNewInstitutionID(institutionID);
+            setRequestingMissingSubject(false);
+          }}
+          requestingMissingSubject={requestingMissingSubject}
+          onRequestMissing={() => setRequestingMissingSubject(true)}
+          institutionID={newInstitutionID}
+          busy={busy}
+          labels={details}
           onSubmit={handleCreateCourse}
-          data-testid="new-course-form"
-          className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4"
-        >
-          <h2 className="text-lg font-semibold">{isAr ? "إنشاء كورس جديد" : "Create a new Course"}</h2>
-
-          {/*
-            University then Subject, before any Course copy. The academic identity
-            is what the Course IS; the title and description describe it.
-          */}
-          <AcademicSubjectPicker
-            onChange={(selection) => {
-              setNewAcademic(selection);
-              if (selection) setRequestingMissingSubject(false);
-            }}
-            onInstitutionChange={(institutionID) => {
-              setNewInstitutionID(institutionID);
-              setRequestingMissingSubject(false);
-            }}
-            onRequestMissing={() => setRequestingMissingSubject(true)}
-          />
-
-          {requestingMissingSubject && (
-            <fieldset className="space-y-3 rounded-md border border-amber-300 p-4" data-testid="new-course-subject-request">
-              <legend className="px-1 text-sm font-semibold">
-                {isAr ? "طلب إضافة مادة" : "Request a missing Subject"}
-              </legend>
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                {isAr
-                  ? "يمكنك متابعة إعداد محتوى الكورس، لكن لا يمكن إرساله للمراجعة حتى تربطه الإدارة بمادة رسمية."
-                  : "You can keep building the Course, but it cannot be submitted until Admin links an official Subject."}
-              </p>
-              <input
-                value={requestedCode}
-                onChange={(event) => setRequestedCode(event.target.value)}
-                placeholder={isAr ? "الرمز الرسمي (اختياري)" : "Official code (optional)"}
-                data-testid="subject-request-code"
-                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-              <input
-                value={requestedTitleAr}
-                onChange={(event) => setRequestedTitleAr(event.target.value)}
-                placeholder={isAr ? "اسم المادة الرسمي بالعربية" : "Official Arabic Subject title"}
-                required
-                data-testid="subject-request-title-ar"
-                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-              <input
-                value={requestedTitleEn}
-                onChange={(event) => setRequestedTitleEn(event.target.value)}
-                placeholder={isAr ? "اسم المادة الرسمي بالإنجليزية" : "Official English Subject title"}
-                required
-                data-testid="subject-request-title-en"
-                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-              <textarea
-                value={requestedNote}
-                onChange={(event) => setRequestedNote(event.target.value)}
-                placeholder={isAr ? "سياق أو ملاحظة للإدارة" : "Context or note for Admin"}
-                rows={2}
-                data-testid="subject-request-note"
-                className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-            </fieldset>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="block text-sm font-medium">
-              {isAr ? "عنوان الدورة (بالعربية)" : "Course Title (Arabic)"}
-              <input
-                type="text"
-                value={newTitleAr}
-                onChange={(event) => setNewTitleAr(event.target.value)}
-                required
-                data-testid="new-course-title-ar"
-                className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              {isAr ? "عنوان الدورة (بالإنجليزية)" : "Course Title (English)"}
-              <input
-                type="text"
-                value={newTitleEn}
-                onChange={(event) => setNewTitleEn(event.target.value)}
-                required
-                data-testid="new-course-title-en"
-                className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              {isAr ? "الوصف (بالعربية)" : "Description (Arabic)"}
-              <textarea
-                value={newDescAr}
-                onChange={(event) => setNewDescAr(event.target.value)}
-                rows={3}
-                data-testid="new-course-description-ar"
-                className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              {isAr ? "الوصف (بالإنجليزية)" : "Description (English)"}
-              <textarea
-                value={newDescEn}
-                onChange={(event) => setNewDescEn(event.target.value)}
-                rows={3}
-                data-testid="new-course-description-en"
-                className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-              />
-            </label>
-          </div>
-          <button
-            type="submit"
-            disabled={busy || (!newAcademic && !(requestingMissingSubject && newInstitutionID && requestedTitleAr && requestedTitleEn))}
-            data-testid="create-course"
-            className="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {isAr ? "إنشاء الكورس" : "Create Course"}
-          </button>
-          {!newAcademic && !requestingMissingSubject && (
-            <p className="text-xs text-slate-600 dark:text-slate-400" data-testid="create-course-needs-subject">
-              {isAr
-                ? "اختر الجامعة والمادة أولًا."
-                : "Choose the university and Subject first."}
-            </p>
-          )}
-        </form>
+        />
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -667,46 +579,59 @@ export function CourseBuilder() {
         </div>
 
         {selectedCourse ? (
-          <div className="md:col-span-2 space-y-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-4">
-              <div
-                data-testid="selected-course-context"
-                data-course-id={selectedCourse.id}
-                data-revision-id={revision?.id ?? ""}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <h2 className="text-xl font-bold mt-0.5">{courseTitle(selectedCourse)}</h2>
-                  <button
-                    type="button"
-                    onClick={() => setShowRoster((current) => !current)}
-                    aria-expanded={showRoster}
-                    data-testid="course-roster-toggle"
-                    className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-700 dark:hover:bg-slate-800"
-                  >
-                    {showRoster ? t.instructor.roster.close : t.instructor.roster.open}
-                  </button>
-                </div>
+          <div className="space-y-6 md:col-span-2">
+            {/*
+              The academic identity panel used to be rendered *inside* this header's flex row,
+              between the course title and the status pill — a whole titled section wedged into a
+              line of chrome. It is a region of the studio, so it sits among the regions.
+            */}
+            <div
+              className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 border-b border-border pb-4"
+              data-testid="selected-course-context"
+              data-course-id={selectedCourse.id}
+              data-revision-id={revision?.id ?? ""}
+            >
+              <h2 className="min-w-0 font-display text-xl font-bold text-foreground">
+                <bdi>{courseTitle(selectedCourse)}</bdi>
+              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  data-testid="revision-state"
+                  data-revision-state={revision?.state ?? selectedCourse.lifecycle ?? ""}
+                  className="rounded-pill bg-muted px-3 py-1 font-display text-xs font-bold text-muted-foreground"
+                >
+                  {stateLabel(revision?.state, selectedCourse.lifecycle)}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowRoster((current) => !current)}
+                  aria-expanded={showRoster}
+                  data-testid="course-roster-toggle"
+                >
+                  {showRoster ? t.instructor.roster.close : t.instructor.roster.open}
+                </Button>
               </div>
-              {isAcademicCourse(selectedCourse) && (
-                <AcademicCourseContextPanel
-                  course={selectedCourse}
-                  busy={busy}
-                  onChangeSubject={handleChangeSubject}
-                  onCustomizeAudience={handleCustomizeAudience}
-                  onResetAudience={handleResetAudience}
-                  onRequestSubject={handleRequestSubject}
-                />
-              )}
-              <span
-                data-testid="revision-state"
-                data-revision-state={revision?.state ?? selectedCourse.lifecycle ?? ""}
-                className="text-xs px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 font-medium"
-              >
-                {stateLabel(revision?.state, selectedCourse.lifecycle)}
-              </span>
             </div>
 
             {showRoster ? <CourseRoster courseID={selectedCourse.id} /> : null}
+
+            {isAcademicCourse(selectedCourse) && (
+              <AcademicCourseContextPanel
+                course={selectedCourse}
+                labels={instructor.academic}
+                busy={busy}
+                onChangeSubject={handleChangeSubject}
+                onCustomizeAudience={handleCustomizeAudience}
+                onResetAudience={handleResetAudience}
+                onRequestSubject={handleRequestSubject}
+              />
+            )}
+
+            {/* The launch price is an Admin decision, stated beside the course it applies to
+                rather than in a second panel with a second copy of the course list. */}
+            <CoursePricingSummary course={selectedCourse} labels={instructor.price} />
 
             {/* Standing notice, not a toast: the Instructor usually returns in a later session. */}
             <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />
@@ -716,41 +641,71 @@ export function CourseBuilder() {
 
             {revision?.id ? (
               <>
-                <form onSubmit={handleSaveRevision} className="space-y-3" data-testid="revision-form">
-                  <h3 className="text-md font-semibold">{isAr ? "تفاصيل الدورة" : "Course details"}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      value={detailTitleAr}
-                      onChange={(event) => setDetailTitleAr(event.target.value)}
-                      aria-label={isAr ? "عنوان الدورة (بالعربية)" : "Course Title (Arabic)"}
-                      data-testid="revision-title-ar"
-                      className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-                    />
-                    <input
-                      type="text"
-                      value={detailTitleEn}
-                      onChange={(event) => setDetailTitleEn(event.target.value)}
-                      aria-label={isAr ? "عنوان الدورة (بالإنجليزية)" : "Course Title (English)"}
-                      data-testid="revision-title-en"
-                      className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-                    />
-                    <textarea
-                      value={detailDescAr}
-                      onChange={(event) => setDetailDescAr(event.target.value)}
-                      rows={2}
-                      aria-label={isAr ? "الوصف (بالعربية)" : "Description (Arabic)"}
-                      data-testid="revision-description-ar"
-                      className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-                    />
-                    <textarea
-                      value={detailDescEn}
-                      onChange={(event) => setDetailDescEn(event.target.value)}
-                      rows={2}
-                      aria-label={isAr ? "الوصف (بالإنجليزية)" : "Description (English)"}
-                      data-testid="revision-description-en"
-                      className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
-                    />
+                <form
+                  onSubmit={handleSaveRevision}
+                  className="space-y-4"
+                  data-testid="revision-form"
+                  aria-labelledby="revision-details-title"
+                >
+                  <div>
+                    <h3
+                      id="revision-details-title"
+                      className="font-display text-base font-bold text-foreground"
+                    >
+                      {details.detailsTitle}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{details.detailsLead}</p>
+                  </div>
+                  {/*
+                    Visible labels, not `aria-label`. These four fields were named only to a screen
+                    reader; a sighted Instructor met two identical empty boxes and had to guess
+                    which was Arabic from the caret direction.
+                  */}
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <Field label={details.titleAr} htmlFor="revision-title-ar">
+                      <Input
+                        id="revision-title-ar"
+                        type="text"
+                        lang="ar"
+                        dir="rtl"
+                        value={detailTitleAr}
+                        onChange={(event) => setDetailTitleAr(event.target.value)}
+                        data-testid="revision-title-ar"
+                      />
+                    </Field>
+                    <Field label={details.titleEn} htmlFor="revision-title-en">
+                      <Input
+                        id="revision-title-en"
+                        type="text"
+                        lang="en"
+                        dir="ltr"
+                        value={detailTitleEn}
+                        onChange={(event) => setDetailTitleEn(event.target.value)}
+                        data-testid="revision-title-en"
+                      />
+                    </Field>
+                    <Field label={details.descriptionAr} htmlFor="revision-description-ar">
+                      <Textarea
+                        id="revision-description-ar"
+                        lang="ar"
+                        dir="rtl"
+                        rows={3}
+                        value={detailDescAr}
+                        onChange={(event) => setDetailDescAr(event.target.value)}
+                        data-testid="revision-description-ar"
+                      />
+                    </Field>
+                    <Field label={details.descriptionEn} htmlFor="revision-description-en">
+                      <Textarea
+                        id="revision-description-en"
+                        lang="en"
+                        dir="ltr"
+                        rows={3}
+                        value={detailDescEn}
+                        onChange={(event) => setDetailDescEn(event.target.value)}
+                        data-testid="revision-description-en"
+                      />
+                    </Field>
                   </div>
                   {/*
                     Legacy study year (D-093 §6). This is part of the legacy
@@ -759,31 +714,29 @@ export function CourseBuilder() {
                     stays available for existing legacy Courses until T5.
                   */}
                   {!isAcademicCourse(selectedCourse) && (
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      {isAr ? "السنة الدراسية" : "Study year"}
-                      <select
+                    <Field
+                      label={details.studyYear}
+                      htmlFor="revision-study-year"
+                      className="max-w-xs"
+                    >
+                      <Select
+                        id="revision-study-year"
                         value={detailStudyYear}
                         onChange={(event) => setDetailStudyYear(event.target.value)}
                         data-testid="revision-study-year"
-                        className="mt-1 block rounded-md border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-800"
                       >
-                        <option value="">{isAr ? "غير محددة" : "Not set"}</option>
-                        {["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"].map((year) => (
+                        <option value="">{details.studyYearUnset}</option>
+                        {STUDY_YEARS.map((year) => (
                           <option key={year} value={year}>
-                            {year}
+                            {details.studyYears[year]}
                           </option>
                         ))}
-                      </select>
-                    </label>
+                      </Select>
+                    </Field>
                   )}
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    data-testid="save-revision"
-                    className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {isAr ? "حفظ التفاصيل" : "Save details"}
-                  </button>
+                  <Button type="submit" size="sm" disabled={busy} data-testid="save-revision">
+                    {busy ? details.saving : details.saveAction}
+                  </Button>
                 </form>
 
                 <PublicPreviewUpload
@@ -1005,8 +958,26 @@ export function CourseBuilder() {
             )}
           </div>
         ) : (
-          <div className="md:col-span-2 border border-dashed rounded-lg p-12 text-center text-slate-500">
-            {isAr ? "اختر دورة لعرض المحتوى والتعديل" : "Select a course to edit content"}
+          <div className="md:col-span-2">
+            <EmptyState
+              title={
+                courses.length === 0
+                  ? instructor.courses.emptyTitle
+                  : instructor.courses.selectPrompt
+              }
+              description={
+                courses.length === 0
+                  ? instructor.courses.emptyBody
+                  : instructor.courses.selectPromptBody
+              }
+              action={
+                courses.length === 0 ? (
+                  <Button type="button" onClick={() => setIsCreating(true)}>
+                    {instructor.courses.emptyAction}
+                  </Button>
+                ) : undefined
+              }
+            />
           </div>
         )}
       </div>

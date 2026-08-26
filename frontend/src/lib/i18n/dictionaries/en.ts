@@ -848,6 +848,8 @@ export const en = {
         "A course begins with the university and the subject it is taught for. Create one and it appears here.",
       emptyAction: "Create your first course",
       academicUnset: "University and subject not chosen yet",
+      selectPrompt: "Choose a course to work on",
+      selectPromptBody: "Pick one from the list to edit its details, build its curriculum, and submit it for review.",
     },
     standing: {
       actor: {
@@ -884,6 +886,91 @@ export const en = {
         label: "No open revision",
         meaning: "There is nothing to edit on this course right now.",
         action: "View course",
+      },
+    },
+    /**
+     * The launch price, which the Instructor does not own.
+     *
+     * The studio used to open with a panel titled "Official Server Prices (Read-only Server
+     * State)" â a sentence written for whoever built the endpoint. It listed every owned Course
+     * again, in a second selector beside the one that already existed, so the screen had two lists
+     * of the same courses and only one of them opened anything.
+     */
+    price: {
+      heading: "Price",
+      adminOwned:
+        "Gradex sets the launch price while reviewing your course. You do not need a price to submit it.",
+      courseLabel: "Course price",
+      sectionsLabel: "Price per section",
+      unset: "An administrator sets this during review.",
+    },
+    details: {
+      createTitle: "Create a new course",
+      createAction: "Create course",
+      creating: "Creating…",
+      needsSubject: "Choose the university and subject first.",
+      created: "Course created.",
+      createdWithRequest: "Course draft created, and your subject request was sent for review.",
+      detailsTitle: "Course details",
+      detailsLead: "What this course is called, and how it is described to students.",
+      saveAction: "Save details",
+      saving: "Saving…",
+      saved: "Course details saved.",
+      titleAr: "Course title (Arabic)",
+      titleEn: "Course title (English)",
+      descriptionAr: "Description (Arabic)",
+      descriptionEn: "Description (English)",
+      studyYear: "Study year",
+      studyYearUnset: "Not set",
+      /**
+       * Legacy study-year labels (D-093 §6). Only a LEGACY_TAXONOMY Course is ever asked for one,
+       * but while it is asked the options must be words rather than `YEAR_1`.
+       */
+      studyYears: {
+        PREP: "Preparatory year",
+        YEAR_1: "First year",
+        YEAR_2: "Second year",
+        YEAR_3: "Third year",
+        YEAR_4: "Fourth year",
+      },
+      subjectRequestTitle: "Request a missing subject",
+      subjectRequestBody:
+        "You can keep building the course, but it cannot be submitted until an administrator links it to an official subject.",
+      subjectRequestCode: "Official code (optional)",
+      subjectRequestTitleAr: "Official subject name (Arabic)",
+      subjectRequestTitleEn: "Official subject name (English)",
+      subjectRequestNote: "Context for the administrator (optional)",
+      subjectRequestSent: "Your subject request was sent for review.",
+    },
+    academic: {
+      title: "Academic identity",
+      lead: "The university and subject this course is taught for. Students find it through them.",
+      institutionLabel: "University",
+      subjectLabel: "Subject",
+      unitLabel: "Department or faculty",
+      codeLabel: "Course code",
+      change: "Change subject",
+      cancel: "Cancel",
+      changed: "Course subject updated.",
+      loading: "Loading subject details…",
+      lockedPublished:
+        "This course has been published. Its subject is part of what the course is, and cannot change.",
+      lockedInReview: "The subject cannot change while an administrator is reviewing this course.",
+      audienceCustomized: "Course audience customized.",
+      audienceReset: "Automatic audience restored.",
+      audience: {
+        automatic: "Programs that see this course",
+        customized: "Chosen programs",
+        automaticNote: "Every program the subject belongs to.",
+        customizedNote: "You narrowed this course to the programs listed.",
+        empty:
+          "No programs are linked to this subject yet. Students still reach the course through the subject itself.",
+        customize: "Choose programs",
+        edit: "Change programs",
+        useAutomatic: "Use every program",
+        save: "Save programs",
+        cancel: "Cancel",
+        legend: "Programs this course is for",
       },
     },
     roster: {

@@ -40,11 +40,13 @@ async function mockCatalogAPI(page: Page) {
   await page.route("**/api/v1/admin/review/queue", (route) => route.fulfill({ json: [] }));
 }
 
+// The instructor anchor moved from the standalone price panel, which was removed, to the
+// course directory heading. The property under test is the viewport behaviour, not the copy.
 function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | "en") {
   if (surface === "instructor") {
     return locale === "ar"
-      ? ["منصة إعداد الدورات التعليمية", "أسعار الخادم الرسمية (قراءة فقط من وقائع الخادم)", "تصنيف المسودة المحددة"]
-      : ["Course Authoring Studio", "Official Server Prices (Read-only Server State)", "Explicit Draft Taxonomy"];
+      ? ["منصة إعداد الدورات التعليمية", "دوراتك", "تصنيف المسودة المحددة"]
+      : ["Course Authoring Studio", "Your courses", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
     ? ["مراجعة الدورات وإدارتها", "إدارة قاموس التصنيف", "قاموس التصنيف"]
