@@ -33,6 +33,13 @@ import { describeApiError } from "@/lib/api/api-error";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { createSubjectRequest } from "@/lib/api/subject-requests";
 import { CourseRoster } from "./course-roster";
+import { ErrorState } from "@/components/common/error-state";
+import {
+  WorkspacePage,
+  WorkspacePageHeader,
+} from "@/components/layout/workspace-page";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 /**
  * Instructor Course Authoring Studio.
@@ -43,7 +50,7 @@ import { CourseRoster } from "./course-roster";
  * Instructor sees is what a page reload would show.
  */
 export function CourseBuilder() {
-  const { locale, dir, t } = useLocale();
+  const { locale, t } = useLocale();
   const isAr = locale === "ar";
 
   /**
@@ -463,38 +470,35 @@ export function CourseBuilder() {
     return isAr ? rev.title_ar : rev.title_en;
   };
 
+  const studio = t.instructor.studio;
+
   return (
-    <div dir={dir} className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-6">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            {isAr ? "منصة إعداد الدورات التعليمية" : "Course Authoring Studio"}
-          </h1>
-          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            {isAr
-              ? "إنشاء وإدارة المحتوى التعليمي المحفوظ على الخادم قبل الاعتماد والنشر"
-              : "Build and manage server-persisted course drafts before submission & review"}
-          </p>
-        </div>
-        <button
-          id="course-builder"
-          onClick={() => setIsCreating(!isCreating)}
-          data-testid="toggle-new-course"
-          className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition"
-        >
-          {isCreating ? (isAr ? "إلغاء الإضافة" : "Cancel") : isAr ? "إنشاء دورة جديدة" : "New Course"}
-        </button>
-      </header>
+    <WorkspacePage className="space-y-8">
+      <WorkspacePageHeader
+        title={studio.title}
+        description={studio.intro}
+        actions={
+          <Button
+            type="button"
+            id="course-builder"
+            variant={isCreating ? "outline" : "default"}
+            aria-expanded={isCreating}
+            aria-controls="new-course-form"
+            onClick={() => setIsCreating(!isCreating)}
+            data-testid="toggle-new-course"
+          >
+            {isCreating ? studio.cancelNewCourse : studio.newCourse}
+          </Button>
+        }
+      />
 
       {error && (
-        <p role="alert" data-testid="authoring-error" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
-          {error}
-        </p>
+        <ErrorState testID="authoring-error" title={studio.actionFailed} detail={error} />
       )}
       {notice && (
-        <p role="status" data-testid="authoring-notice" className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
-          {notice}
-        </p>
+        <div data-testid="authoring-notice">
+          <Alert tone="success" title={notice} />
+        </div>
       )}
 
       <ServerPricingPanel />
@@ -513,6 +517,7 @@ export function CourseBuilder() {
 
       {isCreating && (
         <form
+          id="new-course-form"
           onSubmit={handleCreateCourse}
           data-testid="new-course-form"
           className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-6 space-y-4"
@@ -1030,6 +1035,6 @@ export function CourseBuilder() {
           </div>
         )}
       </div>
-    </div>
+    </WorkspacePage>
   );
 }

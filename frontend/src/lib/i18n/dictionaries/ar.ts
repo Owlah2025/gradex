@@ -748,6 +748,14 @@ export const ar: Dictionary = {
     },
   },
   instructor: {
+    studio: {
+      title: "Course Authoring Studio",
+      intro:
+        "أنشئ مسوّدات دوراتك وأدرها من هنا. لا يصل شيء إلى الطلاب حتى ترسل مراجعة ويعتمدها مسؤول.",
+      newCourse: "دورة جديدة",
+      cancelNewCourse: "إلغاء",
+      actionFailed: "تعذّر إتمام هذا الإجراء.",
+    },
     roster: {
       title: "الطلبة",
       open: "عرض الطلبة",

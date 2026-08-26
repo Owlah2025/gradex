@@ -5,6 +5,22 @@ import { describeApiError } from "@/lib/api/api-error";
 import { getCourseRoster, type CourseRosterPage } from "@/lib/api/catalog";
 import { formatLearningExpiry } from "@/lib/formatters/learning";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { LoadingState } from "@/components/common/loading-state";
+import { WorkspaceSection } from "@/components/layout/workspace-page";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  TableSkeletonRows,
+} from "@/components/ui/table";
 import {
   courseRosterStatusLabel,
   courseRosterViewState,
@@ -29,41 +45,59 @@ type CourseRosterLabels = {
   statuses: Record<CourseRosterAccessStatus, string>;
 };
 
+const COLUMN_COUNT = 5;
+
 function RosterDate({ value, locale, fallback }: { value?: string; locale: "ar" | "en"; fallback: string }) {
   if (!value) return <span>{fallback}</span>;
   const formatted = formatLearningExpiry(value, locale);
   return formatted ? <time dateTime={formatted.dateTime}>{formatted.text}</time> : <span>{fallback}</span>;
 }
 
+function RosterTableHead({ labels }: { labels: CourseRosterLabels }) {
+  return (
+    <TableHead>
+      <TableRow>
+        <TableHeaderCell scope="col">{labels.student}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.accessStatus}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.joined}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.accessStarted}</TableHeaderCell>
+        <TableHeaderCell scope="col">{labels.accessUntil}</TableHeaderCell>
+      </TableRow>
+    </TableHead>
+  );
+}
+
 function CourseRosterTable({ roster, locale, labels }: { roster: CourseRosterPage; locale: "ar" | "en"; labels: CourseRosterLabels }) {
   return (
-    <div className="mt-3 overflow-x-auto">
-      <table className="min-w-full text-start text-sm" data-testid="course-roster-table">
-        <caption className="sr-only">{labels.title}</caption>
-        <thead className="border-b border-slate-200 text-xs uppercase text-slate-600 dark:border-slate-700 dark:text-slate-300">
-          <tr>
-            <th scope="col" className="px-3 py-2 text-start">{labels.student}</th>
-            <th scope="col" className="px-3 py-2 text-start">{labels.accessStatus}</th>
-            <th scope="col" className="px-3 py-2 text-start">{labels.joined}</th>
-            <th scope="col" className="px-3 py-2 text-start">{labels.accessStarted}</th>
-            <th scope="col" className="px-3 py-2 text-start">{labels.accessUntil}</th>
-          </tr>
-        </thead>
-        <tbody>
+    <TableContainer>
+      <Table data-testid="course-roster-table">
+        <TableCaption>{labels.title}</TableCaption>
+        <RosterTableHead labels={labels} />
+        <TableBody>
           {roster.items.map((student, index) => (
-            <tr key={`${student.enrolled_at}-${index}`} className="border-b border-slate-100 dark:border-slate-800" data-testid="course-roster-row">
-              <th scope="row" className="px-3 py-3 text-start font-medium">{student.display_name}</th>
-              <td className="px-3 py-3" data-roster-status={student.access_status}>
+            <TableRow key={`${student.enrolled_at}-${index}`} data-testid="course-roster-row">
+              <TableHeaderCell scope="row" className="min-w-40">
+                {student.display_name}
+              </TableHeaderCell>
+              {/* The access status is a word, not a colour. The wire enum stays on the cell as a
+                  data attribute for support and tests; it is never what the Instructor reads. */}
+              <TableCell data-roster-status={student.access_status}>
                 {courseRosterStatusLabel(student.access_status, labels.statuses)}
-              </td>
-              <td className="px-3 py-3"><RosterDate value={student.enrolled_at} locale={locale} fallback={labels.unavailableDate} /></td>
-              <td className="px-3 py-3"><RosterDate value={student.access_started_at} locale={locale} fallback={labels.unavailableDate} /></td>
-              <td className="px-3 py-3"><RosterDate value={student.access_ends_at} locale={locale} fallback={labels.unavailableDate} /></td>
-            </tr>
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                <RosterDate value={student.enrolled_at} locale={locale} fallback={labels.unavailableDate} />
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                <RosterDate value={student.access_started_at} locale={locale} fallback={labels.unavailableDate} />
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                <RosterDate value={student.access_ends_at} locale={locale} fallback={labels.unavailableDate} />
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 }
 
@@ -77,23 +111,27 @@ function CourseRosterPagination({ roster, page, loading, labels, onPrevious, onN
 }) {
   return (
     <nav aria-label={labels.title} className="mt-4 flex items-center justify-between gap-3 text-sm">
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onPrevious}
         disabled={page === 1 || loading}
-        className="rounded-md border border-slate-300 px-3 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700"
       >
         {labels.previous}
-      </button>
-      <span aria-live="polite">{labels.page} {roster.page}</span>
-      <button
+      </Button>
+      <span aria-live="polite" className="text-muted-foreground">
+        {labels.page} {roster.page}
+      </span>
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
         onClick={onNext}
         disabled={!roster.has_next || loading}
-        className="rounded-md border border-slate-300 px-3 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700"
       >
         {labels.next}
-      </button>
+      </Button>
     </nav>
   );
 }
@@ -109,9 +147,30 @@ function CourseRosterContent({ state, error, roster, page, loading, locale, labe
   onPrevious: () => void;
   onNext: () => void;
 }) {
-  if (state === "loading") return <p role="status" className="mt-3 text-sm text-slate-600 dark:text-slate-300">{labels.loading}</p>;
-  if (state === "error") return <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">{error ?? labels.error}</p>;
-  if (state === "empty") return <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" data-testid="course-roster-empty">{labels.empty}</p>;
+  if (state === "loading") {
+    // The header row is rendered above placeholder rows so the columns are already measured when
+    // the page lands, instead of the roster appearing by pushing the rest of the screen down.
+    return (
+      <>
+        <LoadingState visuallyHidden label={labels.loading} />
+        <TableContainer>
+          <Table>
+            <TableCaption>{labels.title}</TableCaption>
+            <RosterTableHead labels={labels} />
+            <TableSkeletonRows columns={COLUMN_COUNT} rows={3} />
+          </Table>
+        </TableContainer>
+      </>
+    );
+  }
+  if (state === "error") return <ErrorState title={labels.error} detail={error} />;
+  if (state === "empty") {
+    return (
+      <div data-testid="course-roster-empty">
+        <EmptyState density="compact" title={labels.empty} />
+      </div>
+    );
+  }
   if (!roster) return null;
 
   return (
@@ -159,8 +218,7 @@ export function CourseRoster({ courseID }: { courseID: string }) {
 
   const state = courseRosterViewState(loading, error, roster?.items.length ?? 0);
   return (
-    <section aria-labelledby="course-roster-title" data-testid="course-roster">
-      <h3 id="course-roster-title" className="text-lg font-semibold">{labels.title}</h3>
+    <WorkspaceSection title={labels.title} headingLevel="h3" testID="course-roster">
       <CourseRosterContent
         state={state}
         error={error}
@@ -172,6 +230,6 @@ export function CourseRoster({ courseID }: { courseID: string }) {
         onPrevious={() => setPage((current) => Math.max(1, current - 1))}
         onNext={() => setPage((current) => current + 1)}
       />
-    </section>
+    </WorkspaceSection>
   );
 }

@@ -781,6 +781,14 @@ export const en = {
     },
   },
   instructor: {
+    studio: {
+      title: "Course Authoring Studio",
+      intro:
+        "Build and manage your course drafts here. Nothing reaches students until you submit a revision and an administrator approves it.",
+      newCourse: "New course",
+      cancelNewCourse: "Cancel",
+      actionFailed: "That could not be completed.",
+    },
     roster: {
       title: "Students",
       open: "View students",

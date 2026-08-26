@@ -107,13 +107,20 @@ export function WorkspaceToolbar({
 /**
  * A titled region within a workspace screen.
  *
- * The heading is wired to the region with `aria-labelledby` rather than left as a loose `<h2>`, so
+ * The heading is wired to the region with `aria-labelledby` rather than left as a loose heading, so
  * the section is announced by name when a screen reader user moves between landmarks.
+ *
+ * `headingLevel` exists because sections nest. A section directly under the page heading is an
+ * `h2`; one inside another section's content — the Instructor roster inside a selected Course
+ * panel — is an `h3`. Hardcoding `h2` would have produced two headings claiming the same level for
+ * a region and the region containing it, which is precisely the structure a screen reader user
+ * navigates by.
  */
 export function WorkspaceSection({
   title,
   description,
   actions,
+  headingLevel: Heading = "h2",
   children,
   className,
   testID,
@@ -121,6 +128,7 @@ export function WorkspaceSection({
   title?: string;
   description?: string;
   actions?: ReactNode;
+  headingLevel?: "h2" | "h3";
   children: ReactNode;
   className?: string;
   testID?: string;
@@ -135,9 +143,9 @@ export function WorkspaceSection({
       {title ? (
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <h2 id={headingID} className="font-display text-lg font-bold text-foreground">
+            <Heading id={headingID} className="font-display text-lg font-bold text-foreground">
               {title}
-            </h2>
+            </Heading>
             {description ? (
               <p className="mt-1 text-sm text-muted-foreground">{description}</p>
             ) : null}
