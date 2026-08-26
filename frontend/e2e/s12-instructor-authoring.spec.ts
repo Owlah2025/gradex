@@ -187,11 +187,13 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.getByTestId("section-title-ar").fill("القسم الأول");
     await page.getByTestId("section-title-en").fill("Section One");
     await page.getByTestId("add-section").click();
-    await expect(page.getByText("Section One")).toBeVisible();
+    // Scoped to the curriculum: the section title also appears in the per-section price
+    // list, which the studio now shows beside the course it belongs to.
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
-    await expect(page.getByText("Section One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
 
     const sectionBlock = page.locator('[data-testid^="section-"]').first();
     const sectionTestID = await sectionBlock.getAttribute("data-testid");
@@ -200,12 +202,12 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس الأول");
     await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Lesson One");
     await page.getByTestId(`add-lesson-${sectionID}`).click();
-    await expect(page.getByText("Lesson One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Lesson One")).toBeVisible();
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
-    await expect(page.getByText("Section One")).toBeVisible();
-    await expect(page.getByText("Lesson One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Lesson One")).toBeVisible();
     await expect(page.locator('[data-testid^="lesson-video-none-"]').first()).toBeVisible();
 
     await context.close();

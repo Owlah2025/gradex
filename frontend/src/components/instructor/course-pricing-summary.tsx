@@ -81,7 +81,9 @@ export function CoursePricingSummary({
                 <div
                   key={section.id}
                   className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm"
-                  data-testid={`section-price-${section.id}`}
+                  /* Not `section-…`: the curriculum owns that prefix, and specs scan it to
+                     find an authored section. A price row is not one. */
+                  data-testid={`price-for-section-${section.id}`}
                 >
                   <dt className="min-w-0 text-muted-foreground">
                     <bdi>{locale === "ar" ? section.title_ar : section.title_en}</bdi>

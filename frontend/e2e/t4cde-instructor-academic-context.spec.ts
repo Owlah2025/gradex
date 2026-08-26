@@ -163,7 +163,7 @@ async function createMissingSubjectCourse(
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("subject request was sent for review");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
-  await expect(page.getByTestId("subject-request-pending")).toContainText("Pending review", { timeout: 15_000 });
+  await expect(page.getByTestId("subject-request-pending")).toContainText("Subject request under review", { timeout: 15_000 });
   return courseID;
 }
 

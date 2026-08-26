@@ -226,7 +226,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-change-subject").click();
     await chooseSubject(page, UNMAPPED_SUBJECT_CODE);
     await expect(page.getByTestId("new-course-audience-empty")).toContainText(
-      "No Programs are currently associated with this Subject",
+      "The catalog links no program to this subject yet",
     );
     await expect(page.getByTestId("new-course-audience")).toHaveCount(0);
 
