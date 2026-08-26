@@ -43,11 +43,30 @@ function read(relative: string): string {
 }
 
 /**
- * The public catalogue speaks in slugs; `PUT /me/academic-profile` speaks in UUIDs its own option
- * lists return, and those lists carry no slug. No module may hold both option sources at once,
- * because a module that holds both is one line away from bridging them on `name_ar` — which would
- * write the wrong Program onto a real account and tell the Student it was theirs.
+ * The two academic option lists must never meet in one module.
+ *
+ * The public catalogue names entities by slug. The authenticated option lists return the internal
+ * identifiers `PUT /me/academic-profile` requires and carry no slug at all. A module holding both
+ * lists is one line away from bridging them on `name_ar` — which would write the wrong Program onto
+ * a real account and tell the Student it was theirs.
+ *
+ * The rule is about those two *lists*, named precisely, not about the modules that contain them.
+ * Reading a Student's own saved profile beside the public catalogue is not the hazard and is what
+ * the precedence rule actually requires: the account's answer has to be able to outrank a browser
+ * preference, which means something has to hold both.
  */
+const PUBLIC_OPTION_READS = [
+  "getPublicInstitutions",
+  "getPublicPrograms",
+  "getPublicSubjects",
+  "getPublicLevels",
+];
+const AUTHENTICATED_OPTION_READS = [
+  "listInstitutionOptions",
+  "listCollegeOptions",
+  "listProgramOptions",
+];
+
 test("no module reads the public option lists and the authenticated ones together", () => {
   const offenders: string[] = [];
   const walk = (directory: string) => {
@@ -59,9 +78,9 @@ test("no module reads the public option lists and the authenticated ones togethe
       }
       if (!/\.tsx?$/.test(entry.name) || entry.name.endsWith(".test.ts")) continue;
       const text = fs.readFileSync(absolute, "utf8");
-      const publicOptions = /from\s+"[^"]*api\/public-catalog"/.test(text);
-      const authenticatedOptions = /from\s+"[^"]*api\/academic-profile"/.test(text);
-      if (publicOptions && authenticatedOptions) {
+      const reads = (names: string[]) =>
+        names.some((name) => new RegExp(`\\b${name}\\b`).test(text));
+      if (reads(PUBLIC_OPTION_READS) && reads(AUTHENTICATED_OPTION_READS)) {
         offenders.push(path.relative(SOURCE_ROOT, absolute));
       }
     }

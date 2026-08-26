@@ -18,7 +18,10 @@ import {
   getAcademicProfile,
   type AcademicProfile,
 } from "@/lib/api/academic-profile";
-import { useSessionView } from "@/lib/identity/use-session";
+import {
+  getPublicInstitutions,
+  getPublicPrograms,
+} from "@/lib/api/public-catalog";
 
 /**
  * The visitor's academic context, held once for the whole application.
@@ -38,8 +41,41 @@ import { useSessionView } from "@/lib/identity/use-session";
  * to guess.
  */
 
+/**
+ * ## Events worth measuring, if and when a frontend analytics abstraction exists
+ *
+ * There is none today — no `track`, no provider, no vendor SDK anywhere in `src` — and this tranche
+ * deliberately does not introduce one. What the funnel would need is recorded here, next to the
+ * transitions that would emit it, so the work is a matter of adding calls rather than rediscovering
+ * where the moments are:
+ *
+ *  - `academic_selection_started` — the picker is shown to a visitor with no context
+ *  - `institution_selected` / `program_selected` — each chooser resolves, with the **slug**, never
+ *    the localized name
+ *  - `academic_context_set` — `setAnonymous` commits a context, with whether it came from the
+ *    landing panel or the catalogue filter row
+ *  - `academic_context_changed` — `setAnonymous` replaces a different existing context
+ *  - `academic_context_cleared` — `clearAnonymous`, or a `navigate` that empties the selection
+ *  - `academic_context_invalidated` — `reconcile` drops a retired institution or program
+ *  - `academic_context_restored` — the catalogue seeds a bare URL from a remembered context, which
+ *    is the measurement of whether persistence is earning its place
+ *  - `academic_profile_handoff_shown` — a signed-in Student is asked to confirm their earlier
+ *    choice, which is the size of the gap the missing slug-to-identifier contract leaves
+ *
+ * Slugs and counts only. A university name is display prose in two languages and belongs in no
+ * event payload.
+ */
+
 export type AcademicContextValue = {
-  /** `"loading"` until the browser's stored value has been read. Never trust `anonymous` before then. */
+  /**
+   * `"loading"` until *both* questions are settled: what this browser has stored, and whether the
+   * visitor has an academic profile of their own.
+   *
+   * Both, deliberately. The stored value arrives in a mount effect and the profile arrives over the
+   * network, so a status that meant only "storage read" let the catalogue decide precedence while
+   * the profile was still in flight — and a Student with a real saved profile had their browsing
+   * preference applied as filters a moment before the profile that outranks it turned up.
+   */
   status: "loading" | "ready";
   /** The preference this browser is holding, or `null`. Never an account fact. */
   anonymous: AnonymousAcademicContext | null;
@@ -62,8 +98,19 @@ export type AcademicContextValue = {
     institutionSlugs: readonly string[] | null,
     programSlugs: readonly string[] | null,
   ) => void;
-  /** Refresh the non-authoritative display cache from live option data. Identity is untouched. */
-  refreshNames: (names: Partial<AcademicContextNames>) => void;
+  /**
+   * Refresh the non-authoritative display cache from live option data.
+   *
+   * Each part carries the slug it describes and is applied only if that slug is the one currently
+   * stored. A name written beside a different slug would be a label describing something else,
+   * which is the one thing this cache must never become.
+   */
+  refreshNames: (update: AcademicNameUpdate) => void;
+};
+
+export type AcademicNameUpdate = {
+  institution?: { slug: string; nameAr: string; nameEn: string };
+  program?: { slug: string; nameAr: string; nameEn: string };
 };
 
 const AcademicContext = React.createContext<AcademicContextValue | null>(null);
@@ -73,8 +120,8 @@ export function AcademicContextProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const session = useSessionView();
-  const [status, setStatus] = React.useState<"loading" | "ready">("loading");
+  const [storageRead, setStorageRead] = React.useState(false);
+  const [profileSettled, setProfileSettled] = React.useState(false);
   const [anonymous, setAnonymousState] =
     React.useState<AnonymousAcademicContext | null>(null);
   const [profile, setProfile] = React.useState<AcademicProfile | null>(null);
@@ -83,31 +130,43 @@ export function AcademicContextProvider({
   // first client render is what produces a hydration mismatch.
   React.useEffect(() => {
     setAnonymousState(readAcademicContext(browserContextStorage()));
-    setStatus("ready");
+    setStorageRead(true);
   }, []);
 
-  // Only a Student has an academic profile, and only a signed-in one can be asked for it. Gating on
-  // the session keeps the public landing page from issuing a request that can only ever 401.
-  const isStudent = session?.role === "STUDENT";
+  /**
+   * Asks for the visitor's own academic profile, once per page load.
+   *
+   * Deliberately not gated on the session's role. `useSessionView` reports `null` both for "not
+   * signed in" and for "not rehydrated yet", and those are not the same answer: gating on it meant
+   * the profile request was skipped during the rehydration window, precedence was decided without
+   * it, and a Student's saved profile lost to a browsing preference it should have outranked.
+   *
+   * A 401 is the ordinary answer here for an anonymous visitor, exactly as it already is for the
+   * access history the public Course page reads. It is one request per load — the same one the
+   * catalogue used to make on its own — and it never surfaces as an error or hides a Course.
+   */
   React.useEffect(() => {
-    if (!isStudent) {
-      setProfile(null);
-      return;
-    }
     let cancelled = false;
     getAcademicProfile("en")
       .then((loaded) => {
-        if (!cancelled) setProfile(loaded);
+        if (cancelled) return;
+        setProfile(loaded);
+        setProfileSettled(true);
       })
       .catch(() => {
         // A profile that cannot be read is not a profile that says something. Falling back to the
         // browsing preference is the safe direction: it narrows discovery and nothing else.
-        if (!cancelled) setProfile(null);
+        if (cancelled) return;
+        setProfile(null);
+        setProfileSettled(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [isStudent]);
+  }, []);
+
+  const status: "loading" | "ready" =
+    storageRead && profileSettled ? "ready" : "loading";
 
   const setAnonymous = React.useCallback(
     (next: AnonymousAcademicContext | null) => {
@@ -144,22 +203,82 @@ export function AcademicContextProvider({
     [],
   );
 
-  const refreshNames = React.useCallback(
-    (names: Partial<AcademicContextNames>) => {
-      setAnonymousState((current) => {
-        if (current === null) return current;
-        const merged = { ...current.names, ...names };
-        const unchanged = (
-          Object.keys(merged) as (keyof AcademicContextNames)[]
-        ).every((key) => merged[key] === current.names[key]);
-        if (unchanged) return current;
-        const next = { ...current, names: merged };
-        writeAcademicContext(browserContextStorage(), next);
-        return next;
-      });
-    },
-    [],
-  );
+  const refreshNames = React.useCallback((update: AcademicNameUpdate) => {
+    setAnonymousState((current) => {
+      if (current === null) return current;
+      const merged: AcademicContextNames = { ...current.names };
+      if (update.institution?.slug === current.institutionSlug) {
+        merged.institutionAr = update.institution.nameAr;
+        merged.institutionEn = update.institution.nameEn;
+      }
+      if (
+        current.programSlug !== "" &&
+        update.program?.slug === current.programSlug
+      ) {
+        merged.programAr = update.program.nameAr;
+        merged.programEn = update.program.nameEn;
+      }
+      const unchanged = (
+        Object.keys(merged) as (keyof AcademicContextNames)[]
+      ).every((key) => merged[key] === current.names[key]);
+      if (unchanged) return current;
+      const next = { ...current, names: merged };
+      writeAcademicContext(browserContextStorage(), next);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Fills an empty display cache from the public option lists.
+   *
+   * A context adopted straight from a URL — a shared link, a bookmark — arrives with slugs and no
+   * names, and a slug must never be the thing a reader is asked to recognise. One anonymous
+   * catalogue read fixes that everywhere at once, and it runs only while the cache is actually
+   * empty. Both languages come back in the same response, so a locale switch needs no second call.
+   */
+  const institutionSlug = anonymous?.institutionSlug ?? "";
+  const programSlug = anonymous?.programSlug ?? "";
+  const namesMissing =
+    anonymous !== null &&
+    (anonymous.names.institutionEn === "" ||
+      (anonymous.programSlug !== "" && anonymous.names.programEn === ""));
+  React.useEffect(() => {
+    if (!namesMissing || institutionSlug === "") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const institutions = await getPublicInstitutions("en");
+        const institution = institutions.find(
+          (item) => item.slug === institutionSlug,
+        );
+        if (cancelled || !institution) return;
+        refreshNames({
+          institution: {
+            slug: institution.slug,
+            nameAr: institution.name_ar,
+            nameEn: institution.name_en,
+          },
+        });
+        if (programSlug === "") return;
+        const programs = await getPublicPrograms(institutionSlug, "en");
+        const program = programs.find((item) => item.slug === programSlug);
+        if (cancelled || !program) return;
+        refreshNames({
+          program: {
+            slug: program.slug,
+            nameAr: program.name_ar,
+            nameEn: program.name_en,
+          },
+        });
+      } catch {
+        // A name the catalogue cannot supply is a cosmetic loss, not a failure. The identity is
+        // intact and every surface still renders; only the label falls back.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [namesMissing, institutionSlug, programSlug, refreshNames]);
 
   const value = React.useMemo<AcademicContextValue>(
     () => ({

@@ -297,6 +297,7 @@ export function CatalogueList() {
     source: contextSource,
     setAnonymous,
     reconcile,
+    refreshNames,
   } = useAcademicContext();
 
   // The Student's own Program, read from their own profile, used only to order
@@ -311,9 +312,12 @@ export function CatalogueList() {
   const [institutionOptions, setInstitutionOptions] = useState<
     InstitutionOption[] | null
   >(null);
-  const [programOptions, setProgramOptions] = useState<ProgramOption[] | null>(
-    null,
-  );
+  // Tagged with the institution they were read for, so a list that arrived for a university the
+  // visitor has since moved away from cannot be used to judge the current selection.
+  const [programOptions, setProgramOptions] = useState<{
+    institution: string;
+    items: ProgramOption[];
+  } | null>(null);
 
   // The selection as of this render, reachable from callbacks that must stay referentially stable
   // for the effects inside AcademicFilters. Reading it through a ref is what keeps those callbacks
@@ -322,83 +326,135 @@ export function CatalogueList() {
   selectionRef.current = selection;
 
   /**
-   * Keeps the remembered academic context and the address bar in agreement.
+   * What the catalogue does about the academic context on arrival, once.
    *
-   * A catalogue URL that names an institution is what the visitor is actually looking at — whether
-   * it came from the filter row, a shared link, or the back button — so it is adopted as the
-   * remembered context. A URL that names nothing academic is seeded from the remembered context
-   * instead, which is what stops a Student re-picking their university every time they come back.
+   * A URL that already names an institution is what the visitor came to see — a shared link, a
+   * bookmark, a link from the landing page — so it is adopted as the remembered context, which is
+   * what keeps the bar above the results from ever describing something they are not filtered by.
+   * A URL that names nothing academic is seeded from the remembered context instead, so a Student
+   * does not re-pick their university every time they come back.
    *
    * `replace`, not `push`: restoring a remembered preference is not a place the visitor navigated
    * to, and putting it in history would make Back appear to do nothing.
    *
-   * Clearing is deliberately not handled here. `navigate` forgets the context in the same update
-   * that pushes the emptied URL, so by the time this effect sees a bare address there is nothing
-   * left to restore from — which is exactly why "Show all courses" is not undone a moment later by
-   * the context it just dropped.
+   * Once, deliberately. Re-running this on every URL change made "Show all courses" impossible to
+   * complete: clearing writes the empty context and pushes the emptied URL, but the push lands a
+   * render later, so a re-running effect saw the *old* URL beside the *new* empty context and
+   * adopted the context straight back out of it. After arrival every change comes through
+   * `navigate`, which moves both halves in the same update and has no such gap.
    */
+  const arrivalHandled = useRef(false);
   useEffect(() => {
-    if (contextStatus !== "ready") return;
-    if (selection.institution !== "") {
-      const adopted = contextForSelection(selection, anonymous);
+    if (contextStatus !== "ready" || arrivalHandled.current) return;
+    arrivalHandled.current = true;
+    const current = selectionRef.current;
+    if (current.institution !== "") {
+      const adopted = contextForSelection(current, anonymous);
       if (!sameAcademicContext(adopted, anonymous)) setAnonymous(adopted);
       return;
     }
     // A profile-backed Student is never auto-filtered: their profile ranks the catalogue, it does
     // not narrow it, and pretending otherwise would hide Courses their account never asked to hide.
     if (contextSource !== "anonymous" || anonymous === null) return;
-    const restored = { ...selectionForContext(anonymous), query };
+    const restored = { ...selectionForContext(anonymous), query: current.query };
     router.replace(`${pathname}${selectionSearch(restored)}`);
-  }, [
-    contextStatus,
-    contextSource,
-    anonymous,
-    selection,
-    query,
-    pathname,
-    router,
-    setAnonymous,
-  ]);
+  }, [contextStatus, contextSource, anonymous, pathname, router, setAnonymous]);
 
   /**
-   * Drops a remembered university the catalogue no longer offers.
+   * Records the option lists, corrects the remembered context, and refreshes its display names.
    *
-   * Only the invalid part goes, and it goes from the URL as well as from storage — a selection the
-   * filter row cannot render is a filter the visitor can neither see nor remove.
+   * Correcting the *URL* deliberately does not happen here. These callbacks fire whenever a
+   * response lands, which is not necessarily after the arrival effect has finished seeding the
+   * address bar — a list that arrived first saw an empty selection, found nothing wrong with it,
+   * and then a retired university appeared in the URL a moment later with nothing left to notice
+   * it. The URL is judged in an effect below, which re-runs whenever either half changes.
    */
   const handleInstitutions = useCallback(
     (items: InstitutionOption[] | null) => {
       setInstitutionOptions(items);
       if (items === null) return;
-      const slugs = items.map((item) => item.slug);
-      reconcile(slugs, null);
-      const current = selectionRef.current;
-      if (current.institution !== "" && !slugs.includes(current.institution)) {
-        router.replace(
-          `${pathname}${selectionSearch({ ...clearedSelection(), query: current.query })}`,
-        );
-      }
+      reconcile(
+        items.map((item) => item.slug),
+        null,
+      );
+      // The live names for what is selected, so the bar never falls back to showing a slug.
+      const chosen = items.find(
+        (item) => item.slug === selectionRef.current.institution,
+      );
+      if (chosen)
+        refreshNames({
+          institution: {
+            slug: chosen.slug,
+            nameAr: chosen.name_ar,
+            nameEn: chosen.name_en,
+          },
+        });
     },
-    [pathname, reconcile, router],
+    [reconcile, refreshNames],
   );
 
   const handlePrograms = useCallback(
     (items: ProgramOption[] | null) => {
-      setProgramOptions(items);
+      const institution = selectionRef.current.institution;
+      setProgramOptions(items === null ? null : { institution, items });
       if (items === null) return;
-      const slugs = items.map((item) => item.slug);
-      reconcile(null, slugs);
-      const current = selectionRef.current;
-      // The university stays: it is still real, and only the program beneath it has gone. Level and
-      // Subject go with the program, because both are read from the study plan it names.
-      if (current.program !== "" && !slugs.includes(current.program)) {
-        router.replace(
-          `${pathname}${selectionSearch({ ...current, program: "", level: "", subject: "" })}`,
-        );
-      }
+      reconcile(
+        null,
+        items.map((item) => item.slug),
+      );
+      const chosen = items.find(
+        (item) => item.slug === selectionRef.current.program,
+      );
+      if (chosen)
+        refreshNames({
+          program: {
+            slug: chosen.slug,
+            nameAr: chosen.name_ar,
+            nameEn: chosen.name_en,
+          },
+        });
     },
-    [pathname, reconcile, router],
+    [reconcile, refreshNames],
   );
+
+  /**
+   * A filter the catalogue cannot offer is one the visitor can neither see nor remove, so it is
+   * taken out of the address bar.
+   *
+   * Only the invalid part goes. A retired university takes its program with it, because that
+   * program was chosen from *its* list. A program that has gone under a university that still
+   * exists leaves the university selected and takes level and Subject with it, because both are
+   * read from the study plan the program names.
+   *
+   * A list that failed to load is `null` and judges nothing: a network failure is not evidence that
+   * a university was retired.
+   */
+  useEffect(() => {
+    if (selection.institution === "") return;
+
+    // One effect, and the order inside it matters. As two effects these rules deadlocked: both ran
+    // in the same commit, the university rule emptied the address bar, and the program rule — which
+    // by design keeps the university — immediately wrote the retired one back. Neither dependency
+    // list had changed by then, so nothing re-ran and the invalid filter stayed forever.
+    if (
+      institutionOptions !== null &&
+      !institutionOptions.some((item) => item.slug === selection.institution)
+    ) {
+      router.replace(
+        `${pathname}${selectionSearch({ ...clearedSelection(), query: selection.query })}`,
+      );
+      return;
+    }
+
+    if (selection.program === "") return;
+    // Judged only against the list read for this very university.
+    if (programOptions === null || programOptions.institution !== selection.institution)
+      return;
+    if (programOptions.items.some((item) => item.slug === selection.program)) return;
+    router.replace(
+      `${pathname}${selectionSearch({ ...selection, program: "", level: "", subject: "" })}`,
+    );
+  }, [institutionOptions, programOptions, selection, pathname, router]);
 
   const filters = requestFilters(selection, relevantProgram);
   // Serialised so the effect re-runs when the filters change by value rather
@@ -445,9 +501,9 @@ export function CatalogueList() {
   const selectedProgramName =
     selection.program === ""
       ? ""
-      : programOptions?.find((item) => item.slug === selection.program)
+      : programOptions?.items.find((item) => item.slug === selection.program)
         ? programName(
-            programOptions.find((item) => item.slug === selection.program)!,
+            programOptions.items.find((item) => item.slug === selection.program)!,
             locale as "ar" | "en",
           )
         : anonymous?.programSlug === selection.program
@@ -523,7 +579,7 @@ export function CatalogueList() {
           )}
 
           {state.items?.length === 0 && (
-            <div className="mt-8">
+            <div className="mt-8" data-testid="catalogue-empty">
               <EmptyState
                 title={emptyMessage}
                 description={
