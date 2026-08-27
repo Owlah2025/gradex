@@ -202,6 +202,8 @@ export function CourseDirectory() {
         <div className="mt-8" data-testid="admin-course-empty">
           <EmptyState
             density="compact"
+            // This stands directly under the page's own title, with no section heading between.
+            headingLevel={2}
             title={appliedSearch === "" ? copy.empty[filter] : copy.emptySearch}
             action={
               appliedSearch === "" ? undefined : (

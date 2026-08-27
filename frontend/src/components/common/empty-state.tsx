@@ -14,6 +14,12 @@ import { cn } from "@/lib/utils";
  * `description` is where "this is expected" gets said. A queue that is empty because the work is
  * done reads very differently from one that is empty because a filter excluded everything, and the
  * component cannot know which — the caller must.
+ *
+ * `headingLevel` is the caller's for the same reason. Most of these stand inside a section that
+ * already has its own heading, where `h3` is right; a few stand directly under the page title,
+ * where `h3` skips a level and leaves a reader moving by headings to guess what the missing `h2`
+ * would have been. The component cannot see where it was placed, so the default stays `3` and the
+ * screens that sit one level up say so.
  */
 export function EmptyState({
   icon,
@@ -21,6 +27,7 @@ export function EmptyState({
   description,
   action,
   density = "default",
+  headingLevel = 3,
   className,
   testID,
 }: {
@@ -29,12 +36,15 @@ export function EmptyState({
   description?: string;
   action?: React.ReactNode;
   density?: "default" | "compact";
+  /** The level this state's title sits at. `2` when it stands directly under the page's `h1`. */
+  headingLevel?: 2 | 3 | 4;
   className?: string;
   /** Named for the same reason `LoadingState` and `ErrorState` are: a test asserting which of the
       three a screen is showing has to be able to tell them apart. */
   testID?: string;
 }) {
   const compact = density === "compact";
+  const Heading = `h${headingLevel}` as const;
   return (
     <div
       data-testid={testID}
@@ -57,14 +67,14 @@ export function EmptyState({
         </div>
       ) : null}
       <div className={compact ? "min-w-0 flex-1" : "contents"}>
-        <h3
+        <Heading
           className={cn(
             "font-display font-bold text-foreground",
             compact ? "text-base leading-snug" : "text-xl",
           )}
         >
           {title}
-        </h3>
+        </Heading>
         {description ? (
           <p
             className={cn(
