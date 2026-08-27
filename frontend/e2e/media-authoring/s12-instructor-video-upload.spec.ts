@@ -271,11 +271,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(inspector.getByTestId("submitted-academic-audience")).toContainText("Automatic");
   await expect(inspector.getByTestId("submitted-study-year")).toHaveCount(0);
   await expect(inspector.getByTestId("submitted-major")).toHaveCount(0);
-  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
-  await expect(inspector.getByTestId("submitted-public-preview")).toContainText("A separate public preview is selected for this revision.");
+  // The state, in words. The enum behind it stays in the payload and out of the Admin's reading.
+  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
+  await expect(inspector.getByTestId("submitted-revision-state")).not.toContainText("PENDING_REVIEW");
+  await expect(inspector.getByTestId("submitted-public-preview")).toContainText("A separate public preview is attached to this version.");
   await expect(inspector.getByTestId(`submitted-section-${sectionID}`)).toContainText("Media Section");
   await expect(inspector.getByTestId(`submitted-lesson-${lessonID}`)).toContainText("Media Lesson");
-  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("READY");
+  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("Ready to preview");
 
   // Preview is issued through the reviewed Lesson endpoint and receives the
   // application-owned protected manifest route. The browser never receives a
@@ -323,10 +325,12 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/request-changes`,
   );
   await inspector.getByTestId("request-changes-inspected-revision").click();
-  await inspector.getByTestId("request-changes-reason").fill(CHANGE_REQUEST_REASON);
-  await inspector.getByTestId("submit-request-changes").click();
+  const changesDialog = adminPage.getByTestId("review-decision-confirm");
+  await expect(changesDialog).toBeVisible();
+  await changesDialog.getByTestId("request-changes-reason").fill(CHANGE_REQUEST_REASON);
+  await changesDialog.getByTestId("confirm-accept").click();
   expect((await requestChangesResponse).status()).toBe(200);
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Change request sent to instructor");
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The change request was sent to the instructor.");
 
   // ---------------------------------------------------------------------
   // MVP-F02 — the Instructor must be able to learn *why* the Course came
@@ -415,12 +419,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
-  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
+  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
 
   // 11. Approve through the inspector, against the exact revision that was
   // successfully rendered and previewed above.
   await resubmittedInspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toHaveCount(0);
 
   const afterApproval = await admin.get("/api/v1/admin/review/queue");

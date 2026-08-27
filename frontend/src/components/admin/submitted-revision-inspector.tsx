@@ -16,6 +16,16 @@ import {
 } from "@/lib/api/review";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { Field } from "@/components/ui/field";
+import { LoadingState } from "@/components/common/loading-state";
+import { StatusBadge } from "@/components/common/status-badge";
+import { Textarea } from "@/components/ui/textarea";
+import { WorkspaceSection } from "@/components/layout/workspace-page";
 import { ReviewLessonPreview } from "./review-lesson-preview";
 import { PricingPanel } from "./pricing-panel";
 import { TaxonomyOverrideForm } from "./taxonomy-override-form";
@@ -39,15 +49,21 @@ function videoIDs(revision: CourseRevisionWire): string[] {
   );
 }
 
+/**
+ * A catalogue term by its label. `locale` selects between two data fields the server returned, which
+ * is data selection rather than UI copy; the two "no term" answers are copy and come from the
+ * dictionary.
+ */
 function taxonomyLabel(
   termID: string | undefined,
   kind: TaxonomyKind,
   terms: TaxonomyTerm[],
+  copy: ReturnType<typeof useLocale>["t"]["adminReview"]["inspector"],
   locale: "ar" | "en",
 ): string {
-  if (!termID) return locale === "ar" ? "غير محدد" : "Not specified";
+  if (!termID) return copy.notSpecified;
   const term = terms.find((candidate) => candidate.id === termID && candidate.kind === kind);
-  if (!term) return locale === "ar" ? "مصطلح غير متاح" : "Unavailable term";
+  if (!term) return copy.unavailableTerm;
   return locale === "ar" ? term.label_ar : term.label_en;
 }
 
@@ -62,26 +78,6 @@ function isCoursePriceRequired(cause: unknown): boolean {
     violations?: Array<{ code?: string }>;
   };
   return (problem.violations ?? []).some((violation) => violation.code === "COURSE_PRICE_REQUIRED");
-}
-
-function mediaStateLabel(state: string, locale: "ar" | "en"): string {
-  const labels: Record<string, [string, string]> = {
-    LOADING: ["جارٍ قراءة حالة الوسائط", "Loading media state"],
-    READY: ["جاهز للمعاينة", "READY"],
-    PROCESSING: ["قيد المعالجة", "PROCESSING"],
-    SCAN_PASSED: ["بانتظار المعالجة", "Awaiting processing"],
-    FAILED: ["فشلت المعالجة", "FAILED"],
-    QUARANTINED: ["غير متاح بعد الفحص", "Unavailable after scanning"],
-    UNAVAILABLE: ["حالة الوسائط غير متاحة", "Media state unavailable"],
-    NO_VIDEO: ["لا يوجد فيديو مرفق", "No video attached"],
-  };
-  const value = labels[state] ?? [state, state];
-  return locale === "ar" ? value[0] : value[1];
-}
-
-function lessonFileKindLabel(kind: "RESOURCE" | "LAB_MATERIAL", locale: "ar" | "en"): string {
-  if (kind === "RESOURCE") return locale === "ar" ? "مورد" : "Resource";
-  return locale === "ar" ? "مادة مختبر" : "Lab material";
 }
 
 /**
@@ -104,7 +100,9 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
   const [actionSuccess, setActionSuccess] = useState("");
   const [reviewed, setReviewed] = useState(false);
   const [requestReason, setRequestReason] = useState("");
-  const [requestingChanges, setRequestingChanges] = useState(false);
+  // Which decision is awaiting confirmation, or none. One piece of state for both, because an Admin
+  // is answering one question at a time.
+  const [pendingDecision, setPendingDecision] = useState<"approve" | "changes" | null>(null);
   // Read from the price history the pricing panel already loads. `null` means "not known yet",
   // which must not be rendered as "no price" — an unread history is not a missing price.
   const [launchPriced, setLaunchPriced] = useState<boolean | null>(null);
@@ -128,7 +126,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
         revision.id !== item.revision_id ||
         revision.course_id !== item.course_id
       ) {
-        throw new Error(isAr ? "لم تطابق تفاصيل المراجعة المقرر أو المراجعة المحددة." : "Review detail did not match the selected Course or revision.");
+        throw new Error(t.adminReview.inspector.mismatch);
       }
       let terms: TaxonomyTerm[] = [];
       if (!isAcademicCourse(course)) {
@@ -158,12 +156,13 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
     } finally {
       setLoading(false);
     }
-  }, [isAr, item.course_id, item.revision_id, locale]);
+  }, [t, item.course_id, item.revision_id, locale]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  const copy = t.adminReview.inspector;
   const canReview = loaded !== null && !loading && !loadError;
   const canAct = canReview && !reviewed;
   const revision = loaded?.revision;
@@ -172,8 +171,41 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
 
   const csrf = (): string | null => {
     const token = currentCSRFToken();
-    if (!token) setActionError(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+    if (!token) setActionError(copy.csrfMissing);
     return token || null;
+  };
+
+  /**
+   * Carries out whichever decision is awaiting confirmation.
+   *
+   * One entry point for both, so both obey the same rule: the API is called exactly once, the
+   * dialog closes whatever the server says, and a refusal is reported as a refusal rather than
+   * leaving a success notice standing beside it.
+   */
+  const decide = async () => {
+    if (!pendingDecision || busy) return;
+    const isApproval = pendingDecision === "approve";
+    await completeReview(
+      (token) =>
+        isApproval
+          ? approveCourseRevision({
+              courseID: item.course_id,
+              revisionID: item.revision_id,
+              locale,
+              csrf: token,
+            }).then(() => undefined)
+          : requestCourseRevisionChanges({
+              courseID: item.course_id,
+              revisionID: item.revision_id,
+              reason: requestReason,
+              locale,
+              csrf: token,
+            }).then(() => {
+              setRequestReason("");
+            }),
+      isApproval ? copy.approved : copy.requested,
+    );
+    setPendingDecision(null);
   };
 
   const completeReview = async (operation: (token: string) => Promise<void>, success: string) => {
@@ -192,7 +224,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
       const message = describeApiError(cause, locale);
       setActionError(
         isCoursePriceRequired(cause)
-          ? `${isAr ? "يجب ضبط سعر المقرر في لوحة التسعير أدناه قبل الموافقة والنشر." : "Set the Course price in the pricing panel below before approving and publishing."} ${message}`
+          ? `${copy.priceFirst} ${message}`
           : message,
       );
     } finally {
@@ -220,7 +252,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
         issued.lesson_id !== lessonID ||
         issued.video_asset_version_id !== assetVersionID
       ) {
-        throw new Error(isAr ? "لم تطابق معاينة الفيديو الدرس المُرسل." : "Video preview did not match the submitted Lesson.");
+        throw new Error(copy.previewMismatch);
       }
       setPreview(issued);
     } catch (cause) {
@@ -228,96 +260,235 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
     }
   };
 
+
+  const mediaLabel = (state: string): string =>
+    copy.mediaState[state as keyof typeof copy.mediaState] ?? copy.mediaState.UNAVAILABLE;
+
+  /** A field in the "what was submitted" grid. */
+  const Detail = ({
+    label,
+    value,
+    testID,
+    valueDir,
+  }: {
+    label: string;
+    value: string;
+    testID?: string;
+    valueDir?: "rtl" | "ltr";
+  }) => (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        dir={valueDir}
+        data-testid={testID}
+        className="mt-1 whitespace-pre-wrap text-sm text-foreground"
+      >
+        {value}
+      </dd>
+    </div>
+  );
+
   return (
-    <section dir={dir} data-testid="submitted-revision-inspector" className="space-y-5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 dark:border-indigo-900 dark:bg-indigo-950/20">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-indigo-200 pb-4 dark:border-indigo-900">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-            {isAr ? "مراجعة الكورس المُرسل" : "Submitted Course Review"}
-          </h2>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-            {isAr ? "المحتوى أدناه هو النسخة المُرسلة فقط." : "The content below is the submitted version only."}
-          </p>
+    <section dir={dir} data-testid="submitted-revision-inspector" className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-bold text-foreground">{copy.title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{copy.lead}</p>
         </div>
-        <button type="button" onClick={onClose} className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-300">
-          {isAr ? "إغلاق الفحص" : "Close inspector"}
-        </button>
-      </header>
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+          {copy.close}
+        </Button>
+      </div>
 
-      {loading && <p data-testid="submitted-revision-loading" aria-live="polite">{isAr ? "جارٍ تحميل المراجعة المُرسلة..." : "Loading submitted revision..."}</p>}
-      {loadError && <p role="alert" data-testid="submitted-revision-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{loadError}</p>}
+      {loading ? <LoadingState label={copy.loading} testID="submitted-revision-loading" /> : null}
+      {loadError ? (
+        <ErrorState title={copy.loadFailed} detail={loadError} testID="submitted-revision-error" />
+      ) : null}
 
-      {revision && canReview && (
+      {revision && canReview ? (
         <div className="space-y-6">
-          <section className="grid gap-4 rounded-lg bg-white p-4 shadow-sm dark:bg-slate-900 md:grid-cols-2">
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "العنوان العربي" : "Arabic title"}</p><p dir="rtl" data-testid="submitted-title-ar" className="mt-1 text-slate-900 dark:text-slate-100">{revision.title_ar}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "العنوان الإنجليزي" : "English title"}</p><p dir="ltr" data-testid="submitted-title-en" className="mt-1 text-slate-900 dark:text-slate-100">{revision.title_en}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "الوصف العربي" : "Arabic description"}</p><p dir="rtl" data-testid="submitted-description-ar" className="mt-1 whitespace-pre-wrap text-slate-900 dark:text-slate-100">{revision.description_ar || "—"}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "الوصف الإنجليزي" : "English description"}</p><p dir="ltr" data-testid="submitted-description-en" className="mt-1 whitespace-pre-wrap text-slate-900 dark:text-slate-100">{revision.description_en || "—"}</p></div>
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "حالة المراجعة" : "Review status"}</p><p data-testid="submitted-revision-state" className="mt-1 text-slate-900 dark:text-slate-100">{revision.state || "—"}</p></div>
-            {course && isAcademicCourse(course) ? (
-              <AcademicReviewContext course={course} revision={revision} locale={locale} />
-            ) : (
-              <>
-                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "سنة الدراسة" : "Study year"}</p><p data-testid="submitted-study-year" className="mt-1 text-slate-900 dark:text-slate-100">{revision.study_year || "—"}</p></div>
-                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "التخصص" : "Major"}</p><p data-testid="submitted-major" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.major_term_id, "MAJOR", terms, locale)}</p></div>
-                <div><p className="text-xs font-semibold text-slate-500">{isAr ? "المادة" : "Subject"}</p><p data-testid="submitted-subject" className="mt-1 text-slate-900 dark:text-slate-100">{taxonomyLabel(revision.subject_term_id, "SUBJECT", terms, locale)}</p></div>
-              </>
-            )}
-            <div><p className="text-xs font-semibold text-slate-500">{isAr ? "المعاينة العامة" : "Public preview"}</p><p data-testid="submitted-public-preview" className="mt-1 text-slate-900 dark:text-slate-100">{revision.preview_asset_version_id ? (isAr ? "تم اختيار معاينة عامة منفصلة لهذه المراجعة." : "A separate public preview is selected for this revision.") : (isAr ? "لا توجد معاينة عامة لهذه المراجعة." : "No public preview is selected for this revision.")}</p></div>
-          </section>
+          <WorkspaceSection title={copy.details} headingLevel="h3">
+            <dl className="grid gap-x-6 gap-y-4 rounded-lg border border-border bg-card p-5 md:grid-cols-2">
+              <Detail
+                label={copy.titleAr}
+                value={revision.title_ar}
+                testID="submitted-title-ar"
+                valueDir="rtl"
+              />
+              <Detail
+                label={copy.titleEn}
+                value={revision.title_en}
+                testID="submitted-title-en"
+                valueDir="ltr"
+              />
+              <Detail
+                label={copy.descriptionAr}
+                value={revision.description_ar || "—"}
+                testID="submitted-description-ar"
+                valueDir="rtl"
+              />
+              <Detail
+                label={copy.descriptionEn}
+                value={revision.description_en || "—"}
+                testID="submitted-description-en"
+                valueDir="ltr"
+              />
+              {/* The review state, as a state rather than as the enum that carries it. This field
+                  used to render `revision.state` directly, so the one thing the Admin read here in
+                  a screen full of prose was PENDING_REVIEW. */}
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {copy.state}
+                </dt>
+                <dd className="mt-1" data-testid="submitted-revision-state">
+                  <StatusBadge
+                    tone="default"
+                    label={revisionStateLabel(revision.state, t)}
+                    size="sm"
+                  />
+                </dd>
+              </div>
+              {course && isAcademicCourse(course) ? (
+                <AcademicReviewContext course={course} revision={revision} locale={locale} />
+              ) : (
+                <>
+                  <Detail
+                    label={copy.studyYear}
+                    value={revision.study_year || "—"}
+                    testID="submitted-study-year"
+                  />
+                  <Detail
+                    label={copy.major}
+                    value={taxonomyLabel(revision.major_term_id, "MAJOR", terms, copy, locale)}
+                    testID="submitted-major"
+                  />
+                  <Detail
+                    label={copy.subject}
+                    value={taxonomyLabel(revision.subject_term_id, "SUBJECT", terms, copy, locale)}
+                    testID="submitted-subject"
+                  />
+                </>
+              )}
+              <Detail
+                label={copy.preview}
+                value={
+                  revision.preview_asset_version_id ? copy.previewPresent : copy.previewAbsent
+                }
+                testID="submitted-public-preview"
+              />
+            </dl>
+          </WorkspaceSection>
 
-          <section aria-labelledby="submitted-outline-heading" className="space-y-3">
-            <h3 id="submitted-outline-heading" className="font-semibold text-slate-900 dark:text-slate-100">{isAr ? "الأقسام والدروس المُرسلة" : "Submitted Sections and Lessons"}</h3>
+          <WorkspaceSection title={copy.outline} headingLevel="h3">
             {revision.sections.length === 0 ? (
-              <p data-testid="submitted-sections-empty" className="text-sm text-slate-600 dark:text-slate-300">{isAr ? "لا توجد أقسام مُرسلة." : "No submitted Sections."}</p>
-            ) : revision.sections.map((section) => (
-              <article key={section.id} data-testid={`submitted-section-${section.id}`} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{isAr ? `القسم ${section.position}` : `Section ${section.position}`}</p>
-                <p dir="rtl" className="mt-1 font-medium text-slate-900 dark:text-slate-100">{section.title_ar}</p>
-                <p dir="ltr" className="text-sm text-slate-700 dark:text-slate-300">{section.title_en}</p>
-                <div className="mt-3 space-y-3">
-                  {(section.lessons ?? []).map((lesson) => {
-                    const mediaState = lesson.video_asset_version_id ? (mediaStates[lesson.video_asset_version_id] ?? "LOADING") : "NO_VIDEO";
-                    const canPreview = mediaState === "READY";
-                    return (
-                      <div key={lesson.id} data-testid={`submitted-lesson-${lesson.id}`} className="rounded border border-slate-200 p-3 dark:border-slate-700">
-                        <p className="text-xs font-semibold text-slate-500">{isAr ? `الدرس ${lesson.position}` : `Lesson ${lesson.position}`}</p>
-                        <p dir="rtl" className="mt-1 text-slate-900 dark:text-slate-100">{lesson.title_ar}</p>
-                        <p dir="ltr" className="text-sm text-slate-700 dark:text-slate-300">{lesson.title_en}</p>
-                        <p data-testid={`submitted-lesson-media-state-${lesson.id}`} className="mt-2 text-xs text-slate-600 dark:text-slate-300">{isAr ? "حالة الوسائط: " : "Media state: "}{mediaStateLabel(mediaState, locale)}</p>
-                        {lesson.files && lesson.files.length > 0 && (
-                          <ul data-testid={`submitted-lesson-materials-${lesson.id}`} className="mt-2 list-inside list-disc text-xs text-slate-600 dark:text-slate-300">
-                            {lesson.files.map((file) => (
-                              <li key={file.id}>
-                                {lessonFileKindLabel(file.kind, locale)}: {isAr ? file.display_name_ar : file.display_name_en}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <button
-                          type="button"
-                          disabled={!canPreview || busy || reviewed}
-                          onClick={() => void startPreview(lesson.id, lesson.video_asset_version_id)}
-                          data-testid={`preview-submitted-lesson-${lesson.id}`}
-                          className="mt-3 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {canPreview ? (isAr ? "معاينة الفيديو المحمي" : "Preview protected video") : mediaStateLabel(mediaState, locale)}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </article>
-            ))}
-          </section>
+              <EmptyState
+                density="compact"
+                title={copy.outlineEmpty}
+                testID="submitted-sections-empty"
+              />
+            ) : (
+              <ul className="space-y-3">
+                {revision.sections.map((section) => (
+                  <li
+                    key={section.id}
+                    data-testid={`submitted-section-${section.id}`}
+                    className="rounded-lg border border-border bg-card p-4"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {copy.section} {section.position}
+                    </p>
+                    <p dir="rtl" className="mt-1 font-display font-bold text-foreground">
+                      {section.title_ar}
+                    </p>
+                    <p dir="ltr" className="text-sm text-muted-foreground">
+                      {section.title_en}
+                    </p>
+                    <ul className="mt-3 space-y-3">
+                      {(section.lessons ?? []).map((lesson) => {
+                        const mediaState = lesson.video_asset_version_id
+                          ? (mediaStates[lesson.video_asset_version_id] ?? "LOADING")
+                          : "NO_VIDEO";
+                        const canPreview = mediaState === "READY";
+                        return (
+                          <li
+                            key={lesson.id}
+                            data-testid={`submitted-lesson-${lesson.id}`}
+                            className="rounded-md border border-border p-3"
+                          >
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {copy.lesson} {lesson.position}
+                            </p>
+                            <p dir="rtl" className="mt-1 text-foreground">
+                              {lesson.title_ar}
+                            </p>
+                            <p dir="ltr" className="text-sm text-muted-foreground">
+                              {lesson.title_en}
+                            </p>
+                            <p
+                              data-testid={`submitted-lesson-media-state-${lesson.id}`}
+                              className="mt-2 text-sm text-muted-foreground"
+                            >
+                              {copy.media}: {mediaLabel(mediaState)}
+                            </p>
+                            {lesson.files && lesson.files.length > 0 ? (
+                              <ul
+                                data-testid={`submitted-lesson-materials-${lesson.id}`}
+                                className="mt-2 space-y-1 text-sm text-muted-foreground"
+                              >
+                                {lesson.files.map((file) => (
+                                  <li key={file.id}>
+                                    {file.kind === "RESOURCE" ? copy.resource : copy.labMaterial}:{" "}
+                                    <bdi>{isAr ? file.display_name_ar : file.display_name_en}</bdi>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="mt-3"
+                              disabled={!canPreview || busy || reviewed}
+                              onClick={() =>
+                                void startPreview(lesson.id, lesson.video_asset_version_id)
+                              }
+                              data-testid={`preview-submitted-lesson-${lesson.id}`}
+                              // The disabled reason is the media state, which the line above already
+                              // states; the control names the action rather than repeating it.
+                              aria-label={`${copy.previewLesson} — ${lesson.title_en}`}
+                            >
+                              {copy.previewLesson}
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </WorkspaceSection>
 
-          {previewError && <p role="alert" data-testid="review-preview-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{previewError}</p>}
-          {preview && <section data-testid="review-preview-player" className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><h3 className="mb-3 font-semibold text-slate-900 dark:text-slate-100">{isAr ? "معاينة الدرس المُرسل" : "Submitted Lesson Preview"}</h3><ReviewLessonPreview playbackURL={preview.playback_url} locale={locale} /></section>}
+          {previewError ? (
+            <ErrorState title={copy.previewFailed} detail={previewError} testID="review-preview-error" />
+          ) : null}
+          {preview ? (
+            <WorkspaceSection title={copy.previewHeading} headingLevel="h3" testID="review-preview-player">
+              <div className="rounded-lg border border-border bg-card p-4">
+                <ReviewLessonPreview playbackURL={preview.playback_url} locale={locale} />
+              </div>
+            </WorkspaceSection>
+          ) : null}
 
-          <section className="grid gap-5 lg:grid-cols-2">
-          {course && isAcademicCourse(course) ? null : taxonomyError ? (
-              <p role="alert" data-testid="review-taxonomy-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{taxonomyError}</p>
+          <div className="grid gap-5 lg:grid-cols-2">
+            {course && isAcademicCourse(course) ? null : taxonomyError ? (
+              <ErrorState
+                title={copy.taxonomyFailed}
+                detail={taxonomyError}
+                testID="review-taxonomy-error"
+              />
             ) : (
               <TaxonomyOverrideForm courseID={item.course_id} revisionID={item.revision_id} terms={terms} />
             )}
@@ -326,38 +497,112 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
               sections={revision.sections}
               onLaunchPriceKnown={noteLaunchPrice}
             />
-          </section>
+          </div>
 
-          {actionSuccess && <p role="status" data-testid="review-action-success" className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{actionSuccess}</p>}
-          {actionError && <p role="alert" data-testid="review-action-error" className="rounded border border-rose-300 bg-rose-50 p-3 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300">{actionError}</p>}
+          {actionSuccess ? (
+            <div data-testid="review-action-success">
+              <Alert tone="success" title={actionSuccess} />
+            </div>
+          ) : null}
+          {actionError ? (
+            <div data-testid="review-action-error">
+              <Alert tone="error" title={actionError} />
+            </div>
+          ) : null}
 
           {/* The approval blocker the Admin owns, named before Approve is pressed rather than only
               as a refusal afterwards. The server remains authoritative: this reports what the price
               history says and never decides whether publication is permitted. */}
-          {launchPriced === false && (
-            <p
-              data-testid="review-launch-price-required"
-              className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
-            >
-              {t.adminReview.priceRequired}
-            </p>
-          )}
-
-          <section className="flex flex-wrap gap-3 border-t border-indigo-200 pt-4 dark:border-indigo-900">
-            <button type="button" disabled={busy || reviewed} onClick={() => void completeReview((token) => approveCourseRevision({ courseID: item.course_id, revisionID: item.revision_id, locale, csrf: token }).then(() => undefined), isAr ? "تم نشر المقرر بنجاح" : "Course published successfully")} data-testid="approve-inspected-revision" className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "موافقة ونشر" : "Approve & Publish"}</button>
-            <button type="button" disabled={busy || reviewed} onClick={() => setRequestingChanges(true)} data-testid="request-changes-inspected-revision" className="rounded bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "طلب تعديلات" : "Request Changes"}</button>
-          </section>
-
-          {requestingChanges && (
-            <div role="dialog" aria-modal="true" aria-labelledby="request-changes-title" className="rounded-lg border border-rose-300 bg-white p-4 shadow-sm dark:border-rose-900 dark:bg-slate-900">
-              <h3 id="request-changes-title" className="font-semibold text-slate-900 dark:text-slate-100">{isAr ? "سبب طلب التعديلات" : "Reason for change request"}</h3>
-              <textarea value={requestReason} onChange={(event) => setRequestReason(event.target.value)} rows={4} data-testid="request-changes-reason" className="mt-3 w-full rounded border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-800" placeholder={isAr ? "اكتب الملاحظات للمحاضر" : "Provide clear feedback for the Instructor"} />
-              <div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setRequestingChanges(false)} className="rounded border border-slate-300 px-3 py-1.5 text-sm dark:border-slate-700">{isAr ? "إلغاء" : "Cancel"}</button><button type="button" disabled={busy || !requestReason.trim()} onClick={() => void completeReview((token) => requestCourseRevisionChanges({ courseID: item.course_id, revisionID: item.revision_id, reason: requestReason, locale, csrf: token }).then(() => { setRequestingChanges(false); setRequestReason(""); }), isAr ? "تم إرسال طلب التعديلات إلى المحاضر" : "Change request sent to instructor")} data-testid="submit-request-changes" className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "إرسال الطلب" : "Send request"}</button></div>
+          {launchPriced === false ? (
+            <div data-testid="review-launch-price-required">
+              <Alert tone="info" title={t.adminReview.priceRequired} />
             </div>
-          )}
+          ) : null}
+
+          <WorkspaceSection title={copy.decision} headingLevel="h3">
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                disabled={busy || reviewed}
+                onClick={() => setPendingDecision("approve")}
+                data-testid="approve-inspected-revision"
+              >
+                {copy.approve}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy || reviewed}
+                onClick={() => setPendingDecision("changes")}
+                data-testid="request-changes-inspected-revision"
+              >
+                {copy.requestChanges}
+              </Button>
+            </div>
+          </WorkspaceSection>
+
+          {/*
+            Both decisions are confirmed, and both confirmations state their effect.
+
+            Approve had none at all: one click published a Course into the public catalogue and
+            closed the Instructor's ability to edit the version, from a button sitting beside the
+            one that sends it back. Request-changes had a hand-rolled `role="dialog"` that trapped
+            no focus, closed on no key, and returned focus nowhere.
+          */}
+          {pendingDecision ? (
+            <ConfirmDialog
+              open
+              onOpenChange={(next) => {
+                if (!next && !busy) setPendingDecision(null);
+              }}
+              title={pendingDecision === "approve" ? copy.approveTitle : copy.requestChangesTitle}
+              body={pendingDecision === "approve" ? copy.approveBody : copy.requestChangesBody}
+              confirmLabel={
+                pendingDecision === "approve" ? copy.approveConfirm : copy.requestChangesConfirm
+              }
+              cancelLabel={copy.cancel}
+              tone={pendingDecision === "approve" ? "default" : "destructive"}
+              busy={busy}
+              confirmDisabled={pendingDecision === "changes" && requestReason.trim() === ""}
+              onConfirm={() => void decide()}
+              testID="review-decision-confirm"
+            >
+              {pendingDecision === "changes" ? (
+                <Field htmlFor="request-changes-reason" label={copy.reason} hint={copy.reasonHint}>
+                  <Textarea
+                    id="request-changes-reason"
+                    data-testid="request-changes-reason"
+                    rows={4}
+                    value={requestReason}
+                    onChange={(event) => setRequestReason(event.target.value)}
+                    disabled={busy}
+                  />
+                </Field>
+              ) : null}
+            </ConfirmDialog>
+          ) : null}
         </div>
-      )}
-      {!loading && !revision && !loadError && <p role="alert">{isAr ? "لا تتوفر مراجعة مُرسلة صالحة." : "No valid submitted revision is available."}</p>}
+      ) : null}
+
+      {!loading && !revision && !loadError ? (
+        <EmptyState density="compact" title={copy.unavailable} />
+      ) : null}
     </section>
   );
+}
+
+/**
+ * The submitted revision's state, in words.
+ *
+ * In practice a revision reaches this screen only from the review queue, so the value is always
+ * `PENDING_REVIEW`. The map is still a map rather than a constant, because the field is on the
+ * contract and a value this screen does not recognise must degrade to something readable rather
+ * than to the enum itself.
+ */
+function revisionStateLabel(
+  state: string | undefined,
+  dictionary: ReturnType<typeof useLocale>["t"],
+): string {
+  const labels = dictionary.adminCourses.status as Record<string, string>;
+  return (state && labels[state]) || dictionary.adminReview.inspector.state;
 }

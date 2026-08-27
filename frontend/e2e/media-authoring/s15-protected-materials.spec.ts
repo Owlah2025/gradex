@@ -114,7 +114,8 @@ async function inspectAndApprove(browser: Browser, expectedResourceName: string 
     await expect(inspector).not.toContainText("[RESOURCE]");
   }
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await adminContext.close();
 }
 

@@ -275,6 +275,12 @@ test.describe("UX-A Admin Course discovery without an identifier", () => {
     await expect(page.getByTestId("review-launch-price-required")).toHaveCount(0);
 
     await inspector.getByTestId("approve-inspected-revision").click();
+    // Publishing puts a Course in front of students and closes the version to its author, so it is
+    // confirmed — and the confirmation states that, rather than repeating the button.
+    const publishDialog = page.getByTestId("review-decision-confirm");
+    await expect(publishDialog).toBeVisible();
+    await expect(publishDialog).toContainText("students can be granted access");
+    await publishDialog.getByTestId("confirm-accept").click();
     // The decision is confirmed where it was taken. Redirecting on success would destroy the
     // message that tells the Admin it landed.
     await expect(page.getByTestId("review-action-success")).toBeVisible({ timeout: 20_000 });

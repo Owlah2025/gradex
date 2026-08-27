@@ -139,7 +139,8 @@ async function approveInspected(page: Page, setPrice: boolean): Promise<void> {
     await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
   }
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(page.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await page.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("review-action-success")).toContainText("The course is published.");
 }
 
 async function createMissingSubjectCourse(

@@ -225,8 +225,26 @@ test("the submitted-revision inspector renders only the returned graph and keeps
   assert.match(source, /course\.id !== item\.course_id/, "a mismatched Course detail must fail closed");
   assert.match(source, /revision\.id !== item\.revision_id/, "a mismatched revision detail must fail closed");
   assert.match(source, /mediaStates\[assetVersionID\] !== "READY"/, "non-ready media must not request a preview");
-  for (const state of ["PROCESSING", "SCAN_PASSED", "FAILED", "QUARANTINED", "UNAVAILABLE", "NO_VIDEO"]) {
-    assert.ok(source.includes(state), `the inspector must describe ${state} instead of attempting protected playback`);
+  // Every media state a lesson can be in has words for it. The words moved to the dictionary when
+  // the inspector's copy did — the guarantee is that the state is *described*, not that the
+  // description is written in the component.
+  for (const dictionary of ["en", "ar"] as const) {
+    const copy = readSource(`src/lib/i18n/dictionaries/${dictionary}.ts`);
+    const block = copy.slice(copy.indexOf("mediaState: {"), copy.indexOf("mediaState: {") + 600);
+    for (const state of ["PROCESSING", "SCAN_PASSED", "FAILED", "QUARANTINED", "UNAVAILABLE", "NO_VIDEO"]) {
+      assert.match(
+        block,
+        new RegExp(`${state}: "[^"]+"`),
+        `${dictionary} must describe ${state} instead of leaving the enum to stand for it`,
+      );
+    }
+    // And the description is not the enum wearing a label.
+    for (const state of ["PROCESSING", "READY", "FAILED"]) {
+      assert.ok(
+        !new RegExp(`${state}: "${state}"`).test(block),
+        `${dictionary} renders the raw ${state} enum as its own description`,
+      );
+    }
   }
   assert.ok(!source.includes("storage_object_key"), "the inspector must not expose object-storage keys");
   assert.ok(!source.includes("presigned"), "the inspector must not expose presigned upload material");
@@ -300,8 +318,19 @@ test("an approval refused for a missing Course price names the remedy", () => {
     /isCoursePriceRequired\(cause\)/,
     "the pricing remedy must be chosen from the failure, not from local readiness state",
   );
-  assert.match(source, /Set the Course price/, "the English refusal must name the remedy");
-  assert.match(source, /سعر المقرر/, "the Arabic refusal must name the remedy");
+  // The remedy is copy, so it lives in the dictionaries; what the component must prove is that it
+  // reaches for the remedy rather than passing the violation code through.
+  assert.match(source, /copy\.priceFirst/, "the refusal must name the remedy, in the reader's language");
+  assert.match(
+    readSource("src/lib/i18n/dictionaries/en.ts"),
+    /priceFirst:\s*\n?\s*"Set the course price/,
+    "the English refusal must name the remedy",
+  );
+  assert.match(
+    readSource("src/lib/i18n/dictionaries/ar.ts"),
+    /priceFirst: "اضبط سعر المقرر/,
+    "the Arabic refusal must name the remedy",
+  );
   // The server's own reason is still shown; the remedy is added, not substituted.
   assert.match(source, /const message = describeApiError\(cause, locale\)/);
 

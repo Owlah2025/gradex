@@ -121,6 +121,80 @@ export const en = {
     priceRequired:
       "A launch price is required before this course can be approved. Set one in the pricing section above.",
     priceReady: "A launch price is set.",
+    /**
+     * The submitted-revision inspector: the body of this workspace, and the only place a review
+     * decision is made.
+     *
+     * Every string that used to be an `isAr ?` ternary inside the component lives here. That is not
+     * tidying — the component had accumulated a third Arabic word for Course ("الكورس", a
+     * transliteration, beside مقرر and دورة) precisely because its copy was never anywhere the
+     * vocabulary guard could see it.
+     */
+    inspector: {
+      title: "The submitted version",
+      lead: "Everything below is the version the instructor submitted, not their current draft.",
+      close: "Close",
+      loading: "Loading the submitted version…",
+      loadFailed: "The submitted version could not be loaded.",
+      unavailable: "There is no valid submitted version to review.",
+      details: "What was submitted",
+      titleAr: "Title (Arabic)",
+      titleEn: "Title (English)",
+      descriptionAr: "Description (Arabic)",
+      descriptionEn: "Description (English)",
+      state: "Review state",
+      studyYear: "Study year",
+      major: "Major",
+      subject: "Subject",
+      notSpecified: "Not specified",
+      unavailableTerm: "No longer in the catalogue",
+      preview: "Public preview",
+      previewPresent: "A separate public preview is attached to this version.",
+      previewAbsent: "No public preview is attached to this version.",
+      outline: "Sections and lessons",
+      outlineEmpty: "This version has no sections.",
+      section: "Section",
+      lesson: "Lesson",
+      media: "Video",
+      previewLesson: "Preview the protected video",
+      previewHeading: "Lesson preview",
+      previewFailed: "The lesson preview could not be started.",
+      taxonomyFailed: "The catalogue terms could not be loaded.",
+      resource: "Resource",
+      labMaterial: "Lab material",
+      mediaState: {
+        LOADING: "Checking…",
+        READY: "Ready to preview",
+        PROCESSING: "Being prepared",
+        SCAN_PASSED: "Waiting to be prepared",
+        FAILED: "Could not be prepared",
+        QUARANTINED: "Withheld after scanning",
+        UNAVAILABLE: "State unavailable",
+        NO_VIDEO: "No video attached",
+      },
+      decision: "Your decision",
+      approve: "Approve and publish",
+      approveTitle: "Publish this course?",
+      approveBody:
+        "It becomes visible in the public catalogue and students can be granted access to it. The instructor can no longer edit this version.",
+      approveConfirm: "Publish it",
+      approved: "The course is published.",
+      requestChanges: "Request changes",
+      requestChangesTitle: "Send this back to the instructor?",
+      requestChangesBody:
+        "The course leaves your queue and returns to the instructor to edit. Nothing is published, and they can submit it again.",
+      requestChangesConfirm: "Send it back",
+      reason: "What needs to change",
+      reasonHint: "The instructor reads this. Be specific about what to fix.",
+      requested: "The change request was sent to the instructor.",
+      cancel: "Cancel",
+      failed: "The decision could not be recorded.",
+      mismatch: "The loaded review did not match the course and version this workspace is for.",
+      previewMismatch: "The issued video preview did not match the submitted lesson.",
+      csrfMissing: "This session is missing its security token. Reload the page.",
+      priceFirst:
+        "Set the course price in the pricing section below before approving and publishing.",
+    },
   },
   adminReviewQueue: {
     title: "Course review & administration",

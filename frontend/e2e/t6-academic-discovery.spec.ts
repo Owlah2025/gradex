@@ -153,7 +153,8 @@ async function publishAcademicCourse(
   await inspector.getByTestId("pricing-submit").click();
   await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await adminContext.close();
 
   await instructor.dispose();
