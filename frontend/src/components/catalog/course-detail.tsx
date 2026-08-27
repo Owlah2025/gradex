@@ -11,7 +11,6 @@ import { catalogueHrefForContext } from "@/components/academic/catalogue-context
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Container } from "@/components/layout/container";
-import { SkipLink } from "@/components/common/skip-link";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingState, SkeletonBlock } from "@/components/common/loading-state";
@@ -129,7 +128,6 @@ export function CourseDetail({
 
   return (
     <>
-      <SkipLink />
       <Navbar />
       <main id="main" tabIndex={-1} className="py-8 outline-none sm:py-10">
         <Container>

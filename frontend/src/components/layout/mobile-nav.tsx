@@ -11,12 +11,15 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { AuthActions, type AuthState } from "./auth-actions";
-import { navItems } from "./nav-items";
+import { usePathname } from "next/navigation";
+import { AuthActions } from "./auth-actions";
+import { primaryNavigation } from "./nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
-export function MobileNav({ authState }: { authState?: AuthState }) {
-  const { t } = useLocale();
+export function MobileNav() {
+  const { locale, t } = useLocale();
+  const pathname = usePathname();
+  const primary = primaryNavigation(pathname ?? "/", locale);
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -33,8 +36,11 @@ export function MobileNav({ authState }: { authState?: AuthState }) {
       </SheetTrigger>
       <SheetContent side="right" closeLabel={t.meta.closeMenu}>
         <SheetTitle className="sr-only">{t.nav.browse}</SheetTitle>
-        <nav aria-label="Mobile" className="mt-8 flex flex-col gap-1">
-          {navItems.map((item) => (
+        <nav
+          aria-label={t.nav.primaryNavigation}
+          className="mt-8 flex flex-col gap-1"
+        >
+          {primary.map((item) => (
             <SheetClose asChild key={item.href}>
               <Link
                 href={item.href}
@@ -47,7 +53,7 @@ export function MobileNav({ authState }: { authState?: AuthState }) {
         </nav>
         <div className="my-4 h-px bg-border" />
         <div onClick={() => setOpen(false)}>
-          <AuthActions state={authState} stacked />
+          <AuthActions stacked />
         </div>
       </SheetContent>
     </Sheet>

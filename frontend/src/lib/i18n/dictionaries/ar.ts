@@ -71,7 +71,7 @@ export const ar: Dictionary = {
     reportedContent: "البلاغات عن المحتوى",
     staffOperations: "إدارة فريق العمل",
     courseBuilder: "منشئ المقررات",
-    notifications: "الإشعارات",
+    primaryNavigation: "التنقل في الموقع",
   },
   adminCourses: {
     title: "المقررات",
@@ -1047,6 +1047,11 @@ export const ar: Dictionary = {
     ],
   },
   courses: {
+    loading: "جارٍ تحميل المقررات المنشورة…",
+    failed: "تعذّر تحميل المقررات المنشورة. حاول مرة أخرى.",
+    instructor: "المدرّس",
+    preview: "تتوفر معاينة عامة",
+    price: "السعر الإرشادي",
     eyebrow: "المقررات",
     title: "ابدأ من حيث أنت في فصلك.",
     subtitle: "تصفّح المقررات المنشورة حالياً من Gradex.",

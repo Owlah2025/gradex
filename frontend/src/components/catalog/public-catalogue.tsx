@@ -65,7 +65,6 @@ import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Container } from "@/components/layout/container";
 import { EmptyState } from "@/components/common/empty-state";
-import { SkipLink } from "@/components/common/skip-link";
 import { formatFils } from "@/lib/formatters/currency";
 
 function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
@@ -356,7 +355,6 @@ export function CatalogueList() {
 
   return (
     <>
-      <SkipLink />
       <Navbar />
       <main id="main" tabIndex={-1} className="py-10 outline-none">
         <Container>

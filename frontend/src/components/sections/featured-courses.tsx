@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { GraduationCap } from "lucide-react";
 import { Section, SectionHeader } from "@/components/layout/section";
 import { Reveal } from "@/components/common/reveal";
+import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,22 +20,6 @@ import {
 } from "@/components/academic/catalogue-context";
 import { requestFilters } from "@/components/catalog/academic-filter-state";
 
-const copy = {
-  ar: {
-    loading: "جارٍ تحميل المقررات المنشورة…",
-    failed: "تعذّر تحميل المقررات المنشورة. حاول مرة أخرى.",
-    instructor: "المدرّس",
-    preview: "تتوفر معاينة عامة",
-    price: "السعر الإرشادي",
-  },
-  en: {
-    loading: "Loading published courses…",
-    failed: "Published courses could not be loaded. Try again.",
-    instructor: "Instructor",
-    preview: "Public preview available",
-    price: "Price guidance",
-  },
-};
 
 type FeaturedState =
   | { kind: "loading" }
@@ -46,8 +31,7 @@ function courseHref(locale: "ar" | "en", course: PublicCourse): string {
 }
 
 function PublicCourseCard({ course }: { course: PublicCourse }) {
-  const { locale } = useLocale();
-  const t = copy[locale];
+  const { locale, t } = useLocale();
   const taxonomy = [course.major, course.subject, course.study_year].filter(Boolean);
 
   return (
@@ -66,9 +50,9 @@ function PublicCourseCard({ course }: { course: PublicCourse }) {
           {course.title}
         </Link>
       </h3>
-      {course.instructor_display_name && <p className="mt-2 text-sm text-muted-foreground">{t.instructor}: {course.instructor_display_name}</p>}
-      {course.has_preview && <p className="mt-3 text-sm text-primary">{t.preview}</p>}
-      {course.price && <p dir="ltr" className="mt-auto pt-5 font-mono text-base font-semibold text-foreground">{t.price}: {formatFils(course.price.minor_units, locale)}</p>}
+      {course.instructor_display_name && <p className="mt-2 text-sm text-muted-foreground">{t.courses.instructor}: {course.instructor_display_name}</p>}
+      {course.has_preview && <p className="mt-3 text-sm text-primary">{t.courses.preview}</p>}
+      {course.price && <p dir="ltr" className="mt-auto pt-5 font-mono text-base font-semibold text-foreground">{t.courses.price}: {formatFils(course.price.minor_units, locale)}</p>}
     </Card>
   );
 }
@@ -116,8 +100,12 @@ export function FeaturedCourses() {
     <Section id="courses" aria-labelledby="courses-title">
       <SectionHeader eyebrow={t.courses.eyebrow} title={t.courses.title} lead={t.courses.subtitle} headingId="courses-title" />
 
-      {state.kind === "loading" && <p aria-live="polite" data-testid="featured-courses-loading">{copy[locale].loading}</p>}
-      {state.kind === "failed" && <p role="alert" data-testid="featured-courses-error" className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-950">{copy[locale].failed}</p>}
+      {state.kind === "loading" && <p aria-live="polite" data-testid="featured-courses-loading">{t.courses.loading}</p>}
+      {state.kind === "failed" && (
+        <div data-testid="featured-courses-error">
+          <Alert tone="error" title={t.courses.failed} />
+        </div>
+      )}
       {state.kind === "ready" && state.courses.length === 0 && (
         <EmptyState icon={<GraduationCap aria-hidden />} title={t.courses.emptyTitle} description={t.courses.emptyBody} />
       )}

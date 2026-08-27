@@ -28,7 +28,7 @@ export const en = {
     reportedContent: "Reported Content",
     staffOperations: "Staff operations",
     courseBuilder: "Course Builder",
-    notifications: "Notifications",
+    primaryNavigation: "Site navigation",
   },
   adminCourses: {
     title: "Courses",
@@ -1095,6 +1095,11 @@ export const en = {
     ],
   },
   courses: {
+    loading: "Loading published courses…",
+    failed: "Published courses could not be loaded. Try again.",
+    instructor: "Instructor",
+    preview: "Public preview available",
+    price: "Price guidance",
     eyebrow: "Courses",
     title: "Start where your semester is.",
     subtitle: "Browse the Courses currently published by Gradex.",
