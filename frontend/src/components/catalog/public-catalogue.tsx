@@ -388,7 +388,7 @@ export function CatalogueList() {
           />
 
           {relevantProgram !== "" && selection.program === "" && (
-            <p className="mt-4 text-sm text-slate-600">{t.relevanceNote}</p>
+            <p className="mt-4 text-sm text-muted-foreground">{t.relevanceNote}</p>
           )}
 
           {!state.items && !state.error && (

@@ -1,6 +1,7 @@
 "use client";
 
 import type { TaxonomyKind, TaxonomyTerm } from "@/lib/api/catalog";
+import { Select } from "@/components/ui/select";
 
 type TaxonomyTermSelectProps = {
   kind: TaxonomyKind;
@@ -28,13 +29,14 @@ export function TaxonomyTermSelect({
   const label = kind === "MAJOR" ? (isAr ? "التخصص" : "Major") : (isAr ? "المادة" : "Subject");
 
   return (
-    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+    <label className="block text-xs font-semibold text-foreground">
       {label}
-      <select
+      <Select
+        controlSize="sm"
+        className="mt-1"
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs text-slate-900 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       >
         <option value="">{isAr ? `اختر ${label}` : `Select ${label}`}</option>
         {matchingTerms.map((term) => (
@@ -42,7 +44,7 @@ export function TaxonomyTermSelect({
             {taxonomyTermLabel(term, locale)}{term.academic_code ? ` (${term.academic_code})` : ""}
           </option>
         ))}
-      </select>
+      </Select>
     </label>
   );
 }

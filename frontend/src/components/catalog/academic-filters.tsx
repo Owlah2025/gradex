@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Select } from "@/components/ui/select";
 import {
   getPublicInstitutions,
   getPublicLevels,
@@ -94,21 +95,21 @@ function Field({
   const hintId = hint ? `${id}-hint` : undefined;
   return (
     <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
-      <label className="text-sm font-semibold text-slate-700" htmlFor={id}>
+      <label className="text-sm font-semibold text-foreground" htmlFor={id}>
         {label}
       </label>
-      <select
+      <Select
         id={id}
+        controlSize="sm"
         value={value}
         disabled={disabled}
         aria-describedby={hintId}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
         {children}
-      </select>
+      </Select>
       {hint && (
-        <p id={hintId} className="text-xs text-slate-500">
+        <p id={hintId} className="text-xs text-muted-foreground">
           {hint}
         </p>
       )}
@@ -234,12 +235,12 @@ export function AcademicFilters({
   return (
     <section
       aria-label={t.heading}
-      className="mt-8 rounded-lg border border-slate-200 bg-white p-5"
+      className="mt-8 rounded-lg border border-border bg-card p-5"
       data-testid="academic-filters"
     >
       <h2 className="font-display text-base font-bold">{t.heading}</h2>
       {unavailable && (
-        <p role="status" className="mt-2 text-sm text-slate-600">
+        <p role="status" className="mt-2 text-sm text-muted-foreground">
           {t.unavailable}
         </p>
       )}
