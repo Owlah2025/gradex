@@ -1,6 +1,7 @@
 "use client";
 
 import { formatFils } from "@/lib/formatters/currency";
+import { formatTimestamp } from "@/lib/formatters/datetime";
 import { type PriceChangeRecord, type SectionWire } from "@/lib/api/catalog";
 import {
   Table,
@@ -105,7 +106,7 @@ export function PricingHistoryTable({
                   </TableCell>
                   <TableCell>{rec.reason}</TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(rec.changed_at).toLocaleString(isAr ? "ar-KW" : "en-KW")}
+                    {formatTimestamp(rec.changed_at, locale)}
                   </TableCell>
                 </TableRow>
               ))}
