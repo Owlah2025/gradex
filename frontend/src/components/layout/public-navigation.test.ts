@@ -140,10 +140,20 @@ test("the page announces one skip link, from the root layout", () => {
   for (const surface of [
     "components/catalog/course-detail.tsx",
     "components/catalog/public-catalogue.tsx",
+    "components/learning/learning-shell.tsx",
+    "components/layout/role-workspace-shell.tsx",
+    "components/auth/auth-shell.tsx",
   ]) {
+    const source = readSource(surface);
     assert.ok(
-      !readSource(surface).includes("<SkipLink />"),
+      !source.includes("<SkipLink />"),
       `${surface} renders a second skip link under the layout's own`,
+    );
+    // Nor a hand-rolled one, which is how the learning frame acquired its
+    // duplicate: the same anchor written out rather than the shared component.
+    assert.ok(
+      !source.includes('href="#main"'),
+      `${surface} hand-rolls a second skip link under the layout's own`,
     );
   }
 });

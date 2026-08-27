@@ -60,15 +60,6 @@ export function LearningShell({
 
   return (
     <div dir={dir} className="flex min-h-screen flex-col bg-background">
-      <nav aria-label={labels.skipToContent}>
-        <a
-          href="#main"
-          className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:font-display focus:font-bold focus:text-foreground focus:shadow-lg focus:ring-2 focus:ring-ring"
-        >
-          {labels.skipToContent}
-        </a>
-      </nav>
-
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
         <div className="mx-auto flex h-16 max-w-container items-center gap-3 px-5 sm:px-6">
           <Logo href={dashboardHref} className="shrink-0" />

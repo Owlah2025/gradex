@@ -808,6 +808,7 @@ export const ar: Dictionary = {
       policyEffective: "سارية منذ",
       policiesUnavailable: "تعذّر تحميل الشروط الحالية.",
       acceptPrefix: "قرأت وأوافق على",
+      policiesLegend: "الشروط والخصوصية",
       create: "إنشاء الحساب",
       creating: "جارٍ إنشاء الحساب…",
       invalidName: "أدخل اسماً من 2 إلى 50 حرفاً عربياً أو لاتينياً.",

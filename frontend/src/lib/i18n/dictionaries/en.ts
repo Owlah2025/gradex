@@ -828,6 +828,9 @@ export const en = {
       policyEffective: "in effect since",
       policiesUnavailable: "The current terms could not be loaded.",
       acceptPrefix: "I have read and accept",
+      // The legend used to be `acceptPrefix` too, so the group heading and every
+      // row inside it read the same seven words.
+      policiesLegend: "Terms and privacy",
       create: "Create account",
       creating: "Creating account…",
       invalidName: "Enter a name using 2–50 Arabic or Latin characters.",

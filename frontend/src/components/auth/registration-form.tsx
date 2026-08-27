@@ -192,7 +192,7 @@ export function RegistrationForm() {
         aria-describedby={errors.policy ? "policy-error" : undefined}
       >
         <legend className="px-2 font-display text-sm font-bold">
-          {t.auth.register.acceptPrefix}
+          {t.auth.register.policiesLegend}
         </legend>
         {!policySet && !policyError ? (
           <p className="text-sm text-muted-foreground">{t.auth.register.policiesLoading}</p>
