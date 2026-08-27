@@ -31,7 +31,8 @@ import { useSessionResolution } from "@/lib/identity/use-session";
  * they have an account, and the academic profile a signed-in Student's account already holds. They
  * are kept separate in the value — `anonymous` and `profile` are distinct fields, and `source` says
  * which one currently outranks the other — precisely so no screen can mistake one for the other.
- * Nothing in this provider ever writes to the profile.
+ * Nothing in this provider ever writes to the profile: it reads the account's answer and, when a
+ * surface performs a real write, adopts the server's response to it. It never composes one.
  *
  * ## Hydration
  *
@@ -86,6 +87,16 @@ export type AcademicContextValue = {
   anonymous: AnonymousAcademicContext | null;
   /** The signed-in Student's own profile, or `null` for everyone else. Authoritative when complete. */
   profile: AcademicProfile | null;
+  /**
+   * Replace the held profile with the server's own answer to a write the Student just performed.
+   *
+   * The only legitimate caller is the surface that made the write, and the only legitimate argument
+   * is the response body that write returned. This does not make the browser authoritative about a
+   * profile: it keeps the value held above the page from describing an account state the server has
+   * already replaced, which is what a client navigation away from the profile form would otherwise
+   * leave behind for the rest of the session.
+   */
+  adoptProfile: (profile: AcademicProfile) => void;
   /** Which of the two the product should act on right now. */
   source: ResolvedAcademicSource;
   /** Replace the browsing preference. Writes through to storage immediately. */
@@ -204,6 +215,16 @@ export function AcademicContextProvider({
   const status: "loading" | "ready" =
     storageRead && precedenceSettled ? "ready" : "loading";
 
+  /**
+   * See `adoptProfile` on the value type. `profileRead` is set alongside it because a write that
+   * returned a profile has answered the same question the read answers, and leaving precedence
+   * "still deciding" after it would hold surfaces on a request that already has its answer.
+   */
+  const adoptProfile = React.useCallback((next: AcademicProfile) => {
+    setProfile(next);
+    setProfileRead(true);
+  }, []);
+
   const setAnonymous = React.useCallback(
     (next: AnonymousAcademicContext | null) => {
       const normalized =
@@ -321,6 +342,7 @@ export function AcademicContextProvider({
       status,
       anonymous,
       profile,
+      adoptProfile,
       source: resolveAcademicSource({
         anonymous,
         profileSetupState: profile?.setup_state ?? null,
@@ -334,6 +356,7 @@ export function AcademicContextProvider({
       status,
       anonymous,
       profile,
+      adoptProfile,
       setAnonymous,
       clearAnonymous,
       reconcile,

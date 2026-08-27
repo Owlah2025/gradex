@@ -270,6 +270,23 @@ test("the learning routes issue one media authorization and no duplicate reads",
 
   const count = (predicate: (call: string) => boolean) => calls.filter(predicate).length;
 
+  const profileReads = () =>
+    count((call) => call === "GET /me/academic-profile");
+
+  /**
+   * The Dashboard asks the account for its academic profile exactly once.
+   *
+   * Two things on this page want to know it — whether an account's profile outranks a browsing
+   * preference, and whether to invite a Student who has never answered — and they are one question
+   * about one principal-scoped resource. The application holds the answer above the page, so the
+   * second consumer reads it rather than asking again.
+   */
+  await page.goto(`/en/learn/dashboard`);
+  await expect(page.locator("main")).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(profileReads(), calls.join("\n")).toBe(1);
+
+  calls.length = 0;
   // The Course page reads nothing about media at all.
   await page.goto(`/en/learn/courses/${COURSE_ID}`);
   await expect(page.locator("main")).toBeVisible();
@@ -290,9 +307,10 @@ test("the learning routes issue one media authorization and no duplicate reads",
   expect(count((call) => call.startsWith("GET /learn/courses/"))).toBe(0);
   expect(count((call) => call.startsWith("GET /learn/dashboard"))).toBe(0);
 
-  // The academic profile is read once per consumer, never again because the route's locale
+  // A fresh page load re-reads it once, because the holder above the page is mounted again with
+  // it. Once, though: not once per surface that wants it, and not again because the route's locale
   // replaced the provider's default during hydration.
-  expect(count((call) => call.includes("/me/academic-profile"))).toBeLessThanOrEqual(1);
+  expect(profileReads()).toBeLessThanOrEqual(1);
 });
 
 /* ------------------------------------------------------------------ mobile */

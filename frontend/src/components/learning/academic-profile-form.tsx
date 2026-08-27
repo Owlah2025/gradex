@@ -79,7 +79,7 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   const router = useRouter();
   // What the Student chose while browsing, shown here as guidance and nothing more. See the
   // handoff note below the form for why it cannot become a preselection.
-  const { anonymous } = useAcademicContext();
+  const { anonymous, adoptProfile } = useAcademicContext();
 
   const [profile, setProfile] = useState<AcademicProfile | null>(null);
   const [institutions, setInstitutions] = useState<InstitutionOption[]>([]);
@@ -259,6 +259,11 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         currentLevel: levelChoice === "" ? null : Number(levelChoice),
       });
       setProfile(saved);
+      // The application holds the account's profile above the page, and a client navigation away
+      // from this form does not remount it. Handing it the server's own answer keeps every surface
+      // that reads the profile — the Dashboard's onboarding invitation, and precedence over a
+      // browsing preference — from acting on a state the account has just left behind.
+      adoptProfile(saved);
       setMessage(t.saved);
       if (mode === "onboarding") {
         // Onboarding hands the Student back to their normal destination.
@@ -270,6 +275,7 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
     void withCSRF(async (csrf) => {
       const skipped = await skipAcademicOnboarding({ locale, csrf });
       setProfile(skipped);
+      adoptProfile(skipped);
       setMessage(t.skipped);
       router.push(`/${locale}/learn/dashboard`);
     });

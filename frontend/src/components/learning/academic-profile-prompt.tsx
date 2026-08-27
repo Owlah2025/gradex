@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getAcademicProfile, shouldPromptOnboarding } from "@/lib/api/academic-profile";
+import { shouldPromptOnboarding } from "@/lib/api/academic-profile";
+import { useAcademicContext } from "@/components/academic/academic-context-provider";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 /**
@@ -14,39 +14,29 @@ import { useLocale } from "@/lib/i18n/locale-provider";
  *
  * This is a card on a page the Student already reached. It blocks nothing, and
  * a failure to read the profile simply renders nothing.
+ *
+ * # WHERE THE PROFILE COMES FROM
+ *
+ * From the one place the application already holds it. `AcademicContextProvider` reads
+ * `/me/academic-profile` once per authenticated session to decide whether an account's profile
+ * outranks a browsing preference, and that read answers this question too: the setup state is the
+ * same fact, from the same principal-scoped resource, in the same browser session. Asking for it a
+ * second time on the Dashboard bought nothing but a second request.
+ *
+ * Reading it here rather than fetching is not a cache. The value is the provider's own state, held
+ * for exactly as long as the session it belongs to — it is dropped the moment the session resolves
+ * to anything but `AUTHENTICATED`, so it can never describe a different Student — and nothing here
+ * writes to it or treats it as authority for anything but whether to show a card.
+ *
+ * A profile still in flight, a profile that could not be read, and a Student with no session all
+ * arrive as `null`, and all three mean the same thing to this component: say nothing. That is the
+ * same safe direction the local read took when it failed.
  */
 export function AcademicProfilePrompt() {
   const { locale } = useLocale();
   const isAr = locale === "ar";
-  const [prompt, setPrompt] = useState(false);
-
-  /**
-   * The locale reaches the read as a header for its error copy, and changes nothing about the
-   * answer: whether a Student has decided about their academic profile is the same fact in either
-   * language. Keying the effect on it meant the Dashboard read the profile twice — once at the
-   * provider's default and again the moment the route's locale replaced it on hydration — for a
-   * result that could not differ. A ref carries the current value in without making the read
-   * depend on it.
-   */
-  const localeRef = useRef(locale);
-  localeRef.current = locale;
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const profile = await getAcademicProfile(localeRef.current);
-        if (!cancelled) setPrompt(shouldPromptOnboarding(profile));
-      } catch {
-        // Personalisation is optional. A Student's dashboard must never degrade
-        // because a discovery-only read failed.
-        if (!cancelled) setPrompt(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { profile } = useAcademicContext();
+  const prompt = shouldPromptOnboarding(profile);
 
   if (!prompt) return null;
 

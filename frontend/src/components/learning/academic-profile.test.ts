@@ -38,6 +38,7 @@ function readSource(relativePath: string): string {
 const FORM = "src/components/learning/academic-profile-form.tsx";
 const CLIENT = "src/lib/api/academic-profile.ts";
 const PROMPT = "src/components/learning/academic-profile-prompt.tsx";
+const PROVIDER = "src/components/academic/academic-context-provider.tsx";
 
 type Captured = { url: string; method?: string; csrf: string | null; body: unknown };
 
@@ -299,4 +300,47 @@ test("the client exposes no other Student's profile and no bulk listing", () => 
   for (const forbidden of ["account_id", "student_id", "/admin/", "profiles?", "student-profiles"]) {
     assert.ok(!client.includes(forbidden), `the client exposes ${forbidden}`);
   }
+});
+
+/**
+ * The Dashboard asks the account for its academic profile once.
+ *
+ * The setup state and the precedence decision are the same fact about the same principal-scoped
+ * resource, read in the same browser session. The application already holds it above the page, so
+ * the onboarding invitation reads that value instead of issuing a second identical request.
+ */
+test("the onboarding invitation reads the held profile rather than fetching its own", () => {
+  const prompt = readSource(PROMPT);
+  assert.ok(
+    prompt.includes("useAcademicContext"),
+    "the prompt no longer reads the profile the application already holds",
+  );
+  assert.ok(
+    !prompt.includes("getAcademicProfile"),
+    "the prompt issues a second read of a profile the Dashboard has already fetched",
+  );
+  assert.ok(
+    !prompt.includes("useEffect"),
+    "the prompt still runs a mount effect, which is how the duplicate read got there",
+  );
+});
+
+/**
+ * And a write moves it on. The holder lives above the route, so a client navigation away from the
+ * form does not remount it; without this, a Student who has just onboarded would keep being invited
+ * to onboard, and their finished profile would keep losing precedence to a browsing preference.
+ */
+test("a saved or skipped profile replaces the held one", () => {
+  const form = readSource(FORM);
+  const provider = readSource(PROVIDER);
+  assert.ok(
+    provider.includes("adoptProfile"),
+    "the holder cannot be told about a write the Student just performed",
+  );
+  const adoptions = form.match(/adoptProfile\(([^)]*)\)/g) ?? [];
+  assert.deepEqual(
+    adoptions.sort(),
+    ["adoptProfile(saved)", "adoptProfile(skipped)"],
+    "the form does not hand both of its writes' server responses to the held profile",
+  );
 });
