@@ -128,7 +128,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
         revision.id !== item.revision_id ||
         revision.course_id !== item.course_id
       ) {
-        throw new Error(isAr ? "لم تطابق تفاصيل المراجعة الدورة أو المراجعة المحددة." : "Review detail did not match the selected Course or revision.");
+        throw new Error(isAr ? "لم تطابق تفاصيل المراجعة المقرر أو المراجعة المحددة." : "Review detail did not match the selected Course or revision.");
       }
       let terms: TaxonomyTerm[] = [];
       if (!isAcademicCourse(course)) {
@@ -192,7 +192,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
       const message = describeApiError(cause, locale);
       setActionError(
         isCoursePriceRequired(cause)
-          ? `${isAr ? "يجب ضبط سعر الدورة في لوحة التسعير أدناه قبل الموافقة والنشر." : "Set the Course price in the pricing panel below before approving and publishing."} ${message}`
+          ? `${isAr ? "يجب ضبط سعر المقرر في لوحة التسعير أدناه قبل الموافقة والنشر." : "Set the Course price in the pricing panel below before approving and publishing."} ${message}`
           : message,
       );
     } finally {
@@ -344,7 +344,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
           )}
 
           <section className="flex flex-wrap gap-3 border-t border-indigo-200 pt-4 dark:border-indigo-900">
-            <button type="button" disabled={busy || reviewed} onClick={() => void completeReview((token) => approveCourseRevision({ courseID: item.course_id, revisionID: item.revision_id, locale, csrf: token }).then(() => undefined), isAr ? "تم نشر الدورة بنجاح" : "Course published successfully")} data-testid="approve-inspected-revision" className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "موافقة ونشر" : "Approve & Publish"}</button>
+            <button type="button" disabled={busy || reviewed} onClick={() => void completeReview((token) => approveCourseRevision({ courseID: item.course_id, revisionID: item.revision_id, locale, csrf: token }).then(() => undefined), isAr ? "تم نشر المقرر بنجاح" : "Course published successfully")} data-testid="approve-inspected-revision" className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "موافقة ونشر" : "Approve & Publish"}</button>
             <button type="button" disabled={busy || reviewed} onClick={() => setRequestingChanges(true)} data-testid="request-changes-inspected-revision" className="rounded bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAr ? "طلب تعديلات" : "Request Changes"}</button>
           </section>
 

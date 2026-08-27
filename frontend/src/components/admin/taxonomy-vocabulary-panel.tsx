@@ -24,7 +24,7 @@ export function TaxonomyVocabularyPanel() {
 
   return (
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="border-b border-slate-200 pb-3 dark:border-slate-800"><h2 className="text-base font-bold text-slate-900 dark:text-slate-100">{isAr ? "إدارة قاموس التصنيف" : "Taxonomy Vocabulary Administration"}</h2><p className="mt-1 text-xs text-slate-500">{isAr ? "إدارة تخصصات ومواد Gradex بشكل منفصل عن مراجعة دورة بعينها." : "Manage Gradex Majors and Subjects separately from a specific Course review."}</p></div>
+      <div className="border-b border-slate-200 pb-3 dark:border-slate-800"><h2 className="text-base font-bold text-slate-900 dark:text-slate-100">{isAr ? "إدارة قاموس التصنيف" : "Taxonomy Vocabulary Administration"}</h2><p className="mt-1 text-xs text-slate-500">{isAr ? "إدارة تخصصات ومواد Gradex بشكل منفصل عن مراجعة مقرر بعينها." : "Manage Gradex Majors and Subjects separately from a specific Course review."}</p></div>
       {error ? <p className="text-xs text-rose-600">{error}</p> : <TaxonomyTermManagement terms={terms} refresh={refresh} />}
     </section>
   );

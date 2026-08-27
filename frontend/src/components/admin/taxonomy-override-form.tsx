@@ -44,7 +44,7 @@ export function TaxonomyOverrideForm({ courseID, revisionID, terms }: TaxonomyOv
 
   return (
     <section className="rounded-lg border border-blue-200 bg-blue-50/60 p-4 dark:border-blue-900 dark:bg-blue-950/20">
-      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{isAr ? "تجاوز تصنيف الدورة" : "Course Taxonomy Override"}</h3>
+      <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{isAr ? "تجاوز تصنيف المقرر" : "Course Taxonomy Override"}</h3>
       <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{isAr ? "اختياري؛ يُطبق على المراجعة المُرسلة المفتوحة فقط." : "Optional; applies only to the open submitted revision."}</p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <TaxonomyTermSelect kind="MAJOR" locale={locale} terms={terms} value={majorTermID} onChange={setMajorTermID} disabled={busy} />

@@ -89,7 +89,7 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
 
       setSuccessMsg(
         isAr
-          ? `تم تحديث سعر ${targetType === "COURSE" ? "الدورة" : "القسم"} بنجاح`
+          ? `تم تحديث سعر ${targetType === "COURSE" ? "المقرر" : "القسم"} بنجاح`
           : `Successfully updated ${targetType === "COURSE" ? "Course" : "Section"} price`
       );
       setReasonInput("");
@@ -135,7 +135,7 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
               }}
               className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
             >
-              <option value="COURSE">{isAr ? "الدورة كاملة (Course)" : "Course Level"}</option>
+              <option value="COURSE">{isAr ? "المقرر كاملة (Course)" : "Course Level"}</option>
               <option value="SECTION" disabled={sections.length === 0}>{isAr ? "قسم كورس (Section)" : "Section Level"}</option>
             </select>
           </div>

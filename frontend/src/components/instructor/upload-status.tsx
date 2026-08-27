@@ -71,7 +71,8 @@ export function UploadStatus({
           className={cn(
             "rounded-pill px-2 py-0.5 text-xs font-semibold",
             failed && "bg-destructive/10 text-destructive",
-            phase === "READY" && "bg-gx-success-soft text-gx-success",
+            // Text, so the AA-safe success green rather than the icon one.
+            phase === "READY" && "bg-gx-success-soft text-gx-success-strong",
             !failed && phase !== "READY" && "bg-muted text-muted-foreground",
           )}
         >

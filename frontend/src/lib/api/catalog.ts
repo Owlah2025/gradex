@@ -237,7 +237,7 @@ export async function getCourseLifecycleDirectory(
   );
   if (res === null) {
     throw new Error(
-      locale === "ar" ? "لم يتم استلام قائمة الدورات" : "No Course lifecycle directory returned",
+      locale === "ar" ? "لم يتم استلام قائمة المقررات" : "No Course lifecycle directory returned",
     );
   }
   return res.items ?? [];
@@ -335,7 +335,7 @@ export async function getOwnedCourses(
   if (res === null) {
     throw new Error(
       locale === "ar"
-        ? "لم يتم استلام قائمة الدورات المملوكة من الخادم"
+        ? "لم يتم استلام قائمة المقررات المملوكة من الخادم"
         : "No owned courses returned from server",
     );
   }
@@ -354,7 +354,7 @@ export async function getOwnedCourseDetail(
   if (res === null) {
     throw new Error(
       locale === "ar"
-        ? "لم يتم استلام تفاصيل الدورة من الخادم"
+        ? "لم يتم استلام تفاصيل المقرر من الخادم"
         : "No course details returned from server",
     );
   }

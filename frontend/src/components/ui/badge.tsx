@@ -9,7 +9,9 @@ const badgeVariants = cva(
       variant: {
         default: "bg-gx-blue-50 text-gx-blue-600",
         accent: "bg-gx-orange-50 text-gx-orange-700",
-        success: "bg-gx-success-soft text-gx-success",
+        // `success-strong`, not `success`: this is text. See the token comment in the Tailwind
+        // config for why success as text and success as an icon are two different greens.
+        success: "bg-gx-success-soft text-gx-success-strong",
         neutral: "bg-muted text-muted-foreground",
       },
       size: {

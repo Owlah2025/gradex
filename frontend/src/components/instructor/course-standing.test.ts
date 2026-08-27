@@ -95,29 +95,29 @@ test("the wire enum is carried for support but is never a stage", () => {
   assert.notEqual(standing.stage, standing.wire);
 });
 
-test("a standing's tone never reaches for the success token, which fails AA", () => {
-  // gx-success is #178a50: 4.39:1 on white and 3.94:1 on its own soft ground. The Instructor
-  // standing must not add a new instance of that defect, so no stage maps to it.
-  const stages = [
-    "DRAFT",
-    "DRAFT_UPDATE",
-    "IN_REVIEW",
-    "CHANGES_REQUESTED",
-    "PUBLISHED",
-    "UNAVAILABLE",
-  ] as const;
-  for (const stage of stages) {
-    assert.notEqual(standingTone(stage), "success", stage);
-  }
-  assert.equal(standingTone("PUBLISHED"), "default");
+/**
+ * This assertion used to say the opposite: that no stage may reach for the success tone, because
+ * `gx-success` measured 4.39:1 on white and 3.94:1 on its own soft ground and this surface refused
+ * to add a new instance of a known defect. The token has since been split — the pill's text is
+ * `gx-success-strong` at 4.85:1 — and the AA guarantee is proved arithmetically in
+ * `design-tokens.test.ts` rather than avoided here. So the mapping is now free to say what the
+ * product means, and this test pins that meaning instead of the workaround.
+ */
+test("a standing's tone says where the Course is in its journey", () => {
+  // Published is the end of the journey, and the only stage that is an achievement.
+  assert.equal(standingTone("PUBLISHED"), "success");
+  // Changes requested is the one stage that asks the Instructor for something.
   assert.equal(standingTone("CHANGES_REQUESTED"), "accent");
-  assert.equal(standingTone("DRAFT"), "neutral");
+  // Everything still in flight is decoration, distinguished by the actor line beside it.
+  for (const stage of ["DRAFT", "DRAFT_UPDATE", "IN_REVIEW", "UNAVAILABLE"] as const) {
+    assert.equal(standingTone(stage), "neutral", stage);
+  }
 });
 
 test("a Course title is never a UUID", () => {
   const course: OwnedCourseSummary = { id: "8f14e45f-ceea-467a-9a3f-6d4a1f3f0000" };
   assert.equal(courseDisplayTitle(course, "en", "Untitled course"), "Untitled course");
-  assert.equal(courseDisplayTitle(course, "ar", "دورة بلا عنوان"), "دورة بلا عنوان");
+  assert.equal(courseDisplayTitle(course, "ar", "مقرر بلا عنوان"), "مقرر بلا عنوان");
 });
 
 test("a blank title falls through to the untitled label rather than rendering empty", () => {

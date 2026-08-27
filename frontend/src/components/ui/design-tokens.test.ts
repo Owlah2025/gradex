@@ -107,3 +107,145 @@ test("secondary text stays clearly subordinate to primary text", () => {
       "secondary is no longer visibly subordinate",
   );
 });
+
+/* ---------------------------------------------------------------- success */
+
+/**
+ * The success token, which is two tokens because one could not do both jobs.
+ *
+ * `gx-success` (#178a50) was painted as small bold text on three separate surfaces and measured
+ * 4.39:1 on white and 3.94:1 on its own soft ground — under the 4.5:1 AA minimum for normal text.
+ * Three surfaces had already worked around it by reaching for a different colour, which is the
+ * shape a shared-token defect takes when it is routed around rather than fixed.
+ *
+ * Darkening the single token to clear AA takes it to 2.87:1 against the dark theme's card, under
+ * the 3:1 WCAG minimum for icons and other non-text. The two requirements pull in opposite
+ * directions, so the token was split by the job rather than moved: `success` is the identity, on
+ * icons and borders, and answers to 3:1 in both themes; `success-strong` is success as text on a
+ * light ground, and answers to 4.5:1.
+ *
+ * Both live as hex in the Tailwind config rather than as HSL custom properties, so they are read
+ * from there.
+ */
+function brandHex(name: string): [number, number, number] {
+  const root = process.cwd().endsWith("/frontend")
+    ? process.cwd()
+    : path.join(process.cwd(), "frontend");
+  const config = fs.readFileSync(path.join(root, "tailwind.config.ts"), "utf8");
+  const match = config.match(
+    new RegExp(`["']?${name}["']?:\\s*["']#([0-9a-fA-F]{6})["']`),
+  );
+  assert.ok(match, `the brand ramp has no ${name}`);
+  const hex = match![1];
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ];
+}
+
+/** A theme surface, read from whichever block actually defines it. */
+function themeToken(
+  css: string,
+  name: string,
+  theme: "light" | "dark",
+): [number, number, number] {
+  const block =
+    theme === "light"
+      ? css.slice(css.indexOf(":root"), css.indexOf(".dark"))
+      : css.slice(css.indexOf(".dark"));
+  const match = block.match(
+    new RegExp(`--${name}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`),
+  );
+  assert.ok(match, `--${name} was not found in the ${theme} theme`);
+  return hslToRgb([Number(match![1]), Number(match![2]) / 100, Number(match![3]) / 100]);
+}
+
+test("success as text meets AA on every light ground it is painted on", () => {
+  const css = stylesheet();
+  const strong = brandHex("success-strong");
+  const grounds: [string, [number, number, number]][] = [
+    ["the soft success ground it is paired with", brandHex("success-soft")],
+    ["a card", themeToken(css, "card", "light")],
+    ["the page", themeToken(css, "background", "light")],
+  ];
+  for (const [where, ground] of grounds) {
+    const measured = contrast(strong, ground);
+    assert.ok(
+      measured >= 4.5,
+      `gx-success-strong on ${where} is ${measured.toFixed(2)}:1, under the 4.5:1 AA minimum`,
+    );
+  }
+});
+
+/**
+ * And the identity keeps its own, weaker but genuinely different, obligation. This is the half that
+ * a single darkened token would have broken silently: an icon on the dark theme's card.
+ */
+test("the success identity clears the non-text minimum in both themes", () => {
+  const css = stylesheet();
+  const identity = brandHex("success");
+  for (const theme of ["light", "dark"] as const) {
+    for (const surface of ["card", "background"] as const) {
+      const measured = contrast(identity, themeToken(css, surface, theme));
+      assert.ok(
+        measured >= 3,
+        `gx-success on the ${theme} --${surface} is ${measured.toFixed(2)}:1, ` +
+          "under the 3:1 WCAG minimum for non-text",
+      );
+    }
+  }
+});
+
+/** Success must still read as success, not as ink that happens to pass. */
+test("success stays green and stays distinguishable from body text", () => {
+  const css = stylesheet();
+  const [r, g, b] = brandHex("success-strong");
+  assert.ok(g > r * 2 && g > b, `gx-success-strong is rgb(${r}, ${g}, ${b}), which is not green`);
+  const onCard = contrast(brandHex("success-strong"), themeToken(css, "card", "light"));
+  const bodyOnCard = contrast(
+    themeToken(css, "foreground", "light"),
+    themeToken(css, "card", "light"),
+  );
+  assert.ok(
+    bodyOnCard > onCard,
+    `success text is ${onCard.toFixed(2)}:1 against body text's ${bodyOnCard.toFixed(2)}:1; ` +
+      "a status colour must not outweigh the prose around it",
+  );
+});
+
+/**
+ * The split only holds if each token stays on its own side of it.
+ *
+ * `success-strong` is proved above against light grounds only, so a usage that put it on the dark
+ * theme's card would be painting an unproven pair. Every usage today pairs it with `success-soft`,
+ * which is a fixed light ground in both themes; this keeps it that way.
+ */
+test("success text is only ever painted on the light ground it was proved against", () => {
+  const root = process.cwd().endsWith("/frontend")
+    ? process.cwd()
+    : path.join(process.cwd(), "frontend");
+  const offenders: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry.name) || entry.name.includes(".test.")) continue;
+      const source = fs.readFileSync(full, "utf8");
+      for (const line of source.split("\n")) {
+        if (!line.includes("text-gx-success-strong")) continue;
+        if (line.includes("bg-gx-success-soft")) continue;
+        offenders.push(`${path.relative(root, full)}: ${line.trim()}`);
+      }
+    }
+  };
+  walk(path.join(root, "src"));
+  assert.deepEqual(
+    offenders,
+    [],
+    "success text appears without its proved ground:\n" + offenders.join("\n"),
+  );
+});

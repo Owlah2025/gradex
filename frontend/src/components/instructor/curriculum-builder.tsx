@@ -366,9 +366,10 @@ function LessonRow({
             data-video-attached={hasVideo ? "true" : "false"}
             className={
               /*
-                Not the `gx-success` token: at 12px it measures 4.39:1 on this card, under AA. The
-                icon carries the distinction visually and the words carry it outright, so the ink
-                does not have to.
+                Ink, not colour. This is "a video is attached" and "one is not" — a completeness
+                fact, not a success — and the icon plus the words already carry it, so nothing is
+                gained by tinting it. (The success token's own AA failure, which is what first ruled
+                green out here, has since been fixed by splitting it; this stayed ink on merit.)
               */
               hasVideo
                 ? "inline-flex items-center gap-1 text-xs font-semibold text-foreground"

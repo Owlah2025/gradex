@@ -164,8 +164,10 @@ export function LearningUnavailable({ labels }: { labels: UnavailableLabels }) {
  * distinguishes the two states only for a reader who can separate the two tones; the sentence
  * distinguishes them for everyone, and is the half a screen reader conveys.
  *
- * Neither tone is the success token. `gx-success` on `gx-success-soft` measures 3.94:1, which is
- * below AA for text this size, and an access state is not a place to spend a known contrast defect.
+ * Neither tone is the success token, and not for a contrast reason any more — that defect was real
+ * (3.94:1) and has since been fixed by splitting the token. Holding access is simply not a success:
+ * it is the ordinary state of a Student who bought a Course, and dressing it as an achievement
+ * would leave nothing to say when the access actually ends.
  */
 export function LearningStatusBadge({
   status,

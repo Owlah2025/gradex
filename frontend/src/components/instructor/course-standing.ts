@@ -158,10 +158,12 @@ export function standingTone(
 ): "default" | "accent" | "success" | "neutral" {
   switch (stage) {
     case "PUBLISHED":
-      // Deliberately not the `success` tone. That variant paints gx-success (#178a50) on its own
-      // soft ground, which measures 3.94:1 — under AA, and 4.39:1 even on white. The shared token
-      // is a known defect scheduled elsewhere; this surface does not add a new instance of it.
-      return "default";
+      // The success tone, now that it is safe to say so. This surface used the blue one because the
+      // success variant painted gx-success on its own soft ground at 3.94:1, under AA — a defect
+      // recorded here rather than spread. That token has since been split: the pill's text is
+      // `gx-success-strong` at 4.85:1 on the same ground, so the end state of the Course's journey
+      // can finally be the colour the product means by it.
+      return "success";
     case "CHANGES_REQUESTED":
       return "accent";
     default:

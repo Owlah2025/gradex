@@ -301,7 +301,7 @@ test("an approval refused for a missing Course price names the remedy", () => {
     "the pricing remedy must be chosen from the failure, not from local readiness state",
   );
   assert.match(source, /Set the Course price/, "the English refusal must name the remedy");
-  assert.match(source, /سعر الدورة/, "the Arabic refusal must name the remedy");
+  assert.match(source, /سعر المقرر/, "the Arabic refusal must name the remedy");
   // The server's own reason is still shown; the remedy is added, not substituted.
   assert.match(source, /const message = describeApiError\(cause, locale\)/);
 

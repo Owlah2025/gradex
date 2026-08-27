@@ -56,7 +56,7 @@ export function PricingHistoryTable({
                     {rec.section_id
                       ? pricingScopeLabel(rec.section_id, sections, locale)
                       : isAr
-                        ? "الدورة"
+                        ? "المقرر"
                         : "Course"}
                   </td>
                   <td className="p-2 border-e text-slate-400">

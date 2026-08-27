@@ -328,7 +328,7 @@ test.describe("UX-A Admin Course discovery without an identifier", () => {
     await expect(page.getByTestId("admin-course-loading")).toHaveCount(0, { timeout: 20_000 });
 
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
-    await expect(page.locator("h1")).toContainText("الدورات");
+    await expect(page.locator("h1")).toContainText("المقررات");
     // Arabic must be real copy, not an English screen flipped: the filters are translated too.
     await expect(page.getByTestId("admin-course-filter-NEEDS_REVIEW")).toContainText("بانتظار المراجعة");
 

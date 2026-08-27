@@ -45,11 +45,11 @@ async function mockCatalogAPI(page: Page) {
 function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | "en") {
   if (surface === "instructor") {
     return locale === "ar"
-      ? ["منصة إعداد الدورات التعليمية", "دوراتك", "تصنيف المسودة المحددة"]
+      ? ["منصة إعداد المقررات التعليمية", "مقرراتك", "تصنيف المسودة المحددة"]
       : ["Course Authoring Studio", "Your courses", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["مراجعة الدورات وإدارتها", "إدارة قاموس التصنيف", "قاموس التصنيف"]
+    ? ["مراجعة المقررات وإدارتها", "إدارة قاموس التصنيف", "قاموس التصنيف"]
     : ["Course review & administration", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
 }
 

@@ -62,7 +62,7 @@ export function PricingPanel({ courseID, sections, onLaunchPriceKnown }: Pricing
     <section data-testid="review-pricing-panel" className="space-y-4 rounded-lg border border-blue-200 bg-white p-4 dark:border-blue-900 dark:bg-slate-900">
       <div>
         <h3 className="font-semibold text-slate-900 dark:text-slate-100">{isAr ? "تسعير المراجعة المُرسلة" : "Submitted Course Pricing"}</h3>
-        <p className="mt-1 text-xs text-slate-500">{isAr ? "اختر الدورة أو قسماً بعنوانه المُرسل؛ تُحفظ الهوية داخلياً." : "Choose the Course or a submitted Section by title; identity is carried internally."}</p>
+        <p className="mt-1 text-xs text-slate-500">{isAr ? "اختر المقرر أو قسماً بعنوانه المُرسل؛ تُحفظ الهوية داخلياً." : "Choose the Course or a submitted Section by title; identity is carried internally."}</p>
       </div>
       <PricingForm courseID={courseID} locale={locale} sections={sections} onSuccess={loadHistory} />
       <PricingHistoryTable history={history} isLoading={loading} error={error} locale={locale} sections={sections} />

@@ -85,7 +85,28 @@ const config: Config = {
           "ink-700": "#364453",
           "ink-800": "#1e2a3a",
           "ink-900": "#0d1b2a",
+          /**
+           * Success, split by the job the colour is doing.
+           *
+           * One token could not do both. `success` was painted as small bold text — a status pill,
+           * an upload phase — where it measured 4.39:1 on white and 3.94:1 on its own soft
+           * background, under the 4.5:1 AA minimum for normal text; three separate surfaces had
+           * already worked around it by reaching for a different colour rather than fixing it.
+           * Darkening the one token to clear AA takes it to 2.87:1 against the dark theme's card,
+           * under the 3:1 minimum for the icons and borders that are its other job. The two
+           * requirements pull in opposite directions, so they are two tokens.
+           *
+           * `success` is the success *identity*: icons, borders, anything non-text, where WCAG asks
+           * for 3:1 and this clears it on every surface in both themes (3.53:1 at its worst, the
+           * dark card).
+           *
+           * `success-strong` is success *as text*, and only ever on a light surface — it is paired
+           * with `success-soft` in a self-contained pill whose two halves are both fixed, so it
+           * reads identically in either theme and is never painted on the dark card that would
+           * undo it.
+           */
           success: "#178a50",
+          "success-strong": "#0f7a44",
           "success-soft": "#e8f6ef",
         },
       },
