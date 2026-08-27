@@ -160,17 +160,22 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("section-title-ar").fill("القسم");
   await page.getByTestId("section-title-en").fill("Media Section");
   await page.getByTestId("add-section").click();
-  await expect(page.getByText("Media Section")).toBeVisible();
-  const sectionID = (await page
-    .locator('[data-testid^="section-"]')
-    .first()
-    .getAttribute("data-testid"))!.replace("section-", "");
+  // Scoped to the section itself. The submission-readiness panel names the sections that still
+  // need lessons, so a brand-new empty section legitimately appears twice on this page — once as
+  // the row and once as the reason submission is blocked — and a page-wide text match is ambiguous
+  // from the moment the section is created.
+  const sectionRow = page.locator('[data-testid^="section-"]').first();
+  await expect(sectionRow).toBeVisible();
+  await expect(sectionRow).toContainText("Media Section");
+  const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace("section-", "");
 
   // 3. Lesson
   await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس");
   await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Media Lesson");
   await page.getByTestId(`add-lesson-${sectionID}`).click();
-  await expect(page.getByText("Media Lesson")).toBeVisible();
+  // Scoped for the same reason the section title is: the readiness panel names the lessons that
+  // still need a video, so a new lesson appears both as its row and as a reason to wait.
+  await expect(sectionRow).toContainText("Media Lesson");
   const lessonID = (await page
     .locator('[data-testid^="lesson-video-upload-"]')
     .first()
@@ -248,7 +253,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   ]);
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/en/admin/catalog");
-  await expect(adminPage.locator("h1")).toContainText("Course Review & Pricing Admin");
+  // The queue screen was renamed when pricing stopped being a separate panel on it.
+  await expect(adminPage.locator("h1")).toContainText("Course review & administration");
 
   const row = adminPage.getByTestId(`review-item-${courseID}`);
   await expect(row).toBeVisible();
@@ -415,7 +421,9 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await otherInstructorAPI.dispose();
   await studentAPI.dispose();
 
-  await adminPage.reload();
+  // Back to the queue, not a reload. Reviewing a Course is its own route now, so the Admin page is
+  // still sitting on the workspace it was sent to — reloading re-opens the review, not the list.
+  await adminPage.goto("/en/admin/catalog");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");

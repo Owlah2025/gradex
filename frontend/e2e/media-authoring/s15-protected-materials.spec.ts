@@ -169,12 +169,25 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   const resourceInput = instructorPage.getByTestId(`lesson-resource-file-${LESSON_ID}`);
   await resourceInput.setInputFiles({ name: "unsafe.exe", mimeType: "application/octet-stream", buffer: Buffer.from("not a resource") });
   await expect(instructorPage.getByTestId(`lesson-resource-message-${LESSON_ID}`)).toContainText("Select a PDF or DOCX file.");
-  await expect(instructorPage.getByRole("button", { name: "Retry upload" })).toBeVisible();
+  // No retry control, deliberately. Retry belongs to an upload that reached the server and failed
+  // there; a file the browser refused before sending is not retryable by pressing a button, and
+  // the only remedy is the one this test performs next — choose a different file. The control is
+  // reserved for a genuine FAILED phase so that offering it always means something.
+  await expect(instructorPage.getByRole("button", { name: "Retry upload" })).toHaveCount(0);
+  await expect(resourceInput).toBeEnabled();
 
   const replacementFile = temporaryFile(REPLACEMENT_RESOURCE_NAME, REPLACEMENT_RESOURCE_BYTES);
   await resourceInput.setInputFiles(replacementFile);
-  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(/Preparing|Uploading|Checking|Attaching|Attached/, { timeout: 30_000 });
-  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText("Attached", { timeout: 4 * 60 * 1000 });
+  // The phase vocabulary the Instructor reads: Uploading, Checking the file, Attaching, Ready.
+  // "Attached" was the wording before the upload states were given words of their own.
+  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(
+    /Preparing|Uploading|Checking|Attaching|Ready/,
+    { timeout: 30_000 },
+  );
+  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(
+    "Ready",
+    { timeout: 4 * 60 * 1000 },
+  );
   const candidateResource = instructorPage.locator(`li[data-testid^="lesson-resource-"]`).filter({ hasText: REPLACEMENT_RESOURCE_NAME });
   await expect(candidateResource).toBeVisible();
   const candidateResourceID = (await candidateResource.getAttribute("data-testid"))!.replace("lesson-resource-", "");
