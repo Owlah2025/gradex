@@ -43,7 +43,7 @@ test("both dictionaries carry the same keys, and none of them is empty", () => {
  *
  * Short entries are exempt: "—" is the same placeholder in both languages by design.
  */
-const TRANSLATED_BLOCKS = ["adminReviewQueue", "adminLifecycle", "instructor.studio", "adminCourses", "academicContext", "courseDetail"];
+const TRANSLATED_BLOCKS = ["adminReviewQueue", "adminLifecycle", "instructor.studio", "adminCourses", "academicContext", "academicProfile", "courseDetail"];
 
 test("workspace copy is actually translated, not copied across", () => {
   const untranslated: string[] = [];

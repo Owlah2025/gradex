@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { ar } from "../../lib/i18n/dictionaries/ar";
+import { en } from "../../lib/i18n/dictionaries/en";
 import {
   academicLevelLabels,
   getAcademicProfile,
@@ -222,14 +224,27 @@ test("Department is context, never a required selector", () => {
     "a Department selector was added; Department is derived context only",
   );
   assert.ok(!source.includes("اختر القسم"), "the Student is asked to choose a Department");
+  assert.ok(
+    !Object.values(ar.academicProfile).some((value) => value.includes("اختر القسم")),
+    "the Student is asked to choose a Department",
+  );
   // It may still be shown as a subtitle.
   assert.ok(source.includes("profile-program-context"), "the Department context line is missing");
 });
 
 test("undeclared and non-degree are Student states, not Program rows", () => {
   const source = readSource(FORM);
-  assert.ok(source.includes("لم أحدد تخصصي بعد"), "the undeclared option is missing in Arabic");
-  assert.ok(source.includes("طالب غير مقيد"), "the non-degree option is missing in Arabic");
+  // This copy moved out of a private object inside the form and into the
+  // dictionaries, where parity and the retired-vocabulary rules can see it. The
+  // guarantee is unchanged: both states are offered, in Arabic, by name.
+  assert.equal(ar.academicProfile.undeclared, "لم أحدد تخصصي بعد");
+  assert.equal(ar.academicProfile.nonDegree, "طالب غير مقيد");
+  assert.ok(source.includes("t.undeclared"), "the undeclared option is not offered");
+  assert.ok(source.includes("t.nonDegree"), "the non-degree option is not offered");
+  // The fourth enrollment status is a real one and must be reachable wherever
+  // the institution actually has a foundation stage.
+  assert.ok(source.includes("has_foundation_stage"), "the foundation option is not gated on the institution");
+  assert.ok(source.includes('status = "FOUNDATION"'), "a foundation Student cannot save that they are one");
   // Both are sentinels resolved into an enrollment status, never sent as a
   // program_id, so no placeholder Program is ever needed.
   assert.ok(source.includes('const UNDECLARED = "__undeclared__"'));
@@ -269,12 +284,16 @@ test("onboarding is never a route guard and never blocks access", () => {
 test("the access promise is shown and is stated in both languages", () => {
   const source = readSource(FORM);
   assert.ok(source.includes("profile-access-promise"), "the access promise is not rendered");
+  assert.ok(source.includes("t.accessPromise"), "the access promise is not read from the dictionary");
+  // The promise itself, now that it lives where both languages are checked
+  // against each other. It must keep saying the one thing that makes this form
+  // safe to fill in: nothing here decides what the Student can reach.
   assert.ok(
-    source.includes("كورساتك ومشترياتك لا تتأثر"),
+    ar.academicProfile.accessPromise.includes("مقرراتك ومشترياتك لا تتأثر"),
     "the Arabic access promise is missing",
   );
   assert.ok(
-    source.includes("Your courses and purchases are unaffected"),
+    en.academicProfile.accessPromise.includes("Your courses and purchases are unaffected"),
     "the English access promise is missing",
   );
 });

@@ -1385,6 +1385,13 @@ export const en = {
         "Accept to continue. If Gradex has already confirmed payment, access starts immediately; otherwise an administrator reviews your acceptance.",
       missingToken:
         "This invitation link is incomplete. Ask an administrator to send it again.",
+      // Reaching the page with an invitation that is no longer waiting on the
+      // Student is an ordinary, non-destructive outcome — most often their own
+      // second visit to a link they already used. The panel used to render its
+      // heading and then nothing at all.
+      alreadyAnsweredTitle: "You have already answered this invitation",
+      alreadyAnsweredBody:
+        "There is nothing more to do here. Where it stands now is in your course access list below.",
       expired:
         "This invitation link is no longer usable. Ask an administrator to send a new one.",
       notFound: "This invitation is not available to your account.",
@@ -1899,6 +1906,61 @@ export const en = {
     handoffTitle: "Confirm your academic profile",
     handoffLead: "You were browsing Gradex as:",
     handoffNote: "That choice was only remembered on this device. Choose your university and major below to save it to your account.",
+  },
+  /**
+   * The Student's own academic profile: the authenticated, account-backed one.
+   *
+   * Kept apart from `academicContext`, which is the browsing preference a
+   * visitor can set without an account. The two are never the same fact and
+   * this copy must never let them read as though they were.
+   *
+   * All of it used to live in a `copy(isAr)` function inside the form, which is
+   * the one place two languages cannot be checked for parity, for the retired
+   * vocabulary, or for simply existing.
+   */
+  academicProfile: {
+    onboardingTitle: "Tell us about your studies",
+    onboardingIntro:
+      "We use this to order the catalogue around your studies. You can skip now and finish later.",
+    editTitle: "Your academic profile",
+    editIntro:
+      "This shapes what the catalogue shows you first. Change it whenever your studies change.",
+    university: "University",
+    college: "College",
+    program: "Major",
+    level: "Academic level",
+    levelUnsure: "I'm not sure",
+    undeclared: "I haven't chosen my major yet",
+    nonDegree: "Non-degree student",
+    foundation: "I'm in the foundation year",
+    select: "Select",
+    selectCollegeFirst: "Choose your university first",
+    selectProgramFirst: "Choose your college first",
+    save: "Save and continue",
+    saveEdit: "Save changes",
+    skip: "Skip for now",
+    saving: "Saving…",
+    accessPromise:
+      "Changing your major or level only changes how the catalogue is personalised. Your courses and purchases are unaffected.",
+    saved: "Your academic profile was saved.",
+    skipped: "Skipped. You can finish your profile any time.",
+    loadFailed:
+      "Your study options could not be loaded. Try again in a moment.",
+    saveFailed:
+      "Your academic profile could not be saved. Try again in a moment.",
+    // Deliberately not "the CSRF token is missing", which is what this screen
+    // used to say to a Student.
+    sessionEnded: "Your session ended. Sign in again to save your profile.",
+    noPrograms: "No majors are available for this college yet.",
+    currentlyOn: "Your study plan",
+    // The server keeps a setup state. The reader gets the consequence of it,
+    // never the word the server uses.
+    notStartedTitle: "You haven't set this up yet",
+    notStartedBody:
+      "Nothing here is required. Filling it in changes what the catalogue shows you first.",
+    skippedTitle: "You skipped this earlier",
+    skippedBody: "You can finish it now, and change it again later.",
+    backToCourses: "Back to my courses",
   },
 };
 

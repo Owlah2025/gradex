@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Select } from "@/components/ui/select";
 import {
   academicLevelLabels,
-  getAcademicProfile,
   listCollegeOptions,
   listInstitutionOptions,
   listProgramOptions,
@@ -38,59 +41,51 @@ import { academicContextNames } from "@/lib/academic/anonymous-context";
 /** Not a Program row — a state of the Student (D-092 §5). */
 const UNDECLARED = "__undeclared__";
 const NON_DEGREE = "__non_degree__";
-
-function copy(isAr: boolean) {
-  return {
-    onboardingTitle: isAr ? "خلّينا نعرف دراستك" : "Tell us about your studies",
-    onboardingIntro: isAr
-      ? "نستخدم هذه المعلومات لترتيب الكتالوج حسب دراستك. تقدر تتخطاها الآن وتكملها لاحقًا."
-      : "We use this to order the catalogue around your studies. You can skip now and finish later.",
-    editTitle: isAr ? "ملفك الدراسي" : "Your academic profile",
-    university: isAr ? "الجامعة" : "University",
-    college: isAr ? "الكلية" : "College",
-    program: isAr ? "التخصص" : "Major",
-    level: isAr ? "المستوى الدراسي" : "Academic level",
-    levelUnsure: isAr ? "لست متأكدًا" : "I'm not sure",
-    undeclared: isAr ? "لم أحدد تخصصي بعد" : "I haven't chosen my major yet",
-    nonDegree: isAr ? "طالب غير مقيد" : "Non-degree student",
-    select: isAr ? "اختر" : "Select",
-    save: isAr ? "حفظ والمتابعة" : "Save and continue",
-    saveEdit: isAr ? "حفظ التغييرات" : "Save changes",
-    skip: isAr ? "تخطي الآن" : "Skip for now",
-    saving: isAr ? "جارٍ الحفظ..." : "Saving...",
-    // This promise is technically true: the server never reads the profile in
-    // any access decision.
-    accessPromise: isAr
-      ? "تغيير تخصصك أو مستواك يغيّر تخصيص الكتالوج فقط. كورساتك ومشترياتك لا تتأثر."
-      : "Changing your major or level only changes how the catalogue is personalised. Your courses and purchases are unaffected.",
-    saved: isAr ? "تم حفظ ملفك الدراسي." : "Your academic profile was saved.",
-    skipped: isAr ? "تم التخطي. تقدر تكمل ملفك في أي وقت." : "Skipped. You can finish your profile any time.",
-    loadFailed: isAr ? "تعذر تحميل خيارات الدراسة" : "Unable to load your study options",
-    saveFailed: isAr ? "تعذر حفظ ملفك الدراسي" : "Unable to save your academic profile",
-    noPrograms: isAr ? "لا توجد تخصصات متاحة لهذه الكلية بعد." : "No majors are available for this college yet.",
-    currentlyOn: isAr ? "خطتك الدراسية" : "Your study plan",
-  };
-}
+/**
+ * Also not a Program row.
+ *
+ * `EnrollmentStatus` has always had four members and this form offered three.
+ * A Student the server recorded as FOUNDATION loaded a form with no way to say
+ * so, and the only saveable answers moved them out of it — the form quietly
+ * disagreeing with the account about a fact the account owned. The option is
+ * offered only where the institution actually has a foundation stage, which is
+ * a field on the institution rather than an assumption made here.
+ */
+const FOUNDATION = "__foundation__";
 
 export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   const { locale, t: dictionary } = useLocale();
+  const t = dictionary.academicProfile;
   const isAr = locale === "ar";
-  const t = useMemo(() => copy(isAr), [isAr]);
   const router = useRouter();
   // What the Student chose while browsing, shown here as guidance and nothing more. See the
   // handoff note below the form for why it cannot become a preselection.
-  const { anonymous, adoptProfile } = useAcademicContext();
+  //
+  // `profile` is the account's own answer, already held above the page. This form used to issue
+  // its own `GET /me/academic-profile` beside that one — the same principal-scoped resource, read
+  // twice in one browser session, and re-read on every language switch even though the response
+  // does not depend on language.
+  const { anonymous, profile, adoptProfile } = useAcademicContext();
 
-  const [profile, setProfile] = useState<AcademicProfile | null>(null);
   const [institutions, setInstitutions] = useState<InstitutionOption[]>([]);
   const [colleges, setColleges] = useState<CollegeOption[]>([]);
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
 
   const [institutionID, setInstitutionID] = useState("");
   const [collegeID, setCollegeID] = useState("");
-  // Holds either a Program identifier or one of the two Program-less sentinels.
+  // Holds either a Program identifier or one of the Program-less sentinels.
   const [programChoice, setProgramChoice] = useState("");
   const [levelChoice, setLevelChoice] = useState("");
+  /**
+   * Whether the Student has touched the University since the form loaded.
+   *
+   * Restoring a stored profile and honouring a deliberate change are the same
+   * two effects looking at the same empty College. Without this they fought:
+   * changing University cleared the College, the restore effect saw an empty
+   * College and put the *old* University's College back, and the Major list was
+   * then requested for a College belonging to a different institution.
+   */
+  const [institutionTouched, setInstitutionTouched] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -107,33 +102,36 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
     let cancelled = false;
     void (async () => {
       try {
-        const [existing, options] = await Promise.all([
-          getAcademicProfile(locale),
-          listInstitutionOptions(locale),
-        ]);
+        const options = await listInstitutionOptions(locale);
         if (cancelled) return;
-        setProfile(existing);
         setInstitutions(options);
-        // Pre-populate an existing profile so editing starts from the truth.
-        if (existing.institution_id) {
-          setInstitutionID(existing.institution_id);
-        } else if (options.length === 1) {
-          // One launch institution: choosing it for the Student removes a step
-          // that has only one answer, without hardcoding which one it is.
-          setInstitutionID(options[0].id);
-        }
-        if (existing.current_level) setLevelChoice(String(existing.current_level));
-        if (existing.enrollment_status === "NON_DEGREE") setProgramChoice(NON_DEGREE);
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : t.loadFailed);
-        }
+      } catch {
+        // The reason a list did not arrive is the transport's business. What
+        // the reader needs is the consequence and a way forward, which is one
+        // sentence and is the same sentence every time.
+        if (!cancelled) setError(t.loadFailed);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [locale, t.loadFailed]);
+
+  // Seed the form from the account's profile once, and only while the Student
+  // has not started editing.
+  useEffect(() => {
+    if (!profile || institutionTouched || institutionID) return;
+    if (profile.institution_id) {
+      setInstitutionID(profile.institution_id);
+    } else if (institutions.length === 1) {
+      // One launch institution: choosing it for the Student removes a step
+      // that has only one answer, without hardcoding which one it is.
+      setInstitutionID(institutions[0].id);
+    }
+    if (profile.current_level) setLevelChoice(String(profile.current_level));
+    if (profile.enrollment_status === "NON_DEGREE") setProgramChoice(NON_DEGREE);
+    if (profile.enrollment_status === "FOUNDATION") setProgramChoice(FOUNDATION);
+  }, [profile, institutions, institutionID, institutionTouched]);
 
   // Colleges cascade from the University.
   useEffect(() => {
@@ -147,8 +145,8 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         const options = await listCollegeOptions(institutionID, locale);
         if (cancelled) return;
         setColleges(options);
-      } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : t.loadFailed);
+      } catch {
+        if (!cancelled) setError(t.loadFailed);
       }
     })();
     return () => {
@@ -168,8 +166,8 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         const options = await listProgramOptions(institutionID, collegeID, locale);
         if (cancelled) return;
         setPrograms(options);
-      } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : t.loadFailed);
+      } catch {
+        if (!cancelled) setError(t.loadFailed);
       }
     })();
     return () => {
@@ -177,32 +175,43 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
     };
   }, [institutionID, collegeID, locale, t.loadFailed]);
 
-  // Once the Colleges are known, restore the one an existing profile implies —
-  // the stored College for an undeclared Student, or the derived College name
-  // for an enrolled one.
+  /**
+   * Restore the College an existing profile implies.
+   *
+   * `academic_unit_id` is a real identifier and is used as one. `college_name`
+   * is display prose and is only ever used to *preselect* a list the Student is
+   * then asked to confirm — never to compose what gets saved. The Major below
+   * is bound by identifier and is dropped entirely if the restored College does
+   * not contain it, so a name collision costs a preselection and cannot cost a
+   * Student the wrong Major on their account.
+   */
   useEffect(() => {
-    if (!profile || collegeID || colleges.length === 0) return;
+    if (!profile || institutionTouched || collegeID || colleges.length === 0) return;
     if (profile.academic_unit_id) {
       setCollegeID(profile.academic_unit_id);
       setProgramChoice(UNDECLARED);
       return;
     }
     if (profile.college_name) {
-      const match = colleges.find((college) => name(college) === profile.college_name ||
-        college.name_en === profile.college_name);
+      const match = colleges.find(
+        (college) =>
+          name(college) === profile.college_name ||
+          college.name_en === profile.college_name,
+      );
       if (match) setCollegeID(match.id);
     }
-  }, [profile, colleges, collegeID, name]);
+  }, [profile, colleges, collegeID, institutionTouched, name]);
 
   // And then the Major itself, once its College's Majors have loaded.
   useEffect(() => {
-    if (!profile?.program_id || programChoice || programs.length === 0) return;
+    if (!profile?.program_id || institutionTouched || programChoice || programs.length === 0) return;
     if (programs.some((program) => program.id === profile.program_id)) {
       setProgramChoice(profile.program_id);
     }
-  }, [profile, programs, programChoice]);
+  }, [profile, programs, programChoice, institutionTouched]);
 
   const changeInstitution = (next: string) => {
+    setInstitutionTouched(true);
     setInstitutionID(next);
     // Cascading clears everything downstream, so no impossible combination can
     // survive a change of University.
@@ -213,6 +222,7 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   };
 
   const changeCollege = (next: string) => {
+    setInstitutionTouched(true);
     setCollegeID(next);
     setProgramChoice("");
     setError(null);
@@ -221,7 +231,7 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   const withCSRF = async (action: (csrf: string) => Promise<void>) => {
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      setError(t.sessionEnded);
       return;
     }
     setBusy(true);
@@ -229,8 +239,8 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
     setMessage(null);
     try {
       await action(csrf);
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : t.saveFailed);
+    } catch {
+      setError(t.saveFailed);
     } finally {
       setBusy(false);
     }
@@ -246,6 +256,9 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         academicUnitID = collegeID || null;
       } else if (programChoice === NON_DEGREE) {
         status = "NON_DEGREE";
+      } else if (programChoice === FOUNDATION) {
+        status = "FOUNDATION";
+        academicUnitID = collegeID || null;
       } else {
         programID = programChoice;
       }
@@ -258,7 +271,6 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         academicUnitID,
         currentLevel: levelChoice === "" ? null : Number(levelChoice),
       });
-      setProfile(saved);
       // The application holds the account's profile above the page, and a client navigation away
       // from this form does not remount it. Handing it the server's own answer keeps every surface
       // that reads the profile — the Dashboard's onboarding invitation, and precedence over a
@@ -274,7 +286,6 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   const skip = () =>
     void withCSRF(async (csrf) => {
       const skipped = await skipAcademicOnboarding({ locale, csrf });
-      setProfile(skipped);
       adoptProfile(skipped);
       setMessage(t.skipped);
       router.push(`/${locale}/learn/dashboard`);
@@ -289,20 +300,53 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
   const canSubmit = institutionID !== "" && programChoice !== "" &&
     (programChoice !== UNDECLARED || collegeID !== "");
 
-  const fieldClass =
-    "mt-1 w-full rounded-md border border-border bg-background p-2.5 text-sm text-foreground";
+  const foundationOffered =
+    selectedInstitution?.has_foundation_stage === true ||
+    profile?.enrollment_status === "FOUNDATION";
+
+  /**
+   * What the account's setup state means for this reader, in a sentence.
+   *
+   * The states themselves — NOT_STARTED, SKIPPED, COMPLETED — are the server's
+   * vocabulary and stay there. Only shown while editing: during onboarding the
+   * screen's whole purpose already says it.
+   */
+  const setupNote =
+    mode !== "edit" || !profile
+      ? null
+      : profile.setup_state === "NOT_STARTED"
+        ? { title: t.notStartedTitle, body: t.notStartedBody }
+        : profile.setup_state === "SKIPPED"
+          ? { title: t.skippedTitle, body: t.skippedBody }
+          : null;
+
+  const chosenProgram = programs.find((program) => program.id === programChoice);
+  const chosenCollege = colleges.find((item) => item.id === collegeID);
+  const programContext = chosenProgram
+    ? [
+        isAr ? chosenProgram.department_name_ar : chosenProgram.department_name_en,
+        chosenCollege ? name(chosenCollege) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   return (
     <section
       data-testid="academic-profile-form"
-      dir={isAr ? "rtl" : "ltr"}
       className="rounded-2xl border border-border bg-card p-6 shadow-sm"
     >
-      <h2 className="font-display text-2xl font-bold text-foreground">
+      <h1 className="font-display text-2xl font-bold text-foreground">
         {mode === "onboarding" ? t.onboardingTitle : t.editTitle}
-      </h2>
-      {mode === "onboarding" ? (
-        <p className="mt-2 text-muted-foreground">{t.onboardingIntro}</p>
+      </h1>
+      <p className="mt-2 text-muted-foreground">
+        {mode === "onboarding" ? t.onboardingIntro : t.editIntro}
+      </p>
+
+      {setupNote ? (
+        <div className="mt-5" data-testid="academic-profile-setup-note">
+          <Alert title={setupNote.title}>{setupNote.body}</Alert>
+        </div>
       ) : null}
 
       {/**
@@ -348,11 +392,10 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
       ) : null}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
-        <label className="block text-sm font-semibold text-foreground">
-          {t.university}
-          <select
+        <Field label={t.university} htmlFor="profile-university">
+          <Select
+            id="profile-university"
             data-testid="profile-university"
-            className={fieldClass}
             value={institutionID}
             disabled={busy}
             onChange={(event) => changeInstitution(event.target.value)}
@@ -363,14 +406,17 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
                 {name(institution)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
 
-        <label className="block text-sm font-semibold text-foreground">
-          {t.college}
-          <select
+        <Field
+          label={t.college}
+          htmlFor="profile-college"
+          hint={institutionID === "" ? t.selectCollegeFirst : undefined}
+        >
+          <Select
+            id="profile-college"
             data-testid="profile-college"
-            className={fieldClass}
             value={collegeID}
             disabled={busy || institutionID === ""}
             onChange={(event) => changeCollege(event.target.value)}
@@ -381,14 +427,23 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
                 {name(college)}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
 
-        <label className="block text-sm font-semibold text-foreground">
-          {t.program}
-          <select
+        <Field
+          label={t.program}
+          htmlFor="profile-program"
+          hint={
+            collegeID === ""
+              ? t.selectProgramFirst
+              : !chosenProgram && programs.length === 0
+                ? t.noPrograms
+                : undefined
+          }
+        >
+          <Select
+            id="profile-program"
             data-testid="profile-program"
-            className={fieldClass}
             value={programChoice}
             disabled={busy || collegeID === ""}
             onChange={(event) => setProgramChoice(event.target.value)}
@@ -399,35 +454,32 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
                 {name(program)}
               </option>
             ))}
-            {/* Neither of these is a Program row. */}
+            {/* None of these is a Program row. */}
             <option value={UNDECLARED}>{t.undeclared}</option>
+            {foundationOffered ? (
+              <option value={FOUNDATION}>{t.foundation}</option>
+            ) : null}
             <option value={NON_DEGREE}>{t.nonDegree}</option>
-          </select>
+          </Select>
           {/* Department is context, never a step. */}
-          {(() => {
-            const chosen = programs.find((program) => program.id === programChoice);
-            const department = chosen && (isAr ? chosen.department_name_ar : chosen.department_name_en);
-            const college = colleges.find((item) => item.id === collegeID);
-            if (!chosen) {
-              return collegeID !== "" && programs.length === 0 ? (
-                <span data-testid="profile-no-programs" className="mt-1 block text-xs text-muted-foreground">
-                  {t.noPrograms}
-                </span>
-              ) : null;
-            }
-            return (
-              <span data-testid="profile-program-context" className="mt-1 block text-xs text-muted-foreground">
-                {[department, college ? name(college) : null].filter(Boolean).join(" · ")}
-              </span>
-            );
-          })()}
-        </label>
+          {programContext !== "" ? (
+            <span
+              data-testid="profile-program-context"
+              className="block text-sm text-muted-foreground"
+            >
+              {programContext}
+            </span>
+          ) : null}
+        </Field>
 
-        <label className="block text-sm font-semibold text-foreground">
-          {t.level}
-          <select
+        <Field
+          label={t.level}
+          htmlFor="profile-level"
+          hint={institutionID === "" ? t.selectCollegeFirst : undefined}
+        >
+          <Select
+            id="profile-level"
             data-testid="profile-level"
-            className={fieldClass}
             value={levelChoice}
             disabled={busy || institutionID === ""}
             onChange={(event) => setLevelChoice(event.target.value)}
@@ -439,8 +491,8 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
                 {level.label}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
       </div>
 
       {profile?.curriculum_version_label ? (
@@ -453,37 +505,38 @@ export function AcademicProfileForm({ mode }: { mode: "onboarding" | "edit" }) {
         {t.accessPromise}
       </p>
 
+      {/* Success and failure used to render as the same sentence in the same
+          weight and the same colour, distinguishable only by reading them. */}
       {message ? (
-        <p role="status" data-testid="profile-message" className="mt-4 text-sm font-semibold text-foreground">
-          {message}
-        </p>
+        <div className="mt-4" data-testid="profile-message">
+          <Alert tone="success" title={message} />
+        </div>
       ) : null}
       {error ? (
-        <p role="alert" data-testid="profile-error" className="mt-4 text-sm font-semibold text-foreground">
-          {error}
-        </p>
+        <div className="mt-4" data-testid="profile-error">
+          <Alert tone="error" title={error} />
+        </div>
       ) : null}
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <button
+        <Button
           type="button"
           data-testid="profile-save"
           disabled={busy || !canSubmit}
           onClick={submit}
-          className="rounded-md border border-border bg-foreground px-4 py-2 font-semibold text-background hover:opacity-90 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           {busy ? t.saving : mode === "onboarding" ? t.save : t.saveEdit}
-        </button>
+        </Button>
         {mode === "onboarding" ? (
-          <button
+          <Button
             type="button"
+            variant="outline"
             data-testid="profile-skip"
             disabled={busy}
             onClick={skip}
-            className="rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             {t.skip}
-          </button>
+          </Button>
         ) : null}
       </div>
     </section>

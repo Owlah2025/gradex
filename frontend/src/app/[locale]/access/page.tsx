@@ -3,6 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { LearningShell } from "@/components/learning/learning-shell";
+import { shellLabels } from "@/components/learning/learning-label-sets";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { localeFromPath } from "@/lib/i18n/locale-path";
 import { safeReturnTo } from "@/lib/identity/return-to";
@@ -180,14 +184,32 @@ export default function StudentCourseAccessPage() {
 
   const awaitingAcceptance =
     activeInvitation?.state === "PENDING_STUDENT_ACCEPTANCE";
+  /**
+   * The invitation loaded and is not waiting on this Student.
+   *
+   * Almost always their own second visit to a link they have already used. The
+   * panel used to render its heading and then nothing at all under it — a
+   * labelled box with no content and no explanation, on the one screen the
+   * Student came to for an answer.
+   */
+  const alreadyAnswered =
+    activeInvitation !== null && !awaitingAcceptance && !accepted;
+  /**
+   * The link carried an invitation but no one-time credential — most often a
+   * URL copied without its fragment. Saying so up front beats offering an
+   * Accept control that can only fail.
+   */
+  const credentialMissing =
+    awaitingAcceptance && token.current === null && !submitting;
   const records = [...historyItems].sort(byStudentPriority);
 
   return (
-    <main
-      id="main"
-      dir={dir}
-      className="mx-auto min-h-screen max-w-3xl px-5 py-10 sm:px-6"
-    >
+    /* The Student frame, like every other Student screen. This page used to be a
+       bare `<main>`: a Student who followed an invitation link from their email
+       landed on a page with no header, no route back to their Courses, no
+       language or theme control, and no way to sign out. */
+    <LearningShell locale={locale} dir={dir} labels={shellLabels(t)}>
+      <div className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
       <header className="mb-8">
         <h1 className="font-display text-3xl font-bold text-foreground">
           {labels.title}
@@ -210,27 +232,19 @@ export default function StudentCourseAccessPage() {
           </h2>
 
           {invitationError ? (
-            <p
-              role="alert"
-              data-testid="access-invitation-error"
-              className="mt-3 text-sm font-medium text-destructive"
-            >
-              {invitationError}
-            </p>
+            <div className="mt-3" data-testid="access-invitation-error">
+              <Alert tone="error" title={invitationError} />
+            </div>
           ) : null}
 
           {accepted ? (
-            <div
-              role="status"
-              data-testid="access-invitation-accepted"
-              className="mt-3"
-            >
-              <p className="font-semibold text-foreground">
-                {labels.invitation.acceptedTitle}
-              </p>
-              <p className="mt-1 leading-6 text-muted-foreground">
+            <div className="mt-3" data-testid="access-invitation-accepted">
+              <Alert
+                tone="success"
+                title={labels.invitation.acceptedTitle}
+              >
                 {labels.invitation.acceptedBody}
-              </p>
+              </Alert>
             </div>
           ) : awaitingAcceptance ? (
             <div className="mt-3">
@@ -238,17 +252,29 @@ export default function StudentCourseAccessPage() {
               <p className="leading-6 text-muted-foreground">
                 {labels.invitation.acceptNote}
               </p>
-              <button
-                type="button"
-                data-testid="accept-invitation"
-                onClick={handleAccept}
-                disabled={submitting}
-                className="mt-4 rounded-md bg-primary px-5 py-2 font-semibold text-primary-foreground disabled:opacity-50"
-              >
-                {submitting
-                  ? labels.invitation.accepting
-                  : labels.invitation.accept}
-              </button>
+              {credentialMissing ? (
+                <div className="mt-4" data-testid="access-invitation-incomplete">
+                  <Alert tone="error" title={labels.invitation.missingToken} />
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  className="mt-4"
+                  data-testid="accept-invitation"
+                  onClick={handleAccept}
+                  disabled={submitting}
+                >
+                  {submitting
+                    ? labels.invitation.accepting
+                    : labels.invitation.accept}
+                </Button>
+              )}
+            </div>
+          ) : alreadyAnswered ? (
+            <div className="mt-3" data-testid="access-invitation-answered">
+              <Alert title={labels.invitation.alreadyAnsweredTitle}>
+                {labels.invitation.alreadyAnsweredBody}
+              </Alert>
             </div>
           ) : null}
         </section>
@@ -263,15 +289,16 @@ export default function StudentCourseAccessPage() {
           {labels.loading}
         </p>
       ) : historyError ? (
-        <div role="alert" data-testid="access-error">
-          <p className="text-sm font-medium text-destructive">{historyError}</p>
-          <button
+        <div data-testid="access-error">
+          <Alert tone="error" title={historyError} />
+          <Button
             type="button"
+            variant="outline"
+            className="mt-3"
             onClick={() => void fetchStudentData()}
-            className="mt-3 rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent"
           >
             {labels.retry}
-          </button>
+          </Button>
         </div>
       ) : records.length === 0 ? (
         <section
@@ -284,12 +311,9 @@ export default function StudentCourseAccessPage() {
           <p className="mx-auto mt-2 max-w-md text-muted-foreground">
             {labels.emptyBody}
           </p>
-          <Link
-            href={`/${locale}/catalog`}
-            className="mt-6 inline-flex rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent"
-          >
-            {labels.emptyAction}
-          </Link>
+          <Button asChild variant="outline" className="mt-6">
+            <Link href={`/${locale}/catalog`}>{labels.emptyAction}</Link>
+          </Button>
         </section>
       ) : (
         <section
@@ -307,6 +331,7 @@ export default function StudentCourseAccessPage() {
           ))}
         </section>
       )}
-    </main>
+      </div>
+    </LearningShell>
   );
 }
