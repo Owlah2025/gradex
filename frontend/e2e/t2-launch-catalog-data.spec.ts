@@ -290,7 +290,7 @@ test.describe("T2 Kuwait University launch catalog", () => {
 
     const page = await context.newPage();
     await page.goto("/en/admin/catalog");
-    await expect(page.getByRole("heading", { name: "Taxonomy Vocabulary Administration" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Catalogue vocabulary" })).toBeVisible();
 
     // The public catalogue is unchanged and carries no academic filters yet.
     const publicCatalogue = await admin.get("/api/v1/catalog/courses");

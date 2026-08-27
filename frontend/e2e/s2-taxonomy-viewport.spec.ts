@@ -49,8 +49,8 @@ function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | 
       : ["Course Authoring Studio", "Your courses", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["مراجعة المقررات وإدارتها", "إدارة قاموس التصنيف", "قاموس التصنيف"]
-    : ["Course review & administration", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
+    ? ["مراجعة المقررات وإدارتها", "مفردات الكتالوج", "التخصصات والمواد"]
+    : ["Course review & administration", "Catalogue vocabulary", "Majors and subjects"];
 }
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {

@@ -158,7 +158,7 @@ test.describe("S14 Admin Catalog review surface", () => {
     await openAdminCatalog(page);
     await expect(page.getByTestId("administer-course-id")).toHaveCount(0);
     await expect(page.locator('[data-testid^="administer-review-item-"]')).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Taxonomy Vocabulary Administration" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Catalogue vocabulary" })).toBeVisible();
 
     await context.close();
   });
@@ -174,14 +174,14 @@ test.describe("S14 Admin Catalog review surface", () => {
     await page.getByTestId("taxonomy-term-label-ar").fill(MAJOR_AR);
     await page.getByTestId("taxonomy-term-label-en").fill(MAJOR_EN);
     await page.getByTestId("taxonomy-term-create").click();
-    await expect(page.getByTestId("taxonomy-term-message")).toContainText("Term created and audited");
+    await expect(page.getByTestId("taxonomy-term-message")).toContainText("The term was added.");
 
     await page.getByTestId("taxonomy-term-kind").selectOption("SUBJECT");
     await page.getByTestId("taxonomy-term-label-ar").fill(SUBJECT_AR);
     await page.getByTestId("taxonomy-term-label-en").fill(SUBJECT_EN);
     await page.getByTestId("taxonomy-term-academic-code").fill(SUBJECT_CODE);
     await page.getByTestId("taxonomy-term-create").click();
-    await expect(page.getByTestId("taxonomy-term-message")).toContainText("Term created and audited");
+    await expect(page.getByTestId("taxonomy-term-message")).toContainText("The term was added.");
 
     // Persisted, not merely rendered: a reload re-reads the vocabulary.
     await page.reload();
