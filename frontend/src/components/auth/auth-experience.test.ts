@@ -360,3 +360,129 @@ test("the staff invitation names which of the four refusals it received", () => 
     "an invitation link that was never presented is described as an invalid one",
   );
 });
+
+test("a required password change offers no way around itself", () => {
+  const form = readSource(PASSWORD_CHANGE);
+  // The escape hatch exists only for the visitor who came here deliberately.
+  // For a restricted principal, leaving is the thing the server refuses.
+  assert.ok(
+    /!required && escape/.test(form),
+    "the password-change screen offers a way out regardless of whether the change is required",
+  );
+  assert.ok(
+    /const required = session\?\.password_change_required === true/.test(form),
+    "the screen decides whether a change is required from something other than the session",
+  );
+  // And the screen is not a destination a crafted link may ask for.
+  const returnTo = readSource("lib/identity/return-to.ts");
+  assert.ok(
+    returnTo.includes("passwordChangePath") &&
+      /blockedRoots = \[[^\]]*passwordChangePath/s.test(returnTo),
+    "password-change is no longer blocked as a returnTo destination",
+  );
+});
+
+test("the required notice is shown only when a change is actually required", () => {
+  const form = readSource(PASSWORD_CHANGE);
+  const page = readSource("app/(auth)/password-change/page.tsx");
+  assert.ok(
+    /\{required \?\s*\(\s*<Alert tone="info" title=\{t\.auth\.passwordChange\.requiredTitle\}/s.test(
+      form,
+    ),
+    "every visitor is told their account cannot continue without a password change",
+  );
+  assert.ok(
+    page.includes("voluntaryIntro") && page.includes("voluntaryTitle"),
+    "the screen opens with the same words whether or not the change is required",
+  );
+});
+
+test("signing out drops local state even when there is no token to spend", () => {
+  const source = readSource(SIGN_OUT);
+  // Returning early on a missing CSRF token made the control do nothing at
+  // all — no clear, no navigation, no feedback.
+  assert.ok(
+    !/if \(!csrf\) return;/.test(source),
+    "sign out abandons the local teardown when it cannot call the server",
+  );
+  assert.ok(
+    /if \(csrf\) await deleteSession/.test(source),
+    "sign out calls the server without a token",
+  );
+  const finallyBlock = source.slice(source.indexOf("} finally {"));
+  assert.ok(
+    finallyBlock.includes("clearSession()"),
+    "the in-memory session is not cleared on every path",
+  );
+  assert.ok(finallyBlock.includes("router.push"), "sign out lands nowhere");
+});
+
+test("signing out drops the account's academic profile with the account", () => {
+  const provider = readSource("components/academic/academic-context-provider.tsx");
+  // The profile is held above the page. If it survived sign-out it would go on
+  // outranking the browsing preference for a visitor who no longer has it —
+  // on a shared machine, for the next person.
+  const gate = provider.slice(
+    provider.indexOf('if (sessionResolution !== "AUTHENTICATED")'),
+    provider.indexOf('if (sessionResolution !== "AUTHENTICATED")') + 500,
+  );
+  assert.ok(gate.includes("setProfile(null)"), "a stale profile survives sign-out");
+  assert.ok(
+    gate.includes("setProfileRead(false)"),
+    "the profile is dropped but still reported as read",
+  );
+});
+
+test("the account surface offers only what the product implements", () => {
+  const source = readSource("components/learning/account-summary.tsx");
+  // The session view carries a display name and a role. There is no email on
+  // it, and a labelled box with nothing behind it is worse than no box.
+  assert.ok(source.includes("display_name"), "the account surface names nobody");
+  assert.ok(
+    source.includes("/password-change"),
+    "changing a password still has no route through the product",
+  );
+  for (const invented of ["email", "phone", "notifications", "delete", "export"]) {
+    assert.ok(
+      !new RegExp(`t\\.account\\.${invented}`).test(source),
+      `the account surface offers ${invented}, which has no route behind it`,
+    );
+  }
+  const text = jsxTextOf(source);
+  assert.ok(!/\{\s*session\.role\s*\}/.test(text), "the raw role enum is rendered");
+});
+
+test("every screen that asks for a password states the rule before enforcing it", () => {
+  for (const surface of [REGISTER, PASSWORD_CHANGE, RECOVERY_RESET, STAFF_INVITE]) {
+    const source = readSource(surface);
+    assert.ok(
+      /hint=\{(t\.auth\.common\.passwordRule|text\.invalidPassword)\}/.test(source),
+      `${surface} refuses a password by a rule it never showed`,
+    );
+  }
+  // One statement of the rule, in one place, in both languages.
+  assert.equal(
+    en.auth.common.passwordRule.includes("15"),
+    true,
+    "the shared password rule does not state the minimum length",
+  );
+  assert.notEqual(
+    ar.auth.common.passwordRule,
+    en.auth.common.passwordRule,
+    "the Arabic password rule is the English one",
+  );
+});
+
+test("a password field can be read back on every screen that asks for one", () => {
+  for (const surface of [LOGIN, REGISTER, PASSWORD_CHANGE, RECOVERY_RESET, STAFF_INVITE]) {
+    const source = readSource(surface);
+    assert.ok(
+      source.includes("PasswordInput"),
+      `${surface} asks for a 15-character password blind`,
+    );
+    assert.ok(
+      !/type="password"/.test(source),
+      `${surface} still hand-rolls a password field beside the shared one`,
+    );
+  }
+});

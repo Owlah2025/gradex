@@ -31,10 +31,15 @@ export function SignOutButton({
 
   async function signOut() {
     const csrf = currentCSRFToken();
-    if (!csrf) return;
     setSigningOut(true);
     try {
-      await deleteSession(csrf, locale);
+      // No token means this document never held a session, or already dropped
+      // it. Returning early made the control do nothing at all — no local
+      // clear, no navigation, no feedback — which is the one outcome a reader
+      // pressing Sign out cannot distinguish from being ignored. The local
+      // teardown below is exactly what they asked for and runs either way; only
+      // the server call, which cannot be made without the token, is skipped.
+      if (csrf) await deleteSession(csrf, locale);
     } catch {
       // Logout is best-effort from the browser's side. The server is authoritative, and a failed
       // call must still drop local state rather than leave a signed-out-looking header holding a

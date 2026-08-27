@@ -173,7 +173,7 @@ export function RegistrationForm() {
       <Field
         label={t.auth.register.password}
         htmlFor="password"
-        hint={t.auth.register.passwordHint}
+        hint={t.auth.common.passwordRule}
         error={errors.password}
       >
         <PasswordInput

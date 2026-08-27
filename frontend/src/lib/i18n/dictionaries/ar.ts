@@ -803,8 +803,6 @@ export const ar: Dictionary = {
       displayHint: "من 2 إلى 50 حرفاً عربياً أو لاتينياً. يمكنك تغييره لاحقاً.",
       email: "البريد الإلكتروني",
       password: "كلمة المرور",
-      passwordHint:
-        "من 15 إلى 128 محرفاً. المسافات مسموحة ولا نفرض رموزاً محددة.",
       policiesLoading: "جارٍ تحميل الشروط الحالية…",
       policySetLabel: "إصدار الشروط",
       policyEffective: "سارية منذ",
@@ -983,6 +981,10 @@ export const ar: Dictionary = {
     passwordChange: {
       title: "غيّر كلمة المرور",
       intro: "يحتاج حسابك إلى كلمة مرور جديدة قبل المتابعة. خطوة واحدة فقط.",
+      voluntaryTitle: "غيّر كلمة المرور",
+      voluntaryIntro:
+        "اختر كلمة مرور جديدة لحسابك. ستحتاج الكلمة الجديدة لتسجيل الدخول على أجهزتك الأخرى.",
+      cancel: "ليس الآن",
       requiredTitle: "تغيير كلمة المرور مطلوب",
       requiredBody:
         "أُنشئ هذا الحساب بكلمة مرور مؤقتة. اختر كلمة مرور خاصة بك لفتح بقية Gradex.",
@@ -1024,6 +1026,7 @@ export const ar: Dictionary = {
       required: "هذا الحقل مطلوب.",
       backHome: "العودة إلى المقررات",
       opensInNewTab: "يفتح في تبويب جديد",
+      passwordRule: "من 15 إلى 128 حرفاً. المسافات مسموحة، ولا توجد قواعد للرموز.",
       currentStep: "أنت هنا",
       showPassword: "إظهار كلمة المرور",
       hidePassword: "إخفاء كلمة المرور",
@@ -1806,5 +1809,13 @@ export const ar: Dictionary = {
     skippedTitle: "تخطيت هذه الخطوة سابقًا",
     skippedBody: "تقدر تكملها الآن، وتغيّرها لاحقًا في أي وقت.",
     backToCourses: "العودة إلى مقرراتي",
+  },
+  account: {
+    title: "حسابك",
+    signedInAs: "مسجّل الدخول باسم",
+    security: "كلمة المرور",
+    securityBody:
+      "غيّر كلمة المرور التي تسجّل الدخول بها. ستحتاج إلى الكلمة الحالية.",
+    changePassword: "تغيير كلمة المرور",
   },
 };

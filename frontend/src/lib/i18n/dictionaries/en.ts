@@ -823,8 +823,6 @@ export const en = {
         "2–50 Arabic or Latin characters. This can be changed later.",
       email: "Email address",
       password: "Password",
-      passwordHint:
-        "15–128 characters. Spaces are welcome; there are no symbol rules.",
       policiesLoading: "Loading the current terms…",
       policySetLabel: "Terms version",
       policyEffective: "in effect since",
@@ -1025,6 +1023,12 @@ export const en = {
       title: "Change your password",
       intro:
         "Your account needs a new password before you can continue. This takes one step.",
+      // The same screen, reached deliberately rather than because the server
+      // refused everything else. It used to announce a requirement either way.
+      voluntaryTitle: "Change your password",
+      voluntaryIntro:
+        "Choose a new password for your account. Signing in on your other devices will need the new one.",
+      cancel: "Not now",
       requiredTitle: "A password change is required",
       requiredBody:
         "This account was created with a temporary password. Choose your own to unlock the rest of Gradex.",
@@ -1069,6 +1073,8 @@ export const en = {
       required: "This field is required.",
       backHome: "Back to courses",
       opensInNewTab: "opens in a new tab",
+      passwordRule:
+        "15–128 characters. Spaces are welcome; there are no symbol rules.",
       currentStep: "you are here",
       showPassword: "Show password",
       hidePassword: "Hide password",
@@ -1961,6 +1967,21 @@ export const en = {
     skippedTitle: "You skipped this earlier",
     skippedBody: "You can finish it now, and change it again later.",
     backToCourses: "Back to my courses",
+  },
+  /**
+   * The Student's account surface.
+   *
+   * Deliberately small. It names what the session actually carries and offers
+   * the one security action the product implements. It does not invent a
+   * settings screen for capabilities that have no route behind them.
+   */
+  account: {
+    title: "Your account",
+    signedInAs: "Signed in as",
+    security: "Password",
+    securityBody:
+      "Change the password you sign in with. You will need the current one.",
+    changePassword: "Change password",
   },
 };
 

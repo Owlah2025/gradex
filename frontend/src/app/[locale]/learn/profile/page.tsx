@@ -1,4 +1,5 @@
 import { AcademicProfileForm } from "@/components/learning/academic-profile-form";
+import { AccountSummary } from "@/components/learning/account-summary";
 import { LearningShell } from "@/components/learning/learning-shell";
 import { shellLabels } from "@/components/learning/learning-label-sets";
 import { ar } from "@/lib/i18n/dictionaries/ar";
@@ -21,6 +22,7 @@ export default async function StudentProfilePage({
     >
       <div className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
         <AcademicProfileForm mode="edit" />
+        <AccountSummary />
       </div>
     </LearningShell>
   );
