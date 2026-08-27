@@ -168,7 +168,9 @@ export function LoginForm() {
         />
       </Field>
 
-      <Button className="w-full" size="lg" disabled={submitting}>
+      {/* Explicit, so the form's submit is distinguishable from the password
+          field's reveal control without relying on either order or wording. */}
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.login.signingIn : t.auth.login.signIn}
       </Button>
 

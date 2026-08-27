@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { queryLearningState } from "../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
-import { en } from "../src/lib/i18n/dictionaries/en";
 import {
   issueRotatingSession,
   queryEmailVerificationAction,
@@ -210,11 +209,11 @@ test.describe("Automated manual Course purchase flow", () => {
       await expect(policies).toHaveCount(2);
       await policies.nth(0).check();
       await policies.nth(1).check();
-      // Named rather than "the button in the form": the password field now
-      // carries a reveal control, so the form holds more than one button.
-      await studentPage
-        .getByRole("button", { name: en.auth.register.create })
-        .click();
+      // Not `form button`: the password field now carries a reveal control, so
+      // the form holds more than one. And not the button's name either — these
+      // auth routes carry no locale segment and render in the reader's stored
+      // language, so an English name matches nothing on an Arabic page.
+      await studentPage.locator('form button[type="submit"]').click();
       await studentPage.waitForURL((url) => url.pathname === "/verify-email");
 
       const verification = queryEmailVerificationAction(NEW_STUDENT_EMAIL);
@@ -234,11 +233,8 @@ test.describe("Automated manual Course purchase flow", () => {
       await studentPage.locator('a[href^="/login"]').click();
       await studentPage.locator("#email").fill(NEW_STUDENT_EMAIL);
       await studentPage.locator("#password").fill(NEW_STUDENT_PASSWORD);
-      // Same reason as the registration submit above: the sign-in form's
-      // password field carries a reveal control beside the submit.
-      await studentPage
-        .getByRole("button", { name: en.auth.login.signIn })
-        .click();
+      // Same reason as the registration submit above.
+      await studentPage.locator('form button[type="submit"]').click();
       await studentPage.waitForURL(
         (url) =>
           /\/(en|ar)\/access$/.test(url.pathname) &&

@@ -247,7 +247,7 @@ export function RegistrationForm() {
         ) : null}
       </fieldset>
 
-      <Button className="w-full" size="lg" disabled={submitting || !policySet || policyError}>
+      <Button type="submit" className="w-full" size="lg" disabled={submitting || !policySet || policyError}>
         {submitting ? t.auth.register.creating : t.auth.register.create}
       </Button>
     </form>

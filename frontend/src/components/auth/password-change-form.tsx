@@ -240,6 +240,7 @@ export function PasswordChangeForm() {
       </Field>
 
       <Button
+        type="submit"
         className="w-full"
         size="lg"
         disabled={submitting}

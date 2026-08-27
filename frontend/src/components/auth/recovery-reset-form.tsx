@@ -209,7 +209,7 @@ export function RecoveryResetForm() {
           onChange={(event) => setConfirmation(event.target.value)}
         />
       </Field>
-      <Button className="w-full" size="lg" disabled={submitting}>
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.resetPassword.submitting : t.auth.resetPassword.submit}
       </Button>
     </form>

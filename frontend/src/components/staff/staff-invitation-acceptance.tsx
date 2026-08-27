@@ -281,7 +281,7 @@ export function StaffInvitationAcceptance() {
             />
           </Field>
 
-          <Button className="w-full" size="lg" disabled={submitting}>
+          <Button type="submit" className="w-full" size="lg" disabled={submitting}>
             {submitting ? text.completing : text.complete}
           </Button>
         </form>

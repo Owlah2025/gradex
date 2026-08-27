@@ -56,6 +56,17 @@ export default function StudentCourseAccessPage() {
   const invitationId =
     searchParams.get("invitation_id") || searchParams.get("id");
   const token = useRef<string | null>(null);
+  /**
+   * Whether a one-time credential is in hand, as state rather than as the ref.
+   *
+   * The ref is the right home for the secret — it must not drive rendering and
+   * must not be captured in a closure. But *whether* it exists decides whether
+   * the Accept control is offered, and a ref cannot decide that: writing one
+   * schedules no re-render, so a credential restored after the current render
+   * would leave the control hidden with nothing to bring it back. Rendering
+   * reads this; the request still reads the ref.
+   */
+  const [credentialHeld, setCredentialHeld] = useState(false);
 
   const [activeInvitation, setActiveInvitation] =
     useState<StudentCourseAccessInvitation | null>(null);
@@ -78,6 +89,7 @@ export default function StudentCourseAccessPage() {
       } else {
         token.current = restoreCourseAccessInvitationContext(invitationId);
       }
+      setCredentialHeld(token.current !== null);
       scrubTokenFragment();
     };
     captureInvitationToken();
@@ -144,6 +156,7 @@ export default function StudentCourseAccessPage() {
         throw new Error("Invitation acceptance returned no invitation state.");
       }
       token.current = null;
+      setCredentialHeld(false);
       releaseFragmentToken("COURSE_ACCESS_INVITATION");
       releaseCourseAccessInvitationContext();
       setActiveInvitation(updated);
@@ -161,6 +174,7 @@ export default function StudentCourseAccessPage() {
       if (cause instanceof ProblemError) {
         if (cause.problem.status === 410) {
           token.current = null;
+          setCredentialHeld(false);
           releaseFragmentToken("COURSE_ACCESS_INVITATION");
           releaseCourseAccessInvitationContext();
           setInvitationError(labels.invitation.expired);
@@ -168,6 +182,7 @@ export default function StudentCourseAccessPage() {
           setInvitationError(labels.invitation.wrongState);
         } else if (cause.problem.status === 404) {
           token.current = null;
+          setCredentialHeld(false);
           releaseFragmentToken("COURSE_ACCESS_INVITATION");
           releaseCourseAccessInvitationContext();
           setInvitationError(labels.invitation.notFound);
@@ -199,8 +214,7 @@ export default function StudentCourseAccessPage() {
    * URL copied without its fragment. Saying so up front beats offering an
    * Accept control that can only fail.
    */
-  const credentialMissing =
-    awaitingAcceptance && token.current === null && !submitting;
+  const credentialMissing = awaitingAcceptance && !credentialHeld && !submitting;
   const records = [...historyItems].sort(byStudentPriority);
 
   return (
