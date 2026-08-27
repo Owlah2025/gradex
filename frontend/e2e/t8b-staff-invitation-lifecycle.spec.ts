@@ -78,10 +78,18 @@ async function apiContextFor(session: Session): Promise<APIRequestContext> {
 /** Sends one invitation through the Admin screen and returns when the screen confirms it. */
 async function inviteFromAdminScreen(page: Page, recipient: string): Promise<void> {
   await page.goto("/staff");
-  await expect(page.getByRole("heading", { name: "Invite Instructor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Invite an instructor" })).toBeVisible();
   await page.locator("#staff-invite-email").fill(recipient);
-  await page.getByRole("button", { name: "Send Invitation" }).click();
-  await expect(page.getByText("Invitation sent successfully.")).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId("staff-invite-submit").click();
+  await expect(page.getByTestId("staff-notice")).toHaveAttribute("data-tone", "success", {
+    timeout: 15_000,
+  });
+  await expect(page.getByText("The invitation was sent.")).toBeVisible();
+
+  // The invitation the Admin just issued is visible as something still waiting, which is the whole
+  // reason the pending list exists: before it, an invitation vanished the moment it was sent.
+  const row = page.getByTestId("staff-invitation-row").filter({ hasText: recipient });
+  await expect(row).toBeVisible({ timeout: 15_000 });
 }
 
 /**
@@ -196,7 +204,7 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
     // The Admin sees the resulting state without needing an id: the accepted invitee is now an
     // Instructor account, listed by address and shown Active.
     await adminPage.reload();
-    const acceptedRow = adminPage.locator("article", { hasText: recipient });
+    const acceptedRow = adminPage.getByTestId("staff-instructor-row").filter({ hasText: recipient });
     await expect(acceptedRow).toBeVisible({ timeout: 15_000 });
     await expect(acceptedRow).toContainText("Active");
 
@@ -279,13 +287,23 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
 
     // Suspension is performed from the Admin screen, by address and with a stated reason.
     await adminPage.reload();
-    const row = adminPage.locator("article", { hasText: recipient });
+    const row = adminPage.getByTestId("staff-instructor-row").filter({ hasText: recipient });
     await expect(row).toBeVisible({ timeout: 15_000 });
     await expect(row).toContainText("Active");
-    await row.getByRole("textbox").fill("T8B suspension acceptance");
-    await row.getByRole("button", { name: "Suspend Account" }).click();
-    await expect(adminPage.getByText("Account suspended.")).toBeVisible({ timeout: 15_000 });
-    await expect(adminPage.locator("article", { hasText: recipient })).toContainText("Suspended");
+    await row.getByTestId("staff-instructor-suspend").click();
+    // Suspension signs a person out everywhere, so it is confirmed rather than performed on a
+    // single click — and the confirmation states that effect rather than repeating the button. The
+    // reason the server records is collected here, beside the consequence it describes.
+    const suspendDialog = adminPage.getByTestId("staff-confirm");
+    await expect(suspendDialog).toBeVisible();
+    await suspendDialog.getByTestId("staff-instructor-reason").fill("T8B suspension acceptance");
+    await expect(suspendDialog).toContainText("signed out everywhere immediately");
+    await expect(suspendDialog).toContainText("students keep their access");
+    await suspendDialog.getByTestId("confirm-accept").click();
+    await expect(adminPage.getByText("The account was suspended.")).toBeVisible({ timeout: 15_000 });
+    await expect(
+      adminPage.getByTestId("staff-instructor-row").filter({ hasText: recipient }),
+    ).toContainText("Suspended");
 
     // The suspended account keeps its identity — it is not deleted — and loses its capability.
     const suspendedCookies = await recipientContext.cookies();
@@ -316,11 +334,21 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
     await deniedContext.close();
 
     // Reinstatement restores the same account, not a new one.
-    const suspendedRow = adminPage.locator("article", { hasText: recipient });
-    await suspendedRow.getByRole("textbox").fill("T8B reinstatement acceptance");
-    await suspendedRow.getByRole("button", { name: "Reinstate Account" }).click();
-    await expect(adminPage.getByText("Account reinstated.")).toBeVisible({ timeout: 15_000 });
-    await expect(adminPage.locator("article", { hasText: recipient })).toContainText("Active");
+    const suspendedRow = adminPage
+      .getByTestId("staff-instructor-row")
+      .filter({ hasText: recipient });
+    await suspendedRow.getByTestId("staff-instructor-reinstate").click();
+    const reinstateDialog = adminPage.getByTestId("staff-confirm");
+    await reinstateDialog
+      .getByTestId("staff-instructor-reason")
+      .fill("T8B reinstatement acceptance");
+    await reinstateDialog.getByTestId("confirm-accept").click();
+    await expect(adminPage.getByText("The account was reinstated.")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      adminPage.getByTestId("staff-instructor-row").filter({ hasText: recipient }),
+    ).toContainText("Active");
 
     // Suspension ended the earlier session, so the contract is a fresh login — which now works.
     const restoredContext = await browser.newContext({ baseURL: frontendOrigin() });

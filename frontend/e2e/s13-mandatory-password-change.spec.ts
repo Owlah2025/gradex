@@ -150,7 +150,7 @@ test.describe("S13 mandatory password change", () => {
     expect(await privilegedRequestStatus(page, "/api/v1/staff-invitations")).toBe(200);
 
     // The Administrator can now do the thing the launch needs: invite staff.
-    await expect(page.getByText("Invite Instructor")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Invite an instructor" })).toBeVisible();
 
     // Finally, the credential itself changed hands: the temporary password no
     // longer authenticates and the chosen one does, signing in unrestricted.

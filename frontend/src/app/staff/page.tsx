@@ -7,7 +7,9 @@ import { RoleWorkspaceShell } from "@/components/layout/role-workspace-shell";
 export default function StaffPage() {
   return (
     <RoleWorkspaceShell role="ADMIN">
-      <main id="main" className="container mx-auto py-8 px-4">
+      {/* The workspace owns its own width, gutters and direction, the same as every other
+          operational screen. A second container here was a fifth content measure. */}
+      <main id="main">
         <StaffManagement />
       </main>
     </RoleWorkspaceShell>

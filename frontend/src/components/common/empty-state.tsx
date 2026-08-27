@@ -22,6 +22,7 @@ export function EmptyState({
   action,
   density = "default",
   className,
+  testID,
 }: {
   icon?: React.ReactNode;
   title: string;
@@ -29,10 +30,14 @@ export function EmptyState({
   action?: React.ReactNode;
   density?: "default" | "compact";
   className?: string;
+  /** Named for the same reason `LoadingState` and `ErrorState` are: a test asserting which of the
+      three a screen is showing has to be able to tell them apart. */
+  testID?: string;
 }) {
   const compact = density === "compact";
   return (
     <div
+      data-testid={testID}
       className={cn(
         "rounded-lg border border-dashed border-border bg-card",
         compact

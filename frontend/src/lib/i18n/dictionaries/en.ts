@@ -207,6 +207,96 @@ export const en = {
       restore: "Access restoration completed",
     },
   },
+  /**
+   * The staff workspace: the people who can author and administer Courses, and the invitations that
+   * are still waiting for an answer.
+   *
+   * Every consequence sentence here is the contract's, not a guess. Suspending an account revokes
+   * whatever the person is currently signed in to and bumps their session epoch, and touches
+   * nothing else — no Course changes state, no Student loses access. Cancelling an invitation moves it to REVOKED, which is what
+   * stops the link in the invitee's mail from working. Re-inviting an address supersedes the open
+   * invitation on the server, which is why there is no separate "resend".
+   */
+  adminStaff: {
+    title: "Staff",
+    intro:
+      "The people who can author and administer courses on Gradex, and the invitations still waiting for an answer.",
+    invite: {
+      title: "Invite an instructor",
+      lead: "They receive a one-time link by email and choose their own name and password.",
+      email: "Email address",
+      emailHint: "The address the invitation is sent to. It becomes their sign-in address.",
+      role: "Role",
+      roleFixed: "Instructor",
+      roleNote: "Instructor is the only role that can be invited from here.",
+      submit: "Send invitation",
+      sending: "Sending the invitation…",
+      success: "The invitation was sent.",
+      failed: "The invitation could not be sent.",
+      supersedes:
+        "Inviting an address that already has an invitation waiting replaces it: the older link stops working and a new one is sent.",
+    },
+    invitations: {
+      title: "Invitations waiting",
+      lead: "Everyone who has been invited and has not yet created their account.",
+      caption: "Staff invitations that are still open",
+      invitee: "Invited",
+      role: "Role",
+      sent: "Invited on",
+      actions: "Action",
+      loading: "Loading invitations…",
+      loadFailed: "The invitations could not be loaded.",
+      retry: "Try again",
+      emptyTitle: "Nothing is waiting",
+      emptyBody:
+        "Everyone who was invited has answered. This is a normal state, not a problem.",
+      cancel: "Cancel invitation",
+      cancelling: "Cancelling…",
+      cancelTitle: "Cancel this invitation?",
+      cancelBody:
+        "The link in their email stops working immediately, and they cannot create an account until you invite them again.",
+      cancelConfirm: "Cancel the invitation",
+      keep: "Keep it",
+      cancelled: "The invitation was cancelled.",
+      cancelFailed: "The invitation could not be cancelled.",
+    },
+    instructors: {
+      title: "Instructor accounts",
+      lead: "Everyone who has completed their invitation.",
+      caption: "Instructor accounts and whether each can sign in",
+      instructor: "Instructor",
+      email: "Email",
+      state: "Account",
+      actions: "Action",
+      loading: "Loading instructor accounts…",
+      loadFailed: "The instructor accounts could not be loaded.",
+      retry: "Try again",
+      emptyTitle: "No instructor accounts yet",
+      emptyBody: "An account appears here once an invited instructor completes their invitation.",
+      active: "Active",
+      activeDetail: "Can sign in and work on their courses.",
+      suspended: "Suspended",
+      suspendedDetail: "Cannot sign in. Their published courses are unaffected.",
+      suspend: "Suspend",
+      suspending: "Suspending…",
+      reinstate: "Reinstate",
+      reinstating: "Reinstating…",
+      reason: "Reason",
+      suspendReasonHint: "Recorded with the suspension. Required.",
+      reinstateReasonHint: "Recorded with the reinstatement. Required.",
+      suspendTitle: "Suspend this instructor?",
+      suspendBody:
+        "They are signed out everywhere immediately and cannot sign in again until you reinstate them. Their published courses stay published and students keep their access.",
+      suspendConfirm: "Suspend the account",
+      reinstateTitle: "Reinstate this instructor?",
+      reinstateBody: "They can sign in again and continue working on their courses.",
+      reinstateConfirm: "Reinstate the account",
+      keep: "Cancel",
+      suspendSuccess: "The account was suspended.",
+      reinstateSuccess: "The account was reinstated.",
+      failed: "The account could not be changed.",
+    },
+  },
   adminReports: {
     title: "Reported Content",
     intro: "Review Student reports and record one clear outcome.",

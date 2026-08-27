@@ -31,6 +31,8 @@ export function ConfirmDialog({
   tone = "destructive",
   onConfirm,
   testID,
+  children,
+  confirmDisabled = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -43,6 +45,22 @@ export function ConfirmDialog({
   tone?: "destructive" | "default";
   onConfirm: () => void;
   testID?: string;
+  /**
+   * Something the confirmation itself needs to collect — a required reason, a typed acknowledgement.
+   *
+   * This exists because the alternative is worse. The staff workspace put its required suspension
+   * reason in the table row, which meant every row carried a text field and a red button whether or
+   * not anyone was suspending anybody: three rows of standing red, and a directory that could no
+   * longer be scanned down a column. The field belongs where the consequence is stated, which is
+   * here.
+   *
+   * A field in the dialog takes initial focus ahead of Cancel, and that is correct: the reason the
+   * destructive button is not first in the DOM is that a reflexive Enter must not destroy anything,
+   * and a text input is as safe a landing place as Cancel.
+   */
+  children?: React.ReactNode;
+  /** Set while `children` has not been filled in, so the dialog cannot confirm an invalid action. */
+  confirmDisabled?: boolean;
 }) {
   const titleID = React.useId();
   const bodyID = React.useId();
@@ -89,6 +107,7 @@ export function ConfirmDialog({
           >
             {body}
           </DialogPrimitive.Description>
+          {children ? <div className="mt-4">{children}</div> : null}
           <div className="mt-6 flex flex-wrap justify-end gap-2">
             {/* Cancel is first in the DOM so it takes initial focus. */}
             <DialogPrimitive.Close asChild>
@@ -100,7 +119,7 @@ export function ConfirmDialog({
               type="button"
               variant={tone === "destructive" ? "destructive" : "default"}
               size="sm"
-              disabled={busy}
+              disabled={busy || confirmDisabled}
               onClick={onConfirm}
               data-testid="confirm-accept"
             >

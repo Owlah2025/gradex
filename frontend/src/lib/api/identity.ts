@@ -177,6 +177,56 @@ export function createStaffInvitation(
   }>("/staff-invitations", "POST", locale, csrf, { email, role: "INSTRUCTOR" });
 }
 
+/**
+ * A staff invitation that has been issued and not yet answered.
+ *
+ * `GET /staff-invitations` returns `state = 'PENDING'` rows only, so this is a queue of open
+ * invitations rather than a history: an invitation that was accepted, revoked, superseded or left
+ * to expire leaves the list rather than appearing in it with a different state. The `state` field
+ * is on the contract and is carried here for completeness, but no Admin surface should present it
+ * as a column — every row would read the same.
+ */
+export type StaffInvitationSummary = {
+  id: string;
+  email: string;
+  invited_role: "INSTRUCTOR" | "ADMIN";
+  state: StaffInvitationState;
+  created_at: string;
+};
+
+export function listStaffInvitations(locale: "ar" | "en") {
+  return authenticatedRequest<{ invitations: StaffInvitationSummary[] }>(
+    "/staff-invitations",
+    "GET",
+    locale,
+  ) as Promise<{ invitations: StaffInvitationSummary[] }>;
+}
+
+/**
+ * Withdraws an issued invitation.
+ *
+ * The invitation moves to `REVOKED` and the link in the invitee's email stops working — this is the
+ * only way to take back an invitation that has already been sent. It is not the way to *replace*
+ * one: inviting the same address again supersedes the open invitation on the server and issues a
+ * fresh link, so a re-invite needs no revoke before it.
+ *
+ * The server requires a recently authenticated session and answers a stale one with a refusal, the
+ * same as every other privileged staff mutation. That refusal is the caller's to surface; it is not
+ * an error to swallow.
+ */
+export function revokeStaffInvitation(
+  invitationID: string,
+  locale: "ar" | "en",
+  csrf?: string,
+) {
+  return authenticatedRequest<null>(
+    `/staff-invitations/${encodeURIComponent(invitationID)}`,
+    "DELETE",
+    locale,
+    csrf,
+  ) as Promise<null>;
+}
+
 export type InstructorStaffAccount = {
   id: string;
   email: string;
