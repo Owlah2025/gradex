@@ -23,24 +23,24 @@ export function PricingHistoryTable({
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <h4 className="text-sm font-semibold text-foreground">
         {isAr ? "سجل الأسعار التاريخي" : "Price Audit History"}
       </h4>
 
       {isLoading ? (
-        <p className="text-xs text-slate-500 italic py-4">
+        <p className="text-xs text-muted-foreground italic py-4">
           {isAr ? "جاري تحميل سجل الأسعار..." : "Loading price history..."}
         </p>
       ) : error ? (
-        <p className="text-xs text-rose-600 font-medium py-2">{error}</p>
+        <p className="text-xs text-destructive font-medium py-2">{error}</p>
       ) : history.length === 0 ? (
-        <p className="text-xs text-slate-500 italic py-4">
+        <p className="text-xs text-muted-foreground italic py-4">
           {isAr ? "لا يوجد سجل تغييرات أسعار بعد." : "No price history recorded yet."}
         </p>
       ) : (
         <div className="overflow-x-auto border rounded-lg">
           <table className="w-full text-xs text-start">
-            <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b">
+            <thead className="bg-muted text-muted-foreground font-semibold border-b">
               <tr>
                 <th className="p-2 border-e">{isAr ? "النطاق" : "Scope"}</th>
                 <th className="p-2 border-e">{isAr ? "السعر السابق" : "Old Price"}</th>
@@ -59,14 +59,17 @@ export function PricingHistoryTable({
                         ? "المقرر"
                         : "Course"}
                   </td>
-                  <td className="p-2 border-e text-slate-400">
+                  <td className="p-2 border-e text-muted-foreground">
                     {formatFils(rec.old_value_minor_units, locale)}
                   </td>
-                  <td className="p-2 border-e font-semibold text-emerald-600 dark:text-emerald-400">
+                  {/* Weight, not colour. This is the new price beside the old one — emphasis, not
+                      a success — and green on a bare card is only proved in the light theme. The
+                      pricing summary reached the same conclusion for the same reason. */}
+                  <td className="p-2 border-e font-semibold text-foreground">
                     {formatFils(rec.new_value_minor_units, locale)}
                   </td>
                   <td className="p-2 border-e font-sans">{rec.reason}</td>
-                  <td className="p-2 text-slate-500 font-sans">
+                  <td className="p-2 text-muted-foreground font-sans">
                     {new Date(rec.changed_at).toLocaleString(isAr ? "ar-KW" : "en-KW")}
                   </td>
                 </tr>

@@ -59,10 +59,10 @@ export function PricingPanel({ courseID, sections, onLaunchPriceKnown }: Pricing
   useEffect(() => { void loadHistory(); }, [loadHistory]);
 
   return (
-    <section data-testid="review-pricing-panel" className="space-y-4 rounded-lg border border-blue-200 bg-white p-4 dark:border-blue-900 dark:bg-slate-900">
+    <section data-testid="review-pricing-panel" className="space-y-4 rounded-lg border border-gx-blue-200 bg-white p-4">
       <div>
-        <h3 className="font-semibold text-slate-900 dark:text-slate-100">{isAr ? "تسعير المراجعة المُرسلة" : "Submitted Course Pricing"}</h3>
-        <p className="mt-1 text-xs text-slate-500">{isAr ? "اختر المقرر أو قسماً بعنوانه المُرسل؛ تُحفظ الهوية داخلياً." : "Choose the Course or a submitted Section by title; identity is carried internally."}</p>
+        <h3 className="font-semibold text-foreground">{isAr ? "تسعير المراجعة المُرسلة" : "Submitted Course Pricing"}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">{isAr ? "اختر المقرر أو قسماً بعنوانه المُرسل؛ تُحفظ الهوية داخلياً." : "Choose the Course or a submitted Section by title; identity is carried internally."}</p>
       </div>
       <PricingForm courseID={courseID} locale={locale} sections={sections} onSuccess={loadHistory} />
       <PricingHistoryTable history={history} isLoading={loading} error={error} locale={locale} sections={sections} />

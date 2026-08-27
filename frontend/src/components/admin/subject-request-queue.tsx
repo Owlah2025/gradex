@@ -66,42 +66,42 @@ export function SubjectRequestQueue() {
   };
 
   return (
-    <section className="space-y-4 rounded-xl border border-amber-300 p-4" data-testid="subject-request-queue">
+    <section className="space-y-4 rounded-xl border border-gx-blue-200 p-4" data-testid="subject-request-queue">
       <div>
         <h2 className="text-lg font-semibold">{isAr ? "طلبات المواد" : "Subject Requests"}</h2>
-        <p className="text-xs text-slate-600 dark:text-slate-400">
+        <p className="text-xs text-muted-foreground">
           {isAr ? "راجع المواد التي لم يجدها المدرسون في الكتالوج الأكاديمي." : "Review Subjects Instructors could not find in the Academic Catalog."}
         </p>
       </div>
       {message && <p role="status" data-testid="subject-request-message" className="text-sm">{message}</p>}
       {requests.length === 0 ? (
-        <p className="text-sm text-slate-600 dark:text-slate-400" data-testid="subject-request-empty">
+        <p className="text-sm text-muted-foreground" data-testid="subject-request-empty">
           {isAr ? "لا توجد طلبات معلقة." : "No pending Subject requests."}
         </p>
       ) : requests.map((request) => (
-        <article key={request.id} className="space-y-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800" data-testid="subject-request-item">
+        <article key={request.id} className="space-y-3 rounded-lg border border-border p-4" data-testid="subject-request-item">
           <dl className="grid gap-2 text-sm md:grid-cols-2">
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "المدرس" : "Instructor"}</dt><dd>{request.requester_display_name}</dd></div>
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "الكورس" : "Course"}</dt><dd>{isAr ? request.course_title_ar : request.course_title_en}</dd></div>
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "الجامعة" : "University"}</dt><dd>{isAr ? request.institution_name_ar : request.institution_name_en}</dd></div>
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "الرمز المقترح" : "Proposed code"}</dt><dd>{request.proposed_official_code || "—"}</dd></div>
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "الاسم العربي" : "Arabic title"}</dt><dd dir="rtl">{request.proposed_title_ar}</dd></div>
-            <div><dt className="text-xs font-semibold text-slate-500">{isAr ? "الاسم الإنجليزي" : "English title"}</dt><dd dir="ltr">{request.proposed_title_en}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "المدرس" : "Instructor"}</dt><dd>{request.requester_display_name}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "الكورس" : "Course"}</dt><dd>{isAr ? request.course_title_ar : request.course_title_en}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "الجامعة" : "University"}</dt><dd>{isAr ? request.institution_name_ar : request.institution_name_en}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "الرمز المقترح" : "Proposed code"}</dt><dd>{request.proposed_official_code || "—"}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "الاسم العربي" : "Arabic title"}</dt><dd dir="rtl">{request.proposed_title_ar}</dd></div>
+            <div><dt className="text-xs font-semibold text-muted-foreground">{isAr ? "الاسم الإنجليزي" : "English title"}</dt><dd dir="ltr">{request.proposed_title_en}</dd></div>
           </dl>
           {(request.academic_context || request.note) && (
-            <p className="text-xs text-slate-600 dark:text-slate-400" data-testid="subject-request-context">
+            <p className="text-xs text-muted-foreground" data-testid="subject-request-context">
               {[request.academic_context, request.note].filter(Boolean).join(" — ")}
             </p>
           )}
 
-          <div className="space-y-2 rounded border border-slate-200 p-3 dark:border-slate-800">
+          <div className="space-y-2 rounded border border-border p-3">
             <label className="block text-xs font-semibold">
               {isAr ? "البحث عن مادة موجودة" : "Search existing Subjects"}
               <input
                 value={queries[request.id] ?? ""}
                 onChange={(event) => setQueries((current) => ({ ...current, [request.id]: event.target.value }))}
                 data-testid="subject-request-existing-search"
-                className="mt-1 w-full rounded border p-2 font-normal dark:bg-slate-900"
+                className="mt-1 w-full rounded border p-2 font-normal"
               />
             </label>
             <button
@@ -125,7 +125,7 @@ export function SubjectRequestQueue() {
                 value={selected[request.id] ?? ""}
                 onChange={(event) => setSelected((current) => ({ ...current, [request.id]: event.target.value }))}
                 data-testid="subject-request-existing-result"
-                className="w-full rounded border p-2 text-sm dark:bg-slate-900"
+                className="w-full rounded border p-2 text-sm"
               >
                 <option value="">{isAr ? "اختر المادة" : "Choose Subject"}</option>
                 {(results[request.id] ?? []).map((subject) => (
@@ -140,7 +140,7 @@ export function SubjectRequestQueue() {
                 await linkSubjectRequest({ requestID: request.id, subjectID: selected[request.id], locale, csrf });
               })}
               data-testid="subject-request-link"
-              className="rounded bg-blue-600 px-3 py-1 text-xs text-white disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-gx-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
             >
               {isAr ? "ربط بمادة موجودة" : "Link to Existing"}
             </button>
@@ -154,7 +154,7 @@ export function SubjectRequestQueue() {
                 await approveSubjectRequestAsNew({ requestID: request.id, locale, csrf });
               })}
               data-testid="subject-request-approve-new"
-              className="rounded bg-emerald-700 px-3 py-1 text-xs text-white disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
             >
               {isAr ? "اعتماد كمادة جديدة" : "Approve as New"}
             </button>
@@ -163,7 +163,7 @@ export function SubjectRequestQueue() {
               onChange={(event) => setReasons((current) => ({ ...current, [request.id]: event.target.value }))}
               placeholder={isAr ? "سبب الرفض (إجباري)" : "Rejection reason (required)"}
               data-testid="subject-request-reject-reason"
-              className="min-w-64 flex-1 rounded border p-2 text-sm dark:bg-slate-900"
+              className="min-w-64 flex-1 rounded border p-2 text-sm"
             />
             <button
               type="button"
@@ -172,7 +172,7 @@ export function SubjectRequestQueue() {
                 await rejectSubjectRequest({ requestID: request.id, reason: reasons[request.id], locale, csrf });
               })}
               data-testid="subject-request-reject"
-              className="rounded bg-rose-700 px-3 py-1 text-xs text-white disabled:opacity-50"
+              className="rounded bg-destructive px-3 py-1 text-xs text-white disabled:opacity-50"
             >
               {isAr ? "رفض" : "Reject"}
             </button>
