@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { ar } from "../src/lib/i18n/dictionaries/ar";
+import { en } from "../src/lib/i18n/dictionaries/en";
 
 /**
  * UX-D — the public Course Details experience, in a real browser.
@@ -199,8 +201,14 @@ for (const locale of ["en", "ar"] as const) {
     await expect(page.getByTestId("course-detail-description")).toContainText(copy.description);
     await expect(page.getByTestId("course-detail-eyebrow")).toContainText(copy.university);
 
-    // The one shared shell, not a bespoke catalogue header.
-    await expect(page.getByRole("navigation", { name: "Primary" })).toBeAttached();
+    // The one shared shell, not a bespoke catalogue header. Named from the
+    // dictionary because the label used to be a hardcoded English "Primary" —
+    // which this Arabic case was asserting, on an Arabic-default product.
+    await expect(
+      page.getByRole("navigation", {
+        name: (locale === "ar" ? ar : en).nav.primaryNavigation,
+      }),
+    ).toBeAttached();
     await expect(page.locator("footer")).toBeAttached();
   });
 
