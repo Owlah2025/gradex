@@ -272,6 +272,32 @@ export const en = {
         SEVERE_MODERATION: "Severe moderation",
       },
     },
+    /**
+     * The consequence of a lifecycle command, stated before it fires.
+     *
+     * Each body says what this specific command does to a Student who already holds access, because
+     * that is the part an Admin cannot undo by pressing the opposite button afterwards. Retiring and
+     * archiving are not interchangeable and must not read as though they were, and suspension is the
+     * only one of the three that touches people who are mid-course right now.
+     */
+    confirm: {
+      cancel: "Cancel",
+      retire: {
+        title: "Retire this course?",
+        body: "No one new can be given access to the course after it is retired. Students who already hold access keep it and can keep studying.",
+        action: "Retire course",
+      },
+      archive: {
+        title: "Archive this course?",
+        body: "Archiving is terminal. An archived course cannot be relisted, retired, or archived again, and nothing in the product reverses it.",
+        action: "Archive course",
+      },
+      suspend: {
+        title: "Suspend access to this course?",
+        body: "Every read of the course stops immediately, including for students who hold access and are studying it right now. It revokes no one's access and does not change the course state; restoring access undoes it.",
+        action: "Suspend access",
+      },
+    },
     completed: {
       delist: "Delist completed",
       relist: "Relist completed",

@@ -28,6 +28,7 @@ import {
 } from "@/components/layout/workspace-page";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -72,11 +73,16 @@ const SUSPENSION_CAUSES: SuspensionCause[] = [
  * mean — the amber/emerald/slate/rose palette they used to be told apart by said nothing to a
  * reader who cannot separate those hues, and nothing at all to a screen reader.
  *
- * What has deliberately *not* changed is that these commands fire immediately. Archival is terminal
- * and suspension denies every student read, so both want a confirmation step; adding one is a
- * behaviour change with its own tests to write, and it is recorded as outstanding rather than
- * smuggled into a presentation tranche.
+ * The three consequential commands no longer fire on the click that names them. Retiring closes the
+ * Course to anyone new, archiving is terminal, and suspension stops every read for Students who are
+ * mid-course right now — none of which the opposite button can undo afterwards. Each now states that
+ * specific consequence and waits for an answer. Delisting and relisting still fire immediately, and
+ * so does restoring access: they are reversible by the button beside them, and putting a dialog in
+ * front of every red-looking control is how readers learn to dismiss dialogs without reading them.
  */
+/** The three commands that state their consequence and wait for an answer before they fire. */
+type PendingCommand = "retire" | "archive" | "suspend";
+
 export function CourseLifecycleWorkspace() {
   const { locale, t } = useLocale();
   const copy = t.adminLifecycle;
@@ -92,6 +98,7 @@ export function CourseLifecycleWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
@@ -143,6 +150,36 @@ export function CourseLifecycleWorkspace() {
       return;
     }
     run();
+  };
+
+  /**
+   * Fire the command the Admin has now confirmed, exactly once.
+   *
+   * The dialog is dismissed before the request is issued rather than after it resolves. Dismissing
+   * first is what makes "exactly once" true — a dialog left open behind an in-flight request can be
+   * confirmed again — and it hands focus back to the button that opened it while the directory is
+   * still reloading, rather than stranding a keyboard reader on a dialog that is about to vanish.
+   *
+   * `selected` is read here rather than captured when the dialog opened, and the guard is real: a
+   * reload between opening and confirming can empty the directory.
+   */
+  const confirmPending = () => {
+    if (!pending || !selected) return;
+    const command = pending;
+    const courseID = selected.id;
+    setPending(null);
+
+    if (command === "retire") {
+      void invoke(copy.completed.retire, (csrf) => retireCourse({ courseID, locale, csrf }));
+      return;
+    }
+    if (command === "archive") {
+      void invoke(copy.completed.archive, (csrf) => archiveCourse({ courseID, locale, csrf }));
+      return;
+    }
+    void invoke(copy.completed.suspend, (csrf) =>
+      suspendCourseAccess({ courseID, locale, csrf, cause, reason: reason.trim() }),
+    );
   };
 
   return (
@@ -334,11 +371,7 @@ export function CourseLifecycleWorkspace() {
               size="sm"
               disabled={busy}
               data-testid="lifecycle-retire"
-              onClick={() =>
-                void invoke(copy.completed.retire, (csrf) =>
-                  retireCourse({ courseID: selected.id, locale, csrf }),
-                )
-              }
+              onClick={() => setPending("retire")}
             >
               {copy.withdrawal.retire}
             </Button>
@@ -348,11 +381,7 @@ export function CourseLifecycleWorkspace() {
               size="sm"
               disabled={busy}
               data-testid="lifecycle-archive"
-              onClick={() =>
-                void invoke(copy.completed.archive, (csrf) =>
-                  archiveCourse({ courseID: selected.id, locale, csrf }),
-                )
-              }
+              onClick={() => setPending("archive")}
             >
               {copy.withdrawal.archive}
             </Button>
@@ -393,19 +422,10 @@ export function CourseLifecycleWorkspace() {
                 size="sm"
                 disabled={busy}
                 data-testid="lifecycle-suspend"
-                onClick={() =>
-                  withReason(() =>
-                    void invoke(copy.completed.suspend, (csrf) =>
-                      suspendCourseAccess({
-                        courseID: selected.id,
-                        locale,
-                        csrf,
-                        cause,
-                        reason: reason.trim(),
-                      }),
-                    ),
-                  )
-                }
+                // The reason gate runs before the dialog, not after it: a missing reason is refused
+                // while the Admin is still filling the form, rather than after they have agreed to
+                // a consequence the product then declines to carry out.
+                onClick={() => withReason(() => setPending("suspend"))}
               >
                 {copy.suspension.suspend}
               </Button>
@@ -432,6 +452,22 @@ export function CourseLifecycleWorkspace() {
               </Button>
             </div>
           </CommandGroup>
+
+          {pending && (
+            <ConfirmDialog
+              open
+              onOpenChange={(next) => {
+                if (!next) setPending(null);
+              }}
+              title={copy.confirm[pending].title}
+              body={copy.confirm[pending].body}
+              confirmLabel={copy.confirm[pending].action}
+              cancelLabel={copy.confirm.cancel}
+              busy={busy}
+              onConfirm={confirmPending}
+              testID={`lifecycle-confirm-${pending}`}
+            />
+          )}
 
           {busy && <LoadingState visuallyHidden label={copy.working} />}
         </section>
