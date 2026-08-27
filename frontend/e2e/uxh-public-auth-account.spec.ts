@@ -14,6 +14,7 @@ import {
   studentFor,
 } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { en } from "../src/lib/i18n/dictionaries/en";
 
 /**
  * UX-H — the way into the product, and the account once you are in.
@@ -221,8 +222,19 @@ test.describe("UX-H the way in", () => {
       // Language and theme toggles are real; a notifications bell was not.
       expect(deadButtons.join(" ")).not.toMatch(/notification|إشعار/i);
 
-      await page.getByRole("link", { name: locale === "ar" ? /تسجيل الدخول/ : /Log in/i }).first().click();
-      await expect(page).toHaveURL(/\/login/);
+      // Scoped to the header's own visible control: the mobile sheet holds a
+      // second copy of these actions, and `.first()` could resolve to the one
+      // inside a closed sheet.
+      const signIn = page
+        .locator("header")
+        .getByRole("link", { name: locale === "ar" ? /تسجيل الدخول/ : /Log in/i })
+        .filter({ visible: true })
+        .first();
+      await expect(signIn).toHaveAttribute("href", "/login");
+      await signIn.click();
+      // A generous wait: this is the first navigation of a cold dev-server page
+      // and compilation, not the product, is what makes it slow.
+      await page.waitForURL(/\/login/, { timeout: 30_000 });
       await expect(page.locator("#email")).toBeVisible();
       await context.close();
     });
@@ -322,13 +334,29 @@ test.describe("UX-H sign-in", () => {
     await page.goto("/login");
     await page.locator("#email").fill("someone@example.test");
     await page.locator("#password").fill("a-long-enough-passphrase");
+
+    // Prove React is attached before dispatching anything. Submitting an
+    // unhydrated form reaches no handler and no network, which would let this
+    // test report "one attempt" for a page that made none. Toggling the reveal
+    // is a state change only React can make.
+    const password = page.locator("#password");
+    await page.getByRole("button", { name: /show password/i }).click();
+    await expect(password).toHaveAttribute("type", "text");
+    await page.getByRole("button", { name: /hide password/i }).click();
+    await expect(password).toHaveAttribute("type", "password");
+
     // Dispatched together, before any re-render could disable the control.
     await page.evaluate(() => {
       const form = document.querySelector("form");
       form?.requestSubmit();
       form?.requestSubmit();
     });
-    await expect(page.getByRole("alert").first()).toBeVisible();
+    // The form's own refusal banner, not `role="alert"` at large: the Next.js
+    // development overlay is also an alert, and matching it would let this pass
+    // while the form did nothing.
+    await expect(page.getByText(en.auth.login.failed)).toBeVisible({
+      timeout: 15_000,
+    });
     expect(attempts, "one sign-in became two authentication attempts").toBe(1);
     await context.close();
   });

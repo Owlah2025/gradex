@@ -7,6 +7,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
+import { en } from "../src/lib/i18n/dictionaries/en";
 import { actionLinkFor, messageCountFor, waitForMessageTo } from "./mailpit";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 
@@ -109,20 +110,26 @@ async function completeInvitationFromEmail(
 
   const page = await context.newPage();
   await page.goto(invitationLink);
-  await expect(page.getByRole("heading", { name: "Complete your staff invitation" })).toBeVisible();
-  // The role is presented as fixed by the invitation. The form offers no way to change it.
-  await expect(page.getByText("Instructor", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("The assigned role is fixed by the invitation and cannot be changed here."),
+    page.getByRole("heading", { name: en.auth.staffInvitation.title }),
   ).toBeVisible();
+  // The role is presented as fixed by the invitation. The form offers no way to change it.
+  await expect(
+    page.getByText(en.auth.staffInvitation.roleInstructor, { exact: true }),
+  ).toBeVisible();
+  // Read from the dictionary rather than transcribed: this copy moved out of a
+  // private object inside the component, and a transcription here would have to
+  // be re-transcribed every time it is reworded.
+  await expect(page.getByText(en.auth.staffInvitation.fixed)).toBeVisible();
 
   await page.locator("#staff-display-name").fill(displayName);
   await page.locator("#staff-password").fill(RECIPIENT_PASSWORD);
   await page.locator("#staff-password-confirm").fill(RECIPIENT_PASSWORD);
-  await page.getByRole("button", { name: "Create staff account" }).click();
-  await expect(
-    page.getByText("Your staff account is ready. Sign in with the invited email address."),
-  ).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: en.auth.staffInvitation.complete }).click();
+  await expect(page.getByText(en.auth.staffInvitation.doneTitle)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText(en.auth.staffInvitation.doneBody)).toBeVisible();
   await page.close();
 
   return invitationLink;
@@ -244,9 +251,18 @@ test.describe("T8B AD-13 staff invitation lifecycle", () => {
     });
     const replayPage = await replayContext.newPage();
     await replayPage.goto(invitationLink);
+    // The screen used to collapse four different refusals into one sentence.
+    // The preview route names this one exactly — the invitation was consumed —
+    // so the replay is now told that, and pointed at signing in instead.
     await expect(
-      replayPage.getByText("This invitation is invalid, expired, revoked, or already used."),
+      replayPage.getByText(en.auth.staffInvitation.consumedTitle),
     ).toBeVisible({ timeout: 15_000 });
+    await expect(
+      replayPage.getByText(en.auth.staffInvitation.consumedBody),
+    ).toBeVisible();
+    await expect(
+      replayPage.getByRole("link", { name: en.auth.staffInvitation.signIn }),
+    ).toBeVisible();
     // The completion form is not offered at all, so there is nothing to submit a second time.
     await expect(replayPage.locator("#staff-password")).toHaveCount(0);
 
