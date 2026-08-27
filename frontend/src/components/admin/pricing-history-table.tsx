@@ -2,6 +2,16 @@
 
 import { formatFils } from "@/lib/formatters/currency";
 import { type PriceChangeRecord, type SectionWire } from "@/lib/api/catalog";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/components/ui/table";
 import { pricingScopeLabel } from "./pricing-sections";
 
 export interface PricingHistoryTableProps {
@@ -12,6 +22,22 @@ export interface PricingHistoryTableProps {
   sections: SectionWire[];
 }
 
+/**
+ * The audit trail of every price an Admin has set on a Course.
+ *
+ * This was the last table in the product still hand-written. The shared table parts were built
+ * naming three tables to absorb — the review queue, the Instructor roster, and this one — and this
+ * one was missed. What it cost was not decoration. Its five `<th>` elements carried no `scope`, so
+ * nothing associated a figure with the column it belongs to: a reader moving through the row by
+ * ear heard five bare numbers and had to remember which was the old price and which was the new.
+ * The table also had no accessible name at all, which is what makes a table findable in the first
+ * place. Both come from the shared parts now, and the scroll container comes with them, so a wide
+ * history scrolls inside its own box instead of pushing the pricing panel sideways.
+ *
+ * The row is still deliberately monospaced. Prices are read down a column and compared against each
+ * other, and proportional digits make that comparison harder than it needs to be; the labels that
+ * are words rather than figures opt back into the body face.
+ */
 export function PricingHistoryTable({
   history,
   isLoading,
@@ -38,45 +64,54 @@ export function PricingHistoryTable({
           {isAr ? "لا يوجد سجل تغييرات أسعار بعد." : "No price history recorded yet."}
         </p>
       ) : (
-        <div className="overflow-x-auto border rounded-lg">
-          <table className="w-full text-xs text-start">
-            <thead className="bg-muted text-muted-foreground font-semibold border-b">
-              <tr>
-                <th className="p-2 border-e">{isAr ? "النطاق" : "Scope"}</th>
-                <th className="p-2 border-e">{isAr ? "السعر السابق" : "Old Price"}</th>
-                <th className="p-2 border-e">{isAr ? "السعر الجديد" : "New Price"}</th>
-                <th className="p-2 border-e">{isAr ? "السبب" : "Reason"}</th>
-                <th className="p-2">{isAr ? "التاريخ" : "Timestamp"}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+        <TableContainer>
+          <Table className="text-xs">
+            <TableCaption>
+              {isAr
+                ? "سجل تغييرات أسعار هذا المقرر، الأحدث أولاً."
+                : "Every recorded price change on this course, most recent first."}
+            </TableCaption>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell scope="col">{isAr ? "النطاق" : "Scope"}</TableHeaderCell>
+                <TableHeaderCell scope="col">
+                  {isAr ? "السعر السابق" : "Old Price"}
+                </TableHeaderCell>
+                <TableHeaderCell scope="col">
+                  {isAr ? "السعر الجديد" : "New Price"}
+                </TableHeaderCell>
+                <TableHeaderCell scope="col">{isAr ? "السبب" : "Reason"}</TableHeaderCell>
+                <TableHeaderCell scope="col">{isAr ? "التاريخ" : "Timestamp"}</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {history.map((rec) => (
-                <tr key={rec.id} className="font-mono text-[11px]">
-                  <td className="p-2 border-e font-sans">
+                <TableRow key={rec.id}>
+                  <TableHeaderCell scope="row" className="text-xs">
                     {rec.section_id
                       ? pricingScopeLabel(rec.section_id, sections, locale)
                       : isAr
                         ? "المقرر"
                         : "Course"}
-                  </td>
-                  <td className="p-2 border-e text-muted-foreground">
+                  </TableHeaderCell>
+                  <TableCell className="font-mono text-[11px] text-muted-foreground">
                     {formatFils(rec.old_value_minor_units, locale)}
-                  </td>
+                  </TableCell>
                   {/* Weight, not colour. This is the new price beside the old one — emphasis, not
                       a success — and green on a bare card is only proved in the light theme. The
                       pricing summary reached the same conclusion for the same reason. */}
-                  <td className="p-2 border-e font-semibold text-foreground">
+                  <TableCell className="font-mono text-[11px] font-semibold">
                     {formatFils(rec.new_value_minor_units, locale)}
-                  </td>
-                  <td className="p-2 border-e font-sans">{rec.reason}</td>
-                  <td className="p-2 text-muted-foreground font-sans">
+                  </TableCell>
+                  <TableCell>{rec.reason}</TableCell>
+                  <TableCell className="text-muted-foreground">
                     {new Date(rec.changed_at).toLocaleString(isAr ? "ar-KW" : "en-KW")}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </div>
   );
