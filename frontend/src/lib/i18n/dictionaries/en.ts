@@ -486,6 +486,9 @@ export const en = {
       retry: "Try again",
       emptyTitle: "No access requests yet",
       emptyBody: "An invitation appears here as soon as you issue one.",
+      bounded: "Showing the most recent {shown} of {total}. This is not the whole list.",
+      complete: "{total} in total.",
+      legendTitle: "What each state means",
       reason: "Reason",
       status: {
         PENDING_STUDENT_ACCEPTANCE: "Waiting for the student",

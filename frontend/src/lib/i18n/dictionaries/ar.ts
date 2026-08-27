@@ -492,6 +492,9 @@ export const ar: Dictionary = {
       retry: "أعد المحاولة",
       emptyTitle: "لا توجد طلبات وصول بعد",
       emptyBody: "تظهر الدعوة هنا بمجرد أن تُصدرها.",
+      bounded: "تُعرض أحدث {shown} من أصل {total}. هذه ليست القائمة كاملة.",
+      complete: "{total} في المجموع.",
+      legendTitle: "معنى كل حالة",
       reason: "السبب",
       status: {
         PENDING_STUDENT_ACCEPTANCE: "بانتظار الطالب",

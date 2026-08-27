@@ -80,6 +80,9 @@ import {
 
 type Load = "loading" | "ready" | "failed";
 
+/** One page of the server's invitation list. The screen says so rather than implying completeness. */
+const QUEUE_PAGE_LIMIT = 100;
+
 /** Which confirmation is open, and what it is about. */
 type Pending =
   | { kind: "approve" | "reject" | "resend" | "cancel"; invitation: CourseAccessInvitation }
@@ -101,6 +104,10 @@ export default function AdminCourseAccessPage() {
   const copy = t.adminAccess;
 
   const [invitations, setInvitations] = useState<CourseAccessInvitation[]>([]);
+  // What the server says exists, against what this page asked for. The queue is a bounded page, and
+  // a directory that shows a hundred rows while saying nothing reads as the whole list — which is
+  // the Tranche A lesson about a server-bounded directory not being an actionable queue.
+  const [queueTotal, setQueueTotal] = useState(0);
   const [queueLoad, setQueueLoad] = useState<Load>("loading");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -137,8 +144,9 @@ export default function AdminCourseAccessPage() {
   const fetchInvitations = useCallback(async () => {
     setQueueLoad("loading");
     try {
-      const res = await listAdminCourseAccessInvitations(1, 100, locale);
+      const res = await listAdminCourseAccessInvitations(1, QUEUE_PAGE_LIMIT, locale);
       setInvitations(res?.invitations ?? []);
+      setQueueTotal(res?.total ?? res?.invitations?.length ?? 0);
       setQueueLoad("ready");
     } catch {
       setQueueLoad("failed");
@@ -398,8 +406,11 @@ export default function AdminCourseAccessPage() {
   const active = entitlement?.state === "ACTIVE";
 
   return (
-    <WorkspacePage testID="course-access-workspace">
-      <WorkspacePageHeader title={copy.title} description={copy.intro} />
+    // The page's own landmark, and the target the skip link jumps to. `WorkspacePage` decides width,
+    // gutters and direction; it is deliberately not a landmark, because a screen composes one.
+    <main id="main">
+      <WorkspacePage testID="course-access-workspace">
+        <WorkspacePageHeader title={copy.title} description={copy.intro} />
 
       {notice ? (
         <div className="mt-6" data-testid="course-access-notice" data-tone={notice.tone}>
@@ -549,7 +560,29 @@ export default function AdminCourseAccessPage() {
           />
         ) : null}
         {queueLoad === "ready" && invitations.length > 0 ? (
-          <TableContainer>
+          <>
+            {/* How much of the list this is, and what each state means — said once, above a table
+                that would otherwise repeat the same sentence on every one of its rows. */}
+            <p className="mb-3 text-sm text-muted-foreground" data-testid="access-queue-bound">
+              {queueTotal > invitations.length
+                ? copy.queue.bounded
+                    .replace("{shown}", String(invitations.length))
+                    .replace("{total}", String(queueTotal))
+                : copy.queue.complete.replace("{total}", String(invitations.length))}
+            </p>
+            <dl className="mb-4 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              {(
+                Object.keys(copy.queue.status) as (keyof typeof copy.queue.status)[]
+              ).map((state) => (
+                <div key={state} className="flex flex-wrap gap-x-2">
+                  <dt className="font-semibold text-foreground">{copy.queue.status[state]}</dt>
+                  <dd className="min-w-0 flex-1 text-muted-foreground">
+                    {copy.queue.statusDetail[state]}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <TableContainer>
             <Table>
               <TableCaption>{copy.queue.caption}</TableCaption>
               <TableHead>
@@ -582,7 +615,6 @@ export default function AdminCourseAccessPage() {
                         <StatusBadge
                           tone={INVITATION_TONE[inv.state]}
                           label={copy.queue.status[inv.state]}
-                          detail={copy.queue.statusDetail[inv.state]}
                           labelTestID="access-invitation-state"
                         />
                         {inv.decision_reason ? (
@@ -668,7 +700,8 @@ export default function AdminCourseAccessPage() {
                 })}
               </TableBody>
             </Table>
-          </TableContainer>
+            </TableContainer>
+          </>
         ) : null}
       </WorkspaceSection>
 
@@ -954,7 +987,8 @@ export default function AdminCourseAccessPage() {
           onConfirm={() => void handleRevokeEntitlement()}
           testID="confirm-revoke-entitlement"
         />
-      ) : null}
-    </WorkspacePage>
+        ) : null}
+      </WorkspacePage>
+    </main>
   );
 }

@@ -323,15 +323,22 @@ test.describe("UX-G Admin staff operations", () => {
  * where a reviewer can open them. `GRADEX_UXG_EVIDENCE_DIR` puts them somewhere durable; without it
  * they land in the run's own output directory and are attached to the report either way.
  */
-const SHOTS = [["staff", "/staff", 390, 900], ["staff", "/staff", 1024, 900], ["staff", "/staff", 1440, 1000]] as const;
+const SHOTS = [
+  ["staff", "/staff"],
+  ["access", "/en/admin/course-access"],
+  ["catalogue", "/en/admin/academic-catalog"],
+  ["review-queue", "/en/admin/catalog"],
+] as const;
+const WIDTHS = [390, 1024, 1440] as const;
 
-for (const [name, route, width, height] of SHOTS) {
+for (const [name, route] of SHOTS) {
+  for (const width of WIDTHS) {
   for (const locale of ["en", "ar"] as const) {
     for (const theme of ["light", "dark"] as const) {
       test(`evidence: ${name} at ${width}px in ${locale} ${theme}`, async ({ browser }, testInfo) => {
         const context = await browser.newContext({
           locale: locale === "ar" ? "ar-KW" : "en-US",
-          viewport: { width, height },
+          viewport: { width, height: width === 390 ? 900 : 1000 },
           colorScheme: theme,
         });
         await signInAdmin(context, locale);
@@ -340,9 +347,11 @@ for (const [name, route, width, height] of SHOTS) {
           theme,
         );
         const page = await context.newPage();
-        await page.goto(route);
-        await expect(page.getByTestId("staff-workspace")).toBeVisible();
-        await page.waitForTimeout(1500);
+        // The staff route carries no locale segment; the others do, so the Arabic shot asks for the
+        // Arabic address rather than relying on the saved language alone.
+        await page.goto(locale === "ar" ? route.replace("/en/", "/ar/") : route);
+        await expect(page.locator("main")).toBeVisible();
+        await page.waitForTimeout(2000);
 
         const file = path.join(
           process.env.GRADEX_UXG_EVIDENCE_DIR || testInfo.outputDir,
@@ -357,6 +366,7 @@ for (const [name, route, width, height] of SHOTS) {
         await context.close();
       });
     }
+  }
   }
 }
 
@@ -415,3 +425,42 @@ test.describe("UX-G consequential staff actions", () => {
   });
 });
 
+test.describe("UX-G access operations", () => {
+  /**
+   * The queue is one server page. A directory that renders a hundred rows and says nothing reads as
+   * the whole list, which is how an Administrator comes to believe a queue is empty when it is not.
+   */
+  test("I the access queue says how much of the list it is showing", async ({ browser }) => {
+    const context = await browser.newContext({ locale: "en-US" });
+    const session = await signInAdmin(context, "en");
+    const page = await context.newPage();
+    await page.goto("/en/admin/course-access");
+
+    const bound = page.getByTestId("access-queue-bound");
+    await expect(bound).toBeVisible({ timeout: 20_000 });
+
+    const api = await apiFor(session);
+    const listed = await (await api.get("/api/v1/admin/course-access-invitations?page=1&limit=100")).json();
+    const total = listed.total as number;
+    const shown = (listed.invitations as unknown[]).length;
+    await api.dispose();
+
+    // Whichever the server reports, the sentence has to be the true one.
+    if (total > shown) {
+      await expect(bound).toContainText(`most recent ${shown} of ${total}`);
+      await expect(bound).toContainText("not the whole list");
+    } else {
+      await expect(bound).toContainText(`${shown} in total`);
+    }
+
+    // And the state meanings are said once rather than on every row.
+    const rows = await page.getByTestId("access-invitation-row").count();
+    if (rows > 1) {
+      const detail = "They can open the course.";
+      const occurrences = ((await page.locator("main").textContent()) ?? "").split(detail).length - 1;
+      expect(occurrences, "the state's meaning is repeated on every row").toBeLessThanOrEqual(1);
+    }
+
+    await context.close();
+  });
+});
