@@ -11,6 +11,7 @@ export default function PasswordChangePage() {
     <AuthShell
       title={t.auth.passwordChange.title}
       intro={t.auth.passwordChange.intro}
+      audience="session"
     >
       {/* The form reads the returnTo query parameter, so it needs a Suspense
           boundary to stay statically renderable — the same shape the sign-in

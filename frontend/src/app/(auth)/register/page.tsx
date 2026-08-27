@@ -8,7 +8,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 export default function RegisterPage() {
   const { t } = useLocale();
   return (
-    <AuthShell title={t.auth.register.title} intro={t.auth.register.intro}>
+    <AuthShell title={t.auth.register.title} intro={t.auth.register.intro} activeStep={0}>
       {/* RegistrationForm reads query parameters, so it needs a Suspense
           boundary to stay statically renderable. */}
       <React.Suspense fallback={null}>

@@ -786,14 +786,34 @@ export const en = {
   },
   auth: {
     shell: {
-      eyebrow: "Student access",
-      sideTitle: "Start with one clear next step.",
-      sideBody:
-        "Create your Student account, confirm your email, then return to sign in when access opens.",
       privacy:
         "Your password and verification link stay in this browser flow only.",
       language: "Language",
-      steps: ["Create account", "Confirm email", "Sign in"],
+      // One panel per audience. A staff invitee never registers or confirms an
+      // email, and someone already signed in is not at the start of the Student
+      // funnel — showing them all the same three steps, with the first one lit,
+      // told each of them they were somewhere they were not.
+      student: {
+        eyebrow: "Student access",
+        sideTitle: "Start with one clear next step.",
+        sideBody:
+          "Create your Student account, confirm your email, then sign in to start learning.",
+        steps: ["Create account", "Confirm email", "Sign in"],
+      },
+      staff: {
+        eyebrow: "Staff invitation",
+        sideTitle: "Your invitation decides your role.",
+        sideBody:
+          "The role on your invitation is already set. Choose a password, then sign in with the invited address.",
+        steps: ["Open your invitation", "Set your password", "Sign in"],
+      },
+      session: {
+        eyebrow: "Account security",
+        sideTitle: "One step, then straight back to work.",
+        sideBody:
+          "You are already signed in. Finish this and Gradex takes you where you were heading.",
+        steps: [],
+      },
     },
     register: {
       title: "Create your Student account",
@@ -837,7 +857,7 @@ export const en = {
       checking: "Checking the verification link…",
       successTitle: "Email confirmed",
       successBody:
-        "Your Student account is active. Sign in becomes available in the next launch step.",
+        "Your Student account is active. Sign in to start browsing and learning.",
       invalidTitle: "This link is unavailable",
       invalidBody:
         "The link may be expired, already used, or replaced. Request a fresh link to continue.",
@@ -879,6 +899,58 @@ export const en = {
         "Password reset is temporarily unavailable. Try again shortly.",
       failed: "The request could not be completed. Try again shortly.",
       backToSignIn: "Back to sign in",
+    },
+    /**
+     * The staff invitation acceptance screen.
+     *
+     * Its copy used to live in a private object inside the component, in both
+     * languages, outside every dictionary guarantee — parity, vocabulary, and
+     * the ability to see all of the product's prose in one place.
+     *
+     * The four negative states are named separately because the preview route
+     * names them separately. Collapsing them into "invalid, expired, revoked or
+     * already used" made the reader guess which of four different next actions
+     * was theirs. None of this leaks anything: whoever holds the link is the
+     * person the invitation was addressed to, and the state is about them.
+     */
+    staffInvitation: {
+      title: "Complete your staff invitation",
+      intro: "Check the role you have been given, then choose a password.",
+      checking: "Checking your invitation…",
+      role: "Your role",
+      roleInstructor: "Instructor",
+      roleAdmin: "Administrator",
+      fixed: "This role comes from your invitation and cannot be changed here.",
+      name: "Display name",
+      password: "Password",
+      confirm: "Confirm password",
+      complete: "Create staff account",
+      completing: "Creating your account…",
+      mismatch: "Both password fields must match.",
+      invalidName: "Enter a name using 2–50 Arabic or Latin characters.",
+      invalidPassword: "Use between 15 and 128 characters.",
+      failed: "Your account could not be created. Try again shortly.",
+      doneTitle: "Your staff account is ready",
+      doneBody: "Sign in with the email address your invitation was sent to.",
+      signIn: "Sign in",
+      consumedTitle: "This invitation has already been used",
+      consumedBody:
+        "An account was created from this link. If that was you, sign in instead.",
+      expiredTitle: "This invitation has expired",
+      expiredBody:
+        "Invitations are valid for a limited time. Ask the administrator who invited you to send a new one.",
+      revokedTitle: "This invitation was cancelled",
+      revokedBody:
+        "It is no longer usable. Contact the administrator who invited you if you still need access.",
+      supersededTitle: "A newer invitation replaced this one",
+      supersededBody:
+        "Open the most recent invitation email you received and use the link there.",
+      missingTitle: "This page needs an invitation link",
+      missingBody:
+        "Open the link from your invitation email rather than typing this address.",
+      unavailableTitle: "Your invitation could not be checked",
+      unavailableBody:
+        "This is a temporary problem, not a problem with your invitation. Reload the page to try again.",
     },
     staff: {
       createTitle: "Invite Instructor",
@@ -994,6 +1066,9 @@ export const en = {
     common: {
       required: "This field is required.",
       backHome: "Back to courses",
+      currentStep: "you are here",
+      showPassword: "Show password",
+      hidePassword: "Hide password",
     },
   },
   hero: {

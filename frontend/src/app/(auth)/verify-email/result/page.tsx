@@ -8,7 +8,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 export default function VerificationResultPage() {
   const { t } = useLocale();
   return (
-    <AuthShell title={t.auth.result.title} intro={t.auth.result.intro}>
+    <AuthShell title={t.auth.result.title} intro={t.auth.result.intro} activeStep={1}>
       {/* VerificationConsumer reads query parameters, so it needs a Suspense
           boundary to stay statically renderable. */}
       <React.Suspense fallback={null}>

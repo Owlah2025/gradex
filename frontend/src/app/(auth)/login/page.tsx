@@ -8,7 +8,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 export default function LoginPage() {
   const { t } = useLocale();
   return (
-    <AuthShell title={t.auth.login.title} intro={t.auth.login.intro}>
+    <AuthShell title={t.auth.login.title} intro={t.auth.login.intro} activeStep={2}>
       {/* LoginForm reads the reason and returnTo query parameters, so it needs
           a Suspense boundary to stay statically renderable. */}
       <React.Suspense fallback={null}>
