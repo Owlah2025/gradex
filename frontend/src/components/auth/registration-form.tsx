@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Alert } from "@/components/ui/alert";
 import {
   getRegistrationPolicySet,
@@ -18,6 +19,7 @@ import {
   validPassword,
 } from "@/lib/identity/validation";
 import { withReturnTo } from "@/lib/identity/return-to";
+import { formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type FieldErrors = Partial<Record<"display_name" | "email" | "password" | "policy", string>>;
@@ -42,6 +44,9 @@ export function RegistrationForm() {
   const [errors, setErrors] = React.useState<FieldErrors>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [requestError, setRequestError] = React.useState<string | null>(null);
+  // See the note on the sign-in form: `submitting` is state and does not close
+  // the window between two submits dispatched in the same render pass.
+  const inFlight = React.useRef(false);
   const refs: FieldRefs = {
     display_name: React.useRef<HTMLInputElement>(null),
     email: React.useRef<HTMLInputElement>(null),
@@ -77,8 +82,10 @@ export function RegistrationForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (inFlight.current) return;
     setRequestError(null);
     if (!validate() || !policySet) return;
+    inFlight.current = true;
     setSubmitting(true);
     try {
       await registerStudent({
@@ -118,9 +125,14 @@ export function RegistrationForm() {
         }
         setErrors(backendErrors);
         focusFirstError(backendErrors, refs);
+        // A generic banner on top of field messages that already name the
+        // problem is two answers to one question, and the vaguer one is
+        // louder. Only speak when nothing more precise was said.
+        if (Object.keys(backendErrors).length > 0) return;
       }
       setRequestError(t.auth.register.failed);
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }
@@ -164,10 +176,9 @@ export function RegistrationForm() {
         hint={t.auth.register.passwordHint}
         error={errors.password}
       >
-        <Input
+        <PasswordInput
           id="password"
           ref={refs.password}
-          type="password"
           autoComplete="new-password"
           value={fields.password}
           onChange={(event) => setFields({ ...fields, password: event.target.value })}
@@ -191,9 +202,9 @@ export function RegistrationForm() {
         ) : null}
         {policySet?.version ? (
           <p className="mb-3 text-xs text-muted-foreground" data-testid="registration-policy-version">
-            {locale === "ar" ? "مجموعة السياسات" : "Policy set"} {policySet.version}
+            {t.auth.register.policySetLabel} {policySet.version}
             {policySet.effective_date
-              ? ` · ${locale === "ar" ? "سارية من" : "effective"} ${policySet.effective_date}`
+              ? ` · ${t.auth.register.policyEffective} ${formatDate(policySet.effective_date, locale)}`
               : ""}
           </p>
         ) : null}
@@ -203,7 +214,7 @@ export function RegistrationForm() {
               <input
                 ref={index === 0 ? refs.policy : undefined}
                 type="checkbox"
-                className="mt-1 size-4 accent-gx-blue-deep"
+                className="mt-1 size-4 accent-gx-blue-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 checked={Boolean(accepted[policy.kind])}
                 aria-invalid={Boolean(errors.policy)}
                 onChange={(event) =>
@@ -212,9 +223,19 @@ export function RegistrationForm() {
               />
               <span>
                 {t.auth.register.acceptPrefix}{" "}
-                <a className="font-bold text-primary underline" href={policy.url}>
+                {/* A new tab, because this link sits mid-form. Following it in
+                    place discarded a name, an email, a passphrase and every
+                    box already ticked — to read the document the form is
+                    asking the reader to agree to. */}
+                <a
+                  className="font-bold text-primary underline"
+                  href={policy.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {policy.label}
                 </a>
+                <span className="sr-only"> ({t.auth.common.opensInNewTab})</span>
               </span>
             </label>
           ))}

@@ -806,6 +806,8 @@ export const ar: Dictionary = {
       passwordHint:
         "من 15 إلى 128 محرفاً. المسافات مسموحة ولا نفرض رموزاً محددة.",
       policiesLoading: "جارٍ تحميل الشروط الحالية…",
+      policySetLabel: "إصدار الشروط",
+      policyEffective: "سارية منذ",
       policiesUnavailable: "تعذّر تحميل الشروط الحالية.",
       acceptPrefix: "قرأت وأوافق على",
       create: "إنشاء الحساب",
@@ -1021,6 +1023,7 @@ export const ar: Dictionary = {
     common: {
       required: "هذا الحقل مطلوب.",
       backHome: "العودة إلى المقررات",
+      opensInNewTab: "يفتح في تبويب جديد",
       currentStep: "أنت هنا",
       showPassword: "إظهار كلمة المرور",
       hidePassword: "إخفاء كلمة المرور",

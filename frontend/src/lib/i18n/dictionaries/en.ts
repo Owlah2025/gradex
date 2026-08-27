@@ -826,6 +826,8 @@ export const en = {
       passwordHint:
         "15–128 characters. Spaces are welcome; there are no symbol rules.",
       policiesLoading: "Loading the current terms…",
+      policySetLabel: "Terms version",
+      policyEffective: "in effect since",
       policiesUnavailable: "The current terms could not be loaded.",
       acceptPrefix: "I have read and accept",
       create: "Create account",
@@ -1066,6 +1068,7 @@ export const en = {
     common: {
       required: "This field is required.",
       backHome: "Back to courses",
+      opensInNewTab: "opens in a new tab",
       currentStep: "you are here",
       showPassword: "Show password",
       hidePassword: "Hide password",
