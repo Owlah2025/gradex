@@ -110,9 +110,21 @@ function kuwaitBoundaryInstant(date: string): Date {
   return new Date(Date.UTC(year, month - 1, day, 21, 0, 0));
 }
 
-/** The calendar day that instant falls on in Asia/Kuwait — what the Admin screen renders. */
+/**
+ * The calendar day that instant falls on in Asia/Kuwait, formatted the way the product formats it.
+ *
+ * This used to hardcode `en-US` while calling itself "what the Admin screen renders", which was
+ * true only for as long as the screen called `toLocaleString()` with whatever locale the browser
+ * happened to carry. The product now has one date format, and Kuwait writes the day before the
+ * month, so the assertion mirrors `src/lib/i18n/format.ts` rather than asserting a rendering no
+ * screen produces.
+ */
 function displayedKuwaitDate(instant: Date): string {
-  return instant.toLocaleDateString("en-US", { timeZone: "Asia/Kuwait" });
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    numberingSystem: "latn",
+    timeZone: "Asia/Kuwait",
+  }).format(instant);
 }
 
 /**
@@ -148,7 +160,7 @@ async function openManageAccess(adminPage: Page, student: RotatingStudent): Prom
     row,
     `${student.email} is not reachable on the Admin Course Access queue`,
   ).toHaveCount(1);
-  await row.getByRole("button", { name: "Manage access" }).click();
+  await row.getByRole("button", { name: /Manage access/ }).click();
   const detail = adminPage.getByTestId("entitlement-detail");
   await expect(detail).toBeVisible();
   await expect(detail).toContainText("CS101");
@@ -174,7 +186,7 @@ async function submitExpiry(
   await adminPage.locator("#entitlement-expiry-reason").fill(reason);
   await adminPage.locator("#entitlement-expiry-reference").fill(reference);
   await adminPage.getByTestId("save-entitlement-expiry").click();
-  await expect(adminPage.getByTestId("entitlement-notice")).toContainText("Access expiry updated");
+  await expect(adminPage.getByTestId("entitlement-notice")).toContainText("The access end date was changed.");
   await expect(adminPage.getByTestId("entitlement-error")).toHaveCount(0);
 }
 
@@ -192,6 +204,11 @@ async function openStudentPage(browser: Browser, student: RotatingStudent): Prom
 
 async function openAdminPage(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ locale: "en-US", timezoneId: "Asia/Kuwait" });
+  // The workspace is bilingual now, so a spec that means English has to say so. `LocaleProvider`
+  // reads the saved language before the browser's, the same as every other Admin suite here.
+  await context.addInitScript(() => {
+    window.localStorage.setItem("gradex.locale", "en");
+  });
   await authenticateAdmin(context);
   return { context, page: await context.newPage() };
 }
@@ -228,7 +245,7 @@ test.describe("T8A / MVP-F24A — AD-09 Admin Entitlement lifecycle", () => {
       await expectActiveLearning(learner.page);
 
       await openManageAccess(admin.page, student);
-      await expect(admin.page.getByTestId("entitlement-state")).toContainText("ACTIVE");
+      await expect(admin.page.getByTestId("entitlement-state")).toContainText("Access is active");
       await expect(admin.page.getByTestId("entitlement-access-ends-at")).toContainText(
         displayedKuwaitDate(new Date(before.access_ends_at)),
       );
@@ -238,7 +255,7 @@ test.describe("T8A / MVP-F24A — AD-09 Admin Entitlement lifecycle", () => {
 
       // The server's boundary, on a record read back from the API rather than echoed by the form.
       await refetchManageAccess(admin.page, student);
-      await expect(admin.page.getByTestId("entitlement-state")).toContainText("ACTIVE");
+      await expect(admin.page.getByTestId("entitlement-state")).toContainText("Access is active");
       await expect(admin.page.getByTestId("entitlement-access-ends-at")).toContainText(
         displayedKuwaitDate(kuwaitBoundaryInstant(extendedTo)),
       );
@@ -288,7 +305,7 @@ test.describe("T8A / MVP-F24A — AD-09 Admin Entitlement lifecycle", () => {
       await submitExpiry(admin.page, shortenedTo, "T8A E2E entitlement shortening", "T8A-SHORTEN");
 
       await refetchManageAccess(admin.page, student);
-      await expect(admin.page.getByTestId("entitlement-state")).toContainText("ACTIVE");
+      await expect(admin.page.getByTestId("entitlement-state")).toContainText("Access is active");
       await expect(admin.page.getByTestId("entitlement-access-ends-at")).toContainText(
         displayedKuwaitDate(kuwaitBoundaryInstant(shortenedTo)),
       );
@@ -410,13 +427,21 @@ test.describe("T8A / MVP-F24A — AD-09 Admin Entitlement lifecycle", () => {
       await openManageAccess(admin.page, student);
       await admin.page.locator("#entitlement-revoke-reason").fill("T8A E2E entitlement revocation");
       await admin.page.locator("#entitlement-revoke-reference").fill("T8A-REVOKE");
-      await admin.page.getByTestId("confirm-revoke-entitlement").check();
       await admin.page.getByTestId("revoke-entitlement").click();
-      await expect(admin.page.getByTestId("entitlement-notice")).toContainText("Course access revoked");
-      await expect(admin.page.getByTestId("entitlement-error")).toHaveCount(0);
+      await admin.page
+        .getByTestId("confirm-revoke-entitlement")
+        .getByTestId("confirm-accept")
+        .click();
+      await expect(admin.page.getByTestId("entitlement-notice")).toContainText("Access was ended");
+      // A success notice and a failure notice are the same element with a different tone, so this
+      // asserts the tone rather than the absence of a separate error element.
+      await expect(admin.page.getByTestId("entitlement-notice")).toHaveAttribute(
+        "data-tone",
+        "success",
+      );
 
       await refetchManageAccess(admin.page, student);
-      await expect(admin.page.getByTestId("entitlement-state")).toContainText("REVOKED");
+      await expect(admin.page.getByTestId("entitlement-state")).toContainText("Access was ended");
       await expect(admin.page.getByTestId("entitlement-revoked-at")).toBeVisible();
       // A terminal record offers no further operation.
       await expect(admin.page.getByTestId("entitlement-expiry-form")).toHaveCount(0);

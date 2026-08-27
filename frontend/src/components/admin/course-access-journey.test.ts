@@ -150,20 +150,30 @@ test("one selected published Course carries into both access commands", () => {
   );
   // Both commands read the same state, so the two operations cannot address
   // different Courses.
-  assert.equal(page.match(/useState<string>\(""\);/g)?.length !== undefined, true);
-  assert.match(page, /if \(!selectedCourseId \|\| !expiryDate \|\| !expiryReason\) return;/);
+  assert.match(page, /if \(!selectedCourseId \|\| !expiryDate \|\| !expiryReason\.trim\(\)\) return;/);
   assert.match(page, /if \(!selectedCourseId \|\| !createEmail\) return;/);
   assert.match(page, /disabled=\{expirySubmitting \|\| !selectedCourseId\}/);
   assert.match(page, /disabled=\{createSubmitting \|\| !selectedCourseId\}/);
 });
 
-test("the journey confirms and lists Courses by title, not by identifier", () => {
+test("the journey names Courses and people, never identifiers", () => {
   const page = readSource(PAGE);
 
-  assert.match(page, /Default access expiry configured for \$\{selectedCourse\?\.title/);
-  assert.match(page, /Course access invitation created for .*\n?.*selectedCourse\?\.title/s);
+  // Each form states which Course it acts on, by title.
+  assert.match(page, /data-testid="expiry-course-context"/);
+  assert.match(page, /data-testid="invitation-course-context"/);
+  assert.match(page, /selectedCourse\.title/, "the chosen Course must be named by its title");
   assert.match(page, /courseLabel\(inv\.course_id\)/, "the queue must name the Course a row belongs to");
   assert.ok(!page.includes(">Course ID</th>"), "the queue must not head a column with a raw identifier");
+
+  // The success notices used to name the invitation by its UUID — in the rejection dialog, in the
+  // rejection notice, and in the resend notice. An invitation is named by the person it was sent
+  // to; its identifier belongs to the API call and to the row's test id.
+  assert.ok(
+    !/setNotice\([^)]*\$\{(rejectingInvId|invitation\.id|id)\}/.test(page),
+    "a notice must not name an invitation by its identifier",
+  );
+  assert.match(page, /<bdi[^>]*>\{inv\.email\}<\/bdi>/, "the queue must identify a row by its recipient");
 });
 
 test("a Course that leaves the published catalogue cannot stay silently selected", () => {
@@ -182,8 +192,9 @@ test("a Course that leaves the published catalogue cannot stay silently selected
 test("an existing grant is reached from its queue row, not by identifier", () => {
   const page = readSource(PAGE);
 
-  assert.match(page, /inv\.entitlement_id && \(/, "a granted invitation must offer its access record");
+  assert.match(page, /inv\.entitlement_id \? \(/, "a granted invitation must offer its access record");
   assert.match(page, /handleViewEntitlement\(inv\.entitlement_id as string\)/);
+  assert.match(page, /data-testid="access-invitation-row"/, "a queue row must be addressable");
   assert.match(page, /data-testid=\{`manage-access-\$\{inv\.id\}`\}/);
   // No operator form that asks for an identifier.
   for (const operatorInput of ["Entitlement ID", "Enrollment ID", "Student account ID", "Student ID (UUID)"]) {
@@ -194,11 +205,25 @@ test("an existing grant is reached from its queue row, not by identifier", () =>
 test("the access record is inspected in human terms before it is changed", () => {
   const page = readSource(PAGE);
 
-  assert.match(page, /courseLabel\(detailModal\.entitlement\.course_id\)/, "the record must name its Course");
-  assert.match(page, /data-testid="entitlement-state"/, "current status must be visible");
+  assert.match(page, /courseLabel\(entitlement\.course_id\)/, "the record must name its Course");
+  assert.match(page, /labelTestID="entitlement-state"/, "current status must be visible");
   assert.match(page, /data-testid="entitlement-access-ends-at"/, "current expiry must be visible");
-  assert.match(page, /Originally granted until/, "the original grant instant stays visible and read-only");
-  assert.match(page, /Adjustment History/, "adjustment history must stay on the record");
+  assert.match(page, /copy\.entitlement\.originally/, "the original grant instant stays visible and read-only");
+  assert.match(page, /copy\.entitlement\.historyTitle/, "adjustment history must stay on the record");
+
+  // The status is the state said in words, and the enum behind it is never the reading matter.
+  assert.match(
+    page,
+    /copy\.entitlement\.status\[entitlement\.state\]/,
+    "the entitlement state must be rendered through its label, not printed raw",
+  );
+  const enLabels = readSource("src/lib/i18n/dictionaries/en.ts");
+  for (const state of ["ACTIVE", "REVOKED", "EXPIRED"]) {
+    assert.ok(
+      !new RegExp(`${state}: "${state}"`).test(enLabels),
+      `the ${state} label is the enum wearing a label`,
+    );
+  }
   // `original_access_ends_at` is never editable by any actor in any slice.
   assert.ok(
     !/original_access_ends_at["']?\s*[:=]\s*(adjust|new|input)/i.test(page),
@@ -211,45 +236,86 @@ test("expiry adjustment and revocation are server calls carrying a reason and th
 
   assert.match(page, /adjustEntitlementExpiry\(/, "expiry changes must go to the server");
   assert.match(page, /revokeEntitlement\(/, "revocation must go to the server");
-  assert.match(
-    page,
-    /expectedRevision: detailModal\.entitlement\.revision/,
+  assert.equal(
+    (page.match(/expectedRevision: detail\.entitlement\.revision/g) ?? []).length,
+    2,
     "both mutations must send the revision the Admin was looking at",
   );
   // Neither operation may be simulated in component state.
   assert.ok(
-    !/setDetailModal\(\{[\s\S]{0,200}state: ["']REVOKED["']/.test(page),
+    !/setDetail\(\{[\s\S]{0,200}state: ["']REVOKED["']/.test(page),
     "revocation must not be faked client-side",
   );
-  assert.match(page, /if \(updated\) setDetailModal\(updated\)/, "the server response is the new record");
+  assert.equal(
+    (page.match(/if \(updated\) setDetail\(updated\)/g) ?? []).length,
+    2,
+    "the server response is the new record",
+  );
 
   assert.match(page, /!adjustReason\.trim\(\)/, "an expiry change requires a reason");
   assert.match(page, /!revokeReason\.trim\(\)/, "a revocation requires a reason");
 });
 
+/**
+ * Revocation used to be gated by a checkbox sitting directly above the button that performed it —
+ * confirmation and action in the same breath, in the same form. It is a `ConfirmDialog` now, which
+ * is a separate deliberate step, states the consequence, and restores focus to the control that
+ * opened it. The guarantee is unchanged and stronger; only its shape moved.
+ */
 test("revocation is confirmed explicitly and reports what it does not delete", () => {
   const page = readSource(PAGE);
 
-  assert.match(page, /data-testid="confirm-revoke-entitlement"/, "revoke needs an explicit confirmation");
+  assert.match(page, /testID="confirm-revoke-entitlement"/, "revoke needs an explicit confirmation");
   assert.match(
     page,
-    /disabled=\{detailBusy \|\| !revokeConfirming \|\| !revokeReason\.trim\(\)\}/,
-    "the revoke control stays disabled until confirmed with a reason",
+    /onClick=\{\(\) => setPending\(\{ kind: "revoke" \}\)\}/,
+    "the revoke control must open a confirmation rather than mutate",
   );
-  assert.match(page, /learning progress and access history are kept/i, "the Admin must be told what survives");
-  assert.match(page, /Enrollment and progress records are retained/, "the result must say the same");
+  assert.match(
+    page,
+    /disabled=\{detailBusy \|\| revokeReason\.trim\(\) === ""\}/,
+    "the revoke control stays disabled until a reason is given",
+  );
+  assert.match(
+    page,
+    /copy\.entitlement\.revokeConfirmBody/,
+    "the confirmation must state the consequence",
+  );
+
+  const enLabels = readSource("src/lib/i18n/dictionaries/en.ts");
+  assert.match(
+    enLabels,
+    /learning progress and access history are kept/i,
+    "the Admin must be told what survives",
+  );
+  assert.match(
+    enLabels,
+    /revoked:\s*"Access was ended\. Enrollment and progress are kept\."/,
+    "the result must say the same",
+  );
 });
 
 test("a revoked grant offers no further mutation", () => {
   const page = readSource(PAGE);
   assert.match(
     page,
-    /detailModal\.entitlement\.state === "ACTIVE" \? \(/,
-    "the mutation forms must render only for an active grant",
+    /const active = entitlement\?\.state === "ACTIVE";/,
+    "the mutation forms must be conditional on an active grant",
   );
+  assert.match(page, /\{active \? \(/, "the mutation forms must render only for an active grant");
   assert.match(page, /data-testid="entitlement-terminal"/, "a revoked grant must explain its terminal state");
-  assert.match(page, /data-testid="entitlement-error"/, "a refused mutation must be reported in place");
-  assert.match(page, /role="alert"/, "a refused mutation must be announced");
+  assert.match(
+    page,
+    /data-testid="entitlement-notice" data-tone=\{detailNotice\.tone\}/,
+    "a refused mutation must be reported in place, and distinguishable from a success",
+  );
+  // `Alert` announces an error with role="alert" and a success with role="status", so a failure
+  // reported here can never render as the success it is not.
+  assert.match(
+    readSource("src/components/ui/alert.tsx"),
+    /role=\{tone === "error" \? "alert" : "status"\}/,
+    "a refused mutation must be announced",
+  );
 });
 
 test("the selector states every outcome the Admin can encounter", () => {

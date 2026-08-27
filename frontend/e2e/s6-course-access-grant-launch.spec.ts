@@ -100,6 +100,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
   test("Complete 30-Step End-to-End Course Access Grant & Protected Learning Journey", async ({ browser }) => {
     // Context 1: Admin Context
     const adminContext = await browser.newContext({ locale: "en-US" });
+  // The workspace is bilingual now, so a spec that means English has to say so. `LocaleProvider`
+  // reads the saved language before the browser's, the same as every other Admin suite here.
+    await adminContext.addInitScript(() => {
+      window.localStorage.setItem("gradex.locale", "en");
+    });
     const origin = new URL(frontendOrigin());
 
     // 1. Admin signs in using production session cookie
@@ -120,7 +125,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     // 2. Admin navigates to Course Access Portal
     await adminPage.goto("/en/admin/course-access");
-    await expect(adminPage.locator("h1")).toContainText("Course Access Management");
+    await expect(adminPage.locator("h1")).toContainText("Course access");
 
     // 3. Admin selects the published Course by title, then configures its
     // future access-expiry date. No Course identifier is ever typed.
@@ -131,29 +136,35 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await courseSelect.selectOption(COURSE_ID);
     await expect(adminPage.getByTestId("course-access-selected-course")).toContainText("CS101");
 
-    const expiryDateInput = adminPage.locator('input[type="date"]').first();
-    const expiryReasonInput = adminPage.locator('input[placeholder="Standard cohort 30-day access grant"]').first();
+    const expiryDateInput = adminPage.locator("#access-expiry-date");
+    const expiryReasonInput = adminPage.locator("#access-expiry-reason");
 
     await expiryDateInput.fill("2026-12-31");
     await expiryReasonInput.fill("August 15 Launch Cohort");
 
-    await adminPage.click('button:has-text("Save Default Expiry")');
+    await adminPage.getByTestId("access-expiry-submit").click();
 
     // 4. Assert successful UI result
-    await expect(adminPage.locator('[role="status"]')).toContainText("Default access expiry configured");
+    await expect(adminPage.getByTestId("course-access-notice")).toContainText("The default access period was saved.");
 
     // 5. Admin creates an invitation for Student A (unentitled student) on the
     // same selected Course.
-    const createEmailInput = adminPage.locator('input[type="email"]').first();
+    const createEmailInput = adminPage.locator("#access-invite-email");
 
     await createEmailInput.fill(STUDENT_A_EMAIL);
-    await adminPage.click('button:has-text("Create Invitation")');
+    await adminPage.getByTestId("access-invite-submit").click();
 
     // 6. Assert invitation appears in queue as PENDING_STUDENT_ACCEPTANCE,
     // named by the Course the Admin selected.
-    await expect(adminPage.locator("table")).toContainText(STUDENT_A_EMAIL);
-    await expect(adminPage.locator("table")).toContainText("PENDING_STUDENT_ACCEPTANCE");
-    await expect(adminPage.locator("table")).toContainText("CS101");
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(STUDENT_A_EMAIL);
+    // The state in words, and the enum behind it nowhere on screen.
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(
+      "Waiting for the student",
+    );
+    await expect(adminPage.getByTestId("access-queue").locator("table")).not.toContainText(
+      "PENDING_STUDENT_ACCEPTANCE",
+    );
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText("CS101");
 
     // The invitation identity comes from the row's own test hook, not from text on screen.
     // The queue deliberately no longer prints the identifier to the Admin — an invitation is
@@ -284,8 +295,10 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await expect(studentPage.locator("body")).toContainText("unavailable");
 
     // 14. Admin sees decision-ready invitation
-    await adminPage.click('button:has-text("Refresh Queue")');
-    await expect(adminPage.locator("table")).toContainText("PENDING_ADMIN_APPROVAL");
+    await adminPage.click('button:has-text("Refresh")');
+    // The state an Admin reads is the state said in words. The enum stays in the payload.
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText("Waiting for you");
+    await expect(adminPage.getByTestId("access-queue").locator("table")).not.toContainText("PENDING_ADMIN_APPROVAL");
 
     // 15. Admin approves invitation
     // Addressed by the invitee, which is how the queue identifies an invitation to an Admin. The
@@ -294,10 +307,16 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
       `tr:has(td:has-text("${STUDENT_A_EMAIL}")) button:has-text("Approve")`,
     );
     await approveButton.click();
-    await expect(adminPage.locator('[role="status"]')).toContainText("Invitation approved!");
+    // Granting access is confirmed, and the confirmation says what the Student gets.
+    const approveDialog = adminPage.getByTestId("access-queue-confirm");
+    await expect(approveDialog).toBeVisible();
+    await expect(approveDialog).toContainText("can open the course straight away");
+    await approveDialog.getByTestId("confirm-accept").click();
+    await expect(adminPage.getByTestId("course-access-notice")).toContainText("Access was granted.");
 
-    // 16. Assert invitation state becomes APPROVED in queue
-    await expect(adminPage.locator("table")).toContainText("APPROVED");
+    // 16. Assert invitation state becomes granted in the queue
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText("Access granted");
+    await expect(adminPage.getByTestId("access-queue").locator("table")).not.toContainText("APPROVED");
 
     // 17. Database assertion: verify exactly 1 Entitlement & 1 Enrollment exist
     const stateSnapshot = queryLearningState(STUDENT_A_ID, COURSE_ID);
@@ -447,7 +466,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     const accessRecord = adminPage.getByTestId("entitlement-detail");
     await expect(accessRecord).toBeVisible();
     await expect(accessRecord).toContainText("CS101");
-    await expect(adminPage.getByTestId("entitlement-state")).toContainText("ACTIVE");
+    await expect(adminPage.getByTestId("entitlement-state")).toContainText("Access is active");
 
     // Protected learning is exercised through the same production progress
     // route the journey already used, so each access answer is comparable.
@@ -468,22 +487,29 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     await adminPage.locator("#entitlement-expiry-date").fill("2027-06-30");
     await adminPage.locator("#entitlement-expiry-reason").fill("Semester extended for the launch cohort");
     await adminPage.getByTestId("save-entitlement-expiry").click();
-    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("Access expiry updated");
+    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("The access end date was changed.");
     expect([200, 204]).toContain(await protectedProgressStatus(20));
 
     // 29. Shorten the grant to a still-open period: access continues.
     await adminPage.locator("#entitlement-expiry-date").fill("2026-12-31");
     await adminPage.locator("#entitlement-expiry-reason").fill("Cohort finishes earlier than planned");
     await adminPage.getByTestId("save-entitlement-expiry").click();
-    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("Access expiry updated");
+    await expect(adminPage.getByTestId("entitlement-notice")).toContainText("The access end date was changed.");
     expect([200, 204]).toContain(await protectedProgressStatus(25));
 
     // 30. Revoke the grant: protected learning is refused afterwards, and the
     // record stays as history rather than disappearing.
     await adminPage.locator("#entitlement-revoke-reason").fill("Access ended after out-of-band refund");
-    await adminPage.getByTestId("confirm-revoke-entitlement").check();
     await adminPage.getByTestId("revoke-entitlement").click();
-    await expect(adminPage.getByTestId("entitlement-state")).toContainText("REVOKED");
+    // Ending access is irreversible, so it is a separate deliberate step rather than a checkbox
+    // above the button that performs it.
+    const revokeDialog = adminPage.getByTestId("confirm-revoke-entitlement");
+    await expect(revokeDialog).toBeVisible();
+    await expect(revokeDialog).toContainText("lose access to the course immediately");
+    await expect(revokeDialog).toContainText("enrollment, learning progress and access history are kept");
+    await revokeDialog.getByTestId("confirm-accept").click();
+    await expect(adminPage.getByTestId("entitlement-state")).toContainText("Access was ended");
+    await expect(adminPage.getByTestId("entitlement-state")).not.toContainText("REVOKED");
     await expect(adminPage.getByTestId("entitlement-terminal")).toBeVisible();
     expect([401, 403, 404, 410]).toContain(await protectedProgressStatus(30));
 
@@ -494,6 +520,11 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
   test("Rejection & Expired Link UI Coverage", async ({ browser, request }) => {
     const adminContext = await browser.newContext({ locale: "en-US" });
+  // The workspace is bilingual now, so a spec that means English has to say so. `LocaleProvider`
+  // reads the saved language before the browser's, the same as every other Admin suite here.
+    await adminContext.addInitScript(() => {
+      window.localStorage.setItem("gradex.locale", "en");
+    });
     const origin = new URL(frontendOrigin());
 
     const adminSession = issueRotatingSession({ email: ADMIN_EMAIL, accountID: ADMIN_ID });
@@ -513,14 +544,14 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     // Admin creates invitation for Rejection test
     await adminPage.goto("/en/admin/course-access");
-    const emailInput = adminPage.locator('input[type="email"]').first();
+    const emailInput = adminPage.locator("#access-invite-email");
     const rejectTargetEmail = "student-reject@example.test";
 
     await adminPage.getByTestId("course-access-course-select").selectOption(COURSE_ID);
     await emailInput.fill(rejectTargetEmail);
-    await adminPage.click('button:has-text("Create Invitation")');
+    await adminPage.getByTestId("access-invite-submit").click();
 
-    await expect(adminPage.locator("table")).toContainText(rejectTargetEmail);
+    await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(rejectTargetEmail);
     const invId = await invitationIdFromRow(adminPage, rejectTargetEmail);
 
     // Invalid token returns 403, 404 or 410
