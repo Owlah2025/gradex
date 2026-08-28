@@ -193,7 +193,7 @@ export default function AdminCourseAccessPage() {
 
   const selectedCourse = findPublishedCourse(courseOptions, selectedCourseId);
   const courseLabel = (courseID: string): string =>
-    invitationCourseLabel(courseOptions, courseID);
+    invitationCourseLabel(courseOptions, courseID, copy.queue.unlistedCourse);
 
   const handleSetExpiry = async (event: React.FormEvent) => {
     event.preventDefault();

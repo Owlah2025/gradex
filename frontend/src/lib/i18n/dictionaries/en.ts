@@ -504,6 +504,8 @@ export const en = {
       caption: "Course access invitations and their current state",
       student: "Student",
       course: "Course",
+      /** A Course an invitation still points at after it left the catalogue. */
+      unlistedCourse: "No longer listed",
       state: "State",
       when: "Last change",
       actions: "Action",

@@ -21,6 +21,8 @@ import {
  */
 
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
+/** Stands in for the dictionary's words; the helper is told them rather than choosing them. */
+const UNLISTED = "No longer listed";
 const OTHER_COURSE_ID = "c0000000-0000-0000-0000-000000000002";
 
 const ENGLISH: PublicCourse[] = [
@@ -111,13 +113,25 @@ test("selection resolves to the Course identity the commands need", () => {
   assert.equal(findPublishedCourse(options, "not-a-selected-course"), undefined);
 });
 
-test("an invitation for a Course outside the published catalogue reports its stored identifier", () => {
+test("an invitation for a Course outside the published catalogue says so in words", () => {
   const options = buildPublishedCourseOptions(ENGLISH, ARABIC);
-  assert.equal(invitationCourseLabel(options, COURSE_ID), "CS101: Introduction to Programming");
-  // Invitations outlive catalogue visibility. The row must not invent a title
-  // or silently blank the Course it belongs to.
+  assert.equal(
+    invitationCourseLabel(options, COURSE_ID, UNLISTED),
+    "CS101: Introduction to Programming",
+  );
+
+  // Invitations outlive catalogue visibility, so the row must neither invent a title nor silently
+  // blank the Course it belongs to. This used to be answered with the stored identifier, and that
+  // is the assertion being deliberately changed: a raw UUID in the Course column is unreadable to
+  // the Administrator it was shown to, and it is the leak the rest of this workspace removed. The
+  // words are the third option the previous answer missed.
   const retired = "c0000000-0000-0000-0000-0000000000ff";
-  assert.equal(invitationCourseLabel(options, retired), retired);
+  assert.equal(invitationCourseLabel(options, retired, UNLISTED), UNLISTED);
+  assert.doesNotMatch(
+    invitationCourseLabel(options, retired, UNLISTED),
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    "the stored identifier reached the Administrator's copy",
+  );
 });
 
 test("no raw Course UUID input remains in the Course Access creation journey", () => {

@@ -58,13 +58,21 @@ export function findPublishedCourse(
 }
 
 /**
- * The Course label shown for an existing invitation. Invitations outlive
- * catalogue visibility, so an unresolvable Course reports its stored
- * identifier rather than a guessed or blank title.
+ * The Course label shown for an existing invitation.
+ *
+ * Invitations outlive catalogue visibility, so this has to answer for a Course that is no longer
+ * listed. It used to answer with the stored identifier, on the reasoning that the row must neither
+ * invent a title nor silently blank the Course it belongs to — which is right, but the identifier
+ * is not the third option. A raw UUID in the Course column is the leak the rest of this workspace
+ * removed, and it is unreadable to the Administrator it was shown to.
+ *
+ * The caller supplies the words instead. "No longer listed" says the true thing — the invitation is
+ * real and its Course is not in the catalogue — without guessing a title and without going blank.
  */
 export function invitationCourseLabel(
   options: PublishedCourseOption[],
   courseID: string,
+  unlistedLabel: string,
 ): string {
-  return findPublishedCourse(options, courseID)?.title ?? courseID;
+  return findPublishedCourse(options, courseID)?.title ?? unlistedLabel;
 }

@@ -502,6 +502,7 @@ export const ar: Dictionary = {
       caption: "دعوات الوصول إلى المقررات وحالتها الحالية",
       student: "الطالب",
       course: "المقرر",
+      unlistedCourse: "لم يعد مدرجاً",
       state: "الحالة",
       when: "آخر تغيير",
       actions: "الإجراء",
