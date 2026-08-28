@@ -36,6 +36,10 @@ ALLOWLIST=(
   "cmd/api/main.go"          # database, storage client construction
   "cmd/worker/main.go"       # database, storage client construction
   "cmd/migrate/main.go"      # database connection for schema migration
+  # DATABASE_URL crosses exactly once into pgxpool.New for the read-only
+  # load-test snapshot. Connection errors become a fixed diagnostic and the
+  # JSON artifact contains metrics only, so the DSN goes no further.
+  "cmd/loadtest-capture/main.go"
   # T035a failure-only diagnostic: the run-owned PostgreSQL DSN crosses
   # directly into db.Connect/pgx. Connection errors are discarded and the
   # sanitized artifact never receives configuration secrets. D-087.
@@ -99,6 +103,10 @@ PASSWORD_BOUNDARY_EXPOSURES=2
 REDIS_PASSWORD_BOUNDARY_FILE="internal/queue/connection.go"
 REDIS_PASSWORD_BOUNDARY_MARKER="gradex:redis-password-plaintext-boundary"
 REDIS_PASSWORD_BOUNDARY_EXPOSURES=2
+
+LOADTEST_CAPTURE_DATABASE_BOUNDARY_FILE="cmd/loadtest-capture/main.go"
+LOADTEST_CAPTURE_DATABASE_BOUNDARY_CALL='pgxpool.New(ctx, cfg.DatabaseURL().Expose())'
+LOADTEST_CAPTURE_DATABASE_BOUNDARY_EXPOSURES=1
 
 # Packages that exist to send data outward. Expose() here is a defect even if
 # someone adds the file to the allowlist, so this check runs independently.
@@ -243,6 +251,21 @@ else
       fail=1
     fi
   fi
+fi
+
+# The load-test capture may expose only DATABASE_URL, exactly once, as the
+# pgxpool constructor argument reviewed in the allowlist. Pinning the total
+# Expose() count prevents the file-level allowlist from becoming permission to
+# log, serialize, or otherwise read another secret later.
+loadtest_capture_exposures=$(cd "$BACKEND" && grep -c '\.Expose()' "$LOADTEST_CAPTURE_DATABASE_BOUNDARY_FILE" || true)
+if [ "$loadtest_capture_exposures" -ne "$LOADTEST_CAPTURE_DATABASE_BOUNDARY_EXPOSURES" ]; then
+  note "expose-guard: $LOADTEST_CAPTURE_DATABASE_BOUNDARY_FILE has $loadtest_capture_exposures Expose() calls, expected $LOADTEST_CAPTURE_DATABASE_BOUNDARY_EXPOSURES"
+  fail=1
+fi
+if ! grep --fixed-strings --quiet -- "$LOADTEST_CAPTURE_DATABASE_BOUNDARY_CALL" \
+  "$BACKEND/$LOADTEST_CAPTURE_DATABASE_BOUNDARY_FILE"; then
+  note "expose-guard: load-test DATABASE_URL exposure moved outside the reviewed pgxpool.New boundary"
+  fail=1
 fi
 
 # A password Expose() anywhere outside the two reviewed boundary files,
