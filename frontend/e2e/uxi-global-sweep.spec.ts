@@ -154,13 +154,23 @@ test.describe("UX-I global sweep", () => {
         colorScheme: "dark",
       });
       await signInAdmin(context, locale);
+      /**
+       * The theme is a class, not a media query — but the class is not ours to set.
+       *
+       * `next-themes` owns it and rewrites it at hydration from its stored preference, and this
+       * application configures `defaultTheme="light"`, so an unset preference resolves to light no
+       * matter what the OS asks for. Adding the class in an init script was therefore overwritten
+       * before first paint, and every assertion below ran against a *light* page while reporting
+       * dark-theme coverage. The stored preference is the only input that survives hydration.
+       */
+      await context.addInitScript(() => window.localStorage.setItem("theme", "dark"));
       const page = await context.newPage();
-      // The theme is a class, not a media query, so asking the OS for dark is not enough.
-      await page.addInitScript(() => document.documentElement.classList.add("dark"));
 
       for (const [name, path] of ROUTES) {
         await page.goto(localised(path, locale));
         await expect(page.locator("main")).toBeVisible();
+        // Proof the theme was selected, so this can never quietly become a light-mode test again.
+        await expect(page.locator("html"), `${name} did not enter the dark theme`).toHaveClass(/dark/);
         const results = await new AxeBuilder({ page })
           .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
           .analyze();

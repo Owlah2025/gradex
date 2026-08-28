@@ -78,8 +78,25 @@
     --accent: 213 25% 22%;
     --accent-foreground: 210 40% 98%;
 
-    --destructive: 8 74% 57%;
-    --destructive-foreground: 0 0% 100%;
+    /**
+     * Lifted further than the page needs, because the card is the harder ground.
+     *
+     * This red has to clear 4.5:1 as text on two different surfaces — the page (`--background`) and
+     * the raised card (`--card`) an error message actually sits on — and simultaneously carry
+     * readable text of its own when it fills a destructive button. At 57% it cleared the page at
+     * 4.98:1 but only reached 4.16:1 on the card, so a failure notice rendered below AA. At 62% the
+     * three pairings are 5.79:1 on the page, 4.84:1 on the card, and 5.43:1 for the foreground
+     * below.
+     */
+    --destructive: 8 74% 62%;
+    /**
+     * Ink, not white, and only in the dark theme.
+     *
+     * White on this lifted red is 3.29:1 — below the 4.5:1 a filled destructive button needs — and
+     * darkening the red far enough for white text would drop `text-destructive` back below AA on
+     * the surfaces above. The two roles genuinely conflict, so the foreground is what changes.
+     */
+    --destructive-foreground: 211 53% 11%;
 
     --border: 213 25% 24%;
     --input: 213 25% 24%;

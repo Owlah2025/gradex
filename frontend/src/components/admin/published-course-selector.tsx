@@ -31,7 +31,7 @@ export function PublishedCourseSelector({
   const selected = findPublishedCourse(options, selectedCourseID);
 
   return (
-    <section className="bg-white p-6 rounded-lg border shadow-sm" data-testid="course-access-course-picker">
+    <section className="bg-card p-6 rounded-lg border shadow-sm" data-testid="course-access-course-picker">
       <h2 className="text-xl font-semibold mb-1 text-foreground">Selected Course</h2>
       <p className="text-sm text-muted-foreground mb-4">
         Choose the published Course this expiry configuration and invitation apply to.
@@ -45,7 +45,7 @@ export function PublishedCourseSelector({
 
       {!loading && error && (
         <div className="space-y-3" data-testid="course-access-courses-error">
-          <p className="text-sm text-destructive bg-destructive border border-destructive/25 rounded-md p-3" role="alert">
+          <p className="text-sm text-destructive bg-destructive/5 border border-destructive/25 rounded-md p-3" role="alert">
             <strong>Could not load published Courses:</strong> {error}
           </p>
           <button
