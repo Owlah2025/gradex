@@ -30,6 +30,10 @@ async function installAdminSession(
 ) {
   const session = issueRotatingSession(ADMIN);
   const origin = new URL(frontendOrigin());
+  // The access workspace is bilingual now, so a spec that means English has to say so.
+  await context.addInitScript(() => {
+    window.localStorage.setItem("gradex.locale", "en");
+  });
   await context.addCookies([
     {
       name: session.cookie_name,
@@ -48,18 +52,18 @@ async function configurePurchaseableCourse(
 ) {
   await page.goto("/en/admin/course-access");
   await expect(
-    page.getByRole("heading", { name: "Course Access Management" }),
+    page.getByRole("heading", { name: "Course access", exact: true }),
   ).toBeVisible();
   const course = page.getByTestId("course-access-course-select");
   await course.selectOption(COURSE_ID);
-  await page.locator('input[type="date"]').first().fill("2026-12-31");
+  await page.locator("#access-expiry-date").fill("2026-12-31");
   await page
-    .locator('input[placeholder="Standard cohort 30-day access grant"]')
+    .locator("#access-expiry-reason")
     .first()
     .fill("Manual purchase E2E access term");
-  await page.getByRole("button", { name: "Save Default Expiry" }).click();
-  await expect(page.locator('[role="status"]')).toContainText(
-    "Default access expiry configured",
+  await page.getByTestId("access-expiry-submit").click();
+  await expect(page.getByTestId("course-access-notice")).toContainText(
+    "The default access period was saved.",
   );
 }
 
@@ -126,9 +130,13 @@ async function confirmPurchaseInAdminUI(
         new URL(response.url()).pathname,
       ) && response.request().method() === "POST",
   );
-  await row
-    .getByRole("button", { name: "Confirm payment & send invitation" })
-    .click();
+  await row.getByRole("button", { name: /Confirm payment & send invitation/ }).click();
+  // Gradex takes no money, so recording a payment as received is a deliberate confirmed step and
+  // the confirmation says exactly that.
+  const paymentDialog = page.getByTestId("purchase-request-confirm");
+  await expect(paymentDialog).toBeVisible();
+  await expect(paymentDialog).toContainText("Gradex does not take or verify money");
+  await paymentDialog.getByTestId("confirm-accept").click();
   const confirmationResponse = await confirmation;
   expect(confirmationResponse.status()).toBe(200);
   const confirmationBody = (await confirmationResponse.json()) as {
@@ -136,7 +144,7 @@ async function confirmPurchaseInAdminUI(
     purchase_request: { reference: string; state: string };
   };
   expect(confirmationBody.purchase_request.state).toBe("INVITATION_CREATED");
-  await expect(page.getByText("Payment confirmed and invitation queued")).toBeVisible();
+  await expect(page.getByText("The payment was recorded and the invitation sent.")).toBeVisible();
   return confirmationBody;
 }
 
@@ -201,7 +209,11 @@ test.describe("Automated manual Course purchase flow", () => {
       await expect(policies).toHaveCount(2);
       await policies.nth(0).check();
       await policies.nth(1).check();
-      await studentPage.locator("form button").click();
+      // Not `form button`: the password field now carries a reveal control, so
+      // the form holds more than one. And not the button's name either — these
+      // auth routes carry no locale segment and render in the reader's stored
+      // language, so an English name matches nothing on an Arabic page.
+      await studentPage.locator('form button[type="submit"]').click();
       await studentPage.waitForURL((url) => url.pathname === "/verify-email");
 
       const verification = queryEmailVerificationAction(NEW_STUDENT_EMAIL);
@@ -221,7 +233,8 @@ test.describe("Automated manual Course purchase flow", () => {
       await studentPage.locator('a[href^="/login"]').click();
       await studentPage.locator("#email").fill(NEW_STUDENT_EMAIL);
       await studentPage.locator("#password").fill(NEW_STUDENT_PASSWORD);
-      await studentPage.locator("form button").click();
+      // Same reason as the registration submit above.
+      await studentPage.locator('form button[type="submit"]').click();
       await studentPage.waitForURL(
         (url) =>
           /\/(en|ar)\/access$/.test(url.pathname) &&
@@ -253,9 +266,7 @@ test.describe("Automated manual Course purchase flow", () => {
       );
       await expect(finished).toContainText("Access granted");
       await expect(
-        finished.getByRole("button", {
-          name: "Confirm payment & send invitation",
-        }),
+        finished.getByRole("button", { name: /Confirm payment & send invitation/ }),
       ).toHaveCount(0);
 
       // Course Home is server-authorized; the protected Lesson is now reachable too.
@@ -351,7 +362,11 @@ test.describe("Automated manual Course purchase flow", () => {
             new URL(response.url()).pathname,
           ) && response.request().method() === "POST",
       );
-      await original.getByRole("button", { name: "Cancel request" }).click();
+      await original.getByRole("button", { name: /Cancel request/ }).click();
+      await adminPage
+        .getByTestId("purchase-request-confirm")
+        .getByTestId("confirm-accept")
+        .click();
       expect((await cancellation).status()).toBe(200);
       await expect(original).toContainText("Cancelled");
 

@@ -74,6 +74,24 @@ async function protectedMutationStatuses(page: Page, csrf: string) {
   );
 }
 
+/**
+ * Reads one invitation's identifier from the row's existing test hook.
+ *
+ * The Admin surface identifies an invitation by its invitee, and no longer renders the identifier
+ * as readable text. The id is still needed here to look the delivery token up in the outbox, so it
+ * is taken from the attribute the row already carries rather than from anything a human reads.
+ */
+async function invitationIdFromRow(page: Page, email: string): Promise<string> {
+  const hook = page
+    .locator(`tr:has(td:has-text("${email}")) [data-testid^="invitation-course-"]`)
+    .first();
+  await expect(hook).toBeVisible();
+  const testid = await hook.getAttribute("data-testid");
+  const id = (testid ?? "").replace("invitation-course-", "");
+  expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  return id;
+}
+
 test.describe("S11 release acceptance", () => {
   test("registration to protected learning is denial-safe and replay-safe", async ({ browser }) => {
     test.setTimeout(120_000);
@@ -83,6 +101,8 @@ test.describe("S11 release acceptance", () => {
 
     try {
       await studentContext.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
+      // The access workspace is bilingual now, so the Admin context needs the same.
+      await adminContext.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
       let studentPage = await studentContext.newPage();
 
       // Student registration through the shipped form and policy contract.
@@ -160,7 +180,7 @@ test.describe("S11 release acceptance", () => {
       const adminSession = await installIssuedSession(adminContext, ADMIN);
       const adminPage = await adminContext.newPage();
       await adminPage.goto("/en/admin/course-access");
-      await expect(adminPage.locator("h1")).toContainText("Course Access Management");
+      await expect(adminPage.locator("h1")).toContainText("Course access");
 
       // The launch Course is chosen by title; no Course identifier is typed.
       const courseSelect = adminPage.getByTestId("course-access-course-select");
@@ -168,24 +188,21 @@ test.describe("S11 release acceptance", () => {
       await expect(adminPage.locator("body")).not.toContainText("Course ID (UUID)");
       await courseSelect.selectOption(COURSE_ID);
       await expect(adminPage.getByTestId("course-access-selected-course")).toBeVisible();
-      await adminPage.locator('input[type="date"]').first().fill("2026-12-31");
+      await adminPage.locator("#access-expiry-date").fill("2026-12-31");
       await adminPage
-        .locator('input[placeholder="Standard cohort 30-day access grant"]')
+        .locator("#access-expiry-reason")
         .first()
         .fill("August 15 S11 release acceptance");
-      await adminPage.getByRole("button", { name: "Save Default Expiry" }).click();
-      await expect(adminPage.locator('[role="status"]')).toContainText("Default access expiry configured");
+      await adminPage.getByTestId("access-expiry-submit").click();
+      await expect(adminPage.getByTestId("course-access-notice")).toContainText("The default access period was saved.");
 
-      await adminPage.locator('input[type="email"]').first().fill(STUDENT_EMAIL);
-      await adminPage.getByRole("button", { name: "Create Invitation" }).click();
-      await expect(adminPage.locator("table")).toContainText(STUDENT_EMAIL);
+      await adminPage.locator("#access-invite-email").fill(STUDENT_EMAIL);
+      await adminPage.getByTestId("access-invite-submit").click();
+      await expect(adminPage.getByTestId("access-queue").locator("table")).toContainText(STUDENT_EMAIL);
 
-      const invitationCell = await adminPage.locator(`td:has-text("${STUDENT_EMAIL}")`).first().innerText();
-      const invitationMatch = invitationCell.match(
-        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
-      );
-      expect(invitationMatch).not.toBeNull();
-      const invitationID = invitationMatch![1];
+      // Taken from the row's own test hook: the Admin queue identifies an invitation by its
+      // invitee and no longer prints the identifier as readable text.
+      const invitationID = await invitationIdFromRow(adminPage, STUDENT_EMAIL);
       const invitationToken = queryInvitationToken(invitationID);
 
       // Invalid acceptance is refused, then the valid link recovers without a premature grant.
@@ -228,9 +245,10 @@ test.describe("S11 release acceptance", () => {
       await expectZeroGrantState(verification.account_id);
 
       // Admin Approval is the sole grant trigger.
-      await adminPage.getByRole("button", { name: "Refresh Queue" }).click();
+      await adminPage.getByRole("button", { name: "Refresh" }).click();
       const approveButton = adminPage.locator(
-        `tr:has-text("${invitationID}") button:has-text("Approve")`,
+        // Addressed by the invitee, which is how the queue identifies an invitation to an Admin.
+        `tr:has(td:has-text("${STUDENT_EMAIL}")) button:has-text("Approve")`,
       );
       const approvalResponsePromise = adminPage.waitForResponse(
         (response) =>
@@ -238,6 +256,8 @@ test.describe("S11 release acceptance", () => {
           response.request().method() === "POST",
       );
       await approveButton.click();
+      // Granting access is a confirmed decision, not a single click.
+      await adminPage.getByTestId("access-queue-confirm").getByTestId("confirm-accept").click();
       const approvalResponse = await approvalResponsePromise;
       expect(approvalResponse.status()).toBe(200);
       const approvalBody = (await approvalResponse.json()) as {

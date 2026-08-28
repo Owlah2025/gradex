@@ -282,14 +282,35 @@ test("a Subject label leads with the university's own official code", () => {
   assert.equal(subjectLabel(codeless, "en"), "Seminar");
 });
 
+/**
+ * The vocabulary is asserted where it now lives.
+ *
+ * These labels used to be 53 `isAr ?` ternaries inside the component, which is exactly the shape
+ * that let a third Arabic word for Course grow unnoticed elsewhere in this tranche. They are in the
+ * dictionaries, so this reads the dictionaries — and additionally holds the component to having no
+ * inline UI copy left to drift.
+ */
 test("the Admin surface renders localized academic vocabulary in both languages", () => {
-  const source = readSource(COMPONENT);
+  const arabicDictionary = readSource("src/lib/i18n/dictionaries/ar.ts");
+  const englishDictionary = readSource("src/lib/i18n/dictionaries/en.ts");
   for (const arabic of ["الجامعة", "الكلية", "القسم", "التخصص", "الخطة الدراسية", "المادة"]) {
-    assert.ok(source.includes(arabic), `the Arabic label ${arabic} is missing from the Admin surface`);
+    assert.ok(arabicDictionary.includes(arabic), `the Arabic label ${arabic} is missing`);
   }
   for (const english of ["University", "College", "Department", "Major", "Study plan", "Subject"]) {
-    assert.ok(source.includes(english), `the English label ${english} is missing from the Admin surface`);
+    assert.ok(englishDictionary.includes(english), `the English label ${english} is missing`);
   }
+
+  const source = readSource(COMPONENT);
+  assert.ok(
+    source.includes("dictionary.adminCatalog"),
+    "the Admin surface must read its copy from the dictionary",
+  );
+  const inlineCopy = source.match(/isAr \? "/g) ?? [];
+  assert.deepEqual(
+    inlineCopy,
+    [],
+    "the Admin surface still carries inline bilingual copy, which is how vocabulary drifts",
+  );
 });
 
 test("the Admin surface never exposes identifiers or legacy taxonomy vocabulary as workflow", () => {

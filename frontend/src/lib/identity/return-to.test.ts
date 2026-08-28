@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { SessionRole } from "./return-to";
 import {
+  neutralRoot,
   passwordChangePath,
   postAuthenticationDestination,
   postLoginDestination,
@@ -203,4 +205,85 @@ test("a completed change still honours the destination the visitor was interrupt
     postPasswordChangeDestination("ADMIN", "https://evil.example", "en"),
     "/en/admin/catalog",
   );
+});
+
+/**
+ * Regression: an unrecognised runtime role is answered with "no workspace", not with a workspace.
+ *
+ * `roleRoot` was an exhaustive switch over `SessionRole` with no `default`. The compiler accepted
+ * it because the union is closed, but the role reaching it is read off `GET /session` and cast
+ * without validation, so an unrecognised role fell through and the function returned `undefined`
+ * from a signature declaring `string`. The shared header put that on its workspace `<Link>`, which
+ * React rendered as an anchor carrying no `href` — a dead control, and the "prop `href` … got
+ * `undefined`" development-overlay warning on every route in both locales.
+ *
+ * The first correction mapped an unknown role to the Student dashboard. That is also wrong, and
+ * these assertions exist to keep it from coming back: being unclassifiable is not evidence of being
+ * a Student, and `/learn` is a Student surface. An unknown principal is offered no role workspace
+ * at all.
+ */
+const UNKNOWN_ROLE = "SUPPORT" as unknown as SessionRole;
+const ROLE_WORKSPACE_PREFIXES = ["/admin", "/instructor", "/learn"];
+
+function namesARoleWorkspace(path: string): boolean {
+  return ROLE_WORKSPACE_PREFIXES.some((prefix) =>
+    path === prefix || path.startsWith(`${prefix}/`) || path.includes(prefix + "/"),
+  );
+}
+
+test("every known role still resolves to its own workspace", () => {
+  assert.equal(roleRoot("STUDENT", "en"), "/en/learn/dashboard");
+  assert.equal(roleRoot("STUDENT", "ar"), "/ar/learn/dashboard");
+  assert.equal(roleRoot("INSTRUCTOR", "en"), "/en/instructor/courses");
+  assert.equal(roleRoot("INSTRUCTOR", "ar"), "/ar/instructor/courses");
+  assert.equal(roleRoot("ADMIN", "en"), "/en/admin/catalog");
+  assert.equal(roleRoot("ADMIN", "ar"), "/ar/admin/catalog");
+});
+
+test("an unrecognised role resolves to no workspace at all", () => {
+  for (const locale of ["en", "ar"] as const) {
+    assert.equal(roleRoot(UNKNOWN_ROLE, locale), null);
+  }
+});
+
+test("an unrecognised role is never given an Admin, Instructor or Student destination", () => {
+  for (const locale of ["en", "ar"] as const) {
+    const destination = postLoginDestination(UNKNOWN_ROLE, undefined, locale);
+    assert.equal(
+      namesARoleWorkspace(destination),
+      false,
+      `post-login sent an unknown role to a role workspace: ${destination}`,
+    );
+    assert.equal(destination, neutralRoot);
+  }
+});
+
+test("post-login navigation is a deterministic string for every role", () => {
+  for (const role of ["STUDENT", "INSTRUCTOR", "ADMIN", UNKNOWN_ROLE] as SessionRole[]) {
+    for (const locale of ["en", "ar"] as const) {
+      const first = postLoginDestination(role, undefined, locale);
+      assert.equal(typeof first, "string");
+      assert.notEqual(first.length, 0);
+      assert.equal(postLoginDestination(role, undefined, locale), first);
+    }
+  }
+});
+
+/**
+ * A validated caller destination still wins for every role, including an unknown one: the visitor
+ * asked to go somewhere the application already deemed safe, and failing to classify their role is
+ * not a reason to discard it.
+ */
+test("a safe requested destination still wins, including for an unrecognised role", () => {
+  assert.equal(postLoginDestination(UNKNOWN_ROLE, "/en/catalog", "en"), "/en/catalog");
+  assert.equal(postLoginDestination("ADMIN", "/en/catalog", "en"), "/en/catalog");
+});
+
+/** A restricted principal is still sent to the password change first, whatever its role. */
+test("an unrecognised role with a restricted credential still reaches the password change", () => {
+  assert.equal(
+    postAuthenticationDestination(UNKNOWN_ROLE, undefined, "en", true),
+    passwordChangePath,
+  );
+  assert.equal(postAuthenticationDestination(UNKNOWN_ROLE, undefined, "en", false), neutralRoot);
 });

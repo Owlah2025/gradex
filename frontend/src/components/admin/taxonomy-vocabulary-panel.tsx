@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getTaxonomyTerms, type TaxonomyTerm } from "@/lib/api/catalog";
+import { describeApiError } from "@/lib/api/api-error";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { ErrorState } from "@/components/common/error-state";
+import { WorkspaceSection } from "@/components/layout/workspace-page";
 import { TaxonomyTermManagement } from "./taxonomy-term-management";
 
 export function TaxonomyVocabularyPanel() {
-  const { locale } = useLocale();
-  const isAr = locale === "ar";
+  const { locale, t } = useLocale();
+  const copy = t.adminTaxonomy;
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,16 +19,32 @@ export function TaxonomyVocabularyPanel() {
     try {
       setTerms(await getTaxonomyTerms(locale));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : isAr ? "تعذر تحميل المصطلحات" : "Unable to load taxonomy terms");
+      setError(describeApiError(loadError, locale) || copy.loadFailed);
     }
-  }, [isAr, locale]);
+  }, [copy.loadFailed, locale]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   return (
-    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="border-b border-slate-200 pb-3 dark:border-slate-800"><h2 className="text-base font-bold text-slate-900 dark:text-slate-100">{isAr ? "إدارة قاموس التصنيف" : "Taxonomy Vocabulary Administration"}</h2><p className="mt-1 text-xs text-slate-500">{isAr ? "إدارة تخصصات ومواد Gradex بشكل منفصل عن مراجعة دورة بعينها." : "Manage Gradex Majors and Subjects separately from a specific Course review."}</p></div>
-      {error ? <p className="text-xs text-rose-600">{error}</p> : <TaxonomyTermManagement terms={terms} refresh={refresh} />}
-    </section>
+    <WorkspaceSection title={copy.title} description={copy.lead} testID="taxonomy-vocabulary">
+      {error ? (
+        <ErrorState
+          title={copy.loadFailed}
+          detail={error}
+          retryLabel={copy.retry}
+          onRetry={() => void refresh()}
+          testID="taxonomy-vocabulary-failed"
+        />
+      ) : (
+        // The area is the vocabulary; the form inside it is what a reader is actually editing. The
+        // nesting is what lets a screen-reader user move to the editor rather than to the whole
+        // catalogue region.
+        <WorkspaceSection title={copy.panelTitle} headingLevel="h3" className="mt-0">
+          <TaxonomyTermManagement terms={terms} refresh={refresh} />
+        </WorkspaceSection>
+      )}
+    </WorkspaceSection>
   );
 }

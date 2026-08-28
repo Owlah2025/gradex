@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import {
   archiveCourse,
   delistCourse,
@@ -15,6 +16,42 @@ import {
 import { ProblemError } from "@/lib/api/problem";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { LoadingState } from "@/components/common/loading-state";
+import { StatusBadge } from "@/components/common/status-badge";
+import {
+  WorkspacePage,
+  WorkspacePageHeader,
+  WorkspaceSection,
+  WorkspaceToolbar,
+} from "@/components/layout/workspace-page";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/components/ui/table";
+import { courseStatusView } from "./course-status";
+
+type LifecycleCopy = Dictionary["adminLifecycle"];
+
+const SUSPENSION_CAUSES: SuspensionCause[] = [
+  "LEGAL",
+  "SECURITY",
+  "MALWARE",
+  "SEVERE_MODERATION",
+];
 
 /**
  * AD-12 — the Admin Course lifecycle surface.
@@ -28,19 +65,40 @@ import { useLocale } from "@/lib/i18n/locale-provider";
  * The screen holds no lifecycle policy of its own. Every button issues the canonical request and
  * then refetches the directory; what it renders afterwards is the server's state, never an
  * optimistic guess. A refused transition renders the server's refusal.
+ *
+ * It is also where the Courses directory sends an Admin who presses "Manage", which is why its
+ * presentation matters: arriving here from a screen built on the design system and landing on six
+ * differently-coloured buttons in an unframed page read as two different products. The six commands
+ * are now grouped by what they do to the Course and each group says, in words, what its buttons
+ * mean — the amber/emerald/slate/rose palette they used to be told apart by said nothing to a
+ * reader who cannot separate those hues, and nothing at all to a screen reader.
+ *
+ * The three consequential commands no longer fire on the click that names them. Retiring closes the
+ * Course to anyone new, archiving is terminal, and suspension stops every read for Students who are
+ * mid-course right now — none of which the opposite button can undo afterwards. Each now states that
+ * specific consequence and waits for an answer. Delisting and relisting still fire immediately, and
+ * so does restoring access: they are reversible by the button beside them, and putting a dialog in
+ * front of every red-looking control is how readers learn to dismiss dialogs without reading them.
  */
+/** The three commands that state their consequence and wait for an answer before they fire. */
+type PendingCommand = "retire" | "archive" | "suspend";
+
 export function CourseLifecycleWorkspace() {
-  const { locale } = useLocale();
-  const isAr = locale === "ar";
+  const { locale, t } = useLocale();
+  const copy = t.adminLifecycle;
+  const courseLabels = t.adminCourses;
 
   const [search, setSearch] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [courses, setCourses] = useState<CourseLifecycleSummary[]>([]);
   const [selectedID, setSelectedID] = useState<string | null>(null);
   const [cause, setCause] = useState<SuspensionCause>("SECURITY");
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<PendingCommand | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
@@ -48,25 +106,26 @@ export function CourseLifecycleWorkspace() {
       setLoading(true);
       try {
         setCourses(await getCourseLifecycleDirectory(locale, query));
-      } catch (loadError) {
-        setError(problemMessage(loadError, isAr ? "تعذّر تحميل الدورات" : "Could not load Courses"));
+        setLoadError(null);
+      } catch (cause) {
+        setLoadError(problemMessage(cause, copy.failed));
       } finally {
         setLoading(false);
       }
     },
-    [locale, isAr],
+    [locale, copy.failed],
   );
 
   useEffect(() => {
-    void load("");
-  }, [load]);
+    void load(appliedSearch);
+  }, [load, appliedSearch]);
 
   const selected = courses.find((course) => course.id === selectedID) ?? null;
 
-  const invoke = async (label: string, action: (csrf: string) => Promise<void>) => {
+  const invoke = async (completed: string, action: (csrf: string) => Promise<void>) => {
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      setError(copy.csrfMissing);
       return;
     }
     setBusy(true);
@@ -74,245 +133,415 @@ export function CourseLifecycleWorkspace() {
     setError(null);
     try {
       await action(csrf);
-      setMessage(isAr ? `تم ${label}` : `${label} completed`);
+      setMessage(completed);
     } catch (actionError) {
-      setError(problemMessage(actionError, isAr ? "فشلت العملية" : "Operation failed"));
+      setError(problemMessage(actionError, copy.failed));
     } finally {
       // The directory is reread whether the command succeeded or was refused, so the rendered
       // state is always the server's and a refusal cannot leave a stale screen behind.
-      await load(search);
+      await load(appliedSearch);
       setBusy(false);
     }
   };
 
   const withReason = (run: () => void) => {
     if (!reason.trim()) {
-      setError(isAr ? "السبب إجباري لهذا الإجراء" : "A reason is required for this action");
+      setError(copy.reasonRequired);
       return;
     }
     run();
   };
 
+  /**
+   * Fire the command the Admin has now confirmed, exactly once.
+   *
+   * The dialog is dismissed before the request is issued rather than after it resolves. Dismissing
+   * first is what makes "exactly once" true — a dialog left open behind an in-flight request can be
+   * confirmed again — and it hands focus back to the button that opened it while the directory is
+   * still reloading, rather than stranding a keyboard reader on a dialog that is about to vanish.
+   *
+   * `selected` is read here rather than captured when the dialog opened, and the guard is real: a
+   * reload between opening and confirming can empty the directory.
+   */
+  const confirmPending = () => {
+    if (!pending || !selected) return;
+    const command = pending;
+    const courseID = selected.id;
+    setPending(null);
+
+    if (command === "retire") {
+      void invoke(copy.completed.retire, (csrf) => retireCourse({ courseID, locale, csrf }));
+      return;
+    }
+    if (command === "archive") {
+      void invoke(copy.completed.archive, (csrf) => archiveCourse({ courseID, locale, csrf }));
+      return;
+    }
+    void invoke(copy.completed.suspend, (csrf) =>
+      suspendCourseAccess({ courseID, locale, csrf, cause, reason: reason.trim() }),
+    );
+  };
+
   return (
-    <section className="space-y-4 p-4" data-testid="course-lifecycle-workspace">
-      <header className="space-y-1">
-        <h1 className="text-lg font-semibold">
-          {isAr ? "حالة الدورة وإجراءات الطوارئ" : "Course Lifecycle & Emergency Controls"}
-        </h1>
-        <p className="text-xs text-slate-500">
-          {isAr
-            ? "الحذف غير معروض هنا؛ الدورات ذات الوصول القائم يجب أرشفتها."
-            : "Deletion is intentionally absent here; Courses with existing access must be archived."}
-        </p>
-      </header>
+    <WorkspacePage>
+      <WorkspacePageHeader title={copy.title} description={copy.intro} />
 
-      <form
-        className="flex flex-wrap gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void load(search);
-        }}
-      >
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={isAr ? "ابحث بعنوان الدورة" : "Search by Course title"}
-          aria-label={isAr ? "ابحث بعنوان الدورة" : "Search by Course title"}
-          data-testid="lifecycle-course-search"
-          className="p-2 border rounded text-sm bg-white dark:bg-slate-900"
-        />
-        <button
-          type="submit"
-          data-testid="lifecycle-course-search-submit"
-          className="px-3 py-2 rounded bg-slate-700 text-white text-xs"
+      <WorkspaceToolbar>
+        <form
+          role="search"
+          className="flex flex-1 gap-2 sm:max-w-md"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setAppliedSearch(search.trim());
+          }}
         >
-          {isAr ? "بحث" : "Search"}
-        </button>
-      </form>
+          <label className="sr-only" htmlFor="lifecycle-course-search">
+            {copy.searchLabel}
+          </label>
+          <Input
+            id="lifecycle-course-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={copy.searchPlaceholder}
+            data-testid="lifecycle-course-search"
+          />
+          <Button type="submit" data-testid="lifecycle-course-search-submit">
+            {copy.searchSubmit}
+          </Button>
+        </form>
+      </WorkspaceToolbar>
 
-      <ul className="space-y-1" data-testid="lifecycle-course-list">
-        {loading && <li className="text-xs text-slate-500">{isAr ? "جارٍ التحميل…" : "Loading…"}</li>}
-        {!loading && courses.length === 0 && (
-          <li className="text-xs text-slate-500" data-testid="lifecycle-course-list-empty">
-            {isAr ? "لا توجد دورات مطابقة" : "No Courses match this search"}
-          </li>
+      <WorkspaceSection title={copy.tableCaption} className="mt-8">
+        {loadError ? (
+          <ErrorState
+            testID="lifecycle-course-list-error"
+            title={copy.loadFailed}
+            detail={loadError}
+            retryLabel={copy.retry}
+            onRetry={() => void load(appliedSearch)}
+          />
+        ) : loading ? (
+          <LoadingState testID="lifecycle-course-list-loading" label={copy.loading} />
+        ) : courses.length === 0 ? (
+          <div data-testid="lifecycle-course-list-empty">
+            <EmptyState
+              density="compact"
+              title={copy.emptyTitle}
+              description={appliedSearch === "" ? undefined : copy.emptyBody}
+              action={
+                appliedSearch === "" ? undefined : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSearch("");
+                      setAppliedSearch("");
+                    }}
+                  >
+                    {copy.clearSearch}
+                  </Button>
+                )
+              }
+            />
+          </div>
+        ) : (
+          <TableContainer>
+            <Table data-testid="lifecycle-course-list">
+              <TableCaption>{copy.tableCaption}</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell scope="col">{copy.course}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.state}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.actions}</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {courses.map((course) => {
+                  const title = locale === "ar" ? course.title_ar : course.title_en;
+                  return (
+                    <TableRow
+                      key={course.id}
+                      interactive
+                      data-testid="lifecycle-course-row"
+                      data-lifecycle-state={course.lifecycle}
+                    >
+                      <TableHeaderCell scope="row" className="min-w-48">
+                        <bdi>{title}</bdi>
+                      </TableHeaderCell>
+                      <TableCell>
+                        <LifecycleState course={course} labels={courseLabels} />
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          type="button"
+                          variant={course.id === selectedID ? "default" : "outline"}
+                          size="sm"
+                          aria-pressed={course.id === selectedID}
+                          onClick={() => {
+                            setSelectedID(course.id);
+                            setMessage(null);
+                            setError(null);
+                          }}
+                        >
+                          {copy.manage}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
-        {courses.map((course) => (
-          <li
-            key={course.id}
-            data-testid="lifecycle-course-row"
-            data-lifecycle-state={course.lifecycle}
-            className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 dark:border-slate-700 p-2"
-          >
-            <span className="text-sm">
-              {isAr ? course.title_ar : course.title_en}
-              <span className="ms-2 text-xs text-slate-500">{lifecycleLabel(course, isAr)}</span>
-            </span>
-            <button
-              onClick={() => {
-                setSelectedID(course.id);
-                setMessage(null);
-                setError(null);
-              }}
-              className="px-3 py-1 rounded bg-blue-700 text-white text-xs"
-            >
-              {isAr ? "إدارة" : "Manage"}
-            </button>
-          </li>
-        ))}
-      </ul>
+      </WorkspaceSection>
 
       {selected && (
-        <div
-          className="space-y-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-4"
+        <section
+          aria-labelledby="lifecycle-selected-title"
+          className="mt-8 rounded-lg border border-border bg-card p-5 shadow-sm sm:p-6"
           data-testid="lifecycle-selected-course"
           data-lifecycle-state={selected.lifecycle}
           data-access-suspended={selected.access_suspended_at ? "true" : "false"}
           data-retired={selected.retired_at ? "true" : "false"}
         >
-          <h2 className="text-sm font-semibold" data-testid="lifecycle-selected-title">
-            {isAr ? selected.title_ar : selected.title_en}
-          </h2>
-          <p className="text-xs text-slate-500" data-testid="lifecycle-selected-state">
-            {lifecycleLabel(selected, isAr)}
+          <p className="font-display text-xs font-bold uppercase tracking-[0.1em] text-muted-foreground">
+            {copy.selected}
           </p>
+          <h2
+            id="lifecycle-selected-title"
+            className="mt-1 font-display text-xl font-bold text-foreground"
+            data-testid="lifecycle-selected-title"
+          >
+            <bdi>{locale === "ar" ? selected.title_ar : selected.title_en}</bdi>
+          </h2>
+          <div className="mt-3" data-testid="lifecycle-selected-state">
+            <LifecycleState course={selected} labels={courseLabels} />
+          </div>
 
-          <div className="flex flex-wrap gap-2">
-            <button
+          {message && (
+            <div className="mt-5" data-testid="lifecycle-message">
+              <Alert tone="success" title={message} />
+            </div>
+          )}
+          {error && (
+            <ErrorState
+              className="mt-5"
+              testID="lifecycle-error"
+              title={copy.actionFailed}
+              detail={error}
+            />
+          )}
+
+          <CommandGroup title={copy.visibility.title} body={copy.visibility.body}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
               disabled={busy}
               data-testid="lifecycle-delist"
               onClick={() =>
-                void invoke(isAr ? "إلغاء الإدراج" : "Delist", (csrf) =>
+                void invoke(copy.completed.delist, (csrf) =>
                   delistCourse({ courseID: selected.id, locale, csrf }),
                 )
               }
-              className="px-3 py-2 rounded bg-amber-600 text-white text-xs disabled:opacity-50"
             >
-              {isAr ? "إلغاء الإدراج" : "Delist"}
-            </button>
-            <button
+              {copy.visibility.delist}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
               disabled={busy}
               data-testid="lifecycle-relist"
               onClick={() =>
-                void invoke(isAr ? "إعادة الإدراج" : "Relist", (csrf) =>
+                void invoke(copy.completed.relist, (csrf) =>
                   relistCourse({ courseID: selected.id, locale, csrf }),
                 )
               }
-              className="px-3 py-2 rounded bg-emerald-600 text-white text-xs disabled:opacity-50"
             >
-              {isAr ? "إعادة الإدراج" : "Relist"}
-            </button>
-            <button
+              {copy.visibility.relist}
+            </Button>
+          </CommandGroup>
+
+          <CommandGroup title={copy.withdrawal.title} body={copy.withdrawal.body}>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
               disabled={busy}
               data-testid="lifecycle-retire"
-              onClick={() =>
-                void invoke(isAr ? "التقاعد" : "Retire", (csrf) =>
-                  retireCourse({ courseID: selected.id, locale, csrf }),
-                )
-              }
-              className="px-3 py-2 rounded bg-slate-700 text-white text-xs disabled:opacity-50"
+              onClick={() => setPending("retire")}
             >
-              {isAr ? "تقاعد" : "Retire"}
-            </button>
-            <button
+              {copy.withdrawal.retire}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
               disabled={busy}
               data-testid="lifecycle-archive"
-              onClick={() =>
-                void invoke(isAr ? "الأرشفة" : "Archive", (csrf) =>
-                  archiveCourse({ courseID: selected.id, locale, csrf }),
-                )
-              }
-              className="px-3 py-2 rounded bg-rose-700 text-white text-xs disabled:opacity-50"
+              onClick={() => setPending("archive")}
             >
-              {isAr ? "أرشفة" : "Archive"}
-            </button>
-          </div>
+              {copy.withdrawal.archive}
+            </Button>
+          </CommandGroup>
 
-          <div className="grid gap-2 sm:grid-cols-3">
-            <select
-              value={cause}
-              onChange={(event) => setCause(event.target.value as SuspensionCause)}
-              aria-label={isAr ? "سبب الإيقاف" : "Suspension cause"}
-              data-testid="lifecycle-suspension-cause"
-              className="p-2 border rounded text-xs bg-white dark:bg-slate-900"
-            >
-              <option value="LEGAL">{isAr ? "قانوني" : "Legal"}</option>
-              <option value="SECURITY">{isAr ? "أمني" : "Security"}</option>
-              <option value="MALWARE">{isAr ? "برمجيات خبيثة" : "Malware"}</option>
-              <option value="SEVERE_MODERATION">{isAr ? "إشراف جسيم" : "Severe moderation"}</option>
-            </select>
-            <input
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder={isAr ? "سبب الإيقاف أو الاستعادة" : "Suspension or restoration reason"}
-              aria-label={isAr ? "سبب الإيقاف أو الاستعادة" : "Suspension or restoration reason"}
-              data-testid="lifecycle-suspension-reason"
-              className="p-2 border rounded text-xs bg-white dark:bg-slate-900"
-            />
-            <div className="flex gap-2">
-              <button
+          <CommandGroup title={copy.suspension.title} body={copy.suspension.body}>
+            <div className="grid w-full gap-4 sm:grid-cols-2">
+              <Field label={copy.suspension.causeLabel} htmlFor="lifecycle-suspension-cause">
+                <Select
+                  id="lifecycle-suspension-cause"
+                  controlSize="sm"
+                  value={cause}
+                  onChange={(event) => setCause(event.target.value as SuspensionCause)}
+                  data-testid="lifecycle-suspension-cause"
+                >
+                  {SUSPENSION_CAUSES.map((value) => (
+                    <option key={value} value={value}>
+                      {copy.suspension.causes[value]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label={copy.suspension.reasonLabel} htmlFor="lifecycle-suspension-reason">
+                <Input
+                  id="lifecycle-suspension-reason"
+                  controlSize="sm"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  placeholder={copy.suspension.reasonPlaceholder}
+                  data-testid="lifecycle-suspension-reason"
+                />
+              </Field>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
                 disabled={busy}
                 data-testid="lifecycle-suspend"
+                // The reason gate runs before the dialog, not after it: a missing reason is refused
+                // while the Admin is still filling the form, rather than after they have agreed to
+                // a consequence the product then declines to carry out.
+                onClick={() => withReason(() => setPending("suspend"))}
+              >
+                {copy.suspension.suspend}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                data-testid="lifecycle-restore"
                 onClick={() =>
                   withReason(() =>
-                    void invoke(isAr ? "إيقاف الوصول" : "Access suspension", (csrf) =>
-                      suspendCourseAccess({
+                    void invoke(copy.completed.restore, (csrf) =>
+                      restoreCourseAccess({
                         courseID: selected.id,
                         locale,
                         csrf,
-                        cause,
                         reason: reason.trim(),
                       }),
                     ),
                   )
                 }
-                className="px-3 py-2 rounded bg-rose-600 text-white text-xs disabled:opacity-50"
               >
-                {isAr ? "إيقاف" : "Suspend"}
-              </button>
-              <button
-                disabled={busy}
-                data-testid="lifecycle-restore"
-                onClick={() =>
-                  withReason(() =>
-                    void invoke(isAr ? "استعادة الوصول" : "Access restoration", (csrf) =>
-                      restoreCourseAccess({ courseID: selected.id, locale, csrf, reason: reason.trim() }),
-                    ),
-                  )
-                }
-                className="px-3 py-2 rounded bg-emerald-700 text-white text-xs disabled:opacity-50"
-              >
-                {isAr ? "استعادة" : "Restore"}
-              </button>
+                {copy.suspension.restore}
+              </Button>
             </div>
-          </div>
+          </CommandGroup>
 
-          {message && (
-            <p role="status" data-testid="lifecycle-message" className="text-xs text-emerald-700 dark:text-emerald-300">
-              {message}
-            </p>
+          {pending && (
+            <ConfirmDialog
+              open
+              onOpenChange={(next) => {
+                if (!next) setPending(null);
+              }}
+              title={copy.confirm[pending].title}
+              body={copy.confirm[pending].body}
+              confirmLabel={copy.confirm[pending].action}
+              cancelLabel={copy.confirm.cancel}
+              busy={busy}
+              onConfirm={confirmPending}
+              testID={`lifecycle-confirm-${pending}`}
+            />
           )}
-          {error && (
-            <p role="alert" data-testid="lifecycle-error" className="text-xs text-rose-700 dark:text-rose-300">
-              {error}
-            </p>
-          )}
-        </div>
+
+          {busy && <LoadingState visuallyHidden label={copy.working} />}
+        </section>
       )}
-    </section>
+    </WorkspacePage>
   );
 }
 
-/** The rendered state names every authority that is currently acting on the Course, not just one. */
-function lifecycleLabel(course: CourseLifecycleSummary, isAr: boolean): string {
-  const parts: string[] = [course.lifecycle];
-  if (course.retired_at) {
-    parts.push(isAr ? "متقاعدة" : "Retired");
-  }
-  if (course.access_suspended_at) {
-    parts.push(isAr ? "الوصول موقوف" : "Access suspended");
-  }
-  return parts.join(" · ");
+/**
+ * One group of lifecycle commands with the sentence that says what they do.
+ *
+ * The sentence is the point. Delist, retire and archive are three different kinds of withdrawal
+ * with three different consequences for a Student who already holds access, and the screen used to
+ * distinguish them with an amber button, a slate one and a rose one.
+ */
+function CommandGroup({
+  title,
+  body,
+  children,
+}: {
+  title: string;
+  body: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <h3 className="font-display text-sm font-bold text-foreground">{title}</h3>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{body}</p>
+      <div className="mt-4 flex flex-wrap items-end gap-3">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The rendered state names every authority currently acting on the Course, not just one.
+ *
+ * The state word comes from the shared Admin course vocabulary rather than from the raw `lifecycle`
+ * enum this screen used to print verbatim, and the qualifiers — retired, access suspended — are
+ * listed beside it rather than replacing it, because they are orthogonal to the lifecycle: a
+ * suspended Course is still PUBLISHED.
+ */
+function LifecycleState({
+  course,
+  labels,
+}: {
+  course: CourseLifecycleSummary;
+  labels: Dictionary["adminCourses"];
+}) {
+  // This screen reads only the lifecycle directory, so it never knows about a pending review; the
+  // Courses directory is the surface that joins the two.
+  const view = courseStatusView({
+    id: course.id,
+    titleAr: course.title_ar,
+    titleEn: course.title_en,
+    ownerDisplayName: course.owner_display_name,
+    lifecycle: course.lifecycle,
+    updatedAt: course.updated_at,
+    accessSuspendedAt: course.access_suspended_at,
+    retiredAt: course.retired_at,
+    pendingReview: null,
+    fromQueueOnly: false,
+  });
+  const qualifiers: string[] = [];
+  if (view.retired) qualifiers.push(labels.flags.retired);
+  if (view.accessSuspended) qualifiers.push(labels.flags.accessSuspended);
+
+  return (
+    <StatusBadge
+      size="sm"
+      tone={view.tone}
+      label={labels.status[view.state]}
+      detail={qualifiers.length > 0 ? qualifiers.join(" · ") : undefined}
+    />
+  );
 }
 
 function problemMessage(cause: unknown, fallback: string): string {

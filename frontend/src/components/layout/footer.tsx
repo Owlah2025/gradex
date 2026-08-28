@@ -5,11 +5,16 @@ import Link from "next/link";
 import { Container } from "./container";
 import { BirdMark } from "@/components/brand/bird-mark";
 import { Wordmark } from "@/components/brand/wordmark";
+import { usePathname } from "next/navigation";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { navItems } from "./nav-items";
+import { exploreNavigation } from "./nav-items";
 
 export function Footer() {
   const { locale, t } = useLocale();
+  const pathname = usePathname();
+  // The footer is under the workspaces too, where the landing page's own
+  // section anchors resolve to nothing.
+  const explore = exploreNavigation(pathname ?? "/", locale);
 
   // LG-011 uses Terms §8 for the no-commerce launch disclosure; there is no
   // separate Refund Policy artifact in the approved package.
@@ -33,7 +38,7 @@ export function Footer() {
           </div>
 
           <FooterColumn title={t.footer.explore}>
-            {navItems.map((item) => (
+            {explore.map((item) => (
               <FooterLink key={item.href} href={item.href}>
                 {item.label(t)}
               </FooterLink>

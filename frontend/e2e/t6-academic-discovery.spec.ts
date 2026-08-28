@@ -112,7 +112,7 @@ async function publishAcademicCourse(
   await page.getByTestId("new-course-description-ar").fill("وصف الاكتشاف الأكاديمي");
   await page.getByTestId("new-course-description-en").fill("Academic discovery journey course.");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;
@@ -137,7 +137,8 @@ async function publishAcademicCourse(
   expect(videoResponse.status(), await videoResponse.text()).toBe(200);
 
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("An administrator will review it");
 
   const adminContext = await browser.newContext({ locale: "en-US" });
   await signIn(adminContext, ADMIN);
@@ -152,7 +153,8 @@ async function publishAcademicCourse(
   await inspector.getByTestId("pricing-submit").click();
   await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await adminContext.close();
 
   await instructor.dispose();

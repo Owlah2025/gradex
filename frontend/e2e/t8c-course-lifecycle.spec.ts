@@ -106,6 +106,25 @@ async function openLifecycleCourse(adminPage: Page, title: string): Promise<void
   await expect(adminPage.getByTestId("lifecycle-selected-title")).toHaveText(title);
 }
 
+/**
+ * Issue one of the three consequential lifecycle commands.
+ *
+ * Retire, archive and suspend each state their consequence and wait for an answer before the
+ * request is made. The transitions these cases assert are unchanged — the command still fires, and
+ * still fires once — so the confirmation is a step on the way to them rather than a case of its
+ * own. Tranche I's own spec is what proves the dialog itself.
+ */
+async function issueLifecycleCommand(
+  adminPage: Page,
+  command: "retire" | "archive" | "suspend",
+): Promise<void> {
+  await adminPage.getByTestId(`lifecycle-${command}`).click();
+  const dialog = adminPage.getByTestId(`lifecycle-confirm-${command}`);
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("confirm-accept").click();
+  await expect(dialog).toHaveCount(0);
+}
+
 /** Reopens the Course after a mutation, so what is asserted is a later read and not an echo. */
 async function refetchLifecycleCourse(adminPage: Page, title: string): Promise<void> {
   await adminPage.reload();
@@ -208,7 +227,7 @@ test.describe("T8C / MVP-F24C — AD-12 Admin Course lifecycle", () => {
       await admin.page
         .getByTestId("lifecycle-suspension-reason")
         .fill("T8C E2E course access suspension");
-      await admin.page.getByTestId("lifecycle-suspend").click();
+      await issueLifecycleCommand(admin.page, "suspend");
       await expect(admin.page.getByTestId("lifecycle-message")).toContainText(
         "Access suspension completed",
       );
@@ -281,7 +300,7 @@ test.describe("T8C / MVP-F24C — AD-12 Admin Course lifecycle", () => {
       await openLifecycleCourse(admin.page, RETIREMENT_COURSE_TITLE);
       await expectAdminLifecycleState(admin.page, { lifecycle: "PUBLISHED" });
 
-      await admin.page.getByTestId("lifecycle-retire").click();
+      await issueLifecycleCommand(admin.page, "retire");
       await expect(admin.page.getByTestId("lifecycle-message")).toContainText("Retire completed");
       await expect(admin.page.getByTestId("lifecycle-error")).toHaveCount(0);
 
@@ -293,7 +312,7 @@ test.describe("T8C / MVP-F24C — AD-12 Admin Course lifecycle", () => {
 
       // The refusal is a coherent domain answer on a screen that still works, not a generic
       // failure and not a silent second retirement.
-      await admin.page.getByTestId("lifecycle-retire").click();
+      await issueLifecycleCommand(admin.page, "retire");
       await expect(admin.page.getByTestId("lifecycle-error")).toBeVisible();
       await expect(admin.page.getByTestId("lifecycle-message")).toHaveCount(0);
       await expectAdminLifecycleState(admin.page, { lifecycle: "PUBLISHED", retired: true });
@@ -317,7 +336,7 @@ test.describe("T8C / MVP-F24C — AD-12 Admin Course lifecycle", () => {
       await openLifecycleCourse(admin.page, ARCHIVE_COURSE_TITLE);
       await expectAdminLifecycleState(admin.page, { lifecycle: "PUBLISHED" });
 
-      await admin.page.getByTestId("lifecycle-archive").click();
+      await issueLifecycleCommand(admin.page, "archive");
       await expect(admin.page.getByTestId("lifecycle-message")).toContainText("Archive completed");
       await expect(admin.page.getByTestId("lifecycle-error")).toHaveCount(0);
 

@@ -53,10 +53,8 @@ const TEXT = {
     accessUntil: "Access until",
     percent: "33%",
     completedOverTotal: "1/3",
-    partialPosition: "120",
-    completedPosition: "300",
+    inProgress: "In progress",
     completed: "Completed",
-    notCompleted: "Not completed",
     openCourse: "Open course",
     previousLesson: "Previous lesson",
     nextLesson: "Next lesson",
@@ -77,10 +75,8 @@ const TEXT = {
     accessUntil: "الوصول حتى",
     percent: "٣٣٪",
     completedOverTotal: "١/٣",
-    partialPosition: "١٢٠",
-    completedPosition: "٣٠٠",
+    inProgress: "قيد التقدم",
     completed: "مكتمل",
-    notCompleted: "غير مكتمل",
     openCourse: "فتح المقرر",
     previousLesson: "الدرس السابق",
     nextLesson: "الدرس التالي",
@@ -420,22 +416,35 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
 
           // Current approved live graph, Sections in authored order.
           const sectionHeadings = page.locator("main h2");
-          await expect(sectionHeadings.nth(0)).toHaveText(t.sectionOne);
-          await expect(sectionHeadings.nth(1)).toHaveText(t.sectionTwo);
+          // `toContainText` rather than `toHaveText`: a section heading is now a disclosure that
+          // also states how much of its own section is done. The authored order, which is what this
+          // assertion is for, is unchanged.
+          await expect(sectionHeadings.nth(0)).toContainText(t.sectionOne);
+          await expect(sectionHeadings.nth(1)).toContainText(t.sectionTwo);
 
           // Lessons in authored order within their Section.
-          const firstSectionLessons = page.locator("main section").first().locator("ol li");
+          // The contents are a navigation landmark rather than a bare section, and the ordered
+          // lists inside it are the only ones on the page — so the Lessons are still addressed by
+          // their authored order, and still only theirs.
+          const firstSectionLessons = page.locator("main ol li");
           await expect(firstSectionLessons.nth(0)).toContainText(t.lessonPartial);
           await expect(firstSectionLessons.nth(1)).toContainText(t.lessonCompleted);
           await expect(page.getByText(t.lessonThird)).toBeVisible();
 
           // Aggregate and per-Lesson Progress, including completion state.
+          //
+          // The retained per-Lesson state is now read as the state itself rather than as the raw
+          // second count the reporter persists: UX-F removed "120 seconds · Not completed" from
+          // the Student surfaces, and a Student reading a Course whose access has ended needs to
+          // know which Lessons they finished, not the value of a database column. The claim this
+          // test makes is unchanged and slightly stronger — the part-watched Lesson and the
+          // finished one must still be told apart, and the aggregate figures must still survive.
           await expect(page.getByText(t.percent, { exact: false })).toBeVisible();
-          await expect(firstSectionLessons.nth(0)).toContainText(t.partialPosition);
-          await expect(firstSectionLessons.nth(0)).toContainText(t.notCompleted);
-          await expect(firstSectionLessons.nth(1)).toContainText(t.completedPosition);
+          await expect(page.getByText(t.completedOverTotal, { exact: false })).toBeVisible();
+          await expect(firstSectionLessons.nth(0)).toContainText(t.inProgress);
+          await expect(firstSectionLessons.nth(0)).not.toContainText(t.completed);
           await expect(firstSectionLessons.nth(1)).toContainText(t.completed);
-          await expect(firstSectionLessons.nth(1)).not.toContainText(t.notCompleted);
+          await expect(firstSectionLessons.nth(1)).not.toContainText(t.inProgress);
 
           // Explicit localized expired state, original instant preserved.
           await expect(page.locator('[data-learning-status="expired"]')).toHaveCount(1);
@@ -453,11 +462,13 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
 
           // Lesson metadata and Section context remain visible.
           await expect(page.getByRole("heading", { name: t.lessonPartial, level: 1 })).toBeVisible();
-          await expect(page.getByText(t.sectionOne)).toBeVisible();
+          // The Lesson names its Section above the title, and the Course contents beside it name it
+          // again. `first()` is the Lesson's own header; both are the same authored string.
+          await expect(page.getByText(t.sectionOne).first()).toBeVisible();
 
-          // Saved position and completion state remain visible.
-          await expect(page.getByText(t.partialPosition, { exact: false })).toBeVisible();
-          await expect(page.getByText(t.notCompleted)).toBeVisible();
+          // The retained state remains visible, and is the part-watched one rather than the
+          // finished one.
+          await expect(page.getByTestId("lesson-state")).toHaveText(t.inProgress);
 
           // Previous/next navigation remains reachable.
           await expect(page.getByRole("navigation", { name: t.lessonNavigation })).toBeVisible();
@@ -481,8 +492,7 @@ test.describe("T043 — retained-expired Entitlement authorises nothing", () => 
           await page.goto(`/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_COMPLETED_ID}`);
           await page.waitForLoadState("networkidle");
           await expect(page.getByRole("heading", { name: t.lessonCompleted, level: 1 })).toBeVisible();
-          await expect(page.getByText(t.completedPosition, { exact: false })).toBeVisible();
-          await expect(page.getByText(t.completed).first()).toBeVisible();
+          await expect(page.getByTestId("lesson-state")).toHaveText(t.completed);
           await expect(page.getByRole("link", { name: t.previousLesson })).toBeVisible();
           await expect(page.locator("video")).toHaveCount(0);
           await expect(page.locator("[data-player-controls]")).toHaveCount(0);

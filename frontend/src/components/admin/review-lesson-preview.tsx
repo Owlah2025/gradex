@@ -46,7 +46,7 @@ export function ReviewLessonPreview({ playbackURL, locale }: ReviewLessonPreview
 
   if (unavailable) {
     return (
-      <p role="alert" data-testid="review-preview-unavailable" className="text-sm text-rose-700 dark:text-rose-300">
+      <p role="alert" data-testid="review-preview-unavailable" className="text-sm text-destructive">
         {isAr ? "تعذرت معاينة الفيديو المحمي." : "The protected video preview is unavailable."}
       </p>
     );
@@ -58,7 +58,7 @@ export function ReviewLessonPreview({ playbackURL, locale }: ReviewLessonPreview
       controls
       data-testid="review-protected-video"
       aria-label={isAr ? "معاينة فيديو الدرس" : "Lesson video preview"}
-      className="w-full rounded-lg bg-slate-950"
+      className="w-full rounded-lg bg-card"
     />
   );
 }

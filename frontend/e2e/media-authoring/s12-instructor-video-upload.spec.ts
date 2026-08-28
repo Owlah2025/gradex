@@ -143,7 +143,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-ar").fill("وصف");
   await page.getByTestId("new-course-description-en").fill("Real media journey");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
   // The public preview is a second, separately uploaded PREVIEW Asset Version.
@@ -151,26 +151,31 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // Instructor UI cannot be selecting or reusing protected Lesson media.
   const mp4Path = makeSampleMP4();
   const publicPreviewAuthoring = page.getByTestId("public-preview-authoring");
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is selected");
+  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is attached");
   await publicPreviewAuthoring.locator('input[type="file"]').setInputFiles(mp4Path);
   await expect(publicPreviewAuthoring.getByTestId("public-preview-message")).toContainText("Public preview is ready for review", { timeout: 4 * 60 * 1000 });
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("A public preview is selected");
+  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("A public preview is attached");
 
   // 2. Section
   await page.getByTestId("section-title-ar").fill("القسم");
   await page.getByTestId("section-title-en").fill("Media Section");
   await page.getByTestId("add-section").click();
-  await expect(page.getByText("Media Section")).toBeVisible();
-  const sectionID = (await page
-    .locator('[data-testid^="section-"]')
-    .first()
-    .getAttribute("data-testid"))!.replace("section-", "");
+  // Scoped to the section itself. The submission-readiness panel names the sections that still
+  // need lessons, so a brand-new empty section legitimately appears twice on this page — once as
+  // the row and once as the reason submission is blocked — and a page-wide text match is ambiguous
+  // from the moment the section is created.
+  const sectionRow = page.locator('[data-testid^="section-"]').first();
+  await expect(sectionRow).toBeVisible();
+  await expect(sectionRow).toContainText("Media Section");
+  const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace("section-", "");
 
   // 3. Lesson
   await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس");
   await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Media Lesson");
   await page.getByTestId(`add-lesson-${sectionID}`).click();
-  await expect(page.getByText("Media Lesson")).toBeVisible();
+  // Scoped for the same reason the section title is: the readiness panel names the lessons that
+  // still need a video, so a new lesson appears both as its row and as a reason to wait.
+  await expect(sectionRow).toContainText("Media Lesson");
   const lessonID = (await page
     .locator('[data-testid^="lesson-video-upload-"]')
     .first()
@@ -189,9 +194,22 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId(`owned-course-${courseID}`).click();
   const attached = page.getByTestId(`lesson-video-ref-${lessonID}`);
   await expect(attached).toBeVisible();
-  const assetVersionID = (await attached.innerText()).match(UUID_PATTERN)![0];
+  await expect(attached).toHaveAttribute("data-video-attached", "true");
 
+  // The asset version id comes from the API, which is the only place it was ever meaningful. The
+  // studio used to print it beside the words "Video attached" and this spec scraped it back out of
+  // the rendered text; an Instructor has no use for a media identifier, so it is no longer there.
   const instructorAPI = await apiContextFor(instructorSession);
+  const authoredCourse = await instructorAPI.get(`/api/v1/courses/${courseID}`);
+  expect(authoredCourse.status()).toBe(200);
+  const authoredGraph = (await authoredCourse.json()) as {
+    editable_revision?: { sections?: Array<{ lessons?: Array<{ id: string; video_asset_version_id?: string }> }> };
+  };
+  const authoredLesson = (authoredGraph.editable_revision?.sections ?? [])
+    .flatMap((section) => section.lessons ?? [])
+    .find((lesson) => lesson.id === lessonID);
+  const assetVersionID = authoredLesson?.video_asset_version_id;
+  expect(assetVersionID, "the submitted Lesson must carry its video Asset Version").toMatch(UUID_PATTERN);
   const assetStatus = await instructorAPI.get(`/api/v1/media/assets/${assetVersionID}`);
   expect(assetStatus.status()).toBe(200);
   expect((await assetStatus.json()).state).toBe("READY");
@@ -199,7 +217,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 6. Submission uses the Course-level canonical Subject; Academic Courses
   // never populate the legacy Major/Subject/Study-Year vocabulary.
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   // 7. The Admin review surface sees the submitted revision.
   const queue = await admin.get("/api/v1/admin/review/queue");
@@ -234,7 +253,8 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   ]);
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/en/admin/catalog");
-  await expect(adminPage.locator("h1")).toContainText("Course Review & Pricing Admin");
+  // The queue screen was renamed when pricing stopped being a separate panel on it.
+  await expect(adminPage.locator("h1")).toContainText("Course review & administration");
 
   const row = adminPage.getByTestId(`review-item-${courseID}`);
   await expect(row).toBeVisible();
@@ -257,11 +277,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(inspector.getByTestId("submitted-academic-audience")).toContainText("Automatic");
   await expect(inspector.getByTestId("submitted-study-year")).toHaveCount(0);
   await expect(inspector.getByTestId("submitted-major")).toHaveCount(0);
-  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
-  await expect(inspector.getByTestId("submitted-public-preview")).toContainText("A separate public preview is selected for this revision.");
+  // The state, in words. The enum behind it stays in the payload and out of the Admin's reading.
+  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
+  await expect(inspector.getByTestId("submitted-revision-state")).not.toContainText("PENDING_REVIEW");
+  await expect(inspector.getByTestId("submitted-public-preview")).toContainText("A separate public preview is attached to this version.");
   await expect(inspector.getByTestId(`submitted-section-${sectionID}`)).toContainText("Media Section");
   await expect(inspector.getByTestId(`submitted-lesson-${lessonID}`)).toContainText("Media Lesson");
-  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("READY");
+  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("Ready to preview");
 
   // Preview is issued through the reviewed Lesson endpoint and receives the
   // application-owned protected manifest route. The browser never receives a
@@ -309,10 +331,12 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/request-changes`,
   );
   await inspector.getByTestId("request-changes-inspected-revision").click();
-  await inspector.getByTestId("request-changes-reason").fill(CHANGE_REQUEST_REASON);
-  await inspector.getByTestId("submit-request-changes").click();
+  const changesDialog = adminPage.getByTestId("review-decision-confirm");
+  await expect(changesDialog).toBeVisible();
+  await changesDialog.getByTestId("request-changes-reason").fill(CHANGE_REQUEST_REASON);
+  await changesDialog.getByTestId("confirm-accept").click();
   expect((await requestChangesResponse).status()).toBe(200);
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Change request sent to instructor");
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The change request was sent to the instructor.");
 
   // ---------------------------------------------------------------------
   // MVP-F02 — the Instructor must be able to learn *why* the Course came
@@ -335,7 +359,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // The state is explained in the Instructor's language; the wire enum is
   // still available for support, but it is not the explanation.
   await expect(page.getByTestId("revision-state")).toHaveText("Changes requested");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "CHANGES_REQUESTED");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "CHANGES_REQUESTED");
 
   // 10b. Another Instructor and a Student are refused the reason outright.
   // The reason travels with the owned-Course read, so refusing that read is
@@ -383,29 +407,33 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("saved");
 
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   // 10d. The resolved change request must not linger. The server keeps
   // `review_reason` on the revision row after a resubmission, so a surface
   // that rendered on the reason instead of the state would still be telling
   // the Instructor to fix something they already fixed.
   await expect(page.getByTestId("revision-state")).toHaveText("In review");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
   await expect(page.getByTestId("change-request-notice")).toHaveCount(0);
 
   await otherInstructorAPI.dispose();
   await studentAPI.dispose();
 
-  await adminPage.reload();
+  // Back to the queue, not a reload. Reviewing a Course is its own route now, so the Admin page is
+  // still sitting on the workspace it was sent to — reloading re-opens the review, not the list.
+  await adminPage.goto("/en/admin/catalog");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
-  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("PENDING_REVIEW");
+  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
 
   // 11. Approve through the inspector, against the exact revision that was
   // successfully rendered and previewed above.
   await resubmittedInspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toHaveCount(0);
 
   const afterApproval = await admin.get("/api/v1/admin/review/queue");
@@ -498,10 +526,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-ar").fill("مسودة");
   await page.getByTestId("new-course-description-en").fill("Draft that must stay private");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const draftCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(draftCourseID).toMatch(UUID_PATTERN);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
 
   // The public API itself excludes it — this is the guarantee that matters.
   // `catalogpublic.PublishedOnly` is applied in SQL and the repository refuses
@@ -585,7 +613,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("start-revision").click();
 
   // The studio moved into the new candidate, and says plainly that these edits are not live yet.
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await expect(page.getByTestId("editing-published-notice")).toContainText(
     "Students still see the published version",
   );
@@ -620,14 +648,15 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   // Submitted through the studio, not the API.
   await page.getByTestId("submit-for-review").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
 
   // In review, the studio says so and offers no second revision.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
 
   // Authorization: only the owning Instructor may begin a revision.
   const otherStart = await (await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR))).put(
@@ -654,7 +683,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId(`owned-course-${draftCourseID}`).click();
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
   await expect(page.getByTestId("editing-published-notice")).toHaveCount(0);
-  await expect(page.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await page.getByTestId(`owned-course-${courseID}`).click();
 
   // Revision B is now PENDING_REVIEW while A stays live.

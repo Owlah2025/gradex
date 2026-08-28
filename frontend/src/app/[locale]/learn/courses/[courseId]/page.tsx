@@ -1,82 +1,174 @@
 import Link from "next/link";
-import { AccessUntil, CourseOutline, LearningProgressSummary, LearningStatusBadge, LearningUnavailable } from "@/components/learning/learning-views";
+import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import {
+  AccessUntil,
+  LearningProgressSummary,
+  LearningStatusBadge,
+  LearningUnavailable,
+  MaterialsInline,
+} from "@/components/learning/learning-views";
+import { CourseCurriculum } from "@/components/learning/course-curriculum";
+import { courseCurriculum, courseIsComplete } from "@/components/learning/curriculum-model";
 import { requestCourseHomeServer } from "@/lib/api/learning-server";
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
-import { LearningLocaleToggle } from "@/components/learning/learning-locale-toggle";
+import { LearningShell } from "@/components/learning/learning-shell";
 import { ReportTargetActions } from "@/components/learning/report-content-dialog";
 import { courseReportTargets } from "@/components/learning/report-targets";
 import { reportLabels } from "@/components/learning/report-labels";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   accessLabels,
+  curriculumLabels,
+  learningStatusDetail,
   learningStatusLabel,
-  outlineLabels,
+  materialsLabels,
   progressLabels,
+  shellLabels,
   unavailableLabels,
 } from "@/components/learning/learning-label-sets";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+/**
+ * The Course a Student is inside: how far they have got, and everything it contains.
+ *
+ * The contents are the page. The header states the Course, what its access means in words, and the
+ * one progress figure the server computes — then gets out of the way, because a Student arriving
+ * here is choosing a Lesson, not reading a summary.
+ */
 export default async function CourseHomePage({ params }: { params: Promise<{ locale: string; courseId: string }> }) {
   const { locale: requestedLocale, courseId } = await params;
   const locale = requestedLocale === "en" ? "en" : "ar";
   const dictionary = locale === "ar" ? ar : en;
+  const shell = shellLabels(dictionary);
+  const Backward = locale === "ar" ? ArrowRight : ArrowLeft;
   try {
     const course = await requestCourseHomeServer(courseId, locale);
+    const sections = courseCurriculum(course.sections);
+    const complete = courseIsComplete(course.progress);
+
+    // Materials are composed here, on the server, and handed to the contents already built. The
+    // download paths, the file names and the decision that access even permits a download all stay
+    // on this side of the boundary; the contents component receives a subtree, never a material.
+    const materialsByLesson =
+      course.learning_status === "active"
+        ? Object.fromEntries(
+            course.sections.flatMap((section) =>
+              section.lessons
+                .filter((lesson) => lesson.resources.length > 0 || lesson.lab_materials.length > 0)
+                .map((lesson) => [
+                  lesson.lesson_id,
+                  <MaterialsInline
+                    key={lesson.lesson_id}
+                    resources={lesson.resources}
+                    labMaterials={lesson.lab_materials}
+                    labels={materialsLabels(dictionary.learning)}
+                    locale={locale}
+                  />,
+                ]),
+            ),
+          )
+        : undefined;
+
     return (
-      <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto min-h-screen max-w-6xl px-5 py-10 sm:px-6">
-        <header className="mb-8">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-muted-foreground">{dictionary.learning.courseHome}</p>
-              <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-                <h1 className="font-display text-4xl font-bold text-foreground">{course.title}</h1>
-                <LearningStatusBadge status={course.learning_status} label={learningStatusLabel(course.learning_status, dictionary.learning)} />
-              </div>
+      <LearningShell locale={locale} dir={locale === "ar" ? "rtl" : "ltr"} labels={shell}>
+        {/* A reading measure rather than the full container. The Course page is a list of Lesson
+            titles and their state: run across 1200px, a section heading and its own chevron end up
+            a hand's width apart, and a file name and its download control further still. */}
+        <div className="mx-auto max-w-4xl px-5 py-8 sm:px-6 sm:py-10">
+          <Button asChild variant="ghost" size="sm" className="-ms-3">
+            <Link href={`/${locale}/learn/dashboard`}>
+              <Backward aria-hidden />
+              {dictionary.learning.myCourses}
+            </Link>
+          </Button>
+
+          <header className="mt-3 border-b border-border pb-6">
+            <p className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
+              {dictionary.learning.courseHome}
+            </p>
+            <h1 className="mt-2 font-display text-2xl font-bold text-foreground sm:text-3xl">
+              {course.title}
+            </h1>
+            <div className="mt-4">
+              <LearningStatusBadge
+                status={course.learning_status}
+                label={learningStatusLabel(course.learning_status, dictionary.learning)}
+                detail={learningStatusDetail(course.learning_status, dictionary.learning)}
+              />
             </div>
-            <LearningLocaleToggle locale={locale} label={dictionary.meta.switchToAria} />
-          </div>
-          <div className="mt-5 space-y-2">
-            <LearningProgressSummary progress={course.progress} labels={progressLabels(dictionary.learning)} locale={locale} />
-            <AccessUntil expiresAt={course.expires_at} labels={accessLabels(dictionary.learning)} locale={locale} />
-          </div>
-        </header>
-        <CourseOutline
-          courseId={course.course_id}
-          learningStatus={course.learning_status}
-          sections={course.sections}
-          locale={locale}
-          labels={outlineLabels(dictionary.learning)}
-        />
-        {/* Offered only when this active read issued a COURSE context (D-065). With no target the
-            client component is not mounted at all, so no report copy enters the payload either. */}
-        {courseReportTargets(course).length > 0 ? (
-          <div className="mt-6">
-            <ReportTargetActions
-              targets={courseReportTargets(course)}
-              scopePrefix={course.course_id}
+            <div className="mt-4 max-w-sm">
+              <LearningProgressSummary
+                progress={course.progress}
+                labels={progressLabels(dictionary.learning)}
+                locale={locale}
+              />
+              <AccessUntil
+                className="mt-2"
+                expiresAt={course.expires_at}
+                labels={accessLabels(dictionary.learning)}
+                locale={locale}
+              />
+            </div>
+          </header>
+
+          {/* The only completion state this product can honestly show: every Lesson the server
+              counts is done. No certificate, no score, no badge — none of those exist. */}
+          {complete ? (
+            <Card data-testid="course-complete" className="mt-6 flex items-start gap-3 p-5">
+              <CheckCircle2 aria-hidden className="mt-0.5 size-5 shrink-0 text-primary" />
+              <div>
+                <h2 className="font-display text-base font-bold text-foreground">
+                  {dictionary.learning.courseCompleteTitle}
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {dictionary.learning.courseCompleteBody}
+                </p>
+              </div>
+            </Card>
+          ) : null}
+
+          {/* The contents are a navigation landmark — they are a named list of routes into the
+              Course, which is what a Student uses them for — and the sections are the page's own
+              second level, so the disclosure triggers are `h2` with no separate heading above them
+              competing for the same rank. */}
+          <p className="mt-8 text-xs text-muted-foreground">{dictionary.learning.completionAutomatic}</p>
+          <nav aria-label={dictionary.learning.courseOutline} className="mt-4">
+            <CourseCurriculum
+              courseID={course.course_id}
               locale={locale}
-              labels={reportLabels(dictionary.learning)}
+              sections={sections}
+              labels={curriculumLabels(dictionary.learning)}
+              headingLevel="h2"
+              materialsByLesson={materialsByLesson}
             />
-          </div>
-        ) : null}
-        <Link
-          href={`/${locale}/learn/dashboard`}
-          className="mt-8 inline-flex rounded-md border border-border px-4 py-2 font-semibold text-foreground hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-        >
-          {dictionary.learning.dashboardTitle}
-        </Link>
-      </main>
+          </nav>
+
+          {/* Offered only when this active read issued a COURSE context (D-065). With no target the
+              client component is not mounted at all, so no report copy enters the payload either. */}
+          {courseReportTargets(course).length > 0 ? (
+            <div className="mt-8">
+              <ReportTargetActions
+                targets={courseReportTargets(course)}
+                scopePrefix={course.course_id}
+                locale={locale}
+                labels={reportLabels(dictionary.learning)}
+              />
+            </div>
+          ) : null}
+        </div>
+      </LearningShell>
     );
   } catch {
     return (
-      <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto min-h-screen max-w-3xl px-5 py-10 sm:px-6">
-        <div className="space-y-5">
-          <div className="flex justify-end"><LearningLocaleToggle locale={locale} label={dictionary.meta.switchToAria} /></div>
+      <LearningShell locale={locale} dir={locale === "ar" ? "rtl" : "ltr"} labels={shell}>
+        <div className="mx-auto max-w-3xl px-5 py-10 sm:px-6">
           <LearningUnavailable labels={unavailableLabels(dictionary.learning)} />
         </div>
-      </main>
+      </LearningShell>
     );
   }
 }

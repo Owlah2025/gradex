@@ -71,7 +71,7 @@ export function VerificationRequestForm() {
           onChange={(event) => setEmail(event.target.value)}
         />
       </Field>
-      <Button className="w-full" size="lg" disabled={submitting}>
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.verify.sending : t.auth.verify.send}
       </Button>
     </form>

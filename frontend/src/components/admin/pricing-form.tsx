@@ -89,7 +89,7 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
 
       setSuccessMsg(
         isAr
-          ? `تم تحديث سعر ${targetType === "COURSE" ? "الدورة" : "القسم"} بنجاح`
+          ? `تم تحديث سعر ${targetType === "COURSE" ? "المقرر" : "القسم"} بنجاح`
           : `Successfully updated ${targetType === "COURSE" ? "Course" : "Section"} price`
       );
       setReasonInput("");
@@ -110,13 +110,13 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
   return (
     <div className="space-y-4">
       {successMsg && (
-        <div data-testid="pricing-success" className="p-3 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-medium">
+        <div data-testid="pricing-success" className="p-3 bg-gx-success-soft text-gx-success-strong border border-gx-success/25 rounded-lg text-xs font-medium">
           {successMsg}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-lg border border-slate-200 dark:border-slate-700 space-y-4">
-        <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <form onSubmit={handleSubmit} className="bg-muted p-4 rounded-lg border border-border space-y-4">
+        <h4 className="text-sm font-semibold text-foreground">
           {isAr ? "تحديد سعر جديد (مسؤول النظام)" : "Set Price (Admin Only)"}
         </h4>
 
@@ -133,9 +133,9 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
                 setTargetType(nextTarget);
                 if (nextTarget === "COURSE") setSelectedSectionID("");
               }}
-              className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
+              className="w-full p-2 border rounded text-xs bg-white border-border"
             >
-              <option value="COURSE">{isAr ? "الدورة كاملة (Course)" : "Course Level"}</option>
+              <option value="COURSE">{isAr ? "المقرر كاملة (Course)" : "Course Level"}</option>
               <option value="SECTION" disabled={sections.length === 0}>{isAr ? "قسم كورس (Section)" : "Section Level"}</option>
             </select>
           </div>
@@ -149,7 +149,7 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
                 value={selectedSectionID}
                 onChange={(e) => setSelectedSectionID(e.target.value)}
                 data-testid="pricing-section-select"
-                className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
+                className="w-full p-2 border rounded text-xs bg-white border-border"
               >
                 <option value="">{isAr ? "اختر قسماً" : "Select a Section"}</option>
                 {sections.map((section) => (
@@ -170,9 +170,9 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
               value={priceFilsInput}
               data-testid="pricing-amount"
               onChange={(e) => setPriceFilsInput(e.target.value === "" ? "" : Number(e.target.value))}
-              className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700 font-mono"
+              className="w-full p-2 border rounded text-xs bg-white border-border font-mono"
             />
-            <span className="text-[10px] text-slate-500 font-mono block mt-0.5">
+            <span className="text-[10px] text-muted-foreground font-mono block mt-0.5">
               {priceFilsInput !== ""
                 ? `= ${formatFils(Number(priceFilsInput), locale)} (${isAr ? "١ د.ك = ١٠٠٠ فلس" : "1 KWD = 1000 fils"})`
                 : ""}
@@ -189,18 +189,18 @@ export function PricingForm({ courseID, locale, sections, onSuccess }: PricingFo
               data-testid="pricing-reason"
               onChange={(e) => setReasonInput(e.target.value)}
               placeholder={isAr ? "مثال: تحديث تسعير الفصل الدراسي" : "e.g., Semester pricing adjustment"}
-              className="w-full p-2 border rounded text-xs bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-700"
+              className="w-full p-2 border rounded text-xs bg-white border-border"
             />
           </div>
         </div>
 
-        {formError && <p className="text-xs text-rose-600 font-medium">{formError}</p>}
+        {formError && <p className="text-xs text-destructive font-medium">{formError}</p>}
 
         <button
           type="submit"
           data-testid="pricing-submit"
           disabled={isSubmitting}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded text-xs font-semibold transition"
+          className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-gx-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-50"
         >
           {isSubmitting
             ? isAr

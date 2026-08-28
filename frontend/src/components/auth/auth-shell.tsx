@@ -4,18 +4,45 @@ import Link from "next/link";
 import { LockKeyhole } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { LanguageToggle } from "@/components/common/language-toggle";
+import { routes } from "@/components/layout/nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
+
+/**
+ * Who this screen is talking to.
+ *
+ * The panel used to be one fixed thing: the eyebrow read "Student access" and
+ * the three steps read Create account → Confirm email → Sign in, with the first
+ * one always lit. That is right for exactly one screen. An Instructor opening a
+ * staff invitation was told they were creating a Student account; someone
+ * already signed in, changing a required password, was told the same. And on
+ * the sign-in screen itself the lit step said "Create account" — the one thing
+ * the visitor was demonstrably not doing.
+ *
+ * So the audience picks the panel, and the screen says which of its steps it
+ * actually is.
+ */
+export type AuthAudience = "student" | "staff" | "session";
 
 export function AuthShell({
   title,
   intro,
+  audience = "student",
+  /**
+   * Zero-based index of the step this screen is. Omitted where the journey has
+   * no steps, or where the screen is a side path — recovery is not step three
+   * of registering, so it lights nothing rather than lighting the wrong thing.
+   */
+  activeStep,
   children,
 }: {
   title: string;
   intro: string;
+  audience?: AuthAudience;
+  activeStep?: number;
   children: React.ReactNode;
 }) {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
+  const panel = t.auth.shell[audience];
   return (
     <main id="main" className="min-h-dvh bg-background lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.72fr)]">
       <section className="flex min-h-dvh flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8 xl:px-20">
@@ -26,7 +53,7 @@ export function AuthShell({
 
         <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center py-12 sm:py-16">
           <p className="mb-3 font-mono text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-            {t.auth.shell.eyebrow}
+            {panel.eyebrow}
           </p>
           <h1 className="max-w-xl text-3xl font-extrabold tracking-tight sm:text-4xl">
             {title}
@@ -38,7 +65,12 @@ export function AuthShell({
         </div>
 
         <footer className="flex flex-col items-start justify-between gap-3 border-t pt-5 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
-          <Link className="font-semibold hover:text-foreground" href="/">
+          {/* The copy says courses, so the link goes to the courses. It used to
+              point at the landing page, which is a different promise. */}
+          <Link
+            className="font-semibold hover:text-foreground"
+            href={routes.catalogue(locale)}
+          >
             {t.auth.common.backHome}
           </Link>
           <span className="flex items-center gap-2">
@@ -62,35 +94,47 @@ export function AuthShell({
             Gradex · Kuwait
           </span>
           <h2 className="mt-8 max-w-md text-4xl font-extrabold leading-tight text-white xl:text-5xl">
-            {t.auth.shell.sideTitle}
+            {panel.sideTitle}
           </h2>
           <p className="mt-5 max-w-md text-lg leading-8 text-white/70">
-            {t.auth.shell.sideBody}
+            {panel.sideBody}
           </p>
         </div>
 
-        <ol className="relative mt-12 space-y-0">
-          {t.auth.shell.steps.map((step, index) => (
-            <li key={step} className="relative flex min-h-20 items-start gap-5">
-              {index < t.auth.shell.steps.length - 1 ? (
-                <span
-                  className="absolute start-[15px] top-8 h-12 w-px bg-white/25"
-                  aria-hidden
-                />
-              ) : null}
-              <span
-                className={`relative z-10 grid size-8 shrink-0 place-items-center rounded-full border font-mono text-xs font-bold ${
-                  index === 0
-                    ? "border-gx-orange bg-gx-orange text-gx-navy"
-                    : "border-white/35 bg-gx-navy text-white/70"
-                }`}
-              >
-                {index + 1}
-              </span>
-              <span className="pt-1 font-display text-lg font-bold">{step}</span>
-            </li>
-          ))}
-        </ol>
+        {panel.steps.length > 0 ? (
+          <ol className="relative mt-12 space-y-0">
+            {panel.steps.map((step, index) => {
+              const current = index === activeStep;
+              return (
+                <li key={step} className="relative flex min-h-20 items-start gap-5">
+                  {index < panel.steps.length - 1 ? (
+                    <span
+                      className="absolute start-[15px] top-8 h-12 w-px bg-white/25"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <span
+                    className={`relative z-10 grid size-8 shrink-0 place-items-center rounded-full border font-mono text-xs font-bold ${
+                      current
+                        ? "border-gx-orange bg-gx-orange text-gx-navy"
+                        : "border-white/35 bg-gx-navy text-white/70"
+                    }`}
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="pt-1 font-display text-lg font-bold">
+                    {step}
+                    {/* The lit marker is a colour difference on a decorative
+                        list. Said in text as well, so it is not colour-only. */}
+                    {current ? (
+                      <span className="sr-only"> — {t.auth.common.currentStep}</span>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : null}
       </aside>
     </main>
   );

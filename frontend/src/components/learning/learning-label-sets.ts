@@ -28,14 +28,22 @@ type LearningLabels = Dictionary["learning"];
  * would type-check while still serializing every key the value actually carries.
  */
 
-export type StatusLabels = Pick<LearningLabels, "active" | "expired">;
+export type StatusLabels = Pick<LearningLabels, "active" | "expired" | "activeDetail" | "expiredDetail">;
 export type ProgressLabels = Pick<LearningLabels, "progress" | "completedLessons">;
 export type AccessLabels = Pick<LearningLabels, "accessUntil" | "noExpiry">;
 export type UnavailableLabels = Pick<LearningLabels, "unavailableTitle" | "unavailableBody">;
 
-export type LessonProgressLabels = Pick<
+/**
+ * What a Lesson's own state is called.
+ *
+ * The raw playback position deliberately left this set. "Progress: 145 seconds · Not completed" was
+ * a database row read aloud: seconds are the reporter's unit, not a fact a Student has any use for,
+ * and the Lesson Player already returns them to the exact second they stopped at. What remains is
+ * the state itself, which is the part they can act on.
+ */
+export type LessonStateLabels = Pick<
   LearningLabels,
-  "positionSeconds" | "completed" | "notCompleted"
+  "completed" | "lessonInProgress" | "lessonNotStarted"
 >;
 
 export type MaterialsLabels = Pick<
@@ -52,14 +60,25 @@ export type MaterialsLabels = Pick<
   | "downloadUnavailable"
 >;
 
-export type OutlineLabels = Pick<LearningLabels, "courseOutline"> &
-  LessonProgressLabels &
-  MaterialsLabels;
+export type CurriculumLabels = Pick<
+  LearningLabels,
+  "currentLessonLabel" | "completedLessons" | "files"
+> &
+  LessonStateLabels;
 
 export type NavigationLabels = Pick<
   LearningLabels,
   "lessonNavigation" | "previousLesson" | "nextLesson" | "firstLesson" | "lastLesson"
 >;
+
+/** The learning frame's own copy: navigation and the two sheet controls, and nothing else. */
+export type ShellLabels = {
+  learningNavigation: string;
+  myCourses: string;
+  openMenu: string;
+  closeMenu: string;
+  skipToContent: string;
+};
 
 /**
  * learningStatusLabel resolves the badge text on the server.
@@ -70,6 +89,11 @@ export type NavigationLabels = Pick<
  */
 export function learningStatusLabel(status: LearningStatus, labels: StatusLabels): string {
   return status === "expired" ? labels.expired : labels.active;
+}
+
+/** The same resolution for the sentence beside the badge, for the same reason. */
+export function learningStatusDetail(status: LearningStatus, labels: StatusLabels): string {
+  return status === "expired" ? labels.expiredDetail : labels.activeDetail;
 }
 
 export function progressLabels(labels: LearningLabels): ProgressLabels {
@@ -84,11 +108,11 @@ export function unavailableLabels(labels: LearningLabels): UnavailableLabels {
   return { unavailableTitle: labels.unavailableTitle, unavailableBody: labels.unavailableBody };
 }
 
-export function lessonProgressLabels(labels: LearningLabels): LessonProgressLabels {
+export function lessonStateLabels(labels: LearningLabels): LessonStateLabels {
   return {
-    positionSeconds: labels.positionSeconds,
     completed: labels.completed,
-    notCompleted: labels.notCompleted,
+    lessonInProgress: labels.lessonInProgress,
+    lessonNotStarted: labels.lessonNotStarted,
   };
 }
 
@@ -107,11 +131,12 @@ export function materialsLabels(labels: LearningLabels): MaterialsLabels {
   };
 }
 
-export function outlineLabels(labels: LearningLabels): OutlineLabels {
+export function curriculumLabels(labels: LearningLabels): CurriculumLabels {
   return {
-    courseOutline: labels.courseOutline,
-    ...lessonProgressLabels(labels),
-    ...materialsLabels(labels),
+    currentLessonLabel: labels.currentLessonLabel,
+    completedLessons: labels.completedLessons,
+    files: labels.files,
+    ...lessonStateLabels(labels),
   };
 }
 
@@ -122,5 +147,15 @@ export function navigationLabels(labels: LearningLabels): NavigationLabels {
     nextLesson: labels.nextLesson,
     firstLesson: labels.firstLesson,
     lastLesson: labels.lastLesson,
+  };
+}
+
+export function shellLabels(dictionary: Dictionary): ShellLabels {
+  return {
+    learningNavigation: dictionary.learning.learningNavigation,
+    myCourses: dictionary.learning.myCourses,
+    openMenu: dictionary.meta.openMenu,
+    closeMenu: dictionary.meta.closeMenu,
+    skipToContent: dictionary.meta.skipToContent,
   };
 }

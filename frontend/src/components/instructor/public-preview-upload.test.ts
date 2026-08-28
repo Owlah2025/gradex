@@ -3,14 +3,28 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-const source = readFileSync(join(process.cwd(), "src/components/instructor/public-preview-upload.tsx"), "utf8");
+const read = (relative: string) => readFileSync(join(process.cwd(), relative), "utf8");
+
+const source = read("src/components/instructor/public-preview-upload.tsx");
 
 test("public preview authoring exposes selected, replace, remove, and localized absence states", () => {
   assert.match(source, /hasPreview \? t\.selected : t\.absent/);
   assert.match(source, /hasPreview \? t\.replace : t\.choose/);
   assert.match(source, /onClick=\{\(\) => void remove\(\)\}/);
-  assert.match(source, /No public preview is selected for this revision/);
-  assert.match(source, /لا توجد معاينة عامة مختارة لهذه المراجعة/);
+  // The copy moved out of a local bilingual table and into the shared dictionaries, so both
+  // languages are asserted where they now live.
+  assert.match(
+    read("src/lib/i18n/dictionaries/en.ts"),
+    /absent: "No public preview is attached to this revision\."/,
+  );
+  assert.match(
+    read("src/lib/i18n/dictionaries/ar.ts"),
+    /absent: "لا توجد معاينة عامة مرفقة بهذه المراجعة\."/,
+  );
+  assert.ok(
+    !/isAr \?/.test(source),
+    "the public preview surface must not branch its UI copy on the locale in place",
+  );
 });
 
 test("public preview authoring binds upload and commands to the revision and rejects non-ready processing", () => {

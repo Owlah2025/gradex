@@ -6,12 +6,14 @@ import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { completePasswordReset } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import {
   captureTokenFromFragment,
   isFragmentTokenSpent,
+  passwordMaximum,
+  passwordMinimum,
   releaseFragmentToken,
   scrubTokenFragment,
   validPassword,
@@ -182,28 +184,32 @@ export function RecoveryResetForm() {
   return (
     <form className="space-y-5" onSubmit={submit} noValidate>
       {error ? <Alert tone="error" title={t.auth.resetPassword[error]} /> : null}
-      <Field label={t.auth.resetPassword.password} htmlFor="reset-password">
-        <Input
+      <Field
+        label={t.auth.resetPassword.password}
+        htmlFor="reset-password"
+        hint={t.auth.common.passwordRule}
+      >
+        <PasswordInput
           id="reset-password"
           ref={passwordRef}
-          type="password"
           autoComplete="new-password"
-          dir="ltr"
+          minLength={passwordMinimum}
+          maxLength={passwordMaximum}
           value={password}
           onChange={(event) => setPassword(event.target.value)}
+          aria-describedby="reset-password-hint"
         />
       </Field>
       <Field label={t.auth.resetPassword.confirm} htmlFor="reset-password-confirm">
-        <Input
+        <PasswordInput
           id="reset-password-confirm"
-          type="password"
           autoComplete="new-password"
-          dir="ltr"
+          maxLength={passwordMaximum}
           value={confirmation}
           onChange={(event) => setConfirmation(event.target.value)}
         />
       </Field>
-      <Button className="w-full" size="lg" disabled={submitting}>
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.resetPassword.submitting : t.auth.resetPassword.submit}
       </Button>
     </form>

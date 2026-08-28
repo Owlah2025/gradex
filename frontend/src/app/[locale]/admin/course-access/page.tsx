@@ -1,23 +1,24 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useLocale } from "@/lib/i18n/locale-provider";
+import { useCallback, useEffect, useState } from "react";
 import {
-  CourseAccessInvitation,
-  AdminEntitlementDetail,
-  createCourseAccessInvitation,
-  listAdminCourseAccessInvitations,
-  approveCourseAccessInvitation,
-  rejectCourseAccessInvitation,
-  cancelCourseAccessInvitation,
-  resendCourseAccessInvitation,
-  setCourseDefaultAccessExpiry,
-  getAdminEntitlementDetail,
   adjustEntitlementExpiry,
+  approveCourseAccessInvitation,
+  cancelCourseAccessInvitation,
+  createCourseAccessInvitation,
+  getAdminEntitlementDetail,
+  listAdminCourseAccessInvitations,
+  rejectCourseAccessInvitation,
+  resendCourseAccessInvitation,
   revokeEntitlement,
+  setCourseDefaultAccessExpiry,
+  type AdminEntitlementDetail,
+  type CourseAccessInvitation,
 } from "@/lib/api/access";
+import { describeApiError } from "@/lib/api/api-error";
 import { getPublicCourses } from "@/lib/api/public-catalog";
-import { ProblemError } from "@/lib/api/problem";
+import { formatDate, formatDateTime } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/locale-provider";
 import { PublishedCourseSelector } from "@/components/admin/published-course-selector";
 import { PurchaseRequestsPanel } from "@/components/admin/purchase-requests";
 import {
@@ -26,91 +27,136 @@ import {
   invitationCourseLabel,
   type PublishedCourseOption,
 } from "@/components/admin/published-courses";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { LoadingState } from "@/components/common/loading-state";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { StatusBadge } from "@/components/common/status-badge";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  WorkspacePage,
+  WorkspacePageHeader,
+  WorkspaceSection,
+} from "@/components/layout/workspace-page";
 
-function getProblemErrorMessage(e: unknown, fallback: string): string {
-  if (e instanceof ProblemError) {
-    return e.problem.detail || e.problem.title || fallback;
-  }
-  if (
-    e &&
-    typeof e === "object" &&
-    "message" in e &&
-    typeof e.message === "string"
-  ) {
-    return e.message;
-  }
-  return fallback;
-}
+/**
+ * Course access operations.
+ *
+ * # WHAT THIS SCREEN IS, AND WHAT IT REFUSES TO LOOK LIKE
+ *
+ * Gradex grants Course access by hand. Money moves somewhere the product cannot see, an
+ * Administrator records that it moved, and the grant follows. Nothing here settles a payment, and
+ * the copy is written so that no control on the page could be mistaken for one.
+ *
+ * # THE FIVE STATES AN ADMIN ACTUALLY READS
+ *
+ * The queue used to print `inv.state` — PENDING_ADMIN_APPROVAL — into a coloured pill, and the
+ * access record printed ACTIVE and REVOKED. Every one of those is now the state said as what it
+ * means for the two people involved, with the sentence beside it that a colour cannot carry. The
+ * enums stay in the payload, in the API call, and in `data-testid`, which is where they belong.
+ *
+ * # AND NO IDENTIFIERS
+ *
+ * An invitation was previously named to the Admin by its UUID — in the rejection dialog, in the
+ * success notice, in the resend notice. An invitation is named by the person it was sent to and the
+ * Course it is for. The identifier is still what the API is called with and still what the row's
+ * test id is built from; it is not reading matter.
+ */
+
+type Load = "loading" | "ready" | "failed";
+
+/** One page of the server's invitation list. The screen says so rather than implying completeness. */
+const QUEUE_PAGE_LIMIT = 100;
+
+/** Which confirmation is open, and what it is about. */
+type Pending =
+  | { kind: "approve" | "reject" | "resend" | "cancel"; invitation: CourseAccessInvitation }
+  | { kind: "revoke" };
+
+const INVITATION_TONE: Record<
+  CourseAccessInvitation["state"],
+  "default" | "accent" | "success" | "neutral"
+> = {
+  PENDING_STUDENT_ACCEPTANCE: "default",
+  PENDING_ADMIN_APPROVAL: "accent",
+  APPROVED: "success",
+  REJECTED: "neutral",
+  CANCELLED: "neutral",
+};
 
 export default function AdminCourseAccessPage() {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
+  const copy = t.adminAccess;
+
   const [invitations, setInvitations] = useState<CourseAccessInvitation[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  // What the server says exists, against what this page asked for. The queue is a bounded page, and
+  // a directory that shows a hundred rows while saying nothing reads as the whole list — which is
+  // the Tranche A lesson about a server-bounded directory not being an actionable queue.
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [queueLoad, setQueueLoad] = useState<Load>("loading");
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  // The one Course context both Admin operations act on. The Admin picks a
-  // published Course by title; the identifier below is never typed by hand.
-  const [courseOptions, setCourseOptions] = useState<PublishedCourseOption[]>(
-    [],
-  );
-  const [coursesLoading, setCoursesLoading] = useState<boolean>(true);
+  const [courseOptions, setCourseOptions] = useState<PublishedCourseOption[]>([]);
+  const [coursesLoading, setCoursesLoading] = useState(true);
   const [coursesError, setCoursesError] = useState<string | null>(null);
-  const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+  const [selectedCourseId, setSelectedCourseId] = useState("");
 
-  // Form states: Expiry Configuration
-  const [expiryDate, setExpiryDate] = useState<string>("");
-  const [expiryReason, setExpiryReason] = useState<string>("");
-  const [expirySubmitting, setExpirySubmitting] = useState<boolean>(false);
+  const [expiryDate, setExpiryDate] = useState("");
+  const [expiryReason, setExpiryReason] = useState("");
+  const [expirySubmitting, setExpirySubmitting] = useState(false);
 
-  // Form states: Create Invitation
-  const [createEmail, setCreateEmail] = useState<string>("");
-  const [createNote, setCreateNote] = useState<string>("");
-  const [createRef, setCreateRef] = useState<string>("");
-  const [createSubmitting, setCreateSubmitting] = useState<boolean>(false);
+  const [createEmail, setCreateEmail] = useState("");
+  const [createNote, setCreateNote] = useState("");
+  const [createRef, setCreateRef] = useState("");
+  const [createSubmitting, setCreateSubmitting] = useState(false);
 
-  // Modal state: Reject Reason
-  const [rejectingInvId, setRejectingInvId] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState<string>("");
-  const [rejectSubmitting, setRejectSubmitting] = useState<boolean>(false);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  // Modal state: Entitlement Detail — the AD07 surface. It is where an
-  // existing grant is inspected and, under BR-026, extended, shortened, or
-  // revoked. The Admin reaches it from a queue row, never by identifier.
-  const [detailModal, setDetailModal] = useState<AdminEntitlementDetail | null>(
+  const [detail, setDetail] = useState<AdminEntitlementDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailNotice, setDetailNotice] = useState<{ tone: "success" | "error"; text: string } | null>(
     null,
   );
-  const [detailLoading, setDetailLoading] = useState<boolean>(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [detailNotice, setDetailNotice] = useState<string | null>(null);
-  const [detailBusy, setDetailBusy] = useState<boolean>(false);
-  const [adjustDate, setAdjustDate] = useState<string>("");
-  const [adjustReason, setAdjustReason] = useState<string>("");
-  const [adjustSupportRef, setAdjustSupportRef] = useState<string>("");
-  const [revokeReason, setRevokeReason] = useState<string>("");
-  const [revokeSupportRef, setRevokeSupportRef] = useState<string>("");
-  const [revokeConfirming, setRevokeConfirming] = useState<boolean>(false);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [adjustDate, setAdjustDate] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustSupportRef, setAdjustSupportRef] = useState("");
+  const [revokeReason, setRevokeReason] = useState("");
+  const [revokeSupportRef, setRevokeSupportRef] = useState("");
 
   const fetchInvitations = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+    setQueueLoad("loading");
     try {
-      const res = await listAdminCourseAccessInvitations(1, 100, locale);
-      if (res && res.invitations) {
-        setInvitations(res.invitations);
-      }
-    } catch (e: unknown) {
-      setError(getProblemErrorMessage(e, "Failed to fetch invitations"));
-    } finally {
-      setLoading(false);
+      const res = await listAdminCourseAccessInvitations(1, QUEUE_PAGE_LIMIT, locale);
+      setInvitations(res?.invitations ?? []);
+      setQueueTotal(res?.total ?? res?.invitations?.length ?? 0);
+      setQueueLoad("ready");
+    } catch {
+      setQueueLoad("failed");
     }
   }, [locale]);
 
   /**
-   * The published catalogue is the authoritative list of Courses a launch
-   * grant can target: published, not emergency-suspended, not retired, live
-   * revision. The second read only supplies the other-locale title, so its
-   * failure narrows the label rather than the Course list.
+   * The published catalogue is the authoritative list of Courses a launch grant can target:
+   * published, not emergency-suspended, not retired, live revision. The second read only supplies
+   * the other-locale title, so its failure narrows the label rather than the Course list.
    */
   const fetchCourses = useCallback(async () => {
     setCoursesLoading(true);
@@ -121,878 +167,828 @@ export default function AdminCourseAccessPage() {
         getPublicCourses(locale),
         getPublicCourses(alternateLocale).catch(() => null),
       ]);
-      const options = buildPublishedCourseOptions(
-        primary.items ?? [],
-        alternate?.items ?? [],
-      );
+      const options = buildPublishedCourseOptions(primary.items ?? [], alternate?.items ?? []);
       setCourseOptions(options);
-      // A Course that left the published catalogue must not stay silently
-      // selected under a stale label.
+      // A Course that left the published catalogue must not stay silently selected under a stale
+      // label.
       setSelectedCourseId((current) =>
-        current && options.some((option) => option.id === current)
-          ? current
-          : "",
+        current && options.some((option) => option.id === current) ? current : "",
       );
-    } catch (e: unknown) {
+    } catch (cause) {
       setCourseOptions([]);
       setSelectedCourseId("");
-      setCoursesError(
-        getProblemErrorMessage(e, "Failed to load published Courses"),
-      );
+      setCoursesError(describeApiError(cause, locale));
     } finally {
       setCoursesLoading(false);
     }
   }, [locale]);
 
   useEffect(() => {
-    fetchInvitations();
+    void fetchInvitations();
   }, [fetchInvitations]);
 
   useEffect(() => {
-    fetchCourses();
+    void fetchCourses();
   }, [fetchCourses]);
 
   const selectedCourse = findPublishedCourse(courseOptions, selectedCourseId);
   const courseLabel = (courseID: string): string =>
-    invitationCourseLabel(courseOptions, courseID);
+    invitationCourseLabel(courseOptions, courseID, copy.queue.unlistedCourse);
 
-  const handleSetExpiry = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedCourseId || !expiryDate || !expiryReason) return;
+  const handleSetExpiry = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedCourseId || !expiryDate || !expiryReason.trim()) return;
     setExpirySubmitting(true);
-    setError(null);
-    setSuccess(null);
+    setNotice(null);
     try {
-      await setCourseDefaultAccessExpiry(
-        selectedCourseId,
-        expiryDate,
-        expiryReason,
-        locale,
-      );
-      setSuccess(
-        `Default access expiry configured for ${selectedCourse?.title ?? courseLabel(selectedCourseId)}`,
-      );
+      await setCourseDefaultAccessExpiry(selectedCourseId, expiryDate, expiryReason.trim(), locale);
+      setNotice({ tone: "success", text: copy.expiry.saved });
       setExpiryDate("");
       setExpiryReason("");
-    } catch (err: unknown) {
-      setError(
-        getProblemErrorMessage(err, "Failed to set default access expiry"),
-      );
+    } catch (cause) {
+      setNotice({ tone: "error", text: describeApiError(cause, locale) || copy.expiry.failed });
     } finally {
       setExpirySubmitting(false);
     }
   };
 
-  const handleCreateInvitation = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateInvitation = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!selectedCourseId || !createEmail) return;
     setCreateSubmitting(true);
-    setError(null);
-    setSuccess(null);
+    setNotice(null);
     try {
-      const created = await createCourseAccessInvitation(
+      await createCourseAccessInvitation(
         selectedCourseId,
         createEmail,
         createNote || undefined,
         createRef || undefined,
         locale,
       );
-      setSuccess(
-        `Course access invitation created for ${created?.email || createEmail} on ${
-          selectedCourse?.title ?? courseLabel(selectedCourseId)
-        }`,
-      );
+      setNotice({ tone: "success", text: copy.invite.sent });
       setCreateEmail("");
       setCreateNote("");
       setCreateRef("");
-      fetchInvitations();
-    } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Failed to create invitation"));
+      await fetchInvitations();
+    } catch (cause) {
+      setNotice({ tone: "error", text: describeApiError(cause, locale) || copy.invite.failed });
     } finally {
       setCreateSubmitting(false);
     }
   };
 
-  const handleApprove = async (id: string) => {
-    setError(null);
-    setSuccess(null);
+  /**
+   * Every confirmed queue decision runs through here.
+   *
+   * One path, so all four obey the same rule: the API is called exactly once, the queue is re-read
+   * from the server rather than patched locally, and a refusal is reported as a refusal instead of
+   * leaving a success notice standing over a change that did not happen.
+   */
+  const confirmQueueAction = async () => {
+    if (!pending || pending.kind === "revoke" || busy) return;
+    const { kind, invitation } = pending;
+    setBusy(true);
+    setNotice(null);
     try {
-      const res = await approveCourseAccessInvitation(id, locale);
-      // The grant is now reachable from its queue row; the Admin never needs
-      // the identifier it was previously shown here.
-      setSuccess(
-        `Invitation approved! Course access is active until ${
-          res?.entitlement?.access_ends_at
-            ? new Date(res.entitlement.access_ends_at).toLocaleString()
-            : "the configured expiry"
-        }. Use "Manage access" on the row to change or revoke it.`,
-      );
-      fetchInvitations();
-    } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Approval failed"));
-    }
-  };
-
-  const handleRejectSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rejectingInvId || !rejectReason.trim()) return;
-    setRejectSubmitting(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await rejectCourseAccessInvitation(
-        rejectingInvId,
-        rejectReason.trim(),
-        locale,
-      );
-      setSuccess(`Invitation ${rejectingInvId} rejected.`);
-      setRejectingInvId(null);
-      setRejectReason("");
-      fetchInvitations();
-    } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Rejection failed"));
+      if (kind === "approve") {
+        await approveCourseAccessInvitation(invitation.id, locale);
+        setNotice({ tone: "success", text: copy.queue.approved });
+      } else if (kind === "reject") {
+        await rejectCourseAccessInvitation(invitation.id, rejectReason.trim(), locale);
+        setNotice({ tone: "success", text: copy.queue.rejected });
+        setRejectReason("");
+      } else if (kind === "resend") {
+        await resendCourseAccessInvitation(invitation.id, locale);
+        setNotice({ tone: "success", text: copy.queue.resent });
+      } else {
+        await cancelCourseAccessInvitation(invitation.id, locale);
+        setNotice({ tone: "success", text: copy.queue.cancelled });
+      }
+      await fetchInvitations();
+    } catch (cause) {
+      setNotice({ tone: "error", text: describeApiError(cause, locale) || copy.genericFailure });
     } finally {
-      setRejectSubmitting(false);
-    }
-  };
-
-  const handleCancel = async (id: string) => {
-    setError(null);
-    setSuccess(null);
-    try {
-      await cancelCourseAccessInvitation(id, locale);
-      setSuccess(`Invitation ${id} cancelled.`);
-      fetchInvitations();
-    } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Cancellation failed"));
-    }
-  };
-
-  const handleResend = async (id: string) => {
-    setError(null);
-    setSuccess(null);
-    try {
-      await resendCourseAccessInvitation(id, locale);
-      setSuccess(
-        `New acceptance link generated and queued for invitation ${id}.`,
-      );
-      fetchInvitations();
-    } catch (err: unknown) {
-      setError(getProblemErrorMessage(err, "Resend failed"));
+      setBusy(false);
+      setPending(null);
     }
   };
 
   const resetEntitlementForms = () => {
-    setDetailError(null);
     setDetailNotice(null);
     setAdjustDate("");
     setAdjustReason("");
     setAdjustSupportRef("");
     setRevokeReason("");
     setRevokeSupportRef("");
-    setRevokeConfirming(false);
   };
 
   const handleViewEntitlement = async (entitlementId: string) => {
     setDetailLoading(true);
     resetEntitlementForms();
     try {
-      const detail = await getAdminEntitlementDetail(entitlementId, locale);
-      if (detail) {
-        setDetailModal(detail);
-      }
-    } catch (err: unknown) {
-      setError(
-        getProblemErrorMessage(err, "Failed to load entitlement details"),
-      );
+      const loaded = await getAdminEntitlementDetail(entitlementId, locale);
+      if (loaded) setDetail(loaded);
+    } catch (cause) {
+      setNotice({
+        tone: "error",
+        text: describeApiError(cause, locale) || copy.entitlement.loadFailed,
+      });
     } finally {
       setDetailLoading(false);
     }
   };
 
   const closeEntitlementDetail = () => {
-    setDetailModal(null);
+    setDetail(null);
     resetEntitlementForms();
   };
 
   /**
-   * One expiry adjustment. The direction is the server's business: a later
-   * date extends access, an earlier one shortens it, and a past date ends it
-   * immediately. The Admin supplies the date and the required reason.
+   * One expiry adjustment. The direction is the server's business: a later date extends access, an
+   * earlier one shortens it, and a past date ends it immediately. The Admin supplies the date and
+   * the required reason.
    */
-  const handleAdjustExpiry = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detailModal || !adjustDate || !adjustReason.trim() || detailBusy)
-      return;
+  const handleAdjustExpiry = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!detail || !adjustDate || !adjustReason.trim() || detailBusy) return;
     setDetailBusy(true);
-    setDetailError(null);
     setDetailNotice(null);
     try {
       const updated = await adjustEntitlementExpiry(
-        detailModal.entitlement.id,
+        detail.entitlement.id,
         adjustDate,
         adjustReason.trim(),
         {
           supportReference: adjustSupportRef.trim() || undefined,
-          // The revision the Admin is looking at. A grant changed by someone
-          // else in the meantime is refused, not silently overwritten.
-          expectedRevision: detailModal.entitlement.revision,
+          // The revision the Admin is looking at. A grant changed by someone else in the meantime
+          // is refused, not silently overwritten.
+          expectedRevision: detail.entitlement.revision,
         },
         locale,
       );
-      if (updated) setDetailModal(updated);
-      setDetailNotice("Access expiry updated.");
+      if (updated) setDetail(updated);
+      setDetailNotice({ tone: "success", text: copy.entitlement.adjusted });
       setAdjustDate("");
       setAdjustReason("");
       setAdjustSupportRef("");
-      fetchInvitations();
-    } catch (err: unknown) {
-      setDetailError(
-        getProblemErrorMessage(err, "Failed to update access expiry"),
-      );
+      await fetchInvitations();
+    } catch (cause) {
+      setDetailNotice({
+        tone: "error",
+        text: describeApiError(cause, locale) || copy.entitlement.adjustFailed,
+      });
     } finally {
       setDetailBusy(false);
     }
   };
 
-  const handleRevokeEntitlement = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detailModal || !revokeReason.trim() || !revokeConfirming || detailBusy)
-      return;
+  const handleRevokeEntitlement = async () => {
+    if (!detail || !revokeReason.trim() || detailBusy) return;
     setDetailBusy(true);
-    setDetailError(null);
     setDetailNotice(null);
     try {
       const updated = await revokeEntitlement(
-        detailModal.entitlement.id,
+        detail.entitlement.id,
         revokeReason.trim(),
         {
           supportReference: revokeSupportRef.trim() || undefined,
-          expectedRevision: detailModal.entitlement.revision,
+          expectedRevision: detail.entitlement.revision,
         },
         locale,
       );
-      if (updated) setDetailModal(updated);
-      setDetailNotice(
-        "Course access revoked. Enrollment and progress records are retained.",
-      );
+      if (updated) setDetail(updated);
+      setDetailNotice({ tone: "success", text: copy.entitlement.revoked });
       setRevokeReason("");
       setRevokeSupportRef("");
-      setRevokeConfirming(false);
-      fetchInvitations();
-    } catch (err: unknown) {
-      setDetailError(getProblemErrorMessage(err, "Failed to revoke access"));
+      await fetchInvitations();
+    } catch (cause) {
+      setDetailNotice({
+        tone: "error",
+        text: describeApiError(cause, locale) || copy.entitlement.revokeFailed,
+      });
     } finally {
       setDetailBusy(false);
+      setPending(null);
     }
   };
 
+  const queueDialog =
+    pending && pending.kind !== "revoke"
+      ? {
+          approve: {
+            title: copy.queue.approveTitle,
+            body: copy.queue.approveBody,
+            confirmLabel: copy.queue.approveAccept,
+            tone: "default" as const,
+          },
+          reject: {
+            title: copy.queue.rejectTitle,
+            body: copy.queue.rejectBody,
+            confirmLabel: copy.queue.rejectAccept,
+            tone: "destructive" as const,
+          },
+          resend: {
+            title: copy.queue.resendTitle,
+            body: copy.queue.resendBody,
+            confirmLabel: copy.queue.resendAccept,
+            tone: "default" as const,
+          },
+          cancel: {
+            title: copy.queue.cancelTitle,
+            body: copy.queue.cancelBody,
+            confirmLabel: copy.queue.cancelAccept,
+            tone: "destructive" as const,
+          },
+        }[pending.kind]
+      : null;
+
+  const entitlement = detail?.entitlement;
+  const active = entitlement?.state === "ACTIVE";
+
   return (
-    <main id="main" className="max-w-7xl mx-auto p-6 space-y-8">
-      <div className="border-b pb-4">
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-          Course Access Management
-        </h1>
-        <p className="text-sm text-gray-600 mt-1">
-          Configure course default access expiry, issue manual course
-          invitations, approve pending grants, and manage entitlement records.
-        </p>
-      </div>
+    // The page's own landmark, and the target the skip link jumps to. `WorkspacePage` decides width,
+    // gutters and direction; it is deliberately not a landmark, because a screen composes one.
+    <main id="main">
+      <WorkspacePage testID="course-access-workspace">
+        <WorkspacePageHeader title={copy.title} description={copy.intro} />
 
-      {error && (
-        <div
-          className="bg-red-50 border border-red-200 text-red-800 rounded-md p-4 text-sm"
-          role="alert"
-        >
-          <strong>Error:</strong> {error}
+      {notice ? (
+        <div className="mt-6" data-testid="course-access-notice" data-tone={notice.tone}>
+          <Alert tone={notice.tone} title={notice.text} />
         </div>
-      )}
-
-      {success && (
-        <div
-          className="bg-green-50 border border-green-200 text-green-800 rounded-md p-4 text-sm"
-          role="status"
-        >
-          <strong>Success:</strong> {success}
-        </div>
-      )}
+      ) : null}
 
       <PurchaseRequestsPanel />
 
-      <PublishedCourseSelector
-        options={courseOptions}
-        loading={coursesLoading}
-        error={coursesError}
-        selectedCourseID={selectedCourseId}
-        onSelect={setSelectedCourseId}
-        onRetry={fetchCourses}
-      />
+      <WorkspaceSection title={copy.course.title} description={copy.course.lead}>
+        <PublishedCourseSelector
+          options={courseOptions}
+          loading={coursesLoading}
+          error={coursesError}
+          selectedCourseID={selectedCourseId}
+          onSelect={setSelectedCourseId}
+          onRetry={fetchCourses}
+        />
+      </WorkspaceSection>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* Course Default Access Expiry Config */}
-        <section className="bg-white p-6 rounded-lg border shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">
-            1. Configure Course Access Expiry
-          </h2>
-          <p
-            className="text-sm text-gray-600 mb-4"
-            data-testid="expiry-course-context"
-          >
+      <div className="grid gap-8 md:grid-cols-2">
+        <WorkspaceSection title={copy.expiry.title} description={copy.expiry.lead}>
+          <p className="text-sm text-muted-foreground" data-testid="expiry-course-context">
             {selectedCourse
-              ? `Applies to ${selectedCourse.title}.`
-              : "Select a published Course above to configure its default access expiry."}
+              ? `${copy.expiry.appliesTo}: ${selectedCourse.title}`
+              : copy.course.none}
           </p>
-          <form onSubmit={handleSetExpiry} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Default Access Expiry Date (YYYY-MM-DD)
-              </label>
-              <input
+          <form onSubmit={handleSetExpiry} className="mt-4 space-y-4">
+            <Field htmlFor="access-expiry-date" label={copy.expiry.date}>
+              <Input
+                id="access-expiry-date"
                 type="date"
                 required
                 value={expiryDate}
-                onChange={(e) => setExpiryDate(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                onChange={(event) => setExpiryDate(event.target.value)}
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Reason / Reference
-              </label>
-              <input
-                type="text"
+            </Field>
+            <Field
+              htmlFor="access-expiry-reason"
+              label={copy.expiry.reason}
+              hint={copy.expiry.reasonHint}
+            >
+              <Input
+                id="access-expiry-reason"
                 required
                 value={expiryReason}
-                onChange={(e) => setExpiryReason(e.target.value)}
-                placeholder="Standard cohort 30-day access grant"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                onChange={(event) => setExpiryReason(event.target.value)}
+                placeholder={copy.expiry.reasonPlaceholder}
               />
-            </div>
-            <button
+            </Field>
+            <Button
               type="submit"
+              data-testid="access-expiry-submit"
               disabled={expirySubmitting || !selectedCourseId}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm text-sm disabled:opacity-50"
             >
-              {expirySubmitting ? "Saving..." : "Save Default Expiry"}
-            </button>
+              {expirySubmitting ? copy.expiry.saving : copy.expiry.submit}
+            </Button>
           </form>
-        </section>
+        </WorkspaceSection>
 
-        {/* Create Invitation */}
-        <section className="bg-white p-6 rounded-lg border shadow-sm">
-          <h2 className="text-xl font-semibold mb-4 text-gray-800">
-            2. Issue Course Access Invitation
-          </h2>
-          <p
-            className="text-sm text-gray-600 mb-4"
-            data-testid="invitation-course-context"
-          >
+        <WorkspaceSection title={copy.invite.title} description={copy.invite.lead}>
+          <p className="text-sm text-muted-foreground" data-testid="invitation-course-context">
             {selectedCourse
-              ? `Grants access to ${selectedCourse.title}.`
-              : "Select a published Course above to issue an invitation."}
+              ? `${copy.expiry.appliesTo}: ${selectedCourse.title}`
+              : copy.course.none}
           </p>
-          <form onSubmit={handleCreateInvitation} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Student Email Address
-              </label>
-              <input
+          <form onSubmit={handleCreateInvitation} className="mt-4 space-y-4">
+            <Field
+              htmlFor="access-invite-email"
+              label={copy.invite.email}
+              hint={copy.invite.emailHint}
+            >
+              <Input
+                id="access-invite-email"
                 type="email"
                 required
                 value={createEmail}
-                onChange={(e) => setCreateEmail(e.target.value)}
-                placeholder="student@example.com"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                onChange={(event) => setCreateEmail(event.target.value)}
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Admin Internal Note (Optional)
-              </label>
-              <input
-                type="text"
+            </Field>
+            <Field htmlFor="access-invite-note" label={copy.invite.note} hint={copy.invite.noteHint}>
+              <Input
+                id="access-invite-note"
                 value={createNote}
-                onChange={(e) => setCreateNote(e.target.value)}
-                placeholder="Approved via scholarship program"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                onChange={(event) => setCreateNote(event.target.value)}
+                placeholder={copy.invite.notePlaceholder}
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                External Reference ID (Optional)
-              </label>
-              <input
-                type="text"
-                value={createRef}
-                onChange={(e) => setCreateRef(e.target.value)}
-                placeholder="SCHOLARSHIP-2026-08"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={createSubmitting || !selectedCourseId}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-4 rounded-md shadow-sm text-sm disabled:opacity-50"
+            </Field>
+            <Field
+              htmlFor="access-invite-reference"
+              label={copy.invite.reference}
+              hint={copy.invite.referenceHint}
             >
-              {createSubmitting ? "Creating..." : "Create Invitation"}
-            </button>
+              <Input
+                id="access-invite-reference"
+                value={createRef}
+                onChange={(event) => setCreateRef(event.target.value)}
+                placeholder={copy.invite.referencePlaceholder}
+              />
+            </Field>
+            {/* Named, because "Send invitation" is a substring of the purchase panel's "Confirm
+                payment & send invitation" and a text-matching selector reached the wrong one. */}
+            <Button
+              type="submit"
+              data-testid="access-invite-submit"
+              disabled={createSubmitting || !selectedCourseId}
+            >
+              {createSubmitting ? copy.invite.sending : copy.invite.submit}
+            </Button>
           </form>
-        </section>
+        </WorkspaceSection>
       </div>
 
-      {/* Invitations Queue & Decision Center */}
-      <section className="bg-white p-6 rounded-lg border shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-gray-800">
-            3. Invitation Queue & Decision Center
-          </h2>
-          <button
-            onClick={fetchInvitations}
-            disabled={loading}
-            className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 py-1 px-3 rounded-md border"
+      <WorkspaceSection
+        title={copy.queue.title}
+        description={copy.queue.lead}
+        testID="access-queue"
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchInvitations()}
+            disabled={queueLoad === "loading"}
           >
-            {loading ? "Refreshing..." : "Refresh Queue"}
-          </button>
-        </div>
-
-        {loading ? (
-          <p className="text-gray-500 text-sm py-8 text-center">
-            Loading invitations queue...
-          </p>
-        ) : invitations.length === 0 ? (
-          <p className="text-gray-500 text-sm py-8 text-center border rounded-md bg-gray-50">
-            No invitations found.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead>
-                <tr className="bg-gray-100 border-b text-gray-700">
-                  <th className="p-3">ID / Recipient</th>
-                  <th className="p-3">Course</th>
-                  <th className="p-3">State</th>
-                  <th className="p-3">Timestamps</th>
-                  <th className="p-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {invitations.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-gray-50">
-                    <td className="p-3 font-mono text-xs">
-                      <div className="font-semibold text-gray-900">
-                        {inv.email}
-                      </div>
-                      <div className="text-gray-400">{inv.id}</div>
-                    </td>
-                    <td
-                      className="p-3 text-xs text-gray-700"
-                      data-testid={`invitation-course-${inv.id}`}
-                    >
-                      {courseLabel(inv.course_id)}
-                    </td>
-                    <td className="p-3">
-                      <span
-                        className={`inline-block px-2 py-1 text-xs font-semibold rounded ${
-                          inv.state === "APPROVED"
-                            ? "bg-green-100 text-green-800"
-                            : inv.state === "PENDING_ADMIN_APPROVAL"
-                              ? "bg-amber-100 text-amber-800"
-                              : inv.state === "PENDING_STUDENT_ACCEPTANCE"
-                                ? "bg-blue-100 text-blue-800"
-                                : inv.state === "REJECTED"
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {inv.state}
-                      </span>
-                      {inv.decision_reason && (
-                        <div className="text-xs text-gray-500 mt-1">
-                          Reason: {inv.decision_reason}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3 text-xs text-gray-500 space-y-1">
-                      <div>
-                        Created: {new Date(inv.created_at).toLocaleString()}
-                      </div>
-                      {inv.accepted_at && (
-                        <div>
-                          Accepted: {new Date(inv.accepted_at).toLocaleString()}
-                        </div>
-                      )}
-                      {inv.decided_at && (
-                        <div>
-                          Decided: {new Date(inv.decided_at).toLocaleString()}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3 text-right space-x-2">
-                      {inv.state === "PENDING_ADMIN_APPROVAL" && (
-                        <>
-                          <button
-                            onClick={() => handleApprove(inv.id)}
-                            className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 text-xs font-semibold rounded"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => {
-                              setRejectingInvId(inv.id);
-                              setRejectReason("");
-                            }}
-                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 text-xs font-semibold rounded"
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-
-                      {inv.entitlement_id && (
-                        <button
-                          onClick={() =>
-                            handleViewEntitlement(inv.entitlement_id as string)
-                          }
-                          disabled={detailLoading}
-                          data-testid={`manage-access-${inv.id}`}
-                          className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-1 text-xs font-semibold rounded disabled:opacity-50"
-                        >
-                          {detailLoading ? "Opening..." : "Manage access"}
-                        </button>
-                      )}
-
-                      {inv.state === "PENDING_STUDENT_ACCEPTANCE" && (
-                        <>
-                          <button
-                            onClick={() => handleResend(inv.id)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 text-xs rounded"
-                          >
-                            Resend Link
-                          </button>
-                          <button
-                            onClick={() => handleCancel(inv.id)}
-                            className="bg-gray-600 hover:bg-gray-700 text-white px-2 py-1 text-xs rounded"
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* Reject Reason Modal */}
-      {rejectingInvId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl">
-            <h3 className="text-lg font-bold text-gray-900 mb-2">
-              Reject Course Access Invitation
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Specify the reason for rejecting invitation{" "}
-              <code className="bg-gray-100 p-1 rounded text-xs">
-                {rejectingInvId}
-              </code>
-              .
+            {copy.refresh}
+          </Button>
+        }
+      >
+        {queueLoad === "loading" ? (
+          <LoadingState label={copy.queue.loading} testID="access-queue-loading" />
+        ) : null}
+        {queueLoad === "failed" ? (
+          <ErrorState
+            title={copy.queue.loadFailed}
+            retryLabel={copy.queue.retry}
+            onRetry={() => void fetchInvitations()}
+            testID="access-queue-failed"
+          />
+        ) : null}
+        {queueLoad === "ready" && invitations.length === 0 ? (
+          <EmptyState
+            density="compact"
+            title={copy.queue.emptyTitle}
+            description={copy.queue.emptyBody}
+            testID="access-queue-empty"
+          />
+        ) : null}
+        {queueLoad === "ready" && invitations.length > 0 ? (
+          <>
+            {/* How much of the list this is, and what each state means — said once, above a table
+                that would otherwise repeat the same sentence on every one of its rows. */}
+            <p className="mb-3 text-sm text-muted-foreground" data-testid="access-queue-bound">
+              {queueTotal > invitations.length
+                ? copy.queue.bounded
+                    .replace("{shown}", String(invitations.length))
+                    .replace("{total}", String(queueTotal))
+                : copy.queue.complete.replace("{total}", String(invitations.length))}
             </p>
-            <form onSubmit={handleRejectSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Rejection Reason
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="Ineligible academic status or duplicate request."
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-                />
-              </div>
-              <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setRejectingInvId(null)}
-                  className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 text-sm rounded-md"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={rejectSubmitting}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50"
-                >
-                  {rejectSubmitting ? "Rejecting..." : "Confirm Rejection"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Entitlement Detail Modal (AD07) */}
-      {detailModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div
-            className="bg-white rounded-lg p-6 max-w-xl w-full shadow-xl space-y-4 my-8"
-            data-testid="entitlement-detail"
-          >
-            <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="text-lg font-bold text-gray-900">
-                Course Access Record
-              </h3>
-              <button
-                onClick={closeEntitlementDetail}
-                className="text-gray-500 hover:text-gray-700 font-bold text-lg"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="space-y-2 text-sm bg-gray-50 p-4 rounded border">
-              <div>
-                <strong>Course:</strong>{" "}
-                {courseLabel(detailModal.entitlement.course_id)}
-              </div>
-              <div>
-                <strong>Status:</strong>{" "}
-                <span
-                  data-testid="entitlement-state"
-                  className={`font-bold ${detailModal.entitlement.state === "ACTIVE" ? "text-green-700" : "text-red-700"}`}
-                >
-                  {detailModal.entitlement.state}
-                </span>
-              </div>
-              <div data-testid="entitlement-access-ends-at">
-                <strong>Access ends:</strong>{" "}
-                {new Date(
-                  detailModal.entitlement.access_ends_at,
-                ).toLocaleString()}
-              </div>
-              <div className="text-xs text-gray-600">
-                Originally granted until{" "}
-                {new Date(
-                  detailModal.entitlement.original_access_ends_at,
-                ).toLocaleString()}
-              </div>
-              {detailModal.entitlement.revoked_at && (
-                <div
-                  className="text-xs text-red-700"
-                  data-testid="entitlement-revoked-at"
-                >
-                  Revoked on{" "}
-                  {new Date(
-                    detailModal.entitlement.revoked_at,
-                  ).toLocaleString()}
+            <dl className="mb-4 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-3">
+              {(
+                Object.keys(copy.queue.status) as (keyof typeof copy.queue.status)[]
+              ).map((state) => (
+                <div key={state} className="flex flex-wrap gap-x-2">
+                  <dt className="font-semibold text-foreground">{copy.queue.status[state]}</dt>
+                  <dd className="min-w-0 flex-1 text-muted-foreground">
+                    {copy.queue.statusDetail[state]}
+                  </dd>
                 </div>
-              )}
-              <div className="text-xs text-gray-600">
-                Grant source: {detailModal.entitlement.grant_source}
+              ))}
+            </dl>
+            <TableContainer>
+            <Table>
+              <TableCaption>{copy.queue.caption}</TableCaption>
+              <TableHead>
+                <TableRow>
+                  <TableHeaderCell scope="col">{copy.queue.student}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.queue.course}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.queue.state}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.queue.when}</TableHeaderCell>
+                  <TableHeaderCell scope="col">{copy.queue.actions}</TableHeaderCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {invitations.map((inv) => {
+                  const lastChange =
+                    inv.decided_at ?? inv.cancelled_at ?? inv.accepted_at ?? inv.created_at;
+                  return (
+                    <TableRow key={inv.id} data-testid="access-invitation-row">
+                      {/* An invitation is named by the person it was sent to. Its identifier is what
+                          the API is called with and what this row's test id is built from — it is
+                          not something an Admin should ever have to read or repeat. A `td` rather
+                          than a row header because the queue is scanned by person, and the
+                          harness locates a row by the address in its cells. */}
+                      <TableCell>
+                        <bdi className="font-medium text-foreground">{inv.email}</bdi>
+                      </TableCell>
+                      <TableCell data-testid={`invitation-course-${inv.id}`}>
+                        {courseLabel(inv.course_id)}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          tone={INVITATION_TONE[inv.state]}
+                          label={copy.queue.status[inv.state]}
+                          labelTestID="access-invitation-state"
+                        />
+                        {inv.decision_reason ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {copy.queue.reason}: {inv.decision_reason}
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>{formatDate(lastChange, locale)}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-2">
+                          {inv.state === "PENDING_ADMIN_APPROVAL" ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => setPending({ kind: "approve", invitation: inv })}
+                                aria-label={`${copy.queue.approve} — ${inv.email}`}
+                              >
+                                {copy.queue.approve}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => {
+                                  setRejectReason("");
+                                  setPending({ kind: "reject", invitation: inv });
+                                }}
+                                aria-label={`${copy.queue.reject} — ${inv.email}`}
+                              >
+                                {copy.queue.reject}
+                              </Button>
+                            </>
+                          ) : null}
+
+                          {inv.entitlement_id ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={detailLoading}
+                              data-testid={`manage-access-${inv.id}`}
+                              onClick={() =>
+                                void handleViewEntitlement(inv.entitlement_id as string)
+                              }
+                              aria-label={`${copy.queue.manage} — ${inv.email}`}
+                            >
+                              {detailLoading ? copy.queue.opening : copy.queue.manage}
+                            </Button>
+                          ) : null}
+
+                          {inv.state === "PENDING_STUDENT_ACCEPTANCE" ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => setPending({ kind: "resend", invitation: inv })}
+                                aria-label={`${copy.queue.resend} — ${inv.email}`}
+                              >
+                                {copy.queue.resend}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => setPending({ kind: "cancel", invitation: inv })}
+                                aria-label={`${copy.queue.cancel} — ${inv.email}`}
+                              >
+                                {copy.queue.cancel}
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            </TableContainer>
+          </>
+        ) : null}
+      </WorkspaceSection>
+
+      {queueDialog && pending && pending.kind !== "revoke" ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !busy) setPending(null);
+          }}
+          title={queueDialog.title}
+          body={queueDialog.body}
+          confirmLabel={queueDialog.confirmLabel}
+          cancelLabel={copy.queue.keep}
+          tone={queueDialog.tone}
+          busy={busy}
+          confirmDisabled={pending.kind === "reject" && rejectReason.trim() === ""}
+          onConfirm={() => void confirmQueueAction()}
+          testID="access-queue-confirm"
+        >
+          {pending.kind === "reject" ? (
+            <Field
+              htmlFor="access-reject-reason"
+              label={copy.queue.rejectReason}
+              hint={copy.queue.rejectReasonHint}
+            >
+              <Textarea
+                id="access-reject-reason"
+                data-testid="access-reject-reason"
+                rows={3}
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+                disabled={busy}
+              />
+            </Field>
+          ) : null}
+        </ConfirmDialog>
+      ) : null}
+
+      {/* The access record. A sheet rather than the hand-rolled fixed overlay this screen used to
+          paint: that one trapped no focus, closed on no key, and scrolled the page behind it. */}
+      <Sheet
+        open={detail !== null}
+        onOpenChange={(next) => {
+          if (!next && !detailBusy) closeEntitlementDetail();
+        }}
+      >
+        {/* Wider than the navigation drawer this primitive was built for, because the record it
+            holds is a pair of forms rather than a list of links. Composed rather than forked: the
+            focus trap, the escape key, the overlay and the labelled close control are exactly what
+            the hand-rolled `fixed inset-0` panel this replaces had none of. */}
+        <SheetContent
+          side="right"
+          className="w-[min(38rem,94vw)] max-w-none overflow-y-auto"
+          closeLabel={copy.entitlement.close}
+          data-testid="entitlement-detail"
+        >
+          <SheetTitle>{copy.entitlement.title}</SheetTitle>
+          {entitlement ? (
+          <div className="space-y-6">
+            <dl className="space-y-3 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-semibold text-foreground">{copy.entitlement.course}</dt>
+                <dd className="text-muted-foreground">{courseLabel(entitlement.course_id)}</dd>
               </div>
-            </div>
+              <div className="flex flex-wrap items-center gap-x-2">
+                <dt className="font-semibold text-foreground">{copy.entitlement.state}</dt>
+                <dd>
+                  <StatusBadge
+                    tone={active ? "success" : "neutral"}
+                    label={copy.entitlement.status[entitlement.state]}
+                    labelTestID="entitlement-state"
+                  />
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2" data-testid="entitlement-access-ends-at">
+                <dt className="font-semibold text-foreground">{copy.entitlement.endsAt}</dt>
+                <dd className="text-muted-foreground">
+                  {formatDateTime(entitlement.access_ends_at, locale)}
+                </dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-semibold text-foreground">{copy.entitlement.originally}</dt>
+                <dd className="text-muted-foreground">
+                  {formatDateTime(entitlement.original_access_ends_at, locale)}
+                </dd>
+              </div>
+              {entitlement.revoked_at ? (
+                <div className="flex flex-wrap gap-x-2" data-testid="entitlement-revoked-at">
+                  <dt className="font-semibold text-foreground">{copy.entitlement.revokedOn}</dt>
+                  <dd className="text-muted-foreground">
+                    {formatDateTime(entitlement.revoked_at, locale)}
+                  </dd>
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-semibold text-foreground">{copy.entitlement.source}</dt>
+                <dd className="text-muted-foreground">
+                  {/* Two grant sources exist on the contract, and both have words. An unrecognised
+                      one degrades to the Course rather than to the enum. */}
+                  {copy.entitlement.grantSource[
+                    entitlement.grant_source as keyof typeof copy.entitlement.grantSource
+                  ] ?? courseLabel(entitlement.course_id)}
+                </dd>
+              </div>
+            </dl>
 
-            {detailNotice && (
-              <p
-                role="status"
-                data-testid="entitlement-notice"
-                className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-800"
-              >
-                {detailNotice}
-              </p>
-            )}
-            {detailError && (
-              <p
-                role="alert"
-                data-testid="entitlement-error"
-                className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800"
-              >
-                {detailError}
-              </p>
-            )}
+            {detailNotice ? (
+              <div data-testid="entitlement-notice" data-tone={detailNotice.tone}>
+                <Alert tone={detailNotice.tone} title={detailNotice.text} />
+              </div>
+            ) : null}
 
-            {detailModal.entitlement.state === "ACTIVE" ? (
-              <div className="space-y-5">
+            {active ? (
+              <>
                 <form
                   onSubmit={handleAdjustExpiry}
-                  className="space-y-3 border rounded-md p-4"
+                  className="space-y-4 rounded-lg border border-border p-4"
                   data-testid="entitlement-expiry-form"
                 >
-                  <h4 className="font-semibold text-sm text-gray-800">
-                    Change access expiry
-                  </h4>
-                  <p className="text-xs text-gray-600">
-                    A later date extends access; an earlier date shortens it. A
-                    date already past ends access immediately and keeps
-                    enrollment and progress.
-                  </p>
                   <div>
-                    <label
-                      className="block text-sm font-medium text-gray-700"
-                      htmlFor="entitlement-expiry-date"
-                    >
-                      New access expiry date (YYYY-MM-DD)
-                    </label>
-                    <input
+                    <h3 className="font-display text-base font-bold text-foreground">
+                      {copy.entitlement.adjustTitle}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {copy.entitlement.adjustLead}
+                    </p>
+                  </div>
+                  <Field htmlFor="entitlement-expiry-date" label={copy.entitlement.adjustDate}>
+                    <Input
                       id="entitlement-expiry-date"
                       type="date"
                       required
                       value={adjustDate}
-                      onChange={(e) => setAdjustDate(e.target.value)}
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                      onChange={(event) => setAdjustDate(event.target.value)}
                     />
-                  </div>
-                  <div>
-                    <label
-                      className="block text-sm font-medium text-gray-700"
-                      htmlFor="entitlement-expiry-reason"
-                    >
-                      Reason
-                    </label>
-                    <input
+                  </Field>
+                  <Field
+                    htmlFor="entitlement-expiry-reason"
+                    label={copy.entitlement.adjustReason}
+                    hint={copy.entitlement.adjustReasonHint}
+                  >
+                    <Input
                       id="entitlement-expiry-reason"
-                      type="text"
                       required
                       value={adjustReason}
-                      onChange={(e) => setAdjustReason(e.target.value)}
-                      placeholder="Semester extended for the whole cohort"
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                      onChange={(event) => setAdjustReason(event.target.value)}
+                      placeholder={copy.entitlement.adjustReasonPlaceholder}
                     />
-                  </div>
-                  <div>
-                    <label
-                      className="block text-sm font-medium text-gray-700"
-                      htmlFor="entitlement-expiry-reference"
-                    >
-                      Support reference (optional)
-                    </label>
-                    <input
-                      id="entitlement-expiry-reference"
-                      type="text"
-                      value={adjustSupportRef}
-                      onChange={(e) => setAdjustSupportRef(e.target.value)}
-                      placeholder="SUPPORT-2026-08"
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={detailBusy || !adjustDate || !adjustReason.trim()}
-                    data-testid="save-entitlement-expiry"
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md text-sm disabled:opacity-50"
+                  </Field>
+                  <Field
+                    htmlFor="entitlement-expiry-reference"
+                    label={copy.entitlement.supportReference}
+                    hint={copy.entitlement.supportReferenceHint}
                   >
-                    {detailBusy ? "Saving..." : "Save new expiry"}
-                  </button>
+                    <Input
+                      id="entitlement-expiry-reference"
+                      value={adjustSupportRef}
+                      onChange={(event) => setAdjustSupportRef(event.target.value)}
+                    />
+                  </Field>
+                  <Button
+                    type="submit"
+                    data-testid="save-entitlement-expiry"
+                    disabled={detailBusy || !adjustDate || adjustReason.trim() === ""}
+                  >
+                    {detailBusy ? copy.entitlement.adjustSaving : copy.entitlement.adjustSubmit}
+                  </Button>
                 </form>
 
-                <form
-                  onSubmit={handleRevokeEntitlement}
-                  className="space-y-3 border border-red-200 rounded-md p-4 bg-red-50/40"
+                <div
+                  className="space-y-4 rounded-lg border border-destructive/25 p-4"
                   data-testid="entitlement-revoke-form"
                 >
-                  <h4 className="font-semibold text-sm text-red-800">
-                    Revoke access
-                  </h4>
-                  <p className="text-xs text-gray-700">
-                    {"Revoking ends this Student's access to the Course immediately. The enrollment record, learning progress and access history are kept."}
-                  </p>
                   <div>
-                    <label
-                      className="block text-sm font-medium text-gray-700"
-                      htmlFor="entitlement-revoke-reason"
-                    >
-                      Reason
-                    </label>
-                    <input
+                    <h3 className="font-display text-base font-bold text-foreground">
+                      {copy.entitlement.revokeTitle}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {copy.entitlement.revokeLead}
+                    </p>
+                  </div>
+                  <Field
+                    htmlFor="entitlement-revoke-reason"
+                    label={copy.entitlement.revokeReason}
+                    hint={copy.entitlement.revokeReasonHint}
+                  >
+                    <Input
                       id="entitlement-revoke-reason"
-                      type="text"
                       required
                       value={revokeReason}
-                      onChange={(e) => setRevokeReason(e.target.value)}
-                      placeholder="Access ended after out-of-band refund"
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
+                      onChange={(event) => setRevokeReason(event.target.value)}
+                      placeholder={copy.entitlement.revokeReasonPlaceholder}
                     />
-                  </div>
-                  <div>
-                    <label
-                      className="block text-sm font-medium text-gray-700"
-                      htmlFor="entitlement-revoke-reference"
-                    >
-                      Support reference (optional)
-                    </label>
-                    <input
-                      id="entitlement-revoke-reference"
-                      type="text"
-                      value={revokeSupportRef}
-                      onChange={(e) => setRevokeSupportRef(e.target.value)}
-                      placeholder="SUPPORT-2026-08"
-                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 text-sm"
-                    />
-                  </div>
-                  <label className="flex items-start gap-2 text-xs text-gray-800">
-                    <input
-                      type="checkbox"
-                      checked={revokeConfirming}
-                      onChange={(e) => setRevokeConfirming(e.target.checked)}
-                      data-testid="confirm-revoke-entitlement"
-                      className="mt-0.5"
-                    />
-                    <span>
-                      I confirm this Student should lose access to{" "}
-                      {courseLabel(detailModal.entitlement.course_id)} now.
-                    </span>
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={detailBusy || !revokeConfirming || !revokeReason.trim()}
-                    data-testid="revoke-entitlement"
-                    className="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md text-sm disabled:opacity-50"
+                  </Field>
+                  <Field
+                    htmlFor="entitlement-revoke-reference"
+                    label={copy.entitlement.supportReference}
+                    hint={copy.entitlement.supportReferenceHint}
                   >
-                    {detailBusy ? "Revoking..." : "Revoke access"}
-                  </button>
-                </form>
-              </div>
+                    <Input
+                      id="entitlement-revoke-reference"
+                      value={revokeSupportRef}
+                      onChange={(event) => setRevokeSupportRef(event.target.value)}
+                    />
+                  </Field>
+                  {/* Ending access is irreversible, so it is confirmed rather than gated behind a
+                      checkbox the reader ticks in the same breath as pressing the button. */}
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    data-testid="revoke-entitlement"
+                    disabled={detailBusy || revokeReason.trim() === ""}
+                    onClick={() => setPending({ kind: "revoke" })}
+                  >
+                    {detailBusy ? copy.entitlement.revoking : copy.entitlement.revokeSubmit}
+                  </Button>
+                </div>
+              </>
             ) : (
-              <p
-                className="text-sm text-gray-700 border rounded-md p-4 bg-gray-50"
-                data-testid="entitlement-terminal"
-              >
-                This access grant is revoked. It is kept as history and can no
-                longer be extended, shortened, or revoked again.
-              </p>
+              <div data-testid="entitlement-terminal">
+                <Alert
+                  tone="info"
+                  title={
+                    entitlement.state === "REVOKED"
+                      ? copy.entitlement.terminalRevoked
+                      : copy.entitlement.terminalExpired
+                  }
+                />
+              </div>
             )}
-            <div>
-              <h4 className="font-semibold text-sm mb-2 text-gray-800">
-                Adjustment History
-              </h4>
-              {detailModal.adjustments.length === 0 ? (
-                <p className="text-xs text-gray-500 italic">
-                  No adjustments recorded for this entitlement.
+
+            <section aria-labelledby="entitlement-history-heading">
+              <h3
+                id="entitlement-history-heading"
+                className="font-display text-base font-bold text-foreground"
+              >
+                {copy.entitlement.historyTitle}
+              </h3>
+              {detail.adjustments.length === 0 ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {copy.entitlement.historyEmpty}
                 </p>
               ) : (
-                <ul className="text-xs space-y-2">
-                  {detailModal.adjustments.map((adj) => (
-                    <li key={adj.id} className="border p-2 rounded bg-gray-50">
-                      <div>
-                        Adjusted At:{" "}
-                        {new Date(adj.adjusted_at).toLocaleString()}
-                      </div>
-                      <div>Reason: {adj.reason}</div>
-                      <div>
-                        New Expiry:{" "}
-                        {new Date(adj.new_access_ends_at).toLocaleString()}
-                      </div>
+                <ul className="mt-3 space-y-2">
+                  {detail.adjustments.map((adjustment) => (
+                    <li
+                      key={adjustment.id}
+                      className="rounded-md border border-border p-3 text-sm text-muted-foreground"
+                    >
+                      <p>
+                        {copy.entitlement.historyWhen}:{" "}
+                        {formatDateTime(adjustment.adjusted_at, locale)}
+                      </p>
+                      <p>
+                        {copy.entitlement.historyReason}: {adjustment.reason}
+                      </p>
+                      <p>
+                        {copy.entitlement.historyNewEnd}:{" "}
+                        {formatDateTime(adjustment.new_access_ends_at, locale)}
+                      </p>
                     </li>
                   ))}
                 </ul>
               )}
+            </section>
             </div>
-          </div>
-        </div>
-      )}
+          ) : null}
+        </SheetContent>
+      </Sheet>
+
+      {pending?.kind === "revoke" ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !detailBusy) setPending(null);
+          }}
+          title={copy.entitlement.revokeConfirmTitle}
+          body={copy.entitlement.revokeConfirmBody}
+          confirmLabel={copy.entitlement.revokeConfirmAccept}
+          cancelLabel={copy.entitlement.keep}
+          tone="destructive"
+          busy={detailBusy}
+          onConfirm={() => void handleRevokeEntitlement()}
+          testID="confirm-revoke-entitlement"
+        />
+        ) : null}
+      </WorkspacePage>
     </main>
   );
 }

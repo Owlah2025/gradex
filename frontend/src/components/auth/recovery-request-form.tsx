@@ -91,7 +91,7 @@ export function RecoveryRequestForm() {
           onChange={(event) => setEmail(event.target.value)}
         />
       </Field>
-      <Button className="w-full" size="lg" disabled={submitting}>
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.recover.sending : t.auth.recover.send}
       </Button>
       <p className="text-center text-sm">

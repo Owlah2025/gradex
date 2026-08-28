@@ -114,7 +114,8 @@ async function inspectAndApprove(browser: Browser, expectedResourceName: string 
     await expect(inspector).not.toContainText("[RESOURCE]");
   }
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
   await adminContext.close();
 }
 
@@ -158,7 +159,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await instructorPage.getByTestId(`owned-course-${COURSE_ID}`).click();
   await expect(instructorPage.getByTestId("start-revision-panel")).toBeVisible();
   await instructorPage.getByTestId("start-revision").click();
-  await expect(instructorPage.getByTestId("revision-state")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(instructorPage.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
 
   const removeA = instructorPage.locator(`[data-testid^="remove-lesson-resource-"]`).first();
   await expect(removeA).toBeVisible();
@@ -168,12 +169,25 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   const resourceInput = instructorPage.getByTestId(`lesson-resource-file-${LESSON_ID}`);
   await resourceInput.setInputFiles({ name: "unsafe.exe", mimeType: "application/octet-stream", buffer: Buffer.from("not a resource") });
   await expect(instructorPage.getByTestId(`lesson-resource-message-${LESSON_ID}`)).toContainText("Select a PDF or DOCX file.");
-  await expect(instructorPage.getByRole("button", { name: "Retry upload" })).toBeVisible();
+  // No retry control, deliberately. Retry belongs to an upload that reached the server and failed
+  // there; a file the browser refused before sending is not retryable by pressing a button, and
+  // the only remedy is the one this test performs next — choose a different file. The control is
+  // reserved for a genuine FAILED phase so that offering it always means something.
+  await expect(instructorPage.getByRole("button", { name: "Retry upload" })).toHaveCount(0);
+  await expect(resourceInput).toBeEnabled();
 
   const replacementFile = temporaryFile(REPLACEMENT_RESOURCE_NAME, REPLACEMENT_RESOURCE_BYTES);
   await resourceInput.setInputFiles(replacementFile);
-  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(/Preparing|Uploading|Checking|Attaching|Attached/, { timeout: 30_000 });
-  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText("Attached", { timeout: 4 * 60 * 1000 });
+  // The phase vocabulary the Instructor reads: Uploading, Checking the file, Attaching, Ready.
+  // "Attached" was the wording before the upload states were given words of their own.
+  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(
+    /Preparing|Uploading|Checking|Attaching|Ready/,
+    { timeout: 30_000 },
+  );
+  await expect(instructorPage.getByTestId(`lesson-resource-phase-${LESSON_ID}`)).toContainText(
+    "Ready",
+    { timeout: 4 * 60 * 1000 },
+  );
   const candidateResource = instructorPage.locator(`li[data-testid^="lesson-resource-"]`).filter({ hasText: REPLACEMENT_RESOURCE_NAME });
   await expect(candidateResource).toBeVisible();
   const candidateResourceID = (await candidateResource.getAttribute("data-testid"))!.replace("lesson-resource-", "");
@@ -187,9 +201,13 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // direct database construction. Taxonomy terms are Admin-owned, so their
   // canonical command is exercised with an Admin session before the Instructor
   // assigns them.
+  // Deleting a Lesson or a Section destroys uploaded media the server cannot return, so both now
+  // ask before doing it.
   await instructorPage.getByTestId(`delete-lesson-${MISSING_VIDEO_LESSON_ID}`).click();
+  await instructorPage.getByTestId("curriculum-delete-confirm").getByTestId("confirm-accept").click();
   await expect(instructorPage.getByTestId(`lesson-${MISSING_VIDEO_LESSON_ID}`)).toHaveCount(0);
   await instructorPage.getByTestId(`delete-section-${EMPTY_SECTION_ID}`).click();
+  await instructorPage.getByTestId("curriculum-delete-confirm").getByTestId("confirm-accept").click();
   await expect(instructorPage.getByTestId(`section-${EMPTY_SECTION_ID}`)).toHaveCount(0);
   const taxonomyAdmin = await apiContextFor(issueRotatingSession(ADMIN));
   const major = await taxonomyAdmin.post("/api/v1/admin/taxonomy/terms", {
@@ -215,7 +233,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await expect(instructorPage.getByText("Taxonomy saved for the named revision")).toBeVisible();
   await instructorPage.getByTestId("revision-study-year").selectOption("YEAR_1");
   await instructorPage.getByTestId("save-revision").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Revision details saved");
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course details saved");
 
   // Candidate B is not yet live: A remains visible/downloadable, B cannot be
   // probed by an entitled Student, anonymous caller, unentitled Student, a
@@ -243,7 +261,8 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await entitledAPI.dispose();
 
   await instructorPage.getByTestId("submit-for-review").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
   await inspectAndApprove(browser, REPLACEMENT_RESOURCE_NAME);
 
   // Publication atomically switches the Student's projection to B. The
@@ -265,7 +284,8 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await expect(removeB).toBeVisible();
   await removeB.click();
   await instructorPage.getByTestId("submit-for-review").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Course submitted for Admin review");
+  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
 
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toBeVisible();

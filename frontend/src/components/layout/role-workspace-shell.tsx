@@ -21,6 +21,7 @@ export function RoleWorkspaceShell({
   const { locale, t } = useLocale();
   const labels: Record<WorkspaceNavigationKey, string> = {
     courseReview: t.nav.courseReview,
+    adminCourses: t.nav.adminCourses,
     academicCatalog: t.nav.academicCatalog,
     courseAccess: t.nav.courseAccess,
     courseLifecycle: t.nav.courseLifecycle,

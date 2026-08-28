@@ -88,7 +88,7 @@ async function createCourse(page: Page, titleEn: string, titleAr: string): Promi
   await page.getByTestId("new-course-description-en").fill("Acceptance test description");
   await page.getByTestId("create-course").click();
 
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
   expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
   return courseID!;
@@ -187,11 +187,13 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.getByTestId("section-title-ar").fill("القسم الأول");
     await page.getByTestId("section-title-en").fill("Section One");
     await page.getByTestId("add-section").click();
-    await expect(page.getByText("Section One")).toBeVisible();
+    // Scoped to the curriculum: the section title also appears in the per-section price
+    // list, which the studio now shows beside the course it belongs to.
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
-    await expect(page.getByText("Section One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
 
     const sectionBlock = page.locator('[data-testid^="section-"]').first();
     const sectionTestID = await sectionBlock.getAttribute("data-testid");
@@ -200,12 +202,12 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس الأول");
     await page.getByTestId(`lesson-title-en-${sectionID}`).fill("Lesson One");
     await page.getByTestId(`add-lesson-${sectionID}`).click();
-    await expect(page.getByText("Lesson One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Lesson One")).toBeVisible();
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
-    await expect(page.getByText("Section One")).toBeVisible();
-    await expect(page.getByText("Lesson One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
+    await expect(page.getByTestId("curriculum").getByText("Lesson One")).toBeVisible();
     await expect(page.locator('[data-testid^="lesson-video-none-"]').first()).toBeVisible();
 
     await context.close();
@@ -259,6 +261,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     await createCourse(page, `Incomplete Course ${Date.now()}`, "دورة غير مكتملة");
 
     await page.getByTestId("submit-for-review").click();
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
 
     // The Course has a canonical Subject but no Sections and no Lesson video,
     // so the server refuses it. The Instructor is shown which requirements
@@ -269,10 +272,15 @@ test.describe("S12 Instructor authoring persistence", () => {
     // does not carry and must never be asked for — the property is unchanged,
     // the dimension that fails is. The legacy gate itself stays proven for
     // legacy Courses in the backend suite until T5.
-    const failure = page.getByTestId("authoring-error");
+    //
+    // The refusal is reported beside Submit, in words. It used to arrive in the page-level error
+    // region as `COURSE_EMPTY · course:<uuid>`; the wire code and the identifier are both gone.
+    const failure = page.getByTestId("submit-error");
     await expect(failure).toBeVisible();
-    await expect(failure).toContainText("COURSE_EMPTY");
+    await expect(failure).toContainText("at least one section");
+    await expect(failure).not.toContainText("COURSE_EMPTY");
     await expect(failure).not.toContainText("TAXONOMY_DIMENSION_MISSING");
+    await expect(page.getByTestId("authoring-error")).toHaveCount(0);
 
     await context.close();
   });

@@ -1,15 +1,16 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { changePassword } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
-import { validPassword } from "@/lib/identity/validation";
-import { postPasswordChangeDestination } from "@/lib/identity/return-to";
+import { passwordMaximum, passwordMinimum, validPassword } from "@/lib/identity/validation";
+import { postPasswordChangeDestination, roleRoot } from "@/lib/identity/return-to";
 import { currentCSRFToken, setSession } from "@/lib/identity/session";
 import { useSessionView } from "@/lib/identity/use-session";
 import { useLocale } from "@/lib/i18n/locale-provider";
@@ -55,9 +56,20 @@ export function PasswordChangeForm() {
     confirmation: "",
   });
   const [error, setError] = React.useState<ChangeErrorKey | null>(null);
+  /**
+   * Which field a local rule rejected, when the message is about one field.
+   *
+   * "Both new password fields must match" is a fact about the confirmation box,
+   * and "choose a longer password" is a fact about the new-password box. Both
+   * were announced in a banner at the top of the form, leaving the control that
+   * was actually wrong unmarked and undescribed.
+   */
+  const [errorField, setErrorField] =
+    React.useState<"next" | "confirmation" | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
   const currentRef = React.useRef<HTMLInputElement>(null);
   const nextRef = React.useRef<HTMLInputElement>(null);
+  const confirmationRef = React.useRef<HTMLInputElement>(null);
 
   function clearEntry() {
     setFields({ current: "", next: "", confirmation: "" });
@@ -66,15 +78,18 @@ export function PasswordChangeForm() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setErrorField(null);
 
     if (!validPassword(fields.next)) {
       setError("weak");
+      setErrorField("next");
       nextRef.current?.focus();
       return;
     }
     if (fields.next !== fields.confirmation) {
       setError("mismatch");
-      nextRef.current?.focus();
+      setErrorField("confirmation");
+      confirmationRef.current?.focus();
       return;
     }
     // Checked here as well as on the server. The server refuses reuse
@@ -83,6 +98,7 @@ export function PasswordChangeForm() {
     // Argon2id verification and gives a precise message.
     if (fields.next === fields.current) {
       setError("sameAsCurrent");
+      setErrorField("next");
       nextRef.current?.focus();
       return;
     }
@@ -120,6 +136,8 @@ export function PasswordChangeForm() {
       // they just composed, and a refused new password is the one thing they
       // need to edit.
       setFields((previous) => ({ ...previous, current: "" }));
+      // A server refusal is about the request, not about one box.
+      setErrorField(null);
       setError(errorKeyFor(caught));
       currentRef.current?.focus();
     } finally {
@@ -127,14 +145,24 @@ export function PasswordChangeForm() {
     }
   }
 
+  const required = session?.password_change_required === true;
+  // Somewhere to go when the change is optional. A restricted principal is
+  // deliberately given none: leaving is the thing the server refuses.
+  const escape = session ? roleRoot(session.role, locale) : null;
+
   return (
     <form className="space-y-5" onSubmit={submit} noValidate>
-      <Alert tone="info" title={t.auth.passwordChange.requiredTitle}>
-        {t.auth.passwordChange.requiredBody}
-      </Alert>
+      {/* Only when a change actually is required. A signed-in visitor who came
+          here deliberately used to be told their account could not continue
+          without one, which was simply not true of them. */}
+      {required ? (
+        <Alert tone="info" title={t.auth.passwordChange.requiredTitle}>
+          {t.auth.passwordChange.requiredBody}
+        </Alert>
+      ) : null}
       {/* The shared Alert takes only its own props, so the test handle lives on
           a wrapper rather than widening that component's contract. */}
-      {error ? (
+      {error && errorField === null ? (
         <div data-testid="password-change-error">
           <Alert tone="error" title={t.auth.passwordChange[error]} />
         </div>
@@ -144,13 +172,12 @@ export function PasswordChangeForm() {
         label={t.auth.passwordChange.current}
         htmlFor="password-change-current"
       >
-        <Input
+        <PasswordInput
           id="password-change-current"
           data-testid="password-change-current"
           ref={currentRef}
-          type="password"
           autoComplete="current-password"
-          dir="ltr"
+          maxLength={passwordMaximum}
           value={fields.current}
           onChange={(event) =>
             setFields({ ...fields, current: event.target.value })
@@ -158,17 +185,28 @@ export function PasswordChangeForm() {
         />
       </Field>
 
-      <Field label={t.auth.passwordChange.next} htmlFor="password-change-new">
-        <Input
+      <Field
+        label={t.auth.passwordChange.next}
+        htmlFor="password-change-new"
+        hint={t.auth.common.passwordRule}
+        error={errorField === "next" && error ? t.auth.passwordChange[error] : undefined}
+      >
+        <PasswordInput
           id="password-change-new"
           data-testid="password-change-new"
           ref={nextRef}
-          type="password"
           autoComplete="new-password"
-          dir="ltr"
+          minLength={passwordMinimum}
+          maxLength={passwordMaximum}
           value={fields.next}
           onChange={(event) =>
             setFields({ ...fields, next: event.target.value })
+          }
+          aria-invalid={errorField === "next"}
+          aria-describedby={
+            errorField === "next"
+              ? "password-change-new-error"
+              : "password-change-new-hint"
           }
         />
       </Field>
@@ -176,21 +214,33 @@ export function PasswordChangeForm() {
       <Field
         label={t.auth.passwordChange.confirm}
         htmlFor="password-change-confirm"
+        error={
+          errorField === "confirmation" && error
+            ? t.auth.passwordChange[error]
+            : undefined
+        }
       >
-        <Input
+        <PasswordInput
           id="password-change-confirm"
           data-testid="password-change-confirm"
-          type="password"
+          ref={confirmationRef}
           autoComplete="new-password"
-          dir="ltr"
+          maxLength={passwordMaximum}
           value={fields.confirmation}
           onChange={(event) =>
             setFields({ ...fields, confirmation: event.target.value })
+          }
+          aria-invalid={errorField === "confirmation"}
+          aria-describedby={
+            errorField === "confirmation"
+              ? "password-change-confirm-error"
+              : undefined
           }
         />
       </Field>
 
       <Button
+        type="submit"
         className="w-full"
         size="lg"
         disabled={submitting}
@@ -200,6 +250,14 @@ export function PasswordChangeForm() {
           ? t.auth.passwordChange.submitting
           : t.auth.passwordChange.submit}
       </Button>
+
+      {!required && escape ? (
+        <p className="text-center text-sm">
+          <Link className="underline" href={escape}>
+            {t.auth.passwordChange.cancel}
+          </Link>
+        </p>
+      ) : null}
 
       {session ? (
         <p className="text-center text-sm text-muted-foreground">

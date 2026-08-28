@@ -12,6 +12,10 @@ import {
   type InstitutionOption,
 } from "@/lib/api/authoring-academic";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 
 /**
  * University → Subject selection for Academic Course authoring (T4-B).
@@ -50,8 +54,9 @@ export function AcademicSubjectPicker({
   disabled?: boolean;
   idPrefix?: string;
 }) {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
   const isAr = locale === "ar";
+  const copy = t.instructor.picker;
 
   const [institutions, setInstitutions] = useState<InstitutionOption[]>([]);
   const [institutionID, setInstitutionID] = useState(initialInstitutionID ?? "");
@@ -80,9 +85,9 @@ export function AcademicSubjectPicker({
         setInstitutionID((current) => current || (options.length === 1 ? options[0].id : ""));
       })
       .catch(() =>
-        setError(isAr ? "تعذر تحميل الجامعات" : "Unable to load universities"),
+        setError(copy.universityFailed),
       );
-  }, [isAr, locale]);
+  }, [copy.universityFailed, locale]);
 
   useEffect(() => {
     institutionReportRef.current?.(institutionID);
@@ -117,11 +122,11 @@ export function AcademicSubjectPicker({
           setSearched(true);
           setError(null);
         })
-        .catch(() => setError(isAr ? "تعذر البحث عن المادة" : "Unable to search Subjects"))
+        .catch(() => setError(copy.searchFailed))
         .finally(() => setSearching(false));
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [institutionID, query, locale, isAr]);
+  }, [institutionID, query, locale, copy.searchFailed]);
 
   const choose = (subject: AuthoringSubject) => {
     setSelected(subject);
@@ -138,9 +143,9 @@ export function AcademicSubjectPicker({
 
   return (
     <div className="space-y-4" data-testid={`${idPrefix}-academic-picker`}>
-      <label className="block text-sm font-medium">
-        {isAr ? "الجامعة" : "University"}
-        <select
+      <Field label={copy.universityLabel} htmlFor={`${idPrefix}-institution`}>
+        <Select
+          id={`${idPrefix}-institution`}
           value={institutionID}
           onChange={(event) => {
             setInstitutionID(event.target.value);
@@ -150,82 +155,97 @@ export function AcademicSubjectPicker({
           }}
           disabled={disabled || institutions.length === 0}
           data-testid={`${idPrefix}-institution`}
-          className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
         >
-          <option value="">{isAr ? "اختر الجامعة" : "Select a university"}</option>
+          <option value="">{copy.universityPlaceholder}</option>
           {institutions.map((institution) => (
             <option key={institution.id} value={institution.id}>
               {isAr ? institution.name_ar : institution.name_en}
             </option>
           ))}
-        </select>
-      </label>
+        </Select>
+      </Field>
 
       {selected ? (
         <div
           data-testid={`${idPrefix}-selected-subject`}
-          className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-3 space-y-2"
+          className="space-y-3 rounded-lg border border-border bg-card p-4"
         >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold" data-testid={`${idPrefix}-selected-subject-label`}>
-                {subjectLabel(selected, locale)}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p
+                className="font-display text-sm font-bold text-foreground"
+                data-testid={`${idPrefix}-selected-subject-label`}
+              >
+                {/* A Latin subject code sits inside an Arabic title here more often than not. */}
+                <bdi>{subjectLabel(selected, locale)}</bdi>
               </p>
               {subjectContext(selected, locale) && (
-                <p className="text-xs text-slate-600 dark:text-slate-400" data-testid={`${idPrefix}-selected-subject-context`}>
-                  {subjectContext(selected, locale)}
+                <p
+                  className="mt-0.5 text-xs text-muted-foreground"
+                  data-testid={`${idPrefix}-selected-subject-context`}
+                >
+                  <bdi>{subjectContext(selected, locale)}</bdi>
                 </p>
               )}
             </div>
             {!disabled && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={clear}
                 data-testid={`${idPrefix}-change-subject`}
-                className="shrink-0 rounded-md border border-slate-300 dark:border-slate-700 px-2 py-1 text-xs"
+                className="shrink-0"
               >
-                {isAr ? "تغيير المادة" : "Change Subject"}
-              </button>
+                {copy.change}
+              </Button>
             )}
           </div>
           <AutomaticAudience subject={selected} idPrefix={idPrefix} />
         </div>
       ) : (
-        <label className="block text-sm font-medium">
-          {isAr ? "المادة" : "Subject"}
-          <input
+        <Field label={copy.subjectLabel} htmlFor={`${idPrefix}-subject-search`}>
+          <Input
+            id={`${idPrefix}-subject-search`}
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             disabled={disabled || !institutionID}
-            placeholder={isAr ? "ابحث باسم المادة أو الكود" : "Search by Subject name or code"}
+            placeholder={copy.subjectSearchPlaceholder}
             data-testid={`${idPrefix}-subject-search`}
-            className="mt-1 w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-sm"
           />
-        </label>
+        </Field>
       )}
 
       {searching && (
-        <p className="text-xs text-slate-600 dark:text-slate-400" data-testid={`${idPrefix}-subject-searching`}>
-          {isAr ? "جارٍ البحث…" : "Searching…"}
+        <p
+          role="status"
+          className="text-sm text-muted-foreground"
+          data-testid={`${idPrefix}-subject-searching`}
+        >
+          {copy.searching}
         </p>
       )}
 
       {!selected && results.length > 0 && (
-        <ul className="divide-y divide-slate-200 dark:divide-slate-800 rounded-md border border-slate-300 dark:border-slate-700"
-            data-testid={`${idPrefix}-subject-results`}>
+        <ul
+          className="divide-y divide-border overflow-hidden rounded-lg border border-border"
+          data-testid={`${idPrefix}-subject-results`}
+        >
           {results.map((subject) => (
             <li key={subject.id}>
               <button
                 type="button"
                 onClick={() => choose(subject)}
                 data-testid={`${idPrefix}-subject-result`}
-                className="w-full px-3 py-2 text-start hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="w-full px-3 py-2.5 text-start hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <span className="block text-sm font-medium">{subjectLabel(subject, locale)}</span>
+                <span className="block text-sm font-semibold text-foreground">
+                  <bdi>{subjectLabel(subject, locale)}</bdi>
+                </span>
                 {subjectContext(subject, locale) && (
-                  <span className="block text-xs text-slate-600 dark:text-slate-400">
-                    {subjectContext(subject, locale)}
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    <bdi>{subjectContext(subject, locale)}</bdi>
                   </span>
                 )}
               </button>
@@ -236,26 +256,27 @@ export function AcademicSubjectPicker({
 
       {!selected && searched && !searching && results.length === 0 && (
         <div className="space-y-2" data-testid={`${idPrefix}-subject-empty`}>
-          <p className="text-xs text-slate-600 dark:text-slate-400">
-            {isAr
-              ? "لا توجد مادة مطابقة. جرّب كود المادة أو اسمًا آخر."
-              : "No matching Subject. Try the Subject code or another name."}
-          </p>
+          <p className="text-sm text-muted-foreground">{copy.noMatch}</p>
           {onRequestMissing && institutionID && (
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={onRequestMissing}
               data-testid={`${idPrefix}-request-subject`}
-              className="rounded-md border border-slate-300 dark:border-slate-700 px-3 py-1 text-xs"
             >
-              {isAr ? "لم أجد مادتي" : "I can't find my Subject"}
-            </button>
+              {copy.requestMissing}
+            </Button>
           )}
         </div>
       )}
 
       {error && (
-        <p role="alert" className="text-xs text-red-700 dark:text-red-400" data-testid={`${idPrefix}-academic-error`}>
+        <p
+          role="alert"
+          className="text-sm font-medium text-destructive"
+          data-testid={`${idPrefix}-academic-error`}
+        >
           {error}
         </p>
       )}
@@ -272,32 +293,33 @@ export function AcademicSubjectPicker({
  * Course into having an explicit override. Choosing a narrower audience is T4-C.
  */
 function AutomaticAudience({ subject, idPrefix }: { subject: AuthoringSubject; idPrefix: string }) {
-  const { locale } = useLocale();
-  const isAr = locale === "ar";
+  const { locale, t } = useLocale();
+  const copy = t.instructor.picker;
 
   if (subject.programs.length === 0) {
     // A Subject with no Curriculum mapping is a legitimate Course Subject. The
     // honest statement is that the catalog maps no Program to it — not that the
     // Course has no audience, and not an invented association.
     return (
-      <p className="text-xs text-slate-600 dark:text-slate-400" data-testid={`${idPrefix}-audience-empty`}>
-        {isAr
-          ? "لا توجد تخصصات مرتبطة بهذه المادة في الكتالوج الأكاديمي حاليًا."
-          : "No Programs are currently associated with this Subject in the Academic Catalog."}
+      <p className="text-xs text-muted-foreground" data-testid={`${idPrefix}-audience-empty`}>
+        {copy.audienceEmpty}
       </p>
     );
   }
 
   return (
     <div data-testid={`${idPrefix}-audience`}>
-      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
-        {isAr ? "الجمهور التلقائي · التخصصات المرتبطة" : "Automatic audience · Associated Programs"}
+      <p className="font-display text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        {copy.audienceTitle}
       </p>
       <ul className="mt-1 space-y-0.5">
         {subject.programs.map((program) => (
-          <li key={program.program_id} className="text-xs text-slate-600 dark:text-slate-400"
-              data-testid={`${idPrefix}-audience-program`}>
-            {programName(program, locale)}
+          <li
+            key={program.program_id}
+            className="text-xs text-muted-foreground"
+            data-testid={`${idPrefix}-audience-program`}
+          >
+            <bdi>{programName(program, locale)}</bdi>
             {/*
               Placement appears only where the Curriculum mapping carries it.
               Kuwait University publishes a study plan for Computer Science and
@@ -305,10 +327,7 @@ function AutomaticAudience({ subject, idPrefix }: { subject: AuthoringSubject; i
               frequently absent and is never derived from the Subject code.
             */}
             {program.recommended_level !== undefined && (
-              <span className="text-slate-500">
-                {" — "}
-                {isAr ? `المستوى ${program.recommended_level}` : `Level ${program.recommended_level}`}
-              </span>
+              <span> {`\u2014 ${copy.level} ${program.recommended_level}`}</span>
             )}
           </li>
         ))}

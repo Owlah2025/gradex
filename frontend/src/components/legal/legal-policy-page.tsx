@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Alert } from "@/components/ui/alert";
 import {
   approvedPolicyDocument,
   approvedPolicyMetadata,
@@ -100,7 +101,14 @@ export function LegalPolicyPage({ locale, kind }: Props) {
     <main id="main" tabIndex={-1} lang={locale} dir={locale === "ar" ? "rtl" : "ltr"} className="min-h-screen bg-background">
       <div className="mx-auto max-w-4xl px-5 py-8 sm:px-8 sm:py-12">
         <LanguageNavigation locale={locale} kind={kind} labels={labels} />
-        {runtime.controlledStaging ? <p role="status" className="mb-7 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950">{labels.staging}</p> : null}
+        {/* The one raw-palette surface left outside the design system. Amber-50 behind amber-950 has
+            no dark answer, so on a dark screen this notice was a bright card the rest of the page
+            had stopped being. `Alert` carries the same `role="status"` it already had. */}
+        {runtime.controlledStaging ? (
+          <div className="mb-7">
+            <Alert title={labels.staging} />
+          </div>
+        ) : null}
         <article className="space-y-5 rounded-xl border bg-card p-5 shadow-sm sm:p-9">{policyBlocks(document)}</article>
         <LegalContactSection identity={runtime.identity} labels={labels} />
       </div>

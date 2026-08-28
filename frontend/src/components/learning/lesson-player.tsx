@@ -1,6 +1,7 @@
 "use client";
 
 import Hls from "hls.js";
+import { AlertCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { requestPlayback, type PlaybackAuthorization } from "@/lib/api/learning";
 import { currentCSRFToken } from "@/lib/identity/session";
@@ -219,11 +220,40 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
 
   useProgressReporter(videoRef, lessonID, playback?.asset_version_id ?? null);
 
-  if (failed) return <p role="alert">{labels.unavailable}</p>;
-  if (!playback) return <p aria-live="polite">{labels.loading}</p>;
+  // A Lesson with no playable media is a real dead end, so it is stated in the media's own place
+  // rather than as a line of text where a player used to be — the surrounding Lesson, its contents
+  // and its previous/next controls all remain usable.
+  if (failed) {
+    return (
+      <div
+        role="alert"
+        data-testid="lesson-media-unavailable"
+        className="flex aspect-video w-full flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted px-6 text-center"
+      >
+        <AlertCircle aria-hidden className="size-6 text-muted-foreground" />
+        <p className="text-sm font-semibold text-foreground">{labels.unavailable}</p>
+      </div>
+    );
+  }
+  // The placeholder holds the exact space the media will occupy. Announcing without reserving the
+  // space meant the controls, the materials and the navigation all jumped once playback resolved.
+  if (!playback) {
+    return (
+      <div
+        data-testid="lesson-media-loading"
+        className="flex aspect-video w-full animate-pulse items-center justify-center rounded-lg bg-muted"
+      >
+        <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+          {labels.loading}
+        </p>
+      </div>
+    );
+  }
   return (
     <div ref={containerRef} className="space-y-3" data-lesson-player>
-      <video ref={videoRef} controls={false} aria-label={labels.video} className="w-full rounded-xl bg-slate-950" />
+      {/* `gx-navy` rather than a stock slate: the letterbox around a video is a brand surface, and
+          it is the one colour on this screen that is not the page background. */}
+      <video ref={videoRef} controls={false} aria-label={labels.video} className="aspect-video w-full rounded-lg bg-gx-navy" />
       <PlayerControls
         labels={labels}
         playing={playing}

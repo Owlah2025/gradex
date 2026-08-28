@@ -22,10 +22,13 @@ export function PurchaseRequestForm({
   courseId,
   locale,
   labels,
+  className,
 }: {
   courseId: string;
   locale: "ar" | "en";
   labels: Labels;
+  /** Framing, so the form can sit inside the access card without a second border around it. */
+  className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const [email, setEmail] = React.useState("");
@@ -55,7 +58,7 @@ export function PurchaseRequestForm({
     return (
       <Button
         type="button"
-        className="mt-6"
+        className={className ?? "mt-6"}
         onClick={() => setOpen(true)}
         data-testid="purchase-request-open"
       >
@@ -66,7 +69,11 @@ export function PurchaseRequestForm({
 
   return (
     <section
-      className="mt-6 rounded-lg border border-border bg-card p-5"
+      className={
+        className === undefined
+          ? "mt-6 rounded-lg border border-border bg-card p-5"
+          : `${className} rounded-lg border border-border bg-muted/40 p-5`
+      }
       aria-labelledby="purchase-request-heading"
     >
       <h2

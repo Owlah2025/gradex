@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { ar } from "../../lib/i18n/dictionaries/ar";
+import { en } from "../../lib/i18n/dictionaries/en";
 import {
   academicLevelLabels,
   getAcademicProfile,
@@ -38,6 +40,7 @@ function readSource(relativePath: string): string {
 const FORM = "src/components/learning/academic-profile-form.tsx";
 const CLIENT = "src/lib/api/academic-profile.ts";
 const PROMPT = "src/components/learning/academic-profile-prompt.tsx";
+const PROVIDER = "src/components/academic/academic-context-provider.tsx";
 
 type Captured = { url: string; method?: string; csrf: string | null; body: unknown };
 
@@ -221,14 +224,27 @@ test("Department is context, never a required selector", () => {
     "a Department selector was added; Department is derived context only",
   );
   assert.ok(!source.includes("اختر القسم"), "the Student is asked to choose a Department");
+  assert.ok(
+    !Object.values(ar.academicProfile).some((value) => value.includes("اختر القسم")),
+    "the Student is asked to choose a Department",
+  );
   // It may still be shown as a subtitle.
   assert.ok(source.includes("profile-program-context"), "the Department context line is missing");
 });
 
 test("undeclared and non-degree are Student states, not Program rows", () => {
   const source = readSource(FORM);
-  assert.ok(source.includes("لم أحدد تخصصي بعد"), "the undeclared option is missing in Arabic");
-  assert.ok(source.includes("طالب غير مقيد"), "the non-degree option is missing in Arabic");
+  // This copy moved out of a private object inside the form and into the
+  // dictionaries, where parity and the retired-vocabulary rules can see it. The
+  // guarantee is unchanged: both states are offered, in Arabic, by name.
+  assert.equal(ar.academicProfile.undeclared, "لم أحدد تخصصي بعد");
+  assert.equal(ar.academicProfile.nonDegree, "طالب غير مقيد");
+  assert.ok(source.includes("t.undeclared"), "the undeclared option is not offered");
+  assert.ok(source.includes("t.nonDegree"), "the non-degree option is not offered");
+  // The fourth enrollment status is a real one and must be reachable wherever
+  // the institution actually has a foundation stage.
+  assert.ok(source.includes("has_foundation_stage"), "the foundation option is not gated on the institution");
+  assert.ok(source.includes('status = "FOUNDATION"'), "a foundation Student cannot save that they are one");
   // Both are sentinels resolved into an enrollment status, never sent as a
   // program_id, so no placeholder Program is ever needed.
   assert.ok(source.includes('const UNDECLARED = "__undeclared__"'));
@@ -268,12 +284,16 @@ test("onboarding is never a route guard and never blocks access", () => {
 test("the access promise is shown and is stated in both languages", () => {
   const source = readSource(FORM);
   assert.ok(source.includes("profile-access-promise"), "the access promise is not rendered");
+  assert.ok(source.includes("t.accessPromise"), "the access promise is not read from the dictionary");
+  // The promise itself, now that it lives where both languages are checked
+  // against each other. It must keep saying the one thing that makes this form
+  // safe to fill in: nothing here decides what the Student can reach.
   assert.ok(
-    source.includes("كورساتك ومشترياتك لا تتأثر"),
+    ar.academicProfile.accessPromise.includes("مقرراتك ومشترياتك لا تتأثر"),
     "the Arabic access promise is missing",
   );
   assert.ok(
-    source.includes("Your courses and purchases are unaffected"),
+    en.academicProfile.accessPromise.includes("Your courses and purchases are unaffected"),
     "the English access promise is missing",
   );
 });
@@ -299,4 +319,47 @@ test("the client exposes no other Student's profile and no bulk listing", () => 
   for (const forbidden of ["account_id", "student_id", "/admin/", "profiles?", "student-profiles"]) {
     assert.ok(!client.includes(forbidden), `the client exposes ${forbidden}`);
   }
+});
+
+/**
+ * The Dashboard asks the account for its academic profile once.
+ *
+ * The setup state and the precedence decision are the same fact about the same principal-scoped
+ * resource, read in the same browser session. The application already holds it above the page, so
+ * the onboarding invitation reads that value instead of issuing a second identical request.
+ */
+test("the onboarding invitation reads the held profile rather than fetching its own", () => {
+  const prompt = readSource(PROMPT);
+  assert.ok(
+    prompt.includes("useAcademicContext"),
+    "the prompt no longer reads the profile the application already holds",
+  );
+  assert.ok(
+    !prompt.includes("getAcademicProfile"),
+    "the prompt issues a second read of a profile the Dashboard has already fetched",
+  );
+  assert.ok(
+    !prompt.includes("useEffect"),
+    "the prompt still runs a mount effect, which is how the duplicate read got there",
+  );
+});
+
+/**
+ * And a write moves it on. The holder lives above the route, so a client navigation away from the
+ * form does not remount it; without this, a Student who has just onboarded would keep being invited
+ * to onboard, and their finished profile would keep losing precedence to a browsing preference.
+ */
+test("a saved or skipped profile replaces the held one", () => {
+  const form = readSource(FORM);
+  const provider = readSource(PROVIDER);
+  assert.ok(
+    provider.includes("adoptProfile"),
+    "the holder cannot be told about a write the Student just performed",
+  );
+  const adoptions = form.match(/adoptProfile\(([^)]*)\)/g) ?? [];
+  assert.deepEqual(
+    adoptions.sort(),
+    ["adoptProfile(saved)", "adoptProfile(skipped)"],
+    "the form does not hand both of its writes' server responses to the held profile",
+  );
 });

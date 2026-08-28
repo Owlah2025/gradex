@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Alert } from "@/components/ui/alert";
 import { createSession } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
@@ -29,6 +30,10 @@ export function LoginForm() {
   const [errors, setErrors] = React.useState<FieldErrors>({});
   const [submitting, setSubmitting] = React.useState(false);
   const [requestError, setRequestError] = React.useState<string | null>(null);
+  // `submitting` is state, so two submits dispatched within one render pass
+  // both read the old value and both reach the network — the disabled button
+  // only takes effect on the next render. This closes before that.
+  const inFlight = React.useRef(false);
   const refs = {
     email: React.useRef<HTMLInputElement>(null),
     password: React.useRef<HTMLInputElement>(null),
@@ -69,8 +74,10 @@ export function LoginForm() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (inFlight.current) return;
     setRequestError(null);
     if (!validate()) return;
+    inFlight.current = true;
     setSubmitting(true);
     try {
       const session = await createSession(
@@ -112,6 +119,7 @@ export function LoginForm() {
       setFields({ email: fields.email, password: "" });
       refs.password.current?.focus();
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }
@@ -147,10 +155,9 @@ export function LoginForm() {
         htmlFor="password"
         error={errors.password}
       >
-        <Input
+        <PasswordInput
           id="password"
           ref={refs.password}
-          type="password"
           autoComplete="current-password"
           value={fields.password}
           onChange={(event) =>
@@ -161,7 +168,9 @@ export function LoginForm() {
         />
       </Field>
 
-      <Button className="w-full" size="lg" disabled={submitting}>
+      {/* Explicit, so the form's submit is distinguishable from the password
+          field's reveal control without relying on either order or wording. */}
+      <Button type="submit" className="w-full" size="lg" disabled={submitting}>
         {submitting ? t.auth.login.signingIn : t.auth.login.signIn}
       </Button>
 

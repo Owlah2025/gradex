@@ -99,7 +99,7 @@ test.describe("T1 Admin Academic Catalog", () => {
 
     // The Academic Catalog is its own workspace, not part of Course review.
     await expect(page.locator("body")).not.toContainText("Course Review & Pricing Admin");
-    await expect(page.locator("body")).not.toContainText("Taxonomy Vocabulary");
+    await expect(page.locator("body")).not.toContainText("Catalogue vocabulary");
 
     // 1. University. T1 ships none, so the first action is creating one.
     await submitForm(
@@ -277,7 +277,7 @@ test.describe("T1 Admin Academic Catalog", () => {
 
     const page = await context.newPage();
     await page.goto("/en/admin/catalog");
-    await expect(page.getByRole("heading", { name: "Taxonomy Vocabulary Administration" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Catalogue vocabulary" })).toBeVisible();
 
     await admin.dispose();
     await context.close();

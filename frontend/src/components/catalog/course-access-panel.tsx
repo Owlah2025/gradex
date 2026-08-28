@@ -26,12 +26,15 @@ export function CourseAccessPanel({
   labels,
   locale,
   onRetry,
+  className,
 }: {
   relationship: CourseAccessRelationship;
   courseID: string;
   labels: Labels;
   locale: "ar" | "en";
   onRetry: () => void;
+  /** Framing, so the panel can sit inside the access card without a second border around it. */
+  className?: string;
 }) {
   const copy = labels.courseDetails;
 
@@ -53,7 +56,7 @@ export function CourseAccessPanel({
       data-testid="course-access-panel"
       data-access-relationship={relationship}
       aria-labelledby="course-access-heading"
-      className="mt-10 rounded-lg border border-border bg-card p-5"
+      className={className ?? "mt-10 rounded-lg border border-border bg-card p-5"}
     >
       <h2 id="course-access-heading" className="font-display text-lg font-bold text-foreground">
         {copy.heading}

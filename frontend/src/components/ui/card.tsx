@@ -1,11 +1,20 @@
 import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "@/lib/utils";
 
+/**
+ * `asChild` exists because a card is a surface, not an element. Most cards are a `div` and should
+ * stay one; a Course on the Student dashboard is an `article`, and wrapping the article in a div
+ * that carries the card's border adds a node that says nothing to anyone reading the page by its
+ * structure.
+ */
 const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean }
->(({ className, interactive = false, ...props }, ref) => (
-  <div
+  React.HTMLAttributes<HTMLDivElement> & { interactive?: boolean; asChild?: boolean }
+>(({ className, interactive = false, asChild = false, ...props }, ref) => {
+  const Comp = asChild ? Slot : "div";
+  return (
+  <Comp
     ref={ref}
     className={cn(
       "rounded-lg border border-border bg-card text-card-foreground shadow-sm",
@@ -15,7 +24,8 @@ const Card = React.forwardRef<
     )}
     {...props}
   />
-));
+  );
+});
 Card.displayName = "Card";
 
 const CardHeader = React.forwardRef<

@@ -150,7 +150,24 @@ test("the review queue is server state, not component state", () => {
     "the queue must be read through the Admin review API client",
   );
   assert.ok(source.includes("listReviewQueue"), "the Admin surface must call the real queue endpoint wrapper");
-  assert.ok(source.includes("SubmittedRevisionInspector"), "a queue row must open the submitted-revision inspector");
+
+  // A queue row still opens the submitted-revision inspector, but through the workspace's own
+  // address rather than through component state. The route is what makes a review reloadable,
+  // linkable and reachable from the Courses directory; holding it in `useState` meant a refresh
+  // mid-review discarded the whole context.
+  assert.match(
+    source,
+    /href=\{`\/\$\{locale\}\/admin\/courses\/\$\{item\.course_id\}\/review`\}/,
+    "a queue row must link to the addressable review workspace for that Course",
+  );
+  assert.ok(
+    !source.includes("SubmittedRevisionInspector"),
+    "the queue must not also mount the inspector inline, or a review would have two entry points",
+  );
+  assert.ok(
+    readSource("src/components/admin/routed-course-review.tsx").includes("SubmittedRevisionInspector"),
+    "the routed review workspace must mount the submitted-revision inspector",
+  );
 
   // No seeded array: the only initial queue is the empty one, replaced by the
   // server's response.
@@ -164,11 +181,16 @@ test("the review queue is server state, not component state", () => {
     "the queue must not be initialised from a literal Course",
   );
 
-  assert.match(source, /setInspectedItem\(item\)/, "the selected queue row must establish the workspace context");
+  const routed = readSource("src/components/admin/routed-course-review.tsx");
   assert.match(
-    source,
-    /key=\{inspectedItem\.revision_id\}/,
-    "a newly selected revision must receive a fresh workspace state",
+    routed,
+    /entry\.course_id === courseID/,
+    "the routed workspace must establish its context from the server's queue, not from a link parameter",
+  );
+  assert.match(
+    routed,
+    /key=\{item\.revision_id\}/,
+    "a newly resolved revision must receive a fresh workspace state",
   );
 
   for (const removedBridge of [
@@ -203,8 +225,26 @@ test("the submitted-revision inspector renders only the returned graph and keeps
   assert.match(source, /course\.id !== item\.course_id/, "a mismatched Course detail must fail closed");
   assert.match(source, /revision\.id !== item\.revision_id/, "a mismatched revision detail must fail closed");
   assert.match(source, /mediaStates\[assetVersionID\] !== "READY"/, "non-ready media must not request a preview");
-  for (const state of ["PROCESSING", "SCAN_PASSED", "FAILED", "QUARANTINED", "UNAVAILABLE", "NO_VIDEO"]) {
-    assert.ok(source.includes(state), `the inspector must describe ${state} instead of attempting protected playback`);
+  // Every media state a lesson can be in has words for it. The words moved to the dictionary when
+  // the inspector's copy did — the guarantee is that the state is *described*, not that the
+  // description is written in the component.
+  for (const dictionary of ["en", "ar"] as const) {
+    const copy = readSource(`src/lib/i18n/dictionaries/${dictionary}.ts`);
+    const block = copy.slice(copy.indexOf("mediaState: {"), copy.indexOf("mediaState: {") + 600);
+    for (const state of ["PROCESSING", "SCAN_PASSED", "FAILED", "QUARANTINED", "UNAVAILABLE", "NO_VIDEO"]) {
+      assert.match(
+        block,
+        new RegExp(`${state}: "[^"]+"`),
+        `${dictionary} must describe ${state} instead of leaving the enum to stand for it`,
+      );
+    }
+    // And the description is not the enum wearing a label.
+    for (const state of ["PROCESSING", "READY", "FAILED"]) {
+      assert.ok(
+        !new RegExp(`${state}: "${state}"`).test(block),
+        `${dictionary} renders the raw ${state} enum as its own description`,
+      );
+    }
   }
   assert.ok(!source.includes("storage_object_key"), "the inspector must not expose object-storage keys");
   assert.ok(!source.includes("presigned"), "the inspector must not expose presigned upload material");
@@ -242,17 +282,27 @@ test("the founder pricing/taxonomy regression stays unified without dialog state
 
 test("a completed review locks before queue refresh and clears its workspace", () => {
   const inspector = readSource("src/components/admin/submitted-revision-inspector.tsx");
-  const queue = readSource("src/components/admin/review-queue.tsx");
+  const routed = readSource("src/components/admin/routed-course-review.tsx");
   const lockedAt = inspector.indexOf("setReviewed(true)");
   const refreshedAt = inspector.indexOf("await onReviewed(success)", lockedAt);
 
   assert.ok(lockedAt > 0, "successful review must lock the decision controls");
   assert.ok(refreshedAt > lockedAt, "the decision must lock before the queue refresh callback");
   assert.match(inspector, /const canAct = canReview && !reviewed/);
+
+  // The workspace is a route now, so a completed review is confirmed in place and left
+  // deliberately. Redirecting on success would destroy the message that tells the Admin the
+  // decision landed; the directory re-reads the queue and the lifecycle directory when it mounts,
+  // so returning shows the server's new state rather than anything held here.
   assert.match(
-    queue,
-    /onReviewed=\{async \(notice\) => \{\s*await loadQueue\(\);\s*setReviewNotice\(notice\);\s*setInspectedItem\(null\);\s*\}\}/,
-    "the queue must refresh before clearing the completed workspace",
+    routed,
+    /onReviewed=\{async \(\) => \{\s*setDecided\(true\);\s*\}\}/,
+    "a completed review must be confirmed in the workspace rather than redirected away",
+  );
+  assert.match(
+    routed,
+    /review-decision-recorded/,
+    "a recorded decision must be stated, with a route back to the directory",
   );
 });
 
@@ -268,8 +318,19 @@ test("an approval refused for a missing Course price names the remedy", () => {
     /isCoursePriceRequired\(cause\)/,
     "the pricing remedy must be chosen from the failure, not from local readiness state",
   );
-  assert.match(source, /Set the Course price/, "the English refusal must name the remedy");
-  assert.match(source, /سعر الدورة/, "the Arabic refusal must name the remedy");
+  // The remedy is copy, so it lives in the dictionaries; what the component must prove is that it
+  // reaches for the remedy rather than passing the violation code through.
+  assert.match(source, /copy\.priceFirst/, "the refusal must name the remedy, in the reader's language");
+  assert.match(
+    readSource("src/lib/i18n/dictionaries/en.ts"),
+    /priceFirst:\s*\n?\s*"Set the course price/,
+    "the English refusal must name the remedy",
+  );
+  assert.match(
+    readSource("src/lib/i18n/dictionaries/ar.ts"),
+    /priceFirst: "اضبط سعر المقرر/,
+    "the Arabic refusal must name the remedy",
+  );
   // The server's own reason is still shown; the remedy is added, not substituted.
   assert.match(source, /const message = describeApiError\(cause, locale\)/);
 
@@ -318,17 +379,26 @@ test("the Instructor surface calls no Admin taxonomy mutation", () => {
 });
 
 test("an Instructor submission failure is reported at the Submit control", () => {
-  const source = readSource("src/components/instructor/course-builder.tsx");
+  // Submission moved into its own panel alongside the readiness checklist, so the guarantee the
+  // founder's manual test produced is asserted where it now lives. It is unchanged: the reason
+  // renders beside the control, is scrolled to, takes focus, and is announced.
+  const panel = readSource("src/components/instructor/submission-panel.tsx");
 
-  const submitIndex = source.indexOf('data-testid="submit-for-review"');
-  const errorIndex = source.indexOf('data-testid="submit-error"');
+  const submitIndex = panel.indexOf('data-testid="submit-for-review"');
+  const errorIndex = panel.indexOf('data-testid="submit-error"');
   assert.ok(submitIndex > 0, "the Submit control must be present");
   assert.ok(errorIndex > submitIndex, "the failure region must render beside the Submit control, not only at the top");
 
-  assert.match(source, /submitErrorRef\.current\?\.scrollIntoView/, "the failure must be brought into view");
-  assert.match(source, /submitErrorRef\.current\?\.focus\(\)/, "the failure must take focus");
-  assert.match(source, /role="alert"/, "the failure must be announced");
-  // The server's reason is what is shown: it is never replaced by local wording.
-  assert.match(source, /const message = describeApiError\(cause, locale\)/);
-  assert.match(source, /setSubmitError\(message\)/);
+  assert.match(panel, /rejectionRef\.current\?\.scrollIntoView/, "the failure must be brought into view");
+  assert.match(panel, /rejectionRef\.current\?\.focus\(\)/, "the failure must take focus");
+  assert.match(panel, /role="alert"/, "the failure must be announced");
+
+  // The server's reason is still never replaced by invented wording. Codes it publishes are
+  // translated one-for-one from `catalog/validation.go`; anything unrecognised keeps the server's
+  // own text rather than being dropped.
+  const builder = readSource("src/components/instructor/course-builder.tsx");
+  assert.match(builder, /describeSubmissionRejection\(/);
+  assert.match(builder, /detail: translated\.hasUntranslated \? message : null/);
+  const readiness = readSource("src/components/instructor/submission-readiness.ts");
+  assert.match(readiness, /hasUntranslated = true/, "an unmapped violation code must not be swallowed");
 });

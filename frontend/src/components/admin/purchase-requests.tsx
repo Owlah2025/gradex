@@ -2,243 +2,270 @@
 
 import * as React from "react";
 import {
-	cancelPurchaseRequest,
+  cancelPurchaseRequest,
   confirmPurchaseRequestPayment,
   listAdminPurchaseRequests,
   type PurchaseRequest,
   type PurchaseRequestState,
 } from "@/lib/api/access";
-import { useLocale } from "@/lib/i18n/locale-provider";
+import { describeApiError } from "@/lib/api/api-error";
 import { formatFils } from "@/lib/formatters/currency";
-import { ProblemError } from "@/lib/api/problem";
+import { formatDate } from "@/lib/i18n/format";
+import { useLocale } from "@/lib/i18n/locale-provider";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState } from "@/components/common/empty-state";
+import { ErrorState } from "@/components/common/error-state";
+import { Input } from "@/components/ui/input";
+import { LoadingState } from "@/components/common/loading-state";
+import { StatusBadge } from "@/components/common/status-badge";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from "@/components/ui/table";
+import { WorkspaceSection } from "@/components/layout/workspace-page";
 
-const stateLabel: Record<PurchaseRequestState, string> = {
-  WAITING_PAYMENT: "Waiting for payment",
-  INVITATION_CREATED: "Invitation sent — waiting for Student",
-  ACCESS_GRANTED: "Access granted",
-  CANCELLED: "Cancelled",
+/**
+ * The manual purchase queue.
+ *
+ * # THE THING THIS SCREEN MUST NOT PRETEND
+ *
+ * Gradex takes no money. A Student asks for a Course, pays somewhere the product cannot see, and an
+ * Administrator records that it happened. "Confirm payment" is therefore a statement about the
+ * world, not a transaction — the confirmation says so in as many words, because a button that reads
+ * like a payment control on a screen that settles nothing is the single most dangerous sentence
+ * this workspace could contain.
+ *
+ * The reference, not the identifier, is how a request is named. `reference` is a short code the
+ * Student was given and can quote; the row's `id` exists only to call the API with.
+ */
+
+const TONE: Record<PurchaseRequestState, "default" | "accent" | "success" | "neutral"> = {
+  WAITING_PAYMENT: "accent",
+  INVITATION_CREATED: "default",
+  ACCESS_GRANTED: "success",
+  CANCELLED: "neutral",
 };
 
-function message(error: unknown) {
-  if (error instanceof ProblemError)
-    return error.problem.detail || error.problem.title;
-  return "Purchase requests could not be updated.";
-}
+type Pending = { kind: "confirm" | "cancel"; request: PurchaseRequest };
 
 export function PurchaseRequestsPanel() {
-  const { locale } = useLocale();
+  const { locale, t } = useLocale();
+  const copy = t.adminAccess.purchases;
+
   const [requests, setRequests] = React.useState<PurchaseRequest[]>([]);
   const [query, setQuery] = React.useState("");
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
-  const [notice, setNotice] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState<string | null>(null);
+  // What the listed rows were actually filtered by, so the empty state can tell "nothing to do"
+  // apart from "nothing matched what you typed".
+  const [appliedQuery, setAppliedQuery] = React.useState("");
+  const [state, setState] = React.useState<"loading" | "ready" | "failed">("loading");
+  const [notice, setNotice] = React.useState<{ tone: "success" | "error"; text: string } | null>(
+    null,
+  );
+  const [pending, setPending] = React.useState<Pending | null>(null);
+  const [busy, setBusy] = React.useState(false);
 
   const load = React.useCallback(
-    async (search = query) => {
-      setLoading(true);
-      setError(null);
+    async (search: string) => {
+      setState("loading");
       try {
-        const result = await listAdminPurchaseRequests(
-          { query: search },
-          locale,
-        );
+        const result = await listAdminPurchaseRequests({ query: search }, locale);
         setRequests(result?.purchase_requests ?? []);
-      } catch (caught) {
-        setError(message(caught));
-      } finally {
-        setLoading(false);
+        setAppliedQuery(search);
+        setState("ready");
+      } catch {
+        setState("failed");
       }
     },
-    [locale, query],
+    [locale],
   );
 
+  // The listing is locale-invariant except for the Course title the server resolves, so it is read
+  // once per locale and not on every keystroke.
   React.useEffect(() => {
     void load("");
-  }, [locale]);
+  }, [load]);
 
-  async function confirm(request: PurchaseRequest) {
-    setBusy(request.id);
-    setError(null);
+  /**
+   * Carries out whichever decision was confirmed. One path for both, so both call the API exactly
+   * once and both report what the server actually answered.
+   */
+  const act = async () => {
+    if (!pending || busy) return;
+    setBusy(true);
     setNotice(null);
     try {
-      const result = await confirmPurchaseRequestPayment(request.id, locale);
-      setNotice(
-        `Payment confirmed and invitation queued for ${result?.purchase_request.email ?? request.email}.`,
-      );
-      await load();
-    } catch (caught) {
-      setError(message(caught));
+      if (pending.kind === "confirm") {
+        await confirmPurchaseRequestPayment(pending.request.id, locale);
+        setNotice({ tone: "success", text: copy.confirmed });
+      } else {
+        await cancelPurchaseRequest(pending.request.id, locale);
+        setNotice({ tone: "success", text: copy.cancelled });
+      }
+      await load(appliedQuery);
+    } catch (cause) {
+      setNotice({ tone: "error", text: describeApiError(cause, locale) });
     } finally {
-      setBusy(null);
+      setBusy(false);
+      setPending(null);
     }
-  }
-
-  async function cancel(request: PurchaseRequest) {
-    setBusy(request.id);
-    setError(null);
-    setNotice(null);
-    try {
-      await cancelPurchaseRequest(request.id, locale);
-      setNotice(`Purchase request ${request.reference} was cancelled.`);
-      await load();
-    } catch (caught) {
-      setError(message(caught));
-    } finally {
-      setBusy(null);
-    }
-  }
+  };
 
   return (
-    <section
-      className="bg-white p-6 rounded-lg border shadow-sm"
-      aria-labelledby="purchase-requests-heading"
-    >
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h2
-            id="purchase-requests-heading"
-            className="text-xl font-semibold text-gray-800"
-          >
-            Purchase requests
-          </h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Find a request by reference, email, Course title, or state.
-          </p>
-        </div>
+    <WorkspaceSection
+      title={copy.title}
+      description={copy.lead}
+      testID="purchase-requests"
+      actions={
         <form
-          className="flex gap-2"
+          className="flex flex-wrap items-center gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             void load(query);
           }}
         >
           <label className="sr-only" htmlFor="purchase-request-search">
-            Search purchase requests
+            {copy.searchLabel}
           </label>
-          <input
+          <Input
             id="purchase-request-search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-            placeholder="Reference, email, Course"
+            placeholder={copy.searchPlaceholder}
+            className="w-56"
           />
-          <button
-            type="submit"
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium"
-          >
-            Search
-          </button>
+          <Button type="submit" variant="outline" size="sm">
+            {copy.search}
+          </Button>
         </form>
-      </div>
-      {error ? (
-        <p role="alert" className="mt-4 text-sm text-red-700">
-          {error}
-        </p>
-      ) : null}
+      }
+    >
       {notice ? (
-        <p role="status" className="mt-4 text-sm text-green-700">
-          {notice}
-        </p>
-      ) : null}
-      {loading ? (
-        <p className="mt-4 text-sm text-gray-600">Loading purchase requests…</p>
-      ) : null}
-      {!loading ? (
-        <div className="mt-4 overflow-x-auto">
-          <div
-            role="table"
-            aria-label="Purchase requests"
-            className="min-w-[860px] text-left text-sm"
-          >
-            <div
-              role="row"
-              className="grid grid-cols-[0.9fr_1.6fr_1.4fr_0.7fr_1.2fr_1.2fr_1.6fr] border-b text-gray-600"
-            >
-              {[
-                "Reference",
-                "Email",
-                "Course",
-                "Price",
-                "Requested",
-                "Status",
-                "Action",
-              ].map((label) => (
-                <div key={label} role="columnheader" className="p-2">
-                  {label}
-                </div>
-              ))}
-            </div>
-            {requests.map((request) => (
-              <div
-                key={request.id}
-                role="row"
-                data-testid={`purchase-request-${request.reference}`}
-                className="grid grid-cols-[0.9fr_1.6fr_1.4fr_0.7fr_1.2fr_1.2fr_1.6fr] border-b align-top"
-              >
-                <div role="cell" className="p-2 font-mono">
-                  {request.reference}
-                </div>
-                <div role="cell" className="p-2">
-                  {request.email}
-                </div>
-                <div role="cell" className="p-2">
-                  {request.course_title || "Course"}
-                </div>
-                <div role="cell" className="p-2" dir="ltr">
-                  {formatFils(request.price_minor_units, locale)}
-                </div>
-                <div role="cell" className="p-2">
-                  {new Date(request.requested_at).toLocaleString(locale)}
-                </div>
-                <div role="cell" className="p-2">
-                  {stateLabel[request.state]}
-                </div>
-                <div role="cell" className="p-2">
-                  {request.state === "WAITING_PAYMENT" ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={busy === request.id}
-                        onClick={() => void confirm(request)}
-                        className="rounded-md bg-emerald-600 px-3 py-2 font-medium text-white disabled:opacity-50"
-                      >
-                        {busy === request.id
-                          ? "Confirming…"
-                          : "Confirm payment & send invitation"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy === request.id}
-                        onClick={() => void cancel(request)}
-                        className="rounded-md border border-red-300 px-3 py-2 font-medium text-red-700 disabled:opacity-50"
-                      >
-                        Cancel request
-                      </button>
-                    </div>
-                  ) : request.state === "INVITATION_CREATED" ? (
-                    <button
-                      type="button"
-                      disabled={busy === request.id}
-                      onClick={() => void cancel(request)}
-                      className="rounded-md border border-red-300 px-3 py-2 font-medium text-red-700 disabled:opacity-50"
-                    >
-                      {busy === request.id ? "Cancelling…" : "Cancel request"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-            {requests.length === 0 ? (
-              <div role="row">
-                <div role="cell" className="p-4 text-gray-600">
-                  No purchase requests found.
-                </div>
-              </div>
-            ) : null}
-          </div>
+        <div className="mb-4" data-testid="purchase-request-notice" data-tone={notice.tone}>
+          {notice.tone === "error" ? (
+            <ErrorState title={notice.text} />
+          ) : (
+            <p role="status" className="text-sm font-semibold text-foreground">
+              {notice.text}
+            </p>
+          )}
         </div>
       ) : null}
-    </section>
+
+      {state === "loading" ? (
+        <LoadingState label={copy.loading} testID="purchase-requests-loading" />
+      ) : null}
+      {state === "failed" ? (
+        <ErrorState
+          title={copy.loadFailed}
+          retryLabel={copy.retry}
+          onRetry={() => void load(appliedQuery)}
+          testID="purchase-requests-failed"
+        />
+      ) : null}
+      {state === "ready" && requests.length === 0 ? (
+        <EmptyState
+          density="compact"
+          title={appliedQuery === "" ? copy.emptyTitle : copy.emptySearchTitle}
+          description={appliedQuery === "" ? copy.emptyBody : copy.emptySearchBody}
+          testID="purchase-requests-empty"
+        />
+      ) : null}
+
+      {state === "ready" && requests.length > 0 ? (
+        <TableContainer>
+          <Table>
+            <TableCaption>{copy.caption}</TableCaption>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell scope="col">{copy.reference}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.student}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.course}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.price}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.requested}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.state}</TableHeaderCell>
+                <TableHeaderCell scope="col">{copy.actions}</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {requests.map((request) => (
+                <TableRow key={request.id} data-testid={`purchase-request-${request.reference}`}>
+                  {/* The reference is the name of this request — a code the Student was given and
+                      can quote back. Latin in either language, so `bdi`. */}
+                  <TableHeaderCell scope="row">
+                    <bdi className="font-mono">{request.reference}</bdi>
+                  </TableHeaderCell>
+                  <TableCell>
+                    <bdi>{request.email}</bdi>
+                  </TableCell>
+                  <TableCell>{request.course_title || copy.course}</TableCell>
+                  <TableCell dir="ltr">{formatFils(request.price_minor_units, locale)}</TableCell>
+                  <TableCell>{formatDate(request.requested_at, locale)}</TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      tone={TONE[request.state]}
+                      label={copy.status[request.state]}
+                      detail={copy.statusDetail[request.state]}
+                      labelTestID="purchase-request-state"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-2">
+                      {request.state === "WAITING_PAYMENT" ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => setPending({ kind: "confirm", request })}
+                          aria-label={`${copy.confirm} — ${request.reference}`}
+                        >
+                          {copy.confirm}
+                        </Button>
+                      ) : null}
+                      {request.state === "WAITING_PAYMENT" ||
+                      request.state === "INVITATION_CREATED" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => setPending({ kind: "cancel", request })}
+                          aria-label={`${copy.cancel} — ${request.reference}`}
+                        >
+                          {copy.cancel}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      ) : null}
+
+      {pending ? (
+        <ConfirmDialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !busy) setPending(null);
+          }}
+          title={pending.kind === "confirm" ? copy.confirmTitle : copy.cancelTitle}
+          body={pending.kind === "confirm" ? copy.confirmBody : copy.cancelBody}
+          confirmLabel={pending.kind === "confirm" ? copy.confirmAccept : copy.cancelAccept}
+          cancelLabel={copy.keep}
+          tone={pending.kind === "confirm" ? "default" : "destructive"}
+          busy={busy}
+          onConfirm={() => void act()}
+          testID="purchase-request-confirm"
+        />
+      ) : null}
+    </WorkspaceSection>
   );
 }

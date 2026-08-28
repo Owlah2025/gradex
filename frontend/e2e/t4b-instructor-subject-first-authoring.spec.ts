@@ -121,7 +121,7 @@ async function createAcademicCourse(page: Page, titleEn: string, code = SHARED_S
   await page.getByTestId("new-course-description-ar").fill("وصف");
   await page.getByTestId("new-course-description-en").fill("Description");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
   expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
   return courseID!;
@@ -176,7 +176,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-description-ar").fill("وصف");
     await page.getByTestId("new-course-description-en").fill("Description");
     await page.getByTestId("create-course").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
     // What the server actually stored.
     const api = await apiFor(session);
@@ -226,7 +226,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-change-subject").click();
     await chooseSubject(page, UNMAPPED_SUBJECT_CODE);
     await expect(page.getByTestId("new-course-audience-empty")).toContainText(
-      "No Programs are currently associated with this Subject",
+      "The catalog links no program to this subject yet",
     );
     await expect(page.getByTestId("new-course-audience")).toHaveCount(0);
 
@@ -234,7 +234,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-title-ar").fill("مادة غير مرتبطة");
     await page.getByTestId("new-course-title-en").fill(`Unmapped Course ${Date.now()}`);
     await page.getByTestId("create-course").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
     // And displaying an audience wrote no target rows.
     const api = await apiFor(session);
@@ -261,7 +261,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await expect(page.getByTestId("academic-course-context")).toBeVisible();
     await page.getByTestId("academic-course-edit-subject").click();
     await chooseSubject(page, ALT_SUBJECT_CODE, "academic-course", false);
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course Subject updated");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course subject updated");
 
     await expect
       .poll(async () => (await (await api.get(`/api/v1/courses/${courseID}`)).json()).subject_id)
@@ -335,7 +335,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-title-ar").fill("كورس");
     await page.getByTestId("new-course-title-en").fill(`Guarded Course ${Date.now()}`);
     await page.getByTestId("create-course").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
     const created = (await (await api.get("/api/v1/courses")).json())[0];
     const terms = await (await api.get("/api/v1/taxonomy/terms")).json();

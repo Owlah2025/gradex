@@ -184,7 +184,7 @@ test("getOwnedCourses and getOwnedCourseDetail preserve real Go nested revision 
       course_id: "30000000-0000-0000-0000-000000000001",
       revision_number: 1,
       state: "DRAFT",
-      title_ar: "عنوان الدورة الحقيقي",
+      title_ar: "عنوان المقرر الحقيقي",
       title_en: "Real Course Title",
       description_ar: "الوصف",
       description_en: "Description",

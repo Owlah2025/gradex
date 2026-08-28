@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { GraduationCap } from "lucide-react";
 import { Section, SectionHeader } from "@/components/layout/section";
 import { Reveal } from "@/components/common/reveal";
+import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,23 +13,13 @@ import { getPublicCourses, type PublicCourse } from "@/lib/api/public-catalog";
 import { formatFils } from "@/lib/formatters/currency";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { routes } from "@/components/layout/nav-items";
+import { useAcademicContext } from "@/components/academic/academic-context-provider";
+import {
+  catalogueHrefForContext,
+  selectionForContext,
+} from "@/components/academic/catalogue-context";
+import { requestFilters } from "@/components/catalog/academic-filter-state";
 
-const copy = {
-  ar: {
-    loading: "جارٍ تحميل المقررات المنشورة…",
-    failed: "تعذّر تحميل المقررات المنشورة. حاول مرة أخرى.",
-    instructor: "المدرّس",
-    preview: "تتوفر معاينة عامة",
-    price: "السعر الإرشادي",
-  },
-  en: {
-    loading: "Loading published courses…",
-    failed: "Published courses could not be loaded. Try again.",
-    instructor: "Instructor",
-    preview: "Public preview available",
-    price: "Price guidance",
-  },
-};
 
 type FeaturedState =
   | { kind: "loading" }
@@ -40,8 +31,7 @@ function courseHref(locale: "ar" | "en", course: PublicCourse): string {
 }
 
 function PublicCourseCard({ course }: { course: PublicCourse }) {
-  const { locale } = useLocale();
-  const t = copy[locale];
+  const { locale, t } = useLocale();
   const taxonomy = [course.major, course.subject, course.study_year].filter(Boolean);
 
   return (
@@ -60,9 +50,9 @@ function PublicCourseCard({ course }: { course: PublicCourse }) {
           {course.title}
         </Link>
       </h3>
-      {course.instructor_display_name && <p className="mt-2 text-sm text-muted-foreground">{t.instructor}: {course.instructor_display_name}</p>}
-      {course.has_preview && <p className="mt-3 text-sm text-primary">{t.preview}</p>}
-      {course.price && <p dir="ltr" className="mt-auto pt-5 font-mono text-base font-semibold text-foreground">{t.price}: {formatFils(course.price.minor_units, locale)}</p>}
+      {course.instructor_display_name && <p className="mt-2 text-sm text-muted-foreground">{t.courses.instructor}: {course.instructor_display_name}</p>}
+      {course.has_preview && <p className="mt-3 text-sm text-primary">{t.courses.preview}</p>}
+      {course.price && <p dir="ltr" className="mt-auto pt-5 font-mono text-base font-semibold text-foreground">{t.courses.price}: {formatFils(course.price.minor_units, locale)}</p>}
     </Card>
   );
 }
@@ -70,11 +60,24 @@ function PublicCourseCard({ course }: { course: PublicCourse }) {
 export function FeaturedCourses() {
   const { locale, t } = useLocale();
   const [state, setState] = useState<FeaturedState>({ kind: "loading" });
+  const { status, anonymous, source } = useAcademicContext();
+
+  // Narrowed by the visitor's own academic context, through the same anonymous catalogue API the
+  // catalogue itself uses. A profile-backed Student is left alone here: their profile orders the
+  // catalogue rather than narrowing it, and this strip is too small to be worth misrepresenting.
+  const filters =
+    source === "anonymous" && anonymous
+      ? requestFilters(selectionForContext(anonymous))
+      : {};
+  const filterKey = JSON.stringify(filters);
 
   useEffect(() => {
+    // Waiting for the stored context avoids fetching the unfiltered list first and then visibly
+    // replacing it a moment later with the personalised one.
+    if (status !== "ready") return;
     let active = true;
     setState({ kind: "loading" });
-    getPublicCourses(locale)
+    getPublicCourses(locale, "", JSON.parse(filterKey))
       .then((result) => {
         if (active) setState({ kind: "ready", courses: result.items.slice(0, 3) });
       })
@@ -84,14 +87,25 @@ export function FeaturedCourses() {
     return () => {
       active = false;
     };
-  }, [locale]);
+  }, [locale, status, filterKey]);
+
+  // Carries the context into the catalogue, so "Browse all courses" continues the list the reader
+  // is looking at instead of resetting it.
+  const browseAllHref =
+    source === "anonymous" && anonymous
+      ? catalogueHrefForContext(locale, anonymous)
+      : routes.catalogue(locale);
 
   return (
     <Section id="courses" aria-labelledby="courses-title">
       <SectionHeader eyebrow={t.courses.eyebrow} title={t.courses.title} lead={t.courses.subtitle} headingId="courses-title" />
 
-      {state.kind === "loading" && <p aria-live="polite" data-testid="featured-courses-loading">{copy[locale].loading}</p>}
-      {state.kind === "failed" && <p role="alert" data-testid="featured-courses-error" className="rounded-lg border border-amber-300 bg-amber-50 p-5 text-amber-950">{copy[locale].failed}</p>}
+      {state.kind === "loading" && <p aria-live="polite" data-testid="featured-courses-loading">{t.courses.loading}</p>}
+      {state.kind === "failed" && (
+        <div data-testid="featured-courses-error">
+          <Alert tone="error" title={t.courses.failed} />
+        </div>
+      )}
       {state.kind === "ready" && state.courses.length === 0 && (
         <EmptyState icon={<GraduationCap aria-hidden />} title={t.courses.emptyTitle} description={t.courses.emptyBody} />
       )}
@@ -106,7 +120,7 @@ export function FeaturedCourses() {
           </ul>
           <div className="mt-9 flex justify-center">
             <Button asChild variant="outline">
-              <Link href={routes.catalogue(locale)}>{t.courses.browseAll}</Link>
+              <Link href={browseAllHref}>{t.courses.browseAll}</Link>
             </Button>
           </div>
         </>

@@ -40,15 +40,17 @@ async function mockCatalogAPI(page: Page) {
   await page.route("**/api/v1/admin/review/queue", (route) => route.fulfill({ json: [] }));
 }
 
+// The instructor anchor moved from the standalone price panel, which was removed, to the
+// course directory heading. The property under test is the viewport behaviour, not the copy.
 function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | "en") {
   if (surface === "instructor") {
     return locale === "ar"
-      ? ["منصة إعداد الدورات التعليمية", "أسعار الخادم الرسمية (قراءة فقط من وقائع الخادم)", "تصنيف المسودة المحددة"]
-      : ["Course Authoring Studio", "Official Server Prices (Read-only Server State)", "Explicit Draft Taxonomy"];
+      ? ["منصة إعداد المقررات التعليمية", "مقرراتك", "تصنيف المسودة المحددة"]
+      : ["Course Authoring Studio", "Your courses", "Explicit Draft Taxonomy"];
   }
   return locale === "ar"
-    ? ["قائمة مراجعة وتسعير الدورات", "إدارة قاموس التصنيف", "قاموس التصنيف"]
-    : ["Course Review & Pricing Admin", "Taxonomy Vocabulary Administration", "Taxonomy Vocabulary"];
+    ? ["مراجعة المقررات وإدارتها", "مفردات الكتالوج", "التخصصات والمواد"]
+    : ["Course review & administration", "Catalogue vocabulary", "Majors and subjects"];
 }
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
@@ -61,8 +63,12 @@ for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
         await page.goto(path);
 
         await expect(page.locator("html")).toHaveAttribute("dir", direction);
+        // Scoped to the page content rather than the whole document: the workspace navigation
+        // entry that leads to a screen now carries the same words as that screen's own heading,
+        // which is the intent, but leaves a bare document-wide text match ambiguous.
+        const content = page.locator("#main");
         for (const heading of expectedScreenHeadings(surfaceName, locale)) {
-          await expect(page.getByText(heading, { exact: true })).toBeVisible();
+          await expect(content.getByText(heading, { exact: true })).toBeVisible();
         }
         await expect(page.locator("button, input, select").first()).toBeVisible();
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBe(true);

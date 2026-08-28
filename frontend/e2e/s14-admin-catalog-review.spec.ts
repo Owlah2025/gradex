@@ -65,7 +65,7 @@ async function apiContext(session: Session): Promise<APIRequestContext> {
 
 async function openAdminCatalog(page: Page): Promise<void> {
   await page.goto("/en/admin/catalog");
-  await expect(page.locator("h1")).toContainText("Course Review & Pricing Admin");
+  await expect(page.locator("h1")).toContainText("Course review & administration");
   // The queue resolves against the server before anything is asserted about it.
   await expect(page.getByTestId("review-queue-loading")).toHaveCount(0);
 }
@@ -158,7 +158,7 @@ test.describe("S14 Admin Catalog review surface", () => {
     await openAdminCatalog(page);
     await expect(page.getByTestId("administer-course-id")).toHaveCount(0);
     await expect(page.locator('[data-testid^="administer-review-item-"]')).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Taxonomy Vocabulary Administration" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Catalogue vocabulary" })).toBeVisible();
 
     await context.close();
   });
@@ -174,14 +174,14 @@ test.describe("S14 Admin Catalog review surface", () => {
     await page.getByTestId("taxonomy-term-label-ar").fill(MAJOR_AR);
     await page.getByTestId("taxonomy-term-label-en").fill(MAJOR_EN);
     await page.getByTestId("taxonomy-term-create").click();
-    await expect(page.getByTestId("taxonomy-term-message")).toContainText("Term created and audited");
+    await expect(page.getByTestId("taxonomy-term-message")).toContainText("The term was added.");
 
     await page.getByTestId("taxonomy-term-kind").selectOption("SUBJECT");
     await page.getByTestId("taxonomy-term-label-ar").fill(SUBJECT_AR);
     await page.getByTestId("taxonomy-term-label-en").fill(SUBJECT_EN);
     await page.getByTestId("taxonomy-term-academic-code").fill(SUBJECT_CODE);
     await page.getByTestId("taxonomy-term-create").click();
-    await expect(page.getByTestId("taxonomy-term-message")).toContainText("Term created and audited");
+    await expect(page.getByTestId("taxonomy-term-message")).toContainText("The term was added.");
 
     // Persisted, not merely rendered: a reload re-reads the vocabulary.
     await page.reload();
@@ -253,21 +253,23 @@ test.describe("S14 Admin Catalog review surface", () => {
     await page.getByTestId("new-course-description-ar").fill("وصف");
     await page.getByTestId("new-course-description-en").fill("Incomplete");
     await page.getByTestId("create-course").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+    await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
 
     const submit = page.getByTestId("submit-for-review");
     await submit.click();
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
 
     // The founder clicked Submit and saw nothing happen, because the reason
-    // rendered far above the viewport. It now renders at the control, and the
-    // server's own violation codes are shown unchanged.
+    // rendered far above the viewport. It still renders at the control.
     // T4-B (§48): this previously also asserted TAXONOMY_DIMENSION_MISSING. That
     // gate belongs to the legacy classification, which an Academic Course does
-    // not carry and must never be asked for. The property under test — the
-    // server's own reason, rendered at the control — is unchanged.
+    // not carry and must never be asked for.
+    // The server's violation is now named in words rather than as its wire code: COURSE_EMPTY
+    // told an instructor nothing, and the target that accompanied it was a raw course UUID.
     const submitError = page.getByTestId("submit-error");
     await expect(submitError).toBeVisible();
-    await expect(submitError).toContainText("COURSE_EMPTY");
+    await expect(submitError).toContainText("at least one section");
+    await expect(submitError).not.toContainText("COURSE_EMPTY");
     await expect(submitError).not.toContainText("TAXONOMY_DIMENSION_MISSING");
 
     const errorBox = await submitError.boundingBox();

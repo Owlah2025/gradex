@@ -2,27 +2,16 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { deleteSession } from "@/lib/api/identity";
-import { clearSession, currentCSRFToken } from "@/lib/identity/session";
 import { useSessionView } from "@/lib/identity/use-session";
 import { roleHomeNavigation } from "./role-workspace-navigation";
 import { routes } from "./nav-items";
+import { SignOutButton } from "./sign-out-button";
 import { cn } from "@/lib/utils";
 
-export type AuthState = "guest" | "authenticated";
-
 interface AuthActionsProps {
-  /**
-   * Forces a state instead of reading the live session. The landing page uses
-   * this to preview the returning-user header; leave it unset everywhere else
-   * so the header follows the real session.
-   */
-  state?: AuthState;
   /** Stacked, full-width layout for the mobile sheet. */
   stacked?: boolean;
 }
@@ -32,34 +21,18 @@ interface AuthActionsProps {
  * returning users). Guests get log-in / register / browse; authenticated users
  * get notifications + dashboard + sign out.
  */
-export function AuthActions({ state, stacked = false }: AuthActionsProps) {
+export function AuthActions({ stacked = false }: AuthActionsProps) {
   const { locale, t } = useLocale();
-  const router = useRouter();
   const session = useSessionView();
-  const [signingOut, setSigningOut] = React.useState(false);
-  const resolved: AuthState = state ?? (session ? "authenticated" : "guest");
+  // There used to be a `state` prop that forced "authenticated" without a
+  // session, for a landing-page preview of the returning-user header. No caller
+  // ever passed it, and its fallback pointed at the Student dashboard — naming a
+  // role for a principal that had not been read at all.
   const authenticatedHome = session
     ? roleHomeNavigation(session.role, locale)
-    : { key: "dashboard" as const, href: routes.dashboard(locale) };
+    : null;
 
-  async function signOut() {
-    const csrf = currentCSRFToken();
-    if (!csrf) return;
-    setSigningOut(true);
-    try {
-      await deleteSession(csrf, locale);
-    } catch {
-      // Logout is best-effort from the browser's side. The server is
-      // authoritative, and a failed call must still drop local state rather
-      // than leave a signed-out-looking header holding a live CSRF token.
-    } finally {
-      clearSession();
-      setSigningOut(false);
-      router.push(`${routes.login}?reason=signed-out`);
-    }
-  }
-
-  if (resolved === "authenticated") {
+  if (session) {
     return (
       <div
         className={cn(
@@ -67,23 +40,24 @@ export function AuthActions({ state, stacked = false }: AuthActionsProps) {
           stacked && "flex-col items-stretch",
         )}
       >
-        {!stacked && (
-          <Button variant="outline" size="icon" aria-label={t.nav.notifications}>
-            <Bell className="size-5" aria-hidden />
+        {/* There was a notifications button here. It had no href, no handler
+            and no feature behind it: a control that looked operable, was
+            reachable by keyboard, was announced as a button, and did nothing
+            when pressed. The Student learning frame had already refused to
+            carry it for exactly that reason. */}
+        {/* No workspace control at all when the session names no role this application knows.
+            There is no honest destination to offer — every candidate either invents a role for the
+            visitor or is a link the server refuses — and an anchor with no `href` is a control that
+            looks operable and does nothing. Sign out stays, which is the action that applies. */}
+        {authenticatedHome && (
+          <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
+            <Link href={authenticatedHome.href}>{t.nav[authenticatedHome.key]}</Link>
           </Button>
         )}
-        <Button asChild size={stacked ? "default" : "sm"} className={cn(stacked && "w-full")}>
-          <Link href={authenticatedHome.href}>{t.nav[authenticatedHome.key]}</Link>
-        </Button>
-        <Button
-          variant="outline"
+        <SignOutButton
           size={stacked ? "default" : "sm"}
           className={cn(stacked && "w-full")}
-          onClick={signOut}
-          disabled={signingOut}
-        >
-          {signingOut ? t.auth.session.signingOut : t.auth.session.signOut}
-        </Button>
+        />
         {!stacked && (
           <Avatar size="sm" aria-hidden>
             <AvatarFallback>

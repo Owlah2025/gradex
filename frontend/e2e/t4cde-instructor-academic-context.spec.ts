@@ -85,7 +85,7 @@ async function createAcademicCourse(page: Page, title: string): Promise<{ course
   await page.getByTestId("new-course-description-ar").fill("وصف أكاديمي");
   await page.getByTestId("new-course-description-en").fill("Academic context journey");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created on the server");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;
   const revisionID = (await selected.getAttribute("data-revision-id"))!;
@@ -139,7 +139,8 @@ async function approveInspected(page: Page, setPrice: boolean): Promise<void> {
     await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
   }
   await inspector.getByTestId("approve-inspected-revision").click();
-  await expect(page.getByTestId("review-action-success")).toContainText("Course published successfully");
+  await page.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
+  await expect(page.getByTestId("review-action-success")).toContainText("The course is published.");
 }
 
 async function createMissingSubjectCourse(
@@ -161,9 +162,9 @@ async function createMissingSubjectCourse(
   await page.getByTestId("new-course-title-en").fill(title);
   await page.getByTestId("new-course-description-en").fill("Continue drafting while pending");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Subject request sent for review");
+  await expect(page.getByTestId("authoring-notice")).toContainText("subject request was sent for review");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
-  await expect(page.getByTestId("subject-request-pending")).toContainText("Pending review", { timeout: 15_000 });
+  await expect(page.getByTestId("subject-request-pending")).toContainText("Subject request under review", { timeout: 15_000 });
   return courseID;
 }
 
@@ -186,7 +187,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const originalSubject = SHARED_SUBJECT_CODE;
 
     // C1/C2 — automatic inference, then an explicit valid subset.
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Automatic audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Programs that see this course");
     await page.getByTestId("academic-course-customize-audience").click();
     const options = page.getByTestId("academic-course-audience-option");
     expect(await options.count()).toBeGreaterThan(1);
@@ -194,7 +195,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
       await options.nth(index).uncheck();
     }
     await page.getByTestId("academic-course-save-audience").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Customized audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Chosen programs");
 
     const detailResponse = await instructorAPI.get(`/api/v1/courses/${courseID}`);
     expect(detailResponse.status()).toBe(200);
@@ -223,7 +224,8 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("submit-for-review").click();
-    await expect(page.getByTestId("authoring-notice")).toContainText("submitted for Admin review");
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+    await expect(page.getByTestId("authoring-notice")).toContainText("An administrator will review it");
 
     const firstReview = await openAdminReview(browser, courseID);
     const inspector = firstReview.page.getByTestId("submitted-revision-inspector");
@@ -262,7 +264,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("start-revision").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Customized audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Chosen programs");
     await page.getByTestId("academic-course-edit-audience").click();
     const checked = page.locator('[data-testid="academic-course-audience-option"]:checked');
     await expect(checked).toHaveCount(2);
@@ -273,6 +275,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     expect(owned.live_revision.audience.programs).toHaveLength(2);
     expect(owned.editable_revision.audience.programs).toHaveLength(1);
     await page.getByTestId("submit-for-review").click();
+    await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
     const secondReview = await openAdminReview(browser, courseID);
     await expect(secondReview.page.getByTestId("submitted-academic-audience").locator("li")).toHaveCount(1);
     await approveInspected(secondReview.page, false);
@@ -287,7 +290,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await page.getByTestId(`owned-course-${courseID}`).click();
     await page.getByTestId("start-revision").click();
     await page.getByTestId("academic-course-use-automatic-audience").click();
-    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Automatic audience");
+    await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Programs that see this course");
     owned = await (await instructorAPI.get(`/api/v1/courses/${courseID}`)).json() as any;
     expect(owned.live_revision.audience.mode).toBe("CUSTOMIZED");
     expect(owned.live_revision.audience.programs).toHaveLength(1);

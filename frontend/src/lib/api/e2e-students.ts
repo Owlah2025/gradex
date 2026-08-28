@@ -46,7 +46,7 @@ export const ROTATING_EXPIRED_POOL_SIZE = 100;
 // slot * repeats + repeat, so slots 0-23 keep indices 0-239 and slots 0-29 keep
 // indices 0-299.
 //
-// Expired pool: 0-3, the expired-access matrix's 4 viewports.
+// Expired pool: 0-3, the expired-access matrix's 4 viewports; 4-7, the UX-I access scans.
 
 /** The viewport x locale Lesson Player executions occupy active slots 0-7. */
 export function playerTestSlot(viewportIndex: number, localeIndex: number, localeCount: number): number {
@@ -60,6 +60,26 @@ export function genericTestSlot(viewportIndex: number): number {
 export function lifecycleTestSlot(viewportIndex: number): number {
   return 12 + viewportIndex;
 }
+/**
+ * The UX-I Course-access accessibility scans occupy expired slots 4-7.
+ *
+ * Both come from the expired pool because neither needs a Student with live access: one reads the
+ * ended-access record list exactly as it is seeded, and the other is invited fresh, which grants
+ * its own access and leaves the expired record beside it — a page carrying two states at once,
+ * which is the harder thing for an accessibility scan to survive.
+ *
+ * Each language gets its own Student rather than sharing one across the two executions. Accepting
+ * an invitation is a one-time answer, so a second language arriving at the same Student finds an
+ * invitation that has already been answered and no control to scan — which is how this was found.
+ *
+ * They are not borrowed from the active pool's claimed slots either. A scan that shared a Student
+ * with another execution would be scanning whatever that execution had most recently done to them.
+ */
+export const ACCESS_A11Y_EXPIRED_EN_TEST_SLOT = 4;
+export const ACCESS_A11Y_EXPIRED_AR_TEST_SLOT = 7;
+export const ACCESS_A11Y_INVITED_EN_TEST_SLOT = 5;
+export const ACCESS_A11Y_INVITED_AR_TEST_SLOT = 6;
+
 /** The per-viewport expired executions occupy expired slots 0-3. */
 export function expiredTestSlot(viewportIndex: number): number {
   return viewportIndex;

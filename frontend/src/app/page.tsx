@@ -1,6 +1,7 @@
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Hero } from "@/components/sections/hero";
+import { AcademicContextPanel } from "@/components/academic/academic-context-panel";
 import { FeaturedCourses } from "@/components/sections/featured-courses";
 import { WhyGradex } from "@/components/sections/why-gradex";
 import { LearningExperience } from "@/components/sections/learning-experience";
@@ -19,6 +20,9 @@ export default function LandingPage() {
       <Navbar />
       <main id="main">
         <Hero />
+        {/* Directly under the hero, before any course is shown: the question that decides which
+            courses are worth showing belongs ahead of the answer, not after it. */}
+        <AcademicContextPanel />
         <FeaturedCourses />
         <WhyGradex />
         <LearningExperience />

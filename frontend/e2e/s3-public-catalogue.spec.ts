@@ -24,13 +24,13 @@ const detail = {
 const localized = {
   ar: {
     catalogue: "الكتالوج",
-    title: "عنوان الدورة",
-    description: "وصف الدورة الذي كتبه المدرس.",
+    title: "عنوان المقرر",
+    description: "وصف المقرر الذي كتبه المدرس.",
     instructor: "اسم المدرس الظاهر",
-    outline: "محتوى الدورة",
-    loading: "جارٍ تحميل الدورات…",
-    empty: "لا توجد دورات منشورة الآن.",
-    unavailable: "هذه الدورة غير متاحة.",
+    outline: "محتوى المقرر",
+    loading: "جارٍ تحميل المقررات…",
+    empty: "لا توجد مقررات منشورة الآن.",
+    unavailable: "هذا المقرر غير متاح",
     failed: "تعذر تحميل الكتالوج. حاول مرة أخرى.",
     language: "التبديل إلى الإنجليزية",
   },
@@ -42,7 +42,7 @@ const localized = {
     outline: "Course outline",
     loading: "Loading courses…",
     empty: "No published courses are available yet.",
-    unavailable: "This course is unavailable.",
+    unavailable: "This course is not available",
     failed: "The catalogue could not be loaded. Try again.",
     language: "Switch to Arabic",
   },
@@ -276,12 +276,12 @@ test("catalogue search forwards raw bilingual input and renders safe result stat
   await search.fill("أحياء Biology ١٠١");
   await page.getByRole("button", { name: "بحث" }).click();
   await expect(page).toHaveURL(/q=/);
-  await expect(page.getByRole("link", { name: "عنوان الدورة" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "عنوان المقرر" })).toBeVisible();
   expect(receivedQueries).toContain("أحياء Biology ١٠١");
 
   await search.fill("لا-نتائج");
   await page.getByRole("button", { name: "بحث" }).click();
-  await expect(page.getByText("لا توجد دورات مطابقة.", { exact: true })).toBeVisible();
+  await expect(page.getByText("لا توجد مقررات مطابقة.", { exact: true })).toBeVisible();
   expect(receivedQueries).toContain("لا-نتائج");
 });
 
@@ -327,7 +327,9 @@ test("catalogue maps a public not-found problem to the anonymous state", async (
     },
   }));
   await page.goto("/en/catalog/course-unknown");
-  await expect(page.getByText(localized.en.unavailable, { exact: true })).toBeVisible();
+  await expect(page.getByTestId("course-detail-unavailable")).toContainText(
+    localized.en.unavailable,
+  );
 });
 
 test("catalogue renders an empty published collection", async ({ page }) => {

@@ -4,33 +4,54 @@ import { useEffect, useState } from "react";
 import { TaxonomyTermSelect } from "@/components/catalog/taxonomy-term-select";
 import {
   assignInstructorTaxonomy,
-  getOwnedCourses,
   getTaxonomyTerms,
   type OwnedCourseSummary,
   type TaxonomyTerm,
 } from "@/lib/api/catalog";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Select } from "@/components/ui/select";
+import { courseDisplayTitle } from "./course-standing";
 
-export function TaxonomyAssignmentPanel() {
+type LegacyLabels = Dictionary["instructor"]["legacyTaxonomy"];
+
+/**
+ * Legacy taxonomy compatibility (D-093 §6). Removed at T5.
+ *
+ * It edits `major_term_id` / `subject_term_id`, which only a LEGACY_TAXONOMY course carries, and
+ * disappears entirely once an Instructor owns none. The server refuses these fields on an academic
+ * course regardless of what is rendered, so this is presentation and never the control.
+ *
+ * It used to fetch the owned-course list itself. That was the studio's third request for the same
+ * list on one page load — the builder's, the price panel's, and this one's — and it existed only
+ * to populate a course selector beside two others. The courses are handed in now.
+ *
+ * Its single `message` string carried successes and failures alike, in the same grey paragraph
+ * under the same `role="status"`, so a refused save read exactly like a saved one.
+ */
+export function TaxonomyAssignmentPanel({
+  courses,
+  labels,
+}: {
+  courses: OwnedCourseSummary[];
+  labels: LegacyLabels;
+}) {
   const { locale } = useLocale();
-  const isAr = locale === "ar";
-  const [courses, setCourses] = useState<OwnedCourseSummary[]>([]);
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
   const [courseID, setCourseID] = useState("");
   const [majorTermID, setMajorTermID] = useState("");
   const [subjectTermID, setSubjectTermID] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "ok" | "fail"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    Promise.all([getOwnedCourses(locale), getTaxonomyTerms(locale)])
-      .then(([ownedCourses, activeTerms]) => {
-        setCourses(ownedCourses);
-        setTerms(activeTerms);
-      })
-      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : isAr ? "تعذر تحميل التصنيف" : "Unable to load taxonomy"));
-  }, [isAr, locale]);
+    getTaxonomyTerms(locale)
+      .then(setTerms)
+      .catch(() => setNotice({ tone: "fail", text: labels.loadFailed }));
+  }, [locale, labels.loadFailed]);
 
   const selectedCourse = courses.find((course) => course.id === courseID);
   const revision = selectedCourse?.editable_revision;
@@ -40,54 +61,113 @@ export function TaxonomyAssignmentPanel() {
     const selected = courses.find((course) => course.id === selectedID)?.editable_revision;
     setMajorTermID(selected?.major_term_id ?? "");
     setSubjectTermID(selected?.subject_term_id ?? "");
-    setMessage(null);
+    setNotice(null);
   };
 
   const save = async () => {
     if (!revision?.id || !majorTermID || !subjectTermID) {
-      setMessage(isAr ? "اختر دورة مسودة وتخصصاً ومادةً" : "Select an editable draft, major, and subject");
+      setNotice({ tone: "fail", text: labels.incomplete });
       return;
     }
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setMessage(isAr ? "رمز CSRF للجلسة مفقود" : "Session CSRF token is missing");
+      setNotice({ tone: "fail", text: labels.saveFailed });
       return;
     }
     setBusy(true);
-    setMessage(null);
+    setNotice(null);
     try {
-      await assignInstructorTaxonomy({ courseID, revisionID: revision.id, majorTermID, subjectTermID, locale, csrf });
-      setMessage(isAr ? "تم حفظ تصنيف المراجعة المحددة" : "Taxonomy saved for the named revision");
+      await assignInstructorTaxonomy({
+        courseID,
+        revisionID: revision.id,
+        majorTermID,
+        subjectTermID,
+        locale,
+        csrf,
+      });
+      setNotice({ tone: "ok", text: labels.saved });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : isAr ? "تعذر حفظ التصنيف" : "Unable to save taxonomy");
+      setNotice({
+        tone: "fail",
+        text: error instanceof Error && error.message ? error.message : labels.saveFailed,
+      });
     } finally {
       setBusy(false);
     }
   };
 
+  const editable = courses.filter((course) => course.editable_revision?.id);
+
   return (
-    <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-5 shadow-sm dark:border-indigo-900 dark:bg-indigo-950/20">
-      <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">{isAr ? "تصنيف المسودة المحددة" : "Explicit Draft Taxonomy"}</h2>
-      <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-        {isAr ? "يحفظ الاختيار على مراجعة المسودة المعروضة فقط، وليس على أحدث مراجعة مفترضة." : "Saves to the displayed editable revision only; no latest-revision lookup is used."}
-      </p>
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-          {isAr ? "الدورة" : "Course"}
-          <select value={courseID} onChange={(event) => selectCourse(event.target.value)} data-testid="taxonomy-course" className="mt-1 w-full rounded border border-slate-300 bg-white p-2 text-xs dark:border-slate-700 dark:bg-slate-900">
-            <option value="">{isAr ? "اختر دورة" : "Select a Course"}</option>
-            {courses.filter((course) => course.editable_revision?.id).map((course) => (
-              <option key={course.id} value={course.id}>{isAr ? course.editable_revision?.title_ar : course.editable_revision?.title_en}</option>
+    <section
+      className="rounded-lg border border-border bg-card p-5"
+      aria-labelledby="legacy-taxonomy-title"
+      data-testid="legacy-taxonomy-panel"
+    >
+      <h2 id="legacy-taxonomy-title" className="font-display text-base font-bold text-foreground">
+        {labels.title}
+      </h2>
+      <p className="mt-1 text-sm text-muted-foreground">{labels.lead}</p>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <Field label={labels.courseLabel} htmlFor="taxonomy-course">
+          <Select
+            id="taxonomy-course"
+            value={courseID}
+            onChange={(event) => selectCourse(event.target.value)}
+            data-testid="taxonomy-course"
+          >
+            <option value="">{labels.coursePlaceholder}</option>
+            {editable.map((course) => (
+              <option key={course.id} value={course.id}>
+                {courseDisplayTitle(course, locale, labels.coursePlaceholder)}
+              </option>
             ))}
-          </select>
-        </label>
-        <TaxonomyTermSelect kind="MAJOR" locale={locale} terms={terms} value={majorTermID} onChange={setMajorTermID} disabled={!revision?.id || busy} />
-        <TaxonomyTermSelect kind="SUBJECT" locale={locale} terms={terms} value={subjectTermID} onChange={setSubjectTermID} disabled={!revision?.id || busy} />
+          </Select>
+        </Field>
+        <TaxonomyTermSelect
+          kind="MAJOR"
+          locale={locale}
+          terms={terms}
+          value={majorTermID}
+          onChange={setMajorTermID}
+          disabled={!revision?.id || busy}
+        />
+        <TaxonomyTermSelect
+          kind="SUBJECT"
+          locale={locale}
+          terms={terms}
+          value={subjectTermID}
+          onChange={setSubjectTermID}
+          disabled={!revision?.id || busy}
+        />
       </div>
-      <button type="button" disabled={busy || !revision?.id} onClick={save} className="mt-4 rounded bg-indigo-700 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-800 disabled:opacity-50">
-        {busy ? (isAr ? "جارٍ الحفظ..." : "Saving...") : (isAr ? "حفظ التصنيف" : "Save Taxonomy")}
-      </button>
-      {message && <p role="status" className="mt-3 text-xs text-slate-700 dark:text-slate-300">{message}</p>}
+
+      <Button
+        type="button"
+        size="sm"
+        className="mt-4"
+        disabled={busy || !revision?.id}
+        onClick={save}
+        data-testid="save-taxonomy"
+      >
+        {busy ? labels.saving : labels.save}
+      </Button>
+
+      {notice ? (
+        /* A refusal is announced as one, and painted as one. */
+        <p
+          role={notice.tone === "fail" ? "alert" : "status"}
+          data-testid="taxonomy-notice"
+          className={
+            notice.tone === "fail"
+              ? "mt-3 text-sm font-medium text-destructive"
+              : "mt-3 text-sm text-muted-foreground"
+          }
+        >
+          {notice.text}
+        </p>
+      ) : null}
     </section>
   );
 }
