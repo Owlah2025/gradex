@@ -19,12 +19,22 @@
 #     compromised-password screening is not configured
 #
 # Screening is not a student-registration concern. Staff invitation and
-# onboarding set passwords, so `assertStaffCompositionPreconditions` in
-# cmd/api requires PasswordScreenMode == adapter even while public student
-# registration stays closed. A composition the application will reject must be
-# rejected before anything starts.
+# onboarding set passwords, so `validateStaffComposition` in cmd/api requires
+# PasswordScreenMode == adapter even while public student registration stays
+# closed. A composition the application will reject must be rejected before
+# anything starts.
 #
-# This renders only. It starts nothing and prints no value.
+# The first repair fixed production and left staging asserting the same broken
+# values, which only moved the trap: `validateStaffComposition` exempts
+# development ALONE, and a managed host is never development, so staging carries
+# the identical contract. Both managed environments are covered below.
+#
+# The invariant: if preflight says a managed composition is valid, the API must
+# not then fail on a static environment precondition preflight could have
+# checked. The final section enforces that forward, by reading the backend's own
+# precondition list and failing if preflight does not mirror it.
+#
+# This renders only. It starts nothing, needs no provider, and prints no value.
 
 set -euo pipefail
 
@@ -32,6 +42,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/deploy/hostinger/compose.yml"
 HOST_SCRIPT="$ROOT/deploy/hostinger/host.sh"
 RUNTIME_EXAMPLE="$ROOT/deploy/hostinger/runtime.env.example"
+API_MAIN="$ROOT/backend/cmd/api/main.go"
 
 note() { printf 'hostinger-production-render: %s\n' "$*" >&2; }
 die() { note "$*"; exit 1; }
@@ -154,11 +165,14 @@ note "only the edge publishes host ports, and only 80/tcp, 443/tcp and 443/udp"
 
 # --- 6. staging still renders its intended staging shape --------------------
 
+# A managed host is never development, and validateStaffComposition exempts
+# development alone, so staging carries the same composition contract as
+# production. Only the LG-021 approval flag differs.
 staging_render="$(
   APP_ENV=staging \
-  PASSWORD_SCREEN_MODE=unavailable \
+  PASSWORD_SCREEN_MODE=adapter \
   COMPROMISED_PASSWORD_ADAPTER_APPROVED=false \
-  EMAIL_ENABLED=false \
+  EMAIL_ENABLED=true \
   EMAIL_PROVIDER=resend \
     render
 )" || die "the Hostinger topology no longer renders in staging mode"
@@ -166,13 +180,19 @@ staging_render="$(
 staging_api="$(api_environment "$staging_render")"
 for expectation in \
   'APP_ENV: staging' \
-  'PASSWORD_SCREEN_MODE: unavailable' \
+  'PASSWORD_SCREEN_MODE: adapter' \
+  'COMPROMISED_PASSWORD_ADAPTER_APPROVED: "false"' \
+  'EMAIL_ENABLED: "true"' \
+  'EMAIL_PROVIDER: resend' \
   'STUDENT_REGISTRATION_ENABLED: "false"' \
   'AUTH_FAKE_MODE: "false"'; do
   printf '%s' "$staging_api" | grep --quiet --fixed-strings "$expectation" ||
     die "the staging API environment is missing: $expectation"
 done
-note "staging render keeps its intended staging composition"
+if printf '%s' "$staging_render" | grep --quiet --ignore-case 'minio'; then
+  die "MinIO entered the managed staging topology"
+fi
+note "staging render is application-startup-compatible: adapter screening, Resend email, registration closed"
 
 # --- the environment must be declared, never defaulted ----------------------
 
@@ -227,26 +247,43 @@ compose_case() {
     validate_application_composition
 }
 
+# Positive: both managed environments. Staging differs only in the approval
+# flag, exactly as config.go gates it on environment.IsProduction().
 compose_case production adapter true ||
   die "the approved production composition was rejected"
-compose_case staging unavailable false false resend ||
-  die "the existing staging composition was rejected"
+compose_case staging adapter false ||
+  die "the approved staging composition was rejected"
 
 # `die` exits, so every negative runs in a subshell.
-(compose_case production unavailable false >/dev/null 2>&1) &&
-  die "production accepted unavailable password screening"
-(compose_case production deterministic true >/dev/null 2>&1) &&
-  die "production accepted deterministic password screening"
-(compose_case development deterministic false >/dev/null 2>&1) &&
-  die "a managed host accepted an environment other than staging or production"
+
+# The environment must be a managed one.
+(compose_case development adapter false >/dev/null 2>&1) &&
+  die "a managed host accepted development"
+(compose_case acceptance adapter false >/dev/null 2>&1) &&
+  die "a managed host accepted an unknown environment"
+
+# Screening: the contract validateStaffComposition enforces for every
+# non-development environment, so both managed environments must satisfy it.
+for environment in staging production; do
+  approved=true
+  [ "$environment" = staging ] && approved=false
+  (compose_case "$environment" unavailable "$approved" >/dev/null 2>&1) &&
+    die "$environment accepted unavailable password screening"
+  (compose_case "$environment" deterministic "$approved" >/dev/null 2>&1) &&
+    die "$environment accepted deterministic password screening"
+  (compose_case "$environment" adapter "$approved" false resend >/dev/null 2>&1) &&
+    die "$environment accepted disabled transactional email"
+  (compose_case "$environment" adapter "$approved" true smtp >/dev/null 2>&1) &&
+    die "$environment accepted a transactional email provider other than Resend"
+  (compose_case "$environment" adapter "$approved" true fake >/dev/null 2>&1) &&
+    die "$environment accepted the fake transactional email provider"
+done
+
+# Approval is production-only, and never a substitute for the adapter.
 (compose_case production adapter false >/dev/null 2>&1) &&
   die "production accepted the adapter without COMPROMISED_PASSWORD_ADAPTER_APPROVED=true"
-(compose_case staging unavailable true >/dev/null 2>&1) &&
-  die "adapter approval was accepted while screening was unavailable"
-(compose_case production adapter true false resend >/dev/null 2>&1) &&
-  die "production accepted disabled transactional email"
-(compose_case production adapter true true smtp >/dev/null 2>&1) &&
-  die "production accepted a transactional email provider other than Resend"
+compose_case staging adapter true ||
+  die "staging rejected an approval flag the backend simply ignores outside production"
 (
   APP_ENV=production PASSWORD_SCREEN_MODE=adapter COMPROMISED_PASSWORD_ADAPTER_APPROVED=true \
     EMAIL_ENABLED=true EMAIL_PROVIDER=resend EMAIL_API_KEY= \
@@ -267,6 +304,60 @@ compose_case staging unavailable false false resend ||
 ) && die "a managed host accepted public student registration"
 
 printf 'hostinger-production-render: production and staging renders, port safety, R2 isolation, and fail-closed preflight verified\n' >&2
+
+# --- the preflight mirrors the backend's own precondition list ---------------
+
+# Read validateStaffComposition from the API and require preflight to cover each
+# precondition it enforces for non-development environments. If the backend
+# grows a new one, this fails until preflight mirrors it, which is the whole
+# point: preflight must not certify a composition the API will reject.
+staff_rule="$(
+  awk '
+    /^func validateStaffComposition\(/ { capture = 1 }
+    capture { print }
+    capture && /^}/ { exit }
+  ' "$API_MAIN"
+)"
+[ -n "$staff_rule" ] || die "validateStaffComposition could not be read from $API_MAIN"
+
+# Development, and only development, is exempt. If that ever widens to staging,
+# the shared contract below stops being true and must be re-derived.
+printf '%s' "$staff_rule" |
+  grep --quiet --fixed-strings 'cfg.Environment() == config.EnvDevelopment' ||
+  die "validateStaffComposition no longer exempts development explicitly; re-derive the managed-host contract"
+if printf '%s' "$staff_rule" | grep --quiet --fixed-strings 'EnvStaging'; then
+  die "validateStaffComposition now treats staging specially; re-derive the managed-host contract"
+fi
+
+declare -A mirrored=(
+  ["cfg.Sessions().Enabled()"]="require_value SESSION_CSRF_KEY"
+  ["cfg.AuthFakeMode()"]="AUTH_FAKE_MODE"
+  ["config.PasswordScreenAdapter"]="PASSWORD_SCREEN_MODE"
+  ["email.Enabled()"]="EMAIL_ENABLED"
+  ["config.EmailProviderResend"]="EMAIL_PROVIDER"
+)
+preflight="$(
+  awk '
+    /^validate_application_composition\(\)/ { capture = 1 }
+    capture { print }
+    capture && /^}/ { exit }
+  ' "$HOST_SCRIPT"
+)"
+for predicate in "${!mirrored[@]}"; do
+  printf '%s' "$staff_rule" | grep --quiet --fixed-strings "$predicate" ||
+    die "validateStaffComposition no longer checks $predicate; the preflight mirror is stale"
+  printf '%s' "$preflight" | grep --quiet --fixed-strings "${mirrored[$predicate]}" ||
+    die "preflight does not mirror the backend precondition $predicate"
+done
+
+# PostgreSQL and Redis are the two preconditions preflight cannot check
+# statically; the Compose topology supplies both as hard dependencies.
+backend_preconditions="$(
+  printf '%s' "$staff_rule" | grep --count 'staff composition precondition failed'
+)"
+[ "$backend_preconditions" = 8 ] ||
+  die "validateStaffComposition now has $backend_preconditions preconditions, not the 8 this preflight was derived from; re-audit deploy/hostinger/host.sh"
+note "preflight mirrors every statically checkable staff-composition precondition the API enforces"
 
 # --- 9-10. the release and operator contracts are unchanged -----------------
 

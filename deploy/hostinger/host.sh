@@ -79,24 +79,47 @@ require_value() {
 # composition. Nothing here is inferred from the hostname: a managed host is
 # staging or production because its protected runtime says so.
 #
-# The regression this guards was observed on the first real production bring-up.
-# The Compose file hard-coded APP_ENV=staging and PASSWORD_SCREEN_MODE=unavailable,
-# so preflight passed, PostgreSQL and Redis started, migrations reached schema 28,
-# and only then did the API refuse to build its router: "compromised-password
-# screening is not configured". Screening is not a student-registration concern —
-# staff invitation and onboarding set passwords, so the API's staff composition
-# requires the adapter even while public registration stays closed. A composition
-# the application will reject must be rejected before anything starts.
+# THE RULE THIS MIRRORS
+#   backend/cmd/api/main.go composes the staff lifecycle for every environment
+#   that has sessions and is development, staging, OR production, and
+#   validateStaffComposition there exempts development ALONE. Every other
+#   environment must satisfy, at startup:
+#
+#       real sessions · AUTH_FAKE_MODE=false · PostgreSQL · Redis
+#       PasswordScreenMode == adapter · email enabled · EMAIL_PROVIDER=resend
+#
+#   A managed host is never development, so staging is bound by exactly the same
+#   composition contract as production. The one genuine difference lives in
+#   backend/internal/config/config.go, where the LG-021 approval flag is required
+#   only when the environment IsProduction(); staging runs the same real HIBP
+#   adapter with the flag unset, because NewRuntimeCompromisedSource switches on
+#   the mode alone and never reads the approval.
+#
+# THE REGRESSION THIS GUARDS
+#   The first production bring-up got as far as a clean schema-28 migration
+#   before the API refused to build: "compromised-password screening is not
+#   configured". The Compose file had hard-coded PASSWORD_SCREEN_MODE=unavailable
+#   because screening was read as a student-registration concern. It is not —
+#   staff invitation and onboarding set passwords, so the adapter is required
+#   while public registration stays closed.
+#
+#   The first repair fixed production and left staging asserting the same broken
+#   values, which merely moved the trap. A composition the application will
+#   reject must be rejected here, before anything starts, in EITHER environment.
 validate_application_composition() {
   case "$APP_ENV" in
     staging | production) ;;
+    development) die "development is not a managed-host environment; APP_ENV must be staging or production" ;;
     *) die "APP_ENV must be exactly staging or production; got \"$APP_ENV\"" ;;
   esac
 
   case "$PASSWORD_SCREEN_MODE" in
-    unavailable | adapter) ;;
+    adapter) ;;
     deterministic) die "deterministic PASSWORD_SCREEN_MODE is permitted only in development" ;;
-    *) die "PASSWORD_SCREEN_MODE must be unavailable or adapter; got \"$PASSWORD_SCREEN_MODE\"" ;;
+    unavailable)
+      die "PASSWORD_SCREEN_MODE=adapter is required on every managed host; staff invitation and onboarding set passwords, so the API composes real compromised-password screening in staging as well as production"
+      ;;
+    *) die "PASSWORD_SCREEN_MODE must be adapter on a managed host; got \"$PASSWORD_SCREEN_MODE\"" ;;
   esac
 
   case "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" in
@@ -104,32 +127,34 @@ validate_application_composition() {
     *) die "COMPROMISED_PASSWORD_ADAPTER_APPROVED must be exactly true or false" ;;
   esac
 
-  # Approval without the adapter is a contradiction in either environment.
-  if [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] &&
-    [ "$PASSWORD_SCREEN_MODE" != adapter ]; then
-    die "COMPROMISED_PASSWORD_ADAPTER_APPROVED=true requires PASSWORD_SCREEN_MODE=adapter"
-  fi
+  # Real sessions. Sessions().Enabled() is exactly a non-empty SESSION_CSRF_KEY,
+  # and the staff surface cannot be composed without them.
+  require_value SESSION_CSRF_KEY
 
   [ "${AUTH_FAKE_MODE:-false}" = false ] ||
     die "AUTH_FAKE_MODE must never be enabled on a managed host"
   [ "${STUDENT_REGISTRATION_ENABLED:-false}" = false ] ||
     die "public student registration is outside the approved MVP scope"
 
-  [ "$APP_ENV" = production ] || return 0
-
-  # Everything below is the production composition the application itself
-  # enforces at startup. Preflight refuses the same shapes, earlier.
-  [ "$PASSWORD_SCREEN_MODE" = adapter ] ||
-    die "production requires PASSWORD_SCREEN_MODE=adapter; staff onboarding sets passwords"
-  [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] ||
-    die "production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)"
+  # Transactional email is a staff-composition dependency, not a production
+  # nicety: invitation delivery is how an Admin account ever comes to exist.
   [ "$EMAIL_ENABLED" = true ] ||
-    die "production requires EMAIL_ENABLED=true; staff invitation depends on transactional email"
+    die "EMAIL_ENABLED=true is required on every managed host; staff invitation depends on transactional email"
   [ "$EMAIL_PROVIDER" = resend ] ||
-    die "production requires EMAIL_PROVIDER=resend"
+    die "EMAIL_PROVIDER=resend is required on every managed host; got \"$EMAIL_PROVIDER\""
+  # config.go rejects an empty key for the Resend provider regardless of
+  # environment, so preflight must too.
   require_value EMAIL_API_KEY
   require_value EMAIL_FROM_ADDRESS
-  note "production composition accepted: adapter screening approved, Resend transactional email, no fake authentication, registration closed"
+
+  if [ "$APP_ENV" = production ]; then
+    # The single production-only rule, and the only place the approval flag is
+    # consulted: config.go gates LG-021 on environment.IsProduction().
+    [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] ||
+      die "production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)"
+  fi
+
+  note "$APP_ENV composition accepted: real sessions, adapter screening, Resend transactional email, no fake authentication, registration closed"
 }
 
 validate_environment() {

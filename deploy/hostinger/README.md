@@ -119,22 +119,32 @@ This topology runs both staging and production. Which one it is comes from the p
 environment, never from the hostname, and there is no default — a host that does not declare itself
 fails preflight instead of quietly running as staging.
 
+`validateStaffComposition` in `cmd/api` exempts **development alone**, and a managed host is never
+development. Staging and production therefore share one composition contract; only the LG-021
+approval flag differs.
+
 | | staging | production |
 |---|---|---|
 | `APP_ENV` | `staging` | `production` |
-| `PASSWORD_SCREEN_MODE` | `unavailable` | `adapter` |
-| `COMPROMISED_PASSWORD_ADAPTER_APPROVED` | `false` | `true` |
-| `EMAIL_ENABLED` / `EMAIL_PROVIDER` | as configured | `true` / `resend` |
+| `PASSWORD_SCREEN_MODE` | `adapter` | `adapter` |
+| `COMPROMISED_PASSWORD_ADAPTER_APPROVED` | may stay `false` | `true` |
+| `EMAIL_ENABLED` | `true` | `true` |
+| `EMAIL_PROVIDER` | `resend` | `resend` |
+| `EMAIL_API_KEY` | required | required |
+| `SESSION_CSRF_KEY` | required | required |
 
 `STUDENT_REGISTRATION_ENABLED=false` and `AUTH_FAKE_MODE=false` are fixed in the Compose file for
 both environments and are not operator-settable.
 
-Production requires real compromised-password screening **even though public student registration
-stays closed**. Staff invitation and onboarding set passwords, so the API's staff composition
-(`assertStaffCompositionPreconditions` in `cmd/api`) refuses to build without
-`PasswordScreenMode == adapter`. The adapter is the fixed HIBP Pwned Passwords range endpoint over
-HTTPS; it needs no API key and no additional provider credential, only outbound internet, which the
-API, worker, and bootstrap-admin services already have through the edge network.
+Both environments require real compromised-password screening **even though public student
+registration stays closed**. Staff invitation and onboarding set passwords, so the API's staff
+composition refuses to build without `PasswordScreenMode == adapter`. The adapter is the fixed HIBP
+Pwned Passwords range endpoint over HTTPS; it needs no API key and no additional provider
+credential, only outbound internet, which the API, worker, and bootstrap-admin services already have
+through the edge network.
+
+The approval flag is the single production-only rule: `config.go` gates LG-021 on
+`environment.IsProduction()`, so staging runs the same real adapter with the flag unset.
 
 `host.sh prepare` and `host.sh up` both refuse an invalid composition before any container starts:
 an undeclared or unknown `APP_ENV`, `deterministic` screening on a managed host, production without

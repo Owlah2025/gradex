@@ -186,9 +186,9 @@ grep --quiet --fixed-strings --line-regexp 'SALES_WHATSAPP_NUMBER=' "$S12_HOSTIN
 # deploy/scripts/verify-hostinger-production-render.sh.
 hostinger_render="$(
   APP_ENV=staging \
-  PASSWORD_SCREEN_MODE=unavailable \
+  PASSWORD_SCREEN_MODE=adapter \
   COMPROMISED_PASSWORD_ADAPTER_APPROVED=false \
-  EMAIL_ENABLED=false \
+  EMAIL_ENABLED=true \
   EMAIL_PROVIDER=resend \
     docker compose --file "$S12_HOSTINGER_COMPOSE_FILE" --project-name hostinger-render-check config
 )"
