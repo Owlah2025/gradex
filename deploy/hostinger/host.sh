@@ -403,6 +403,56 @@ start_environment() {
   start_edge
 }
 
+# The one-off Administrator bootstrap.
+#
+# Deliberately not part of up/up-core: creating the platform's only
+# Administrator is a human act, and cmd/bootstrap-admin already refuses to be
+# anything else — it has no HTTP endpoint, no worker task, and no migration.
+#
+# It needs PostgreSQL, the protected configuration, and outbound HTTPS for the
+# HIBP screening lookup. It needs no Redis, sends no email, and does not touch
+# the edge, so it belongs after verify-core and before the public cutover.
+#
+# Inputs arrive through the environment so nothing lands in this script's own
+# arguments. The non-secret ones become flags on the one-shot; the passphrase is
+# forwarded by name only, so its value never reaches the Compose model, a
+# rendered config, or any container that outlives the command.
+bootstrap_admin() {
+  require_tools
+  load_environment
+  validate_environment
+
+  local name
+  for name in BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_OPERATION_ID BOOTSTRAP_ADMIN_PRINCIPAL; do
+    [ -n "${!name:-}" ] || die "$name is required in the operator environment"
+  done
+  [ -n "${BOOTSTRAP_ADMIN_PASSWORD:-}" ] ||
+    die "BOOTSTRAP_ADMIN_PASSWORD is required in the operator environment; the initial passphrase is read only through the secret boundary, never a flag"
+  local display_name="${BOOTSTRAP_ADMIN_DISPLAY_NAME:-Platform Administrator}"
+
+  # The bootstrap writes to the live database, so the deployment must already be
+  # the verified one rather than a half-started stack.
+  require_status postgres healthy
+  require_status api healthy
+
+  # cmd/bootstrap-admin requires the acknowledgement when APP_ENV=production and
+  # refuses it otherwise, so the flag follows the declared environment exactly.
+  local confirmation=()
+  [ "$APP_ENV" = production ] && confirmation=(-confirm-production)
+
+  note "creating the bootstrap Administrator in project $S12_PROJECT ($APP_ENV)"
+  compose --profile bootstrap run --rm --no-deps \
+    --env BOOTSTRAP_ADMIN_PASSWORD \
+    bootstrap-admin \
+    -email "$BOOTSTRAP_ADMIN_EMAIL" \
+    -display-name "$display_name" \
+    -operation-id "$BOOTSTRAP_ADMIN_OPERATION_ID" \
+    -principal "$BOOTSTRAP_ADMIN_PRINCIPAL" \
+    "${confirmation[@]}" ||
+    die "the Administrator bootstrap failed; no second Administrator was created"
+  note "bootstrap Administrator command completed; the credential is CHANGE_REQUIRED and must be changed at first sign-in"
+}
+
 # Everything provable before the hostname resolves and before a certificate
 # exists. It reaches the API over the private Compose network by executing the
 # container's own health probe, so it never depends on PUBLIC_ORIGIN, public
@@ -1248,7 +1298,7 @@ apply_release() {
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1259,6 +1309,7 @@ case "${1:-}" in
   up-edge) [ "$#" = 1 ] || usage; start_edge ;;
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
   verify-core) [ "$#" = 1 ] || usage; verify_core ;;
+  bootstrap-admin) [ "$#" = 1 ] || usage; bootstrap_admin ;;
   seed-smoke) [ "$#" = 1 ] || usage; seed_smoke ;;
   monitor) [ "$#" = 1 ] || usage; run_monitor ;;
   monitor-alert-test) [ "$#" = 1 ] || usage; run_monitor_alert_test ;;

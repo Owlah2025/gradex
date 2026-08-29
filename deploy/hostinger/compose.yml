@@ -230,6 +230,39 @@ services:
     logging: *default-logging
     restart: "no"
 
+  # The one-off Administrator bootstrap. Behind a profile, so it never joins
+  # `up`, `up-core`, `up-edge`, or dependency reconciliation — the only way it
+  # runs is `host.sh bootstrap-admin`, which selects the profile explicitly.
+  #
+  # It uses the proof image because that is the only place the binary exists:
+  # backend/Dockerfile builds gradex-bootstrap-admin into the `proof` target
+  # alone and says why — Administrator creation must not sit in the image the
+  # API and worker run from. The proof image is pinned to the same release and
+  # its revision label is checked against GRADEX_RELEASE_SHA by preflight, so
+  # this is exactly as release-bound as the backend image.
+  #
+  # No command is declared here. host.sh passes the flags, so the operator's
+  # email and operation ID never enter the committed model or a rendered
+  # `compose config`. BOOTSTRAP_ADMIN_PASSWORD is deliberately absent too: it is
+  # forwarded into the one-shot container at run time and therefore never
+  # appears in this file, in `compose config`, or in any long-lived container.
+  #
+  # `app` reaches PostgreSQL; `edge` is the egress-capable network the HIBP
+  # compromised-password lookup needs. It publishes no port, sends no email,
+  # and needs no Redis.
+  bootstrap-admin:
+    profiles: [bootstrap]
+    image: ${GRADEX_PROOF_IMAGE:?GRADEX_PROOF_IMAGE is required}
+    pull_policy: never
+    entrypoint: ["gradex-bootstrap-admin"]
+    environment:
+      <<: *backend-environment
+      SERVICE_ROLE: api
+    volumes: *backend-volumes
+    networks: [app, edge]
+    logging: *default-logging
+    restart: "no"
+
   frontend:
     image: ${GRADEX_FRONTEND_IMAGE:?GRADEX_FRONTEND_IMAGE is required}
     pull_policy: never

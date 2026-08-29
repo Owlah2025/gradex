@@ -47,8 +47,9 @@ core_verify="$(extract verify_core)"
 public_verify="$(extract verify_environment)"
 scope="$(extract assert_production_project_scope)"
 ports="$(extract assert_edge_ports_available)"
+bootstrap="$(extract bootstrap_admin)"
 
-for name in core edge full core_verify public_verify scope ports; do
+for name in core edge full core_verify public_verify scope ports bootstrap; do
   [ -n "${!name}" ] || die "could not extract $name from host.sh"
 done
 
@@ -213,6 +214,128 @@ APP_ENV=staging S12_PROJECT_DECLARED="" S12_STATE_DIR_DECLARED="" \
   S12_PROJECT=gradex-staging assert_production_project_scope >/dev/null 2>&1 ||
   die "staging was forced to declare what it already defaults to"
 note "production must name its project and state directory, and may never inherit the staging defaults"
+
+# --- the Administrator bootstrap is explicit, isolated and credential-safe ---
+# Non-secret placeholders so the model renders here. None is a credential, none
+# is printed, and BOOTSTRAP_ADMIN_PASSWORD is deliberately absent: the whole
+# point below is that the model does not reference it.
+export APP_ENV=staging PASSWORD_SCREEN_MODE=adapter \
+  COMPROMISED_PASSWORD_ADAPTER_APPROVED=false EMAIL_ENABLED=true EMAIL_PROVIDER=resend \
+  PUBLIC_ORIGIN=https://gradex.test STAGING_HOSTNAME=gradex.test ACME_EMAIL=ops@gradex.test \
+  POSTGRES_DB=gradex POSTGRES_PASSWORD=placeholder \
+  DATABASE_URL='postgres://placeholder:placeholder@postgres:5432/gradex?sslmode=disable' \
+  RESTORE_DATABASE_URL='postgres://placeholder:placeholder@restore-postgres:5432/r?sslmode=disable' \
+  RESTORE_POSTGRES_PASSWORD=placeholder \
+  GRADEX_E2E_ADMIN_DB_URL='postgres://placeholder:placeholder@postgres:5432/postgres?sslmode=disable' \
+  REDIS_PASSWORD=placeholder REDIS_TLS_CA_CERT_FILE_HOST=/dev/null \
+  REDIS_TLS_SERVER_CERT_FILE_HOST=/dev/null REDIS_TLS_SERVER_KEY_FILE_HOST=/dev/null \
+  S3_ENDPOINT=https://example.r2.cloudflarestorage.com S3_BUCKET=gradex-media \
+  S3_ACCESS_KEY=placeholder S3_SECRET_KEY=placeholder PLAYBACK_TOKEN_SECRET=placeholder \
+  SALES_WHATSAPP_NUMBER=96500000000 SESSION_CSRF_KEY=placeholder \
+  ANONYMOUS_COOKIE_SIGNING_KEY=placeholder ANONYMOUS_CSRF_KEY=placeholder \
+  ADMISSION_LIMITER_HMAC_KEY=placeholder OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION=v1 \
+  OUTBOX_PROTECTED_PAYLOAD_KEY=placeholder LEGAL_OPERATOR_NAME=Gradex \
+  LEGAL_REGISTRATION_NUMBER=RENDER-ONLY LEGAL_REGISTERED_ADDRESS=Address \
+  PRIVACY_EMAIL=p@gradex.test SUPPORT_EMAIL=s@gradex.test SECURITY_EMAIL=x@gradex.test \
+  EMAIL_API_KEY=placeholder EMAIL_FROM_ADDRESS=no-reply@gradex.test \
+  GRADEX_BACKEND_IMAGE=gradex-backend:check GRADEX_FRONTEND_IMAGE=gradex-frontend:check \
+  GRADEX_PROOF_IMAGE=gradex-backend-proof:check \
+  GRADEX_RELEASE_SHA=0123456789abcdef0123456789abcdef01234567
+unset BOOTSTRAP_ADMIN_PASSWORD BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_OPERATION_ID \
+  BOOTSTRAP_ADMIN_PRINCIPAL BOOTSTRAP_ADMIN_DISPLAY_NAME
+
+
+# 1/2/3. It is profiled, so it is absent from the default service set and can
+#        never be reached by `up`, `up-core`, `up-edge`, or dependency
+#        reconciliation.
+default_services="$(
+  docker compose --file "$COMPOSE_FILE" --project-name hostinger-bootstrap-check config --services 2>/dev/null
+)" || die "the Hostinger topology no longer renders"
+if printf '%s\n' "$default_services" | grep --quiet --line-regexp bootstrap-admin; then
+  die "bootstrap-admin appears in the default service list; it must stay behind its profile"
+fi
+profiled_services="$(
+  docker compose --file "$COMPOSE_FILE" --project-name hostinger-bootstrap-check --profile bootstrap config --services 2>/dev/null
+)" || die "the bootstrap profile does not render"
+printf '%s\n' "$profiled_services" | grep --quiet --line-regexp bootstrap-admin ||
+  die "bootstrap-admin does not render even when its profile is selected"
+for startup in core edge full; do
+  if compose_up_services "${!startup}" | grep --quiet --line-regexp bootstrap-admin; then
+    die "the $startup startup path brings up bootstrap-admin; it must be a deliberate act only"
+  fi
+  if printf '%s' "${!startup}" | grep --quiet -- '--profile bootstrap'; then
+    die "the $startup startup path selects the bootstrap profile"
+  fi
+done
+note "bootstrap-admin is profiled, absent from normal startup, and never reached by up, up-core or up-edge"
+
+# 4/5. It publishes no port and does not depend on the edge service.
+bootstrap_model="$(
+  docker compose --file "$COMPOSE_FILE" --project-name hostinger-bootstrap-check --profile bootstrap config 2>/dev/null |
+    sed -n '/^  bootstrap-admin:/,/^  [a-z]/p'
+)"
+[ -n "$bootstrap_model" ] || die "could not render the bootstrap-admin service"
+if printf '%s' "$bootstrap_model" | grep --quiet '^    ports:'; then
+  die "bootstrap-admin publishes a host port"
+fi
+if printf '%s' "$bootstrap_model" | grep --quiet 'depends_on'; then
+  die "bootstrap-admin declares dependencies; reconciliation must never start it or anything else"
+fi
+# Compose renders the value as `restart: 'no'`; the committed model writes it
+# with double quotes. Accept either quoting, reject any restarting policy.
+printf '%s' "$bootstrap_model" | grep --extended-regexp --quiet "restart: ['\"]no['\"]" ||
+  die "bootstrap-admin may restart; a one-shot credential operation must run once"
+printf '%s' "$bootstrap_model" | grep --quiet 'gradex-bootstrap-admin' ||
+  die "bootstrap-admin no longer overrides the proof image entrypoint"
+note "bootstrap-admin publishes no port, declares no dependency, never restarts, and overrides the entrypoint"
+
+# 6. The canonical command runs only that one-shot, and removes it.
+printf '%s' "$bootstrap" | grep --quiet -- '--profile bootstrap run --rm --no-deps' ||
+  die "the bootstrap command no longer runs the profiled one-shot with --rm --no-deps"
+bootstrap_up="$(compose_up_services "$bootstrap")"
+[ -z "$bootstrap_up" ] ||
+  die "the bootstrap command brings services up: $(printf '%s' "$bootstrap_up" | tr '\n' ' ')"
+if printf '%s' "$bootstrap" | grep --extended-regexp --quiet '\bstart_edge\b|\bedge\b'; then
+  die "the bootstrap command touches the edge"
+fi
+
+# 7/8/9. It gates on a healthy core, stays project-scoped, and inherits the
+#        production scoping refusal through validate_environment.
+printf '%s' "$bootstrap" | grep --quiet 'require_status postgres healthy' ||
+  die "the bootstrap command no longer requires a healthy PostgreSQL"
+printf '%s' "$bootstrap" | grep --quiet 'require_status api healthy' ||
+  die "the bootstrap command no longer requires a healthy API"
+printf '%s' "$bootstrap" | grep --quiet 'validate_environment' ||
+  die "the bootstrap command no longer validates the protected runtime and release identity"
+printf '%s' "$bootstrap" | grep --quiet -- '-confirm-production' ||
+  die "the bootstrap command no longer passes the production acknowledgement"
+
+# 11. A non-zero exit from the one-shot must fail the operator command.
+printf '%s' "$bootstrap" | grep --quiet 'die "the Administrator bootstrap failed' ||
+  die "the bootstrap command does not fail when the one-shot exits non-zero"
+
+# 10. No credential may reach the committed model, a static render, or the
+#     committed environment example. The passphrase is forwarded by name only.
+# Forwarded by name, never by value: `--env NAME` inherits from the operator's
+# environment, while `--env NAME=value` would write the passphrase into the
+# container definition.
+printf '%s' "$bootstrap" | grep --extended-regexp --quiet -- '--env BOOTSTRAP_ADMIN_PASSWORD([[:space:]]|\\|$)' ||
+  die "the passphrase is no longer forwarded by name; a value here would enter the container definition"
+# Scan the model, not its comments: the service's comment explains why the
+# passphrase is absent, and an explanation is not a reference.
+if grep -v '^[[:space:]]*#' "$COMPOSE_FILE" | grep --quiet 'BOOTSTRAP_ADMIN'; then
+  die "the Compose model references BOOTSTRAP_ADMIN configuration; the passphrase must never be part of the committed model"
+fi
+if printf '%s' "$bootstrap_model" | grep --quiet 'BOOTSTRAP_ADMIN'; then
+  die "a rendered bootstrap service carries BOOTSTRAP_ADMIN configuration"
+fi
+if grep --extended-regexp --quiet '^BOOTSTRAP_ADMIN' "$ROOT/deploy/hostinger/runtime.env.example"; then
+  die "the runtime example invites a bootstrap credential into the protected runtime file"
+fi
+if printf '%s' "$bootstrap" | grep --extended-regexp --quiet -- '-password|BOOTSTRAP_ADMIN_PASSWORD='; then
+  die "the bootstrap command puts the passphrase into an argument"
+fi
+note "no bootstrap credential reaches the committed model, a rendered config, or the runtime example"
 
 # --- the edge is still the only service that publishes host ports -----------
 

@@ -169,6 +169,7 @@ two halves separately — see the first-launch runbook below.
 | `verify-core` | private verification: services healthy, clean schema against the image's max version, Redis TLS posture, API readiness over the container's own loopback. **No DNS, no certificate, no `PUBLIC_ORIGIN`.** |
 | `up-edge` | validates, requires a healthy API and frontend, refuses if another project still publishes 80/443, then starts only the edge. |
 | `up` | `up-core` followed by `up-edge`. |
+| `bootstrap-admin` | one deliberate one-shot that creates the first Administrator. Never part of any startup path. |
 | `verify` | the public check. Still probes `PUBLIC_ORIGIN`; run it after the edge is up. |
 
 A production deployment must declare `GRADEX_HOST_PROJECT` and `GRADEX_HOST_STATE_DIR`. Both fall
@@ -262,9 +263,7 @@ Staging keeps serving throughout. `prepare` starts nothing.
 ./deploy/hostinger/host.sh verify-core
 ```
 
-**E — first Admin.** Safe here, before any DNS change. `gradex-bootstrap-admin` needs PostgreSQL,
-the protected configuration, and outbound access for the HIBP screening lookup. It reads no public
-origin, sends no email, and does not touch the edge. See the note below on how it is invoked.
+**E — first Admin.** Safe here, before any DNS change. See the procedure below.
 
 **F/G/H — the port handover.** These three are not independent and must be treated as one window.
 Caddy cannot obtain a certificate until the hostname resolves publicly to this host, and the
@@ -309,14 +308,62 @@ If anything fails between F and L, the reversal is DNS plus the edges: restore t
 the registrar nameservers, stop the production edge, and start the staging edge again. The
 production database is never rolled back for an edge or DNS problem.
 
-### Bootstrapping the first production Admin
+### Bootstrapping the first Admin
 
-`bootstrap-admin` is not a service in this Compose file — it exists only in the disposable
-production-like topology. On a managed host the first Admin is created by running the released
-backend image against the deployment's own networks, which needs both the internal `app` network for
-PostgreSQL and the egress-capable `edge` network for the HIBP screening lookup. Because there is no
-guarded `host.sh` command for it yet, treat the exact invocation as an open operator decision rather
-than improvising it at cutover time.
+One deliberate operator action, run after `verify-core` succeeds and before the public cutover. It
+is never part of `up` or `up-core`: `cmd/bootstrap-admin` is a controlled one-off release command
+precisely so that Administrator creation is not an HTTP endpoint, a worker task, or a migration.
+
+It needs PostgreSQL, the protected configuration, and outbound HTTPS for the HIBP
+compromised-password lookup. It needs no Redis, sends no email, and never touches the edge — which
+is why it is safe before DNS.
+
+```bash
+read -r -p 'Admin email: ' BOOTSTRAP_ADMIN_EMAIL
+read -r -s -p 'Initial passphrase: ' BOOTSTRAP_ADMIN_PASSWORD; echo
+export BOOTSTRAP_ADMIN_EMAIL BOOTSTRAP_ADMIN_PASSWORD
+export BOOTSTRAP_ADMIN_OPERATION_ID=2026-08-29-initial
+export BOOTSTRAP_ADMIN_PRINCIPAL=deploy@hostinger
+export BOOTSTRAP_ADMIN_DISPLAY_NAME='Platform Administrator'
+
+./deploy/hostinger/host.sh bootstrap-admin
+
+unset BOOTSTRAP_ADMIN_PASSWORD
+```
+
+`read -s` keeps the passphrase off the terminal and out of shell history. The command forwards it
+into the one-shot container **by name**, so the value never enters the Compose model, a rendered
+`compose config`, this repository, or any container that outlives the run. The container is removed
+on exit.
+
+Never put a bootstrap credential in `runtime.env`, a shell profile, a systemd unit, or CI. The
+command contract does not need it there, and anything written to `runtime.env` persists at rest for
+the life of the deployment.
+
+**Success** prints the created account and reminds you the credential is `CHANGE_REQUIRED` — the
+first sign-in must change it:
+
+```
+bootstrap-admin: created Administrator <email> (account <uuid>) at <timestamp>
+bootstrap-admin: the credential is CHANGE_REQUIRED; the first sign-in must change it
+```
+
+**If the Admin already exists**, rerunning with the same `BOOTSTRAP_ADMIN_OPERATION_ID` is a safe
+retry, not a second Administrator:
+
+```
+bootstrap-admin: already completed for operation "<id>" at <timestamp> (account <uuid>)
+bootstrap-admin: nothing to do; no second Administrator was created
+```
+
+The whole operation is one transaction under an advisory lock, so a partial failure leaves no
+half-created account. Do not invent a second operation ID to "retry" a completed bootstrap.
+
+The command runs from the **proof** image, not the backend image. `backend/Dockerfile` builds
+`gradex-bootstrap-admin` into the `proof` target alone, deliberately, so Administrator creation is
+absent from the image the API and worker run. The proof image is pinned to the same release and its
+revision label is checked against `GRADEX_RELEASE_SHA` by preflight, so this is exactly as
+release-bound as the backend image.
 
 ## 5a. Live release-acceptance smoke
 
