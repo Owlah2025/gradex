@@ -14,8 +14,8 @@
 #   the assertion production most needs. Auto-detecting the topology would have
 #   been worse, because a production origin that silently lost its proxy would
 #   then quietly verify under the weaker policy. So the topology is named on the
-#   command line, and a production hostname may never be verified in direct mode
-#   at all.
+#   command line, and a production hostname is refused in direct mode unless the
+#   operator supplies the one-shot Stage-A acknowledgement described below.
 #
 # MODES
 #   --mode direct
@@ -31,6 +31,10 @@
 # USAGE
 #   deploy/hostinger/verify-public.sh --mode direct https://staging.example.com
 #   deploy/hostinger/verify-public.sh --mode cloudflare https://example.com
+#
+#   Stage A only, inside the intentional DNS-only production window:
+#     GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT=i-have-authorized-production-direct-verification \
+#       deploy/hostinger/verify-public.sh --mode direct https://gradexcourses.com
 
 set -euo pipefail
 
@@ -42,13 +46,29 @@ EDGE_HOSTNAME=""
 # outlive its scope.
 EDGE_TEMPORARY=""
 
-# Hostnames whose verification must always include the Cloudflare-facing
-# policy. Direct mode is refused for these outright: no environment variable,
-# and no omission of one, may weaken them.
+# Hostnames whose steady-state verification must include the Cloudflare-facing
+# policy. Direct mode is refused for these unless the operator supplies the
+# one-shot Stage-A acknowledgement below.
 EDGE_PRODUCTION_HOSTNAMES=(
   gradexcourses.com
   www.gradexcourses.com
 )
+
+# The production cutover is deliberately two-stage. In Stage A the apex points
+# straight at the VPS with the Cloudflare proxy still off, so Caddy can complete
+# an ACME challenge and obtain a publicly valid origin certificate; a proxied
+# origin cannot, because Always Use HTTPS redirects the HTTP-01 challenge to a
+# TLS endpoint that has no certificate yet. Direct verification of the
+# production origin is therefore a real, intended operation — but only inside
+# that window, and only when the operator says so.
+#
+# The value is a sentence, not a boolean, for the same reason the live smoke
+# uses one: `1` or `true` is a value an environment can acquire by accident, and
+# this decision must be typed on purpose. It is an operator acknowledgement, not
+# a secret, it is read from the environment and never written anywhere, and it
+# relaxes exactly one thing — the hostname refusal. Every other direct-mode
+# check still runs, and Cloudflare mode is untouched by it.
+EDGE_PRODUCTION_DIRECT_AUTHORIZATION="i-have-authorized-production-direct-verification"
 
 # Ports that belong to internal services and must never answer on the public
 # hostname.
@@ -98,13 +118,36 @@ parse_arguments() {
   EDGE_HOSTNAME="${EDGE_ORIGIN#https://}"
 }
 
+# Returns 0 when this run is the authorized Stage-A production-direct probe, so
+# the caller can apply the extra check that only makes sense in that window.
+EDGE_PRODUCTION_DIRECT=0
+
 assert_mode_allowed_for_hostname() {
-  local hostname="$1" mode="$2" candidate
+  local hostname="$1" mode="$2" authorization="${3:-}" candidate
+  EDGE_PRODUCTION_DIRECT=0
   [ "$mode" = direct ] || return 0
   for candidate in "${EDGE_PRODUCTION_HOSTNAMES[@]}"; do
     [ "$hostname" = "$candidate" ] || continue
-    die "$hostname is a production hostname and must be verified with --mode cloudflare"
+    # Exact match only. A near-miss is a refusal, never a warning.
+    [ "$authorization" = "$EDGE_PRODUCTION_DIRECT_AUTHORIZATION" ] ||
+      die "$hostname is a production hostname and must be verified with --mode cloudflare; for the Stage-A DNS-only window only, set GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT=$EDGE_PRODUCTION_DIRECT_AUTHORIZATION"
+    EDGE_PRODUCTION_DIRECT=1
+    note "production hostname $hostname was explicitly authorized for one Stage-A direct probe"
+    return 0
   done
+}
+
+# Stage A claims the proxy is off. If the origin answers through Cloudflare, that
+# claim is false and the operator is not in the window they think they are in.
+# This runs only for the authorized production-direct probe: an ordinary direct
+# verification makes no claim about Cloudflare either way.
+assert_stage_a_proxy_absent() {
+  local headers="$1"
+  [ "$EDGE_PRODUCTION_DIRECT" = 1 ] || return 0
+  if grep --extended-regexp --ignore-case --quiet '^cf-ray:' "$headers"; then
+    die "the authorized Stage-A probe reached a Cloudflare-proxied origin; the proxy must stay off during the DNS-only window, and a proxied origin is verified with --mode cloudflare"
+  fi
+  note "Stage-A probe confirmed the origin is served directly, with no Cloudflare proxy in front"
 }
 
 assert_cloudflare_evidence() {
@@ -134,7 +177,8 @@ require_header() {
 
 main() {
   parse_arguments "$@"
-  assert_mode_allowed_for_hostname "$EDGE_HOSTNAME" "$EDGE_MODE"
+  assert_mode_allowed_for_hostname "$EDGE_HOSTNAME" "$EDGE_MODE" \
+    "${GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT:-}"
 
   local tool
   for tool in curl getent jq mktemp openssl timeout; do
@@ -191,6 +235,7 @@ main() {
       note "public DNS, Cloudflare edge, HTTPS certificate, frontend, health, readiness, security headers, and closed internal ports passed"
       ;;
     direct)
+      assert_stage_a_proxy_absent "$tls_headers"
       note "public DNS, HTTPS certificate, frontend, health, readiness, security headers, and closed internal ports passed"
       note "direct mode verified an origin-served edge and made NO claim about Cloudflare proxying"
       ;;

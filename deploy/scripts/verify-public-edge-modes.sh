@@ -63,16 +63,94 @@ fi
 # --- production may never be verified with the direct policy ----------------
 
 for production in "${EDGE_PRODUCTION_HOSTNAMES[@]}"; do
+  # 2. Unauthorized production direct is refused.
   if (assert_mode_allowed_for_hostname "$production" direct >/dev/null 2>&1); then
-    die "$production was accepted under the weaker direct policy"
+    die "$production was accepted in direct mode with no authorization"
   fi
+  if (assert_mode_allowed_for_hostname "$production" direct "" >/dev/null 2>&1); then
+    die "$production was accepted in direct mode with an empty authorization"
+  fi
+
+  # 4. Only the exact acknowledgement counts. A boolean, a truncation, a
+  #    near-miss, and a differing case are all refusals, never warnings.
+  for wrong in 1 true yes TRUE i-have-authorized-production-direct \
+    I-HAVE-AUTHORIZED-PRODUCTION-DIRECT-VERIFICATION \
+    " $EDGE_PRODUCTION_DIRECT_AUTHORIZATION" \
+    "$EDGE_PRODUCTION_DIRECT_AUTHORIZATION "; do
+    if (assert_mode_allowed_for_hostname "$production" direct "$wrong" >/dev/null 2>&1); then
+      die "$production accepted the non-exact direct authorization \"$wrong\""
+    fi
+  done
+
+  # 3. The exact acknowledgement passes the hostname gate, and records that this
+  #    run is the Stage-A probe.
+  EDGE_PRODUCTION_DIRECT=0
+  assert_mode_allowed_for_hostname "$production" direct "$EDGE_PRODUCTION_DIRECT_AUTHORIZATION" \
+    >/dev/null 2>&1 ||
+    die "$production was refused despite the exact Stage-A authorization"
+  [ "$EDGE_PRODUCTION_DIRECT" = 1 ] ||
+    die "the authorized Stage-A probe was not recorded as production-direct"
+
+  # 5/6. Cloudflare mode is unaffected by the flag in either direction, and the
+  #      flag never marks a cloudflare run as a Stage-A probe.
+  EDGE_PRODUCTION_DIRECT=0
   assert_mode_allowed_for_hostname "$production" cloudflare ||
     die "$production was rejected in cloudflare mode"
+  [ "$EDGE_PRODUCTION_DIRECT" = 0 ] ||
+    die "cloudflare mode was marked as a Stage-A direct probe"
+  assert_mode_allowed_for_hostname "$production" cloudflare "$EDGE_PRODUCTION_DIRECT_AUTHORIZATION" ||
+    die "the Stage-A flag changed cloudflare-mode acceptance"
+  [ "$EDGE_PRODUCTION_DIRECT" = 0 ] ||
+    die "the Stage-A flag leaked into cloudflare mode"
 done
 
-# A staging name stays free to use either policy.
+# 1. A non-production name needs no authorization and is never a Stage-A probe.
+EDGE_PRODUCTION_DIRECT=0
 assert_mode_allowed_for_hostname staging.gradex.network direct ||
   die "a staging hostname was rejected in direct mode"
+[ "$EDGE_PRODUCTION_DIRECT" = 0 ] ||
+  die "an ordinary direct verification was treated as a Stage-A production probe"
+assert_mode_allowed_for_hostname staging.gradex.network direct "$EDGE_PRODUCTION_DIRECT_AUTHORIZATION" ||
+  die "a staging hostname was rejected when the Stage-A flag happened to be set"
+[ "$EDGE_PRODUCTION_DIRECT" = 0 ] ||
+  die "the Stage-A flag marked a non-production hostname as a production probe"
+
+# The authorization relaxes the hostname refusal and nothing else. Stage A still
+# asserts the proxy really is off, so an operator who thinks they are in the
+# DNS-only window but is not gets told.
+PROXIED_STAGE_A="$TEMPORARY/stage-a-proxied.headers"
+printf 'HTTP/2 200\r\ncf-ray: 8f0000000000-FRA\r\n' >"$PROXIED_STAGE_A"
+DIRECT_STAGE_A="$TEMPORARY/stage-a-direct.headers"
+printf 'HTTP/2 200\r\nvia: 1.1 Caddy\r\n' >"$DIRECT_STAGE_A"
+
+EDGE_PRODUCTION_DIRECT=1
+if (assert_stage_a_proxy_absent "$PROXIED_STAGE_A" >/dev/null 2>&1); then
+  die "the authorized Stage-A probe accepted a Cloudflare-proxied origin"
+fi
+assert_stage_a_proxy_absent "$DIRECT_STAGE_A" >/dev/null 2>&1 ||
+  die "the authorized Stage-A probe rejected a genuinely direct origin"
+
+# An ordinary direct run makes no Cloudflare claim, so a proxied response is not
+# its business and must not fail it.
+EDGE_PRODUCTION_DIRECT=0
+assert_stage_a_proxy_absent "$PROXIED_STAGE_A" >/dev/null 2>&1 ||
+  die "an ordinary direct verification started asserting Cloudflare absence"
+
+# 6. The flag must not have become a mode selector anywhere.
+if (
+  GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT="$EDGE_PRODUCTION_DIRECT_AUTHORIZATION" \
+    parse_arguments https://gradexcourses.com >/dev/null 2>&1
+); then
+  die "the Stage-A flag allowed the mode to be omitted"
+fi
+
+# The guard must still be enforced in main, not merely defined.
+grep --quiet --fixed-strings 'assert_mode_allowed_for_hostname "$EDGE_HOSTNAME" "$EDGE_MODE"' "$TARGET" ||
+  die "main no longer applies the production-hostname guard"
+grep --quiet --fixed-strings 'GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT' "$TARGET" ||
+  die "main no longer reads the Stage-A authorization from the environment"
+grep --quiet --fixed-strings 'assert_stage_a_proxy_absent "$tls_headers"' "$TARGET" ||
+  die "direct mode no longer applies the Stage-A proxy-absence check"
 
 # --- cloudflare mode cannot pass without Cloudflare evidence ----------------
 

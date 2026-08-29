@@ -159,9 +159,6 @@ production email, a missing production email key, fake authentication, or public
 ./deploy/hostinger/verify-public.sh --mode direct "https://staging.example.com"
 ```
 
-For a production host, use the production hostname and `--mode cloudflare` once the origin holds a
-certificate and the proxy is enabled.
-
 Replace the example hostname. `verify` reads the selected backend image's maximum supported schema
 with `gradex-migrate max-version`, requires the live database to be clean at exactly that version, and
 checks worker lifecycle, plaintext Redis refusal, unauthenticated TLS refusal, authenticated
@@ -175,8 +172,43 @@ answers on the public hostname. Its edge policy is chosen by an explicit `--mode
   claim about Cloudflare and says so in its output.
 - `--mode cloudflare` additionally requires Cloudflare proxy evidence and the conservative
   expectation that the frontend is not being served from the Cloudflare cache. Production hostnames
-  are refused in `direct` mode outright, so omitting a variable can never downgrade production to the
-  weaker policy.
+  are refused in `direct` mode unless the Stage-A acknowledgement below is supplied, so omitting a
+  variable can never downgrade production to the weaker policy.
+
+### Verifying the production origin across the two-stage cutover
+
+The production cutover is deliberately two-stage, and the reason is ACME. In Stage A the apex points
+straight at the VPS with the Cloudflare proxy **off**, so Caddy can answer the HTTP-01 challenge and
+obtain a publicly valid origin certificate. A proxied origin cannot: Always Use HTTPS redirects the
+challenge to a TLS endpoint that has no certificate yet, and Full (strict) then has nothing valid to
+validate against. Stage B turns the proxy on, once the origin certificate exists.
+
+**Stage A — the intentional DNS-only window, proxy OFF:**
+
+```bash
+GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT=i-have-authorized-production-direct-verification \
+  ./deploy/hostinger/verify-public.sh --mode direct "https://gradexcourses.com"
+```
+
+**Stage B — after the Cloudflare proxy is enabled, and every time thereafter:**
+
+```bash
+./deploy/hostinger/verify-public.sh --mode cloudflare "https://gradexcourses.com"
+```
+
+About the Stage-A acknowledgement:
+
+- It exists **only** for the DNS-only production-origin window. The Cloudflare proxy must be off for
+  the duration of that invocation, and the run fails if the origin answers through Cloudflare —
+  reaching a proxied origin means the window is not what the operator believed.
+- It is **not** a permanent production setting. Do not add it to `runtime.env`, a shell profile, a
+  systemd unit, or CI. Type it on the one command line that needs it.
+- It relaxes exactly one thing: the production-hostname refusal in direct mode. Certificate
+  validity, hostname coverage, the HTTP-to-HTTPS redirect, health, readiness, security headers, and
+  internal-port safety all still run, and `--mode cloudflare` is entirely unaffected by it.
+- The value is matched exactly. `1`, `true`, a truncation, a different case, or stray whitespace are
+  all refusals.
+- After Stage A succeeds, production verification moves to `--mode cloudflare` permanently.
 
 ## 5a. Live release-acceptance smoke
 
