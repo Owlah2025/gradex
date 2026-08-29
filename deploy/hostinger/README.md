@@ -113,6 +113,34 @@ The application trusts only its private Docker proxy network. It does not trust 
 forwarding headers; Cloudflare-specific client-IP restoration is intentionally unnecessary for MVP
 correctness.
 
+## 4a. Declaring the environment
+
+This topology runs both staging and production. Which one it is comes from the protected runtime
+environment, never from the hostname, and there is no default — a host that does not declare itself
+fails preflight instead of quietly running as staging.
+
+| | staging | production |
+|---|---|---|
+| `APP_ENV` | `staging` | `production` |
+| `PASSWORD_SCREEN_MODE` | `unavailable` | `adapter` |
+| `COMPROMISED_PASSWORD_ADAPTER_APPROVED` | `false` | `true` |
+| `EMAIL_ENABLED` / `EMAIL_PROVIDER` | as configured | `true` / `resend` |
+
+`STUDENT_REGISTRATION_ENABLED=false` and `AUTH_FAKE_MODE=false` are fixed in the Compose file for
+both environments and are not operator-settable.
+
+Production requires real compromised-password screening **even though public student registration
+stays closed**. Staff invitation and onboarding set passwords, so the API's staff composition
+(`assertStaffCompositionPreconditions` in `cmd/api`) refuses to build without
+`PasswordScreenMode == adapter`. The adapter is the fixed HIBP Pwned Passwords range endpoint over
+HTTPS; it needs no API key and no additional provider credential, only outbound internet, which the
+API, worker, and bootstrap-admin services already have through the edge network.
+
+`host.sh prepare` and `host.sh up` both refuse an invalid composition before any container starts:
+an undeclared or unknown `APP_ENV`, `deterministic` screening on a managed host, production without
+the adapter, the adapter without its approval, approval without the adapter, disabled or non-Resend
+production email, a missing production email key, fake authentication, or public registration.
+
 ## 5. Deploy and verify
 
 ```bash
@@ -120,6 +148,9 @@ correctness.
 ./deploy/hostinger/host.sh verify
 ./deploy/hostinger/verify-public.sh --mode direct "https://staging.example.com"
 ```
+
+For a production host, use the production hostname and `--mode cloudflare` once the origin holds a
+certificate and the proxy is enabled.
 
 Replace the example hostname. `verify` reads the selected backend image's maximum supported schema
 with `gradex-migrate max-version`, requires the live database to be clean at exactly that version, and

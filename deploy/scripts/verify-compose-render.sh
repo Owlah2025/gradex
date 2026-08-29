@@ -180,7 +180,18 @@ note "production-like compose rejects a missing sales WhatsApp number"
 # future compose edit cannot silently drop either ownership boundary.
 grep --quiet --fixed-strings --line-regexp 'SALES_WHATSAPP_NUMBER=' "$S12_HOSTINGER_RUNTIME_EXAMPLE" ||
   die "hostinger runtime example is missing SALES_WHATSAPP_NUMBER"
-hostinger_render="$(docker compose --file "$S12_HOSTINGER_COMPOSE_FILE" --project-name hostinger-render-check config)"
+# The managed host declares its own environment and admission composition, and
+# none of those variables carries a default. Supply the staging shape here; the
+# production shape and the fail-closed rules are proven in
+# deploy/scripts/verify-hostinger-production-render.sh.
+hostinger_render="$(
+  APP_ENV=staging \
+  PASSWORD_SCREEN_MODE=unavailable \
+  COMPROMISED_PASSWORD_ADAPTER_APPROVED=false \
+  EMAIL_ENABLED=false \
+  EMAIL_PROVIDER=resend \
+    docker compose --file "$S12_HOSTINGER_COMPOSE_FILE" --project-name hostinger-render-check config
+)"
 printf '%s' "$hostinger_render" | grep --quiet 'SALES_WHATSAPP_NUMBER: "15550000000"' ||
   die "SALES_WHATSAPP_NUMBER did not reach the Hostinger API environment"
 note "configured sales WhatsApp number reaches the Hostinger API environment"

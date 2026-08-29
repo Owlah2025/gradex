@@ -1,5 +1,8 @@
 x-backend-environment: &backend-environment
-  APP_ENV: staging
+  # The deployment names its environment. It is never inferred from the
+  # hostname, and it has no default: a managed host that forgets to say
+  # which environment it is must fail to render, not quietly be staging.
+  APP_ENV: ${APP_ENV:?APP_ENV is required and must be staging or production}
   PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
   CORS_ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
   CORS_ALLOW_CREDENTIALS: "true"
@@ -32,8 +35,8 @@ x-backend-environment: &backend-environment
   LOGIN_REQUEST_TIMEOUT: ${LOGIN_REQUEST_TIMEOUT:-60s}
   OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION: ${OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION:?OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION is required}
   OUTBOX_PROTECTED_PAYLOAD_KEY: ${OUTBOX_PROTECTED_PAYLOAD_KEY:?OUTBOX_PROTECTED_PAYLOAD_KEY is required}
-  EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
-  EMAIL_PROVIDER: ${EMAIL_PROVIDER:-resend}
+  EMAIL_ENABLED: ${EMAIL_ENABLED:?EMAIL_ENABLED is required}
+  EMAIL_PROVIDER: ${EMAIL_PROVIDER:?EMAIL_PROVIDER is required}
   EMAIL_API_KEY: ${EMAIL_API_KEY:-}
   EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@gradex.test}
   EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Gradex}
@@ -41,7 +44,13 @@ x-backend-environment: &backend-environment
   EMAIL_PROVIDER_TIMEOUT: ${EMAIL_PROVIDER_TIMEOUT:-10s}
   MEDIA_OPERATING_MODE: ADMIN_CATALOGUE
   STUDENT_REGISTRATION_ENABLED: "false"
-  PASSWORD_SCREEN_MODE: unavailable
+  # Screening is not staging-only. Staff invitation and onboarding set
+  # passwords, so the API's staff composition requires the adapter even
+  # while public student registration stays closed. Hard-coding
+  # `unavailable` here made a production API impossible to start.
+  PASSWORD_SCREEN_MODE: ${PASSWORD_SCREEN_MODE:?PASSWORD_SCREEN_MODE is required}
+  COMPROMISED_PASSWORD_ADAPTER_APPROVED: ${COMPROMISED_PASSWORD_ADAPTER_APPROVED:?COMPROMISED_PASSWORD_ADAPTER_APPROVED is required}
+  COMPROMISED_PASSWORD_TIMEOUT: ${COMPROMISED_PASSWORD_TIMEOUT:-3s}
   LEGAL_IDENTITY_MODE: public
   LEGAL_OPERATOR_NAME: ${LEGAL_OPERATOR_NAME:?LEGAL_OPERATOR_NAME is required}
   LEGAL_REGISTRATION_NUMBER: ${LEGAL_REGISTRATION_NUMBER:?LEGAL_REGISTRATION_NUMBER is required}

@@ -75,6 +75,63 @@ require_value() {
   [ -n "${!name:-}" ] || die "$name is required in the protected runtime environment"
 }
 
+# The deployment declares its own environment and its coupled admission
+# composition. Nothing here is inferred from the hostname: a managed host is
+# staging or production because its protected runtime says so.
+#
+# The regression this guards was observed on the first real production bring-up.
+# The Compose file hard-coded APP_ENV=staging and PASSWORD_SCREEN_MODE=unavailable,
+# so preflight passed, PostgreSQL and Redis started, migrations reached schema 28,
+# and only then did the API refuse to build its router: "compromised-password
+# screening is not configured". Screening is not a student-registration concern —
+# staff invitation and onboarding set passwords, so the API's staff composition
+# requires the adapter even while public registration stays closed. A composition
+# the application will reject must be rejected before anything starts.
+validate_application_composition() {
+  case "$APP_ENV" in
+    staging | production) ;;
+    *) die "APP_ENV must be exactly staging or production; got \"$APP_ENV\"" ;;
+  esac
+
+  case "$PASSWORD_SCREEN_MODE" in
+    unavailable | adapter) ;;
+    deterministic) die "deterministic PASSWORD_SCREEN_MODE is permitted only in development" ;;
+    *) die "PASSWORD_SCREEN_MODE must be unavailable or adapter; got \"$PASSWORD_SCREEN_MODE\"" ;;
+  esac
+
+  case "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" in
+    true | false) ;;
+    *) die "COMPROMISED_PASSWORD_ADAPTER_APPROVED must be exactly true or false" ;;
+  esac
+
+  # Approval without the adapter is a contradiction in either environment.
+  if [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] &&
+    [ "$PASSWORD_SCREEN_MODE" != adapter ]; then
+    die "COMPROMISED_PASSWORD_ADAPTER_APPROVED=true requires PASSWORD_SCREEN_MODE=adapter"
+  fi
+
+  [ "${AUTH_FAKE_MODE:-false}" = false ] ||
+    die "AUTH_FAKE_MODE must never be enabled on a managed host"
+  [ "${STUDENT_REGISTRATION_ENABLED:-false}" = false ] ||
+    die "public student registration is outside the approved MVP scope"
+
+  [ "$APP_ENV" = production ] || return 0
+
+  # Everything below is the production composition the application itself
+  # enforces at startup. Preflight refuses the same shapes, earlier.
+  [ "$PASSWORD_SCREEN_MODE" = adapter ] ||
+    die "production requires PASSWORD_SCREEN_MODE=adapter; staff onboarding sets passwords"
+  [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] ||
+    die "production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)"
+  [ "$EMAIL_ENABLED" = true ] ||
+    die "production requires EMAIL_ENABLED=true; staff invitation depends on transactional email"
+  [ "$EMAIL_PROVIDER" = resend ] ||
+    die "production requires EMAIL_PROVIDER=resend"
+  require_value EMAIL_API_KEY
+  require_value EMAIL_FROM_ADDRESS
+  note "production composition accepted: adapter screening approved, Resend transactional email, no fake authentication, registration closed"
+}
+
 validate_environment() {
   local name image_revision
   validate_local_targets
@@ -83,9 +140,12 @@ validate_environment() {
     GRADEX_E2E_ADMIN_DB_URL RESTORE_POSTGRES_PASSWORD RESTORE_DATABASE_URL REDIS_PASSWORD S3_ENDPOINT S3_BUCKET \
 	S3_ACCESS_KEY S3_SECRET_KEY PLAYBACK_TOKEN_SECRET SALES_WHATSAPP_NUMBER SESSION_CSRF_KEY \
     ANONYMOUS_COOKIE_SIGNING_KEY ANONYMOUS_CSRF_KEY ADMISSION_LIMITER_HMAC_KEY \
-    OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION OUTBOX_PROTECTED_PAYLOAD_KEY; do
+    OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION OUTBOX_PROTECTED_PAYLOAD_KEY \
+    APP_ENV PASSWORD_SCREEN_MODE COMPROMISED_PASSWORD_ADAPTER_APPROVED \
+    EMAIL_ENABLED EMAIL_PROVIDER; do
     require_value "$name"
   done
+  validate_application_composition
   [[ "$GRADEX_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || die "GRADEX_RELEASE_SHA must be a full Git SHA"
   [[ "$STAGING_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || die "STAGING_HOSTNAME is invalid"
   [ "$PUBLIC_ORIGIN" = "https://$STAGING_HOSTNAME" ] || die "PUBLIC_ORIGIN must exactly match the HTTPS staging hostname"
