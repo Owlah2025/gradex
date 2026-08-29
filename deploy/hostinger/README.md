@@ -558,12 +558,15 @@ correlation IDs, never webhook credentials.
 
 ## 8. Systemd monitoring and backup schedule
 
-The production unit sources and installer live in `deploy/hostinger/systemd/`. Installation renders
-the repository checkout and an explicitly supplied non-root operator into the services; the
-repository does not invent a VPS username or checkout path. The services execute only the supported
-`host.sh monitor` and `host.sh backup` entrypoints. `host.sh` reads the mode-0400/0600
-`/var/lib/gradex/runtime.env`, so webhook and provider credentials do not enter unit files or command
-arguments.
+The unit sources and installer live in `deploy/hostinger/systemd/`. The default invocation remains
+the staging scheduler (`gradex-{monitor,backup}.{service,timer}`) and reads the mode-0400/0600
+`/var/lib/gradex/runtime.env`. Production requires the explicit `--instance production` path and
+uses only `gradex-production-{monitor,backup}.{service,timer}` with
+`/home/deploy/gradex-production/runtime.env`. In both profiles, installation renders the repository
+checkout and an explicitly supplied non-root operator into the services; the repository does not
+invent a VPS username or checkout path. The services execute only the supported `host.sh monitor`
+and `host.sh backup` entrypoints. `host.sh` remains the only runtime environment loader, so webhook
+and provider credentials do not enter unit files or command arguments.
 
 Before installation, verify the chosen operator can read the protected state and reach Docker:
 
@@ -611,13 +614,61 @@ systemctl is-active gradex-backup.timer
 systemctl list-timers --all gradex-backup.timer
 ```
 
-Enable `gradex-monitor.timer` separately only after its Founder/deployment topology, runtime metrics,
-health targets, and alert destination have been configured and proved.
+### Production scheduler
 
-`gradex-monitor.timer` runs at exact five-minute calendar boundaries.
-`gradex-backup.timer` runs hourly. Both use `Persistent=true`, so a missed event is run after the VPS
-returns. A oneshot service cannot overlap another invocation of the same unit; the backup command's
-existing `flock` remains the authoritative guard against overlap with manual or other invocations.
+After `/home/deploy/gradex-production/runtime.env` is populated with mode 0400 or 0600 and owned by
+the non-root `deploy` operator, use the separate long-lived deployment checkout to inspect the
+production render without changing systemd:
+
+```bash
+cd /home/deploy/gradex-backup-runtime
+./deploy/hostinger/systemd/install.sh render \
+  --instance production \
+  --output /tmp/gradex-production-systemd \
+  --user deploy \
+  --group deploy \
+  --repo /home/deploy/gradex-backup-runtime
+systemd-analyze verify \
+  /tmp/gradex-production-systemd/gradex-production-monitor.service \
+  /tmp/gradex-production-systemd/gradex-production-monitor.timer \
+  /tmp/gradex-production-systemd/gradex-production-backup.service \
+  /tmp/gradex-production-systemd/gradex-production-backup.timer
+```
+
+Install only the four production filenames; this reloads systemd but does not enable or start either
+timer:
+
+```bash
+cd /home/deploy/gradex-backup-runtime
+sudo ./deploy/hostinger/systemd/install.sh install \
+  --instance production \
+  --user deploy \
+  --group deploy \
+  --repo /home/deploy/gradex-backup-runtime
+sudo systemd-analyze verify \
+  /etc/systemd/system/gradex-production-monitor.service \
+  /etc/systemd/system/gradex-production-monitor.timer \
+  /etc/systemd/system/gradex-production-backup.service \
+  /etc/systemd/system/gradex-production-backup.timer
+```
+
+Only after production monitoring and backup have been manually validated, enable and start the two
+production timers explicitly. These commands do not touch the staging timers:
+
+```bash
+sudo systemctl enable --now gradex-production-monitor.timer
+sudo systemctl enable --now gradex-production-backup.timer
+systemctl is-enabled gradex-production-monitor.timer gradex-production-backup.timer
+systemctl is-active gradex-production-monitor.timer gradex-production-backup.timer
+```
+
+For staging, enable `gradex-monitor.timer` separately only after its Founder/deployment topology,
+runtime metrics, health targets, and alert destination have been configured and proved.
+
+The staging and production monitor timers run at exact five-minute calendar boundaries, and both backup
+timers run hourly. All four use `Persistent=true`, so a missed event is run after the VPS returns. A
+oneshot service cannot overlap another invocation of the same unit; the backup command's existing
+`flock` remains the authoritative guard against overlap with manual or other invocations.
 Failures propagate to systemd and journald.
 
 Inspect schedules, results, and bounded logs with:

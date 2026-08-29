@@ -4,6 +4,9 @@ set -euo pipefail
 
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_SYSTEMD_DIR="$S12_ROOT/deploy/hostinger/systemd"
+S12_README="$S12_ROOT/deploy/hostinger/README.md"
+# Anchor the first-production-launch regression to the reviewed staging contract.
+S12_BASE_COMMIT=087fff32cbe598669b5a8fb3e0e506172469948a
 S12_TEMPORARY=""
 
 note() { printf 'hostinger-systemd: %s\n' "$*" >&2; }
@@ -21,9 +24,123 @@ assert_line() {
     die "$(basename "$file") is missing: $expected"
 }
 
+assert_unit_set() {
+  local directory="$1" profile="$2" file actual
+  local -a expected
+  case "$profile" in
+    staging)
+      expected=(
+        gradex-monitor.service
+        gradex-monitor.timer
+        gradex-backup.service
+        gradex-backup.timer
+      )
+      ;;
+    production)
+      expected=(
+        gradex-production-monitor.service
+        gradex-production-monitor.timer
+        gradex-production-backup.service
+        gradex-production-backup.timer
+      )
+      ;;
+    *) die "unknown systemd verification profile: $profile" ;;
+  esac
+
+  for file in "${expected[@]}"; do
+    [ -f "$directory/$file" ] || die "$profile render is missing $file"
+  done
+  for actual in "$directory"/*; do
+    case "$profile" in
+      staging)
+        case "${actual##*/}" in
+          gradex-monitor.service|gradex-monitor.timer|gradex-backup.service|gradex-backup.timer) ;;
+          *) die "$profile render contains an unexpected unit filename" ;;
+        esac
+        ;;
+      production)
+        case "${actual##*/}" in
+          gradex-production-monitor.service|gradex-production-monitor.timer|gradex-production-backup.service|gradex-production-backup.timer) ;;
+          *) die "$profile render contains an unexpected unit filename" ;;
+        esac
+        ;;
+    esac
+  done
+}
+
+assert_no_environment_file() {
+  local file="$1"
+  if grep --quiet --ignore-case --extended-regexp '^EnvironmentFile[[:space:]]*=' "$file"; then
+    die "$(basename "$file") contains an EnvironmentFile= secret-loading surface"
+  fi
+}
+
+assert_no_environment_assignment() {
+  local file="$1"
+  if grep --quiet --extended-regexp '^Environment=' "$file"; then
+    die "$(basename "$file") contains an unexpected Environment= assignment"
+  fi
+}
+
+assert_staging_environment_surface() {
+  local file="$1"
+  assert_no_environment_file "$file"
+  assert_no_environment_assignment "$file"
+  if grep --quiet --fixed-strings 'GRADEX_HOST_' "$file"; then
+    die "$(basename "$file") contains production routing metadata"
+  fi
+}
+
+assert_production_environment_surface() {
+  local file="$1" environment_count expected environment_line
+  assert_no_environment_file "$file"
+  environment_count="$(awk '/^Environment=/{count++} END {print count+0}' "$file")"
+  [ "$environment_count" = 3 ] ||
+    die "$(basename "$file") does not contain exactly three routing Environment= assignments"
+  for expected in \
+    'Environment=GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production' \
+    'Environment=GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env' \
+    'Environment=GRADEX_HOST_PROJECT=gradex-production'; do
+    assert_line "$file" "$expected"
+  done
+  if grep --quiet --ignore-case --extended-regexp \
+    '^Environment=.*(password|token|secret|webhook|database|credential|api[_-]?key)' "$file"; then
+    die "$(basename "$file") contains a credential-bearing environment assignment"
+  fi
+  while IFS= read -r environment_line; do
+    case "$environment_line" in
+      'Environment=GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production'|'Environment=GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env'|'Environment=GRADEX_HOST_PROJECT=gradex-production') ;;
+      *) die "$(basename "$file") contains an unexpected Environment= assignment" ;;
+    esac
+  done < <(grep --extended-regexp '^Environment=' "$file" || true)
+}
+
+assert_production_readme_contract() {
+  local production_section
+  assert_line "$S12_README" 'cd /home/deploy/gradex-backup-runtime'
+  assert_line "$S12_README" '  --repo /home/deploy/gradex-backup-runtime'
+  if ! grep --quiet --fixed-strings -- '  --instance production ' "$S12_README"; then
+    die "the production README procedure is missing the production instance flag"
+  fi
+  if grep --quiet --fixed-strings 'cd /home/deploy/gradex-production' "$S12_README" ||
+    grep --quiet --fixed-strings -- '--repo /home/deploy/gradex-production' "$S12_README"; then
+    die "the production README procedure collapses state and repository paths"
+  fi
+  production_section="$(awk '
+    /^### Production scheduler$/ { capture = 1 }
+    capture { print }
+    capture && /^For staging,/ { exit }
+  ' "$S12_README")"
+  [ "$(printf '%s\n' "$production_section" | grep -c --fixed-strings '```bash')" = 3 ] ||
+    die "the production README procedure does not contain three bash blocks"
+  [ "$(printf '%s\n' "$production_section" | grep -c --line-regexp '```')" = 3 ] ||
+    die "the production README procedure has malformed code fences"
+}
+
 main() {
   local tool file operator group fake_bin backup_marker runtime_report curl_args_log monitor_log monitor_status now ca_file
-  for tool in cat chmod date grep id mkdir mktemp systemd-analyze; do
+  local staging_omitted staging_explicit production shared baseline_root baseline_render directory
+  for tool in awk cat chmod cmp date git grep id mkdir mktemp systemd-analyze; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
 
@@ -36,54 +153,205 @@ main() {
   if "$S12_SYSTEMD_DIR/install.sh" install --user root --repo "$S12_ROOT" >/dev/null 2>&1; then
     die "the installer accepted root as the scheduled operator"
   fi
-  if grep --extended-regexp 'systemctl[[:space:]]+(enable|start)|--now' \
-    "$S12_SYSTEMD_DIR/install.sh"; then
-    die "the installer enables or starts scheduled work as a side effect"
+  if "$S12_SYSTEMD_DIR/install.sh" install --instance production \
+    --user root --repo "$S12_ROOT" >/dev/null 2>&1; then
+    die "the production installer accepted root as the scheduled operator"
   fi
+  if grep --extended-regexp \
+    'systemctl[[:space:]]+(enable|start|disable|stop|restart|try-restart)|--now' \
+    "$S12_SYSTEMD_DIR/install.sh"; then
+    die "the installer mutates scheduled work as a side effect"
+  fi
+  if grep --quiet --extended-regexp 'host\.sh[[:space:]]+(backup|monitor)' \
+    "$S12_SYSTEMD_DIR/install.sh"; then
+    die "the installer runs a backup or monitor job as a side effect"
+  fi
+  grep --quiet --fixed-strings \
+    'install -o root -g root -m 0644 "${S12_UNIT_PATHS[@]}" "$S12_SYSTEMD_TARGET/"' \
+    "$S12_SYSTEMD_DIR/install.sh" ||
+    die "the installer does not use a filename-scoped unit selection"
+  if grep --quiet --extended-regexp \
+    'S12_TEMPORARY/\*\.(service|timer)' "$S12_SYSTEMD_DIR/install.sh"; then
+    die "the installer uses an unscoped service/timer glob"
+  fi
+  if grep --quiet --extended-regexp -- '--(state-dir|project|env-file|unit-prefix)' \
+    "$S12_SYSTEMD_DIR/install.sh"; then
+    die "the installer exposes an operator-controlled instance override"
+  fi
+  for expectation in \
+    'S12_HOST_STATE=/var/lib/gradex' \
+    'S12_RUNTIME_ENV=/var/lib/gradex/runtime.env' \
+    'S12_PROJECT=gradex-staging' \
+    'S12_HOST_STATE=/home/deploy/gradex-production' \
+    'S12_RUNTIME_ENV=/home/deploy/gradex-production/runtime.env' \
+    'S12_PROJECT=gradex-production' \
+    '[ -f "$S12_RUNTIME_ENV" ] || die "$S12_RUNTIME_ENV is absent"' \
+    'case "$mode" in 400|600) ;; *) die "$S12_RUNTIME_ENV must have mode 0400 or 0600" ;; esac' \
+    'owner_uid="$(stat -c '\''%u'\'' "$S12_RUNTIME_ENV")"' \
+    'operator_uid="$(id -u "$S12_OPERATOR")"' \
+    '[ "$owner_uid" = "$operator_uid" ] ||' \
+    'runuser -u "$S12_OPERATOR" -- test -r "$S12_RUNTIME_ENV"' \
+    'runuser -u "$S12_OPERATOR" -- test -x "$S12_REPO/deploy/hostinger/host.sh"' \
+    'runuser -u "$S12_OPERATOR" -- docker info'; do
+    grep --quiet --fixed-strings "$expectation" "$S12_SYSTEMD_DIR/install.sh" ||
+      die "the installer is missing its instance/install-state contract: $expectation"
+  done
+  assert_line "$S12_ROOT/deploy/hostinger/host.sh" \
+    'S12_HOST_STATE_DIR="${GRADEX_HOST_STATE_DIR:-/var/lib/gradex}"'
+  assert_line "$S12_ROOT/deploy/hostinger/host.sh" \
+    'S12_PROJECT_STAGING_DEFAULT="gradex-staging"'
+  assert_line "$S12_ROOT/deploy/hostinger/host.sh" \
+    'S12_PROJECT="${GRADEX_HOST_PROJECT:-$S12_PROJECT_STAGING_DEFAULT}"'
+  assert_production_readme_contract
 
   S12_TEMPORARY="$(mktemp -d)"
   trap cleanup EXIT
   operator="$(id -un)"
   group="$(id -gn)"
+  staging_omitted="$S12_TEMPORARY/staging-omitted"
+  staging_explicit="$S12_TEMPORARY/staging-explicit"
+  production="$S12_TEMPORARY/production"
+  shared="$S12_TEMPORARY/shared"
+  baseline_root="$S12_TEMPORARY/base"
+  baseline_render="$S12_TEMPORARY/staging-baseline"
+  mkdir -p \
+    "$staging_omitted" "$staging_explicit" "$production" "$shared" \
+    "$baseline_root/deploy/hostinger/systemd" "$baseline_render"
+  if "$S12_SYSTEMD_DIR/install.sh" render \
+    --output "$S12_TEMPORARY/invalid-repo" --user "$operator" --group "$group" \
+    --repo "$S12_TEMPORARY/repo;unsafe" >/dev/null 2>&1; then
+    die "the installer accepted an unsafe repository path"
+  fi
   "$S12_SYSTEMD_DIR/install.sh" render \
-    --output "$S12_TEMPORARY" --user "$operator" --group "$group" --repo "$S12_ROOT"
+    --output "$staging_omitted" --user "$operator" --group "$group" --repo "$S12_ROOT"
+  "$S12_SYSTEMD_DIR/install.sh" render \
+    --instance staging --output "$staging_explicit" \
+    --user "$operator" --group "$group" --repo "$S12_ROOT"
+  "$S12_SYSTEMD_DIR/install.sh" render \
+    --instance production --output "$production" \
+    --user "$operator" --group "$group" --repo "$S12_ROOT"
 
-  for file in gradex-monitor.service gradex-monitor.timer gradex-backup.service gradex-backup.timer; do
-    [ -f "$S12_TEMPORARY/$file" ] || die "rendered $file is absent"
+  for file in \
+    gradex-monitor.service.in gradex-monitor.timer \
+    gradex-backup.service.in gradex-backup.timer install.sh; do
+    git show "$S12_BASE_COMMIT:deploy/hostinger/systemd/$file" \
+      >"$baseline_root/deploy/hostinger/systemd/$file" ||
+      die "the canonical staging baseline is unavailable for $file"
+  done
+  bash "$baseline_root/deploy/hostinger/systemd/install.sh" render \
+    --output "$baseline_render" --user "$operator" --group "$group" --repo "$S12_ROOT"
+
+  assert_unit_set "$staging_omitted" staging
+  assert_unit_set "$staging_explicit" staging
+  assert_unit_set "$production" production
+  for file in \
+    gradex-monitor.service gradex-monitor.timer \
+    gradex-backup.service gradex-backup.timer; do
+    cmp --silent "$staging_omitted/$file" "$staging_explicit/$file" ||
+      die "omitted --instance does not byte-match --instance staging for $file"
+  done
+  for file in \
+    gradex-monitor.service gradex-monitor.timer \
+    gradex-backup.service gradex-backup.timer; do
+    cmp --silent "$staging_omitted/$file" "$baseline_render/$file" ||
+      die "the default staging render changed from canonical base $S12_BASE_COMMIT for $file"
   done
 
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'Type=oneshot'
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" "User=$operator"
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" "Group=$group"
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" "WorkingDirectory=$S12_ROOT"
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh monitor"
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'TimeoutStartSec=120s'
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'UMask=0077'
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'NoNewPrivileges=true'
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'PrivateTmp=true'
-  assert_line "$S12_TEMPORARY/gradex-monitor.service" 'ProtectSystem=full'
-  assert_line "$S12_TEMPORARY/gradex-monitor.timer" 'OnCalendar=*:0/5'
-  assert_line "$S12_TEMPORARY/gradex-monitor.timer" 'Persistent=true'
+  for file in "$staging_omitted"/*; do
+    assert_staging_environment_surface "$file"
+  done
+  assert_line "$staging_omitted/gradex-monitor.service" 'Type=oneshot'
+  assert_line "$staging_omitted/gradex-monitor.service" "User=$operator"
+  assert_line "$staging_omitted/gradex-monitor.service" "Group=$group"
+  assert_line "$staging_omitted/gradex-monitor.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$staging_omitted/gradex-monitor.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh monitor"
+  assert_line "$staging_omitted/gradex-monitor.service" 'TimeoutStartSec=120s'
+  assert_line "$staging_omitted/gradex-monitor.service" 'UMask=0077'
+  assert_line "$staging_omitted/gradex-monitor.service" 'NoNewPrivileges=true'
+  assert_line "$staging_omitted/gradex-monitor.service" 'PrivateTmp=true'
+  assert_line "$staging_omitted/gradex-monitor.service" 'ProtectSystem=full'
+  assert_line "$staging_omitted/gradex-monitor.timer" 'OnCalendar=*:0/5'
+  assert_line "$staging_omitted/gradex-monitor.timer" 'Persistent=true'
+  assert_line "$staging_omitted/gradex-monitor.timer" 'Unit=gradex-monitor.service'
+  assert_line "$staging_omitted/gradex-backup.service" 'Type=oneshot'
+  assert_line "$staging_omitted/gradex-backup.service" 'TimeoutStartSec=360s'
+  assert_line "$staging_omitted/gradex-backup.service" "User=$operator"
+  assert_line "$staging_omitted/gradex-backup.service" "Group=$group"
+  assert_line "$staging_omitted/gradex-backup.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$staging_omitted/gradex-backup.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh backup"
+  assert_line "$staging_omitted/gradex-backup.timer" 'OnCalendar=hourly'
+  assert_line "$staging_omitted/gradex-backup.timer" 'Persistent=true'
+  assert_line "$staging_omitted/gradex-backup.timer" 'Unit=gradex-backup.service'
+  assert_line "$staging_omitted/gradex-backup.service" 'UMask=0077'
+  assert_line "$staging_omitted/gradex-backup.service" 'NoNewPrivileges=true'
+  assert_line "$staging_omitted/gradex-backup.service" 'PrivateTmp=true'
+  assert_line "$staging_omitted/gradex-backup.service" 'ProtectSystem=full'
+  assert_line "$staging_omitted/gradex-backup.service" 'ReadWritePaths=/var/lib/gradex'
+  assert_line "$staging_omitted/gradex-backup.service" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
 
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'Type=oneshot'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'TimeoutStartSec=360s'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" "User=$operator"
-  assert_line "$S12_TEMPORARY/gradex-backup.service" "Group=$group"
-  assert_line "$S12_TEMPORARY/gradex-backup.service" "WorkingDirectory=$S12_ROOT"
-  assert_line "$S12_TEMPORARY/gradex-backup.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh backup"
-  assert_line "$S12_TEMPORARY/gradex-backup.timer" 'OnCalendar=hourly'
-  assert_line "$S12_TEMPORARY/gradex-backup.timer" 'Persistent=true'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'UMask=0077'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'NoNewPrivileges=true'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'PrivateTmp=true'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'ProtectSystem=full'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'ReadWritePaths=/var/lib/gradex'
-  assert_line "$S12_TEMPORARY/gradex-backup.service" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
+  for file in "$production"/*; do
+    assert_no_environment_file "$file"
+  done
+  assert_no_environment_assignment "$production/gradex-production-monitor.timer"
+  assert_no_environment_assignment "$production/gradex-production-backup.timer"
+  assert_production_environment_surface "$production/gradex-production-monitor.service"
+  assert_production_environment_surface "$production/gradex-production-backup.service"
+  assert_line "$production/gradex-production-monitor.service" 'Type=oneshot'
+  assert_line "$production/gradex-production-monitor.service" "User=$operator"
+  assert_line "$production/gradex-production-monitor.service" "Group=$group"
+  assert_line "$production/gradex-production-monitor.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$production/gradex-production-monitor.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh monitor"
+  assert_line "$production/gradex-production-monitor.service" 'TimeoutStartSec=120s'
+  assert_line "$production/gradex-production-monitor.service" 'UMask=0077'
+  assert_line "$production/gradex-production-monitor.service" 'NoNewPrivileges=true'
+  assert_line "$production/gradex-production-monitor.service" 'PrivateTmp=true'
+  assert_line "$production/gradex-production-monitor.service" 'ProtectSystem=full'
+  assert_line "$production/gradex-production-monitor.service" 'SyslogIdentifier=gradex-production-monitor'
+  assert_line "$production/gradex-production-monitor.timer" 'OnCalendar=*:0/5'
+  assert_line "$production/gradex-production-monitor.timer" 'Persistent=true'
+  assert_line "$production/gradex-production-monitor.timer" 'Unit=gradex-production-monitor.service'
+  assert_line "$production/gradex-production-backup.service" 'Type=oneshot'
+  assert_line "$production/gradex-production-backup.service" 'TimeoutStartSec=360s'
+  assert_line "$production/gradex-production-backup.service" "User=$operator"
+  assert_line "$production/gradex-production-backup.service" "Group=$group"
+  assert_line "$production/gradex-production-backup.service" "WorkingDirectory=$S12_ROOT"
+  assert_line "$production/gradex-production-backup.service" "ExecStart=$S12_ROOT/deploy/hostinger/host.sh backup"
+  assert_line "$production/gradex-production-backup.timer" 'OnCalendar=hourly'
+  assert_line "$production/gradex-production-backup.timer" 'Persistent=true'
+  assert_line "$production/gradex-production-backup.timer" 'Unit=gradex-production-backup.service'
+  assert_line "$production/gradex-production-backup.service" 'UMask=0077'
+  assert_line "$production/gradex-production-backup.service" 'NoNewPrivileges=true'
+  assert_line "$production/gradex-production-backup.service" 'PrivateTmp=true'
+  assert_line "$production/gradex-production-backup.service" 'ProtectSystem=full'
+  assert_line "$production/gradex-production-backup.service" 'ReadWritePaths=/home/deploy/gradex-production'
+  assert_line "$production/gradex-production-backup.service" 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6'
 
-  if grep --ignore-case --extended-regexp \
-    '(runtime\.env|webhook|token|password|database_url|secret|Environment(File)?=)' \
-    "$S12_TEMPORARY"/*.service "$S12_TEMPORARY"/*.timer; then
-    die "rendered units contain a secret or duplicate environment-loading surface"
+  "$S12_SYSTEMD_DIR/install.sh" render \
+    --instance staging --output "$shared" \
+    --user "$operator" --group "$group" --repo "$S12_ROOT"
+  for file in \
+    gradex-monitor.service gradex-monitor.timer \
+    gradex-backup.service gradex-backup.timer; do
+    cmp --silent "$shared/$file" "$staging_explicit/$file" ||
+      die "the shared render changed the staging $file before production rendering"
+  done
+  "$S12_SYSTEMD_DIR/install.sh" render \
+    --instance production --output "$shared" \
+    --user "$operator" --group "$group" --repo "$S12_ROOT"
+  for file in \
+    gradex-monitor.service gradex-monitor.timer \
+    gradex-backup.service gradex-backup.timer; do
+    cmp --silent "$shared/$file" "$staging_explicit/$file" ||
+      die "production rendering changed the staging $file in a shared output"
+  done
+  for file in "$production"/*; do
+    [ ! -e "$staging_explicit/${file##*/}" ] ||
+      die "staging and production renders overlap on ${file##*/}"
+  done
+
+  if "$S12_SYSTEMD_DIR/install.sh" render --instance acceptance \
+    --output "$S12_TEMPORARY/invalid-instance" >/dev/null 2>&1; then
+    die "the installer accepted an invalid instance"
   fi
 
   grep --quiet --fixed-strings 'GRADEX_BACKUP_MAX_AGE_SECONDS="${GRADEX_BACKUP_MAX_AGE_SECONDS:-7200}"' \
@@ -257,11 +525,11 @@ EOF
   grep --quiet --fixed-strings 'GRADEX_ALERT_WEBHOOK_URL must be an HTTPS URL outside monitor-test' "$monitor_log" ||
     die "insecure webhook rejection was not reported"
 
-  systemd-analyze verify \
-    "$S12_TEMPORARY/gradex-monitor.service" "$S12_TEMPORARY/gradex-monitor.timer" \
-    "$S12_TEMPORARY/gradex-backup.service" "$S12_TEMPORARY/gradex-backup.timer"
+  for directory in "$staging_omitted" "$staging_explicit" "$production"; do
+    systemd-analyze verify "$directory"/*.service "$directory"/*.timer
+  done
 
-  note "rendering, cadence, entrypoints, persistence, secret isolation, freshness, and unit syntax passed"
+  note "staging and production rendering, cadence, entrypoints, persistence, secret isolation, freshness, filename isolation, and unit syntax passed"
 }
 
 main "$@"
