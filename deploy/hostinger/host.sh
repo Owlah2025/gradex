@@ -790,7 +790,11 @@ collect_monitor_runtime_report() {
 
 run_monitor() {
   load_environment
-  export GRADEX_ENVIRONMENT=staging
+  case "$APP_ENV" in
+    staging|production) ;;
+    *) die "APP_ENV must be exactly staging or production for monitoring; got \"$APP_ENV\"" ;;
+  esac
+  export GRADEX_ENVIRONMENT="$APP_ENV"
   export GRADEX_PUBLIC_URL="$PUBLIC_ORIGIN/"
   export GRADEX_HEALTH_URL="$PUBLIC_ORIGIN/healthz"
   export GRADEX_READY_URL="$PUBLIC_ORIGIN/readyz"

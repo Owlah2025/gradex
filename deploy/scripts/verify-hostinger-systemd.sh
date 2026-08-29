@@ -137,10 +137,139 @@ assert_production_readme_contract() {
     die "the production README procedure has malformed code fences"
 }
 
+extract_host_function() {
+  local function_name="$1" source="$2"
+  awk -v function_name="$function_name" '
+    $0 ~ "^" function_name "\\(\\) \\{" { capture = 1 }
+    capture { print }
+    capture && /^}/ { exit }
+  ' "$source"
+}
+
+verify_host_monitor_environment() {
+  local host_script="$S12_ROOT/deploy/hostinger/host.sh"
+  local real_monitor_once="$S12_ROOT/deploy/monitoring/monitor-once.sh"
+  local routing_root="$S12_TEMPORARY/monitor-routing"
+  local state_dir="$routing_root/gradex-monitor-routing"
+  local environment_file="$state_dir/runtime.env"
+  local environment_log="$routing_root/environment.log"
+  local invocation_log="$routing_root/invocation.log"
+  local payload_log="$routing_root/payload.json"
+  local curl_log="$routing_root/curl.args"
+  local monitor_log="$routing_root/monitor.log"
+  local app_environment monitor_status
+  local S12_ROOT="$routing_root"
+  local S12_HOST_STATE_DIR="$state_dir"
+  local S12_ENV_FILE="$environment_file"
+  local S12_BACKUP_DIR="$state_dir/backups"
+  local S12_PROJECT=gradex-monitor-routing
+
+  mkdir -p "$state_dir/backups" "$routing_root/deploy/monitoring"
+  cat >"$routing_root/deploy/monitoring/monitor-once.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${GRADEX_ENVIRONMENT:-}" >"$FAKE_HOST_MONITOR_ENVIRONMENT_LOG"
+: >"$FAKE_HOST_MONITOR_INVOCATION_LOG"
+exec "$FAKE_HOST_MONITOR_REAL_ONCE"
+EOF
+  chmod 0755 "$routing_root/deploy/monitoring/monitor-once.sh"
+
+  eval "$(extract_host_function validate_local_targets "$host_script")"
+  eval "$(extract_host_function load_environment "$host_script")"
+  eval "$(extract_host_function run_monitor "$host_script")"
+  collect_monitor_runtime_report() {
+    printf '%s\n' \
+      'version=1' \
+      'worker|PASS|routing fixture worker' \
+      'postgres_schema|PASS|routing fixture schema' \
+      'email_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1' \
+      'disk_roots|PASS|routing fixture disk' >"$1"
+  }
+
+  write_monitor_runtime() {
+    local app_environment="$1"
+    printf '%s\n' \
+      "APP_ENV=$app_environment" \
+      'PUBLIC_ORIGIN=https://monitor-routing.example' \
+      "GRADEX_MONITOR_DISK_PATHS=$state_dir" \
+      'GRADEX_MONITOR_DISK_MIN_FREE_BYTES=1' \
+      'GRADEX_ALERT_WEBHOOK_URL=https://alerts.example/routing' >"$environment_file"
+    chmod 0600 "$environment_file"
+  }
+
+  reset_monitor_fixture_logs() {
+    : >"$environment_log"
+    : >"$payload_log"
+    : >"$curl_log"
+    rm -f -- "$invocation_log"
+  }
+
+  run_monitor_fixture() {
+    set +e
+    (
+      export PATH="$S12_TEMPORARY/fake-bin:$PATH"
+      export FAKE_CURL_ARGS_LOG="$curl_log"
+      export FAKE_CURL_DATA_LOG="$payload_log"
+      export FAKE_HOST_MONITOR_ENVIRONMENT_LOG="$environment_log"
+      export FAKE_HOST_MONITOR_INVOCATION_LOG="$invocation_log"
+      export FAKE_HOST_MONITOR_REAL_ONCE="$real_monitor_once"
+      run_monitor
+    ) >"$monitor_log" 2>&1
+    monitor_status=$?
+    set -e
+  }
+
+  for app_environment in staging production; do
+    write_monitor_runtime "$app_environment"
+    reset_monitor_fixture_logs
+    run_monitor_fixture
+    [ "$monitor_status" = 1 ] ||
+      die "host monitor routing fixture returned status $monitor_status for $app_environment"
+    assert_line "$environment_log" "$app_environment"
+    [ -f "$invocation_log" ] || die "monitor-once was not reached for $app_environment"
+    jq --exit-status --arg expected "$app_environment" \
+      '.event == "gradex_monitor_failure" and .environment == $expected' \
+      "$payload_log" >/dev/null ||
+      die "monitor-once alert payload did not preserve $app_environment"
+  done
+
+  for expected_url in \
+    https://monitor-routing.example/ \
+    https://monitor-routing.example/healthz \
+    https://monitor-routing.example/readyz; do
+    grep --quiet --fixed-strings "$expected_url" "$curl_log" ||
+      die "host monitor changed its public/health/readiness URL routing"
+  done
+
+  for app_environment in invalid ""; do
+    write_monitor_runtime "$app_environment"
+    reset_monitor_fixture_logs
+    run_monitor_fixture
+    [ "$monitor_status" != 0 ] ||
+      die "host monitor accepted invalid APP_ENV=$app_environment"
+    [ ! -e "$invocation_log" ] ||
+      die "monitor-once ran before rejecting invalid APP_ENV=$app_environment"
+    grep --quiet --fixed-strings \
+      "APP_ENV must be exactly staging or production for monitoring; got \"$app_environment\"" \
+      "$monitor_log" ||
+      die "invalid APP_ENV=$app_environment was rejected without the monitoring identity error"
+  done
+
+  if grep --quiet --fixed-strings 'export GRADEX_ENVIRONMENT=staging' "$host_script"; then
+    die "host.sh still hard-codes staging monitoring identity"
+  fi
+  if grep --quiet --fixed-strings 'monitor-test' "$host_script"; then
+    die "host.sh selected the monitor-test environment"
+  fi
+  grep --quiet --fixed-strings 'monitor-test' "$real_monitor_once" ||
+    die "monitor-once no longer contains its test-only monitor-test behavior"
+  note "host monitor uses protected APP_ENV identity, rejects invalid values, preserves URLs, and leaves monitor-test test-only"
+}
+
 main() {
   local tool file operator group fake_bin backup_marker runtime_report curl_args_log monitor_log monitor_status now ca_file
   local staging_omitted staging_explicit production shared baseline_root baseline_render directory
-  for tool in awk cat chmod cmp date git grep id mkdir mktemp systemd-analyze; do
+  for tool in awk cat chmod cmp date git grep id jq mkdir mktemp rm stat systemd-analyze; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
 
@@ -404,19 +533,23 @@ main() {
 set -euo pipefail
 output=""
 write_status=0
+data=""
 [ -z "${FAKE_CURL_ARGS_LOG:-}" ] || printf '%s\n' "$@" >>"$FAKE_CURL_ARGS_LOG"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output) output="$2"; shift 2 ;;
     --write-out) write_status=1; shift 2 ;;
+    --data) data="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 [ -z "$output" ] || : >"$output"
+[ -z "${FAKE_CURL_DATA_LOG:-}" ] || [ -z "$data" ] || printf '%s\n' "$data" >"$FAKE_CURL_DATA_LOG"
 [ "$write_status" = 0 ] || printf '200'
 [ "$write_status" = 1 ] || [ "${FAKE_CURL_FAIL:-0}" != 1 ] || exit 22
 EOF
   chmod 0755 "$fake_bin/curl"
+  verify_host_monitor_environment
   printf 'version=1\nworker|PASS|fixture worker\npostgres_schema|PASS|fixture PostgreSQL schema\nemail_outbox|METRICS|terminal=0;oldest_due_age=-1;stale_lease_age=-1\ndisk_roots|PASS|fixture paths\n' >"$runtime_report"
   chmod 600 "$runtime_report"
 
