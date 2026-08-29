@@ -118,15 +118,59 @@ correctness.
 ```bash
 ./deploy/hostinger/host.sh up
 ./deploy/hostinger/host.sh verify
-./deploy/hostinger/verify-public.sh "https://staging.example.com"
+./deploy/hostinger/verify-public.sh --mode direct "https://staging.example.com"
 ```
 
 Replace the example hostname. `verify` reads the selected backend image's maximum supported schema
 with `gradex-migrate max-version`, requires the live database to be clean at exactly that version, and
 checks worker lifecycle, plaintext Redis refusal, unauthenticated TLS refusal, authenticated
 verified-TLS Redis, and public health/readiness.
-`verify-public.sh` independently checks public DNS, HTTP-to-HTTPS redirect, certificate validity,
-Cloudflare presence, conservative cache behavior, frontend, `/healthz`, and `/readyz`.
+
+`verify-public.sh` independently checks public DNS, HTTP-to-HTTPS redirect, certificate validity and
+hostname, frontend, `/healthz`, `/readyz`, API security headers, and that no internal service port
+answers on the public hostname. Its edge policy is chosen by an explicit `--mode`, never guessed:
+
+- `--mode direct` verifies an origin served straight from Caddy, as staging is today. It makes no
+  claim about Cloudflare and says so in its output.
+- `--mode cloudflare` additionally requires Cloudflare proxy evidence and the conservative
+  expectation that the frontend is not being served from the Cloudflare cache. Production hostnames
+  are refused in `direct` mode outright, so omitting a variable can never downgrade production to the
+  weaker policy.
+
+## 5a. Live release-acceptance smoke
+
+A deployed environment is verified where it runs, without owning it:
+
+```bash
+./deploy/scripts/verify-live-staging-acceptance.sh "https://staging.example.com"
+```
+
+The smoke reads the public frontend, locale, privacy and terms routes, `/healthz`, `/readyz`, the
+public catalogue and academic options, and a course detail page addressed by a slug it discovers
+through the public API rather than a fixture identifier. It then asserts the boundaries: admin,
+authoring, and account routes reject anonymous callers, protected media is not served anonymously,
+and the anonymous session/admission boundary refuses a foreign origin and an invalid CSRF token
+before failing authentication closed.
+
+It never resets, seeds, or repoints a database, never brings a Compose project up or down, and never
+mutates an existing record. Optional runtime and provider checks are opt-in and additive:
+
+```bash
+GRADEX_LIVE_SMOKE_COMPOSE_PROJECT=gradex-founder-beta \
+GRADEX_LIVE_SMOKE_POSTGRES_DB=gradex_founder_beta \
+GRADEX_LIVE_SMOKE_PROVIDER_IMAGE=gradex-backend-proof:hostinger-<short-sha> \
+GRADEX_LIVE_SMOKE_PROVIDER_ENV_FILE=/home/deploy/r2-staging.env \
+  ./deploy/scripts/verify-live-staging-acceptance.sh "https://staging.example.com"
+```
+
+The runtime checks observe the operator-named Compose project only. The provider check writes one
+object under `capacity/live-smoke-<run-id>/`, confirms its ETag against the written content, and
+removes it again before exit. Running against a production hostname additionally requires
+`GRADEX_LIVE_SMOKE_ALLOW_PRODUCTION=i-have-authorized-production-smoke`.
+
+Authenticated student, instructor, and admin journeys stay with the isolated E2E suite, which owns
+disposable data. The live smoke proves the deployed composition and its critical boundaries, not the
+whole product.
 
 ## 6. Provider backup and isolated restore
 
