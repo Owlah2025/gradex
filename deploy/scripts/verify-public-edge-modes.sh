@@ -152,6 +152,21 @@ grep --quiet --fixed-strings 'GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT' "$TA
 grep --quiet --fixed-strings 'assert_stage_a_proxy_absent "$tls_headers"' "$TARGET" ||
   die "direct mode no longer applies the Stage-A proxy-absence check"
 
+# Internal service ports belong to the origin. Once the public hostname is
+# Cloudflare-proxied, probing alternate ports on that hostname tests
+# Cloudflare's edge rather than the origin and can produce false positives.
+DIRECT_MODE_BRANCH="$(sed -n '/^[[:space:]]*direct)/,/^[[:space:]]*;;/p' "$TARGET")"
+CLOUDFLARE_MODE_BRANCH="$(sed -n '/^[[:space:]]*cloudflare)/,/^[[:space:]]*;;/p' "$TARGET")"
+
+printf '%s\n' "$DIRECT_MODE_BRANCH" |
+  grep --quiet --fixed-strings 'assert_internal_ports_closed "$EDGE_HOSTNAME"' ||
+  die "direct mode no longer checks the origin-facing internal ports"
+
+if printf '%s\n' "$CLOUDFLARE_MODE_BRANCH" |
+  grep --quiet --fixed-strings 'assert_internal_ports_closed "$EDGE_HOSTNAME"'; then
+  die "cloudflare mode incorrectly probes internal ports on the proxied hostname"
+fi
+
 # --- cloudflare mode cannot pass without Cloudflare evidence ----------------
 
 DIRECT_HEADERS="$TEMPORARY/direct.headers"

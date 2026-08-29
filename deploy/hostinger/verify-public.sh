@@ -227,14 +227,16 @@ main() {
   require_header "$problem_headers" '^x-content-type-options:[[:space:]]*nosniff' "API problem"
   require_header "$problem_headers" '^content-type:[[:space:]]*application/problem\+json' "API problem"
 
-  assert_internal_ports_closed "$EDGE_HOSTNAME"
-
   case "$EDGE_MODE" in
     cloudflare)
       assert_cloudflare_evidence "$tls_headers"
-      note "public DNS, Cloudflare edge, HTTPS certificate, frontend, health, readiness, security headers, and closed internal ports passed"
+      # Once proxied, the public hostname resolves to Cloudflare. Cloudflare
+      # may accept alternate HTTP ports, so probing those ports on the public
+      # hostname would test Cloudflare rather than the origin.
+      note "public DNS, Cloudflare edge, HTTPS certificate, frontend, health, readiness, and security headers passed"
       ;;
     direct)
+      assert_internal_ports_closed "$EDGE_HOSTNAME"
       assert_stage_a_proxy_absent "$tls_headers"
       note "public DNS, HTTPS certificate, frontend, health, readiness, security headers, and closed internal ports passed"
       note "direct mode verified an origin-served edge and made NO claim about Cloudflare proxying"
