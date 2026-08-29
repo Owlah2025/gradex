@@ -5,11 +5,20 @@ set -euo pipefail
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_HOST_DIR="$S12_ROOT/deploy/hostinger"
 S12_COMPOSE_FILE="$S12_HOST_DIR/compose.yml"
+# Whether the operator named the deployment, captured before the staging
+# fallbacks below hide the difference. A production command that inherits
+# `gradex-staging` and `/var/lib/gradex` by omission would operate on the wrong
+# deployment while reporting success, so production requires both to be said out
+# loud. See assert_production_project_scope.
+S12_STATE_DIR_DECLARED="${GRADEX_HOST_STATE_DIR+declared}"
+S12_PROJECT_DECLARED="${GRADEX_HOST_PROJECT+declared}"
+
 S12_HOST_STATE_DIR="${GRADEX_HOST_STATE_DIR:-/var/lib/gradex}"
 S12_ENV_FILE="${GRADEX_HOST_ENV_FILE:-$S12_HOST_STATE_DIR/runtime.env}"
 S12_REDIS_TLS_DIR="$S12_HOST_STATE_DIR/redis-tls"
 S12_BACKUP_DIR="$S12_HOST_STATE_DIR/backups"
-S12_PROJECT="${GRADEX_HOST_PROJECT:-gradex-staging}"
+S12_PROJECT_STAGING_DEFAULT="gradex-staging"
+S12_PROJECT="${GRADEX_HOST_PROJECT:-$S12_PROJECT_STAGING_DEFAULT}"
 S12_DB_TUNNEL_NAME="${S12_PROJECT}-proof-db-tunnel"
 S12_BACKUP_STAGING_DIR=""
 S12_RESTORED_SOURCE_FILE="$S12_BACKUP_DIR/restored-source"
@@ -157,6 +166,23 @@ validate_application_composition() {
   note "$APP_ENV composition accepted: real sessions, adapter screening, Resend transactional email, no fake authentication, registration closed"
 }
 
+# A production deployment must name itself. Both selectors fall back to the
+# staging values, so an operator who exports neither would drive the staging
+# project from the staging state directory while believing they were in
+# production — and on a shared VPS that is the same host, so nothing external
+# would contradict them. Requiring the declaration is the fail-closed form of
+# "remember to set it".
+assert_production_project_scope() {
+  [ "${APP_ENV:-}" = production ] || return 0
+  [ -n "$S12_PROJECT_DECLARED" ] ||
+    die "a production deployment must declare GRADEX_HOST_PROJECT; it must never inherit the staging default \"$S12_PROJECT_STAGING_DEFAULT\""
+  [ -n "$S12_STATE_DIR_DECLARED" ] ||
+    die "a production deployment must declare GRADEX_HOST_STATE_DIR; it must never inherit the staging default"
+  [ "$S12_PROJECT" != "$S12_PROJECT_STAGING_DEFAULT" ] ||
+    die "a production deployment may not use the staging Compose project \"$S12_PROJECT_STAGING_DEFAULT\""
+  note "production deployment scoped to project $S12_PROJECT"
+}
+
 validate_environment() {
   local name image_revision
   validate_local_targets
@@ -171,6 +197,7 @@ validate_environment() {
     require_value "$name"
   done
   validate_application_composition
+  assert_production_project_scope
   [[ "$GRADEX_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || die "GRADEX_RELEASE_SHA must be a full Git SHA"
   [[ "$STAGING_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]] || die "STAGING_HOSTNAME is invalid"
   [ "$PUBLIC_ORIGIN" = "https://$STAGING_HOSTNAME" ] || die "PUBLIC_ORIGIN must exactly match the HTTPS staging hostname"
@@ -306,19 +333,126 @@ wait_for_completion() {
   die "$service did not complete"
 }
 
-start_environment() {
+# The application tier, without the public edge.
+#
+# The edge is the one service that binds host ports, and on this VPS the staging
+# edge already owns 80, 443, and 443/udp. A first production cutover therefore
+# cannot start the whole stack at once: the production edge would collide, and
+# `up` would fail after the database was already migrated. Separating the tier
+# from the edge lets production be brought up and proven privately, while
+# staging keeps serving, and leaves the port handover as one deliberate step.
+#
+# `--no-deps` on the application services keeps Compose from reconciling the
+# edge through the dependency graph; migrate has already run as a one-shot, so
+# the api dependency it satisfies is met.
+start_core() {
   prepare
   compose up --detach postgres redis
   wait_for_status postgres healthy
   wait_for_status redis healthy
   compose up --detach migrate
   wait_for_completion migrate
-  compose up --detach api worker frontend edge
+  compose up --detach --no-deps api worker frontend
   wait_for_status api healthy
   wait_for_status worker running
   wait_for_status frontend healthy
+  note "application tier is running privately; the public edge has not been started"
+}
+
+require_status() {
+  local service="$1" wanted="$2" container status
+  container="$(service_id "$service")"
+  [ -n "$container" ] || die "$service is not running; start the application tier with up-core first"
+  status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+  [ "$status" = "$wanted" ] || die "$service is $status, expected $wanted; the edge may not be started over an unproven application tier"
+}
+
+# Read-only. The repository must never stop, remove, or reconcile a container it
+# does not own, so a conflicting publisher is reported by name and the operator
+# releases it themselves.
+assert_edge_ports_available() {
+  local conflicts
+  conflicts="$(
+    docker ps --format '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Ports}}' |
+      awk -F '\t' -v project="$S12_PROJECT" '
+        $3 != project && $4 ~ /(^|,)[^,]*:(80|443)->/ { print $2 " (project " ($3 == "" ? "none" : $3) ")" }
+      '
+  )"
+  [ -n "$conflicts" ] || return 0
+  note "another deployment already publishes the public ports:"
+  printf '%s\n' "$conflicts" >&2
+  die "release 80/tcp, 443/tcp and 443/udp from the container(s) above before starting this edge; this command will not stop another project's containers"
+}
+
+# The cutover boundary. Deliberately separate from up-core so that binding the
+# public ports is an act, not a side effect.
+start_edge() {
+  require_tools
+  load_environment
+  validate_environment
+  require_status api healthy
+  require_status frontend healthy
+  assert_edge_ports_available
+  compose up --detach --no-deps edge
   wait_for_status edge running
-  note "Hostinger staging processes are running"
+  note "public edge is running and now owns 80/tcp, 443/tcp and 443/udp"
+}
+
+start_environment() {
+  start_core
+  start_edge
+}
+
+# Everything provable before the hostname resolves and before a certificate
+# exists. It reaches the API over the private Compose network by executing the
+# container's own health probe, so it never depends on PUBLIC_ORIGIN, public
+# DNS, or TLS. verify_environment remains the public, post-edge check and is not
+# replaced by this.
+verify_core() {
+  require_tools
+  load_environment
+  validate_environment
+  local service postgres_id redis_id api_id schema_state expected_schema
+  local unauthenticated authenticated readiness
+
+  for service in postgres redis api worker frontend; do
+    [ -n "$(service_id "$service")" ] || die "$service is absent from project $S12_PROJECT"
+  done
+  require_status postgres healthy
+  require_status redis healthy
+  require_status api healthy
+  require_status frontend healthy
+  require_status worker running
+
+  postgres_id="$(service_id postgres)"
+  schema_state="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")"
+  expected_schema="$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")"
+  [ "$schema_state" = "$expected_schema|false" ] ||
+    die "schema is $schema_state, expected clean version $expected_schema for the selected backend image"
+
+  redis_id="$(service_id redis)"
+  if timeout 5 docker exec "$redis_id" redis-cli -h redis -p 6379 ping >/dev/null 2>&1; then
+    die "Redis accepted plaintext"
+  fi
+  unauthenticated="$(docker exec --env REDISCLI_AUTH= "$redis_id" redis-cli --tls \
+    --cacert /run/gradex/redis/ca.crt -h redis -p 6379 ping 2>&1 || true)"
+  case "$unauthenticated" in *NOAUTH*) ;; *) die "Redis did not reject unauthenticated TLS" ;; esac
+  authenticated="$(docker exec "$redis_id" redis-cli --tls --cacert /run/gradex/redis/ca.crt \
+    -h redis -p 6379 ping 2>&1)"
+  [ "$authenticated" = PONG ] || die "authenticated Redis TLS failed"
+
+  # Readiness over the private loopback inside the API container. No public
+  # origin, no DNS, no certificate.
+  api_id="$(service_id api)"
+  readiness="$(docker exec "$api_id" wget -qO- http://127.0.0.1:8080/readyz)" ||
+    die "the API did not answer its own readiness probe"
+  printf '%s' "$readiness" |
+    jq --exit-status '.status == "ok" and .checks.postgres == "ok" and .checks.redis == "ok" and .checks.schema == "ok"' >/dev/null ||
+    die "API readiness did not report every dependency ok"
+
+  note "private verification passed: clean schema $expected_schema, application services healthy, authenticated verified-TLS Redis, and API readiness over the private network"
+  note "public DNS, certificate, and edge behaviour are NOT covered here; run verify and verify-public.sh after the edge is started"
 }
 
 verify_environment() {
@@ -1114,14 +1248,17 @@ apply_release() {
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|verify|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
 case "${1:-}" in
   prepare) [ "$#" = 1 ] || usage; prepare ;;
   up) [ "$#" = 1 ] || usage; start_environment ;;
+  up-core) [ "$#" = 1 ] || usage; start_core ;;
+  up-edge) [ "$#" = 1 ] || usage; start_edge ;;
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
+  verify-core) [ "$#" = 1 ] || usage; verify_core ;;
   seed-smoke) [ "$#" = 1 ] || usage; seed_smoke ;;
   monitor) [ "$#" = 1 ] || usage; run_monitor ;;
   monitor-alert-test) [ "$#" = 1 ] || usage; run_monitor_alert_test ;;

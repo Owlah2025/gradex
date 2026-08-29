@@ -159,6 +159,26 @@ production email, a missing production email key, fake authentication, or public
 ./deploy/hostinger/verify-public.sh --mode direct "https://staging.example.com"
 ```
 
+`up` is the ordinary command for a deployment that already owns the public ports: it brings up the
+application tier and then the edge. On a host where another deployment still holds 80/443, use the
+two halves separately — see the first-launch runbook below.
+
+| command | what it does |
+|---|---|
+| `up-core` | preflight, PostgreSQL, Redis, migrations, API, worker, frontend. **Never the edge, never a host port.** |
+| `verify-core` | private verification: services healthy, clean schema against the image's max version, Redis TLS posture, API readiness over the container's own loopback. **No DNS, no certificate, no `PUBLIC_ORIGIN`.** |
+| `up-edge` | validates, requires a healthy API and frontend, refuses if another project still publishes 80/443, then starts only the edge. |
+| `up` | `up-core` followed by `up-edge`. |
+| `verify` | the public check. Still probes `PUBLIC_ORIGIN`; run it after the edge is up. |
+
+A production deployment must declare `GRADEX_HOST_PROJECT` and `GRADEX_HOST_STATE_DIR`. Both fall
+back to the staging values, so preflight refuses `APP_ENV=production` that inherits either by
+omission, and refuses the staging project by name. On a shared VPS that guard is what keeps a
+mistyped production command from driving staging.
+
+`up-edge` never stops another project's containers. If the staging edge still holds the ports it
+names the conflicting container and stops, and the operator releases the ports deliberately.
+
 Replace the example hostname. `verify` reads the selected backend image's maximum supported schema
 with `gradex-migrate max-version`, requires the live database to be clean at exactly that version, and
 checks worker lifecycle, plaintext Redis refusal, unauthenticated TLS refusal, authenticated
@@ -209,6 +229,94 @@ About the Stage-A acknowledgement:
 - The value is matched exactly. `1`, `true`, a truncation, a different case, or stray whitespace are
   all refusals.
 - After Stage A succeeds, production verification moves to `--mode cloudflare` permanently.
+
+## 5b. First production launch on a shared VPS
+
+The staging edge owns 80/tcp, 443/tcp and 443/udp on this host, and only one process can hold them.
+That single fact orders everything below: production is built and proven privately first, the ports
+change hands once, and DNS follows immediately.
+
+**A — readiness.** Reviewed release merged; images built and recorded at the released SHA with
+matching revision labels; DR tooling advanced; production runtime populated, mode 0600.
+
+**B — preflight.**
+
+```bash
+export GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production
+export GRADEX_HOST_ENV_FILE=$GRADEX_HOST_STATE_DIR/runtime.env
+export GRADEX_HOST_PROJECT=gradex-production
+./deploy/hostinger/host.sh prepare
+```
+
+Staging keeps serving throughout. `prepare` starts nothing.
+
+**C — private application bring-up.**
+
+```bash
+./deploy/hostinger/host.sh up-core
+```
+
+**D — private verification.**
+
+```bash
+./deploy/hostinger/host.sh verify-core
+```
+
+**E — first Admin.** Safe here, before any DNS change. `gradex-bootstrap-admin` needs PostgreSQL,
+the protected configuration, and outbound access for the HIBP screening lookup. It reads no public
+origin, sends no email, and does not touch the edge. See the note below on how it is invoked.
+
+**F/G/H — the port handover.** These three are not independent and must be treated as one window.
+Caddy cannot obtain a certificate until the hostname resolves publicly to this host, and the
+production edge cannot bind until staging releases the ports. Order:
+
+1. Lower the DNS TTLs to 60s beforehand, so a reversal is fast.
+2. **F — release the ports.** Stop only the staging edge container, deliberately, by hand. Nothing in
+   this repository does it for you. Staging is briefly unavailable from here; its data and its other
+   containers are untouched.
+3. **G — start the production edge.**
+   ```bash
+   ./deploy/hostinger/host.sh up-edge
+   ```
+   It refuses if the ports are still held, and names what holds them.
+4. **H — delegate.** Move the registrar nameservers to Cloudflare with apex and `www` already
+   present as **DNS-only, grey cloud** A records pointing at this host.
+
+Caddy will retry ACME until the delegation propagates, so a slow step 4 costs time, not
+correctness. Doing 4 before 3 would leave the hostname resolving to a host with nothing listening.
+
+**I — wait for a valid public certificate.** Watch `host.sh logs edge` until issuance succeeds.
+
+**J — Stage-A verification**, inside the DNS-only window with the proxy still off:
+
+```bash
+GRADEX_PUBLIC_VERIFY_ALLOW_PRODUCTION_DIRECT=i-have-authorized-production-direct-verification \
+  ./deploy/hostinger/verify-public.sh --mode direct "https://gradexcourses.com"
+./deploy/hostinger/host.sh verify
+```
+
+**K — Cloudflare proxy on**, SSL/TLS Full (strict), Always Use HTTPS.
+
+**L — Stage-B verification.**
+
+```bash
+./deploy/hostinger/verify-public.sh --mode cloudflare "https://gradexcourses.com"
+```
+
+**M — remaining policy.** `www` → apex 301 redirect rule, then raise the DNS TTLs.
+
+If anything fails between F and L, the reversal is DNS plus the edges: restore the parked records or
+the registrar nameservers, stop the production edge, and start the staging edge again. The
+production database is never rolled back for an edge or DNS problem.
+
+### Bootstrapping the first production Admin
+
+`bootstrap-admin` is not a service in this Compose file — it exists only in the disposable
+production-like topology. On a managed host the first Admin is created by running the released
+backend image against the deployment's own networks, which needs both the internal `app` network for
+PostgreSQL and the egress-capable `edge` network for the HIBP screening lookup. Because there is no
+guarded `host.sh` command for it yet, treat the exact invocation as an open operator decision rather
+than improvising it at cutover time.
 
 ## 5a. Live release-acceptance smoke
 
