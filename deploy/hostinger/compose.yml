@@ -42,7 +42,7 @@ x-backend-environment: &backend-environment
   EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-Gradex}
   EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
   EMAIL_PROVIDER_TIMEOUT: ${EMAIL_PROVIDER_TIMEOUT:-10s}
-  MEDIA_OPERATING_MODE: ADMIN_CATALOGUE
+  MEDIA_OPERATING_MODE: ${MEDIA_OPERATING_MODE:-ADMIN_CATALOGUE}
   STUDENT_REGISTRATION_ENABLED: "false"
   # Screening is not staging-only. Staff invitation and onboarding set
   # passwords, so the API's staff composition requires the adapter even
