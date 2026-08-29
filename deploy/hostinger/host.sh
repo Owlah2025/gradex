@@ -14,7 +14,17 @@ S12_DB_TUNNEL_NAME="${S12_PROJECT}-proof-db-tunnel"
 S12_BACKUP_STAGING_DIR=""
 S12_RESTORED_SOURCE_FILE="$S12_BACKUP_DIR/restored-source"
 S12_RESTORED_SCHEMA_STATE_FILE="$S12_BACKUP_DIR/restored-schema-state"
+S12_RESTORED_RECORD_COUNTS_FILE="$S12_BACKUP_DIR/restored-record-counts"
 S12_RESTORE_STAGING_DIR=""
+# The restore verification database is deliberately not a Compose service. A
+# deployment whose live topology is driven by its own Compose file (Founder Beta
+# is) has no `restore-postgres` service to bring up, and reconciling this
+# repository's model against that project would inject verification services into
+# the running application. The restore target is therefore a standalone container
+# with its own identity and volume, owned by nothing but this verification.
+S12_RESTORE_VERIFY_CONTAINER="gradex-restore-verify"
+S12_RESTORE_VERIFY_VOLUME="gradex-restore-verify-data"
+S12_RESTORE_POSTGRES_IMAGE="${GRADEX_RESTORE_POSTGRES_IMAGE:-postgres:16.14-alpine}"
 
 cleanup_backup_staging_notice() {
   local exit_status=$?
@@ -631,6 +641,23 @@ source_schema_state() {
     --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;"
 }
 
+# The record counts the source held at capture time, in the same order
+# `restored_database_state` reports them. Recording them turns the restore check
+# into an exact comparison against the source instead of a guess about which
+# record classes a live deployment happens to be populating: a legitimately empty
+# class stays legitimate, while a truncated or partial restore still fails.
+source_record_counts() {
+  local postgres_id="$1"
+  docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "
+      SELECT
+        (SELECT count(*) FROM accounts) || '|' ||
+        (SELECT count(*) FROM courses) || '|' ||
+        (SELECT count(*) FROM course_access_invitations) || '|' ||
+        (SELECT count(*) FROM entitlements WHERE state = 'ACTIVE' AND source_invitation_id IS NOT NULL) || '|' ||
+        (SELECT count(*) FROM enrollments);"
+}
+
 write_backup_metadata() {
   local staging_dir="$1" dump_file="$2" schema_file="$3"
   (cd "$staging_dir" && sha256sum "$(basename "$dump_file")" >"$(basename "$dump_file").sha256")
@@ -640,7 +667,7 @@ write_backup_metadata() {
 
 capture_backup_dump() {
   local postgres_id="$1" staging_dir="$2" stamp="$3"
-  local dump_file partial_file schema_file schema_before schema_after
+  local dump_file partial_file schema_file schema_before schema_after record_counts
   dump_file="$staging_dir/gradex-$stamp.dump"
   partial_file="$dump_file.partial"
   schema_file="$dump_file.schema-state"
@@ -653,8 +680,14 @@ capture_backup_dump() {
   schema_after="$(source_schema_state "$postgres_id")"
   [ "$schema_after" = "$schema_before" ] ||
     die "schema changed while backup was being created: $schema_before -> $schema_after"
+  record_counts="$(source_record_counts "$postgres_id")"
+  [[ "$record_counts" =~ ^[0-9]+(\|[0-9]+){4}$ ]] ||
+    die "refusing backup with unreadable source record counts: $record_counts"
   mv -- "$partial_file" "$dump_file"
-  printf '%s\n' "$schema_before" >"$schema_file"
+  # Line 1 stays exactly the schema state older snapshots carry, so a snapshot
+  # written before record counts existed still restores and still validates its
+  # schema. Line 2 is additive.
+  printf '%s\ncounts=%s\n' "$schema_before" "$record_counts" >"$schema_file"
   write_backup_metadata "$staging_dir" "$dump_file" "$schema_file"
 }
 
@@ -724,21 +757,58 @@ create_backup() {
   rm -f -- "$snapshot_log" "$snapshot_check_log"
   finalize_backup_success "$staging_dir" "$snapshot_id" "$retention_status"
 }
+restore_target_id() {
+  docker inspect --type container --format '{{.Id}}' "$S12_RESTORE_VERIFY_CONTAINER" 2>/dev/null || true
+}
+
+wait_for_restore_target() {
+  local attempts=0
+  while [ "$attempts" -lt 90 ]; do
+    if docker exec "$S12_RESTORE_VERIFY_CONTAINER" \
+      pg_isready --username gradex_restore --dbname gradex_restore >/dev/null 2>&1; then
+      return
+    fi
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  docker logs --tail 50 "$S12_RESTORE_VERIFY_CONTAINER" >&2 || true
+  die "restore target PostgreSQL did not become ready"
+}
+
 prepare_restore_database() {
-  local source_id target_volume target_id
-  source_id="$(service_id postgres)"
+  local source_id target_id
+  # The restore source is the same PostgreSQL the backup was captured from, so it
+  # resolves through the explicit container identity rather than a Compose service
+  # lookup. `service_id postgres` only ever answered for deployments whose live
+  # topology is this repository's Compose project, which is exactly the case the
+  # backup path already stopped assuming.
+  source_id="$(backup_postgres_id)"
   [ -n "$source_id" ] || die "source PostgreSQL is absent"
-  target_volume="${S12_PROJECT}_restore-data"
-  compose --profile restore rm --stop --force api-restore restore-postgres >/dev/null 2>&1 || true
-  if docker volume inspect "$target_volume" >/dev/null 2>&1; then
-    docker volume rm "$target_volume" >/dev/null
+  [ -n "${RESTORE_POSTGRES_PASSWORD:-}" ] ||
+    die "RESTORE_POSTGRES_PASSWORD is required to create the restore verification database"
+  docker rm --force "$S12_RESTORE_VERIFY_CONTAINER" >/dev/null 2>&1 || true
+  if docker volume inspect "$S12_RESTORE_VERIFY_VOLUME" >/dev/null 2>&1; then
+    docker volume rm "$S12_RESTORE_VERIFY_VOLUME" >/dev/null
   fi
-  compose --profile restore up --detach restore-postgres >/dev/null
-  wait_for_status restore-postgres healthy
-  target_id="$(service_id restore-postgres)"
+  docker volume create "$S12_RESTORE_VERIFY_VOLUME" >/dev/null
+  # No published port and no application network: the restored copy is reachable
+  # only through `docker exec` for the duration of the verification.
+  docker run --detach --name "$S12_RESTORE_VERIFY_CONTAINER" \
+    --env POSTGRES_USER=gradex_restore \
+    --env POSTGRES_PASSWORD="$RESTORE_POSTGRES_PASSWORD" \
+    --env POSTGRES_DB=gradex_restore \
+    --volume "$S12_RESTORE_VERIFY_VOLUME":/var/lib/postgresql/data \
+    "$S12_RESTORE_POSTGRES_IMAGE" >/dev/null
+  wait_for_restore_target
+  target_id="$(restore_target_id)"
   [ -n "$target_id" ] && [ "$source_id" != "$target_id" ] ||
     die "restore target is not isolated from source"
   printf '%s\n' "$target_id"
+}
+
+discard_restore_database() {
+  docker rm --force "$S12_RESTORE_VERIFY_CONTAINER" >/dev/null 2>&1 || true
+  docker volume rm "$S12_RESTORE_VERIFY_VOLUME" >/dev/null 2>&1 || true
 }
 
 restore_dump_into_database() {
@@ -754,7 +824,7 @@ restore_backup() {
   backup_validate_configuration || die "encrypted offsite backup configuration is invalid"
   backup_require_repository || die "encrypted offsite backup repository is unavailable"
   local snapshot_id="${1:-}" snapshot_log="$S12_BACKUP_DIR/.restore-snapshots.json"
-  local staging_dir dump_name schema_name expected_schema_state target_id
+  local staging_dir dump_name schema_name expected_schema_state expected_record_counts target_id
   mkdir -p "$S12_BACKUP_DIR"
   chmod 700 "$S12_BACKUP_DIR"
   acquire_backup_lock
@@ -764,7 +834,8 @@ restore_backup() {
   validate_snapshot_id "$snapshot_id"
   backup_snapshot_exists "$snapshot_id" "$snapshot_log" ||
     die "requested encrypted offsite snapshot is absent"
-  rm -f -- "$S12_RESTORED_SOURCE_FILE" "$S12_RESTORED_SCHEMA_STATE_FILE"
+  rm -f -- "$S12_RESTORED_SOURCE_FILE" "$S12_RESTORED_SCHEMA_STATE_FILE" \
+    "$S12_RESTORED_RECORD_COUNTS_FILE"
   staging_dir="$(mktemp -d "$S12_BACKUP_DIR/.restore-staging.XXXXXX")"
   chmod 700 "$staging_dir"
   S12_RESTORE_STAGING_DIR="$staging_dir"
@@ -776,14 +847,22 @@ restore_backup() {
 
   [[ "$schema_name" =~ ^gradex-[0-9]{8}T[0-9]{6}Z\.dump\.schema-state$ ]] ||
     die "restored remote schema identity is invalid"
-  expected_schema_state="$(cat "$staging_dir/$schema_name")"
+  expected_schema_state="$(sed -n '1p' "$staging_dir/$schema_name")"
   [[ "$expected_schema_state" =~ ^[0-9]+\|false$ ]] ||
     die "restored remote schema metadata is invalid"
+  # Absent for snapshots captured before record counts were recorded; those still
+  # restore, and still prove their schema, but cannot be compared count for count.
+  expected_record_counts="$(sed -n '2s/^counts=//p' "$staging_dir/$schema_name")"
+  if [ -n "$expected_record_counts" ]; then
+    [[ "$expected_record_counts" =~ ^[0-9]+(\|[0-9]+){4}$ ]] ||
+      die "restored remote record-count metadata is invalid"
+  fi
 
   target_id="$(prepare_restore_database)"
   restore_dump_into_database "$target_id" "$staging_dir" "$dump_name"
   backup_write_state_file "$S12_RESTORED_SOURCE_FILE" "$snapshot_id"
   backup_write_state_file "$S12_RESTORED_SCHEMA_STATE_FILE" "$expected_schema_state"
+  backup_write_state_file "$S12_RESTORED_RECORD_COUNTS_FILE" "$expected_record_counts"
   rm -rf -- "$staging_dir"
   S12_RESTORE_STAGING_DIR=""
   cleanup_stale_restore_staging
@@ -804,15 +883,31 @@ restored_database_state() {
 }
 
 assert_restored_database_invariants() {
-  local target_id="$1" expected_schema_state="$2" restored_state
-  local version dirty account_count course_count invitation_count entitlement_count enrollment_count
+  local target_id="$1" expected_schema_state="$2" expected_record_counts="${3:-}" restored_state
+  local version dirty restored_counts missing_table
   restored_state="$(restored_database_state "$target_id")"
-  IFS='|' read -r version dirty account_count course_count invitation_count entitlement_count enrollment_count <<<"$restored_state"
+  # A restore that lost a critical table fails here rather than reporting a count,
+  # because the query that produces the counts cannot run without those tables.
+  [ -n "$restored_state" ] || die "restored database did not answer the invariant query"
+  version="${restored_state%%|*}"
+  dirty="$(printf '%s' "$restored_state" | cut -d'|' -f2)"
+  restored_counts="$(printf '%s' "$restored_state" | cut -d'|' -f3-)"
   [ "$version|$dirty" = "$expected_schema_state" ] ||
     die "restored schema $version|$dirty does not match remote schema $expected_schema_state"
-  for record_count in "$account_count" "$course_count" "$invitation_count" "$entitlement_count" "$enrollment_count"; do
-    [ "$record_count" -gt 0 ] || die "restore is missing an identity/access-critical record class"
+  for missing_table in accounts courses course_access_invitations entitlements enrollments; do
+    docker exec "$target_id" psql --no-psqlrc --username gradex_restore --dbname gradex_restore \
+      --tuples-only --no-align --command "SELECT to_regclass('public.$missing_table');" |
+      grep --quiet --line-regexp "$missing_table" ||
+      die "restored database is missing the $missing_table table"
   done
+  if [ -z "$expected_record_counts" ]; then
+    note "snapshot predates recorded source counts; restored counts $restored_counts were not compared"
+    return
+  fi
+  # Exact equality with what the source held at capture time. Zero is a legitimate
+  # source value and passes; a truncated, partial, or substituted restore does not.
+  [ "$restored_counts" = "$expected_record_counts" ] ||
+    die "restored record counts $restored_counts do not match source counts $expected_record_counts"
 }
 
 verify_restore() {
@@ -820,7 +915,7 @@ verify_restore() {
   load_environment
   backup_validate_configuration || die "encrypted offsite backup configuration is invalid"
   backup_require_repository || die "encrypted offsite backup repository is unavailable"
-  local snapshot_id expected_schema_state snapshot_log target_id
+  local snapshot_id expected_schema_state expected_record_counts snapshot_log target_id
   mkdir -p "$S12_BACKUP_DIR"
   chmod 700 "$S12_BACKUP_DIR"
   acquire_backup_lock
@@ -835,13 +930,17 @@ verify_restore() {
   expected_schema_state="$(cat "$S12_RESTORED_SCHEMA_STATE_FILE")"
   [[ "$expected_schema_state" =~ ^[0-9]+\|false$ ]] ||
     die "restored schema provenance is invalid"
-  target_id="$(service_id restore-postgres)"
+  expected_record_counts=""
+  if [ -s "$S12_RESTORED_RECORD_COUNTS_FILE" ]; then
+    expected_record_counts="$(cat "$S12_RESTORED_RECORD_COUNTS_FILE")"
+    [[ "$expected_record_counts" =~ ^[0-9]+(\|[0-9]+){4}$ ]] ||
+      die "restored record-count provenance is invalid"
+  fi
+  target_id="$(restore_target_id)"
   [ -n "$target_id" ] || die "restore target is absent"
-  assert_restored_database_invariants "$target_id" "$expected_schema_state"
-  compose --profile restore up --detach api-restore
-  wait_for_status api-restore healthy
+  assert_restored_database_invariants "$target_id" "$expected_schema_state" "$expected_record_counts"
   rm -f -- "$snapshot_log"
-  note "restored encrypted snapshot $snapshot_id, schema $expected_schema_state, identity, Course, invitation provenance, Entitlement, Enrollment, and API readiness passed"
+  note "restored encrypted snapshot $snapshot_id, schema $expected_schema_state, identity, Course, invitation provenance, Entitlement, and Enrollment passed"
 }
 initialize_backup_repository() {
   require_tools
