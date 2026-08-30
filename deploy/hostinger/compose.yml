@@ -44,6 +44,7 @@ x-backend-environment: &backend-environment
   EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
   EMAIL_PROVIDER_TIMEOUT: ${EMAIL_PROVIDER_TIMEOUT:-10s}
   MEDIA_OPERATING_MODE: ${MEDIA_OPERATING_MODE:-ADMIN_CATALOGUE}
+  MEDIA_PROCESSING_TIMEOUT: ${MEDIA_PROCESSING_TIMEOUT:-15m}
   STUDENT_REGISTRATION_ENABLED: "false"
   # Screening is not staging-only. Staff invitation and onboarding set
   # passwords, so the API's staff composition requires the adapter even
