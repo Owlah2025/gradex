@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -81,6 +82,76 @@ func TestPresigningDefaultsToTheInternalEndpoint(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	assertPresignedOrigin(t, client, http.MethodPut, "http", "minio.internal:9000")
+}
+
+func TestPresignGetURLUntilKeepsGeneratedSigV4ExpiryWithinAbsoluteBound(t *testing.T) {
+	client := newAbsoluteExpiryTestClient(t)
+	requestedExpiry := time.Now().UTC().Add(3500 * time.Millisecond)
+	rawURL, err := client.PresignGetURLUntil(context.Background(), "media/segment.ts", requestedExpiry)
+	if err != nil {
+		t.Fatalf("PresignGetURLUntil: %v", err)
+	}
+	effectiveExpiry, err := presignedAbsoluteExpiry(rawURL)
+	if err != nil {
+		t.Fatalf("presignedAbsoluteExpiry: %v", err)
+	}
+	if effectiveExpiry.After(requestedExpiry) {
+		t.Fatalf("effective expiry=%s exceeds requested expiry=%s", effectiveExpiry, requestedExpiry)
+	}
+}
+
+func TestAbsolutePresignUsesLaterSigningBoundaryClockAndRoundsFractionalExpiryDown(t *testing.T) {
+	deliveryNow := time.Date(2026, 8, 30, 12, 0, 0, 100_000_000, time.UTC)
+	requestedExpiry := deliveryNow.Add(2500 * time.Millisecond)
+	signingNow := deliveryNow.Add(1100 * time.Millisecond)
+	duration, err := presignDurationUntil(signingNow, requestedExpiry)
+	if err != nil {
+		t.Fatalf("presignDurationUntil: %v", err)
+	}
+	if duration != time.Second {
+		t.Fatalf("signing-boundary duration=%s, want 1s", duration)
+	}
+	rawURL := testSigV4URL(signingNow.Truncate(time.Second), duration)
+	if err := validatePresignedExpiry(rawURL, requestedExpiry); err != nil {
+		t.Fatalf("later signing clock produced an invalid absolute expiry: %v", err)
+	}
+}
+
+func TestPresignGetURLUntilFailsWithoutOneSigningSecond(t *testing.T) {
+	client := newAbsoluteExpiryTestClient(t)
+	rawURL, err := client.PresignGetURLUntil(
+		context.Background(), "media/segment.ts", time.Now().UTC().Add(999*time.Millisecond),
+	)
+	if err == nil || rawURL != "" {
+		t.Fatalf("sub-second absolute expiry URL=%q err=%v, want fail-closed", rawURL, err)
+	}
+}
+
+func TestAbsolutePresignValidationRejectsEffectiveExpiryAfterRequestedBound(t *testing.T) {
+	signedAt := time.Date(2026, 8, 30, 12, 0, 2, 0, time.UTC)
+	requestedExpiry := signedAt.Add(500 * time.Millisecond)
+	if err := validatePresignedExpiry(testSigV4URL(signedAt, time.Second), requestedExpiry); err == nil {
+		t.Fatal("effective SigV4 expiry after the requested bound was accepted")
+	}
+}
+
+func newAbsoluteExpiryTestClient(t *testing.T) *Client {
+	t.Helper()
+	client, err := New(context.Background(), Options{
+		Endpoint: "https://storage.gradex.example", AccessKey: "access", SecretKey: "secret",
+		Bucket: "private-media", Region: "us-east-1", UsePathStyle: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return client
+}
+
+func testSigV4URL(signedAt time.Time, expiry time.Duration) string {
+	query := url.Values{}
+	query.Set("X-Amz-Date", signedAt.UTC().Format("20060102T150405Z"))
+	query.Set("X-Amz-Expires", strconv.FormatInt(int64(expiry/time.Second), 10))
+	return "https://storage.test/private/segment.ts?" + query.Encode()
 }
 
 func TestDownloadPresigningUsesASafeAttachmentFilename(t *testing.T) {

@@ -180,9 +180,20 @@ func (h *reviewHandlers) playbackManifest(c *gin.Context) {
 		writeProtectedUnavailable(c)
 		return
 	}
-	c.Header("Cache-Control", "no-store")
-	c.Header("Content-Type", "application/vnd.apple.mpegurl")
-	c.Header("Referrer-Policy", "no-referrer")
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Data(http.StatusOK, "application/vnd.apple.mpegurl", manifest.Contents)
+	writePlaybackManifest(c, manifest)
+}
+
+func (h *reviewHandlers) playbackRenditionManifest(c *gin.Context) {
+	if h.playback == nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	manifest, err := h.playback.IssueAdminReviewPlaybackRenditionManifest(
+		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("playbackSession"), c.Param("rendition"),
+	)
+	if err != nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	writePlaybackManifest(c, manifest)
 }

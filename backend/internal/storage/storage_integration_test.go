@@ -65,9 +65,9 @@ func TestPresignPutAndGet_RealMinIO(t *testing.T) {
 		t.Fatalf("expected size %d, got %d", len(body), size)
 	}
 
-	getURL, err := c.PresignGetURL(ctx, key, 5*time.Minute)
+	getURL, err := c.PresignGetURLUntil(ctx, key, time.Now().UTC().Add(5*time.Minute))
 	if err != nil {
-		t.Fatalf("PresignGetURL: %v", err)
+		t.Fatalf("PresignGetURLUntil: %v", err)
 	}
 	getReq, err := http.NewRequest(http.MethodGet, getURL, nil)
 	if err != nil {

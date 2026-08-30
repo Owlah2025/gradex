@@ -245,9 +245,9 @@ function runPlaybackFlow(session = entitledSession(exec.scenario.iterationInTest
   counters.playback_authorization_successes.add(1);
   const manifest = recordText("playback_manifest", http.get(`${TARGET}${authorization.body.manifest_url}`, requestParams("playback_manifest", session, {
     Accept: "application/vnd.apple.mpegurl",
-  })), 200, (body) => body.startsWith("#EXTM3U") && body.includes("#EXTINF"));
+  })), 200, (body) => body.startsWith("#EXTM3U") && body.includes("#EXT-X-STREAM-INF") && body.includes("/renditions/"));
   if (manifest.ok) counters.playback_manifest_successes.add(1);
-  // The API returns rewritten direct-storage segment capabilities; this control-plane scenario never follows them.
+  // This control-plane scenario validates the protected master and never follows variants or signed segments.
 }
 
 function runOperator() {

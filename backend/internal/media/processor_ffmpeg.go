@@ -242,9 +242,25 @@ func writeMediaMaster(path string, rungs []hlsRung) error {
 	var builder strings.Builder
 	builder.WriteString("#EXTM3U\n#EXT-X-VERSION:3\n")
 	for _, rung := range sorted {
-		fmt.Fprintf(&builder, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/playlist.m3u8\n", (rung.VideoKbps+rung.AudioKbps)*1000, rung.Width, rung.Height, rung.Name)
+		fmt.Fprintf(&builder, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d\n%s/playlist.m3u8\n", hlsBandwidth(rung), rung.Width, rung.Height, rung.Name)
 	}
 	return os.WriteFile(path, []byte(builder.String()), 0o644)
+}
+
+func hlsRungByName(name string) (hlsRung, bool) {
+	for _, rung := range hlsLadder {
+		if rung.Name == name {
+			return rung, true
+		}
+	}
+	return hlsRung{}, false
+}
+
+// hlsBandwidth is the aggregate video-plus-audio rate already used by the
+// FFmpeg master. Persisted Rendition.BitrateKbps is video-only, so protected
+// master generation must add the matching ladder's audio rate as well.
+func hlsBandwidth(rung hlsRung) int {
+	return (rung.VideoKbps + rung.AudioKbps) * 1000
 }
 
 func walkMediaFiles(root string) ([]string, error) {

@@ -8,9 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -223,6 +220,11 @@ type deliveryTarget struct {
 	downloadName   string
 	durationMS     int64
 	retiredAt      *time.Time
+	hasRenditions  bool
+}
+
+func (target deliveryTarget) readyVideo() bool {
+	return target.kind == KindVideo && target.state == StateReady && target.hasRenditions
 }
 
 // TrustedVideoDuration returns S4-owned READY exact-version metadata for an
@@ -244,7 +246,7 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	target, err := s.loadApprovedTarget(ctx, request.LessonID, request.AssetVersionID, KindVideo)
-	if err != nil || target.state != StateReady || target.storageKey == "" {
+	if err != nil || !target.readyVideo() {
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	decision := s.evaluator.EvaluateTarget(ctx, request.StudentID, request.LessonID, target.retiredAt, s.now().UTC())
@@ -271,34 +273,25 @@ type playbackSessionClaims struct {
 	ExpiresAt      int64  `json:"expires_at"`
 }
 
-// IssuePlaybackManifest revalidates the authenticated Student and exact
-// approved Asset Version before reading one small rendition playlist. Every
-// media URI is replaced with an exact-object private-storage capability whose
-// expiry cannot exceed the playback session. Segment bytes remain direct S3
-// responses.
+// IssuePlaybackManifest returns a protected adaptive master generated only
+// from persisted renditions belonging to the revalidated exact Asset Version.
 func (s *DeliveryService) IssuePlaybackManifest(ctx context.Context, studentID, token string) (PlaybackManifest, error) {
-	now := s.now().UTC()
-	claims, err := s.verifyPlaybackSession(token, studentID, now)
+	claims, err := s.authorizeStudentPlaybackSession(ctx, studentID, token)
 	if err != nil {
-		return PlaybackManifest{}, ErrProtectedUnavailable
+		return PlaybackManifest{}, err
 	}
-	target, err := s.loadApprovedTarget(ctx, claims.LessonID, claims.AssetVersionID, KindVideo)
-	if err != nil || target.state != StateReady || target.storageKey == "" {
-		return PlaybackManifest{}, ErrProtectedUnavailable
-	}
-	decision := s.evaluator.EvaluateTarget(ctx, studentID, claims.LessonID, target.retiredAt, now)
-	if !decision.Allowed {
-		return PlaybackManifest{}, denyProtected(decision.Reason)
-	}
-	contents, err := s.store.DownloadObject(ctx, target.storageKey)
-	if err != nil || len(contents) == 0 || len(contents) > maxPlaybackManifestBytes {
-		return PlaybackManifest{}, ErrProtectedUnavailable
-	}
-	rewritten, err := s.rewritePlaybackManifest(ctx, target.storageKey, contents, time.Unix(claims.ExpiresAt, 0).Sub(now))
+	root := "/api/v1/media/playback-manifests/" + token
+	return s.issueMasterManifest(ctx, claims.AssetVersionID, root)
+}
+
+// IssuePlaybackRenditionManifest resolves the selector only inside the
+// authoritative rendition set loaded for the revalidated exact Asset Version.
+func (s *DeliveryService) IssuePlaybackRenditionManifest(ctx context.Context, studentID, token, selector string) (PlaybackManifest, error) {
+	claims, err := s.authorizeStudentPlaybackSession(ctx, studentID, token)
 	if err != nil {
-		return PlaybackManifest{}, ErrProtectedUnavailable
+		return PlaybackManifest{}, err
 	}
-	return PlaybackManifest{Contents: rewritten}, nil
+	return s.issueRenditionManifest(ctx, claims.AssetVersionID, selector, time.Unix(claims.ExpiresAt, 0))
 }
 
 // IssueAdminReviewPlayback creates a short-lived manifest session for the
@@ -308,7 +301,7 @@ func (s *DeliveryService) IssueAdminReviewPlayback(ctx context.Context, request 
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	target, err := s.loadAdminReviewTarget(ctx, request)
-	if err != nil || target.state != StateReady || target.storageKey == "" {
+	if err != nil || !target.readyVideo() {
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	now := s.now().UTC()
@@ -322,80 +315,57 @@ func (s *DeliveryService) IssueAdminReviewPlayback(ctx context.Context, request 
 	}, nil
 }
 
-// IssueAdminReviewPlaybackManifest revalidates the Admin-bound submitted
-// revision target before signing the manifest's private storage references.
+// IssueAdminReviewPlaybackManifest preserves the separate Admin-bound review
+// session while sharing the safe persisted-rendition master renderer.
 func (s *DeliveryService) IssueAdminReviewPlaybackManifest(ctx context.Context, adminAccountID, token string) (PlaybackManifest, error) {
-	now := s.now().UTC()
-	claims, err := s.verifyAdminReviewPlaybackSession(token, adminAccountID, now)
+	claims, err := s.authorizeAdminReviewPlaybackSession(ctx, adminAccountID, token)
 	if err != nil {
-		return PlaybackManifest{}, ErrProtectedUnavailable
+		return PlaybackManifest{}, err
+	}
+	root := "/api/v1/admin/review/playback-manifests/" + token
+	return s.issueMasterManifest(ctx, claims.AssetVersionID, root)
+}
+
+// IssueAdminReviewPlaybackRenditionManifest keeps Admin review authorization
+// separate from Student entitlement while sharing rendition selection/signing.
+func (s *DeliveryService) IssueAdminReviewPlaybackRenditionManifest(ctx context.Context, adminAccountID, token, selector string) (PlaybackManifest, error) {
+	claims, err := s.authorizeAdminReviewPlaybackSession(ctx, adminAccountID, token)
+	if err != nil {
+		return PlaybackManifest{}, err
+	}
+	return s.issueRenditionManifest(ctx, claims.AssetVersionID, selector, time.Unix(claims.ExpiresAt, 0))
+}
+
+func (s *DeliveryService) authorizeStudentPlaybackSession(ctx context.Context, studentID, token string) (playbackSessionClaims, error) {
+	now := s.now().UTC()
+	claims, err := s.verifyPlaybackSession(token, studentID, now)
+	if err != nil {
+		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	target, err := s.loadApprovedTarget(ctx, claims.LessonID, claims.AssetVersionID, KindVideo)
+	if err != nil || !target.readyVideo() {
+		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	decision := s.evaluator.EvaluateTarget(ctx, studentID, claims.LessonID, target.retiredAt, now)
+	if !decision.Allowed {
+		return playbackSessionClaims{}, denyProtected(decision.Reason)
+	}
+	return claims, nil
+}
+
+func (s *DeliveryService) authorizeAdminReviewPlaybackSession(ctx context.Context, adminAccountID, token string) (adminReviewPlaybackClaims, error) {
+	claims, err := s.verifyAdminReviewPlaybackSession(token, adminAccountID, s.now().UTC())
+	if err != nil {
+		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
 	}
 	target, err := s.loadAdminReviewTarget(ctx, AdminReviewPlaybackRequest{
 		AdminAccountID: adminAccountID, CourseID: claims.CourseID, RevisionID: claims.RevisionID,
 		LessonID: claims.LessonID, AssetVersionID: claims.AssetVersionID,
 	})
-	if err != nil || target.state != StateReady || target.storageKey == "" {
-		return PlaybackManifest{}, ErrProtectedUnavailable
+	if err != nil || !target.readyVideo() {
+		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
 	}
-	contents, err := s.store.DownloadObject(ctx, target.storageKey)
-	if err != nil || len(contents) == 0 || len(contents) > maxPlaybackManifestBytes {
-		return PlaybackManifest{}, ErrProtectedUnavailable
-	}
-	rewritten, err := s.rewritePlaybackManifest(ctx, target.storageKey, contents, time.Unix(claims.ExpiresAt, 0).Sub(now))
-	if err != nil {
-		return PlaybackManifest{}, ErrProtectedUnavailable
-	}
-	return PlaybackManifest{Contents: rewritten}, nil
-}
-
-func (s *DeliveryService) rewritePlaybackManifest(ctx context.Context, storageKey string, contents []byte, expiry time.Duration) ([]byte, error) {
-	if expiry <= 0 {
-		return nil, ErrProtectedUnavailable
-	}
-	directory := path.Dir(storageKey)
-	lines := strings.Split(string(contents), "\n")
-	type mediaReference struct {
-		lineIndex int
-		objectKey string
-	}
-	references := make([]mediaReference, 0)
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "#") {
-			if strings.Contains(strings.ToUpper(trimmed), "URI=") {
-				return nil, errors.New("HLS tag URI requires explicit rewriting support")
-			}
-			continue
-		}
-		parsed, err := url.Parse(trimmed)
-		if err != nil || parsed.IsAbs() || parsed.Host != "" || strings.HasPrefix(parsed.Path, "/") ||
-			parsed.RawQuery != "" || parsed.Fragment != "" {
-			return nil, errors.New("HLS media reference must be a plain relative path")
-		}
-		clean := path.Clean(parsed.Path)
-		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-			return nil, errors.New("HLS media reference escapes its rendition directory")
-		}
-		objectKey := path.Join(directory, clean)
-		if !strings.HasPrefix(objectKey, directory+"/") {
-			return nil, errors.New("HLS media reference escapes its rendition directory")
-		}
-		references = append(references, mediaReference{lineIndex: i, objectKey: objectKey})
-	}
-	if len(references) == 0 {
-		return nil, errors.New("HLS manifest contains no media references")
-	}
-	for _, reference := range references {
-		signed, err := s.store.PresignGetURL(ctx, reference.objectKey, expiry)
-		if err != nil {
-			return nil, err
-		}
-		lines[reference.lineIndex] = signed
-	}
-	return []byte(strings.Join(lines, "\n")), nil
+	return claims, nil
 }
 
 // IssueDownload protects Resource and Lab Material bytes independently on each
@@ -622,8 +592,8 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	var assetRetiredAt *time.Time
 	err := s.db.QueryRow(ctx, `
 		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state,
-		       CASE WHEN mav.kind = 'VIDEO' THEN vr.storage_object_key ELSE mav.storage_object_key END,
-		       COALESCE(mav.trusted_duration_ms, 0), ma.retired_at
+		       mav.storage_object_key, COALESCE(mav.trusted_duration_ms, 0), ma.retired_at,
+		       EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
 		FROM course_lessons cl
 		JOIN course_sections cs ON cs.id = cl.section_id AND cs.course_id = cl.course_id
 		JOIN course_revisions cr ON cr.id = cs.revision_id AND cr.course_id = cl.course_id
@@ -631,16 +601,13 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 		JOIN media_asset_versions mav ON mav.id = $2::uuid
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = cl.course_id
 	`+ExactVersionProvenanceJoin+`
-		LEFT JOIN LATERAL (
-			SELECT storage_object_key FROM video_renditions WHERE asset_version_id = mav.id ORDER BY name LIMIT 1
-		) vr ON mav.kind = 'VIDEO'
 		WHERE cl.lesson_identity_id = $1::uuid
 		  AND mav.kind = $3::media_asset_kind
 		  AND mav.state = 'READY'
 		  AND (mav.kind <> 'VIDEO' OR (
 			mav.successful_processing_attempt_id IS NOT NULL
 			AND mav.trusted_duration_ms IS NOT NULL
-			AND vr.storage_object_key IS NOT NULL
+			AND EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
 		  ))
 		  AND (
 				(cl.video_asset_version_id = mav.id AND c.live_revision_id = cr.id AND cr.state = 'APPROVED')
@@ -650,7 +617,7 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 						OR ($3::media_asset_kind = 'LAB_MATERIAL' AND lf.kind = 'LAB_MATERIAL')))
 					AND (c.live_revision_id = cr.id AND cr.state = 'APPROVED' OR cr.state = 'SUPERSEDED'))
 		  )
-	`, lessonID, assetVersionID, kind).Scan(&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &assetRetiredAt)
+	`, lessonID, assetVersionID, kind).Scan(&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &assetRetiredAt, &target.hasRenditions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return deliveryTarget{}, ErrProtectedUnavailable
 	}
@@ -664,8 +631,9 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request AdminReviewPlaybackRequest) (deliveryTarget, error) {
 	var target deliveryTarget
 	err := s.db.QueryRow(ctx, `
-		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, vr.storage_object_key,
-		       COALESCE(mav.trusted_duration_ms, 0)
+		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, mav.storage_object_key,
+		       COALESCE(mav.trusted_duration_ms, 0),
+		       EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
 		FROM courses c
 		JOIN course_revisions cr ON cr.id = $2::uuid AND cr.course_id = c.id AND cr.state = 'PENDING_REVIEW'
 		JOIN course_sections cs ON cs.revision_id = cr.id AND cs.course_id = c.id
@@ -673,14 +641,11 @@ func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request Adm
 		JOIN media_asset_versions mav ON mav.id = $4::uuid AND mav.id = cl.video_asset_version_id
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = c.id AND ma.retired_at IS NULL
 	`+ExactVersionProvenanceJoin+`
-		JOIN LATERAL (
-			SELECT storage_object_key FROM video_renditions WHERE asset_version_id = mav.id ORDER BY name LIMIT 1
-		) vr ON true
 		WHERE c.id = $1::uuid AND cl.lesson_identity_id = $3::uuid
 		  AND mav.kind = 'VIDEO' AND mav.state = 'READY'
 		  AND mav.successful_processing_attempt_id IS NOT NULL AND mav.trusted_duration_ms IS NOT NULL
 	`, request.CourseID, request.RevisionID, request.LessonID, request.AssetVersionID).Scan(
-		&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS,
+		&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &target.hasRenditions,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return deliveryTarget{}, ErrProtectedUnavailable

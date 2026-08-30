@@ -279,8 +279,8 @@ func insertBetaCourseGraph(ctx context.Context, tx pgx.Tx, seed betaSeedContext,
 		return betaCourseFixture{}, fmt.Errorf("inserting beta processing evidence: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, duration_ms)
-		VALUES ($1, '720p', $2, $3)
+		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		VALUES ($1, '720p', $2, 1280, 720, 2800, $3)
 	`, assetVersionID, storageKey, betaVideoDurationMilliseconds); err != nil {
 		return betaCourseFixture{}, fmt.Errorf("inserting beta rendition: %w", err)
 	}

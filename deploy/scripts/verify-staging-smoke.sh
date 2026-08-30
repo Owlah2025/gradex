@@ -135,7 +135,7 @@ main() {
   (cd "$S12_ROOT/backend" && "$seed_binary" >/dev/null)
 
   local object_url="http://${S3_ACCESS_KEY}:${S3_SECRET_KEY}@minio:9000"
-  printf '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1.0,\nsegment000.ts\n#EXT-X-ENDLIST\n' |
+  printf '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:1.0,\nsegment000.ts\n#EXT-X-ENDLIST\n' |
     put_object "$object_url" test/master.m3u8
   docker run --rm --entrypoint ffmpeg "$GRADEX_BACKEND_IMAGE" \
     -nostdin -v error -f lavfi -i 'testsrc=size=320x240:rate=24' -t 1 \
@@ -223,7 +223,7 @@ main() {
     [ "$policy_assertion" = "2" ] || die "deployed registration policy assertion was $policy_assertion"
   fi
 
-  local session_json cookie_name cookie_value manifest_url segment_url
+  local session_json cookie_name cookie_value manifest_url variant_url segment_url
   export DATABASE_URL="$application_url"
   if [ "$S12_SMOKE_MODE" = "s11" ]; then
     session_json="$("$seed_binary" -issue-session -use-registration-password -email "$journey_student_email")"
@@ -240,8 +240,12 @@ main() {
     die "deployed playback issuance omitted the protected manifest"
   curl --fail --silent --show-error --cacert "$S12_CA_FILE" \
     --header "Cookie: $cookie_name=$cookie_value" "$PUBLIC_ORIGIN$manifest_url" >"$manifest_file"
+  variant_url="$(sed -n '/^[^#][^[:space:]]*\/renditions\/[^/]*\/index\.m3u8$/ {p;q;}' "$manifest_file")"
+  [ -n "$variant_url" ] || die "deployed protected master omitted a same-origin rendition"
+  curl --fail --silent --show-error --cacert "$S12_CA_FILE" \
+    --header "Cookie: $cookie_name=$cookie_value" "$PUBLIC_ORIGIN$variant_url" >"$manifest_file"
   segment_url="$(sed -n '/^[^#][^[:space:]]*\.ts?/ {p;q;}' "$manifest_file")"
-  [ -n "$segment_url" ] || die "deployed protected manifest omitted a signed segment"
+  [ -n "$segment_url" ] || die "deployed protected rendition omitted a signed segment"
   docker run --rm --network "${S12_PROJECT}_app" --entrypoint wget "$GRADEX_BACKEND_IMAGE" \
     -qO- "$segment_url" >"$segment_file"
   [ -s "$segment_file" ] || die "deployed protected segment was empty"

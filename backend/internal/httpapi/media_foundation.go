@@ -16,6 +16,7 @@ import (
 type mediaDeliveryIssuer interface {
 	IssuePlayback(context.Context, media.PlaybackRequest) (media.PlaybackAuthorization, error)
 	IssuePlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
+	IssuePlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error)
 	IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error)
 	IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error)
 	IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error)
@@ -26,6 +27,7 @@ type mediaDeliveryIssuer interface {
 type adminReviewPlaybackIssuer interface {
 	IssueAdminReviewPlayback(context.Context, media.AdminReviewPlaybackRequest) (media.PlaybackAuthorization, error)
 	IssueAdminReviewPlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
+	IssueAdminReviewPlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error)
 }
 
 // LearningMedia returns the same already-composed S4 delivery boundary used by

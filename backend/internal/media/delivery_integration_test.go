@@ -17,15 +17,24 @@ import (
 )
 
 type signedDeliveryStore struct {
-	mu       sync.Mutex
-	keys     []string
-	manifest []byte
+	mu        sync.Mutex
+	keys      []string
+	expiresAt []time.Time
+	manifest  []byte
 }
 
 func (s *signedDeliveryStore) PresignGetURL(_ context.Context, key string, _ time.Duration) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.keys = append(s.keys, key)
+	return "https://storage.test/signed/" + key, nil
+}
+
+func (s *signedDeliveryStore) PresignGetURLUntil(_ context.Context, key string, expiresAt time.Time) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keys = append(s.keys, key)
+	s.expiresAt = append(s.expiresAt, expiresAt)
 	return "https://storage.test/signed/" + key, nil
 }
 
@@ -38,13 +47,19 @@ func (s *signedDeliveryStore) DownloadObject(_ context.Context, key string) ([]b
 	if s.manifest != nil {
 		return append([]byte(nil), s.manifest...), nil
 	}
-	return []byte("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment000.ts\n#EXT-X-ENDLIST\n"), nil
+	return []byte("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6,\nsegment000.ts\n#EXT-X-ENDLIST\n"), nil
 }
 
 func (s *signedDeliveryStore) requestedKeys() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.keys...)
+}
+
+func (s *signedDeliveryStore) requestedExpiries() []time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]time.Time(nil), s.expiresAt...)
 }
 
 func (s *signedDeliveryStore) setManifest(contents string) {
@@ -97,7 +112,7 @@ func newDeliveryFixture(t *testing.T) *deliveryFixture {
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_lessons (id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس', 'Lesson', 0)`, lessonRow, sectionRow, f.courseID, f.section, f.lesson); err != nil {
 		t.Fatal(err)
 	}
-	f.video = f.readyAsset(KindVideo, "video/hls/playlist.m3u8")
+	f.video = f.readyAsset(KindVideo, "video/hls/720p/playlist.m3u8")
 	f.resource = f.readyAsset(KindResource, "resource/file.pdf")
 	f.lab = f.readyAsset(KindLabMaterial, "lab/file.zip")
 	f.preview = f.readyAsset(KindPreview, "preview/playlist.m3u8")
@@ -167,7 +182,7 @@ func (f *deliveryFixture) readyAsset(kind AssetKind, outputKey string) string {
 	if _, err := f.pool.Exec(f.ctx, `INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms) VALUES ($1::uuid, $2::uuid, $3, 'SUCCEEDED', 'video/hls', 1, 60000)`, processingID, versionID, "process:"+versionID); err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.pool.Exec(f.ctx, `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, duration_ms) VALUES ($1::uuid, '720p', $2, 60000)`, versionID, outputKey); err != nil {
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms) VALUES ($1::uuid, '720p', $2, 1280, 720, 2800, 60000)`, versionID, outputKey); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, versionID); err != nil {
@@ -177,6 +192,16 @@ func (f *deliveryFixture) readyAsset(kind AssetKind, outputKey string) string {
 		f.t.Fatal(err)
 	}
 	return versionID
+}
+
+func (f *deliveryFixture) addVideoRendition(assetVersionID string, rendition Rendition) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, 60000)
+	`, assetVersionID, rendition.Name, rendition.StorageObjectKey, rendition.Width, rendition.Height, rendition.BitrateKbps); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func (f *deliveryFixture) readyPreviewForRevision(revisionID string) string {
@@ -215,13 +240,26 @@ func (f *deliveryFixture) studentLearningFacts() [3]int {
 
 func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *testing.T) {
 	f := newDeliveryFixture(t)
+	f.addVideoRendition(f.video, Rendition{
+		Name: "240p", StorageObjectKey: "video/hls/240p/playlist.m3u8", Width: 426, Height: 240, BitrateKbps: 400,
+	})
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video})
 	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/media/playback-manifests/") || issued.ExpiresAt.Sub(f.now) != 5*time.Minute {
 		t.Fatalf("playback issuance=%+v err=%v", issued, err)
 	}
 	manifest, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession)
-	if err != nil || !strings.Contains(string(manifest.Contents), "https://storage.test/signed/video/hls/segment000.ts") {
-		t.Fatalf("playback manifest=%q err=%v", manifest.Contents, err)
+	master := string(manifest.Contents)
+	if err != nil || !strings.Contains(master, "#EXT-X-STREAM-INF:BANDWIDTH=2928000,RESOLUTION=1280x720") ||
+		!strings.Contains(master, "#EXT-X-STREAM-INF:BANDWIDTH=496000,RESOLUTION=426x240") {
+		t.Fatalf("playback master=%q err=%v", manifest.Contents, err)
+	}
+	protected720p := "/api/v1/media/playback-manifests/" + issued.PlaybackSession + "/renditions/720p/index.m3u8"
+	if !strings.Contains(master, protected720p) || strings.Contains(master, "storage.test") || strings.Contains(master, "video/hls") {
+		t.Fatalf("playback master exposed a non-protected rendition target: %q", master)
+	}
+	variant, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p")
+	if err != nil || !strings.Contains(string(variant.Contents), "https://storage.test/signed/video/hls/720p/segment000.ts") {
+		t.Fatalf("playback variant=%q err=%v", variant.Contents, err)
 	}
 	replacement := f.readyAsset(KindVideo, "replacement/hls/playlist.m3u8")
 	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: replacement}); err == nil {
@@ -235,6 +273,9 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 	}
 	if len(f.store.requestedKeys()) != 1 {
 		t.Fatalf("signed storage calls=%v, want one allowed exact segment", f.store.requestedKeys())
+	}
+	if expiries := f.store.requestedExpiries(); len(expiries) != 1 || expiries[0].After(issued.ExpiresAt) {
+		t.Fatalf("segment capability expiries=%v exceed playback expiry %s", expiries, issued.ExpiresAt)
 	}
 }
 
@@ -252,8 +293,12 @@ func TestAdminReviewDeliveryUsesExactPendingRevisionAndAdminBoundSession(t *test
 		t.Fatalf("admin review playback issuance=%+v err=%v", issued, err)
 	}
 	manifest, err := f.delivery.IssueAdminReviewPlaybackManifest(f.ctx, admin, issued.PlaybackSession)
-	if err != nil || !strings.Contains(string(manifest.Contents), "https://storage.test/signed/video/hls/segment000.ts") {
-		t.Fatalf("admin review manifest=%q err=%v", manifest.Contents, err)
+	if err != nil || !strings.Contains(string(manifest.Contents), "/renditions/720p/index.m3u8") {
+		t.Fatalf("admin review master=%q err=%v", manifest.Contents, err)
+	}
+	variant, err := f.delivery.IssueAdminReviewPlaybackRenditionManifest(f.ctx, admin, issued.PlaybackSession, "720p")
+	if err != nil || !strings.Contains(string(variant.Contents), "https://storage.test/signed/video/hls/720p/segment000.ts") {
+		t.Fatalf("admin review variant=%q err=%v", variant.Contents, err)
 	}
 	if _, err := f.delivery.IssueAdminReviewPlaybackManifest(f.ctx, uuid.NewString(), issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("cross-Admin session error=%v, want %v", err, ErrProtectedUnavailable)
@@ -293,22 +338,60 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, uuid.NewString(), issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("cross-Student session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, uuid.NewString(), issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("cross-Student variant session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	for _, selector := range []string{"1080p", "../720p", "720p/../../private", "%2e%2e", "720p%2Fprivate"} {
+		if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, selector); !errors.Is(err, ErrProtectedUnavailable) {
+			t.Fatalf("unsafe rendition selector %q error=%v, want %v", selector, err, ErrProtectedUnavailable)
+		}
+	}
 
 	for name, manifest := range map[string]string{
-		"parent traversal": "#EXTM3U\n../other/segment.ts\n",
-		"absolute target":  "#EXTM3U\nhttps://public.example/segment.ts\n",
-		"tag URI":          "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\nsegment.ts\n",
+		"parent traversal": "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6,\n../other/segment.ts\n#EXT-X-ENDLIST\n",
+		"absolute target":  "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:6,\nhttps://public.example/segment.ts\n#EXT-X-ENDLIST\n",
+		"tag URI":          "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-KEY:METHOD=AES-128,URI=\"key.bin\"\n#EXTINF:6,\nsegment.ts\n#EXT-X-ENDLIST\n",
+		"master playlist":  "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2928000,RESOLUTION=1280x720\n720p/playlist.m3u8\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			f.store.setManifest(manifest)
 			before := len(f.store.requestedKeys())
-			if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+			if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
 				t.Fatalf("unsafe manifest error=%v, want %v", err, ErrProtectedUnavailable)
 			}
 			if got := len(f.store.requestedKeys()); got != before {
 				t.Fatalf("unsafe manifest signed %d storage references", got-before)
 			}
 		})
+	}
+	f.now = issued.ExpiresAt
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("expired master session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("expired variant session error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+}
+
+func TestPlaybackRenditionRechecksEntitlementAfterMaster(t *testing.T) {
+	f := newDeliveryFixture(t)
+	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
+		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+	})
+	if err != nil {
+		t.Fatalf("issuing playback: %v", err)
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
+		t.Fatalf("fetching master before revocation: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("variant after entitlement revocation error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if len(f.store.requestedKeys()) != 0 {
+		t.Fatalf("revoked variant minted storage capabilities: %v", f.store.requestedKeys())
 	}
 }
 
@@ -584,7 +667,10 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 		t.Fatalf("issued signature lifetime=%s, want 5m", got)
 	}
 	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
-		t.Fatalf("issuing pre-expiry manifest: %v", err)
+		t.Fatalf("issuing pre-expiry master: %v", err)
+	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); err != nil {
+		t.Fatalf("issuing pre-expiry variant: %v", err)
 	}
 
 	// The storage signature was already minted. Advancing the injected clock
@@ -599,6 +685,9 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	}
 	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("post-expiry manifest error=%v, want %v", err, ErrProtectedUnavailable)
+	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("post-expiry rendition error=%v, want %v", err, ErrProtectedUnavailable)
 	}
 	if len(f.store.requestedKeys()) != 1 {
 		t.Fatalf("post-expiry re-issuance minted another signed URL: %v", f.store.requestedKeys())

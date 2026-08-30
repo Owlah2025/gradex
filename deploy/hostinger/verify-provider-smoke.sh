@@ -99,8 +99,12 @@ manifest_url="$(jq --exit-status --raw-output '.manifest_url | select(length > 0
   die "provider playback issuance omitted the protected manifest"
 curl --fail --silent --show-error --max-time 15 --header "@$cookie_header" \
   "$GRADEX_PROVIDER_ORIGIN$manifest_url" >"$manifest_file"
+variant_url="$(sed -n '/^[^#][^[:space:]]*\/renditions\/[^/]*\/index\.m3u8$/ {p;q;}' "$manifest_file")"
+[ -n "$variant_url" ] || die "provider protected master omitted a same-origin rendition"
+curl --fail --silent --show-error --max-time 15 --header "@$cookie_header" \
+  "$GRADEX_PROVIDER_ORIGIN$variant_url" >"$manifest_file"
 segment_url="$(sed -n '/^[^#][^[:space:]]*\.ts?/ {p;q;}' "$manifest_file")"
-[ -n "$segment_url" ] || die "provider protected manifest omitted a signed segment"
+[ -n "$segment_url" ] || die "provider protected rendition omitted a signed segment"
 printf 'url = "%s"\nfail\nsilent\nshow-error\nmax-time = 30\n' "$segment_url" >"$segment_config"
 chmod 600 "$segment_config"
 curl --config "$segment_config" >"$segment_file"

@@ -35,6 +35,10 @@ func (*reviewDelivery) IssueAdminReviewPlaybackManifest(context.Context, string,
 	return media.PlaybackManifest{Contents: []byte("#EXTM3U\n#EXT-X-ENDLIST\n")}, nil
 }
 
+func (*reviewDelivery) IssueAdminReviewPlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error) {
+	return media.PlaybackManifest{Contents: []byte("#EXTM3U\n#EXT-X-ENDLIST\n")}, nil
+}
+
 func reviewMediaFoundation(t *testing.T, pool *pgxpool.Pool) *MediaFoundation {
 	t.Helper()
 	writer, err := outbox.NewWriter("review-test", []byte("01234567890123456789012345678901"))

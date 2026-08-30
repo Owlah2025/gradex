@@ -125,6 +125,7 @@ func mountCatalogRoutes(
 		adminReviewGetGroup.GET("/queue", reviewH.listQueue)
 		adminReviewGetGroup.GET("/courses/:id/revisions/:revisionId", reviewH.getCourseRevisionGraph)
 		adminReviewGetGroup.GET("/playback-manifests/:playbackSession/index.m3u8", reviewH.playbackManifest)
+		adminReviewGetGroup.GET("/playback-manifests/:playbackSession/renditions/:rendition/index.m3u8", reviewH.playbackRenditionManifest)
 	}
 
 	// Admin review mutation routes under /admin/review

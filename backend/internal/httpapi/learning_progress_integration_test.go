@@ -331,7 +331,7 @@ func seedLearningIntegrationGraph(t *testing.T, ctx context.Context, f learningI
 	if _, err := f.pool.Exec(ctx, `INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms) VALUES ($1::uuid, $2::uuid, 'process:s5-video-'||$3, 'SUCCEEDED', 'video/s5-'||$3, 1, 60000)`, processingID, f.versionID, f.versionID); err != nil {
 		t.Fatalf("seeding video processing: %v", err)
 	}
-	if _, err := f.pool.Exec(ctx, `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, duration_ms) VALUES ($1::uuid, '720p', 'video/s5-'||$2||'/playlist.m3u8', 60000)`, f.versionID, f.versionID); err != nil {
+	if _, err := f.pool.Exec(ctx, `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms) VALUES ($1::uuid, '720p', 'video/s5-'||$2||'/playlist.m3u8', 1280, 720, 2800, 60000)`, f.versionID, f.versionID); err != nil {
 		t.Fatalf("seeding video rendition: %v", err)
 	}
 	if _, err := f.pool.Exec(ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, f.versionID); err != nil {

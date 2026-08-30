@@ -43,6 +43,11 @@ func (d *refusingDelivery) IssuePlaybackManifest(context.Context, string, string
 	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
 }
 
+func (d *refusingDelivery) IssuePlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error) {
+	d.calls++
+	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
+}
+
 func (d *refusingDelivery) IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error) {
 	d.calls++
 	return media.DownloadAuthorization{}, media.ErrProtectedUnavailable
@@ -257,6 +262,7 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	for _, route := range []string{
 		"POST /api/v1/media/playback-authorizations",
 		"GET /api/v1/media/playback-manifests/:playbackSession/index.m3u8",
+		"GET /api/v1/media/playback-manifests/:playbackSession/renditions/:rendition/index.m3u8",
 		"POST /api/v1/media/download-authorizations",
 		"POST /api/v1/media/courses/:courseId/lessons/:lessonId/materials/:materialId/download-authorizations",
 		"GET /api/v1/media/lessons/:lessonId/materials/resource",
@@ -288,6 +294,8 @@ func TestD8ProtectedDeliveryDenialsAreByteIdenticalOnTheProductionRouter(t *test
 	cases := []requestCase{
 		{"course-preview-ineligible", http.MethodGet, "/api/v1/media/courses/00000000-0000-0000-0000-000000000001/preview", ""},
 		{"invalid-playback-session", http.MethodGet, "/api/v1/media/playback-manifests/invalid/index.m3u8", ""},
+		{"invalid-rendition-session", http.MethodGet, "/api/v1/media/playback-manifests/invalid/renditions/720p/index.m3u8", ""},
+		{"encoded-rendition-traversal", http.MethodGet, "/api/v1/media/playback-manifests/invalid/renditions/%2e%2e/index.m3u8", ""},
 		{"non-existent", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000001","asset_version_id":"00000000-0000-0000-0000-000000000001"}`},
 		{"expired", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000002","asset_version_id":"00000000-0000-0000-0000-000000000002"}`},
 		{"revoked", http.MethodPost, "/api/v1/media/playback-authorizations", `{"lesson_id":"00000000-0000-0000-0000-000000000003","asset_version_id":"00000000-0000-0000-0000-000000000003"}`},

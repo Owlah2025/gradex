@@ -119,7 +119,7 @@ main() {
 
   local temporary worker_logs readiness_log session_json unentitled_session_json playback_json manifest_file manifest_headers segment_file denial_log
   local postgres_id api_id worker_id object_url object_stat object_version object_size
-  local receipt_count state_counts cookie_name cookie_value unentitled_cookie manifest_url segment_url
+  local receipt_count state_counts cookie_name cookie_value unentitled_cookie manifest_url variant_url segment_url
   temporary="$(mktemp -d "$S12_STATE_DIR/worker-media.XXXXXX")"
   S12_TEMPORARY="$temporary"
   chmod 700 "$temporary"
@@ -259,7 +259,11 @@ main() {
     die "playback manifest was cacheable"
   grep --extended-regexp --ignore-case --quiet 'Referrer-Policy: no-referrer' "$manifest_headers" ||
     die "playback manifest omitted referrer suppression"
-  grep --fixed-strings --quiet '#EXTM3U' "$manifest_file" || die "signed playlist was not valid HLS"
+  grep --fixed-strings --quiet '#EXT-X-STREAM-INF' "$manifest_file" || die "protected master was not adaptive HLS"
+  variant_url="$(sed -n '/^[^#][^[:space:]]*\/renditions\/[^/]*\/index\.m3u8$/ {p;q;}' "$manifest_file")"
+  [ -n "$variant_url" ] || die "protected master omitted a same-origin rendition"
+  docker exec "$api_id" wget -qO- --header "Cookie: $cookie_name=$cookie_value" \
+    "http://127.0.0.1:8080$variant_url" >"$manifest_file"
   segment_url="$(sed -n '/^[^#][^[:space:]]*\.ts?/ {p;q;}' "$manifest_file")"
   [ -n "$segment_url" ] || die "rewritten playlist did not name a signed media segment"
   case "$segment_url" in

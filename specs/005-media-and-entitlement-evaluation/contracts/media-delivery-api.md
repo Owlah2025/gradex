@@ -30,11 +30,17 @@ the exact approved or historically qualifying Asset Version (BR-050, BR-100). De
 single-use: HLS re-requests segments on seek, rebuffer, and rendition switch.
 
 `GET /api/v1/media/playback-manifests/{playbackSession}/index.m3u8` — authenticates the Student,
-revalidates the exact approved Asset Version and current Entitlement, reads only the small private
-rendition playlist, and rewrites every media reference to an exact-object presigned URL bounded by
-the playback-session expiry. It returns `Cache-Control: no-store` and proxies no segment/video bytes.
-This route was made explicit during S12 production-like storage verification after a private S3
-store correctly refused the unsigned relative segment produced by a directly signed playlist.
+revalidates the exact approved Asset Version and current Entitlement, and returns an adaptive HLS
+master generated from that version's persisted rendition metadata. Every child URI is a protected
+same-origin route; the response contains no storage key or storage URL.
+
+`GET /api/v1/media/playback-manifests/{playbackSession}/renditions/{rendition}/index.m3u8` — repeats
+the authenticated Student, playback-session, exact-version, readiness, provenance, and current
+Entitlement checks. The rendition selector must match exactly one persisted rendition for that Asset
+Version; it is never converted into a storage path. The route reads only that small private media
+playlist and rewrites each supported media-segment reference to an exact-object presigned URL whose
+expiry is no later than the playback session. Both manifest routes return `Cache-Control: no-store`
+and proxy no segment/video bytes.
 
 `POST /api/v1/media/download-authorizations` — issues signed access to a protected Resource or Lab
 Material. Lab Material URLs MAY be single-use. Lab Materials carry the opaque buyer tag; Lesson

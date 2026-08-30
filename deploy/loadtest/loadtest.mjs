@@ -213,10 +213,10 @@ function runPlaybackStart() {
   const manifest = http.get(`${TARGET}${authorizationResult.body.manifest_url}`,
     requestParams("playback_manifest", session, { Accept: "application/vnd.apple.mpegurl" }));
   const manifestResult = recordTextResponse("playback_manifest", manifest, 200,
-    (body) => body.startsWith("#EXTM3U") && body.includes("#EXTINF"));
+    (body) => body.startsWith("#EXTM3U") && body.includes("#EXT-X-STREAM-INF") && body.includes("/renditions/"));
   if (manifestResult.ok) playbackSuccesses.add(1);
-  // Signed segment URLs are deliberately neither followed nor recorded. This scenario measures
-  // Gradex's authentication, entitlement, exact-version grant, and manifest control plane only.
+  // Protected rendition playlists and signed segments are deliberately neither followed nor recorded.
+  // This scenario measures authentication, entitlement, exact-version grant, and master control plane.
 }
 
 function get(name, path, session, validator) {

@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,9 +98,7 @@ func (c *Client) PresignPutURL(ctx context.Context, key, contentType string, exp
 	return req.URL, nil
 }
 
-// PresignGetURL returns a time-limited URL for reading an object — used for
-// signed HLS playback URLs. This is the only way playback bytes are reachable;
-// the bucket itself has no public/anonymous read access (see docker-compose.yml).
+// PresignGetURL returns a time-limited URL for reading an object.
 func (c *Client) PresignGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
 	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
@@ -109,6 +108,65 @@ func (c *Client) PresignGetURL(ctx context.Context, key string, expiry time.Dura
 		return "", fmt.Errorf("presigning GET for %q: %w", key, err)
 	}
 	return req.URL, nil
+}
+
+// PresignGetURLUntil signs a protected media segment against an absolute
+// expiry and verifies the effective SigV4 expiry before releasing the URL.
+func (c *Client) PresignGetURLUntil(ctx context.Context, key string, expiresAt time.Time) (string, error) {
+	expiry, err := presignDurationUntil(time.Now().UTC(), expiresAt)
+	if err != nil {
+		return "", err
+	}
+	req, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("presigning absolute-expiry GET for %q: %w", key, err)
+	}
+	if err := validatePresignedExpiry(req.URL, expiresAt); err != nil {
+		return "", fmt.Errorf("validating absolute-expiry GET for %q: %w", key, err)
+	}
+	return req.URL, nil
+}
+
+func presignDurationUntil(now, expiresAt time.Time) (time.Duration, error) {
+	remainingSeconds := int64(expiresAt.Sub(now) / time.Second)
+	if remainingSeconds < 1 {
+		return 0, fmt.Errorf("absolute storage expiry %s has less than one signing second remaining at %s", expiresAt, now)
+	}
+	return time.Duration(remainingSeconds) * time.Second, nil
+}
+
+func validatePresignedExpiry(rawURL string, expiresAt time.Time) error {
+	effectiveExpiry, err := presignedAbsoluteExpiry(rawURL)
+	if err != nil {
+		return err
+	}
+	if effectiveExpiry.After(expiresAt) {
+		return fmt.Errorf("presigned URL expiry %s exceeds requested expiry %s", effectiveExpiry, expiresAt)
+	}
+	return nil
+}
+
+func presignedAbsoluteExpiry(rawURL string) (time.Time, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing presigned URL: %w", err)
+	}
+	query := parsed.Query()
+	signedAt, err := time.Parse("20060102T150405Z", query.Get("X-Amz-Date"))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing X-Amz-Date: %w", err)
+	}
+	expiresSeconds, err := strconv.ParseInt(query.Get("X-Amz-Expires"), 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing X-Amz-Expires: %w", err)
+	}
+	if expiresSeconds < 1 {
+		return time.Time{}, fmt.Errorf("X-Amz-Expires must be positive, got %d", expiresSeconds)
+	}
+	return signedAt.Add(time.Duration(expiresSeconds) * time.Second), nil
 }
 
 // PresignGetDownloadURL asks the object provider to serve a private object as

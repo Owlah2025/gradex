@@ -545,7 +545,7 @@ seed_smoke() {
   validate_environment
   compose stop api worker >/dev/null 2>&1 || true
   compose --profile proof run --rm proof-tool
-  printf '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1.0,\nsegment000.ts\n#EXT-X-ENDLIST\n' |
+  printf '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:1.0,\nsegment000.ts\n#EXT-X-ENDLIST\n' |
     compose --profile proof run --rm --no-deps -T --entrypoint gradex-storage-fixture proof-tool \
       -key test/master.m3u8
   docker run --rm --entrypoint ffmpeg "$GRADEX_BACKEND_IMAGE" \

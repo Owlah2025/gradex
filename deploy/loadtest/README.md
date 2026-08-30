@@ -186,7 +186,7 @@ Lesson metadata, 5% playback authorization, 5% playback manifest, and 15% Progre
 catalogue operations deliberately use anonymous headers; they never carry a Student session cookie,
 auth token, or CSRF token. Playback authorization and manifest are the real protected
 `/api/v1/media/playback-authorizations` and `/api/v1/media/playback-manifests/:session/index.m3u8`
-control-plane routes; segment bytes are never followed.
+control-plane routes; rendition playlists and segment bytes are never followed.
 
 Additional prepared scenarios are:
 
