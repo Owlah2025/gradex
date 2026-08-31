@@ -1209,6 +1209,12 @@ export const ar: Dictionary = {
     auto: "تلقائي",
     fullscreen: "ملء الشاشة",
     exitFullscreen: "الخروج من ملء الشاشة",
+    speed: "سرعة التشغيل",
+    rewind: "الرجوع 10 ثوانٍ",
+    forward: "التقدّم 10 ثوانٍ",
+    pictureInPicture: "صورة داخل صورة",
+    exitPictureInPicture: "إنهاء صورة داخل صورة",
+    buffering: "جارٍ التحميل",
   },
   why: {
     eyebrow: "لماذا Gradex",

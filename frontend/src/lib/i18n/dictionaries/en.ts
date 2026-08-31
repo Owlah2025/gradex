@@ -1271,6 +1271,12 @@ export const en = {
     auto: "Auto",
     fullscreen: "Enter fullscreen",
     exitFullscreen: "Exit fullscreen",
+    speed: "Playback speed",
+    rewind: "Rewind 10 seconds",
+    forward: "Forward 10 seconds",
+    pictureInPicture: "Picture in picture",
+    exitPictureInPicture: "Exit picture in picture",
+    buffering: "Buffering",
   },
   why: {
     eyebrow: "Why Gradex",
