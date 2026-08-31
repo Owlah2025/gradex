@@ -142,8 +142,21 @@ validate_application_composition() {
 
   [ "${AUTH_FAKE_MODE:-false}" = false ] ||
     die "AUTH_FAKE_MODE must never be enabled on a managed host"
-  [ "${STUDENT_REGISTRATION_ENABLED:-false}" = false ] ||
-    die "public student registration is outside the approved MVP scope"
+  case "${STUDENT_REGISTRATION_ENABLED:-false}" in
+    false) ;;
+    true)
+      require_value REGISTRATION_POLICY_SET_ID
+      case "${REGISTRATION_POLICY_APPROVED:-false}" in
+        true | false) ;;
+        *) die "REGISTRATION_POLICY_APPROVED must be exactly true or false" ;;
+      esac
+      if [ "$APP_ENV" = production ]; then
+        [ "${REGISTRATION_POLICY_APPROVED:-false}" = true ] ||
+          die "production student registration requires REGISTRATION_POLICY_APPROVED=true (LG-011)"
+      fi
+      ;;
+    *) die "STUDENT_REGISTRATION_ENABLED must be exactly true or false" ;;
+  esac
 
   # Transactional email is a staff-composition dependency, not a production
   # nicety: invitation delivery is how an Admin account ever comes to exist.
@@ -163,7 +176,7 @@ validate_application_composition() {
       die "production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)"
   fi
 
-  note "$APP_ENV composition accepted: real sessions, adapter screening, Resend transactional email, no fake authentication, registration closed"
+  note "$APP_ENV composition accepted: real sessions, adapter screening, Resend transactional email, no fake authentication, registration policy validated"
 }
 
 # A production deployment must name itself. Both selectors fall back to the

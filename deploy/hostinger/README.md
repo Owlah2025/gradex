@@ -133,11 +133,13 @@ approval flag differs.
 | `EMAIL_API_KEY` | required | required |
 | `SESSION_CSRF_KEY` | required | required |
 
-`STUDENT_REGISTRATION_ENABLED=false` and `AUTH_FAKE_MODE=false` are fixed in the Compose file for
-both environments and are not operator-settable.
+`AUTH_FAKE_MODE=false` remains fixed for both managed environments. Student registration is
+operator-configurable and defaults to disabled. When `STUDENT_REGISTRATION_ENABLED=true`,
+`REGISTRATION_POLICY_SET_ID` is required; production additionally requires
+`REGISTRATION_POLICY_APPROVED=true` (LG-011).
 
-Both environments require real compromised-password screening **even though public student
-registration stays closed**. Staff invitation and onboarding set passwords, so the API's staff
+Both environments require real compromised-password screening regardless of whether public student
+registration is enabled. Staff invitation and onboarding set passwords, so the API's staff
 composition refuses to build without `PasswordScreenMode == adapter`. The adapter is the fixed HIBP
 Pwned Passwords range endpoint over HTTPS; it needs no API key and no additional provider
 credential, only outbound internet, which the API, worker, and bootstrap-admin services already have

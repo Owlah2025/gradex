@@ -50,7 +50,7 @@ x-backend-environment: &backend-environment
   REGISTRATION_POLICY_APPROVED: ${REGISTRATION_POLICY_APPROVED:-false}
   # Screening is not staging-only. Staff invitation and onboarding set
   # passwords, so the API's staff composition requires the adapter even
-  # while public student registration stays closed. Hard-coding
+  # regardless of whether public student registration is enabled. Hard-coding
   # `unavailable` here made a production API impossible to start.
   PASSWORD_SCREEN_MODE: ${PASSWORD_SCREEN_MODE:?PASSWORD_SCREEN_MODE is required}
   COMPROMISED_PASSWORD_ADAPTER_APPROVED: ${COMPROMISED_PASSWORD_ADAPTER_APPROVED:?COMPROMISED_PASSWORD_ADAPTER_APPROVED is required}

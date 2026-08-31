@@ -121,7 +121,7 @@ for expectation in \
   printf '%s' "$production_api" | grep --quiet --fixed-strings "$expectation" ||
     die "the production API environment is missing: $expectation"
 done
-note "production render: APP_ENV=production, adapter screening approved, registration closed, no fake authentication, Resend email"
+note "production render: APP_ENV=production, adapter screening approved, registration defaults closed, no fake authentication, Resend email"
 
 printf '%s' "$production_api" | grep --quiet 'S3_ENDPOINT: https://example.r2.cloudflarestorage.com' ||
   die "the production render did not take its S3 endpoint from protected configuration"
@@ -192,7 +192,7 @@ done
 if printf '%s' "$staging_render" | grep --quiet --ignore-case 'minio'; then
   die "MinIO entered the managed staging topology"
 fi
-note "staging render is application-startup-compatible: adapter screening, Resend email, registration closed"
+note "staging render is application-startup-compatible: adapter screening, Resend email, registration defaults closed"
 
 # --- the environment must be declared, never defaulted ----------------------
 
@@ -300,8 +300,31 @@ compose_case staging adapter true ||
   APP_ENV=production PASSWORD_SCREEN_MODE=adapter COMPROMISED_PASSWORD_ADAPTER_APPROVED=true \
     EMAIL_ENABLED=true EMAIL_PROVIDER=resend EMAIL_API_KEY=placeholder \
     EMAIL_FROM_ADDRESS=no-reply@updates.gradex.test AUTH_FAKE_MODE=false \
-    STUDENT_REGISTRATION_ENABLED=true validate_application_composition >/dev/null 2>&1
-) && die "a managed host accepted public student registration"
+    STUDENT_REGISTRATION_ENABLED=true \
+    REGISTRATION_POLICY_SET_ID=gradex-legal-2026-08-09-v1 \
+    REGISTRATION_POLICY_APPROVED=true \
+    validate_application_composition
+) || die "production rejected approved student registration"
+
+(
+  APP_ENV=production PASSWORD_SCREEN_MODE=adapter COMPROMISED_PASSWORD_ADAPTER_APPROVED=true \
+    EMAIL_ENABLED=true EMAIL_PROVIDER=resend EMAIL_API_KEY=placeholder \
+    EMAIL_FROM_ADDRESS=no-reply@updates.gradex.test AUTH_FAKE_MODE=false \
+    STUDENT_REGISTRATION_ENABLED=true \
+    REGISTRATION_POLICY_SET_ID= \
+    REGISTRATION_POLICY_APPROVED=true \
+    validate_application_composition >/dev/null 2>&1
+) && die "production registration accepted a missing policy-set id"
+
+(
+  APP_ENV=production PASSWORD_SCREEN_MODE=adapter COMPROMISED_PASSWORD_ADAPTER_APPROVED=true \
+    EMAIL_ENABLED=true EMAIL_PROVIDER=resend EMAIL_API_KEY=placeholder \
+    EMAIL_FROM_ADDRESS=no-reply@updates.gradex.test AUTH_FAKE_MODE=false \
+    STUDENT_REGISTRATION_ENABLED=true \
+    REGISTRATION_POLICY_SET_ID=gradex-legal-2026-08-09-v1 \
+    REGISTRATION_POLICY_APPROVED=false \
+    validate_application_composition >/dev/null 2>&1
+) && die "production registration accepted an unapproved policy set"
 
 printf 'hostinger-production-render: production and staging renders, port safety, R2 isolation, and fail-closed preflight verified\n' >&2
 
