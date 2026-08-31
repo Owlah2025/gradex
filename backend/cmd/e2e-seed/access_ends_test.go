@@ -164,7 +164,7 @@ func seedAccessEndsEmergencyCourse(ctx context.Context, tx pgx.Tx, instructorID 
 		{"processing attempt", `INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms)
 			VALUES ($1, $2, 'op-emergency', 'SUCCEEDED', 'output/', 2, 30000)`,
 			[]any{accessEndsEmergencyProcID, accessEndsEmergencyAssetVersionID}},
-		{"rendition", `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms) VALUES ($1, '720p', 'test/master.m3u8', 1280, 720, 2800, 30000)`,
+		{"rendition", `INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms) VALUES ($1, '720p', 'test/720p.m3u8', 1280, 720, 2800, 30000)`,
 			[]any{accessEndsEmergencyAssetVersionID}},
 		{"scan passed", `UPDATE media_asset_versions SET state = 'SCAN_PASSED', successful_scan_attempt_id = $2 WHERE id = $1`,
 			[]any{accessEndsEmergencyAssetVersionID, accessEndsEmergencyScanID}},

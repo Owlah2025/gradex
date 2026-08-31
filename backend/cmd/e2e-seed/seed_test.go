@@ -902,7 +902,7 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
-		VALUES ($1, '720p', 'test/master.m3u8', 1280, 720, 2800, 30000)
+		VALUES ($1, '720p', 'test/720p.m3u8', 1280, 720, 2800, 30000)
 	`, assetVersionID)
 	if err != nil {
 		return fmt.Errorf("insert video rendition: %w", err)

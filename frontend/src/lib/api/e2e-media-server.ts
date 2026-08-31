@@ -49,6 +49,8 @@ export function ensureMediaFixture(): void {
       "5",
       "-hls_list_size",
       "0",
+      "-hls_playlist_type",
+      "vod",
       path.join(FIXTURE_DIR, "720p.m3u8"),
     ],
     { stdio: "ignore" }
@@ -87,6 +89,8 @@ export function ensureMediaFixture(): void {
       "5",
       "-hls_list_size",
       "0",
+      "-hls_playlist_type",
+      "vod",
       path.join(FIXTURE_DIR, "360p.m3u8"),
     ],
     { stdio: "ignore" }
