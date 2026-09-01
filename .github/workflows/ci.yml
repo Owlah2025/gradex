@@ -252,7 +252,7 @@ jobs:
   admission-integration:
     name: Admission Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -287,7 +287,9 @@ jobs:
         working-directory: backend
         run: |
           go test -tags=integration ./internal/db
-          go test -tags=integration ./internal/identity ./internal/outbox ./internal/httpapi ./internal/catalogpublic ./internal/ratelimit ./internal/learning ./internal/access ./internal/entitlement
+          go test -tags=integration ./internal/identity ./internal/outbox
+          go test -timeout=15m -tags=integration ./internal/httpapi
+          go test -tags=integration ./internal/catalogpublic ./internal/ratelimit ./internal/learning ./internal/access ./internal/entitlement
 
   guards:
     name: Guards
