@@ -87,6 +87,21 @@ ALLOWLIST=(
   # Opaque session and CSRF plaintext cross only into the hardened cookie and
   # no-store JSON body after their authoritative transaction has committed.
   "internal/auth/session_response.go"
+  # The emailed verification code crosses exactly once, into the Code field of
+  # outbox.VerificationCodeDelivery, and no further. That struct is the
+  # protected half of the outbox append: it is serialized only inside
+  # AES-GCM-authenticated ciphertext, so the plaintext never reaches the clear
+  # SafePayload, a log line, an HTTP response, a URL, or a database column. The
+  # dedicated boundary check below pins the single read and the field it lands
+  # in. Human-reviewed.
+  "internal/identity/admission_otp.go"
+  # IDENTITY_OTP_PEPPER is a cryptographic signer key. The plaintext is read
+  # only to check its minimum length and to key HMAC-SHA256; it is never
+  # returned, logged, serialized, or stored. This is the same class of boundary
+  # as the Redis driver and the Resend Authorization header: the value goes
+  # directly into the primitive that must have it. The dedicated boundary check
+  # below pins the exact reads. Human-reviewed.
+  "internal/identity/email_otp.go"
 )
 
 # The one production file permitted to read a password plaintext, the marker
@@ -108,6 +123,41 @@ LOADTEST_CAPTURE_DATABASE_BOUNDARY_FILE="cmd/loadtest-capture/main.go"
 LOADTEST_CAPTURE_DATABASE_BOUNDARY_CALL='pgxpool.New(ctx, cfg.DatabaseURL().Expose())'
 LOADTEST_CAPTURE_DATABASE_BOUNDARY_EXPOSURES=1
 
+# The emailed verification code has one reviewed crossing: into the protected
+# outbox payload. The count is pinned rather than bounded for the same reason
+# the password boundary is — a six-digit code is low entropy, so a second
+# handling path is exactly how it would end up somewhere searchable.
+OTP_DELIVERY_BOUNDARY_FILE="internal/identity/admission_otp.go"
+OTP_DELIVERY_BOUNDARY_CALL='Code:[[:space:]]+request\.otp\.Code\.Expose\(\),'
+OTP_DELIVERY_BOUNDARY_EXPOSURES=1
+
+# The OTP pepper is read three times, all inside its own type: twice to check
+# the key length and once to key the HMAC. Each read is pinned to the exact
+# secret it reads, so a fourth read — or a change turning one of these into a
+# return value, a log argument, or a struct field — fails here rather than in
+# review.
+#
+# The shapes name their secret (`secret`, `p.key`) rather than accepting any
+# `len(<something>.Expose())`. A generic length shape would let an unrelated
+# secret take the place of a reviewed pepper read while the total stayed at
+# three, which is a new plaintext boundary wearing an approved silhouette.
+#
+# The shapes are matched per *occurrence* rather than per line. A line may
+# legitimately contain one of them, and classifying whole lines would let a
+# second, unsafe read ride along on the same line as an approved one.
+OTP_PEPPER_BOUNDARY_FILE="internal/identity/email_otp.go"
+OTP_PEPPER_BOUNDARY_SIGNER_CALL='hmac.New(sha256.New, []byte(p.key.Expose()))'
+OTP_PEPPER_BOUNDARY_EXPOSURES=3
+OTP_PEPPER_APPROVED_READS=(
+  'len\(secret\.Expose\(\)\)'                                # NewEmailOTPPepper length check
+  'len\(p\.key\.Expose\(\)\)'                                # EmailOTPPepper.usable length check
+  'hmac\.New\(sha256\.New, \[\]byte\(p\.key\.Expose\(\)\)\)' # digest HMAC key
+)
+# How many times each approved shape may appear. Pinning these individually
+# stops one reviewed read from being duplicated to cover for another that was
+# removed, which a bare total cannot see.
+OTP_PEPPER_APPROVED_READ_COUNTS=(1 1 1)
+
 # Packages that exist to send data outward. Expose() here is a defect even if
 # someone adds the file to the allowlist, so this check runs independently.
 FORBIDDEN_DIRS=(
@@ -120,6 +170,17 @@ FORBIDDEN_DIRS=(
 fail=0
 
 note() { printf '%s\n' "$*" >&2; }
+
+# The number of `.Expose()` *occurrences* in a file.
+#
+# `grep -c` counts matching lines, not matches. Two plaintext reads written on
+# one line would count as one and slip past a pinned total, which is exactly the
+# invariant these boundaries exist to hold. `grep -o` emits one line per
+# occurrence instead. The `|| true` keeps a zero-match file from tripping
+# `pipefail`.
+expose_occurrences() {
+  { grep -o '\.Expose()' "$1" || true; } | wc -l | tr -d '[:space:]'
+}
 
 # --- 1. call sites outside the allowlist ------------------------------------
 # Test files are excluded: they exercise the boundary rather than cross it.
@@ -268,6 +329,84 @@ if ! grep --fixed-strings --quiet -- "$LOADTEST_CAPTURE_DATABASE_BOUNDARY_CALL" 
   fail=1
 fi
 
+# The verification code may cross into the protected outbox payload and nowhere
+# else. Pinning the count keeps the file-level allowlist from becoming
+# permission to read the code again for a log line or a response body, and
+# pinning the destination field keeps it out of the clear SafePayload that sits
+# a few lines above it in the same struct literal.
+otp_delivery_exposures=$(cd "$BACKEND" && expose_occurrences "$OTP_DELIVERY_BOUNDARY_FILE")
+if [ "$otp_delivery_exposures" -ne "$OTP_DELIVERY_BOUNDARY_EXPOSURES" ]; then
+  note "expose-guard: $OTP_DELIVERY_BOUNDARY_FILE has $otp_delivery_exposures Expose() calls, expected $OTP_DELIVERY_BOUNDARY_EXPOSURES"
+  note "  The emailed code is read once, into the encrypted outbox payload. If a"
+  note "  second read is intended, update OTP_DELIVERY_BOUNDARY_EXPOSURES and say"
+  note "  in review where the plaintext goes."
+  fail=1
+fi
+if ! grep --extended-regexp --quiet -- "$OTP_DELIVERY_BOUNDARY_CALL" \
+  "$BACKEND/$OTP_DELIVERY_BOUNDARY_FILE"; then
+  note "expose-guard: the verification-code exposure moved outside the reviewed"
+  note "  outbox.VerificationCodeDelivery.Code assignment in $OTP_DELIVERY_BOUNDARY_FILE"
+  fail=1
+fi
+
+# The OTP pepper is a signer key. Every read of it must be either a length check
+# or the HMAC construction; anything else is a new handling path for key
+# material that the type exists to keep unreadable.
+otp_pepper_exposures=$(cd "$BACKEND" && expose_occurrences "$OTP_PEPPER_BOUNDARY_FILE")
+if [ "$otp_pepper_exposures" -ne "$OTP_PEPPER_BOUNDARY_EXPOSURES" ]; then
+  note "expose-guard: $OTP_PEPPER_BOUNDARY_FILE has $otp_pepper_exposures Expose() calls, expected $OTP_PEPPER_BOUNDARY_EXPOSURES"
+  note "  The pepper is read only to validate its length and to key HMAC-SHA256."
+  note "  If another read is intended, update OTP_PEPPER_BOUNDARY_EXPOSURES and"
+  note "  say in review what consumes the key material."
+  fail=1
+fi
+if ! grep --fixed-strings --quiet -- "$OTP_PEPPER_BOUNDARY_SIGNER_CALL" \
+  "$BACKEND/$OTP_PEPPER_BOUNDARY_FILE"; then
+  note "expose-guard: the OTP pepper exposure moved outside the reviewed HMAC"
+  note "  construction in $OTP_PEPPER_BOUNDARY_FILE"
+  fail=1
+fi
+# Each reviewed read must still be present exactly as many times as reviewed.
+# The total above only says how many plaintext reads exist; this says which.
+for pepper_index in "${!OTP_PEPPER_APPROVED_READS[@]}"; do
+  pepper_shape="${OTP_PEPPER_APPROVED_READS[$pepper_index]}"
+  pepper_want="${OTP_PEPPER_APPROVED_READ_COUNTS[$pepper_index]}"
+  pepper_have=$(cd "$BACKEND" && { grep -oE "$pepper_shape" "$OTP_PEPPER_BOUNDARY_FILE" || true; } | wc -l | tr -d '[:space:]')
+  if [ "$pepper_have" -ne "$pepper_want" ]; then
+    note "expose-guard: reviewed OTP pepper read appears $pepper_have times, expected $pepper_want:"
+    note "  $pepper_shape"
+    note "  in $OTP_PEPPER_BOUNDARY_FILE"
+    fail=1
+  fi
+done
+
+# Every individual read must be one of the approved shapes. This deletes each
+# approved occurrence from the line and then asks whether any `.Expose()`
+# survives, so an unsafe read sharing a line with a legitimate one is still
+# counted — which classifying whole lines would have missed.
+pepper_unapproved=""
+while IFS= read -r numbered; do
+  [ -z "$numbered" ] && continue
+  pepper_line_no="${numbered%%:*}"
+  pepper_content="${numbered#*:}"
+  pepper_remaining="$pepper_content"
+  for approved in "${OTP_PEPPER_APPROVED_READS[@]}"; do
+    pepper_remaining=$(printf '%s\n' "$pepper_remaining" | sed -E "s@${approved}@@g")
+  done
+  pepper_left=$(printf '%s\n' "$pepper_remaining" | { grep -o '\.Expose()' || true; } | wc -l | tr -d '[:space:]')
+  if [ "$pepper_left" -ne 0 ]; then
+    pepper_unapproved="${pepper_unapproved}  ${pepper_line_no}:${pepper_content}"$'\n'
+  fi
+done < <(cd "$BACKEND" && grep -n '\.Expose()' "$OTP_PEPPER_BOUNDARY_FILE" || true)
+
+if [ -n "$pepper_unapproved" ]; then
+  note "expose-guard: OTP pepper plaintext read outside a length check or the HMAC key:"
+  note "${pepper_unapproved%$'\n'}"
+  note "  A signer key may be measured and used to sign. It may not be returned,"
+  note "  formatted, stored, or copied into another value."
+  fail=1
+fi
+
 # A password Expose() anywhere outside the two reviewed boundary files,
 # including in an otherwise-allowlisted entrypoint.
 if hits=$(cd "$BACKEND" && grep -rn -i '[Pp]assword[A-Za-z]*\.Expose()' --include='*.go' . 2>/dev/null \
@@ -342,6 +481,6 @@ for site in "${enqueue_sites[@]:-}"; do
 done
 
 if [ "$fail" -eq 0 ]; then
-  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary, ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads)"
+  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary with ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads, OTP delivery boundary pinned at ${OTP_DELIVERY_BOUNDARY_EXPOSURES}, OTP pepper boundary pinned at ${OTP_PEPPER_BOUNDARY_EXPOSURES})"
 fi
 exit "$fail"
