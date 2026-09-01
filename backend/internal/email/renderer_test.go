@@ -15,15 +15,26 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// `credential` means the message carries a secret at all; `inLinkFragment`
+	// means that secret reaches the reader inside a URL fragment. They were one
+	// field until the OTP template arrived, which carries a credential and
+	// deliberately has no URL to put it in.
 	cases := []struct {
 		eventType, template string
 		credential          bool
+		inLinkFragment      bool
 	}{
-		{"identity.email_verification_requested", TemplateVerifyEmail, true}, {"identity.password_reset_requested", TemplatePasswordReset, true},
-		{"identity.password_reset_completed", TemplatePasswordChanged, false}, {"identity.staff_invitation_created", TemplateStaffInvitation, true},
-		{"access.invitation_issued", TemplateCourseInvitation, true}, {"access.granted", TemplateAccessGranted, false},
-		{"access.invitation_rejected", TemplateInviteRejected, false}, {"access.invitation_cancelled", TemplateInviteCancelled, false},
-		{"access.entitlement_adjusted", TemplateAccessAdjusted, false}, {"access.entitlement_revoked", TemplateAccessRevoked, false},
+		{"identity.email_verification_requested", TemplateVerifyEmail, true, true},
+		{"identity.email_verification_code_requested", TemplateVerifyEmailOTP, true, false},
+		{"identity.password_reset_requested", TemplatePasswordReset, true, true},
+		{"identity.password_reset_completed", TemplatePasswordChanged, false, false},
+		{"identity.staff_invitation_created", TemplateStaffInvitation, true, true},
+		{"access.invitation_issued", TemplateCourseInvitation, true, true},
+		{"access.granted", TemplateAccessGranted, false, false},
+		{"access.invitation_rejected", TemplateInviteRejected, false, false},
+		{"access.invitation_cancelled", TemplateInviteCancelled, false, false},
+		{"access.entitlement_adjusted", TemplateAccessAdjusted, false, false},
+		{"access.entitlement_revoked", TemplateAccessRevoked, false, false},
 	}
 
 	// The launch-critical inventory is whatever the dispatcher will actually
@@ -80,13 +91,16 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 						}
 					}
 				}
-				if tc.credential {
+				if tc.inLinkFragment {
 					if !strings.Contains(message.Text, "#token=TOKEN_CANARY") {
 						t.Error("credential is not carried in URL fragment")
 					}
-					if strings.Contains(message.Text, "?token=") {
-						t.Error("credential leaked into query string")
-					}
+				}
+				// No template may ever put a credential in a query string,
+				// whether or not it uses a link at all: a query survives
+				// referrers, proxy logs, and browser history.
+				if strings.Contains(message.Text, "?token=") {
+					t.Error("credential leaked into query string")
 				}
 				if tc.template == TemplateCourseInvitation && locale == "en" && !strings.Contains(message.Text, "grants no Course access") {
 					t.Error("Course invitation does not explain preapproval state")
@@ -135,5 +149,68 @@ func TestRendererExplainsPurchaseBackedCourseInvitationWithoutASecondApproval(t 
 	}
 	if strings.Contains(message.Text, "must approve") {
 		t.Fatalf("purchase invitation incorrectly claims another Admin approval: %q", message.Text)
+	}
+}
+
+// TestVerificationCodeMessageCarriesTheCodeAndNoLink is the production
+// rendering evidence for the OTP contract. A verification message that also
+// contained a URL would put two live credentials for one challenge in one
+// mailbox, and the whole reason the code exists is that a forwarded link is a
+// usable credential while a typed code is not.
+func TestVerificationCodeMessageCarriesTheCodeAndNoLink(t *testing.T) {
+	renderer, err := NewRenderer(RendererOptions{PublicOrigin: "https://gradex.example", FromAddress: "notify@gradex.example", FromName: "Gradex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"ar", "en"} {
+		message, err := renderer.Render(RenderRequest{
+			Event:    outbox.Event{ID: uuid.NewString(), Type: "identity.email_verification_code_requested", AggregateID: uuid.NewString()},
+			Template: TemplateVerifyEmailOTP,
+			Locale:   locale,
+			Payload: DeliveryPayload{
+				Destination: "student@example.com", Locale: locale,
+				TemplateContract: TemplateVerifyEmailOTP, VerificationToken: "482913",
+				ExpiresAt: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC),
+			},
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", locale, err)
+		}
+		if !strings.Contains(message.HTML, "482913") || !strings.Contains(message.Text, "482913") {
+			t.Errorf("%s: the code is not readable in the message", locale)
+		}
+		if strings.Contains(message.HTML, "<a href") || strings.Contains(message.HTML, "gradex.example/") {
+			t.Errorf("%s: an OTP message must carry no action link", locale)
+		}
+		if strings.Contains(message.Text, "https://") {
+			t.Errorf("%s: an OTP text part must carry no URL", locale)
+		}
+		// The expiry line must describe what actually expires.
+		wantLabel := "Code expires:"
+		if locale == "ar" {
+			wantLabel = "تنتهي صلاحية الرمز:"
+		}
+		if !strings.Contains(message.Text, wantLabel) {
+			t.Errorf("%s: expiry label does not name the code", locale)
+		}
+	}
+}
+
+// TestVerificationCodeMessageRefusesToRenderWithoutACode proves the render
+// fails closed. Sending "your code is:" with nothing after it would burn the
+// challenge for a Student who can never complete it.
+func TestVerificationCodeMessageRefusesToRenderWithoutACode(t *testing.T) {
+	renderer, err := NewRenderer(RendererOptions{PublicOrigin: "https://gradex.example", FromAddress: "notify@gradex.example", FromName: "Gradex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = renderer.Render(RenderRequest{
+		Event:    outbox.Event{ID: uuid.NewString(), Type: "identity.email_verification_code_requested"},
+		Template: TemplateVerifyEmailOTP,
+		Locale:   "en",
+		Payload:  DeliveryPayload{Destination: "student@example.com", Locale: "en", TemplateContract: TemplateVerifyEmailOTP},
+	})
+	if err == nil {
+		t.Fatal("rendering a code message with no code must fail")
 	}
 }

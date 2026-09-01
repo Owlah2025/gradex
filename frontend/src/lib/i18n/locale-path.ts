@@ -47,3 +47,20 @@ function normalizeSearch(search: string | null | undefined): string {
   const trimmed = search.startsWith("?") ? search.slice(1) : search;
   return trimmed === "" ? "" : `?${trimmed}`;
 }
+
+/**
+ * The locale-addressed form of an application path, when one exists.
+ *
+ * `/catalog` under `ar` is `/ar/catalog`. A path that is already locale-
+ * addressed is re-addressed rather than double-prefixed, which is the bug a
+ * naive concatenation produces the second time a link is built.
+ */
+export function localePath(path: string, locale: Locale): string {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  const segments = normalized.split("/");
+  if (isLocaleSegment(segments[1])) {
+    segments[1] = locale;
+    return segments.join("/");
+  }
+  return `/${locale}${normalized === "/" ? "" : normalized}`;
+}

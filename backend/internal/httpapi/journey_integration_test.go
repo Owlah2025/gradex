@@ -50,10 +50,34 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	for offset := byte(0); offset < 16; offset++ {
 		admissionRandom = append(admissionRandom, bytes.Repeat([]byte{0x71 + offset}, 32)...)
 	}
+	// The session repository is built before the admission service now, because
+	// proving a verification code authenticates the Student in the same
+	// transaction that activates the Account.
+	journeyConfig, err := config.LoadFrom(config.MapLookup(map[string]string{
+		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
+		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
+	}), config.MapSecretResolver{
+		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+	})
+	if err != nil {
+		t.Fatalf("loading journey settings: %v", err)
+	}
+	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
+		Pool: pool, Settings: journeyConfig.Sessions(),
+		CSRFKey: bytes.Repeat([]byte{0x61}, 32), Now: time.Now,
+	})
+	if err != nil {
+		t.Fatalf("constructing session repository: %v", err)
+	}
 	admissionService, err := identity.NewAdmissionService(identity.AdmissionServiceOptions{
 		Pool: pool, Policies: policies, Compromised: compromised, Outbox: writer,
-		VerificationTTL: time.Hour, Now: time.Now,
-		Random: bytes.NewReader(admissionRandom),
+		Sessions:        repository,
+		VerificationTTL: time.Hour,
+		EmailOTPTTL:     10 * time.Minute,
+		EmailOTPPepper:  config.NewSecret(strings.Repeat("p", 32)),
+		Now:             time.Now,
+		Random:          bytes.NewReader(admissionRandom),
 	})
 	if err != nil {
 		t.Fatalf("constructing admission service: %v", err)
@@ -72,24 +96,6 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 		t.Fatalf("constructing recovery service: %v", err)
 	}
 
-	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
-		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
-		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
-	}), config.MapSecretResolver{
-		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
-		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
-	})
-	if err != nil {
-		t.Fatalf("loading journey settings: %v", err)
-	}
-	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
-		Pool: pool, Settings: cfg.Sessions(),
-		CSRFKey: bytes.Repeat([]byte{0x61}, 32), Now: time.Now,
-	})
-	if err != nil {
-		t.Fatalf("constructing session repository: %v", err)
-	}
-
 	limiter, err := ratelimit.New(
 		admissionRateStore{allowed: true}, bytes.Repeat([]byte{0x31}, 32), time.Second,
 	)
@@ -100,12 +106,13 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	admissionPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests",
 		"password-reset-requests",
 	} {
 		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
 	admissionPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
-	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 	readPolicy := ratelimit.DevelopmentPolicySetReadPolicy()
 	admissionPolicies[readPolicy.Endpoint] = readPolicy
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
@@ -264,24 +271,62 @@ func TestCompleteStudentAuthenticationJourney(t *testing.T) {
 	browser := newJourneyBrowser(t, router)
 	ctx := context.Background()
 
-	// 1. Register.
-	if response := browser.send(
+	// 1. Register. The response carries the challenge the verification screen
+	//    is opened with, so nothing has to ask for the address a second time.
+	registration := browser.send(
 		http.MethodPost, "/api/v1/student-registrations", journeyRegistration(),
-	); response.Code != http.StatusAccepted {
-		t.Fatalf("registration = %d, want 202 (%s)", response.Code, response.Body)
+	)
+	if registration.Code != http.StatusAccepted {
+		t.Fatalf("registration = %d, want 202 (%s)", registration.Code, registration.Body)
+	}
+	var accepted struct {
+		Verification struct {
+			ChallengeID string `json:"challenge_id"`
+			MaskedEmail string `json:"masked_email"`
+		} `json:"verification"`
+	}
+	if err := json.Unmarshal(registration.Body.Bytes(), &accepted); err != nil {
+		t.Fatalf("decoding registration acknowledgment: %v", err)
+	}
+	if accepted.Verification.ChallengeID == "" {
+		t.Fatal("registration returned no verification challenge")
+	}
+	if strings.Contains(accepted.Verification.MaskedEmail, journeyEmail) {
+		t.Fatal("the acknowledgment echoed the full address")
 	}
 
-	// 2. Dispatch and follow the credential from the actual rendered email.
+	// 2. Dispatch and read the code out of the actual rendered email.
 	dispatchTransactionalEmail(t, dispatcher)
-	verificationToken := actionCredential(t, sender.Messages(), "/verify-email/result")
-	if response := browser.send(
-		http.MethodPost, "/api/v1/email-verifications",
-		`{"token":"`+verificationToken+`"}`,
-	); response.Code != http.StatusOK {
-		t.Fatalf("verification = %d, want 200 (%s)", response.Code, response.Body)
-	}
+	code := verificationCodeFromEmail(t, sender.Messages())
 
-	// 3. Sign in.
+	// 3. Proving the code activates the Account and signs the Student in, in
+	//    one step. Asking for the password again immediately after they proved
+	//    control of the mailbox would establish nothing further.
+	verification := browser.send(
+		http.MethodPost, "/api/v1/email-verification-codes",
+		`{"challenge_id":"`+accepted.Verification.ChallengeID+`","code":"`+code+`"}`,
+	)
+	if verification.Code != http.StatusCreated {
+		t.Fatalf("verification = %d, want 201 (%s)", verification.Code, verification.Body)
+	}
+	browser.csrf = csrfFromSessionResponse(t, verification.Body.Bytes())
+	if browser.sessionCookie() == nil {
+		t.Fatal("verification issued no session cookie")
+	}
+	// The session it produced is an ordinary one and answers an ordinary read.
+	if resolved := browser.send(http.MethodGet, "/api/v1/session", ""); resolved.Code != http.StatusOK {
+		t.Fatalf("session after verification = %d, want 200 (%s)", resolved.Code, resolved.Body)
+	}
+	if signedOut := browser.send(http.MethodDelete, "/api/v1/session", ""); signedOut.Code != http.StatusOK &&
+		signedOut.Code != http.StatusNoContent {
+		t.Fatalf("sign out after verification = %d (%s)", signedOut.Code, signedOut.Body)
+	}
+	// Signing out left the browser holding a session CSRF token for a family
+	// that no longer exists. Signing in is an anonymous request, so the
+	// anonymous capability is re-obtained exactly as a real browser would.
+	browser.bootstrap()
+
+	// 4. Sign in with the password, which the verification step never replaced.
 	login := `{"email":"` + journeyEmail + `","password":"` + journeyPassword + `"}`
 	response := browser.send(http.MethodPost, "/api/v1/sessions", login)
 	if response.Code != http.StatusCreated {

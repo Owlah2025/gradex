@@ -3,8 +3,11 @@ package httpapi
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 func TestBatchB_AccessInvariants(t *testing.T) {
@@ -114,4 +117,38 @@ func TestBatchB_AccessInvariants(t *testing.T) {
 			t.Error("access_routes.go missing requireSessionMutationSecurity middleware")
 		}
 	})
+}
+
+// TestAuthenticatedPurchaseIsMeteredByAPolicyItCanSatisfy is the regression
+// guard for a defect that refused every purchase.
+//
+// The authenticated route was first mounted behind the public purchase policy.
+// That policy budgets an anonymous browser and includes the anonymous-session
+// dimension; an authenticated request carries no anonymous identifier, so the
+// limiter could not evaluate one of its rules — and a fail-closed policy that
+// cannot evaluate a rule answers UNAVAILABLE. Every confirmation returned 503.
+//
+// The rule this locks in is general: a policy mounted on an authenticated route
+// may only budget dimensions such a request actually has.
+func TestAuthenticatedPurchaseIsMeteredByAPolicyItCanSatisfy(t *testing.T) {
+	policy := ratelimit.StudentPurchaseRequestsPolicy()
+	if policy.Endpoint != "me-purchase-requests" {
+		t.Fatalf("policy endpoint = %q", policy.Endpoint)
+	}
+	for _, rule := range policy.Rules {
+		if rule.Dimension == ratelimit.DimensionAnonymous {
+			t.Fatal("the authenticated purchase route is budgeted on an anonymous identifier it never carries")
+		}
+	}
+	// Fail-closed is retained deliberately: an unmetered route into the Admin
+	// sales queue is worse than a refused one.
+	if !policy.FailClosed {
+		t.Fatal("the authenticated purchase policy stopped failing closed")
+	}
+	// And the route is required to be composed with it, so a foundation built
+	// without the policy refuses at construction rather than at the first
+	// confirmation.
+	if !slices.Contains(requiredStudentAdmissionPolicyEndpoints[:], "me-purchase-requests") {
+		t.Fatal("the purchase endpoint policy is no longer required at construction")
+	}
 }

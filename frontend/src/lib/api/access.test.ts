@@ -13,7 +13,7 @@ import {
   getStudentCourseAccessInvitation,
   acceptStudentCourseAccessInvitation,
   getStudentCourseAccessHistory,
-  createPurchaseRequest,
+  createStudentPurchaseRequest,
   listAdminPurchaseRequests,
   confirmPurchaseRequestPayment,
 	  cancelPurchaseRequest,
@@ -138,11 +138,16 @@ test("access API client forwards requests to correct backend endpoints", async (
 	if (u.includes("/admin/purchase-requests/pr-internal/cancel")) {
 		return new Response(JSON.stringify({ id: "pr-internal", state: "CANCELLED" }), { status: 200 });
 	}
-    if (u.includes("/purchase-requests") && method === "POST") {
+    if (u.includes("/me/purchase-requests") && method === "POST") {
       return new Response(
         JSON.stringify({
           reference: "GRX-1000",
           whatsapp_url: "https://wa.me/15550000000?text=Operating%20Systems",
+          course_title: "Operating Systems",
+          price_minor_units: 25000,
+          currency: "KWD",
+          state: "WAITING_PAYMENT",
+          reused: false,
         }),
         { status: 201 },
       );
@@ -259,13 +264,12 @@ test("access API client forwards requests to correct backend endpoints", async (
     const hist = await getStudentCourseAccessHistory("en", "csrf-token-123");
     assert.equal(hist?.items?.[0]?.has_active_access, true);
 
-    // 11. A public Purchase Request has only Course identity and email. The
-    // browser never supplies a price, a payment state, or an entitlement flag.
-    const purchase = await createPurchaseRequest(
-      "c-1",
-      "student@example.com",
-      "en",
-    );
+    // 11. A Purchase Request carries the Course identity and nothing else. The
+    // browser supplies no email, no price, no payment state, and no
+    // entitlement flag: every one of those is read from the server's own
+    // records, and the email in particular decides where Course access is
+    // eventually sent.
+    const purchase = await createStudentPurchaseRequest("c-1", "en", "csrf-token-123");
     assert.equal(purchase.reference, "GRX-1000");
     assert.match(purchase.whatsapp_url, /^https:\/\/wa\.me\//);
 
@@ -288,17 +292,22 @@ test("access API client forwards requests to correct backend endpoints", async (
 	);
 	assert.equal(cancelledPurchase?.state, "CANCELLED");
 
-    const publicPurchase = requests.find(
-      (request) =>
-        request.url.includes("/purchase-requests") &&
-        !request.url.includes("/admin/"),
+    const studentPurchase = requests.find((request) =>
+      request.url.includes("/me/purchase-requests"),
     );
-    assert.deepEqual(publicPurchase?.body, {
-      course_id: "c-1",
-      email: "student@example.com",
-    });
-    assert.equal(JSON.stringify(publicPurchase?.body).includes("price"), false);
-    assert.equal(JSON.stringify(publicPurchase?.body).includes("paid"), false);
+    assert.deepEqual(studentPurchase?.body, { course_id: "c-1" });
+    // The absence of an email field is the security property, not a detail: a
+    // client-supplied address on this route would let any caller aim someone
+    // else's Course access at a mailbox they control.
+    const serialized = JSON.stringify(studentPurchase?.body);
+    assert.equal(serialized.includes("email"), false);
+    assert.equal(serialized.includes("price"), false);
+    assert.equal(serialized.includes("paid"), false);
+    // It is an authenticated call: the session CSRF token must travel with it.
+    assert.equal(
+      (studentPurchase?.headers as Record<string, string>)["X-CSRF-Token"],
+      "csrf-token-123",
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

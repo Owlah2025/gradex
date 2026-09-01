@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -394,14 +395,14 @@ func TestProgressRoutePreservesCompletionAndResumeAcrossRevisionReplacement(t *t
 		t.Fatalf("initial protected playback = %d %s", response.Code, response.Body.String())
 	}
 	progressPath := "/api/v1/learn/lessons/" + f.lessonID + "/progress"
-	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":54,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusNoContent {
+	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":54,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("trusted 90%% progress = %d %s", response.Code, response.Body.String())
 	}
-	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":12,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusNoContent {
+	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":12,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("backward/retried progress = %d %s", response.Code, response.Body.String())
 	}
 	f.replaceLiveRevision(t)
-	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":18,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusNoContent {
+	if response := f.request(http.MethodPut, progressPath, `{"position_seconds":18,"asset_version_id":"`+f.versionID+`"}`); response.Code != http.StatusOK {
 		t.Fatalf("progress after instructor revision replacement = %d %s", response.Code, response.Body.String())
 	}
 	if response := f.request(http.MethodPost, playbackPath, ""); response.Code != http.StatusOK {
@@ -464,5 +465,94 @@ func TestProgressDelayedAfterRevocationIsRefusedBeforeMutation(t *testing.T) {
 	}
 	if rows != 0 {
 		t.Fatalf("revoked delayed request wrote %d Progress rows", rows)
+	}
+}
+
+// TestProgressWriteReturnsCanonicalStateForTheRenderedSurfaces is the
+// server half of "visible progress updates without a refresh".
+//
+// The write used to answer 204. That was correct as a persistence contract and
+// wrong as a product contract: the browser learned only that the request had
+// been accepted, so every surface showing completion or a course percentage
+// kept rendering whatever it had at page load. Nothing short of a reload could
+// correct it, because nothing else told the page what the server now believed.
+//
+// What is asserted here is that the response carries the state the server
+// computed — not the state the request claimed. The completion rule and the
+// aggregate stay server-side; the browser renders them.
+func TestProgressWriteReturnsCanonicalStateForTheRenderedSurfaces(t *testing.T) {
+	f := newLearningIntegrationFixture(t)
+	playbackPath := "/api/v1/learn/lessons/" + f.lessonID + "/playback"
+	if response := f.request(http.MethodPost, playbackPath, ""); response.Code != http.StatusOK {
+		t.Fatalf("protected playback = %d %s", response.Code, response.Body.String())
+	}
+	progressPath := "/api/v1/learn/lessons/" + f.lessonID + "/progress"
+
+	type confirmation struct {
+		LessonProgress struct {
+			PositionSeconds float64 `json:"position_seconds"`
+			Completed       bool    `json:"completed"`
+		} `json:"lesson_progress"`
+		CourseProgress *struct {
+			CompletedLessons int `json:"completed_lessons"`
+			TotalLessons     int `json:"total_lessons"`
+			Percent          int `json:"percent"`
+		} `json:"course_progress"`
+	}
+	confirm := func(t *testing.T, seconds string) confirmation {
+		t.Helper()
+		response := f.request(http.MethodPut, progressPath,
+			`{"position_seconds":`+seconds+`,"asset_version_id":"`+f.versionID+`"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("progress write = %d %s", response.Code, response.Body.String())
+		}
+		if response.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("progress confirmation Cache-Control = %q", response.Header().Get("Cache-Control"))
+		}
+		var body confirmation
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("progress confirmation is not JSON: %v (%s)", err, response.Body.String())
+		}
+		if body.CourseProgress == nil {
+			t.Fatal("progress confirmation carries no course aggregate")
+		}
+		return body
+	}
+
+	partial := confirm(t, "12")
+	if partial.LessonProgress.Completed {
+		t.Fatal("a partial position was reported as completed")
+	}
+	if partial.LessonProgress.PositionSeconds != 12 {
+		t.Fatalf("confirmed position = %v, want 12", partial.LessonProgress.PositionSeconds)
+	}
+	if partial.CourseProgress.CompletedLessons != 0 || partial.CourseProgress.TotalLessons == 0 {
+		t.Fatalf("partial course aggregate = %+v", *partial.CourseProgress)
+	}
+
+	// Past the completion threshold. The server decides this, and the response
+	// is how the browser finds out.
+	finished := confirm(t, "54")
+	if !finished.LessonProgress.Completed {
+		t.Fatal("a completing position was not confirmed as completed")
+	}
+	if finished.CourseProgress.CompletedLessons != 1 {
+		t.Fatalf("completed course aggregate = %+v", *finished.CourseProgress)
+	}
+	if finished.CourseProgress.Percent == partial.CourseProgress.Percent {
+		t.Fatalf("course percent did not move on completion: %d", finished.CourseProgress.Percent)
+	}
+
+	// A rewind after completion must not un-complete the Lesson, and the
+	// browser must be told the completion stands rather than inferring it.
+	rewound := confirm(t, "5")
+	if !rewound.LessonProgress.Completed {
+		t.Fatal("rewinding after completion reported the Lesson as incomplete")
+	}
+	if rewound.CourseProgress.CompletedLessons != 1 {
+		t.Fatalf("rewound course aggregate = %+v", *rewound.CourseProgress)
+	}
+	if rewound.LessonProgress.PositionSeconds != 5 {
+		t.Fatalf("rewound position = %v, want 5", rewound.LessonProgress.PositionSeconds)
 	}
 }

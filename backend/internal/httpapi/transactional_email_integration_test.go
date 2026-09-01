@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -79,5 +80,35 @@ func actionCredential(t *testing.T, messages []transactionalemail.CapturedMessag
 		}
 	}
 	t.Fatalf("no transactional email contained action path %q", path)
+	return ""
+}
+
+// verificationCodeFromEmail reads the six-digit code out of a rendered
+// verification message.
+//
+// It is deliberately a different helper from actionCredential, not a variant of
+// it: a code is not carried in a URL and must not be. Asserting the message has
+// no link at all is part of what this reads for — a message with both a link
+// and a code would put two live credentials for one challenge in one mailbox.
+func verificationCodeFromEmail(t *testing.T, messages []transactionalemail.CapturedMessage) string {
+	t.Helper()
+	pattern := regexp.MustCompile(`\b\d{6}\b`)
+	for _, captured := range messages {
+		if captured.Message.Subject == "" {
+			continue
+		}
+		text := captured.Message.Text
+		if !strings.Contains(strings.ToLower(text), "code") &&
+			!strings.Contains(text, "الرمز") {
+			continue
+		}
+		if strings.Contains(text, "https://") {
+			t.Fatal("a verification code message carried a URL")
+		}
+		if code := pattern.FindString(text); code != "" {
+			return code
+		}
+	}
+	t.Fatal("no transactional email carried a verification code")
 	return ""
 }

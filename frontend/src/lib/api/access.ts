@@ -138,6 +138,13 @@ export interface PurchaseRequestListResponse {
 export interface PurchaseRequestCreated {
   reference: string;
   whatsapp_url: string;
+  /** Resolved to the request's language by the server. */
+  course_title: string;
+  price_minor_units: number;
+  currency: string;
+  state: PurchaseRequestState;
+  /** True when an already-active request was returned instead of a new one. */
+  reused: boolean;
 }
 
 export interface ConfirmPurchaseRequestResult {
@@ -380,16 +387,32 @@ export async function getStudentCourseAccessHistory(
   );
 }
 
-export async function createPurchaseRequest(
+/**
+ * Records the signed-in Student's intent to buy one Course.
+ *
+ * The body carries the Course and nothing else. There is deliberately no email
+ * parameter: the address on a purchase request decides where Course access is
+ * eventually sent, and the server reads it from the authenticated Account. An
+ * earlier version of this call took an address from an anonymous browser and
+ * returned a WhatsApp handoff in the same response, which let any visitor put
+ * any mailbox into the sales queue.
+ *
+ * This is also the only call that produces the WhatsApp URL. Nothing before the
+ * Student's explicit confirmation reaches it.
+ */
+export async function createStudentPurchaseRequest(
   courseId: string,
-  email: string,
   lang: "ar" | "en" = "en",
+  csrf?: string,
 ) {
-  return postJSON<PurchaseRequestCreated>(
-    "/purchase-requests",
-    { course_id: courseId, email },
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<PurchaseRequestCreated>(
+    "/me/purchase-requests",
+    "POST",
     lang,
-  );
+    token,
+    { course_id: courseId },
+  ) as Promise<PurchaseRequestCreated>;
 }
 
 export async function listAdminPurchaseRequests(

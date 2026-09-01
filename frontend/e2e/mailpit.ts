@@ -15,6 +15,7 @@ const MAILPIT_BASE = process.env.GRADEX_E2E_MAILPIT_API || "http://127.0.0.1:802
 type MailpitSummary = {
   ID: string;
   Subject: string;
+  Created: string;
   To: Array<{ Address: string }>;
 };
 
@@ -63,6 +64,54 @@ export async function waitForMessageTo(
   }
   throw new Error(
     `No transactional email reached Mailpit for ${recipient} within ${timeoutMs}ms (last match count ${lastCount}).`,
+  );
+}
+
+/**
+ * Waits for a message to `recipient` that `matches`, newest first.
+ *
+ * `waitForMessageTo` takes whatever the search returns first, which is right
+ * when an address receives exactly one message in its lifetime. Mailpit is a
+ * shared development instance and is not reset between runs, so an address that
+ * receives more than one kind of message over time — a verification code today,
+ * a Course invitation an hour ago — needs the caller to say which one it means.
+ * Taking the wrong one produces a failure that looks like the product not
+ * sending anything.
+ */
+export async function waitForMessageMatching(
+  recipient: string,
+  matches: (message: MailpitMessage) => boolean,
+  options: { timeoutMs?: number; notBefore?: Date } = {},
+): Promise<MailpitMessage> {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  // A small tolerance for clock skew between this process and the mail server.
+  const floor = options.notBefore ? options.notBefore.getTime() - 5_000 : null;
+  const deadline = Date.now() + timeoutMs;
+  let inspected = 0;
+  while (Date.now() < deadline) {
+    const search = await readJSON<{ messages: MailpitSummary[] }>(
+      `/api/v1/search?query=${encodeURIComponent(`to:${recipient}`)}&limit=50`,
+    );
+    const summaries = (search.messages ?? [])
+      .filter((message) =>
+        (message.To ?? []).some((to) => to.Address.toLowerCase() === recipient.toLowerCase()),
+      )
+      // Newest first, explicitly. Mailpit's ordering is not part of its
+      // contract, and a stale message that merely *looks* right — an expired
+      // code from an earlier run against the same address — is worse than no
+      // message at all: the journey types it and is correctly refused.
+      .filter((message) => floor === null || Date.parse(message.Created) >= floor)
+      .sort((left, right) => Date.parse(right.Created) - Date.parse(left.Created));
+    inspected = summaries.length;
+    for (const summary of summaries) {
+      const message = await readJSON<MailpitMessage>(`/api/v1/message/${summary.ID}`);
+      if (matches(message)) return message;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(
+    `No matching transactional email reached Mailpit for ${recipient} within ${timeoutMs}ms ` +
+      `(${inspected} candidate message(s) to that address were inspected).`,
   );
 }
 

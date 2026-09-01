@@ -11,6 +11,8 @@ import { catalogueHrefForContext } from "@/components/academic/catalogue-context
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Container } from "@/components/layout/container";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
+import { routes } from "@/components/layout/nav-items";
 import { EmptyState } from "@/components/common/empty-state";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingState, SkeletonBlock } from "@/components/common/loading-state";
@@ -131,7 +133,27 @@ export function CourseDetail({
       <Navbar />
       <main id="main" tabIndex={-1} className="py-8 outline-none sm:py-10">
         <Container>
-          <BackToCatalogue href={backHref} label={dictionary.academicContext.backToCatalogue} />
+          {/* Until the Course is known there is no hierarchy to describe, so the
+              single back link stands in. Once it loads, the breadcrumb says the
+              same thing and two more: where this page sits, and that "up" is
+              somewhere the reader can actually go.
+
+              The Courses crumb reuses the academic-context-aware href, so
+              stepping up returns to the filtered catalogue the visitor was
+              browsing rather than to an unfiltered one. */}
+          {state.status === "ready" ? (
+            <Breadcrumbs
+              locale={routeLocale}
+              label={dictionary.nav.breadcrumb}
+              items={[
+                { label: dictionary.nav.home, href: routes.home(routeLocale) },
+                { label: dictionary.nav.courses, href: backHref },
+                { label: state.course.title },
+              ]}
+            />
+          ) : (
+            <BackToCatalogue href={backHref} label={dictionary.academicContext.backToCatalogue} />
+          )}
 
           {state.status === "loading" ? <CourseDetailSkeleton label={copy.loading} /> : null}
 

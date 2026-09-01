@@ -134,6 +134,7 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 		"SESSION_CSRF_KEY":             "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 		"ANONYMOUS_COOKIE_SIGNING_KEY": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
 		"ANONYMOUS_CSRF_KEY":           "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+		"IDENTITY_OTP_PEPPER":          "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
 		"ADMISSION_LIMITER_HMAC_KEY":   "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
 	})
 	if err != nil {
@@ -206,11 +207,22 @@ func TestDevelopmentStaffLifecycleMountsWithoutStudentRegistration(t *testing.T)
 	for _, route := range []string{
 		"POST /api/v1/password-reset-requests",
 		"POST /api/v1/password-resets",
-		"POST /api/v1/purchase-requests",
 	} {
 		if !mounted[route] {
 			t.Fatalf("required anonymous route %q is not mounted while registration is disabled", route)
 		}
+	}
+	// Purchase requests are no longer anonymous. The public route was withdrawn
+	// when a request became something that belongs to a verified Student, so a
+	// posture with registration disabled deliberately offers no way to create
+	// one — the anonymous boundary is still composed for the shared cookie,
+	// CSRF, and rate-decision primitives, and mounts nothing that could put a
+	// caller-supplied address into the Admin sales queue.
+	if mounted["POST /api/v1/purchase-requests"] {
+		t.Fatal("the withdrawn anonymous purchase route was mounted")
+	}
+	if !mounted["POST /api/v1/me/purchase-requests"] {
+		t.Fatal("the Student purchase route is not mounted")
 	}
 
 	// A real request through the production-composed router proves recovery is
@@ -369,6 +381,7 @@ func TestDevelopmentStaffCompositionFailsClosedOnScreeningMode(t *testing.T) {
 		"SESSION_CSRF_KEY":             "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 		"ANONYMOUS_COOKIE_SIGNING_KEY": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
 		"ANONYMOUS_CSRF_KEY":           "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+		"IDENTITY_OTP_PEPPER":          "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
 		"ADMISSION_LIMITER_HMAC_KEY":   "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
 	})
 	if err != nil {
@@ -406,6 +419,7 @@ func TestDevelopmentStaffCompositionRequiresSessions(t *testing.T) {
 		"OUTBOX_PROTECTED_PAYLOAD_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 		"ANONYMOUS_COOKIE_SIGNING_KEY": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 		"ANONYMOUS_CSRF_KEY":           "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+		"IDENTITY_OTP_PEPPER":          "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
 		"ADMISSION_LIMITER_HMAC_KEY":   "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
 	})
 	if err != nil {
@@ -450,6 +464,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		"SESSION_CSRF_KEY":             "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
 		"ANONYMOUS_COOKIE_SIGNING_KEY": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
 		"ANONYMOUS_CSRF_KEY":           "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+		"IDENTITY_OTP_PEPPER":          "OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
 		"ADMISSION_LIMITER_HMAC_KEY":   "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
 	})
 	if err != nil {

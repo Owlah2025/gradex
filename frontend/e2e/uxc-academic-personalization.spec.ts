@@ -289,7 +289,11 @@ test.describe("UX-C anonymous academic personalisation", () => {
     const firstCourse = page.getByTestId("featured-courses-list").getByRole("link").first();
     if (await firstCourse.count()) {
       await firstCourse.click();
-      const back = page.getByTestId("course-detail-back");
+      // The way back up is the breadcrumb's Courses crumb, which carries the
+      // same academic context the standalone back link did.
+      const back = page
+        .getByTestId("breadcrumbs")
+        .getByRole("link", { name: "Courses", exact: true });
       await expect(back).toBeVisible();
       await expect(back).toHaveAttribute(
         "href",

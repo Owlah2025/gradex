@@ -139,6 +139,11 @@ export default async function globalSetup(config?: { workers?: number }) {
       SESSION_CSRF_KEY: "0123456789abcdef0123456789abcdef",
       ANONYMOUS_COOKIE_SIGNING_KEY: "1123456789abcdef0123456789abcdef",
       ANONYMOUS_CSRF_KEY: "2123456789abcdef0123456789abcdef",
+      // The HMAC key that keeps a six-digit verification code unsearchable in
+      // the database. Registration refuses to start without it, deliberately:
+      // a deployment that could only store an unkeyed digest of a
+      // million-value space must not come up quietly.
+      IDENTITY_OTP_PEPPER: "3123456789abcdef0123456789abcdef",
       // Per-run limiter key namespace.
       //
       // Redis is shared between runs even though each run gets its own PostgreSQL database, and
@@ -169,6 +174,10 @@ export default async function globalSetup(config?: { workers?: number }) {
       "OUTBOX_PROTECTED_PAYLOAD_KEY", "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", "REDIS_ADDR",
       "S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SECRET_KEY", "AUTH_FAKE_MODE",
       "STUDENT_REGISTRATION_ENABLED", "REGISTRATION_POLICY_SET_ID", "PASSWORD_SCREEN_MODE",
+      // The seeder's verification query builds the production configuration
+      // the same way the API does, and registration refuses to load without
+      // the OTP pepper.
+      "IDENTITY_OTP_PEPPER",
       "PUBLIC_ORIGIN", "CORS_ALLOWED_ORIGINS", "CORS_ALLOW_CREDENTIALS"]) {
       process.env[key] = (env as Record<string, string>)[key];
     }

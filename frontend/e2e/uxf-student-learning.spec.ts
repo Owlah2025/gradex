@@ -179,10 +179,17 @@ for (const locale of ["en", "ar"] as const) {
     // The Lesson knows which Course it is in, and says so where the Student can act on it.
     await expect(page.getByRole("link", { name: t.courseTitle })).toBeVisible();
 
-    // Where the Student is standing is marked in the contents, semantically.
+    // Exactly one element announces "current page", and it is the breadcrumb's
+    // last item — the canonical place for it. Two elements both claiming to be
+    // the current page is the confusion this count guards against.
     const current = page.locator('[aria-current="page"]');
     await expect(current).toHaveCount(1);
     await expect(current).toContainText(t.lessonOne);
+
+    // Where the Student is standing *within the outline* is marked separately
+    // and semantically, so the contents still say "you are here".
+    const outlinePosition = page.locator('[aria-current="location"]');
+    await expect(outlinePosition.first()).toContainText(t.lessonOne);
 
     // The first Lesson offers no previous action — it says so instead.
     await expect(page.getByText(t.firstLesson)).toBeVisible();

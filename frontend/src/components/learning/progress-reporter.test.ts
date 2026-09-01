@@ -427,3 +427,63 @@ test("disposing a default-path reporter cancels pending retries and sends nothin
     harness.restore();
   }
 });
+
+test("a successful write hands back the canonical state the server computed", async () => {
+  const recorder = requestRecorder();
+  const timer = new FakeTimer();
+  const confirmations: unknown[] = [];
+  const reporter = new ProgressReporter({
+    lessonID: "lesson-1",
+    assetVersionID: "asset-1",
+    fetchImplementation: recorder.fetch,
+    timer,
+    onConfirmed: (confirmation) => confirmations.push(confirmation),
+  });
+
+  reporter.reportPosition(54);
+  recorder.requests[0].deferred.resolve(
+    new Response(
+      JSON.stringify({
+        lesson_progress: { position_seconds: 54, completed: true },
+        course_progress: { completed_lessons: 1, total_lessons: 4, percent: 25 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+  // Reading the body is asynchronous, so this waits a full turn of the event
+  // loop rather than a fixed number of microtasks.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(confirmations, [
+    {
+      lessonID: "lesson-1",
+      lesson: { position_seconds: 54, completed: true },
+      course: { completed_lessons: 1, total_lessons: 4, percent: 25 },
+    },
+  ]);
+  reporter.dispose();
+});
+
+test("a server that returns no body is still a successful write", async () => {
+  const recorder = requestRecorder();
+  const timer = new FakeTimer();
+  const confirmations: unknown[] = [];
+  const reporter = new ProgressReporter({
+    lessonID: "lesson-1",
+    assetVersionID: "asset-1",
+    fetchImplementation: recorder.fetch,
+    timer,
+    onConfirmed: (confirmation) => confirmations.push(confirmation),
+  });
+
+  reporter.reportPosition(12);
+  // An older server answering 204, or any unparseable body: nothing new to
+  // render, and emphatically not a retry — the write already happened.
+  recorder.requests[0].deferred.resolve(new Response(null, { status: 204 }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(confirmations.length, 0);
+  assert.equal(recorder.requests.length, 1, "a bodyless success was retried");
+  assert.equal(timer.count, 0, "a bodyless success scheduled a retry");
+  reporter.dispose();
+});

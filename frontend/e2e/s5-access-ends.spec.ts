@@ -343,7 +343,10 @@ test.describe("T042 — access ending mid-session denies the next issuance and t
 
         // A real, accepted production Progress write through the production reporter.
         const acceptedWrite = await reportProgressThroughPlayer(page, scenario.lessonID, 9);
-        expect(acceptedWrite.status, "baseline Progress write must be accepted").toBe(204);
+        // 200 with the canonical state, not 204: the browser needs the
+        // completion and the Course aggregate the server just computed, or the
+        // visible progress stays stale until a reload.
+        expect(acceptedWrite.status, "baseline Progress write must be accepted").toBe(200);
 
         const baseline = requireProgressRow(
           queryProgress(progressQuery(scenario)),

@@ -149,6 +149,9 @@ type AccessBody = { status: number; json: unknown };
 
 const ANONYMOUS: AccessBody = { status: 401, json: UNAUTHORIZED };
 
+/** Signed in, with no invitation and no entitlement for this Course. */
+const SIGNED_IN_NO_ACCESS: AccessBody = { status: 200, json: { items: [] } };
+
 const ENTITLED: AccessBody = {
   status: 200,
   json: {
@@ -555,7 +558,12 @@ test("the academic context survives catalogue, course and the way back", async (
   await page.getByRole("link", { name: localized.en.title }).first().click();
   await expect(page.getByTestId("course-detail-title")).toBeVisible();
 
-  const back = page.getByTestId("course-detail-back");
+  // The way back up is the breadcrumb now, and it carries the same academic
+  // context the standalone back link did: stepping up returns to the filtered
+  // catalogue the visitor was browsing, not to an unfiltered one.
+  const back = page
+    .getByTestId("breadcrumbs")
+    .getByRole("link", { name: en.nav.courses, exact: true });
   await expect(back).toHaveAttribute(
     "href",
     "/en/catalog?institution=kuwait-university&program=computer-science",
@@ -613,4 +621,232 @@ test("the unavailable state has no accessibility violations", async ({ page }) =
     results.violations.map((violation) => violation.id),
     results.violations.map((v) => `${v.id}: ${v.nodes[0]?.failureSummary ?? ""}`).join("\n"),
   ).toEqual([]);
+});
+
+/**
+ * The purchase journey, from the CTA to the handoff.
+ *
+ * Three properties are under test and each was a defect before: an anonymous
+ * visitor cannot create a purchase request at all; a signed-in Student is shown
+ * what they are about to request before anything exists; and WhatsApp opens
+ * only after the explicit confirmation, never as a side effect of pressing
+ * "Buy this course".
+ */
+
+/** Fails the test if anything creates a request or leaves for WhatsApp. */
+function watchForPrematurePurchase(page: Page): { assertQuiet(): void } {
+  const violations: string[] = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.startsWith("https://wa.me/")) violations.push("navigated to WhatsApp");
+    if (request.method() === "POST" && new URL(url).pathname.endsWith("/purchase-requests")) {
+      violations.push(`created a purchase request via ${new URL(url).pathname}`);
+    }
+  });
+  return {
+    assertQuiet() {
+      expect(violations, "the purchase journey acted before the Student confirmed").toEqual([]);
+    },
+  };
+}
+
+test("an anonymous visitor is sent to sign in, and creates nothing on the way", async ({ page }) => {
+  await serveCourse(page, "en");
+  await openCourse(page, "en");
+
+  const watch = watchForPrematurePurchase(page);
+  await page.getByTestId("purchase-request-open").click();
+
+  // No email field, no request, no handoff — only the two ways to become the
+  // Student a purchase request can belong to.
+  await expect(page.getByTestId("purchase-sign-in-required")).toBeVisible();
+  await expect(page.locator('input[type="email"]')).toHaveCount(0);
+  const signIn = page.getByTestId("purchase-sign-in");
+  const register = page.getByTestId("purchase-create-account");
+  await expect(signIn).toBeVisible();
+  await expect(register).toBeVisible();
+  watch.assertQuiet();
+
+  // Both carry this Course and the intent to buy it, so the journey can come
+  // straight back to the confirmation rather than to a button already pressed.
+  for (const control of [signIn, register]) {
+    const href = await control.getAttribute("href");
+    expect(href).toBeTruthy();
+    const returnTo = new URL(href!, "https://gradex.test").searchParams.get("returnTo");
+    expect(returnTo).toBeTruthy();
+    const destination = new URL(returnTo!, "https://gradex.test");
+    expect(destination.pathname).toBe(`/en/catalog/${SLUG}`);
+    expect(destination.searchParams.get("purchase")).toBe("1");
+  }
+  expect((await signIn.getAttribute("href"))!.startsWith("/login")).toBe(true);
+  expect((await register.getAttribute("href"))!.startsWith("/register")).toBe(true);
+});
+
+test("a signed-in Student sees what is being requested before anything is requested", async ({
+  page,
+}) => {
+  await serveCourse(page, "en", { access: SIGNED_IN_NO_ACCESS });
+  await openCourse(page, "en");
+
+  const watch = watchForPrematurePurchase(page);
+  await page.getByTestId("purchase-request-open").click();
+
+  const confirmation = page.getByTestId("purchase-confirmation");
+  await expect(confirmation).toBeVisible();
+  // Both values come from the Course as the server described it. Neither is
+  // typed by the browser, and neither is sent back on confirm.
+  await expect(page.getByTestId("purchase-course-title")).toContainText(localized.en.title);
+  await expect(page.getByTestId("purchase-price")).toContainText("12.500");
+  await expect(confirmation).toContainText(en.access.purchase.intro);
+  await expect(page.locator('input[type="email"]')).toHaveCount(0);
+  watch.assertQuiet();
+
+  // Cancelling leaves nothing behind and reopens nothing on reload.
+  await page.getByTestId("purchase-request-cancel").click();
+  await expect(page.getByTestId("purchase-confirmation")).toHaveCount(0);
+  watch.assertQuiet();
+});
+
+test("WhatsApp opens only after the explicit confirmation, with a server-built handoff", async ({
+  page,
+}) => {
+  await serveCourse(page, "en", { access: SIGNED_IN_NO_ACCESS });
+  // The external handoff is intercepted so CI sends no WhatsApp message.
+  await page.route("https://wa.me/**", (route) => route.abort());
+
+  let submitted: unknown;
+  await page.route("**/api/v1/me/purchase-requests", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    submitted = route.request().postDataJSON();
+    await route.fulfill({
+      status: 201,
+      json: {
+        reference: "GRX-ABCDEF0123456789",
+        whatsapp_url: "https://wa.me/15550000000?text=Hello",
+        course_title: localized.en.title,
+        price_minor_units: 12500,
+        currency: "KWD",
+        state: "WAITING_PAYMENT",
+        reused: false,
+      },
+    });
+  });
+
+  await openCourse(page, "en");
+  const watch = watchForPrematurePurchase(page);
+  await page.getByTestId("purchase-request-open").click();
+  await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
+  watch.assertQuiet();
+
+  const handoff = page.waitForRequest(
+    (request) => request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
+  );
+  await page.getByTestId("purchase-request-submit").click({ noWaitAfter: true });
+  const handoffRequest = await handoff;
+  expect(handoffRequest.url()).toBe("https://wa.me/15550000000?text=Hello");
+
+  // The body carries the Course and nothing else. An address here would decide
+  // where Course access is eventually sent, and a price here would be a figure
+  // the browser chose.
+  expect(submitted).toEqual({ course_id: COURSE_ID });
+});
+
+test("the purchase intent survives the auth journey and reopens the confirmation", async ({
+  page,
+}) => {
+  await serveCourse(page, "en", { access: SIGNED_IN_NO_ACCESS });
+  // This is the state a Student is in on returning from sign-in or
+  // verification: the destination they were sent back to carries the intent.
+  await page.goto(`/en/catalog/${SLUG}?purchase=1`);
+  await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
+  await expect(page.getByTestId("purchase-course-title")).toContainText(localized.en.title);
+});
+
+test("an entitled Student is never offered a purchase, intent flag or not", async ({ page }) => {
+  await serveCourse(page, "en", { access: ENTITLED });
+  await page.goto(`/en/catalog/${SLUG}?purchase=1`);
+  await expect(page.getByTestId("course-access-go-to-course")).toBeVisible();
+  await expect(page.getByTestId("purchase-confirmation")).toHaveCount(0);
+  await expect(page.getByTestId("purchase-request-open")).toHaveCount(0);
+  await expect(page.getByTestId("purchase-sign-in-required")).toHaveCount(0);
+});
+
+/**
+ * Navigation: where this page sits, and the ways out of it.
+ */
+for (const locale of ["en", "ar"] as const) {
+  test(`Course Details says where it sits and offers a route up (${locale})`, async ({ page }) => {
+    await serveCourse(page, locale);
+    await openCourse(page, locale);
+
+    const dictionary = locale === "ar" ? ar : en;
+    const crumbs = page.getByTestId("breadcrumbs");
+    await expect(crumbs).toBeVisible();
+    const links = crumbs.getByRole("link");
+    await expect(links).toHaveCount(2);
+    await expect(links.nth(0)).toHaveAttribute("href", "/");
+    await expect(links.nth(0)).toHaveText(dictionary.nav.home);
+    expect(await links.nth(1).getAttribute("href")).toContain(`/${locale}/catalog`);
+    // The page you are on is announced, never a link to itself.
+    const current = crumbs.locator('[aria-current="page"]');
+    await expect(current).toHaveText(localized[locale].title);
+    await expect(crumbs.getByRole("link", { name: localized[locale].title })).toHaveCount(0);
+
+    // And the header offers the same two destinations without the URL bar.
+    const header = page.getByRole("navigation", { name: dictionary.nav.primaryNavigation }).first();
+    await expect(
+      header.getByRole("link", { name: dictionary.nav.home, exact: true }),
+    ).toHaveAttribute("href", "/");
+    await expect(
+      header.getByRole("link", { name: dictionary.nav.courses, exact: true }),
+    ).toHaveAttribute("href", `/${locale}/catalog`);
+    // My Learning belongs to a Student session, and this visitor has none.
+    await expect(
+      header.getByRole("link", { name: dictionary.nav.myLearning, exact: true }),
+    ).toHaveCount(0);
+  });
+}
+
+test("a Student session is offered My Learning in the header", async ({ page }) => {
+  await serveCourse(page, "en", { access: SIGNED_IN_NO_ACCESS });
+  await page.route("**/api/v1/session", (route) =>
+    route.fulfill({
+      json: {
+        status: "AUTHENTICATED",
+        role: "STUDENT",
+        display_name: "Test Student",
+        csrf_token: "test-csrf",
+        idle_expires_at: "2027-01-01T00:00:00Z",
+        absolute_expires_at: "2027-01-01T00:00:00Z",
+      },
+    }),
+  );
+  await openCourse(page, "en");
+  const header = page.getByRole("navigation", { name: en.nav.primaryNavigation }).first();
+  await expect(
+    header.getByRole("link", { name: en.nav.myLearning, exact: true }),
+  ).toHaveAttribute("href", "/en/learn/dashboard");
+});
+
+test("the mobile sheet offers the same destinations as the wide header", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await serveCourse(page, "en");
+  await openCourse(page, "en");
+
+  // Below `lg` the sheet is the only primary navigation there is.
+  await page.getByRole("button", { name: en.meta.openMenu }).click();
+  // `exact`, because the account controls in the same sheet carry a
+  // "Browse courses" button whose accessible name contains "Courses".
+  const sheet = page.getByRole("dialog");
+  await expect(sheet.getByRole("link", { name: en.nav.home, exact: true })).toHaveAttribute(
+    "href",
+    "/",
+  );
+  await expect(sheet.getByRole("link", { name: en.nav.courses, exact: true })).toHaveAttribute(
+    "href",
+    "/en/catalog",
+  );
 });

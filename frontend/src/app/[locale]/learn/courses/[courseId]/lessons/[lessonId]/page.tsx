@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2, Circle, CirclePlay } from "lucide-react";
 import { LessonPlayer } from "@/components/learning/lesson-player";
 import { lessonPlaybackPlan } from "@/components/learning/lesson-state";
 import {
@@ -10,7 +8,8 @@ import {
   LessonNavigation,
 } from "@/components/learning/learning-views";
 import { CurriculumSheet, CurriculumSidebar } from "@/components/learning/lesson-curriculum-panel";
-import { courseCurriculum, lessonState, type CurriculumSection } from "@/components/learning/curriculum-model";
+import { courseCurriculum, type CurriculumSection } from "@/components/learning/curriculum-model";
+import { LessonProgressState } from "@/components/learning/lesson-progress-state";
 import { requestCourseHomeServer, requestLessonReadModelServer } from "@/lib/api/learning-server";
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
@@ -28,7 +27,7 @@ import {
   shellLabels,
   unavailableLabels,
 } from "@/components/learning/learning-label-sets";
-import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -93,46 +92,51 @@ async function LessonContent({
   const labels = dictionary.learning;
   const playerLabels = locale === "ar" ? ar.player : en.player;
   const shell = shellLabels(dictionary);
-  const Backward = locale === "ar" ? ArrowRight : ArrowLeft;
   try {
     const [lesson, contents] = await Promise.all([
       requestLessonReadModelServer(courseID, lessonID, locale),
       courseContentsFor(courseID, locale),
     ]);
     const playbackPlan = lessonPlaybackPlan(lesson.learning_status);
-    const state = lessonState(lesson.progress);
-    const StateIcon =
-      state === "completed" ? CheckCircle2 : state === "in-progress" ? CirclePlay : Circle;
-    const stateText =
-      state === "completed"
-        ? labels.completed
-        : state === "in-progress"
-          ? labels.lessonInProgress
-          : labels.lessonNotStarted;
 
     return (
       <LearningShell
         locale={locale}
         dir={locale === "ar" ? "rtl" : "ltr"}
         labels={shell}
-        courseContext={
-          contents ? (
-            <Link
-              href={`/${locale}/learn/courses/${lesson.course_id}`}
-              className="min-w-0 truncate rounded-md px-2 py-1 font-display text-sm font-bold text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {contents.title}
-            </Link>
-          ) : null
-        }
+        /* The Course used to be named in the header band as a link back to it.
+           The breadcrumb below now says the same thing and two more — which
+           Course, which Lesson, and the way up to My Learning — so keeping the
+           header copy would put two links with the same accessible name and the
+           same destination on one screen. */
       >
         <div className="mx-auto max-w-container px-5 py-6 sm:px-6 sm:py-8">
-          <Button asChild variant="ghost" size="sm" className="-ms-3">
-            <Link href={`/${locale}/learn/courses/${lesson.course_id}`}>
-              <Backward aria-hidden />
-              {labels.backToCourse}
-            </Link>
-          </Button>
+          {/* Where this Lesson sits. The single "back to course" control said
+              one level and nothing about the level above it, so a Student two
+              screens into a Course had no page-provided route to their own
+              Courses — only the header, or the browser's history.
+
+              The Course crumb is rendered only when the contents read
+              succeeded, because that is where the Course's own title comes
+              from; without it the breadcrumb would name the Course by
+              identifier, which is not something to show a Student. */}
+          {/* The single "back to course" button that used to sit here said one
+              level and nothing about the level above it, and named the
+              destination generically. The middle crumb is the same link with
+              the Course's own title on it, so the button was a second control
+              to the same place. */}
+          {contents ? (
+            <Breadcrumbs
+              locale={locale}
+              label={dictionary.nav.breadcrumb}
+              items={[
+                { label: labels.myCourses, href: `/${locale}/learn/dashboard` },
+                { label: contents.title, href: `/${locale}/learn/courses/${lesson.course_id}` },
+                { label: lesson.title },
+              ]}
+            />
+          ) : null}
+
 
           {/* Content first, contents second — in the markup as well as on the screen. From `lg` the
               grid puts the contents in a second column beside the Lesson; below it they collapse to
@@ -150,18 +154,20 @@ async function LessonContent({
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
                   {/* A Lesson's own state, in an icon and a word. Completion is the server's and is
                       reached by watching, not by a control here — so there is no button that could
-                      claim a completion the server has not recorded. */}
-                  <p
-                    data-testid="lesson-state"
-                    data-lesson-state={state}
-                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground"
-                  >
-                    <StateIcon
-                      aria-hidden
-                      className={`size-[18px] ${state === "completed" ? "text-primary" : "text-muted-foreground"}`}
-                    />
-                    {stateText}
-                  </p>
+                      claim a completion the server has not recorded. It follows the confirmations
+                      the player receives, so finishing a Lesson is visible without a reload. */}
+                  <LessonProgressState
+                    lessonID={lesson.lesson_id}
+                    initial={{
+                      position_seconds: lesson.progress.position_seconds,
+                      completed: lesson.progress.completed,
+                    }}
+                    labels={{
+                      completed: labels.completed,
+                      inProgress: labels.lessonInProgress,
+                      notStarted: labels.lessonNotStarted,
+                    }}
+                  />
                   <LearningStatusBadge
                     status={lesson.learning_status}
                     label={learningStatusLabel(lesson.learning_status, labels)}
@@ -246,7 +252,15 @@ async function LessonContent({
             </div>
 
             {contents ? (
-              <div className="hidden lg:block">
+              // Sticky beneath the 64px header, exactly as Course Details holds
+              // its access card. Without it the outline scrolls *under* the
+              // sticky header, and every Lesson row that passes behind it is a
+              // partially obscured target — a real WCAG target-size failure
+              // that lands on a different row at every viewport. Holding the
+              // column below the header removes the obstruction rather than
+              // moving it, and keeps the outline visible while reading, which
+              // is what a contents column is for.
+              <div className="hidden lg:sticky lg:top-20 lg:block">
                 <CurriculumSidebar
                   courseID={lesson.course_id}
                   locale={locale}

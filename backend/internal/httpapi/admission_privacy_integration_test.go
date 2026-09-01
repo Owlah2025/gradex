@@ -5,7 +5,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
@@ -88,10 +91,33 @@ func realAdmissionRouter(
 	for offset := byte(0); offset < 16; offset++ {
 		randomness = append(randomness, bytes.Repeat([]byte{0x71 + offset}, 32)...)
 	}
+	// Verification now mints a session, so the admission service cannot be
+	// composed without the session authority.
+	privacyConfig, err := config.LoadFrom(config.MapLookup(map[string]string{
+		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
+		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
+	}), config.MapSecretResolver{
+		"DATABASE_URL": "postgres://x", "S3_ACCESS_KEY": "a",
+		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
+	})
+	if err != nil {
+		t.Fatalf("loading admission privacy settings: %v", err)
+	}
+	sessions, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
+		Pool: pool, Settings: privacyConfig.Sessions(),
+		CSRFKey: bytes.Repeat([]byte{0x61}, 32), Now: time.Now,
+	})
+	if err != nil {
+		t.Fatalf("constructing session repository: %v", err)
+	}
 	service, err := identity.NewAdmissionService(identity.AdmissionServiceOptions{
 		Pool: pool, Policies: policies, Compromised: compromised, Outbox: writer,
-		VerificationTTL: time.Hour, Now: time.Now,
-		Random: bytes.NewReader(randomness),
+		Sessions:        sessions,
+		VerificationTTL: time.Hour,
+		EmailOTPTTL:     10 * time.Minute,
+		EmailOTPPepper:  config.NewSecret(strings.Repeat("p", 32)),
+		Now:             time.Now,
+		Random:          bytes.NewReader(randomness),
 	})
 	if err != nil {
 		t.Fatalf("constructing admission service: %v", err)
@@ -119,6 +145,8 @@ func realAdmissionRouter(
 	endpointPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests",
 		"password-reset-requests", "password-resets",
 	} {
 		endpointPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
@@ -127,7 +155,6 @@ func realAdmissionRouter(
 	endpointPolicies[readPolicy.Endpoint] = readPolicy
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
-	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte("a"), 32),
 		CSRFKey: bytes.Repeat([]byte("b"), 32), AnonymousSessionTTL: time.Hour,
@@ -184,7 +211,10 @@ func realRecoveryOnlyRouter(
 		t.Fatalf("constructing limiter: %v", err)
 	}
 	policies := map[string]ratelimit.Policy{
-		"purchase-requests":       ratelimit.PurchaseRequestsPolicy(),
+		// Closing public Student registration does not make a purchase request
+		// anonymous again, so this posture still composes the authenticated
+		// purchase policy and the foundation still requires it.
+		"me-purchase-requests":    ratelimit.StudentPurchaseRequestsPolicy(),
 		"password-reset-requests": ratelimit.DevelopmentAdmissionPolicy("password-reset-requests"),
 		"password-resets":         ratelimit.DevelopmentPasswordResetCompletionPolicy(),
 		"session-bootstrap":       ratelimit.DevelopmentAnonymousBootstrapPolicy(),
@@ -328,13 +358,82 @@ func postAdmission(
 	}
 }
 
+// assertPrivacyEquivalent compares two responses for everything an observer
+// could read as a fact about an Account.
+//
+// The bodies were once byte-identical constants. They now carry a verification
+// challenge, so three values differ by construction on every request: a fresh
+// opaque challenge identifier and two server-clock timestamps. Those are
+// normalized rather than compared — and the normalization is checked, not
+// assumed, so a body that stopped carrying one of them cannot slip through as
+// "equivalent".
+//
+// Everything else — status, headers, cookies, the shape of the body, the masked
+// address, and every remaining value — must still match exactly. The challenge
+// identifiers must additionally *differ*, or a hidden outcome would be handing
+// back the live challenge of an Account that already exists.
 func assertPrivacyEquivalent(t *testing.T, first, second privacyResponse) {
 	t.Helper()
 	first.duration = 0
 	second.duration = 0
+	firstBody, firstChallenge := normalizedPrivacyBody(t, first.body)
+	secondBody, secondChallenge := normalizedPrivacyBody(t, second.body)
+	first.body, second.body = firstBody, secondBody
 	if first != second {
 		t.Fatalf("hidden outcomes differ:\nfirst  %+v\nsecond %+v", first, second)
 	}
+	if firstChallenge != "" && firstChallenge == secondChallenge {
+		t.Fatal("two outcomes returned the same verification challenge")
+	}
+}
+
+// normalizedPrivacyBody replaces the per-request values with fixed markers and
+// returns the challenge identifier it removed.
+func normalizedPrivacyBody(t *testing.T, body string) (string, string) {
+	t.Helper()
+	if !strings.Contains(body, `"verification"`) {
+		return body, ""
+	}
+	var parsed struct {
+		Code         string `json:"code"`
+		Verification struct {
+			ChallengeID       string `json:"challenge_id"`
+			MaskedEmail       string `json:"masked_email"`
+			ExpiresAt         string `json:"expires_at"`
+			ResendAvailableAt string `json:"resend_available_at"`
+			CodeLength        int    `json:"code_length"`
+			MaximumAttempts   int    `json:"maximum_attempts"`
+		} `json:"verification"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
+		t.Fatalf("acknowledgment is not JSON: %v (%s)", err, body)
+	}
+	for name, value := range map[string]string{
+		"challenge_id":        parsed.Verification.ChallengeID,
+		"expires_at":          parsed.Verification.ExpiresAt,
+		"resend_available_at": parsed.Verification.ResendAvailableAt,
+	} {
+		if value == "" {
+			t.Fatalf("acknowledgment carries no %s: %s", name, body)
+		}
+	}
+	// The masked address is normalized out for the same reason as the
+	// identifier: it is a pure function of the address the *caller* supplied,
+	// so two requests carrying different addresses must produce different
+	// masks, and that difference is the caller's own input echoed back rather
+	// than anything the server knows. What matters — that the mask never
+	// depends on the stored address, and never on whether an Account exists —
+	// is proved directly in the MaskEmail unit tests and by the fact that both
+	// paths build it from the same request field.
+	if parsed.Verification.MaskedEmail == "" {
+		t.Fatalf("acknowledgment carries no masked_email: %s", body)
+	}
+	normalized := fmt.Sprintf(
+		"code=%s length=%d attempts=%d",
+		parsed.Code,
+		parsed.Verification.CodeLength, parsed.Verification.MaximumAttempts,
+	)
+	return normalized, parsed.Verification.ChallengeID
 }
 
 func assertSameTimingClass(t *testing.T, first, second time.Duration) {
@@ -688,13 +787,31 @@ func TestConcurrentVerificationResendsSurviveClockOrdering(t *testing.T) {
 	}
 	wait.Wait()
 
+	// Every request is still accepted. This route must answer identically for a
+	// registered and an unregistered address, so it cannot refuse on a cooldown
+	// that only a registered address can be inside — a 429 here would be a
+	// direct account-existence oracle.
+	//
+	// The cooldown is instead expressed as "nothing new is issued": the burst
+	// leaves the registration's own challenge live and unreplaced, so no
+	// mailbox flood occurs and the attempt budget on that challenge is not
+	// reset. That is the property asserted below.
 	if statuses[http.StatusAccepted] != attempts {
 		t.Fatalf("concurrent resend statuses = %v, want %d accepted", statuses, attempts)
+	}
+	var issued int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM identity_action_secrets WHERE purpose = 'EMAIL_VERIFICATION_OTP'`,
+	).Scan(&issued); err != nil {
+		t.Fatalf("counting issued verification challenges: %v", err)
+	}
+	if issued != 1 {
+		t.Fatalf("a burst inside the cooldown issued %d challenges, want the registration's one", issued)
 	}
 	var live int
 	if err := pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM identity_action_secrets
-		  WHERE purpose = 'EMAIL_VERIFICATION'
+		  WHERE purpose = 'EMAIL_VERIFICATION_OTP'
 		    AND consumed_at IS NULL AND superseded_at IS NULL`,
 	).Scan(&live); err != nil {
 		t.Fatalf("counting live verification secrets: %v", err)

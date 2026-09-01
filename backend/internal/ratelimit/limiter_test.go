@@ -175,20 +175,34 @@ func TestPublicPreviewPolicyIsFailClosedAndDoesNotKeyOnCourseOrAssetInventory(t 
 	}
 }
 
-func TestPurchaseRequestsPolicyBindsNormalizedEmailAndSourceAddress(t *testing.T) {
-	policy := PurchaseRequestsPolicy()
+// TestStudentPurchaseRequestsPolicyBindsAccountAndSourceAddress replaces the
+// public-purchase policy test.
+//
+// The public route was withdrawn: a purchase request now belongs to a verified
+// Student, so the budget is keyed on the Account rather than on a claimed
+// address, and the anonymous-session dimension is gone — an authenticated
+// request carries no anonymous identifier, and a fail-closed policy that cannot
+// evaluate one of its dimensions refuses every call.
+func TestStudentPurchaseRequestsPolicyBindsAccountAndSourceAddress(t *testing.T) {
+	policy := StudentPurchaseRequestsPolicy()
 	if err := policy.Validate(); err != nil {
-		t.Fatalf("purchase policy is invalid: %v", err)
+		t.Fatalf("student purchase policy is invalid: %v", err)
 	}
-	if policy.ID != "purchase-requests-v1" || !policy.FailClosed {
-		t.Fatalf("purchase policy identity = %+v", policy)
+	if policy.ID != "me-purchase-requests-v1" || !policy.FailClosed {
+		t.Fatalf("student purchase policy identity = %+v", policy)
 	}
 	if _, ok := policyRule(policy, DimensionSourceAddr); !ok {
-		t.Fatal("purchase policy has no source-address budget")
+		t.Fatal("student purchase policy has no source-address budget")
 	}
 	if _, ok := policyRule(policy, DimensionIdentifier); !ok {
-		t.Fatal("purchase policy has no normalized-email budget")
+		t.Fatal("student purchase policy has no Account budget")
 	}
+	// The dimension an authenticated request cannot supply must be absent, or
+	// the route fails closed on every call.
+	if _, ok := policyRule(policy, DimensionAnonymous); ok {
+		t.Fatal("student purchase policy budgets an anonymous identifier an authenticated request never carries")
+	}
+
 	store := &scriptedStore{err: errors.New("limiter unavailable")}
 	limiter, err := New(store, []byte(strings.Repeat("p", 32)), time.Second)
 	if err != nil {
@@ -199,30 +213,37 @@ func TestPurchaseRequestsPolicyBindsNormalizedEmailAndSourceAddress(t *testing.T
 	policy.FailClosed = false
 	for attempt := 0; attempt < 3; attempt++ {
 		decision := limiter.Decide(context.Background(), policy, Input{
-			Identifier: fmt.Sprintf("buyer-%d@example.test", attempt), AnonymousID: fmt.Sprintf("browser-%d", attempt), ClientIP: "192.0.2.90",
+			Identifier: fmt.Sprintf("account-%d", attempt), ClientIP: "192.0.2.90",
 		})
 		if !decision.Allowed {
 			t.Fatalf("source attempt %d denied before source budget: %+v", attempt+1, decision)
 		}
 	}
-	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "buyer-four@example.test", AnonymousID: "browser-four", ClientIP: "192.0.2.90"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
+	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "account-four", ClientIP: "192.0.2.90"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
 		t.Fatalf("source abuse decision = %+v, want fallback deny", decision)
 	}
 
 	limiter, err = New(store, []byte(strings.Repeat("q", 32)), time.Second)
 	if err != nil {
-		t.Fatalf("constructing email limiter: %v", err)
+		t.Fatalf("constructing account limiter: %v", err)
 	}
 	for attempt := 0; attempt < 2; attempt++ {
 		decision := limiter.Decide(context.Background(), policy, Input{
-			Identifier: "same-buyer@example.test", AnonymousID: fmt.Sprintf("browser-%d", attempt), ClientIP: fmt.Sprintf("192.0.2.%d", attempt+1),
+			Identifier: "same-account", ClientIP: fmt.Sprintf("192.0.2.%d", attempt+1),
 		})
 		if !decision.Allowed {
-			t.Fatalf("email attempt %d denied before identifier budget: %+v", attempt+1, decision)
+			t.Fatalf("account attempt %d denied before identifier budget: %+v", attempt+1, decision)
 		}
 	}
-	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "same-buyer@example.test", AnonymousID: "browser-three", ClientIP: "192.0.2.3"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
-		t.Fatalf("normalized-email abuse decision = %+v, want fallback deny", decision)
+	if decision := limiter.Decide(context.Background(), policy, Input{Identifier: "same-account", ClientIP: "192.0.2.3"}); decision.Allowed || decision.Outcome != OutcomeFallbackDenied {
+		t.Fatalf("account abuse decision = %+v, want fallback deny", decision)
+	}
+
+	// And the live, fail-closed policy refuses rather than guessing when the
+	// limiter itself cannot answer.
+	strict := StudentPurchaseRequestsPolicy()
+	if decision := limiter.Decide(context.Background(), strict, Input{Identifier: "account", ClientIP: "192.0.2.3"}); decision.Outcome != OutcomeUnavailable {
+		t.Fatalf("fail-closed decision = %+v, want unavailable", decision)
 	}
 }
 

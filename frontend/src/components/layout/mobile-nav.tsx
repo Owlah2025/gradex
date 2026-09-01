@@ -15,11 +15,18 @@ import { usePathname } from "next/navigation";
 import { AuthActions } from "./auth-actions";
 import { primaryNavigation } from "./nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { useSessionView } from "@/lib/identity/use-session";
 
 export function MobileNav() {
   const { locale, t } = useLocale();
   const pathname = usePathname();
-  const primary = primaryNavigation(pathname ?? "/", locale);
+  const session = useSessionView();
+  // Parity with the desktop bar is the requirement, not a nicety: below `lg`
+  // this sheet is the only primary navigation there is, so anything the wide
+  // header offers and this one does not is simply unreachable on a phone.
+  const primary = primaryNavigation(pathname ?? "/", locale, {
+    studentSession: session?.role === "STUDENT",
+  });
   const [open, setOpen] = React.useState(false);
 
   return (

@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import * as React from "react";
 import { LockKeyhole } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { LanguageToggle } from "@/components/common/language-toggle";
-import { routes } from "@/components/layout/nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { AuthShellNavigation } from "./auth-shell-navigation";
 
 /**
  * Who this screen is talking to.
@@ -65,14 +65,11 @@ export function AuthShell({
         </div>
 
         <footer className="flex flex-col items-start justify-between gap-3 border-t pt-5 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
-          {/* The copy says courses, so the link goes to the courses. It used to
-              point at the landing page, which is a different promise. */}
-          <Link
-            className="font-semibold hover:text-foreground"
-            href={routes.catalogue(locale)}
-          >
-            {t.auth.common.backHome}
-          </Link>
+          {/* Reads the requested destination, so it needs a Suspense boundary
+              to keep these screens statically renderable. */}
+          <React.Suspense fallback={null}>
+            <AuthShellNavigation />
+          </React.Suspense>
           <span className="flex items-center gap-2">
             <LockKeyhole className="size-4" aria-hidden />
             {t.auth.shell.privacy}

@@ -747,7 +747,65 @@ func (h *learningHandlers) saveProgress(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	c.Status(http.StatusNoContent)
+	c.JSON(http.StatusOK, h.confirmedProgress(c, enrollment, lessonID, write))
+}
+
+// progressConfirmationResponse is the canonical state after one accepted write.
+//
+// It exists because the write used to answer 204, which told the browser only
+// that the request was accepted. Every visible progress surface therefore stayed
+// on whatever it rendered at page load until the Student reloaded — the Lesson
+// stayed "not completed" after they finished it, and the Course percentage
+// stayed behind. Returning the state the server just computed is what removes
+// the reload, and it keeps the completion rule server-side: the browser renders
+// this, it does not derive it.
+type progressConfirmationResponse struct {
+	LessonProgress learningProgressResponse `json:"lesson_progress"`
+	// CourseProgress is absent when the confirming read could not be served.
+	// The write has already committed at that point, so failing the request
+	// would be a lie about what happened; omitting the aggregate lets the
+	// browser keep the position it knows and reconcile on the next navigation.
+	CourseProgress *learningCourseProgressResponse `json:"course_progress,omitempty"`
+}
+
+// confirmedProgress re-reads what was written rather than echoing the request.
+//
+// Completion is write-once in the store and the aggregate counts only Lessons
+// in the current graph, so the request's own values are not the canonical
+// answer — a rewind after completion must not un-complete the Lesson, and the
+// browser must never be the thing that decides it did.
+func (h *learningHandlers) confirmedProgress(
+	c *gin.Context,
+	enrollment learning.Enrollment,
+	lessonID string,
+	write learning.ProgressWrite,
+) progressConfirmationResponse {
+	// The write is the fallback, not the answer: it is what the server just
+	// persisted, so it is never wrong about position, only potentially stale
+	// about completion.
+	confirmed := progressConfirmationResponse{
+		LessonProgress: learningProgressResponse{
+			PositionSeconds: write.PositionSeconds, Completed: write.Completed,
+		},
+	}
+	graph, err := h.foundation.readRepository.ReadCourseGraph(c.Request.Context(), enrollment.CourseID)
+	if err != nil {
+		return confirmed
+	}
+	progressByLesson, summary, err := h.foundation.readRepository.ReadCourseProgress(
+		c.Request.Context(), enrollment.ID, enrollment.CourseID, graph,
+	)
+	if err != nil {
+		return confirmed
+	}
+	if progress, present := progressByLesson[lessonID]; present {
+		confirmed.LessonProgress = learningProgressResponse{
+			PositionSeconds: progress.LastPositionSeconds, Completed: progress.Completed,
+		}
+	}
+	course := courseProgressResponse(summary)
+	confirmed.CourseProgress = &course
+	return confirmed
 }
 
 func protectedReason(err error) entitlement.Reason {

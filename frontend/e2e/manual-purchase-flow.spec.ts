@@ -6,6 +6,11 @@ import {
   queryEmailVerificationAction,
   queryInvitationToken,
 } from "./rotating-students";
+import {
+  completePurchaseConfirmation,
+  registerAndVerifyStudent,
+  watchForPrematurePurchase,
+} from "./student-journey";
 
 const ADMIN = {
   email: "admin@example.test",
@@ -18,7 +23,10 @@ const EXISTING_STUDENT = {
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
 const LESSON_ID = "30000000-0000-0000-0000-000000000001";
 const NEW_STUDENT_EMAIL = "purchase-new-student@example.test";
-const EXISTING_STUDENT_PURCHASE_EMAIL = EXISTING_STUDENT.email;
+// A purchase request now belongs to a verified Student, so each test either
+// registers one or installs the seeded one's session. Distinct addresses keep
+// the per-Student active-request uniqueness from making one test's outcome
+// depend on another's.
 const CANCELLED_PURCHASE_EMAIL = "purchase-cancelled@example.test";
 const NEW_STUDENT_PASSWORD =
   process.env.GRADEX_E2E_REGISTRATION_PASSWORD || "KuwaitStudy!2026";
@@ -67,51 +75,42 @@ async function configurePurchaseableCourse(
   );
 }
 
-async function createPurchaseIntentAndCaptureHandoff(
+/**
+ * The Student journey from Course Details to the WhatsApp handoff.
+ *
+ * Two things changed and both are asserted here rather than assumed. A purchase
+ * request belongs to a verified Student, so the caller must already hold a
+ * session; and pressing "Buy this course" opens a confirmation rather than
+ * creating anything, so the run is watched from that press until the explicit
+ * confirmation and must stay completely quiet in between.
+ */
+async function purchaseFromConfirmation(
   page: import("@playwright/test").Page,
-  email: string,
+  expected: { email: string },
 ) {
   await page.goto(`/en/catalog/${COURSE_ID}`);
   await expect(page.getByRole("heading", { name: /CS101/ })).toBeVisible();
   await expect(page.locator("main")).toContainText("25.000");
-  await page.getByTestId("purchase-request-open").click();
-  await page.getByTestId("purchase-request-email").fill(email);
 
-  // The page intentionally leaves the origin as soon as its fetch resolves.
-  // Capture the API response in the route proxy before fulfilling the browser,
-  // so Playwright never tries to read a response body after that navigation.
-  let persistedPayload: { reference: string; whatsapp_url: string } | undefined;
-  await page.route("**/api/v1/purchase-requests", async (route) => {
-    if (route.request().method() !== "POST") {
-      await route.continue();
-      return;
-    }
-    const upstream = await route.fetch();
-    const body = await upstream.body();
-    persistedPayload = JSON.parse(body.toString("utf-8")) as {
-      reference: string;
-      whatsapp_url: string;
-    };
-    await route.fulfill({ response: upstream, body });
-  });
-  const persisted = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === "/api/v1/purchase-requests" &&
-      response.request().method() === "POST",
-  );
-  const handoff = page.waitForRequest(
-    (request) =>
-      request.isNavigationRequest() &&
-      request.url().startsWith("https://wa.me/"),
-  );
-  await page
-    .getByTestId("purchase-request-submit")
-    .click({ noWaitAfter: true });
-  const persistedResponse = await persisted;
-  expect(persistedResponse.status()).toBe(201);
-  const handoffRequest = await handoff;
-  expect(persistedPayload).toBeDefined();
-  return { response: persistedPayload!, handoffURL: handoffRequest.url() };
+  const watch = watchForPrematurePurchase(page);
+  await page.getByTestId("purchase-request-open").click();
+
+  // What is being requested, stated before it is requested. Both values come
+  // from the Course as the server describes it; the browser supplies neither.
+  const confirmation = page.getByTestId("purchase-confirmation");
+  await expect(confirmation).toBeVisible();
+  await expect(page.getByTestId("purchase-course-title")).toContainText("CS101");
+  await expect(page.getByTestId("purchase-price")).toContainText("25.000");
+  // Nothing has been created and nothing has been opened.
+  watch.assertQuiet();
+
+  const handoff = await completePurchaseConfirmation(page);
+  expect(handoff.response.reference).toMatch(/^GRX-[A-F0-9]{16}$/);
+  expect(handoff.handoffURL).toBe(handoff.response.whatsapp_url);
+  // The address on the request is the one the server read off the Account.
+  const message = new URL(handoff.handoffURL).searchParams.get("text") || "";
+  expect(message).toContain(expected.email);
+  return handoff;
 }
 
 async function confirmPurchaseInAdminUI(
@@ -162,12 +161,21 @@ test.describe("Automated manual Course purchase flow", () => {
       await installAdminSession(adminContext);
       await configurePurchaseableCourse(adminPage);
 
-      const { response, handoffURL } =
-        await createPurchaseIntentAndCaptureHandoff(
-          studentPage,
-          NEW_STUDENT_EMAIL,
-        );
-		expect(response.reference).toMatch(/^GRX-[A-F0-9]{16}$/);
+      // The Student exists before the purchase does. Registration mails a
+      // six-digit code, the code is entered on the screen that opened by
+      // itself, and proving it signs the Student in — no password re-entry,
+      // because the code already proved control of the mailbox.
+      await registerAndVerifyStudent(studentPage, {
+        email: NEW_STUDENT_EMAIL,
+        password: NEW_STUDENT_PASSWORD,
+        displayName: "Purchase Student",
+      });
+      await studentPage.waitForURL((url) => /\/(en|ar)\/learn\/dashboard$/.test(url.pathname));
+
+      const { response, handoffURL } = await purchaseFromConfirmation(studentPage, {
+        email: NEW_STUDENT_EMAIL,
+      });
+      expect(response.reference).toMatch(/^GRX-[A-F0-9]{16}$/);
       expect(handoffURL).toBe(response.whatsapp_url);
       const message = new URL(handoffURL).searchParams.get("text") || "";
       for (const expected of [
@@ -189,9 +197,21 @@ test.describe("Automated manual Course purchase flow", () => {
       const invitationToken = queryInvitationToken(confirmed.invitation.id);
       expect(invitationToken).toBeTruthy();
 
-      // The invitation context begins with its bearer in a fragment. An
-      // unregistered recipient goes through real registration and verification
-      // with only invitation_id in returnTo, never the bearer.
+      // The invitation context begins with its bearer in a fragment. The
+      // Student is signed out first, so the journey back in is the real one:
+      // the access route refuses an anonymous reader, carries only
+      // invitation_id in returnTo, and never the bearer.
+      //
+      // Signing in with the password is also the assertion that the password
+      // survived verification — proving the emailed code authenticated the
+      // Student without replacing, consuming, or bypassing their credential.
+      await studentPage.goto("/en/learn/dashboard");
+      await studentPage
+        .getByRole("button", { name: /sign out/i })
+        .first()
+        .click();
+      await studentPage.waitForURL((url) => url.pathname === "/login");
+
       await studentPage.goto(
         `/en/access?invitation_id=${confirmed.invitation.id}#token=${encodeURIComponent(invitationToken)}`,
       );
@@ -200,40 +220,10 @@ test.describe("Automated manual Course purchase flow", () => {
         `invitation_id=${confirmed.invitation.id}`,
       );
       expect(studentPage.url()).not.toContain("token=");
-      await studentPage.locator('a[href^="/register"]').click();
-      await studentPage.waitForURL((url) => url.pathname === "/register");
-      await studentPage.locator("#display-name").fill("Purchase Student");
       await studentPage.locator("#email").fill(NEW_STUDENT_EMAIL);
       await studentPage.locator("#password").fill(NEW_STUDENT_PASSWORD);
-      const policies = studentPage.locator('fieldset input[type="checkbox"]');
-      await expect(policies).toHaveCount(2);
-      await policies.nth(0).check();
-      await policies.nth(1).check();
-      // Not `form button`: the password field now carries a reveal control, so
-      // the form holds more than one. And not the button's name either — these
-      // auth routes carry no locale segment and render in the reader's stored
-      // language, so an English name matches nothing on an Arabic page.
-      await studentPage.locator('form button[type="submit"]').click();
-      await studentPage.waitForURL((url) => url.pathname === "/verify-email");
-
-      const verification = queryEmailVerificationAction(NEW_STUDENT_EMAIL);
-      const verificationReturnTo = new URL(studentPage.url()).searchParams.get(
-        "returnTo",
-      );
-      expect(verificationReturnTo).toContain(
-        `invitation_id=${confirmed.invitation.id}`,
-      );
-      await studentPage.goto(
-        `/verify-email/result?returnTo=${encodeURIComponent(verificationReturnTo!)}#token=${encodeURIComponent(verification.verification_token)}`,
-      );
-      await expect(studentPage.getByRole("status")).toContainText(
-        /Email confirmed|تم تأكيد البريد/,
-      );
-      expect(studentPage.url()).not.toContain("token=");
-      await studentPage.locator('a[href^="/login"]').click();
-      await studentPage.locator("#email").fill(NEW_STUDENT_EMAIL);
-      await studentPage.locator("#password").fill(NEW_STUDENT_PASSWORD);
-      // Same reason as the registration submit above.
+      // Not `form button`: the password field carries a reveal control, so the
+      // form holds more than one.
       await studentPage.locator('form button[type="submit"]').click();
       await studentPage.waitForURL(
         (url) =>
@@ -251,7 +241,10 @@ test.describe("Automated manual Course purchase flow", () => {
       );
       expect(studentPage.url()).not.toContain("token=");
       await expect(studentPage.locator("main")).toContainText("CS101");
-      const state = queryLearningState(verification.account_id, COURSE_ID);
+      const state = queryLearningState(
+        queryEmailVerificationAction(NEW_STUDENT_EMAIL).account_id,
+        COURSE_ID,
+      );
       expect(state.entitlement.count).toBe(1);
       expect(state.enrollment.count).toBe(1);
 
@@ -292,14 +285,8 @@ test.describe("Automated manual Course purchase flow", () => {
       await installAdminSession(adminContext);
       await configurePurchaseableCourse(adminPage);
 
-      const { response } = await createPurchaseIntentAndCaptureHandoff(
-        studentPage,
-        EXISTING_STUDENT_PURCHASE_EMAIL,
-      );
-      const confirmed = await confirmPurchaseInAdminUI(
-        adminPage,
-        EXISTING_STUDENT_PURCHASE_EMAIL,
-      );
+      // A purchase request belongs to a verified Student, so the session is
+      // installed before the request exists rather than after it.
       const session = issueRotatingSession(EXISTING_STUDENT);
       const origin = new URL(frontendOrigin());
       await studentContext.addCookies([
@@ -313,6 +300,14 @@ test.describe("Automated manual Course purchase flow", () => {
           sameSite: "Strict",
         },
       ]);
+
+      const { response } = await purchaseFromConfirmation(studentPage, {
+        email: EXISTING_STUDENT.email,
+      });
+      const confirmed = await confirmPurchaseInAdminUI(
+        adminPage,
+        EXISTING_STUDENT.email,
+      );
       await studentPage.goto(
         `/en/access?invitation_id=${confirmed.invitation.id}#token=${encodeURIComponent(queryInvitationToken(confirmed.invitation.id))}`,
       );
@@ -348,10 +343,16 @@ test.describe("Automated manual Course purchase flow", () => {
       await installAdminSession(adminContext);
       await configurePurchaseableCourse(adminPage);
 
-      const first = await createPurchaseIntentAndCaptureHandoff(
-        studentPage,
-        CANCELLED_PURCHASE_EMAIL,
-      );
+      await registerAndVerifyStudent(studentPage, {
+        email: CANCELLED_PURCHASE_EMAIL,
+        password: NEW_STUDENT_PASSWORD,
+        displayName: "Cancelled Purchase Student",
+      });
+      await studentPage.waitForURL((url) => /\/(en|ar)\/learn\/dashboard$/.test(url.pathname));
+
+      const first = await purchaseFromConfirmation(studentPage, {
+        email: CANCELLED_PURCHASE_EMAIL,
+      });
       await confirmPurchaseInAdminUI(adminPage, CANCELLED_PURCHASE_EMAIL);
       const original = adminPage.getByTestId(
         `purchase-request-${first.response.reference}`,
@@ -370,10 +371,11 @@ test.describe("Automated manual Course purchase flow", () => {
       expect((await cancellation).status()).toBe(200);
       await expect(original).toContainText("Cancelled");
 
-      const fresh = await createPurchaseIntentAndCaptureHandoff(
-        studentPage,
-        CANCELLED_PURCHASE_EMAIL,
-      );
+      // The cancelled request no longer occupies the per-Student active slot,
+      // so the same Student may ask again and receives a new reference.
+      const fresh = await purchaseFromConfirmation(studentPage, {
+        email: CANCELLED_PURCHASE_EMAIL,
+      });
       expect(fresh.response.reference).not.toBe(first.response.reference);
       await adminPage.locator("#purchase-request-search").fill(fresh.response.reference);
       await adminPage.getByRole("button", { name: "Search" }).click();

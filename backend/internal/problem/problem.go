@@ -376,3 +376,46 @@ func codeFromSlug(slug string) string {
 	}
 	return string(out)
 }
+
+// VerificationCodeInvalid collapses every unusable verification-code state for
+// exactly the reason TokenInvalid does: wrong digit, unknown challenge,
+// expired, superseded, consumed, and "no such pending Account" must all look
+// the same, or the response becomes an oracle for which addresses are
+// registered and which challenges are live.
+//
+// It is a separate problem from TokenInvalid only so the screen can say "check
+// the code" rather than "check the link" — the two are different recoveries for
+// the reader, and neither wording reveals anything.
+func VerificationCodeInvalid() Problem {
+	return New(http.StatusBadRequest, "verification-code-invalid",
+		"Code unavailable",
+		"This verification code cannot be used.")
+}
+
+// VerificationCodeExhausted is deliberately distinguishable from
+// VerificationCodeInvalid. It leaks nothing new — the caller already holds the
+// challenge and has already spent its attempts — and withholding it would
+// leave the Student retyping a code that can no longer succeed for any value.
+func VerificationCodeExhausted() Problem {
+	return New(http.StatusTooManyRequests, "verification-code-exhausted",
+		"Too many attempts",
+		"Request a new verification code to continue.")
+}
+
+// VerificationCodeResendTooSoon reports the cooldown. The retry moment is
+// already known to the caller from the challenge it holds.
+func VerificationCodeResendTooSoon() Problem {
+	return New(http.StatusTooManyRequests, "verification-code-resend-too-soon",
+		"Code already sent",
+		"A verification code was sent recently. Wait before requesting another.")
+}
+
+// PurchaseAccessAlreadyActive refuses a purchase request for a Course the
+// Student can already open. It is not a security refusal — the caller is
+// entitled — it prevents an Admin sales task that is satisfied before it is
+// created.
+func PurchaseAccessAlreadyActive() Problem {
+	return New(http.StatusConflict, "course-access-already-active",
+		"Access already active",
+		"You already have access to this Course.")
+}

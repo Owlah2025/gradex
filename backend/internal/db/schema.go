@@ -48,7 +48,9 @@ const (
 	CourseAcademicIdentitySchemaVersion = 25
 	SubjectCodeIdentitySchemaVersion    = 26
 	ReportModerationSchemaVersion       = TransactionalEmailMonitorTerminalSchemaVersion + 1
-	MaxSchemaVersion                    = ReportModerationSchemaVersion
+	StudentEmailOTPSchemaVersion        = ReportModerationSchemaVersion + 1
+	AuthenticatedPurchaseSchemaVersion  = StudentEmailOTPSchemaVersion + 1
+	MaxSchemaVersion                    = AuthenticatedPurchaseSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

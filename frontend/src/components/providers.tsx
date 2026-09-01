@@ -6,7 +6,6 @@ import { LocaleProvider } from "@/lib/i18n/locale-provider";
 import { SessionRehydrator } from "@/lib/identity/session-rehydrator";
 import { PasswordChangeGuard } from "@/lib/identity/password-change-guard";
 import { AcademicContextProvider } from "@/components/academic/academic-context-provider";
-
 /** App-wide client providers: colour theme (next-themes) + locale/direction. */
 export function Providers({ children }: { children: React.ReactNode }) {
   return (

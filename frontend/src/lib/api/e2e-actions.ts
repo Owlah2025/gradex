@@ -2,9 +2,17 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import { e2eDatabaseEnvironment, RUN_STATE_FILE_PATH, SEED_BINARY_PATH } from "./e2e-infrastructure";
 
+/**
+ * The Account and the six-digit code Gradex emailed it.
+ *
+ * `verification_code`, not a token: registration no longer mails a link. The
+ * code is unreadable from `identity_action_secrets` — that column holds a keyed
+ * HMAC — so the seeder reads it out of the outbox's encrypted payload, which is
+ * the same ciphertext the dispatcher opens to send the message.
+ */
 export type EmailVerificationAction = {
   account_id: string;
-  verification_token: string;
+  verification_code: string;
 };
 
 export function parseEmailVerificationAction(raw: string): EmailVerificationAction {
@@ -24,8 +32,8 @@ export function parseEmailVerificationAction(raw: string): EmailVerificationActi
     parsed === null ||
     typeof (parsed as EmailVerificationAction).account_id !== "string" ||
     !(parsed as EmailVerificationAction).account_id ||
-    typeof (parsed as EmailVerificationAction).verification_token !== "string" ||
-    !(parsed as EmailVerificationAction).verification_token
+    typeof (parsed as EmailVerificationAction).verification_code !== "string" ||
+    !(parsed as EmailVerificationAction).verification_code
   ) {
     throw new Error("Email-verification query returned an unusable action.");
   }

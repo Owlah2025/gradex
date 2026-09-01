@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
@@ -59,9 +60,17 @@ func verificationRequestIdentifier(c *gin.Context) string {
 	return rateLimitEmailIdentifier(request.Email)
 }
 
-func purchaseRequestIdentifier(c *gin.Context) string {
-	request := c.MustGet(strictJSONBodyContextKey).(*createPurchaseRequestBody)
-	return rateLimitEmailIdentifier(request.Email)
+// authenticatedPurchaseIdentifier budgets purchase requests per Account.
+//
+// The public route this replaces keyed on a claimed email address, which was
+// the best available identity when anyone could ask. Now that the caller is
+// authenticated, the Account is both stronger and cheaper: it cannot be varied
+// by spelling, and it is the thing the operational budget actually protects.
+func authenticatedPurchaseIdentifier(c *gin.Context) string {
+	if accountID := c.GetString(ctxUserIDKey); accountID != "" {
+		return accountID
+	}
+	return "unidentified-purchase-requester"
 }
 
 // passwordResetIdentifier keys the limiter on the normalized address, exactly
@@ -81,6 +90,26 @@ func passwordResetTokenIdentifier(c *gin.Context) string {
 		return "invalid-password-reset-token"
 	}
 	return request.Token
+}
+
+// verificationCodeIdentifier budgets guesses per challenge rather than per
+// address. The challenge is the thing being attacked, and keying on it means a
+// caller cannot buy a fresh budget by varying anything else in the request.
+// A malformed value collapses to one bucket rather than minting unlimited keys.
+func verificationCodeIdentifier(c *gin.Context) string {
+	request := c.MustGet(strictJSONBodyContextKey).(*verificationCodeBody)
+	if _, err := uuid.Parse(request.ChallengeID); err != nil {
+		return "invalid-verification-challenge"
+	}
+	return request.ChallengeID
+}
+
+func verificationResendIdentifier(c *gin.Context) string {
+	request := c.MustGet(strictJSONBodyContextKey).(*verificationResendBody)
+	if _, err := uuid.Parse(request.ChallengeID); err != nil {
+		return "invalid-verification-challenge"
+	}
+	return request.ChallengeID
 }
 
 func verificationTokenIdentifier(c *gin.Context) string {

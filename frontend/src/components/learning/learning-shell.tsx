@@ -45,18 +45,28 @@ export function LearningShell({
   locale,
   dir,
   labels,
-  /** The Course this screen belongs to, shown in the header so a Lesson always names its Course. */
-  courseContext,
   children,
 }: {
   locale: "ar" | "en";
   dir: "ltr" | "rtl";
   labels: ShellLabels;
-  courseContext?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dashboardHref = `/${locale}/learn/dashboard`;
+  // A Student inside a Lesson could reach their own Courses and nothing else.
+  // Finding another Course meant editing the address bar or leaving through the
+  // browser's history, so the two destinations that were missing are here: the
+  // catalogue, and the start of the product.
+  //
+  // The landing page is not locale-addressed — there is no `/[locale]/page.tsx`
+  // — so its language comes from the preference every `/[locale]/…` visit
+  // persists, which is exactly what got the reader here.
+  const learningNavigation: Array<{ href: string; label: string }> = [
+    { href: dashboardHref, label: labels.myCourses },
+    { href: `/${locale}/catalog`, label: labels.catalogue },
+    { href: "/", label: labels.home },
+  ];
 
   return (
     <div dir={dir} className="flex min-h-screen flex-col bg-background">
@@ -64,21 +74,31 @@ export function LearningShell({
         <div className="mx-auto flex h-16 max-w-container items-center gap-3 px-5 sm:px-6">
           <Logo href={dashboardHref} className="shrink-0" />
 
-          {/* The Course name is navigation, not decoration: it is how a Student on a Lesson gets
-              back to the Course they are inside. It truncates rather than wraps, because the header
-              is a fixed 64px band and a two-line Course title would push the page down. */}
-          {courseContext ? (
-            <div className="ms-1 hidden min-w-0 flex-1 items-center gap-2 sm:flex">{courseContext}</div>
-          ) : null}
+          {/* The Course used to be named here as a link back to it. The Lesson
+              screen now carries a breadcrumb that names the Course, the Lesson,
+              and the way up to My Learning, so this was a second link with the
+              same accessible name and the same destination on one screen. */}
 
           <div className="ms-auto flex shrink-0 items-center gap-2">
-            <nav aria-label={labels.learningNavigation} className="hidden md:block">
-              <Link
-                href={dashboardHref}
-                className="rounded-md px-3 py-2 font-display text-[15px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {labels.myCourses}
-              </Link>
+            {/* Three destinations where there was one, so the row now has to
+                satisfy the target-size rule it previously met by having almost
+                nothing in it: each link is a full 44px target and the gap
+                between adjacent targets is wide enough that axe does not read
+                them as obscuring one another. */}
+            <nav
+              aria-label={labels.learningNavigation}
+              data-testid="learning-navigation"
+              className="hidden items-center gap-2 md:flex"
+            >
+              {learningNavigation.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="inline-flex min-h-11 items-center whitespace-nowrap rounded-md px-3 font-display text-[15px] font-semibold text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {item.label}
+                </Link>
+              ))}
             </nav>
             <LanguageToggle />
             <ThemeToggle />
@@ -100,15 +120,24 @@ export function LearningShell({
               </SheetTrigger>
               <SheetContent side="right" closeLabel={labels.closeMenu}>
                 <SheetTitle className="sr-only">{labels.learningNavigation}</SheetTitle>
-                <nav aria-label={labels.learningNavigation} className="mt-8 flex flex-col gap-1">
-                  <SheetClose asChild>
-                    <Link
-                      href={dashboardHref}
-                      className="rounded-md px-2.5 py-3 font-display text-[17px] font-semibold text-foreground hover:bg-accent"
-                    >
-                      {labels.myCourses}
-                    </Link>
-                  </SheetClose>
+                {/* Parity with the wide header. Below `md` this sheet is the only
+                    navigation there is, so anything offered above and not here is
+                    unreachable on a phone. */}
+                <nav
+                  aria-label={labels.learningNavigation}
+                  data-testid="learning-navigation-mobile"
+                  className="mt-8 flex flex-col gap-1"
+                >
+                  {learningNavigation.map((item) => (
+                    <SheetClose asChild key={item.href}>
+                      <Link
+                        href={item.href}
+                        className="flex min-h-11 items-center rounded-md px-2.5 py-3 font-display text-[17px] font-semibold text-foreground hover:bg-accent"
+                      >
+                        {item.label}
+                      </Link>
+                    </SheetClose>
+                  ))}
                 </nav>
                 <div className="my-4 h-px bg-border" />
                 <div onClick={() => setMenuOpen(false)}>

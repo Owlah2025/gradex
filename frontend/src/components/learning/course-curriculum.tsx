@@ -46,7 +46,12 @@ const stateIcon = {
  *
  * Each row carries an icon *and* a word: the icon is `aria-hidden` and the state is written out for
  * a screen reader, so "completed" survives both a monochrome rendering and no rendering at all. The
- * Lesson being read is marked with `aria-current="page"` and says "You are here" in words.
+ * Lesson being read is marked with `aria-current="location"` and says "You are here" in words.
+ *
+ * `location` rather than `page`: the Lesson screen carries a breadcrumb whose last item is the page
+ * itself, and that is the canonical `aria-current="page"`. Two elements both announcing "current
+ * page" is a worse answer than one saying which page and one saying where in the outline that page
+ * sits, which is exactly what these two are.
  */
 export function CourseCurriculum({
   courseID,
@@ -156,7 +161,13 @@ function CurriculumRow({
   return (
     <Link
       href={`/${locale}/learn/courses/${courseID}/lessons/${lesson.lessonID}`}
-      aria-current={current ? "page" : undefined}
+      aria-current={current ? "location" : undefined}
+      // The row's identity and state, readable without parsing localized copy.
+      // The Lesson being watched updates here from the Progress write's own
+      // response, so a test can prove the outline followed it rather than
+      // inferring completion from a word that differs by language.
+      data-lesson-id={lesson.lessonID}
+      data-lesson-state={lesson.state}
       className={cn(
         "flex items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         // The current row is marked by weight and a border on the reading edge as well as by tone,

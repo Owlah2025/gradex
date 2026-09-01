@@ -94,7 +94,7 @@ func TestProductionHIBPRegistrationAcceptsValidUncompromisedPassword(t *testing.
 	})
 	service := approvedRegistrationService(t, pool, 0x61, source)
 
-	if err := service.RegisterStudent(context.Background(), registration); err != nil {
+	if _, err := service.RegisterStudent(context.Background(), registration); err != nil {
 		t.Fatalf("production-boundary registration failed: %v", err)
 	}
 	var accounts, credentials int
@@ -166,7 +166,7 @@ func TestProductionHIBPRegistrationRejectionsCreateNoFacts(t *testing.T) {
 			registration := approvedStudentRegistration()
 			registration.Password = config.NewSecret(tt.password)
 
-			err := service.RegisterStudent(context.Background(), registration)
+			_, err := service.RegisterStudent(context.Background(), registration)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("registration error = %v, want %v", err, tt.want)
 			}

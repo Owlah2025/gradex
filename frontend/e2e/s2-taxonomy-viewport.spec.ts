@@ -6,9 +6,21 @@ const viewports = [
   ["desktop", { width: 1440, height: 1000 }],
 ] as const;
 
+/**
+ * The Admin workspace is a `/[locale]/…` route, so the address is what names
+ * its language. It used to be visited at `/en/admin/catalog` for both locales,
+ * with the language set only in storage — which worked while the locale
+ * provider deliberately ignored the `/en` segment on Admin and Instructor
+ * routes. It no longer does: an explicit locale in the URL now wins over a
+ * saved preference everywhere, so a page addressed `/en/…` renders English and
+ * an Arabic assertion has to ask for `/ar/…`.
+ *
+ * `/instructor/courses` carries no locale segment at all, so it keeps reading
+ * the stored preference.
+ */
 const surfaces = [
-  ["instructor", "/instructor/courses"],
-  ["admin", "/en/admin/catalog"],
+  ["instructor", (_locale: "ar" | "en") => "/instructor/courses"],
+  ["admin", (locale: "ar" | "en") => `/${locale}/admin/catalog`],
 ] as const;
 
 async function mockCatalogAPI(page: Page) {
@@ -55,12 +67,12 @@ function expectedScreenHeadings(surface: "instructor" | "admin", locale: "ar" | 
 
 for (const [locale, direction] of [["en", "ltr"], ["ar", "rtl"]] as const) {
   for (const [viewportName, viewport] of viewports) {
-    for (const [surfaceName, path] of surfaces) {
+    for (const [surfaceName, pathFor] of surfaces) {
       test(`${surfaceName} ${locale} ${viewportName} is directed and usable`, async ({ page }) => {
         await page.setViewportSize(viewport);
         await mockCatalogAPI(page);
         await page.addInitScript((selectedLocale) => localStorage.setItem("gradex.locale", selectedLocale), locale);
-        await page.goto(path);
+        await page.goto(pathFor(locale));
 
         await expect(page.locator("html")).toHaveAttribute("dir", direction);
         // Scoped to the page content rather than the whole document: the workspace navigation

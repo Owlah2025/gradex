@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
@@ -23,8 +24,14 @@ const (
 )
 
 type admissionCommands interface {
-	RegisterStudent(context.Context, identity.StudentRegistration) error
-	RequestEmailVerification(context.Context, identity.VerificationRequest) error
+	RegisterStudent(context.Context, identity.StudentRegistration) (identity.VerificationChallenge, error)
+	RequestEmailVerification(context.Context, identity.VerificationRequest) (identity.VerificationChallenge, error)
+	ResendEmailVerificationOTP(ctx context.Context, challengeID, requestID string) (identity.VerificationChallenge, error)
+	VerifyEmailOTP(ctx context.Context, challengeID, code, requestID string) (identity.SessionGrant, error)
+	// VerifyEmail consumes a pre-OTP emailed link. It stays on this interface
+	// for the length of the legacy window: Gradex is live, and links already in
+	// Student mailboxes when the code flow shipped must keep working until they
+	// expire on their own.
 	VerifyEmail(context.Context, string, string) error
 }
 
@@ -61,6 +68,15 @@ type verificationRequestBody struct {
 
 type verificationConsumptionBody struct {
 	Token string `json:"token" binding:"required"`
+}
+
+type verificationCodeBody struct {
+	ChallengeID string `json:"challenge_id" binding:"required"`
+	Code        string `json:"code" binding:"required"`
+}
+
+type verificationResendBody struct {
+	ChallengeID string `json:"challenge_id" binding:"required"`
 }
 
 type passwordResetRequestBody struct {
@@ -123,11 +139,29 @@ func requestedLocale(header string) (identity.Locale, bool) {
 	return "", false
 }
 
+// verificationContext is the non-secret half of a challenge, shaped for the
+// browser.
+//
+// Nothing here authenticates: challenge_id names a challenge and proves
+// nothing about who is asking, and masked_email is built from an address the
+// caller has already typed. The two timestamps exist so the screen can render a
+// truthful countdown rather than guessing at server policy.
+func verificationContext(challenge identity.VerificationChallenge) gin.H {
+	return gin.H{
+		"challenge_id":        challenge.ChallengeID,
+		"masked_email":        challenge.MaskedEmail,
+		"expires_at":          challenge.ExpiresAt.UTC(),
+		"resend_available_at": challenge.ResendAvailableAt.UTC(),
+		"code_length":         6,
+		"maximum_attempts":    identity.EmailOTPMaxAttempts,
+	}
+}
+
 func (h *identityHandlers) registerStudent(
 	c *gin.Context,
 	request *studentRegistrationRequest,
 ) {
-	err := h.service.RegisterStudent(c.Request.Context(), identity.StudentRegistration{
+	challenge, err := h.service.RegisterStudent(c.Request.Context(), identity.StudentRegistration{
 		DisplayName: request.DisplayName,
 		Email:       request.Email,
 		Password:    config.NewSecret(request.Password),
@@ -139,8 +173,12 @@ func (h *identityHandlers) registerStudent(
 		h.writeAdmissionError(c, err)
 		return
 	}
+	// The verification context travels in the response body rather than being
+	// re-derived on the next screen, which is what removes the second "what is
+	// your email address?" prompt from the journey.
 	writeAdmissionSuccess(c, http.StatusAccepted, gin.H{
-		"code": "REGISTRATION_REQUEST_ACCEPTED",
+		"code":         "REGISTRATION_REQUEST_ACCEPTED",
+		"verification": verificationContext(challenge),
 	})
 }
 
@@ -153,7 +191,7 @@ func (h *identityHandlers) requestVerification(
 	c *gin.Context,
 	request *verificationRequestBody,
 ) {
-	err := h.service.RequestEmailVerification(
+	challenge, err := h.service.RequestEmailVerification(
 		c.Request.Context(),
 		identity.VerificationRequest{
 			Email: request.Email, RequestID: requestid.FromContext(c.Request.Context()),
@@ -164,8 +202,68 @@ func (h *identityHandlers) requestVerification(
 		return
 	}
 	writeAdmissionSuccess(c, http.StatusAccepted, gin.H{
-		"code": "VERIFICATION_REQUEST_ACCEPTED",
+		"code":         "VERIFICATION_REQUEST_ACCEPTED",
+		"verification": verificationContext(challenge),
 	})
+}
+
+func (h *identityHandlers) resendVerificationCode(
+	c *gin.Context,
+	request *verificationResendBody,
+) {
+	challenge, err := h.service.ResendEmailVerificationOTP(
+		c.Request.Context(),
+		request.ChallengeID,
+		requestid.FromContext(c.Request.Context()),
+	)
+	if err != nil {
+		h.writeAdmissionError(c, err)
+		return
+	}
+	writeAdmissionSuccess(c, http.StatusAccepted, gin.H{
+		"code":         "VERIFICATION_REQUEST_ACCEPTED",
+		"verification": verificationContext(challenge),
+	})
+}
+
+func (h *identityHandlers) resendBoundVerificationCode(c *gin.Context) {
+	request := c.MustGet(strictJSONBodyContextKey).(*verificationResendBody)
+	h.resendVerificationCode(c, request)
+}
+
+// consumeVerificationCode proves a code and returns an authenticated session.
+//
+// The session is written only after the domain transaction that activated the
+// Account committed, so a rolled-back verification can never leave the browser
+// holding a cookie for a generation the database does not have — the same rule
+// the login and password-change writers follow.
+//
+// The anonymous admission cookie is cleared for the same reason login clears
+// it: the browser has stopped being anonymous, and leaving the old cookie
+// behind keeps a second, weaker identity alongside the new session.
+func (h *identityHandlers) consumeVerificationCode(
+	c *gin.Context,
+	request *verificationCodeBody,
+) {
+	grant, err := h.service.VerifyEmailOTP(
+		c.Request.Context(),
+		request.ChallengeID,
+		request.Code,
+		requestid.FromContext(c.Request.Context()),
+	)
+	if err != nil {
+		h.writeAdmissionError(c, err)
+		return
+	}
+	clearAnonymousCookie(c)
+	_ = auth.WriteSessionResponse(
+		c.Writer, http.StatusCreated, grant.Session, &grant.Credential, grant.CSRFToken,
+	)
+}
+
+func (h *identityHandlers) consumeBoundVerificationCode(c *gin.Context) {
+	request := c.MustGet(strictJSONBodyContextKey).(*verificationCodeBody)
+	h.consumeVerificationCode(c, request)
 }
 
 func (h *identityHandlers) requestBoundVerification(c *gin.Context) {
@@ -265,6 +363,19 @@ func (h *identityHandlers) writeAdmissionError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, identity.ErrTokenInvalid):
 		writeProblem(c, problem.TokenInvalid())
+	case errors.Is(err, identity.ErrOTPInvalid):
+		writeProblem(c, problem.VerificationCodeInvalid())
+	case errors.Is(err, identity.ErrOTPAttemptsExhausted):
+		writeProblem(c, problem.VerificationCodeExhausted())
+	case errors.Is(err, identity.ErrOTPResendTooSoon):
+		writeProblem(c, problem.VerificationCodeResendTooSoon())
+	case errors.Is(err, identity.ErrOTPUnavailable):
+		writeProblem(c, problem.RegistrationUnavailable())
+	case errors.Is(err, identity.ErrAuthenticationFailed):
+		// The code was right but the Account stopped being eligible between the
+		// lock and the session write. Answering "invalid code" is the honest
+		// available response: nothing about the Account may be disclosed here.
+		writeProblem(c, problem.VerificationCodeInvalid())
 	case errors.Is(err, identity.ErrDeliveryUnavailable):
 		writeProblem(c, problem.TransactionalDeliveryUnavailable())
 	case errors.Is(err, identity.ErrAdmissionUnavailable):

@@ -18,7 +18,16 @@ import (
 )
 
 const (
-	verificationTemplateContract       = "student-email-verification-v1"
+	// verificationTemplateContract names the pre-OTP link message. Nothing
+	// issues it any more; it is retained so operational queries and tests can
+	// still name the contract carried by links that were delivered before the
+	// cutover and have not yet expired.
+	verificationTemplateContract = "student-email-verification-v1"
+	// The OTP contract is a separate template rather than a variant of the link
+	// one. The dispatcher selects rendering by contract, and a message that can
+	// render either a link or a code from the same contract is one branch away
+	// from mailing both.
+	verificationCodeTemplateContract   = "student-email-verification-otp-v1"
 	minimumVerificationRequestDuration = 75 * time.Millisecond
 )
 
@@ -27,7 +36,10 @@ type AdmissionService struct {
 	policies    PolicySetResolver
 	compromised CompromisedRangeSource
 	outbox      *outbox.Writer
+	sessions    *SessionRepository
 	tokenTTL    time.Duration
+	otpPepper   EmailOTPPepper
+	otpTTL      time.Duration
 	now         func() time.Time
 	random      io.Reader
 	randomMu    sync.Mutex
@@ -41,12 +53,28 @@ func NewAdmissionService(options AdmissionServiceOptions) (*AdmissionService, er
 	if options.VerificationTTL <= 0 || options.Now == nil || options.Random == nil {
 		return nil, errors.New("admission clock, randomness, and verification TTL are required")
 	}
+	// Verification now mints a session, so the session authority is a hard
+	// dependency rather than an optional one: without it a Student could prove
+	// their code and still be left anonymous.
+	if options.Sessions == nil {
+		return nil, errors.New("admission service requires the session repository")
+	}
+	if options.EmailOTPTTL <= 0 {
+		return nil, errors.New("email verification OTP TTL is required")
+	}
+	pepper, err := NewEmailOTPPepper(options.EmailOTPPepper)
+	if err != nil {
+		return nil, err
+	}
 	return &AdmissionService{
 		pool:        options.Pool,
 		policies:    options.Policies,
 		compromised: options.Compromised,
 		outbox:      options.Outbox,
+		sessions:    options.Sessions,
 		tokenTTL:    options.VerificationTTL,
+		otpPepper:   pepper,
+		otpTTL:      options.EmailOTPTTL,
 		now:         options.Now,
 		random:      options.Random,
 	}, nil
@@ -59,39 +87,54 @@ type preparedRegistration struct {
 	locale              Locale
 	policySet           RegistrationPolicySet
 	credentialHash      config.Secret
-	actionSecret        IssuedActionSecret
+	otp                 IssuedEmailOTP
 	outboxReservation   outbox.ProtectedPayloadReservation
 	requestID           string
 }
 
+// RegisterStudent creates a pending Student and mails a verification code.
+//
+// It returns the non-secret facts the verification screen needs so the Student
+// is never asked for their address a second time on the very next screen. None
+// of those facts authenticates anyone: the challenge id is an opaque handle
+// that only names which challenge a code is being presented against, and the
+// masked address is derived from what the caller already typed.
+//
+// A duplicate address returns a challenge too. That is the whole
+// anti-enumeration property of this route: an address already registered and a
+// fresh one produce indistinguishable responses, and the synthetic challenge
+// simply never matches a code.
 func (s *AdmissionService) RegisterStudent(
 	ctx context.Context,
 	request StudentRegistration,
-) error {
+) (VerificationChallenge, error) {
 	prepared, err := s.prepareRegistration(ctx, request)
 	if err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("beginning Student registration: %w", err)
+		return VerificationChallenge{}, fmt.Errorf("beginning Student registration: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	accountID, created, err := insertPendingStudent(ctx, tx, prepared)
 	if err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
 	if !created {
-		return tx.Commit(ctx)
+		if err := tx.Commit(ctx); err != nil {
+			return VerificationChallenge{}, fmt.Errorf("committing Student registration: %w", err)
+		}
+		return s.syntheticChallenge(prepared.correspondenceEmail), nil
 	}
 	if err := s.insertRegistrationFacts(ctx, tx, accountID, prepared); err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing Student registration: %w", err)
+		return VerificationChallenge{}, fmt.Errorf("committing Student registration: %w", err)
 	}
-	return nil
+	return challengeOf(prepared.otp, prepared.correspondenceEmail), nil
 }
 
 func (s *AdmissionService) prepareRegistration(
@@ -128,9 +171,9 @@ func (s *AdmissionService) prepareRegistration(
 		}
 		return preparedRegistration{}, fmt.Errorf("%w: credential screening", ErrAdmissionUnavailable)
 	}
-	actionSecret, err := s.issueActionSecret()
+	otp, err := s.issueEmailOTP()
 	if err != nil {
-		return preparedRegistration{}, fmt.Errorf("%w: action-secret generation", ErrAdmissionUnavailable)
+		return preparedRegistration{}, fmt.Errorf("%w: verification-code generation", ErrAdmissionUnavailable)
 	}
 	reservation, err := s.outbox.ReserveProtectedPayload(ctx)
 	if err != nil {
@@ -143,18 +186,17 @@ func (s *AdmissionService) prepareRegistration(
 		locale:              request.Locale,
 		policySet:           policySet,
 		credentialHash:      credentialHash,
-		actionSecret:        actionSecret,
+		otp:                 otp,
 		outboxReservation:   reservation,
 		requestID:           requestID,
 	}, nil
 }
 
-func (s *AdmissionService) issueActionSecret() (IssuedActionSecret, error) {
+func (s *AdmissionService) issueEmailOTP() (IssuedEmailOTP, error) {
 	s.randomMu.Lock()
 	defer s.randomMu.Unlock()
-	return newActionSecret(actionSecretOptions{
-		Purpose: ActionEmailVerification,
-		Now:     s.now().UTC(), TTL: s.tokenTTL, Random: s.random,
+	return newEmailOTP(emailOTPOptions{
+		Pepper: s.otpPepper, Now: s.now().UTC(), TTL: s.otpTTL, Random: s.random,
 	})
 }
 
@@ -201,34 +243,62 @@ func (s *AdmissionService) insertRegistrationFacts(
 	if err := insertPolicyAcceptances(ctx, tx, accountID, registration); err != nil {
 		return err
 	}
-	if err := insertActionSecret(ctx, tx, accountID, registration.actionSecret); err != nil {
+	if err := insertEmailOTPSecret(ctx, tx, accountID, registration.otp); err != nil {
 		return err
 	}
 	if err := appendIdentitySecurityEvent(
 		ctx, tx, securityEventAppend{
 			eventType:      "STUDENT_REGISTRATION_ACCEPTED",
 			accountID:      accountID,
-			actionSecretID: registration.actionSecret.ID,
+			actionSecretID: registration.otp.ChallengeID,
 			revision:       1,
 			requestID:      registration.requestID,
 			evidence: map[string]any{
 				"schema_version": 1,
 				"policy_set_id":  registration.policySet.ID,
 				"locale":         registration.locale,
+				// The verification method is recorded; the code never is.
+				"verification_method": "EMAIL_OTP",
 			},
 		},
 	); err != nil {
 		return err
 	}
-	return s.appendVerificationOutbox(ctx, tx, verificationOutboxRequest{
+	return s.appendVerificationCodeOutbox(ctx, tx, verificationCodeOutboxRequest{
 		accountID:   accountID,
 		revision:    1,
 		email:       registration.correspondenceEmail,
 		locale:      registration.locale,
-		secret:      registration.actionSecret,
+		otp:         registration.otp,
 		requestID:   registration.requestID,
 		reservation: registration.outboxReservation,
 	})
+}
+
+// insertEmailOTPSecret stores the keyed digest of one verification code.
+//
+// The plaintext code is not a column here and never becomes one: what is
+// written is the HMAC output, which is the same 32 bytes the existing digest
+// size and uniqueness constraints already govern.
+func insertEmailOTPSecret(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	otp IssuedEmailOTP,
+) error {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO identity_action_secrets
+		   (id, account_id, purpose, secret_digest, issued_at, expires_at, created_at)
+		 VALUES ($1::uuid, $2::uuid, 'EMAIL_VERIFICATION_OTP', $3, $4, $5, $4)`,
+		otp.ChallengeID,
+		accountID,
+		otp.Digest,
+		otp.IssuedAt,
+		otp.ExpiresAt,
+	); err != nil {
+		return fmt.Errorf("inserting Student verification challenge: %w", err)
+	}
+	return nil
 }
 
 func insertPolicyAcceptances(
@@ -277,117 +347,83 @@ func insertActionSecret(
 	return nil
 }
 
-type verificationOutboxRequest struct {
-	accountID   string
-	revision    int
-	email       string
-	locale      Locale
-	secret      IssuedActionSecret
-	requestID   string
-	reservation outbox.ProtectedPayloadReservation
-}
-
-func (s *AdmissionService) appendVerificationOutbox(
-	ctx context.Context,
-	tx pgx.Tx,
-	request verificationOutboxRequest,
-) error {
-	_, err := s.outbox.AppendReserved(ctx, tx, outbox.ReservedAppend{
-		Event: outbox.Event{
-			Type:              "identity.email_verification_requested",
-			SchemaVersion:     1,
-			SourceModule:      "IDENTITY_AND_ACCESS",
-			AggregateType:     "ACCOUNT",
-			AggregateID:       request.accountID,
-			AggregateRevision: request.revision,
-			CorrelationID:     request.requestID,
-			SafePayload: map[string]any{
-				"purpose":           request.secret.Purpose,
-				"action_secret_id":  request.secret.ID,
-				"locale":            request.locale,
-				"template_contract": verificationTemplateContract,
-				"secret_expires_at": request.secret.ExpiresAt,
-			},
-		},
-		Protected: outbox.VerificationDelivery{
-			Destination:       request.email,
-			Locale:            string(request.locale),
-			TemplateContract:  verificationTemplateContract,
-			VerificationToken: request.secret.Bearer.Expose(),
-			ExpiresAt:         request.secret.ExpiresAt,
-		},
-		Reservation: request.reservation,
-	})
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrDeliveryUnavailable, err)
-	}
-	return nil
-}
-
 func (s *AdmissionService) RequestEmailVerification(
 	ctx context.Context,
 	request VerificationRequest,
-) error {
+) (VerificationChallenge, error) {
 	normalizedEmail, err := NormalizeEmail(request.Email)
 	if err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
 	requestID, err := validateRequestID(request.RequestID)
 	if err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
-	replacement, err := s.issueActionSecret()
+	replacement, err := s.issueEmailOTP()
 	if err != nil {
-		return fmt.Errorf("%w: action-secret generation", ErrAdmissionUnavailable)
+		return VerificationChallenge{}, fmt.Errorf("%w: verification-code generation", ErrAdmissionUnavailable)
 	}
 	reservation, err := s.outbox.ReserveProtectedPayload(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: protected payload reservation", ErrDeliveryUnavailable)
+		return VerificationChallenge{}, fmt.Errorf("%w: protected payload reservation", ErrDeliveryUnavailable)
 	}
 
 	started := time.Now()
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return fmt.Errorf("beginning verification request: %w", err)
+		return VerificationChallenge{}, fmt.Errorf("beginning verification request: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	account, eligible, err := lockPendingStudentByEmail(ctx, tx, normalizedEmail)
 	if err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
 	if !eligible {
-		return commitVerificationRequest(ctx, tx, started)
+		if err := commitVerificationRequest(ctx, tx, started); err != nil {
+			return VerificationChallenge{}, err
+		}
+		return s.syntheticChallenge(request.Email), nil
 	}
-	if err := supersedeLiveVerificationSecret(ctx, tx, account.id, replacement); err != nil {
-		return err
+	// Inside the cooldown the live challenge is returned unchanged: no new code
+	// is generated, nothing is superseded, and no second message is sent.
+	//
+	// It deliberately does not *refuse*. This route must answer identically for
+	// a registered and an unregistered address, and an unregistered one has no
+	// cooldown to be inside — so refusing here would turn "429 versus 202" into
+	// a direct account-existence oracle. The metering that applies uniformly to
+	// this route is the rate limiter, which is keyed on the normalized address
+	// and knows nothing about whether an Account exists.
+	//
+	// The attempt budget is still protected, because the budget lives on the
+	// challenge row and this path leaves that row exactly as it found it.
+	live, hasLive, err := lockLiveEmailOTP(ctx, tx, account.id)
+	if err != nil {
+		return VerificationChallenge{}, err
 	}
-	if err := insertActionSecret(ctx, tx, account.id, replacement); err != nil {
-		return err
+	if hasLive && s.now().UTC().Before(live.issuedAt.Add(EmailOTPResendCooldown)) {
+		if err := commitVerificationRequest(ctx, tx, started); err != nil {
+			return VerificationChallenge{}, err
+		}
+		return liveChallenge(live, request.Email), nil
 	}
-	if err := appendIdentitySecurityEvent(
-		ctx, tx, securityEventAppend{
-			eventType:      "EMAIL_VERIFICATION_REISSUED",
-			accountID:      account.id,
-			actionSecretID: replacement.ID,
-			revision:       account.revision,
-			requestID:      requestID,
-			evidence: map[string]any{
-				"schema_version": 1,
-				"outcome_class":  "ELIGIBLE",
-			},
-		},
-	); err != nil {
-		return err
-	}
-	if err := s.appendVerificationOutbox(ctx, tx, verificationOutboxRequest{
-		accountID: account.id, revision: account.revision, email: account.email,
-		locale: account.locale, secret: replacement, requestID: requestID,
-		reservation: reservation,
+	if err := s.reissueEmailOTP(ctx, tx, reissueRequest{
+		account: account, replacement: replacement, requestID: requestID,
+		reservation: reservation, reason: "ADDRESS_REQUEST",
 	}); err != nil {
-		return err
+		return VerificationChallenge{}, err
 	}
-	return commitVerificationRequest(ctx, tx, started)
+	if err := commitVerificationRequest(ctx, tx, started); err != nil {
+		return VerificationChallenge{}, err
+	}
+	// The mask is built from the address the caller typed, exactly as the
+	// ineligible path does. Masking the *stored* address instead made the two
+	// outcomes distinguishable whenever the two differed in case or
+	// whitespace — typing STUDENT@example.com would come back masked as
+	// "st***@…" for a registered address and "ST***@…" for an unknown one,
+	// which is precisely the account-existence oracle this route is built to
+	// avoid.
+	return challengeOf(replacement, request.Email), nil
 }
 
 func commitVerificationRequest(
@@ -433,49 +469,6 @@ func lockPendingStudentByEmail(
 		return pendingStudent{}, false, fmt.Errorf("locking verification Account: %w", err)
 	}
 	return account, role == "STUDENT" && status == "PENDING_VERIFICATION", nil
-}
-
-func supersedeLiveVerificationSecret(
-	ctx context.Context,
-	tx pgx.Tx,
-	accountID string,
-	replacement IssuedActionSecret,
-) error {
-	var currentID string
-	err := tx.QueryRow(ctx,
-		`SELECT id::text
-		   FROM identity_action_secrets
-		  WHERE account_id = $1::uuid
-		    AND purpose = 'EMAIL_VERIFICATION'
-		    AND consumed_at IS NULL
-		    AND superseded_at IS NULL
-		  FOR UPDATE`,
-		accountID,
-	).Scan(&currentID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("locking live verification secret: %w", err)
-	}
-	// Stamped from the statement clock after the Account row lock, for the same
-	// reason as the reset path in recovery.go: the replacement timestamp
-	// predates both this transaction and its wait on the lock, so concurrent
-	// resend requests invert generation order against lock order and stamp an
-	// older superseded_at onto a newer row. This was latent in S1B1 rather than
-	// introduced by S1B3 — the existing concurrency test freezes the clock, so
-	// every issued_at is equal and the inversion never occurs there. GREATEST
-	// remains only as a clock-skew backstop for the constraint.
-	if _, err := tx.Exec(ctx,
-		`UPDATE identity_action_secrets
-		    SET superseded_at = GREATEST(issued_at, clock_timestamp()),
-		        superseded_by_id = $1::uuid
-		  WHERE id = $2::uuid`,
-		replacement.ID, currentID,
-	); err != nil {
-		return fmt.Errorf("superseding verification secret: %w", err)
-	}
-	return nil
 }
 
 func (s *AdmissionService) VerifyEmail(

@@ -976,3 +976,89 @@ func (r *SessionRepository) window(role Role) config.SessionWindow {
 		return r.settings.Student()
 	}
 }
+
+// IssueSessionInTransaction mints one ordinary session family for an Account
+// whose authority this transaction has already established.
+//
+// It exists so email verification can activate an Account and authenticate it
+// atomically. The alternatives were both worse: committing the activation and
+// then creating a session in a second transaction leaves a verified Student
+// unauthenticated whenever the second one fails, and carrying a
+// pre-verification session forward would mean a session existed before the
+// proof that justifies it.
+//
+// This is not a weaker session. It uses the same family record, the same
+// generation-bound credential, the same CSRF derivation, the same role window,
+// and the same security-event trail as Login. What differs is only the
+// evidence that preceded it — a consumed one-time code instead of a password —
+// and the caller is responsible for having verified that inside this same
+// transaction before calling.
+//
+// The Account row is re-read here under the caller's lock rather than trusted
+// from a parameter: the session window and the admitted epoch must come from
+// the row this transaction will commit, not from a value read before it.
+func (r *SessionRepository) IssueSessionInTransaction(
+	ctx context.Context,
+	tx pgx.Tx,
+	accountID string,
+	requestID string,
+) (SessionGrant, error) {
+	if r == nil || tx == nil {
+		return SessionGrant{}, errors.New("session repository and transaction are required")
+	}
+	var candidate loginCandidate
+	err := tx.QueryRow(ctx,
+		`SELECT a.id::text, a.display_name, a.role::text, a.status::text,
+		        c.state::text, a.session_epoch, a.revision, a.email_verified_at
+		   FROM accounts a
+		   JOIN password_credentials c ON c.account_id = a.id
+		  WHERE a.id = $1::uuid`,
+		accountID,
+	).Scan(
+		&candidate.accountID, &candidate.displayName, &candidate.role,
+		&candidate.status, &candidate.credentialState, &candidate.sessionEpoch,
+		&candidate.revision, &candidate.verifiedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionGrant{}, ErrAuthenticationFailed
+	}
+	if err != nil {
+		return SessionGrant{}, fmt.Errorf("reading session subject: %w", err)
+	}
+	// The same predicate Login applies. An Account that is not ACTIVE and
+	// verified in this transaction does not get a session out of it, whatever
+	// the caller believed it had just done.
+	if !candidate.loginAllowed() {
+		return SessionGrant{}, ErrAuthenticationFailed
+	}
+	pending, err := r.prepareSession(candidate)
+	if err != nil {
+		return SessionGrant{}, err
+	}
+	if err := insertSessionFamily(
+		ctx, tx, pending.session, candidate.sessionEpoch, pending.now,
+	); err != nil {
+		return SessionGrant{}, err
+	}
+	if err := insertSessionGeneration(
+		ctx, tx, pending.session.SessionID, 1, pending.issued, pending.now,
+	); err != nil {
+		return SessionGrant{}, err
+	}
+	if err := appendSessionEvent(ctx, tx, sessionEvent{
+		eventType: "SESSION_CREATED", accountID: candidate.accountID,
+		revision: candidate.revision, requestID: requestID,
+		evidence: map[string]any{
+			"generation": 1, "role": candidate.role,
+			// Recorded so the trail distinguishes a password login from a
+			// session minted by proving a verification code.
+			"authentication_method": "EMAIL_VERIFICATION_OTP",
+		},
+	}); err != nil {
+		return SessionGrant{}, err
+	}
+	return SessionGrant{
+		Session: pending.session, Credential: pending.issued.Credential,
+		CSRFToken: pending.issued.CSRFToken,
+	}, nil
+}

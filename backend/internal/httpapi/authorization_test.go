@@ -120,13 +120,14 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 	admissionPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests",
 		"password-reset-requests", "password-resets",
 	} {
 		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
 	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
-	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 
 	english, arabic := identityPolicySets()
 	policies, err := identity.NewStaticPolicySetResolver(english, arabic)
@@ -313,18 +314,24 @@ type RouteMatrixEntry struct {
 }
 
 var expectedRouteMatrix = map[string]RouteMatrixEntry{
-	"GET /healthz":                              {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
-	"GET /readyz":                               {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
-	"GET /api/v1/session/bootstrap":             {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
-	"GET /api/v1/registration-policy-set":       {Method: http.MethodGet, Path: "/api/v1/registration-policy-set", Class: ClassAnonymous},
-	"POST /api/v1/student-registrations":        {Method: http.MethodPost, Path: "/api/v1/student-registrations", Class: ClassAnonymous},
-	"POST /api/v1/email-verification-requests":  {Method: http.MethodPost, Path: "/api/v1/email-verification-requests", Class: ClassAnonymous},
-	"POST /api/v1/email-verifications":          {Method: http.MethodPost, Path: "/api/v1/email-verifications", Class: ClassAnonymous},
-	"POST /api/v1/password-reset-requests":      {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
-	"POST /api/v1/password-resets":              {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
-	"POST /api/v1/sessions":                     {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
-	"GET /api/v1/staff-invitations/preview":     {Method: http.MethodGet, Path: "/api/v1/staff-invitations/preview", Class: ClassAnonymous},
-	"POST /api/v1/staff-invitation-completions": {Method: http.MethodPost, Path: "/api/v1/staff-invitation-completions", Class: ClassAnonymous},
+	"GET /healthz":                             {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
+	"GET /readyz":                              {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
+	"GET /api/v1/session/bootstrap":            {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
+	"GET /api/v1/registration-policy-set":      {Method: http.MethodGet, Path: "/api/v1/registration-policy-set", Class: ClassAnonymous},
+	"POST /api/v1/student-registrations":       {Method: http.MethodPost, Path: "/api/v1/student-registrations", Class: ClassAnonymous},
+	"POST /api/v1/email-verification-requests": {Method: http.MethodPost, Path: "/api/v1/email-verification-requests", Class: ClassAnonymous},
+	"POST /api/v1/email-verifications":         {Method: http.MethodPost, Path: "/api/v1/email-verifications", Class: ClassAnonymous},
+	// Proving a verification code is an anonymous request that *produces* a
+	// session. It is classed anonymous because that is the authority the caller
+	// carries when it arrives; the session it returns is the outcome, not the
+	// admission requirement.
+	"POST /api/v1/email-verification-codes":        {Method: http.MethodPost, Path: "/api/v1/email-verification-codes", Class: ClassAnonymous},
+	"POST /api/v1/email-verification-code-resends": {Method: http.MethodPost, Path: "/api/v1/email-verification-code-resends", Class: ClassAnonymous},
+	"POST /api/v1/password-reset-requests":         {Method: http.MethodPost, Path: "/api/v1/password-reset-requests", Class: ClassAnonymous},
+	"POST /api/v1/password-resets":                 {Method: http.MethodPost, Path: "/api/v1/password-resets", Class: ClassAnonymous},
+	"POST /api/v1/sessions":                        {Method: http.MethodPost, Path: "/api/v1/sessions", Class: ClassAnonymous},
+	"GET /api/v1/staff-invitations/preview":        {Method: http.MethodGet, Path: "/api/v1/staff-invitations/preview", Class: ClassAnonymous},
+	"POST /api/v1/staff-invitation-completions":    {Method: http.MethodPost, Path: "/api/v1/staff-invitation-completions", Class: ClassAnonymous},
 
 	"GET /api/v1/session":           {Method: http.MethodGet, Path: "/api/v1/session", Class: ClassAuthenticatedSessionLifecycle},
 	"POST /api/v1/session-renewals": {Method: http.MethodPost, Path: "/api/v1/session-renewals", Class: ClassAuthenticatedSessionLifecycle},
@@ -426,8 +433,11 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /api/v1/me/course-access-invitations":                 {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations", Class: ClassCapabilityProtected},
 	"GET /api/v1/me/course-access-invitations/:id":             {Method: http.MethodGet, Path: "/api/v1/me/course-access-invitations/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/me/course-access-invitations/:id/accept":     {Method: http.MethodPost, Path: "/api/v1/me/course-access-invitations/:id/accept", Class: ClassCapabilityProtected},
-	"GET /api/v1/me/course-access":                             {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
-	"POST /api/v1/purchase-requests":                           {Method: http.MethodPost, Path: "/api/v1/purchase-requests", Class: ClassAnonymous},
+	// Purchase requests moved from an anonymous public route to the Student's
+	// own surface. The class change is the security change: creation is now
+	// behind a session, the session CSRF boundary, and the learning capability.
+	"POST /api/v1/me/purchase-requests": {Method: http.MethodPost, Path: "/api/v1/me/purchase-requests", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/course-access":      {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
 }
 
 type fakeOwnershipChecker struct{}

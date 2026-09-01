@@ -14,7 +14,9 @@ var requiredStudentAdmissionPolicyEndpoints = [...]string{
 	"student-registrations",
 	"email-verification-requests",
 	"email-verifications",
-	"purchase-requests",
+	"email-verification-codes",
+	"email-verification-code-resends",
+	"me-purchase-requests",
 }
 
 var requiredRecoveryPolicyEndpoints = [...]string{
@@ -113,7 +115,7 @@ func NewPurchaseAdmissionFoundation(options PurchaseAdmissionFoundationOptions) 
 	if options.Limiter == nil {
 		return nil, errors.New("purchase admission limiter is required")
 	}
-	endpointPolicies, err := validatedEndpointPolicies(options.EndpointPolicies, []string{"purchase-requests"})
+	endpointPolicies, err := validatedEndpointPolicies(options.EndpointPolicies, []string{"me-purchase-requests"})
 	if err != nil {
 		return nil, err
 	}

@@ -144,37 +144,50 @@ test.describe("S11 release acceptance", () => {
       expect((await registrationResponsePromise).status()).toBe(202);
       await studentPage.waitForURL((url) => url.pathname === "/verify-email");
 
+      // The screen opened by itself and already knows which challenge it is
+      // about, so it asks for a code rather than for the address the Student
+      // typed one screen ago.
+      const challengeID = new URL(studentPage.url()).searchParams.get("challenge");
+      expect(challengeID).toMatch(/^[0-9a-f-]{36}$/);
+      await expect(studentPage.getByTestId("verification-masked-email")).toBeVisible();
+      await expect(studentPage.getByTestId("verification-masked-email")).not.toContainText(
+        STUDENT_EMAIL,
+      );
+
       const verification = queryEmailVerificationAction(STUDENT_EMAIL);
       expect(verification.account_id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(verification.verification_code).toMatch(/^\d{6}$/);
 
-      // A bad bearer is recoverable: it is refused without consuming the valid delivery.
-      await studentPage.goto("/verify-email/result#token=invalid-s11-verification-token");
-      await expect(
-        studentPage.getByRole("alert").filter({ hasText: "This link is unavailable" }),
-      ).toBeVisible();
-      await studentPage.close();
-      studentPage = await studentContext.newPage();
-      await studentPage.goto(
-        `/verify-email/result#token=${encodeURIComponent(verification.verification_token)}`,
-      );
-      await expect(
-        studentPage.getByRole("status").filter({ hasText: "Email confirmed" }),
-      ).toBeVisible();
-      await expect(studentPage).not.toHaveURL(/verification_token|token=/);
+      // A wrong code is recoverable: it is refused without consuming the live
+      // challenge, and it costs one of the five attempts rather than the
+      // challenge itself.
+      const wrongCode = verification.verification_code === "000000" ? "111111" : "000000";
+      await studentPage.getByTestId("verification-code-input").fill(wrongCode);
+      await studentPage.getByTestId("verification-code-submit").click();
+      await expect(studentPage.getByRole("alert").first()).toBeVisible();
+      await expect(studentPage).toHaveURL(/\/verify-email\?/);
 
-      // Real password login establishes the Student session used for the rest of the journey.
-      await studentPage.getByRole("link", { name: "Go to login" }).click();
-      await studentPage.locator("#email").fill(STUDENT_EMAIL);
-      await studentPage.locator("#password").fill(STUDENT_PASSWORD);
-      const loginResponsePromise = studentPage.waitForResponse(
-        (response) => response.url().endsWith("/api/v1/sessions") && response.request().method() === "POST",
+      // Proving the code activates the Account and signs the Student in, in one
+      // step. No password is asked for: the code already proved control of the
+      // mailbox, and this response is the session.
+      const verificationResponsePromise = studentPage.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/email-verification-codes") &&
+          response.request().method() === "POST",
       );
-      await studentPage.getByRole("button", { name: "Sign in" }).click();
-      const loginResponse = await loginResponsePromise;
-      expect(loginResponse.status()).toBe(201);
-      const loginBody = (await loginResponse.json()) as { role: string; csrf_token: string };
-      expect(loginBody.role).toBe("STUDENT");
-      expect(loginBody.csrf_token).toBeTruthy();
+      await studentPage.getByTestId("verification-code-input").fill(verification.verification_code);
+      await studentPage.getByTestId("verification-code-submit").click();
+      const verificationResponse = await verificationResponsePromise;
+      expect(verificationResponse.status()).toBe(201);
+      const sessionBody = (await verificationResponse.json()) as {
+        role: string;
+        csrf_token: string;
+      };
+      expect(sessionBody.role).toBe("STUDENT");
+      expect(sessionBody.csrf_token).toBeTruthy();
+      await studentPage.waitForURL((url) => /\/(en|ar)\/learn\/dashboard$/.test(url.pathname));
+      // Nothing about the challenge or the code survives in the address bar.
+      await expect(studentPage).not.toHaveURL(/challenge=|code=|token=/);
 
       // Admin uses a production-valid session and configures the launch Course.
       const adminSession = await installIssuedSession(adminContext, ADMIN);
@@ -238,7 +251,7 @@ test.describe("S11 release acceptance", () => {
       await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
       await expect(studentPage.locator("body")).toContainText(/unavailable/i);
       await expect(studentPage.locator("video")).toHaveCount(0);
-      expect(await protectedMutationStatuses(studentPage, loginBody.csrf_token)).toEqual({
+      expect(await protectedMutationStatuses(studentPage, sessionBody.csrf_token)).toEqual({
         playback: 404,
         progress: 404,
       });
@@ -299,7 +312,7 @@ test.describe("S11 release acceptance", () => {
         {
           lessonID: LESSON_ID,
           assetVersionID: ASSET_VERSION_ID,
-          csrfToken: loginBody.csrf_token,
+          csrfToken: sessionBody.csrf_token,
         },
       );
       expect([200, 204]).toContain(progressStatus);

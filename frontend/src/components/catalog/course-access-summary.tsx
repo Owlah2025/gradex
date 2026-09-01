@@ -11,7 +11,7 @@ import {
   courseAccessRelationship,
   type AccessLookup,
 } from "./course-access-relationship";
-import { PurchaseRequestForm } from "./purchase-request-form";
+import { PurchaseAction } from "./purchase-action";
 
 /** The id the mobile bar scrolls to, and the anchor the access column owns. */
 export const ACCESS_SECTION_ID = "course-access";
@@ -100,10 +100,16 @@ export function CourseAccessSummary({
               className={course.price ? "mt-6 border-t border-border pt-5" : ""}
             />
             {(AWAITING_ACCESS as readonly string[]).includes(relationship) ? (
-              <PurchaseRequestForm
+              <PurchaseAction
                 courseId={course.id}
+                courseTitle={course.title}
+                priceMinorUnits={course.price ? course.price.minor_units : null}
                 locale={locale}
                 labels={accessLabels.purchase}
+                // ANONYMOUS is the one awaiting-access state with no session,
+                // and it is the state that must lead into the auth journey
+                // rather than into a confirmation.
+                authenticated={relationship !== "ANONYMOUS"}
                 className="mt-5 w-full"
               />
             ) : null}

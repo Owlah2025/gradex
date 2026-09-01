@@ -94,6 +94,7 @@ test("a mount subscribes exactly one timer and one listener set", () => {
   assert.equal([...scope.windowTarget.intervals.values()][0].milliseconds, progressReportIntervalMilliseconds);
   assert.equal(scope.media.countFor("pause"), 1);
   assert.equal(scope.media.countFor("seeked"), 1);
+  assert.equal(scope.media.countFor("ended"), 1);
   assert.equal(scope.documentTarget.countFor("visibilitychange"), 1);
   assert.equal(scope.windowTarget.countFor("pagehide"), 1);
 });
@@ -112,7 +113,7 @@ test("React StrictMode's double mount leaves exactly one live reporter, timer, a
   assert.equal(second.disposeCount, 0, "the surviving reporter stays live");
 
   assert.equal(scope.windowTarget.intervals.size, 1, "exactly one active periodic timer");
-  assert.equal(scope.media.totalListeners, 2, "exactly one media listener set");
+  assert.equal(scope.media.totalListeners, 3, "exactly one media listener set: pause, seeked, ended");
   assert.equal(scope.documentTarget.totalListeners, 1);
   assert.equal(scope.windowTarget.totalListeners, 1);
 
@@ -146,7 +147,7 @@ test("the disposer is idempotent, so a repeated teardown cannot detach the live 
   assert.equal(first.disposeCount, 1);
   assert.equal(second.disposeCount, 0);
   assert.equal(scope.windowTarget.intervals.size, 1, "the live mount keeps its timer");
-  assert.equal(scope.media.totalListeners, 2, "the live mount keeps its listeners");
+  assert.equal(scope.media.totalListeners, 3, "the live mount keeps its listeners");
 
   scope.media.currentTime = 7;
   scope.media.emit("pause");
@@ -183,4 +184,22 @@ test("teardown detaches every subscription and disposes the reporter once", () =
   scope.media.emit("pause");
   scope.windowTarget.tickAllIntervals();
   assert.deepEqual(reporter.positions, [], "a disposed mount reports nothing");
+});
+
+test("reaching the end of a Lesson reports immediately rather than waiting for the interval", () => {
+  const scope = targets();
+  const reporter = new RecordingReporter("only");
+  const dispose = attachProgressReporter(scope, reporter);
+
+  scope.media.currentTime = 600;
+  scope.media.emit("ended");
+
+  // Without this the video stops, the Lesson is complete server-side after the
+  // next tick, and the screen keeps saying "in progress" for up to fifteen
+  // seconds — the exact delay the Student sees as "it didn't update".
+  assert.deepEqual(reporter.positions, [600], "ended did not report the completing position");
+  assert.equal(reporter.exits.length, 0, "ended must not be treated as a page exit");
+
+  dispose();
+  assert.equal(scope.media.totalListeners, 0, "the ended listener outlived its mount");
 });

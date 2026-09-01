@@ -175,6 +175,25 @@ func mountStudentAdmissionRoutesWithBootstrap(
 		foundation.requireRateDecision("email-verification-requests", verificationRequestIdentifier),
 		handlers.requestBoundVerification,
 	)
+	// The canonical verification route. Proving a code activates the Account
+	// and returns an authenticated session in the same response.
+	v1.POST(
+		"/email-verification-codes",
+		strictJSONMiddleware(func() any { return &verificationCodeBody{} }, verificationConsumptionBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("email-verification-codes", verificationCodeIdentifier),
+		handlers.consumeBoundVerificationCode,
+	)
+	v1.POST(
+		"/email-verification-code-resends",
+		strictJSONMiddleware(func() any { return &verificationResendBody{} }, verificationRequestBodyLimit),
+		foundation.security.requireAdmission(),
+		foundation.requireRateDecision("email-verification-code-resends", verificationResendIdentifier),
+		handlers.resendBoundVerificationCode,
+	)
+	// Legacy link consumption. Retained for the lifetime of verification links
+	// that were already delivered when the code flow shipped; it activates the
+	// Account and returns no session, exactly as it did before.
 	v1.POST(
 		"/email-verifications",
 		strictJSONMiddleware(func() any { return &verificationConsumptionBody{} }, verificationConsumptionBodyLimit),

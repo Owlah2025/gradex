@@ -73,6 +73,7 @@ export SALES_WHATSAPP_NUMBER=96500000000
 export SESSION_CSRF_KEY=placeholder
 export ANONYMOUS_COOKIE_SIGNING_KEY=placeholder
 export ANONYMOUS_CSRF_KEY=placeholder
+export IDENTITY_OTP_PEPPER=placeholder
 export ADMISSION_LIMITER_HMAC_KEY=placeholder
 export OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION=hostinger-render-v1
 export OUTBOX_PROTECTED_PAYLOAD_KEY=placeholder

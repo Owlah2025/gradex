@@ -48,6 +48,7 @@ func productionAdmissionConfig(t *testing.T) *config.Config {
 		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
 		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
 		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"IDENTITY_OTP_PEPPER":          strings.Repeat("o", 32),
 		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 		"OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("d", 32),
 		"EMAIL_API_KEY":                "resend-key-canary",

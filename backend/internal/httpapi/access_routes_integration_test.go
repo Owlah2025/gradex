@@ -173,13 +173,15 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 		t.Fatalf("constructing admission policies: %v", err)
 	}
 	admissionPolicies := map[string]ratelimit.Policy{}
-	for _, endpoint := range []string{"student-registrations", "email-verification-requests", "email-verifications", "password-reset-requests"} {
+	for _, endpoint := range []string{"student-registrations", "email-verification-requests", "email-verifications",
+		"email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests", "email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests", "password-reset-requests"} {
 		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
 	admissionPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
 	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
-	admissionPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 	admissionFoundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin: "https://gradex.example", CookieSigningKey: bytes.Repeat([]byte{0x31}, 32),
 		CSRFKey: bytes.Repeat([]byte{0x32}, 32), AnonymousSessionTTL: time.Hour,

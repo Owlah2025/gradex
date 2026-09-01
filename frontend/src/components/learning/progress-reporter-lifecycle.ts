@@ -53,6 +53,12 @@ export function attachProgressReporter(targets: ReporterTargets, reporter: Lifec
   const interval = windowTarget.setInterval(report, progressReportIntervalMilliseconds);
   media.addEventListener("pause", report);
   media.addEventListener("seeked", report);
+  // Reaching the end is the moment a Lesson becomes complete, and it is the one
+  // moment where waiting for the next interval tick is visible to the Student:
+  // the video stops, and the Lesson still says "in progress" for up to fifteen
+  // seconds. `ended` also fires on the last frame, so this is the report that
+  // actually carries the completing position.
+  media.addEventListener("ended", report);
   documentTarget.addEventListener("visibilitychange", reportWhenHidden);
   windowTarget.addEventListener("pagehide", reportOnPageHide);
 
@@ -63,6 +69,7 @@ export function attachProgressReporter(targets: ReporterTargets, reporter: Lifec
     windowTarget.clearInterval(interval);
     media.removeEventListener("pause", report);
     media.removeEventListener("seeked", report);
+    media.removeEventListener("ended", report);
     documentTarget.removeEventListener("visibilitychange", reportWhenHidden);
     windowTarget.removeEventListener("pagehide", reportOnPageHide);
     reporter.dispose();

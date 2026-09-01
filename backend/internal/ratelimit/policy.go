@@ -120,22 +120,31 @@ func DevelopmentAdmissionPolicy(endpoint string) Policy {
 	}
 }
 
-// PurchaseRequestsPolicy protects the public manual-sales write boundary. It
-// deliberately budgets both the browser source and the normalized email: an
-// attacker cannot rotate email spellings to evade the source ceiling, nor can
-// a distributed source flood a single sales recipient. The policy is not
-// business authority and its denial response is identical for every address.
-func PurchaseRequestsPolicy() Policy {
+// StudentPurchaseRequestsPolicy meters the authenticated purchase route.
+//
+// It is a separate policy from PurchaseRequestsPolicy because that one budgets
+// an *anonymous browser*: its dimensions include the anonymous-session
+// identifier, which an authenticated request does not carry. Reusing it on this
+// route made every call fail closed — the limiter could not evaluate a
+// dimension the request had no value for, and a fail-closed policy answers
+// UNAVAILABLE rather than guessing.
+//
+// The dimensions here are the ones an authenticated request actually has. The
+// identifier is the Account, which is stronger than the claimed address the
+// public route had to key on: it cannot be varied by spelling, and it is the
+// thing the operational budget — the Admin sales queue — is really protecting.
+// It stays fail-closed for the same reason its predecessor did: an unmetered
+// route into that queue is worse than a refused one.
+func StudentPurchaseRequestsPolicy() Policy {
 	return Policy{
-		ID:       "purchase-requests-v1",
-		Category: "PUBLIC_PURCHASE",
-		Endpoint: "purchase-requests",
+		ID:       "me-purchase-requests-v1",
+		Category: "STUDENT_PURCHASE",
+		Endpoint: "me-purchase-requests",
 		Window:   time.Minute,
 		Rules: []Rule{
 			{Dimension: DimensionEndpoint, Limit: 60, LocalLimit: 6},
 			{Dimension: DimensionIdentifier, Limit: 6, LocalLimit: 2},
 			{Dimension: DimensionSourceAddr, Limit: 20, LocalLimit: 3},
-			{Dimension: DimensionAnonymous, Limit: 10, LocalLimit: 2},
 			{Dimension: DimensionGlobal, Limit: 300, LocalLimit: 20},
 		},
 		LocalMaxKeys: 4096,

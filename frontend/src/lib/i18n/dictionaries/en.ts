@@ -10,6 +10,9 @@ export const en = {
     logoHomeAria: "Gradex home",
   },
   nav: {
+    breadcrumb: "Breadcrumb",
+    home: "Home",
+    myLearning: "My Learning",
     courses: "Courses",
     why: "Why Gradex",
     faq: "FAQ",
@@ -882,6 +885,31 @@ export const en = {
       unavailable:
         "Verification requests are temporarily unavailable. Try again shortly.",
     },
+    code: {
+      title: "Check your email",
+      intro: "Enter the code we sent to finish creating your account.",
+      sentTo: "We sent a 6-digit code to:",
+      label: "Verification code",
+      hint: "Six digits, from the email we just sent.",
+      submit: "Verify and continue",
+      submitting: "Verifying…",
+      invalid: "That code is not correct. Check the email and try again.",
+      malformed: "Enter the 6-digit code from the email.",
+      expired:
+        "This code is no longer usable. Request a new one to continue.",
+      exhausted:
+        "Too many attempts on this code. Request a new one to continue.",
+      unavailable: "Verification is temporarily unavailable. Try again shortly.",
+      resend: "Send a new code",
+      resending: "Sending…",
+      resendIn: "You can request a new code in {seconds}s",
+      resent: "A new code is on its way. The previous one no longer works.",
+      resendTooSoon: "A code was just sent. Wait a moment before asking again.",
+      noChallenge:
+        "This verification screen has expired. Enter your email to start again.",
+      useEmailInstead: "Use a different email address",
+      attemptsLeft: "{count} attempts left",
+    },
     result: {
       title: "Confirming your email",
       intro: "Keep this page open while Gradex checks the one-time link.",
@@ -1103,6 +1131,8 @@ export const en = {
     common: {
       required: "This field is required.",
       backHome: "Back to courses",
+      homeLink: "Gradex home",
+      backToCourse: "Back to the course",
       opensInNewTab: "opens in a new tab",
       passwordRule:
         "15–128 characters. Spaces are welcome; there are no symbol rules.",
@@ -1196,6 +1226,8 @@ export const en = {
     preparingDownload: "Preparing download…",
     downloadUnavailable: "This file cannot be downloaded right now. Try again.",
     myCourses: "My courses",
+    shellCatalogue: "Browse courses",
+    shellHome: "Home",
     learningNavigation: "Learning navigation",
     courseContents: "Course contents",
     closeCourseContents: "Close course contents",
@@ -1406,16 +1438,28 @@ export const en = {
       retry: "Try again",
     },
     purchase: {
-      heading: "Buy this course",
+      heading: "Complete your course purchase request",
       intro:
-        "Share your email first, then continue the payment conversation on WhatsApp.",
-      action: "I want to buy this course",
-      email: "Email address",
-      invalidEmail: "Enter a complete email address.",
-      submit: "Continue to WhatsApp",
+        "You will be taken to WhatsApp to finish the payment arrangements.",
+      action: "Buy this course",
+      signInRequiredTitle: "Sign in to continue",
+      signInRequiredBody:
+        "A purchase request belongs to your account, so we need to know who you are first. You will come straight back to this course.",
+      signIn: "Sign in",
+      createAccount: "Create an account",
+      courseLabel: "Course",
+      priceLabel: "Price",
+      submit: "Complete purchase request",
       submitting: "Saving your request…",
+      cancel: "Cancel",
       failed:
         "Your request could not be saved. WhatsApp was not opened; try again.",
+      alreadyActive: "You already have access to this course.",
+      notPurchasable: "This course is not available for purchase right now.",
+      reusedTitle: "You already have a request for this course",
+      reusedBody:
+        "We reopened your existing request instead of creating a second one.",
+      openingWhatsApp: "Opening WhatsApp…",
     },
     /** The invitation-link surface. */
     invitation: {

@@ -40,6 +40,7 @@ export PLAYBACK_TOKEN_SECRET=verification-only-playback
 export SESSION_CSRF_KEY=verification-only-session-csrf
 export ANONYMOUS_COOKIE_SIGNING_KEY=verification-only-anonymous-cookie
 export ANONYMOUS_CSRF_KEY=verification-only-anonymous-csrf
+export IDENTITY_OTP_PEPPER=verification-only-identity-otp-pepper
 export ADMISSION_LIMITER_HMAC_KEY=verification-only-admission-limiter
 export OUTBOX_PROTECTED_PAYLOAD_KEY=verification-only-outbox
 export PRIVACY_EMAIL=privacy-verification@example.invalid

@@ -18,6 +18,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/access"
 	"github.com/Owlah2025/gradex/backend/internal/auth"
+	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
@@ -52,27 +53,53 @@ func TestManualPurchaseFlowHTTPAPI_RealPostgreSQL(t *testing.T) {
 	}
 
 	requestBody := []byte(`{"course_id":"` + courseID + `","email":"Student-Access@Example.com"}`)
-	// The same valid payload without the browser-bound anonymous capability is
-	// rejected before it can reach business persistence.
+	// The anonymous purchase route no longer exists. It accepted a
+	// caller-supplied address and returned a WhatsApp handoff in the same
+	// response, which meant any browser could put any mailbox into the Admin
+	// sales queue and be handed the conversation that ends in Course access.
+	//
+	// 404 rather than 403 is the assertion that matters: a 403 would mean the
+	// route is still mounted and merely refusing this caller. Both the
+	// unadmitted and the fully admitted anonymous request must find nothing
+	// there at all.
 	unbound := purchaseFlowRequest(t, client, ts.URL+"/api/v1/purchase-requests", "", "", requestBody)
-	if unbound.StatusCode != http.StatusForbidden {
+	if unbound.StatusCode != http.StatusNotFound {
 		unbound.Body.Close()
-		t.Fatalf("unbound public purchase request status = %d, want 403", unbound.StatusCode)
+		t.Fatalf("unbound public purchase request status = %d, want 404", unbound.StatusCode)
 	}
 	unbound.Body.Close()
-	created := purchaseFlowAdmittedRequest(t, client, ts.URL+"/api/v1/purchase-requests", admissionCookie, admissionCSRF, requestBody)
-	if created.StatusCode != http.StatusCreated {
-		t.Fatalf("create purchase request status = %d, want 201", created.StatusCode)
+	admitted := purchaseFlowAdmittedRequest(t, client, ts.URL+"/api/v1/purchase-requests", admissionCookie, admissionCSRF, requestBody)
+	if admitted.StatusCode != http.StatusNotFound {
+		admitted.Body.Close()
+		t.Fatalf("admitted anonymous purchase request status = %d, want 404", admitted.StatusCode)
 	}
-	var createdBody struct {
-		Reference   string `json:"reference"`
-		WhatsAppURL string `json:"whatsapp_url"`
+	admitted.Body.Close()
+
+	// The Admin half of the lifecycle still has to work against a request in
+	// the pre-authentication shape, because rows of exactly that shape are
+	// already in the production table.
+	historicalWriter, err := outbox.NewWriter("key-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("outbox writer: %v", err)
 	}
-	if err := json.NewDecoder(created.Body).Decode(&createdBody); err != nil {
-		created.Body.Close()
-		t.Fatalf("decoding public purchase response: %v", err)
+	historicalRepo, err := access.NewRepository(pool, historicalWriter)
+	if err != nil {
+		t.Fatalf("access repository: %v", err)
 	}
-	created.Body.Close()
+	historical, err := historicalRepo.CreatePurchaseRequest(ctx, access.CreatePurchaseRequestParams{
+		CourseID: courseID, Email: "Student-Access@Example.com", Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("creating historical purchase request: %v", err)
+	}
+	historicalHandoff, err := access.WhatsAppHandoffURL("15550000000", historical, identity.LocaleEnglish)
+	if err != nil {
+		t.Fatalf("building historical WhatsApp handoff: %v", err)
+	}
+	createdBody := struct {
+		Reference   string
+		WhatsAppURL string
+	}{Reference: historical.ReferenceCode, WhatsAppURL: historicalHandoff}
 	if !regexp.MustCompile(`^GRX-[A-F0-9]{16}$`).MatchString(createdBody.Reference) {
 		t.Fatalf("reference = %q, want non-sequential human-safe GRX reference", createdBody.Reference)
 	}
@@ -104,22 +131,17 @@ func TestManualPurchaseFlowHTTPAPI_RealPostgreSQL(t *testing.T) {
 		t.Fatalf("persisted request = email %q, price %d; want normalized email and 25000 fils", normalizedEmail, snapshot)
 	}
 
-	// A retry is externally indistinguishable from a fresh success, but reuses
-	// the existing active request and does not create another audit record.
-	retried := purchaseFlowAdmittedRequest(t, client, ts.URL+"/api/v1/purchase-requests", admissionCookie, admissionCSRF, requestBody)
-	if retried.StatusCode != http.StatusCreated {
-		t.Fatalf("duplicate purchase request status = %d, want 201", retried.StatusCode)
+	// A repeated request reuses the existing active one rather than creating a
+	// second. This is what keeps a double click, a refresh, or a back-and-
+	// forward from filling the Admin sales queue with duplicates of one sale.
+	retry, err := historicalRepo.CreatePurchaseRequest(ctx, access.CreatePurchaseRequestParams{
+		CourseID: courseID, Email: "Student-Access@Example.com", Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("repeating purchase request: %v", err)
 	}
-	var retryBody struct {
-		Reference string `json:"reference"`
-	}
-	if err := json.NewDecoder(retried.Body).Decode(&retryBody); err != nil {
-		retried.Body.Close()
-		t.Fatalf("decoding duplicate purchase response: %v", err)
-	}
-	retried.Body.Close()
-	if retryBody.Reference != createdBody.Reference {
-		t.Fatalf("duplicate reference = %q, want existing %q", retryBody.Reference, createdBody.Reference)
+	if retry.ReferenceCode != createdBody.Reference {
+		t.Fatalf("duplicate reference = %q, want existing %q", retry.ReferenceCode, createdBody.Reference)
 	}
 	var requestCount, createAuditCount int
 	if err := pool.QueryRow(ctx, `
@@ -143,26 +165,25 @@ func TestManualPurchaseFlowHTTPAPI_RealPostgreSQL(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT price_minor_units FROM purchase_requests WHERE id = $1::uuid`, requestID).Scan(&snapshot); err != nil || snapshot != 25000 {
 		t.Fatalf("price snapshot = %d (err=%v), want 25000", snapshot, err)
 	}
-	persistedHandoff := purchaseFlowAdmittedRequest(t, client, ts.URL+"/api/v1/purchase-requests", admissionCookie, admissionCSRF, requestBody)
-	if persistedHandoff.StatusCode != http.StatusCreated {
-		persistedHandoff.Body.Close()
-		t.Fatalf("post-reprice retry status = %d, want 201", persistedHandoff.StatusCode)
+	// The handoff for an existing request quotes the snapshot the request was
+	// created with, not the Course's current price. A Student who was quoted
+	// 25.000 must not arrive in WhatsApp being asked for 30.000.
+	repriced, err := historicalRepo.CreatePurchaseRequest(ctx, access.CreatePurchaseRequestParams{
+		CourseID: courseID, Email: "Student-Access@Example.com", Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("repeating purchase request after reprice: %v", err)
 	}
-	var persistedHandoffBody struct {
-		Reference   string `json:"reference"`
-		WhatsAppURL string `json:"whatsapp_url"`
+	repricedHandoff, err := access.WhatsAppHandoffURL("15550000000", repriced, identity.LocaleEnglish)
+	if err != nil {
+		t.Fatalf("building post-reprice WhatsApp handoff: %v", err)
 	}
-	if err := json.NewDecoder(persistedHandoff.Body).Decode(&persistedHandoffBody); err != nil {
-		persistedHandoff.Body.Close()
-		t.Fatalf("decoding post-reprice retry: %v", err)
-	}
-	persistedHandoff.Body.Close()
-	persistedURL, err := url.Parse(persistedHandoffBody.WhatsAppURL)
+	persistedURL, err := url.Parse(repricedHandoff)
 	if err != nil {
 		t.Fatalf("parsing historical WhatsApp handoff: %v", err)
 	}
-	if persistedHandoffBody.Reference != createdBody.Reference || !strings.Contains(persistedURL.Query().Get("text"), "25.000 KWD") {
-		t.Fatalf("historical WhatsApp handoff was repriced: %+v", persistedHandoffBody)
+	if repriced.ReferenceCode != createdBody.Reference || !strings.Contains(persistedURL.Query().Get("text"), "25.000 KWD") {
+		t.Fatalf("historical WhatsApp handoff was repriced: %+v", repriced)
 	}
 
 	queue := purchaseFlowGet(t, client, ts.URL+"/api/v1/admin/purchase-requests?q="+url.QueryEscape(createdBody.Reference), adminToken)

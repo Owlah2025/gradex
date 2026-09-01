@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 	flag.BoolVar(&queryProgress, "query-progress", false, "Query progress position for a student and lesson")
 	flag.BoolVar(&queryLearningState, "query-learning-state", false, "Emit the Entitlement, Enrollment, Progress, and material snapshot for a student and course")
 	flag.BoolVar(&queryInvitationToken, "query-invitation-token", false, "Emit the verification token for an invitation from outbox")
-	flag.BoolVar(&queryEmailVerificationToken, "query-email-verification-token", false, "Emit the email verification token and Account ID for a registered Student")
+	flag.BoolVar(&queryEmailVerificationToken, "query-email-verification-token", false, "Emit the emailed verification code and Account ID for a registered Student")
 	flag.BoolVar(&queryCredentialState, "query-credential-state", false, "Emit the password credential state for an Account, so a browser journey can assert CHANGE_REQUIRED cleared without writing SQL")
 	flag.StringVar(&studentIDParam, "student", "", "Student ID for query")
 	flag.StringVar(&lessonIDParam, "lesson", "", "Lesson ID for query")
@@ -333,11 +333,11 @@ func TestMain(m *testing.M) {
 			log.Fatalf("reading email verification token: %v", err)
 		}
 		encoded, err := json.Marshal(map[string]string{
-			"account_id":         accountID,
-			"verification_token": token,
+			"account_id":        accountID,
+			"verification_code": token,
 		})
 		if err != nil {
-			log.Fatalf("encoding email verification token result: %v", err)
+			log.Fatalf("encoding email verification result: %v", err)
 		}
 		fmt.Printf("%s", encoded)
 		os.Exit(0)
@@ -1164,6 +1164,16 @@ func queryInvitationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Poo
 	return queryVerificationTokenFromOutbox(ctx, targetPool, invitationID, "access.invitation_issued")
 }
 
+// queryEmailVerificationTokenFromOutbox returns the Account and the emailed
+// verification code for a registered Student.
+//
+// The code cannot be read from `identity_action_secrets`: what is stored there
+// is a keyed HMAC over a server-held pepper, precisely so that a database copy
+// is not an offline dictionary over the million six-digit values. The outbox's
+// protected payload is the only place the plaintext exists, it is AES-GCM
+// encrypted at rest, and this is the same ciphertext the dispatcher opens to
+// send the message — so a fixture reading it is reading what the Student was
+// actually sent.
 func queryEmailVerificationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Pool, email string) (string, string, error) {
 	var accountID string
 	if err := targetPool.QueryRow(
@@ -1177,7 +1187,7 @@ func queryEmailVerificationTokenFromOutbox(ctx context.Context, targetPool *pgxp
 		ctx,
 		targetPool,
 		accountID,
-		"identity.email_verification_requested",
+		"identity.email_verification_code_requested",
 	)
 	if err != nil {
 		return "", "", err

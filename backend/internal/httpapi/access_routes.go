@@ -64,14 +64,28 @@ type rejectInvitationBody struct {
 	Reason string `json:"reason"`
 }
 
-type createPurchaseRequestBody struct {
+// createStudentPurchaseRequestBody carries the Course and nothing else.
+//
+// There is no email field, and adding one back would reintroduce the defect
+// this route exists to remove: the address on a purchase request decides where
+// Course access is eventually sent, so it must come from the authenticated
+// Account rather than from the request body. There is no price field for the
+// same reason — the amount is read from the Course.
+type createStudentPurchaseRequestBody struct {
 	CourseID string `json:"course_id"`
-	Email    string `json:"email"`
 }
 
 type createPurchaseRequestResponse struct {
 	Reference   string `json:"reference"`
 	WhatsAppURL string `json:"whatsapp_url"`
+	CourseTitle string `json:"course_title"`
+	// The price is echoed from the persisted snapshot so the confirmation the
+	// Student saw and the amount the request carries can be compared, rather
+	// than the browser having to trust that they matched.
+	PriceMinorUnits int64  `json:"price_minor_units"`
+	Currency        string `json:"currency"`
+	State           string `json:"state"`
+	Reused          bool   `json:"reused"`
 }
 
 type adminPurchaseRequestListResponse struct {
@@ -113,15 +127,6 @@ func mountAccessRoutes(
 	h := &accessHandlers{
 		repo: foundation.repository, clock: clock, salesWhatsAppNumber: foundation.salesWhatsAppNumber,
 	}
-
-	// A purchase request is public by design. It creates no authority for the
-	// caller and accepts no client-owned price or payment state.
-	v1.POST("/purchase-requests",
-		strictJSONMiddleware(func() any { return &createPurchaseRequestBody{} }, accessMutationBodyLimit),
-		admissionFoundation.security.requireAdmission(),
-		admissionFoundation.requireRateDecision("purchase-requests", purchaseRequestIdentifier),
-		h.createPurchaseRequest,
-	)
 
 	// Admin mutations
 	adminAccessGroup := v1.Group("/admin")
@@ -207,22 +212,44 @@ func mountAccessRoutes(
 			strictJSONMiddleware(func() any { return &acceptInvitationBody{} }, accessMutationBodyLimit),
 			h.acceptStudentCourseAccessInvitation,
 		)
+		// A purchase request belongs to the Student who made it. The public
+		// anonymous route this replaces accepted a caller-supplied address and
+		// returned a WhatsApp handoff in the same response, which meant any
+		// browser could put any mailbox into the Admin sales queue and be
+		// handed the conversation that ends in Course access.
+		//
+		// The rate decision uses the authenticated policy, not the public one.
+		// The public policy budgets an anonymous browser and includes the
+		// anonymous-session dimension, which an authenticated request does not
+		// carry — and a fail-closed policy that cannot evaluate a dimension
+		// answers UNAVAILABLE, so reusing it refused every call.
+		meMutationGroup.POST("/purchase-requests",
+			strictJSONMiddleware(func() any { return &createStudentPurchaseRequestBody{} }, accessMutationBodyLimit),
+			admissionFoundation.requireRateDecision("me-purchase-requests", authenticatedPurchaseIdentifier),
+			h.createStudentPurchaseRequest,
+		)
 	}
 
 	return nil
 }
 
-func (h *accessHandlers) createPurchaseRequest(c *gin.Context) {
-	body := c.MustGet(strictJSONBodyContextKey).(*createPurchaseRequestBody)
+// createStudentPurchaseRequest is the one place a purchase request comes into
+// existence, and the one place the WhatsApp handoff URL is produced.
+//
+// Reaching it already required a session cookie, the session CSRF token, the
+// Student learning capability, and the rate decision. What is added here is the
+// part the browser cannot be trusted with: the address, the title, the price,
+// and the currency are all read from the server's own records inside the
+// transaction that writes the request.
+func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*createStudentPurchaseRequestBody)
 	if _, err := uuid.Parse(body.CourseID); err != nil {
 		writeProblem(c, problem.NotFound())
 		return
 	}
-	if _, err := identity.NormalizeEmail(body.Email); err != nil {
-		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
-			Code: "INVALID_EMAIL", Detail: "A valid email address is required",
-			Location: problem.LocationBody, Parameter: "email",
-		}))
+	studentID := c.GetString(ctxUserIDKey)
+	if _, err := uuid.Parse(studentID); err != nil {
+		writeProblem(c, problem.NotAuthorized())
 		return
 	}
 	locale, ok := requestedLocale(c.GetHeader("Accept-Language"))
@@ -234,19 +261,20 @@ func (h *accessHandlers) createPurchaseRequest(c *gin.Context) {
 	if h != nil && h.clock != nil {
 		now = h.clock()
 	}
-	request, err := h.repo.CreatePurchaseRequest(c.Request.Context(), access.CreatePurchaseRequestParams{
-		CourseID: body.CourseID, Email: body.Email, Now: now,
+	request, err := h.repo.CreateStudentPurchaseRequest(c.Request.Context(), access.CreateStudentPurchaseRequestParams{
+		CourseID: body.CourseID, StudentAccountID: studentID, Now: now,
 	})
 	if err != nil {
-		if errors.Is(err, access.ErrCourseNotPurchasable) {
+		switch {
+		case errors.Is(err, access.ErrCourseNotPurchasable):
 			writeProblem(c, problem.NotFound())
-			return
+		case errors.Is(err, access.ErrPurchaseRequesterNotEligible):
+			writeProblem(c, problem.NotAuthorized())
+		case errors.Is(err, access.ErrCourseAlreadyAccessible):
+			writeProblem(c, problem.PurchaseAccessAlreadyActive())
+		default:
+			writeProblem(c, problem.Internal(""))
 		}
-		if errors.Is(err, access.ErrInvalidEmail) {
-			writeProblem(c, problem.ValidationFailed())
-			return
-		}
-		writeProblem(c, problem.Internal(""))
 		return
 	}
 	handoff, err := access.WhatsAppHandoffURL(h.salesWhatsAppNumber, request, locale)
@@ -254,7 +282,23 @@ func (h *accessHandlers) createPurchaseRequest(c *gin.Context) {
 		writeProblem(c, problem.Internal(""))
 		return
 	}
-	c.JSON(http.StatusCreated, createPurchaseRequestResponse{Reference: request.ReferenceCode, WhatsAppURL: handoff})
+	title := request.CourseTitleEn
+	if locale == identity.LocaleArabic && request.CourseTitleAr != "" {
+		title = request.CourseTitleAr
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusCreated, createPurchaseRequestResponse{
+		Reference:       request.ReferenceCode,
+		WhatsAppURL:     handoff,
+		CourseTitle:     title,
+		PriceMinorUnits: request.PriceMinorUnits,
+		Currency:        request.Currency,
+		State:           string(request.State),
+		// A repeated confirmation reuses the live request rather than creating
+		// a second one, and the browser is told which happened so it can say
+		// "your existing request" instead of implying a new sale.
+		Reused: !request.RequestedAt.Equal(now),
+	})
 }
 
 func (h *accessHandlers) listAdminPurchaseRequests(c *gin.Context) {

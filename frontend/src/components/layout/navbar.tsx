@@ -8,8 +8,9 @@ import { LanguageToggle } from "@/components/common/language-toggle";
 import { usePathname } from "next/navigation";
 import { AuthActions } from "./auth-actions";
 import { MobileNav } from "./mobile-nav";
-import { primaryNavigation } from "./nav-items";
+import { primaryNavigation, routes } from "./nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { useSessionView } from "@/lib/identity/use-session";
 
 /**
  * Sticky, frosted 64px header. Primary nav collapses into a sheet below lg;
@@ -18,15 +19,22 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 export function Navbar() {
   const { locale, t } = useLocale();
   const pathname = usePathname();
+  const session = useSessionView();
   // The header is shared by the landing page, the public catalogue, Course
   // Details and every workspace. What counts as primary navigation is not the
-  // same on all of them.
-  const primary = primaryNavigation(pathname ?? "/", locale);
+  // same on all of them, and for a Student it also includes the surface they
+  // are actually here for.
+  const primary = primaryNavigation(pathname ?? "/", locale, {
+    studentSession: session?.role === "STUDENT",
+  });
 
   return (
     <header className="sticky top-0 z-50 h-16 border-b border-border bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto flex h-full max-w-container items-center gap-5 px-5 sm:px-6">
-        <Logo ariaLabel={t.meta.logoHomeAria} />
+        {/* The logo and the "Home" entry beside it must name one destination.
+            Two controls that look like the way back and disagree about where
+            that is are worse than one. */}
+        <Logo href={routes.home(locale)} ariaLabel={t.meta.logoHomeAria} />
 
         <nav
           aria-label={t.nav.primaryNavigation}

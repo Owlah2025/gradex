@@ -70,10 +70,10 @@ func learningWire(response *httptest.ResponseRecorder) learningWireResponse {
 
 func assertLearningAllowed(t *testing.T, route ginRoute, response *httptest.ResponseRecorder) {
 	t.Helper()
+	// The Progress write answers 200 with the canonical state rather than 204:
+	// the browser needs the completion and aggregate the server just computed,
+	// or the visible progress stays stale until a reload.
 	want := http.StatusOK
-	if route.method == http.MethodPut {
-		want = http.StatusNoContent
-	}
 	if route.method == http.MethodPost && strings.HasSuffix(route.path, "/reports") {
 		want = http.StatusCreated
 	}

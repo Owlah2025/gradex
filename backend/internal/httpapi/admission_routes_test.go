@@ -54,6 +54,8 @@ func mountedAdmissionRouterWithObserver(
 	endpointPolicies := make(map[string]ratelimit.Policy)
 	for _, endpoint := range []string{
 		"student-registrations", "email-verification-requests", "email-verifications",
+		"email-verification-codes", "email-verification-code-resends",
+		"me-purchase-requests",
 		"password-reset-requests", "password-resets",
 	} {
 		policy := ratelimit.DevelopmentAdmissionPolicy(endpoint)
@@ -66,7 +68,6 @@ func mountedAdmissionRouterWithObserver(
 	bootstrapPolicy := ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	bootstrapPolicy.LocalMaxKeys = localMaxKeys
 	endpointPolicies[bootstrapPolicy.Endpoint] = bootstrapPolicy
-	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
 
 	foundation, err := NewAdmissionFoundation(AdmissionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",

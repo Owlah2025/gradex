@@ -674,3 +674,80 @@ test.describe("T061 — S5 Lesson Player E2E Test Suite", () => {
     }
   });
 });
+
+/**
+ * Visible Progress follows the server without a reload.
+ *
+ * The Progress write used to answer 204, so a successful report told the
+ * browser only that it had been accepted. Every surface showing completion or a
+ * Course percentage therefore kept rendering whatever it had at page load, and
+ * a Student who finished a Lesson watched it stay "in progress" until they
+ * reloaded the page.
+ *
+ * What is proved here is the whole chain in a real browser: a real production
+ * write, the canonical state on its response, and the rendered Lesson state and
+ * Course contents following it — with no navigation, no reload, and no second
+ * page load of any kind.
+ */
+test("visible Progress follows a real write without any reload", async ({ browser }, testInfo) => {
+  const student = studentFor(testInfo, PROGRESS_TEST_SLOT);
+  const context = await browser.newContext();
+  await authenticateRotatingStudent(context, student);
+  const page = await context.newPage();
+
+  try {
+    // Any navigation at all would make the assertion meaningless: a fresh
+    // server render would show the new state whether or not the page ever
+    // learned it. This fails the test if one happens.
+    const navigations: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) navigations.push(frame.url());
+    });
+
+    await page.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+    await waitForPlayableMedia(page);
+    await page.evaluate(() => document.querySelector("video")?.pause());
+    const loadedAt = navigations.length;
+
+    const lessonState = page.getByTestId("lesson-state");
+    await expect(lessonState).toBeVisible();
+    await expect(lessonState).not.toHaveAttribute("data-lesson-state", "completed");
+
+    // A partial position: started, not finished. The rendered state has to move
+    // off "not started" without the page being reloaded.
+    const partial = await reportProgressAndAwaitResponse(page, LESSON_ID, 6);
+    expect(partial.status).toBe(200);
+    await expect(lessonState).toHaveAttribute("data-lesson-state", "in-progress");
+
+    // Past the completion threshold. Completion is the server's decision and
+    // arrives on the write's response; the browser renders it.
+    const finished = await reportProgressAndAwaitResponse(
+      page,
+      LESSON_ID,
+      Math.ceil(COMPLETION_THRESHOLD_SECONDS) + 1,
+    );
+    expect(finished.status).toBe(200);
+    await expect(lessonState).toHaveAttribute("data-lesson-state", "completed");
+
+    // The Course contents beside the player follow the same confirmation, so
+    // the outline and the Lesson cannot disagree about what has been finished.
+    const contents = page.getByTestId("course-contents-sidebar");
+    await expect(contents).toBeVisible();
+    await expect(
+      contents.locator(`[data-lesson-id="${LESSON_ID}"][data-lesson-state="completed"]`),
+    ).toHaveCount(1);
+
+    // A rewind after completion must not un-complete the Lesson: completion is
+    // write-once server-side, and the rendered state must not claim otherwise.
+    const rewound = await reportProgressAndAwaitResponse(page, LESSON_ID, 3);
+    expect(rewound.status).toBe(200);
+    await expect(lessonState).toHaveAttribute("data-lesson-state", "completed");
+
+    expect(
+      navigations.length,
+      "the page navigated, so this proves a fresh render rather than a live update",
+    ).toBe(loadedAt);
+  } finally {
+    await context.close();
+  }
+});

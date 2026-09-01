@@ -51,14 +51,24 @@ func recoveryService(
 func activeStudent(t *testing.T, pool *pgxpool.Pool, verificationByte byte) {
 	t.Helper()
 	admission := admissionService(t, pool, time.Now().UTC(), verificationByte)
-	if err := admission.RegisterStudent(context.Background(), studentRegistration()); err != nil {
-		t.Fatalf("registering: %v", err)
-	}
-	if err := admission.VerifyEmail(
-		context.Background(), deterministicBearer(verificationByte), "request-verify-1",
+	challenge := mustRegister(t, admission, studentRegistration())
+	if _, err := admission.VerifyEmailOTP(
+		context.Background(), challenge.ChallengeID,
+		deterministicCode(verificationByte, 0), "request-verify-1",
 	); err != nil {
 		t.Fatalf("verifying: %v", err)
 	}
+}
+
+func countSessionFamilies(t *testing.T, pool *pgxpool.Pool, accountID string) int {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM sessions WHERE account_id = $1::uuid`, accountID,
+	).Scan(&count); err != nil {
+		t.Fatalf("counting session families: %v", err)
+	}
+	return count
 }
 
 func countLiveResetSecrets(t *testing.T, pool *pgxpool.Pool) int {
@@ -122,7 +132,7 @@ func TestPasswordResetRequestIsUniformAcrossAccountStates(t *testing.T) {
 			email:    studentRegistration().Email,
 			setup: func(t *testing.T, pool *pgxpool.Pool) {
 				admission := admissionService(t, pool, time.Now().UTC(), 0x61)
-				if err := admission.RegisterStudent(
+				if _, err := admission.RegisterStudent(
 					context.Background(), studentRegistration(),
 				); err != nil {
 					t.Fatalf("registering: %v", err)
@@ -281,11 +291,19 @@ func TestResetSecretRefusesExpiredReplayedAndWrongPurpose(t *testing.T) {
 		// Register only, leaving a live EMAIL_VERIFICATION secret and no reset
 		// secret at all.
 		admission := admissionService(t, pool, time.Now().UTC(), 0x66)
-		if err := admission.RegisterStudent(
+		if _, err := admission.RegisterStudent(
 			context.Background(), studentRegistration(),
 		); err != nil {
 			t.Fatalf("registering: %v", err)
 		}
+		// A verification challenge is now an OTP row, so the wrong-purpose
+		// probe needs a legacy link to aim at. Inserting one directly is also
+		// the honest shape: this asserts the consumption query refuses a
+		// purpose it does not own, not that anything still issues links.
+		insertLegacyVerificationLink(
+			t, pool, onlyAccountID(t, pool), deterministicBearer(0x66),
+			time.Now().UTC().Add(-time.Minute), time.Hour,
+		)
 		digest, err := DigestActionSecret(deterministicBearer(0x66))
 		if err != nil {
 			t.Fatalf("digesting bearer: %v", err)
@@ -383,6 +401,15 @@ func TestCompletePasswordResetIsAtomicAndInvalidatesEverySession(t *testing.T) {
 	service := recoveryService(t, pool, now, 0x91)
 	accountID, revisionBefore, epochBefore, hashBefore := accountFacts(t, pool)
 	plantSessionFamilies(t, pool, accountID, 3)
+	// Verification now authenticates the Student it verifies, so the fixture
+	// carries that family in addition to the planted ones. The count is read
+	// rather than restated: the invariant is "every family this Account had is
+	// revoked and none is created", which a literal would quietly stop
+	// asserting the next time the fixture changes.
+	familiesBefore := countSessionFamilies(t, pool, accountID)
+	if familiesBefore < 4 {
+		t.Fatalf("fixture produced %d session families, want the planted three plus the verification session", familiesBefore)
+	}
 	bearer := issuedResetBearer(t, pool, service, 0x91)
 
 	if err := service.CompletePasswordReset(context.Background(), PasswordResetCompletion{
@@ -423,8 +450,8 @@ func TestCompletePasswordResetIsAtomicAndInvalidatesEverySession(t *testing.T) {
 	).Scan(&revokedForReset); err != nil {
 		t.Fatalf("counting revoked families: %v", err)
 	}
-	if revokedForReset != 3 {
-		t.Fatalf("families revoked as PASSWORD_RESET = %d, want 3", revokedForReset)
+	if revokedForReset != familiesBefore {
+		t.Fatalf("families revoked as PASSWORD_RESET = %d, want %d", revokedForReset, familiesBefore)
 	}
 
 	// Recovery must not hand back a session: no family may be created by it.
@@ -434,8 +461,8 @@ func TestCompletePasswordResetIsAtomicAndInvalidatesEverySession(t *testing.T) {
 	).Scan(&created); err != nil {
 		t.Fatalf("counting all families: %v", err)
 	}
-	if created != 3 {
-		t.Fatalf("total families = %d, want the original 3 and no new session", created)
+	if created != familiesBefore {
+		t.Fatalf("total families = %d, want the original %d and no new session", created, familiesBefore)
 	}
 
 	if live := countLiveResetSecrets(t, pool); live != 0 {

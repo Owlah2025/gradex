@@ -1,4 +1,10 @@
-import { progressPath, progressReport, type ProgressReport } from "./progress-contract";
+import {
+  progressConfirmation,
+  progressPath,
+  progressReport,
+  type ProgressConfirmation,
+  type ProgressReport,
+} from "./progress-contract";
 
 const maximumAttempts = 3;
 const retryAfterFallbackMilliseconds = 15_000;
@@ -17,6 +23,14 @@ export type ProgressReporterOptions = {
   random?: () => number;
   timer?: ProgressTimer;
   csrfToken?: () => string | null;
+  /**
+   * Called with the canonical state the server returned for an accepted write.
+   *
+   * This is the whole point of the reporter having a response at all. Without
+   * it the reporter is write-only and the rendered progress can only be
+   * corrected by reloading the page.
+   */
+  onConfirmed?: (confirmation: ProgressConfirmation) => void;
 };
 
 const browserTimer: ProgressTimer = {
@@ -63,6 +77,8 @@ export class ProgressReporter {
   private readonly random: () => number;
   private readonly timer: ProgressTimer;
   private readonly csrfToken: () => string | null;
+  private readonly lessonID: string;
+  private readonly onConfirmed: (confirmation: ProgressConfirmation) => void;
   private pending: ProgressReport | null = null;
   private timerID: number | null = null;
   private abortController: AbortController | null = null;
@@ -84,6 +100,8 @@ export class ProgressReporter {
     this.random = options.random ?? Math.random;
     this.timer = options.timer ?? browserTimer;
     this.csrfToken = options.csrfToken ?? (() => null);
+    this.lessonID = options.lessonID;
+    this.onConfirmed = options.onConfirmed ?? (() => {});
   }
 
   reportPosition(positionSeconds: number): void {
@@ -156,10 +174,25 @@ export class ProgressReporter {
 
   private responseReceived(report: ProgressReport, response: Response, keepalive: boolean): void {
     if (response.ok) {
+      // The body is read before the success bookkeeping so a slow parse cannot
+      // delay the next queued report, and a body that fails to parse is simply
+      // no confirmation — the write still succeeded.
+      void this.publishConfirmation(response);
       this.requestSucceeded();
       return;
     }
     this.requestFailed(report, !keepalive && isRetryableResponse(response), null, response);
+  }
+
+  private async publishConfirmation(response: Response): Promise<void> {
+    try {
+      const confirmation = progressConfirmation(this.lessonID, await response.json());
+      if (confirmation && !this.disposed) this.onConfirmed(confirmation);
+    } catch {
+      // A 204 from an older server, an empty body, or unparseable JSON all mean
+      // the same thing here: nothing new to render. The visible progress keeps
+      // whatever it already had rather than being reset to a guess.
+    }
   }
 
   private requestFailed(report: ProgressReport, retryable: boolean, error: unknown, response?: Response): void {

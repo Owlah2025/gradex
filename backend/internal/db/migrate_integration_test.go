@@ -643,9 +643,17 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("report moderation schema = %d, want one past transactional email monitor %d",
 			ReportModerationSchemaVersion, TransactionalEmailMonitorTerminalSchemaVersion)
 	}
-	if MaxSchemaVersion != ReportModerationSchemaVersion {
+	if StudentEmailOTPSchemaVersion != ReportModerationSchemaVersion+1 {
+		t.Fatalf("student email OTP schema = %d, want one past report moderation %d",
+			StudentEmailOTPSchemaVersion, ReportModerationSchemaVersion)
+	}
+	if AuthenticatedPurchaseSchemaVersion != StudentEmailOTPSchemaVersion+1 {
+		t.Fatalf("authenticated purchase schema = %d, want one past student email OTP %d",
+			AuthenticatedPurchaseSchemaVersion, StudentEmailOTPSchemaVersion)
+	}
+	if MaxSchemaVersion != AuthenticatedPurchaseSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, ReportModerationSchemaVersion)
+			MaxSchemaVersion, AuthenticatedPurchaseSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

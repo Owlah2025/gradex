@@ -15,6 +15,7 @@ import (
 
 const (
 	TemplateVerifyEmail      = "student-email-verification-v1"
+	TemplateVerifyEmailOTP   = "student-email-verification-otp-v1"
 	TemplatePasswordReset    = "account-password-reset-v1"
 	TemplatePasswordChanged  = "account-password-reset-completed-v1"
 	TemplateStaffInvitation  = "staff-invitation-v1"
@@ -27,18 +28,26 @@ const (
 )
 
 var eventTemplates = map[string]string{
-	"identity.email_verification_requested": TemplateVerifyEmail,
-	"identity.password_reset_requested":     TemplatePasswordReset,
-	"identity.password_reset_completed":     TemplatePasswordChanged,
-	"identity.staff_invitation_created":     TemplateStaffInvitation,
-	"access.invitation_issued":              TemplateCourseInvitation,
-	"access.granted":                        TemplateAccessGranted,
-	"access.invitation_rejected":            TemplateInviteRejected,
-	"access.invitation_cancelled":           TemplateInviteCancelled,
-	"access.entitlement_adjusted":           TemplateAccessAdjusted,
-	"access.entitlement_revoked":            TemplateAccessRevoked,
+	"identity.email_verification_requested":      TemplateVerifyEmail,
+	"identity.email_verification_code_requested": TemplateVerifyEmailOTP,
+	"identity.password_reset_requested":          TemplatePasswordReset,
+	"identity.password_reset_completed":          TemplatePasswordChanged,
+	"identity.staff_invitation_created":          TemplateStaffInvitation,
+	"access.invitation_issued":                   TemplateCourseInvitation,
+	"access.granted":                             TemplateAccessGranted,
+	"access.invitation_rejected":                 TemplateInviteRejected,
+	"access.invitation_cancelled":                TemplateInviteCancelled,
+	"access.entitlement_adjusted":                TemplateAccessAdjusted,
+	"access.entitlement_revoked":                 TemplateAccessRevoked,
 }
 
+// DeliveryPayload is the decrypted delivery instruction.
+//
+// VerificationToken is the credential slot: for a link template it is the
+// bearer that goes in the URL, and for the OTP template it is the six-digit
+// code that goes in the body. One field rather than two because the outbox
+// ciphertext has one secret shape, and the template — not the payload — is
+// what decides how that secret reaches the reader.
 type DeliveryPayload struct {
 	Destination       string    `json:"destination"`
 	Locale            string    `json:"locale"`
@@ -100,6 +109,14 @@ var localizedTemplates = map[string]map[string]localizedTemplate{
 		"en": {"Verify your Gradex email", "Verify your email address", "Use this link to verify your email address and finish activating your Gradex account.", "Verify email", "If you did not create this account, you can ignore this message."},
 		"ar": {"تحقق من بريدك الإلكتروني في Gradex", "تحقق من عنوان بريدك الإلكتروني", "استخدم هذا الرابط للتحقق من بريدك الإلكتروني وإكمال تفعيل حسابك في Gradex.", "تحقق من البريد", "إذا لم تنشئ هذا الحساب، يمكنك تجاهل هذه الرسالة."},
 	},
+	// The OTP message carries no link and no action button on purpose. A code
+	// the reader types into a page they already have open cannot be harvested
+	// by a forwarded URL, and offering both a link and a code would put two
+	// live credentials in one mailbox for one challenge.
+	TemplateVerifyEmailOTP: {
+		"en": {"Your Gradex verification code", "Verify your email address", "Enter this code on the Gradex verification screen to finish creating your account.", "", "If you did not create this account, you can ignore this message. Nobody from Gradex will ever ask you for this code."},
+		"ar": {"رمز التحقق الخاص بك في Gradex", "تحقق من عنوان بريدك الإلكتروني", "أدخل هذا الرمز في شاشة التحقق في Gradex لإكمال إنشاء حسابك.", "", "إذا لم تنشئ هذا الحساب، يمكنك تجاهل هذه الرسالة. لن يطلب منك أحد من Gradex هذا الرمز أبدًا."},
+	},
 	TemplatePasswordReset: {
 		"en": {"Reset your Gradex password", "Reset your password", "Use this link to choose a new Gradex password. The link can be used only once.", "Reset password", "If you did not request a reset, you can ignore this message."},
 		"ar": {"إعادة تعيين كلمة مرور Gradex", "أعد تعيين كلمة المرور", "استخدم هذا الرابط لاختيار كلمة مرور جديدة في Gradex. يمكن استخدام الرابط مرة واحدة فقط.", "إعادة تعيين كلمة المرور", "إذا لم تطلب إعادة التعيين، يمكنك تجاهل هذه الرسالة."},
@@ -157,11 +174,18 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 			return Message{}, err
 		}
 	}
-	htmlBody, err := renderHTML(request.Locale, copy, actionURL, expiry)
+	// The verification code is a rendered value, not a destination. Passing it
+	// through the same slot as the action URL would eventually put it in an
+	// href, which is exactly what the OTP flow exists to avoid.
+	code := ""
+	if request.Template == TemplateVerifyEmailOTP {
+		code = request.Payload.VerificationToken
+	}
+	htmlBody, err := renderHTML(request.Locale, copy, actionURL, expiry, code)
 	if err != nil {
 		return Message{}, errors.New("transactional email HTML rendering failed")
 	}
-	return Message{From: r.from, Recipient: request.Payload.Destination, ReplyTo: r.replyTo, Subject: copy.Subject, Text: renderText(request.Locale, copy, actionURL, expiry), HTML: htmlBody}, nil
+	return Message{From: r.from, Recipient: request.Payload.Destination, ReplyTo: r.replyTo, Subject: copy.Subject, Text: renderText(request.Locale, copy, actionURL, expiry, code), HTML: htmlBody}, nil
 }
 
 func purchaseBackedInvitation(event outbox.Event) bool {
@@ -217,14 +241,28 @@ func renderExpiringAction(request RenderRequest) (string, error) {
 	return request.Payload.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), nil
 }
 
-func renderText(locale string, copy localizedTemplate, actionURL, expiry string) string {
-	text := copy.Title + "\n\n" + copy.Body
-	if expiry != "" {
-		if locale == "ar" {
-			text += "\n\nتنتهي صلاحية الرابط: " + expiry
-		} else {
-			text += "\n\nLink expires: " + expiry
+// expiryLabelFor says what actually expires. A message with a code and a label
+// reading "Link expires" tells the reader to look for a link that is not there.
+func expiryLabelFor(locale string, hasCode bool) string {
+	if locale == "ar" {
+		if hasCode {
+			return "تنتهي صلاحية الرمز:"
 		}
+		return "تنتهي صلاحية الرابط:"
+	}
+	if hasCode {
+		return "Code expires:"
+	}
+	return "Link expires:"
+}
+
+func renderText(locale string, copy localizedTemplate, actionURL, expiry, code string) string {
+	text := copy.Title + "\n\n" + copy.Body
+	if code != "" {
+		text += "\n\n" + code
+	}
+	if expiry != "" {
+		text += "\n\n" + expiryLabelFor(locale, code != "") + " " + expiry
 	}
 	if actionURL != "" {
 		text += "\n\n" + copy.Action + ": " + actionURL
@@ -242,6 +280,14 @@ func (r *Renderer) actionURL(request RenderRequest) (string, bool, error) {
 			return "", false, errors.New("verification credential is missing")
 		}
 		return r.publicOrigin + "/verify-email/result#token=" + credential, true, nil
+	case TemplateVerifyEmailOTP:
+		// No URL at all. The code is typed into the screen the Student already
+		// has open, so this message is not a navigation surface and carries
+		// nothing clickable that could be forwarded or phished.
+		if token == "" {
+			return "", false, errors.New("verification code is missing")
+		}
+		return "", true, nil
 	case TemplatePasswordReset:
 		if token == "" {
 			return "", false, errors.New("reset credential is missing")
@@ -275,17 +321,21 @@ var htmlMessageTemplate = template.Must(template.New("email").Parse(`<!doctype h
 <body style="margin:0;background:#f6f5f1;color:#17211b;font-family:Arial,sans-serif;direction:{{.Direction}};text-align:{{.Align}}">
 <main style="max-width:600px;margin:0 auto;padding:24px"><div style="background:#ffffff;border:1px solid #dedbd2;border-radius:12px;padding:28px">
 <h1 style="font-size:24px;line-height:1.3;margin:0 0 16px">{{.Title}}</h1><p style="font-size:16px;line-height:1.7">{{.Body}}</p>
+{{if .Code}}<p style="margin:24px 0"><span style="display:inline-block;background:#f2f4f3;border:1px solid #dedbd2;border-radius:8px;padding:14px 22px;font-family:'Courier New',monospace;font-size:32px;font-weight:bold;letter-spacing:8px;direction:ltr;unicode-bidi:isolate">{{.Code}}</span></p>{{end}}
 {{if .Expiry}}<p style="font-size:14px;line-height:1.6"><strong>{{.ExpiryLabel}}</strong> {{.Expiry}}</p>{{end}}
 {{if .ActionURL}}<p style="margin:24px 0"><a href="{{.ActionURL}}" style="display:inline-block;background:#175c3a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px">{{.Action}}</a></p>{{end}}
 <p style="font-size:14px;line-height:1.6;color:#4f5b54">{{.Footer}}</p></div></main></body></html>`))
 
-func renderHTML(locale string, copy localizedTemplate, actionURL, expiry string) (string, error) {
-	direction, align, expiryLabel := "ltr", "left", "Link expires:"
+func renderHTML(locale string, copy localizedTemplate, actionURL, expiry, code string) (string, error) {
+	direction, align := "ltr", "left"
 	if locale == "ar" {
-		direction, align, expiryLabel = "rtl", "right", "تنتهي صلاحية الرابط:"
+		direction, align = "rtl", "right"
 	}
-	data := struct{ Locale, Direction, Align, Title, Body, Action, ActionURL, Footer, Expiry, ExpiryLabel string }{
-		locale, direction, align, copy.Title, copy.Body, copy.Action, actionURL, copy.Footer, expiry, expiryLabel,
+	expiryLabel := expiryLabelFor(locale, code != "")
+	data := struct {
+		Locale, Direction, Align, Title, Body, Action, ActionURL, Footer, Expiry, ExpiryLabel, Code string
+	}{
+		locale, direction, align, copy.Title, copy.Body, copy.Action, actionURL, copy.Footer, expiry, expiryLabel, code,
 	}
 	var buffer bytes.Buffer
 	if err := htmlMessageTemplate.Execute(&buffer, data); err != nil {

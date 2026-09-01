@@ -248,6 +248,7 @@ type AdmissionSettings struct {
 
 	anonymousSessionTTL        time.Duration
 	verificationTokenTTL       time.Duration
+	emailOTPTTL                time.Duration
 	passwordResetTokenTTL      time.Duration
 	rateLimitTimeout           time.Duration
 	compromisedPasswordTimeout time.Duration
@@ -256,6 +257,7 @@ type AdmissionSettings struct {
 	anonymousCSRFKey          Secret
 	limiterHMACKey            Secret
 	protectedPayloadKey       Secret
+	emailOTPPepper            Secret
 }
 
 func (a AdmissionSettings) Enabled() bool                          { return a.capability.Enabled() }
@@ -274,6 +276,17 @@ func (a AdmissionSettings) AnonymousCookieSigningKey() Secret { return a.anonymo
 func (a AdmissionSettings) AnonymousCSRFKey() Secret          { return a.anonymousCSRFKey }
 func (a AdmissionSettings) LimiterHMACKey() Secret            { return a.limiterHMACKey }
 func (a AdmissionSettings) ProtectedPayloadKey() Secret       { return a.protectedPayloadKey }
+
+// EmailOTPPepper is the HMAC key that keeps a six-digit verification code
+// unsearchable in the database. It is separate from every other admission
+// secret so rotating it invalidates only live verification challenges.
+func (a AdmissionSettings) EmailOTPPepper() Secret { return a.emailOTPPepper }
+
+// EmailOTPTTL is deliberately far shorter than VerificationTokenTTL. A link is
+// a long random secret a Student may open hours later from another device; a
+// six-digit code is read off a screen within a minute, and every extra minute
+// it stays live is more time an online guesser has against a small space.
+func (a AdmissionSettings) EmailOTPTTL() time.Duration { return a.emailOTPTTL }
 
 // LoginAdmissionSettings bounds the only public path that performs password
 // verification. These values are capacity controls, not secrets.
@@ -657,6 +670,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		{Name: "ADMISSION_LIMITER_HMAC_KEY"},
 		{Name: "OUTBOX_PROTECTED_PAYLOAD_KEY"},
 		{Name: "SESSION_CSRF_KEY"},
+		{Name: "IDENTITY_OTP_PEPPER"},
 	} {
 		s, err := resolver.Resolve(ref)
 		if err != nil {
@@ -703,6 +717,10 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		protectedPayloadKeyVersion: p.str("OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION", ""),
 		anonymousSessionTTL:        p.duration("ANONYMOUS_SESSION_TTL", 30*time.Minute),
 		verificationTokenTTL:       p.duration("VERIFICATION_TOKEN_TTL", 24*time.Hour),
+		// Ten minutes: long enough for a mail hop and a distracted reader,
+		// short enough that a live six-digit challenge is never sitting in a
+		// mailbox overnight.
+		emailOTPTTL: p.duration("EMAIL_OTP_TTL", 10*time.Minute),
 		// Shorter than email verification on purpose: a reset secret replaces a
 		// password, so its window of usefulness to an attacker who reaches the
 		// mailbox is worth less time.
@@ -713,6 +731,7 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		anonymousCSRFKey:           secrets["ANONYMOUS_CSRF_KEY"],
 		limiterHMACKey:             secrets["ADMISSION_LIMITER_HMAC_KEY"],
 		protectedPayloadKey:        secrets["OUTBOX_PROTECTED_PAYLOAD_KEY"],
+		emailOTPPepper:             secrets["IDENTITY_OTP_PEPPER"],
 	}, p)
 
 	p.rejectRetiredKeys()
@@ -734,6 +753,7 @@ type admissionCapabilityInput struct {
 	protectedPayloadKeyVersion string
 	anonymousSessionTTL        time.Duration
 	verificationTokenTTL       time.Duration
+	emailOTPTTL                time.Duration
 	passwordResetTokenTTL      time.Duration
 	rateLimitTimeout           time.Duration
 	compromisedPasswordTimeout time.Duration
@@ -741,6 +761,7 @@ type admissionCapabilityInput struct {
 	anonymousCSRFKey           Secret
 	limiterHMACKey             Secret
 	protectedPayloadKey        Secret
+	emailOTPPepper             Secret
 }
 
 func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettings {
@@ -751,6 +772,7 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 		protectedPayloadKeyVersion: in.protectedPayloadKeyVersion,
 		anonymousSessionTTL:        in.anonymousSessionTTL,
 		verificationTokenTTL:       in.verificationTokenTTL,
+		emailOTPTTL:                in.emailOTPTTL,
 		passwordResetTokenTTL:      in.passwordResetTokenTTL,
 		rateLimitTimeout:           in.rateLimitTimeout,
 		compromisedPasswordTimeout: in.compromisedPasswordTimeout,
@@ -758,6 +780,7 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 		anonymousCSRFKey:           in.anonymousCSRFKey,
 		limiterHMACKey:             in.limiterHMACKey,
 		protectedPayloadKey:        in.protectedPayloadKey,
+		emailOTPPepper:             in.emailOTPPepper,
 	}
 
 	if !in.passwordScreenMode.Valid() {
@@ -793,6 +816,10 @@ func admissionCapability(in admissionCapabilityInput, p *parser) AdmissionSettin
 		{"ANONYMOUS_CSRF_KEY", in.anonymousCSRFKey},
 		{"ADMISSION_LIMITER_HMAC_KEY", in.limiterHMACKey},
 		{"OUTBOX_PROTECTED_PAYLOAD_KEY", in.protectedPayloadKey},
+		// Without the pepper, a six-digit code could only be stored as a bare
+		// digest — an offline dictionary of one million entries. Registration
+		// refuses to come up rather than issue codes it cannot store safely.
+		{"IDENTITY_OTP_PEPPER", in.emailOTPPepper},
 	} {
 		if required.value.IsEmpty() {
 			p.errf("%s is required when STUDENT_REGISTRATION_ENABLED=true", required.name)
@@ -1073,6 +1100,7 @@ func (c *Config) validate(p *parser) {
 		{"MEDIA_PROCESSING_TIMEOUT", c.mediaProcessingTimeout},
 		{"ANONYMOUS_SESSION_TTL", c.admission.anonymousSessionTTL},
 		{"VERIFICATION_TOKEN_TTL", c.admission.verificationTokenTTL},
+		{"EMAIL_OTP_TTL", c.admission.emailOTPTTL},
 		{"PASSWORD_RESET_TOKEN_TTL", c.admission.passwordResetTokenTTL},
 		{"ADMISSION_RATE_LIMIT_TIMEOUT", c.admission.rateLimitTimeout},
 		{"COMPROMISED_PASSWORD_TIMEOUT", c.admission.compromisedPasswordTimeout},

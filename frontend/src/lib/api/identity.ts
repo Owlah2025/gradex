@@ -30,25 +30,100 @@ export function getRegistrationPolicySet(locale: "ar" | "en") {
   return getJSON<RegistrationPolicySet>("/registration-policy-set", locale);
 }
 
+/**
+ * What the verification screen may know without holding the code.
+ *
+ * None of it is a secret. `challenge_id` names a challenge and authenticates
+ * nobody — presenting it without the code is exactly as useful as presenting
+ * nothing. `masked_email` is derived from an address the visitor has already
+ * typed. The timestamps describe metering the server applies regardless, and
+ * having them is what lets the screen render a truthful countdown instead of
+ * guessing.
+ */
+export type VerificationChallenge = {
+  challenge_id: string;
+  masked_email: string;
+  expires_at: string;
+  resend_available_at: string;
+  code_length: number;
+  maximum_attempts: number;
+};
+
+export type RegistrationAccepted = {
+  code: "REGISTRATION_REQUEST_ACCEPTED";
+  verification: VerificationChallenge;
+};
+
+export type VerificationRequestAccepted = {
+  code: "VERIFICATION_REQUEST_ACCEPTED";
+  verification: VerificationChallenge;
+};
+
 export function registerStudent(input: StudentRegistrationInput) {
-  return postJSON<{ code: "REGISTRATION_REQUEST_ACCEPTED" }>(
+  return postJSON<RegistrationAccepted>(
     "/student-registrations",
     input,
     input.locale,
   );
 }
 
+/**
+ * The address-addressed recovery path, for a visitor who no longer holds a
+ * challenge.
+ *
+ * It answers identically for a registered, unknown, or already-verified
+ * address — a challenge in every case — so the response cannot be read as
+ * "this address has an account".
+ */
 export function requestEmailVerification(
   email: string,
   locale: "ar" | "en",
 ) {
-  return postJSON<{ code: "VERIFICATION_REQUEST_ACCEPTED" }>(
+  return postJSON<VerificationRequestAccepted>(
     "/email-verification-requests",
     { email },
     locale,
   );
 }
 
+/** Replaces the code behind a challenge. The previous code stops working. */
+export function resendEmailVerificationCode(
+  challengeId: string,
+  locale: "ar" | "en",
+) {
+  return postJSON<VerificationRequestAccepted>(
+    "/email-verification-code-resends",
+    { challenge_id: challengeId },
+    locale,
+  );
+}
+
+/**
+ * Proves a code and returns the authenticated session it creates.
+ *
+ * The Student is signed in by this call. Asking for the password again
+ * immediately after they proved control of the mailbox would be a step that
+ * establishes nothing the code has not already established.
+ */
+export function verifyEmailCode(
+  challengeId: string,
+  code: string,
+  locale: "ar" | "en",
+) {
+  return postJSON<AuthenticatedSession>(
+    "/email-verification-codes",
+    { challenge_id: challengeId, code },
+    locale,
+  );
+}
+
+/**
+ * Consumes a pre-OTP verification link.
+ *
+ * Retained for the migration window only: links delivered before the code flow
+ * shipped stay usable until they expire. It activates the Account and returns
+ * no session, exactly as it always did.
+ */
 export function consumeEmailVerification(
   token: string,
   locale: "ar" | "en",

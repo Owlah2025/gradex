@@ -53,6 +53,9 @@ export const ar: Dictionary = {
     logoHomeAria: "الصفحة الرئيسية لـ Gradex",
   },
   nav: {
+    breadcrumb: "مسار التنقل",
+    home: "الرئيسية",
+    myLearning: "لوحة التعلم",
     courses: "المقررات",
     why: "لماذا Gradex",
     faq: "الأسئلة",
@@ -850,6 +853,29 @@ export const ar: Dictionary = {
       limited: "محاولات كثيرة. انتظر قليلاً قبل المحاولة من جديد.",
       unavailable: "طلبات التأكيد غير متاحة مؤقتاً. حاول بعد قليل.",
     },
+    code: {
+      title: "تحقق من بريدك الإلكتروني",
+      intro: "أدخل الرمز لإكمال إنشاء حسابك.",
+      sentTo: "أرسلنا رمزًا مكونًا من 6 أرقام إلى:",
+      label: "رمز التحقق",
+      hint: "ستة أرقام، من الرسالة التي أرسلناها للتو.",
+      submit: "تحقّق وتابع",
+      submitting: "جارٍ التحقق…",
+      invalid: "الرمز غير صحيح. راجع الرسالة وحاول مجدداً.",
+      malformed: "أدخل الرمز المكوّن من 6 أرقام من الرسالة.",
+      expired: "انتهت صلاحية هذا الرمز. اطلب رمزاً جديداً للمتابعة.",
+      exhausted: "محاولات كثيرة على هذا الرمز. اطلب رمزاً جديداً للمتابعة.",
+      unavailable: "التحقق غير متاح مؤقتاً. حاول بعد قليل.",
+      resend: "إرسال رمز جديد",
+      resending: "جارٍ الإرسال…",
+      resendIn: "يمكنك طلب رمز جديد خلال {seconds} ثانية",
+      resent: "تم إرسال رمز جديد. الرمز السابق لم يعد صالحاً.",
+      resendTooSoon: "تم إرسال رمز للتو. انتظر قليلاً قبل الطلب مرة أخرى.",
+      noChallenge:
+        "انتهت صلاحية شاشة التحقق هذه. أدخل بريدك الإلكتروني للبدء من جديد.",
+      useEmailInstead: "استخدام بريد إلكتروني آخر",
+      attemptsLeft: "متبقٍ {count} محاولات",
+    },
     result: {
       title: "جارٍ تأكيد بريدك",
       intro:
@@ -1045,6 +1071,8 @@ export const ar: Dictionary = {
     common: {
       required: "هذا الحقل مطلوب.",
       backHome: "العودة إلى المقررات",
+      homeLink: "الصفحة الرئيسية",
+      backToCourse: "العودة إلى الكورس",
       opensInNewTab: "يفتح في تبويب جديد",
       passwordRule: "من 15 إلى 128 حرفاً. المسافات مسموحة، ولا توجد قواعد للرموز.",
       currentStep: "أنت هنا",
@@ -1135,6 +1163,8 @@ export const ar: Dictionary = {
     preparingDownload: "جارٍ تجهيز التحميل…",
     downloadUnavailable: "لا يمكن تحميل هذا الملف الآن. حاول مرة أخرى.",
     myCourses: "مقرراتي",
+    shellCatalogue: "تصفّح المقررات",
+    shellHome: "الرئيسية",
     learningNavigation: "التنقل في التعلّم",
     courseContents: "محتويات المقرر",
     closeCourseContents: "إغلاق محتويات المقرر",
@@ -1333,14 +1363,29 @@ export const ar: Dictionary = {
       retry: "حاول مرة أخرى",
     },
     purchase: {
-      heading: "اشترِ هذا المقرر",
-      intro: "أدخل بريدك الإلكتروني أولاً، ثم أكمل محادثة الدفع عبر واتساب.",
-      action: "أريد شراء الكورس",
-      email: "البريد الإلكتروني",
-      invalidEmail: "أدخل عنوان بريد إلكتروني صحيحاً.",
-      submit: "المتابعة إلى واتساب",
+      heading: "إتمام طلب شراء الكورس",
+      intro: "سيتم تحويلك إلى واتساب لإكمال إجراءات الدفع.",
+      // "Request to buy", not the bare imperative "buy". Gradex has no
+      // checkout: the control leads to a purchase *request* that an Admin
+      // fulfils manually, and the public catalogue asserts it renders no
+      // gateway-shaped vocabulary anywhere.
+      action: "اطلب شراء هذا الكورس",
+      signInRequiredTitle: "سجّل الدخول للمتابعة",
+      signInRequiredBody:
+        "طلب الشراء مرتبط بحسابك، لذلك نحتاج إلى معرفة هويتك أولاً. ستعود مباشرة إلى هذا الكورس.",
+      signIn: "تسجيل الدخول",
+      createAccount: "إنشاء حساب",
+      courseLabel: "اسم الكورس",
+      priceLabel: "السعر",
+      submit: "إتمام طلب الشراء",
       submitting: "جارٍ حفظ طلبك…",
+      cancel: "إلغاء",
       failed: "تعذّر حفظ طلبك. لم يُفتح واتساب؛ حاول مرة أخرى.",
+      alreadyActive: "لديك بالفعل وصول إلى هذا الكورس.",
+      notPurchasable: "هذا الكورس غير متاح للشراء حالياً.",
+      reusedTitle: "لديك طلب سابق لهذا الكورس",
+      reusedBody: "أعدنا فتح طلبك الحالي بدلاً من إنشاء طلب ثانٍ.",
+      openingWhatsApp: "جارٍ فتح واتساب…",
     },
     invitation: {
       heading: "دعوة إلى مقرر",

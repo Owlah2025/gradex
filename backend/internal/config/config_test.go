@@ -41,6 +41,7 @@ func validSecrets() MapSecretResolver {
 		"SESSION_CSRF_KEY":             strings.Repeat("s", 32),
 		"ANONYMOUS_COOKIE_SIGNING_KEY": strings.Repeat("a", 32),
 		"ANONYMOUS_CSRF_KEY":           strings.Repeat("b", 32),
+		"IDENTITY_OTP_PEPPER":          strings.Repeat("o", 32),
 		"ADMISSION_LIMITER_HMAC_KEY":   strings.Repeat("c", 32),
 	}
 }
@@ -669,6 +670,7 @@ func TestDevelopmentAdmissionConfigurationLoadsExplicitFixtures(t *testing.T) {
 		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
 		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
 		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["IDENTITY_OTP_PEPPER"] = strings.Repeat("o", 32)
 		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
 		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
 	})
@@ -716,6 +718,7 @@ func TestEnabledAdmissionRequiresEveryFailClosedDependency(t *testing.T) {
 		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "dev-v1"
 		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
 		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["IDENTITY_OTP_PEPPER"] = strings.Repeat("o", 32)
 		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
 		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
 	}
@@ -778,6 +781,7 @@ func TestProductionAdmissionRequiresApprovedPolicyAndPasswordAdapter(t *testing.
 		s["OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION"] = "prod-v1"
 		sec["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("a", 32)
 		sec["ANONYMOUS_CSRF_KEY"] = strings.Repeat("b", 32)
+		sec["IDENTITY_OTP_PEPPER"] = strings.Repeat("o", 32)
 		sec["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("c", 32)
 		sec["OUTBOX_PROTECTED_PAYLOAD_KEY"] = strings.Repeat("d", 32)
 	}

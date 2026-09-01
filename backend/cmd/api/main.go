@@ -408,8 +408,17 @@ func buildAdmissionFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
 	redisConnection *queue.Connection,
+	sessions *identity.SessionRepository,
 ) (*httpapi.AdmissionFoundation, *httpapi.RecoveryFoundation, *redis.Client, error) {
 	admission := cfg.Admission()
+	// Email verification now authenticates the Student it verifies, so public
+	// Student registration cannot be composed without the session authority.
+	// Failing here is the point: a deployment that accepts registrations it
+	// cannot complete would strand every new Student at the code screen.
+	if sessions == nil {
+		return nil, nil, nil, errors.New(
+			"STUDENT_REGISTRATION_ENABLED=true requires the session foundation (set SESSION_CSRF_KEY)")
+	}
 	compromisedSource, err := buildCompromisedPasswordSource(cfg)
 	if err != nil {
 		return nil, nil, nil, err
@@ -443,6 +452,8 @@ func buildAdmissionFoundation(
 		"student-registrations",
 		"email-verification-requests",
 		"email-verifications",
+		"email-verification-codes",
+		"email-verification-code-resends",
 		"password-reset-requests",
 	}
 	endpointPolicies := make(map[string]ratelimit.Policy, len(endpoints)+2)
@@ -452,7 +463,7 @@ func buildAdmissionFoundation(
 	// Completion gets its own stricter policy rather than the generic
 	// admission one: it is the only anonymous route that reaches Argon2id.
 	endpointPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
-	endpointPolicies["purchase-requests"] = ratelimit.PurchaseRequestsPolicy()
+	endpointPolicies["me-purchase-requests"] = ratelimit.StudentPurchaseRequestsPolicy()
 	endpointPolicies["session-bootstrap"] = sessionPolicies(cfg.Environment())["session-bootstrap"]
 	endpointPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
 
@@ -461,7 +472,10 @@ func buildAdmissionFoundation(
 		Policies:        policies,
 		Compromised:     compromisedSource,
 		Outbox:          writer,
+		Sessions:        sessions,
 		VerificationTTL: admission.VerificationTokenTTL(),
+		EmailOTPTTL:     admission.EmailOTPTTL(),
+		EmailOTPPepper:  admission.EmailOTPPepper(),
 		Now:             time.Now,
 		Random:          rand.Reader,
 	})
@@ -541,7 +555,10 @@ func buildPurchaseAdmissionFoundation(
 		return nil, nil, nil, err
 	}
 	endpointPolicies := map[string]ratelimit.Policy{
-		"purchase-requests":       ratelimit.PurchaseRequestsPolicy(),
+		// The purchase route is authenticated even in this posture: closing
+		// public Student registration does not make a purchase request
+		// anonymous again.
+		"me-purchase-requests":    ratelimit.StudentPurchaseRequestsPolicy(),
 		"password-reset-requests": ratelimit.DevelopmentAdmissionPolicy("password-reset-requests"),
 		"password-resets":         ratelimit.DevelopmentPasswordResetCompletionPolicy(),
 		"session-bootstrap":       sessionPolicies(cfg.Environment())["session-bootstrap"],
@@ -864,7 +881,7 @@ func buildProductionFoundationsWithStaffSource(
 	var limiterClient *redis.Client
 	var err error
 	if cfg.Admission().Enabled() {
-		admissionFoundation, recoveryFoundation, limiterClient, err = buildAdmissionFoundation(cfg, pool, redisConnection)
+		admissionFoundation, recoveryFoundation, limiterClient, err = buildAdmissionFoundation(cfg, pool, redisConnection, pf.SessionRepository)
 	} else {
 		admissionFoundation, recoveryFoundation, limiterClient, err = buildPurchaseAdmissionFoundation(cfg, pool, redisConnection)
 	}

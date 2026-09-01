@@ -44,6 +44,17 @@ var (
 	ErrPurchaseRequestNotFound   = errors.New("purchase request not found")
 	ErrCourseNotPurchasable      = errors.New("course is not available for purchase requests")
 	ErrPurchaseRequestTransition = errors.New("purchase request state conflict")
+
+	// ErrPurchaseRequesterNotEligible means the authenticated principal is not
+	// a Student who may request a purchase. It is deliberately distinct from
+	// "course not purchasable": the two have different recoveries, and neither
+	// reveals anything the caller does not already know about itself.
+	ErrPurchaseRequesterNotEligible = errors.New("account may not request a Course purchase")
+
+	// ErrCourseAlreadyAccessible means the Student already holds active access.
+	// Creating a purchase request for it would produce an operational task
+	// nobody can act on and an Admin queue entry that is already satisfied.
+	ErrCourseAlreadyAccessible = errors.New("course access is already active")
 )
 
 // PurchaseRequest stores facts Gradex knows about an external/manual sale. It
@@ -77,6 +88,19 @@ type CreatePurchaseRequestParams struct {
 	Now      time.Time
 }
 
+// CreateStudentPurchaseRequestParams carries no email.
+//
+// That absence is the point. The address recorded on a purchase request is the
+// one an Admin will use to issue the invitation that eventually grants access,
+// so accepting it from the browser would let any caller aim someone else's
+// Course access at a mailbox they control. It is read from the authenticated
+// Account inside the same transaction that writes the request.
+type CreateStudentPurchaseRequestParams struct {
+	CourseID         string
+	StudentAccountID string
+	Now              time.Time
+}
+
 type ListPurchaseRequestsFilter struct {
 	Query  string
 	State  *PurchaseRequestState
@@ -106,6 +130,15 @@ type CancelPurchaseRequestParams struct {
 	Now               time.Time
 }
 
+// CreatePurchaseRequest builds a request in the pre-authentication shape: an
+// address with no owning Account.
+//
+// No route mounts it. Gradex now requires a verified Student before a purchase
+// request can exist, and the public anonymous route was withdrawn with that
+// change. It is retained because rows of exactly this shape are already in the
+// production table, and the Admin lifecycle — confirm payment, issue the
+// invitation, cancel — has to keep working on them. Reproducing that shape is
+// what it is for.
 func (r *Repository) CreatePurchaseRequest(ctx context.Context, params CreatePurchaseRequestParams) (PurchaseRequest, error) {
 	if r == nil || r.pool == nil {
 		return PurchaseRequest{}, errors.New("repository is not initialized")
@@ -159,6 +192,257 @@ func (r *Repository) CreatePurchaseRequest(ctx context.Context, params CreatePur
 
 	if err := tx.Commit(ctx); err != nil {
 		return PurchaseRequest{}, fmt.Errorf("committing purchase request: %w", err)
+	}
+	return request, nil
+}
+
+// CreateStudentPurchaseRequest records one authenticated Student's intent to
+// buy one Course.
+//
+// Everything the row carries is server-derived: the address comes from the
+// Account, and the title, price, and currency come from the Course's live
+// published revision and its current price. Nothing the caller sends beyond the
+// Course identifier reaches storage, so there is no client-supplied value an
+// Admin could later act on.
+//
+// Reuse rather than creation is the normal outcome of a repeated click. The
+// partial unique index on (course_id, requester_account_id) for active states
+// makes that a database guarantee rather than a race the handler has to win.
+func (r *Repository) CreateStudentPurchaseRequest(
+	ctx context.Context,
+	params CreateStudentPurchaseRequestParams,
+) (PurchaseRequest, error) {
+	if r == nil || r.pool == nil {
+		return PurchaseRequest{}, errors.New("repository is not initialized")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(params.CourseID)); err != nil {
+		return PurchaseRequest{}, ErrCourseNotPurchasable
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(params.StudentAccountID)); err != nil {
+		return PurchaseRequest{}, ErrPurchaseRequesterNotEligible
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return PurchaseRequest{}, fmt.Errorf("beginning purchase-request transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	email, normalizedEmail, err := lockPurchaseRequesterTx(ctx, tx, params.StudentAccountID)
+	if err != nil {
+		return PurchaseRequest{}, err
+	}
+	// An entitlement that is already active makes the request meaningless. This
+	// is checked inside the transaction that writes it, so a grant landing
+	// concurrently cannot produce a request for a Course the Student can
+	// already open.
+	entitled, err := studentHasActiveAccessTx(ctx, tx, params.StudentAccountID, params.CourseID, now)
+	if err != nil {
+		return PurchaseRequest{}, err
+	}
+	if entitled {
+		return PurchaseRequest{}, ErrCourseAlreadyAccessible
+	}
+
+	request, created, err := createOrReuseStudentPurchaseRequestTx(
+		ctx, tx, params.CourseID, params.StudentAccountID, email, normalizedEmail, now,
+	)
+	if err != nil {
+		return PurchaseRequest{}, err
+	}
+
+	if created {
+		metadata, err := json.Marshal(map[string]any{
+			"course_id": request.CourseID,
+			"reference": request.ReferenceCode,
+		})
+		if err != nil {
+			return PurchaseRequest{}, fmt.Errorf("marshaling purchase-request audit metadata: %w", err)
+		}
+		// The actor is now a real Account rather than an anonymous browser. The
+		// email stays out of the audit payload for the same reason as before:
+		// the trail is useful without a second copy of personal data.
+		if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_role, actor_account_id, actor_descriptor, action, module,
+			target_type, target_id, reason, metadata
+		) VALUES (
+			'STUDENT', $3::uuid, 'AUTHENTICATED_STUDENT', 'PURCHASE_REQUEST_CREATED',
+			'IDENTITY_AND_ACCESS', 'PURCHASE_REQUEST', $1::uuid,
+			'Course purchase request persisted before WhatsApp handoff', $2
+		)
+	`, request.ID, metadata, params.StudentAccountID); err != nil {
+			return PurchaseRequest{}, fmt.Errorf("writing purchase-request audit event: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return PurchaseRequest{}, fmt.Errorf("committing purchase request: %w", err)
+	}
+	return request, nil
+}
+
+// lockPurchaseRequesterTx reads and locks the requesting Account, refusing
+// anything that is not an active, verified Student.
+//
+// The role and status are re-read here rather than trusted from the session the
+// handler authenticated: a suspension or a role change committed between
+// admission and this write must take effect, and the row lock is what makes
+// that ordering deterministic.
+func lockPurchaseRequesterTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	studentAccountID string,
+) (string, string, error) {
+	var email, normalizedEmail, role, status string
+	var verifiedAt *time.Time
+	err := tx.QueryRow(ctx, `
+		SELECT email, normalized_email, role::text, status::text, email_verified_at
+		  FROM accounts WHERE id = $1::uuid FOR UPDATE
+	`, studentAccountID).Scan(&email, &normalizedEmail, &role, &status, &verifiedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrPurchaseRequesterNotEligible
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("locking purchase requester: %w", err)
+	}
+	if role != "STUDENT" || status != "ACTIVE" || verifiedAt == nil {
+		return "", "", ErrPurchaseRequesterNotEligible
+	}
+	return email, normalizedEmail, nil
+}
+
+func studentHasActiveAccessTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	studentAccountID, courseID string,
+	now time.Time,
+) (bool, error) {
+	var active bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+		  SELECT 1 FROM entitlements
+		   WHERE student_account_id = $1::uuid
+		     AND course_id = $2::uuid
+		     AND state = 'ACTIVE'
+		     AND revoked_at IS NULL
+		     AND access_ends_at > $3
+		)
+	`, studentAccountID, courseID, now).Scan(&active)
+	if err != nil {
+		return false, fmt.Errorf("checking existing Course access: %w", err)
+	}
+	return active, nil
+}
+
+// createOrReuseStudentPurchaseRequestTx is the owned-request twin of
+// createOrReusePurchaseRequestTx.
+//
+// The conflict target is the ownership index rather than the email index. Both
+// exist: the email index still covers the historical anonymous rows, and for a
+// new request the two can never disagree because the email is derived from the
+// same Account the ownership column names.
+func createOrReuseStudentPurchaseRequestTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	courseID, studentAccountID, email, normalizedEmail string,
+	now time.Time,
+) (PurchaseRequest, bool, error) {
+	var request PurchaseRequest
+	var created bool
+	err := tx.QueryRow(ctx, `
+		INSERT INTO purchase_requests (
+			id, reference_code, course_id, email, normalized_email, requester_account_id,
+			course_title_ar, course_title_en, price_minor_units, currency, state,
+			requested_at, created_at, updated_at
+		)
+		SELECT
+			$1::uuid,
+			'GRX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)),
+			c.id, $2, $3, $6::uuid,
+			cr.title_ar, cr.title_en, price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
+			$4, $4, $4
+		  FROM courses c
+		  JOIN course_revisions cr ON cr.id = c.live_revision_id
+		  JOIN LATERAL (
+			SELECT new_value_minor_units
+			  FROM course_price_changes
+			 WHERE course_id = c.id AND section_id IS NULL
+			 ORDER BY changed_at DESC, id DESC
+			 LIMIT 1
+		  ) price ON TRUE
+		 WHERE c.id = $5::uuid AND `+catalogpublic.PublishedOnly("c", "cr")+`
+		ON CONFLICT (course_id, requester_account_id)
+			WHERE requester_account_id IS NOT NULL
+			  AND state IN ('WAITING_PAYMENT', 'INVITATION_CREATED')
+		DO UPDATE SET updated_at = purchase_requests.updated_at
+		RETURNING (xmax = 0) AS created, id::text, reference_code, course_id::text, email, normalized_email,
+		          price_minor_units, currency, state, invitation_id::text,
+		          requested_at, payment_confirmed_at, invitation_created_at,
+		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
+		          access_ends_at_snapshot, payment_confirmed_by_account_id::text
+	`, uuid.NewString(), email, normalizedEmail, now, courseID, studentAccountID).Scan(
+		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
+		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
+		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
+		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
+		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PurchaseRequest{}, false, ErrCourseNotPurchasable
+	}
+	if err != nil {
+		// A historical anonymous row for the same Course and address still
+		// occupies the email uniqueness index. Reusing it is the honest
+		// outcome: it is the same person asking for the same Course, and
+		// creating a second WAITING_PAYMENT row would put two tasks in the
+		// Admin queue for one sale.
+		var constraintErr *pgconn.PgError
+		if errors.As(err, &constraintErr) && constraintErr.ConstraintName == "purchase_requests_one_active_course_email" {
+			existing, adoptErr := adoptExistingPurchaseRequestTx(ctx, tx, courseID, normalizedEmail, studentAccountID)
+			if adoptErr != nil {
+				return PurchaseRequest{}, false, adoptErr
+			}
+			return existing, false, nil
+		}
+		return PurchaseRequest{}, false, fmt.Errorf("creating purchase request: %w", err)
+	}
+	return request, created, nil
+}
+
+// adoptExistingPurchaseRequestTx attaches ownership to an active request that
+// predates authentication.
+//
+// It only ever runs for a row whose normalized email is the one this
+// transaction just read off the authenticated Account, so the attribution it
+// records is evidence rather than a guess.
+func adoptExistingPurchaseRequestTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	courseID, normalizedEmail, studentAccountID string,
+) (PurchaseRequest, error) {
+	row := tx.QueryRow(ctx, `
+		UPDATE purchase_requests
+		   SET requester_account_id = COALESCE(requester_account_id, $3::uuid)
+		 WHERE course_id = $1::uuid
+		   AND normalized_email = $2
+		   AND state IN ('WAITING_PAYMENT', 'INVITATION_CREATED')
+		RETURNING id::text, reference_code, course_id::text, email, normalized_email,
+		          price_minor_units, currency, state, invitation_id::text,
+		          requested_at, payment_confirmed_at, invitation_created_at,
+		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
+		          access_ends_at_snapshot, payment_confirmed_by_account_id::text
+	`, courseID, normalizedEmail, studentAccountID)
+	request, err := scanPurchaseRequest(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PurchaseRequest{}, ErrPurchaseRequestNotFound
+	}
+	if err != nil {
+		return PurchaseRequest{}, fmt.Errorf("adopting existing purchase request: %w", err)
 	}
 	return request, nil
 }

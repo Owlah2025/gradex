@@ -33,11 +33,18 @@ type VerificationRequest struct {
 }
 
 type AdmissionServiceOptions struct {
-	Pool            *pgxpool.Pool
-	Policies        PolicySetResolver
-	Compromised     CompromisedRangeSource
-	Outbox          *outbox.Writer
+	Pool        *pgxpool.Pool
+	Policies    PolicySetResolver
+	Compromised CompromisedRangeSource
+	Outbox      *outbox.Writer
+	// Sessions is required because proving a verification code authenticates
+	// the Student in the same transaction that activates the Account.
+	Sessions *SessionRepository
+	// VerificationTTL governs the legacy emailed link only. New registrations
+	// issue a code under EmailOTPTTL.
 	VerificationTTL time.Duration
+	EmailOTPTTL     time.Duration
+	EmailOTPPepper  config.Secret
 	Now             func() time.Time
 	Random          io.Reader
 }

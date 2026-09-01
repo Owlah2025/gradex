@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -19,20 +20,36 @@ type fakeAdmissionService struct {
 	registerErr error
 	requestErr  error
 	verifyErr   error
+	resendErr   error
+	codeErr     error
+	grant       identity.SessionGrant
+	challenge   identity.VerificationChallenge
 }
 
 func (f *fakeAdmissionService) RegisterStudent(
 	context.Context,
 	identity.StudentRegistration,
-) error {
-	return f.registerErr
+) (identity.VerificationChallenge, error) {
+	return f.challenge, f.registerErr
 }
 
 func (f *fakeAdmissionService) RequestEmailVerification(
 	context.Context,
 	identity.VerificationRequest,
-) error {
-	return f.requestErr
+) (identity.VerificationChallenge, error) {
+	return f.challenge, f.requestErr
+}
+
+func (f *fakeAdmissionService) ResendEmailVerificationOTP(
+	context.Context, string, string,
+) (identity.VerificationChallenge, error) {
+	return f.challenge, f.resendErr
+}
+
+func (f *fakeAdmissionService) VerifyEmailOTP(
+	context.Context, string, string, string,
+) (identity.SessionGrant, error) {
+	return f.grant, f.codeErr
 }
 
 func (f *fakeAdmissionService) VerifyEmail(context.Context, string, string) error {
@@ -124,24 +141,39 @@ func identityPolicySets() (identity.RegistrationPolicySet, identity.Registration
 	return english, arabic
 }
 
-// BR-001: hidden registration and resend outcomes share one byte-identical
-// acknowledgment with no cookie, identifier, Account, or delivery claim.
+// BR-001: hidden registration and resend outcomes share one acknowledgment
+// shape with no cookie, identifier, Account, or delivery claim.
+//
+// The body is no longer byte-identical, because the response now carries the
+// verification context the screen needs to render a code prompt without asking
+// for the address a second time. The invariant that mattered is unchanged and
+// is asserted more directly below: the acknowledgment carries a fixed key set,
+// and the *same* key set with structurally identical values whether the address
+// was new or already registered. The domain guarantees that by answering a
+// duplicate with a synthetic challenge; this test guarantees the boundary does
+// not add a distinguishing field on top of it.
 func TestAdmissionAcknowledgmentsAreFixedAndNoStore(t *testing.T) {
+	challenge := identity.VerificationChallenge{
+		ChallengeID:       "3f1d0a86-6f4a-4a1f-9d0b-2f3a4b5c6d7e",
+		MaskedEmail:       "st***@e***.com",
+		ExpiresAt:         time.Date(2026, 9, 1, 12, 10, 0, 0, time.UTC),
+		ResendAvailableAt: time.Date(2026, 9, 1, 12, 1, 0, 0, time.UTC),
+	}
 	tests := map[string]struct {
 		path     string
 		body     string
-		wantBody string
+		wantCode string
 	}{
 		"registration": {
 			path: "/register",
 			body: `{"display_name":"Nora Ahmed","email":"student@example.com",` +
 				`"password":"correct horse battery staple","locale":"en",` +
 				`"policy_set_id":"registration-v1"}`,
-			wantBody: `{"code":"REGISTRATION_REQUEST_ACCEPTED"}`,
+			wantCode: "REGISTRATION_REQUEST_ACCEPTED",
 		},
 		"verification request": {
 			path: "/request", body: `{"email":"student@example.com"}`,
-			wantBody: `{"code":"VERIFICATION_REQUEST_ACCEPTED"}`,
+			wantCode: "VERIFICATION_REQUEST_ACCEPTED",
 		},
 	}
 	for scenario, test := range tests {
@@ -149,10 +181,43 @@ func TestAdmissionAcknowledgmentsAreFixedAndNoStore(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
-			admissionHandlerRouter(t, &fakeAdmissionService{}).ServeHTTP(response, request)
-			if response.Code != http.StatusAccepted ||
-				strings.TrimSpace(response.Body.String()) != test.wantBody {
+			admissionHandlerRouter(t, &fakeAdmissionService{challenge: challenge}).ServeHTTP(response, request)
+			if response.Code != http.StatusAccepted {
 				t.Fatalf("response = %d %q", response.Code, response.Body.String())
+			}
+			var body map[string]any
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatalf("acknowledgment is not JSON: %v", err)
+			}
+			if body["code"] != test.wantCode {
+				t.Fatalf("code = %v, want %s", body["code"], test.wantCode)
+			}
+			if len(body) != 2 {
+				t.Fatalf("acknowledgment carries unexpected top-level keys: %v", body)
+			}
+			verification, ok := body["verification"].(map[string]any)
+			if !ok {
+				t.Fatal("acknowledgment carries no verification context")
+			}
+			wantKeys := []string{
+				"challenge_id", "masked_email", "expires_at",
+				"resend_available_at", "code_length", "maximum_attempts",
+			}
+			if len(verification) != len(wantKeys) {
+				t.Fatalf("verification context key set changed: %v", verification)
+			}
+			for _, key := range wantKeys {
+				if _, present := verification[key]; !present {
+					t.Fatalf("verification context is missing %q", key)
+				}
+			}
+			// Nothing in the acknowledgment may name the Account, the address,
+			// or the code.
+			raw := response.Body.String()
+			for _, forbidden := range []string{"student@example.com", "Nora Ahmed"} {
+				if strings.Contains(raw, forbidden) {
+					t.Fatalf("acknowledgment echoed %q", forbidden)
+				}
 			}
 			if response.Header().Get("Cache-Control") != "no-store" {
 				t.Errorf("Cache-Control = %q, want no-store", response.Header().Get("Cache-Control"))
@@ -161,6 +226,58 @@ func TestAdmissionAcknowledgmentsAreFixedAndNoStore(t *testing.T) {
 				t.Fatal("uniform acknowledgment exposed cookie or Location state")
 			}
 		})
+	}
+}
+
+// TestRegistrationAcknowledgmentDoesNotDistinguishAKnownAddress is the
+// enumeration guard the fixed-body assertion used to provide.
+//
+// The domain answers a duplicate address with a synthetic challenge, so both
+// outcomes reach this boundary as an ordinary VerificationChallenge. What is
+// proved here is that the boundary emits the same shape for both, with values
+// that differ only in ways an attacker already controls or already knows.
+func TestRegistrationAcknowledgmentDoesNotDistinguishAKnownAddress(t *testing.T) {
+	body := `{"display_name":"Nora Ahmed","email":"student@example.com",` +
+		`"password":"correct horse battery staple","locale":"en",` +
+		`"policy_set_id":"registration-v1"}`
+	shapes := make([]string, 0, 2)
+	for _, challenge := range []identity.VerificationChallenge{
+		{
+			ChallengeID:       "11111111-1111-4111-8111-111111111111",
+			MaskedEmail:       "st***@e***.com",
+			ExpiresAt:         time.Date(2026, 9, 1, 12, 10, 0, 0, time.UTC),
+			ResendAvailableAt: time.Date(2026, 9, 1, 12, 1, 0, 0, time.UTC),
+		},
+		{
+			ChallengeID:       "22222222-2222-4222-8222-222222222222",
+			MaskedEmail:       "st***@e***.com",
+			ExpiresAt:         time.Date(2026, 9, 1, 12, 10, 0, 0, time.UTC),
+			ResendAvailableAt: time.Date(2026, 9, 1, 12, 1, 0, 0, time.UTC),
+		},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		admissionHandlerRouter(t, &fakeAdmissionService{challenge: challenge}).ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("response = %d", response.Code)
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		verification := parsed["verification"].(map[string]any)
+		// The challenge id is expected to differ — it is a fresh opaque handle
+		// either way. Everything else must match, or it is a signal.
+		delete(verification, "challenge_id")
+		normalized, err := json.Marshal(parsed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shapes = append(shapes, string(normalized))
+	}
+	if shapes[0] != shapes[1] {
+		t.Fatalf("a known address is distinguishable from a new one:\n%s\n%s", shapes[0], shapes[1])
 	}
 }
 

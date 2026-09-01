@@ -19,6 +19,10 @@ import {
   validPassword,
 } from "@/lib/identity/validation";
 import { withReturnTo } from "@/lib/identity/return-to";
+import {
+  challengeParameter,
+  rememberChallenge,
+} from "@/lib/identity/verification-challenge";
 import { formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
@@ -88,7 +92,7 @@ export function RegistrationForm() {
     inFlight.current = true;
     setSubmitting(true);
     try {
-      await registerStudent({
+      const accepted = await registerStudent({
         display_name: fields.displayName,
         email: fields.email,
         password: fields.password,
@@ -96,10 +100,18 @@ export function RegistrationForm() {
         policy_set_id: policySet.id,
       });
       setFields({ displayName: "", email: "", password: "" });
-      // Carry the requested destination to the next admission step. It is
-      // revalidated inside withReturnTo, so a hostile value is dropped here
-      // rather than trusted because an earlier screen saw it.
-      router.push(withReturnTo("/verify-email", searchParams.get("returnTo")));
+      // The verification screen is opened knowing which challenge it is about,
+      // so it never asks for the email address again. The identifier travels in
+      // the URL because it must survive a reload and the back button; the rest
+      // of the non-secret context travels beside it in session storage.
+      rememberChallenge(accepted.verification);
+      const step = withReturnTo("/verify-email", searchParams.get("returnTo"));
+      const separator = step.includes("?") ? "&" : "?";
+      router.push(
+        `${step}${separator}${challengeParameter}=${encodeURIComponent(
+          accepted.verification.challenge_id,
+        )}`,
+      );
     } catch (error) {
       if (error instanceof ProblemError && error.problem.errors?.length) {
         const backendErrors: FieldErrors = {};

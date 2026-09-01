@@ -32,6 +32,23 @@ type VerificationDelivery struct {
 	ExpiresAt         time.Time `json:"expires_at"`
 }
 
+// VerificationCodeDelivery carries a one-time verification code.
+//
+// It is a distinct type from VerificationDelivery even though both encode a
+// `verification_token` field, because the two secrets have different shapes and
+// different handling rules: a bearer belongs in a URL fragment, a code belongs
+// in the message body and must never reach a URL at all. Keeping the write
+// sites apart means a caller cannot accidentally mail a code where a link was
+// meant, or the reverse. The JSON field name is shared deliberately so the
+// dispatcher continues to decode one payload struct.
+type VerificationCodeDelivery struct {
+	Destination      string    `json:"destination"`
+	Locale           string    `json:"locale"`
+	TemplateContract string    `json:"template_contract"`
+	Code             string    `json:"verification_token"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}
+
 // NoticeDelivery is a message that carries no actionable secret — a statement
 // that something already happened, such as a completed password reset.
 //
