@@ -114,11 +114,37 @@ export type LessonReadModel = {
   };
 };
 
+/**
+ * The server-issued identity rendered over protected video (deterrence and leak attribution).
+ *
+ * Deliberately the smallest set of values that lets a leaked recording be traced back to one
+ * Account without publishing it: a shortened name, an email with its local part masked, and a
+ * short attribution code the server derives under its own key. It contains no Account UUID, no
+ * session or authentication identifier, and no playback token, and it grants nothing — it is text
+ * to be drawn, never a credential to be sent anywhere.
+ */
+export type PlaybackWatermark = {
+  /** A shortened display name, e.g. "Ahmed E.". Absent when the Account has nothing renderable. */
+  display_name?: string;
+  /** The correspondence address with its local part masked, e.g. "ah***@example.com". */
+  masked_identifier: string;
+  /** The short attribution code, e.g. "7K2F". Not reversible on the client and not a secret. */
+  code: string;
+};
+
 export type PlaybackAuthorization = {
   playback_session: string;
   manifest_url: string;
   asset_version_id: string;
   expires_at: string;
+  /**
+   * The Student identity the protected player draws over the video.
+   *
+   * Server-decided, and the only source the watermark may be rendered from: the client does not
+   * send it, choose it, or fall back to whatever the session happens to know about the signed-in
+   * Student. Absent on an Admin review authorization, which deliberately carries no Student.
+   */
+  watermark?: PlaybackWatermark;
 };
 
 /** A temporary private-object capability returned only after live-graph and entitlement revalidation. */

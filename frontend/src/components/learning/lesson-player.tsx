@@ -19,11 +19,9 @@ import {
   setMediaVolume,
   setQualityLevel,
   supportsFullscreen,
-  supportsPictureInPicture,
   toggleFullscreen as toggleFullscreenBehavior,
   toggleMediaMute,
   toggleMediaPlayback,
-  togglePictureInPicture as togglePictureInPictureBehavior,
 } from "./player-controls-behavior";
 import {
   clampMediaValue,
@@ -44,6 +42,7 @@ import {
 } from "./quality-state";
 import { PlayerControls } from "./player-controls";
 import { useProgressReporter } from "./progress-reporter";
+import { VideoWatermark } from "./video-watermark";
 
 type LessonPlayerProps = {
   lessonID: string;
@@ -97,8 +96,6 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
   const [playbackRate, setPlaybackRate] = useState<number>(DEFAULT_PLAYBACK_RATE);
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
-  const [pictureInPicture, setPictureInPicture] = useState(false);
-  const [pictureInPictureSupported, setPictureInPictureSupported] = useState(false);
   // A source replacement mints a new key so a level event still in flight from the destroyed
   // hls.js instance cannot reach the new player's quality state.
   const sourceSequenceRef = useRef(0);
@@ -301,32 +298,6 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     return () => document.removeEventListener("fullscreenchange", syncFullscreen);
   }, [playerElement]);
 
-  /**
-   * Picture-in-Picture capability and state, keyed to the mounted media element.
-   *
-   * The browser owns this presentation outright: it can be left from a window the page cannot see,
-   * so the element's own `enterpictureinpicture` / `leavepictureinpicture` events are the only
-   * honest source for the state, and the control reads it rather than assuming its own request
-   * succeeded.
-   */
-  useEffect(() => {
-    if (!videoElement) {
-      setPictureInPictureSupported(false);
-      setPictureInPicture(false);
-      return;
-    }
-    setPictureInPictureSupported(supportsPictureInPicture(document, videoElement));
-    setPictureInPicture(document.pictureInPictureElement === videoElement);
-    const entered = () => setPictureInPicture(true);
-    const left = () => setPictureInPicture(false);
-    videoElement.addEventListener("enterpictureinpicture", entered);
-    videoElement.addEventListener("leavepictureinpicture", left);
-    return () => {
-      videoElement.removeEventListener("enterpictureinpicture", entered);
-      videoElement.removeEventListener("leavepictureinpicture", left);
-    };
-  }, [videoElement]);
-
   // A rejected `play()` is a transient outcome of one interaction — the media element is still
   // loaded and still authorised. Treating it as the fatal "content unavailable" state replaced
   // the entire control set with an alert, so a single interrupted play attempt permanently
@@ -404,12 +375,6 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     toggleFullscreenBehavior(playerElement, document, () => {});
   }, [fullscreenSupported, playerElement]);
 
-  const togglePictureInPicture = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    togglePictureInPictureBehavior(video, document, () => {});
-  }, []);
-
   /**
    * The player's keyboard, and the keys it is not allowed to take.
    *
@@ -455,14 +420,11 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         case "toggleFullscreen":
           toggleFullscreen();
           return;
-        case "togglePictureInPicture":
-          togglePictureInPicture();
-          return;
         default:
           return;
       }
     },
-    [markActivity, nudgeVolume, skip, toggleFullscreen, toggleMute, togglePictureInPicture, togglePlayPause],
+    [markActivity, nudgeVolume, skip, toggleFullscreen, toggleMute, togglePlayPause],
   );
 
   /**
@@ -549,15 +511,40 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
       <div
         onClick={surfaceClicked}
         onDoubleClick={surfaceDoubleClicked}
+        // Deterrence, not a boundary. Suppressing the menu over the picture removes the one-click
+        // "Save video as…" route a curious Student would otherwise find, and nothing more: it is
+        // scoped to the media surface, so right-click still works everywhere else on the Lesson
+        // page, and the keyboard context-menu key is untouched because it fires on the focused
+        // player container rather than here.
+        onContextMenu={(event) => event.preventDefault()}
         className={cn("relative w-full", fullscreen ? "h-full" : "aspect-video")}
       >
         <video
           ref={attachVideo}
           controls={false}
           playsInline
+          // Picture-in-Picture is refused for protected Student playback, deliberately.
+          //
+          // The watermark is a DOM layer over the media surface, and browser PiP presents the raw
+          // `<video>` element in a window the page does not draw into — the picture would leave the
+          // watermark behind. The control and its shortcut are gone from the player, and this
+          // attribute is the browser-level hint that also removes the menu item a browser offers on
+          // the element itself. Fullscreen is unaffected: it presents the whole player container,
+          // watermark included.
+          disablePictureInPicture
+          // A hint only, and inert here because the custom controls mean the native set is never
+          // shown. It costs nothing and states the intent where a future edit would look.
+          controlsList="nodownload"
+          // The element is a picture, not a file to be dragged onto a desktop. Also deterrence.
+          draggable={false}
+          onDragStart={(event) => event.preventDefault()}
           aria-label={labels.video}
           className="size-full bg-gx-navy object-contain"
         />
+        {/* Inside the fullscreen surface, so it stays on the picture in fullscreen as well as
+            inline. It is `pointer-events-none`, so the click and double-click gestures on this
+            surface pass straight through it. */}
+        {playback.watermark ? <VideoWatermark watermark={playback.watermark} /> : null}
         {/* The affordance is a picture of the control, not a second copy of it: the bar below owns
             the accessible play button, and offering the same action twice to a screen reader would
             be noise. The whole media surface is the target, so the glyph never intercepts a click. */}
@@ -593,8 +580,6 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         playbackRate={playbackRate}
         fullscreen={fullscreen}
         fullscreenSupported={fullscreenSupported}
-        pictureInPicture={pictureInPicture}
-        pictureInPictureSupported={pictureInPictureSupported}
         quality={quality}
         visible={showControls}
         onPlayPause={togglePlayPause}
@@ -604,7 +589,6 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
         onToggleMute={toggleMute}
         onQuality={changeQuality}
         onPlaybackRate={changePlaybackRate}
-        onTogglePictureInPicture={togglePictureInPicture}
         onToggleFullscreen={toggleFullscreen}
         onInteractionHold={setInteractionHeld}
         onActivity={markActivity}

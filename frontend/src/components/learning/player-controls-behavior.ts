@@ -129,60 +129,15 @@ export function supportsFullscreen(
   return typeof element.requestFullscreen === "function" && typeof fullscreenDocument.exitFullscreen === "function";
 }
 
-export type PictureInPictureVideo = {
-  requestPictureInPicture?: unknown;
-  disablePictureInPicture?: boolean;
-};
-
-export type PictureInPictureDocument = {
-  pictureInPictureEnabled?: boolean;
-  pictureInPictureElement?: unknown;
-  exitPictureInPicture?: unknown;
-};
-
 /**
- * Whether Picture-in-Picture is available for this video in this document.
+ * There is deliberately no Picture-in-Picture helper in this module.
  *
- * Three separate things have to hold, and each of them is false somewhere real: the API may be
- * absent entirely (Firefox exposes no `requestPictureInPicture`), the document may have it
- * disabled by permissions policy (`pictureInPictureEnabled === false`), and the element itself may
- * opt out (`disablePictureInPicture`). The control is not rendered unless all three pass, so no
- * Student is offered a button that cannot do anything.
+ * Protected Student playback refuses PiP: the Student watermark is a DOM layer over the media
+ * surface, and browser PiP presents the bare `<video>` element in a window the page does not draw
+ * into, so the picture would leave the watermark behind. The player sets `disablePictureInPicture`
+ * on the element and offers neither a control nor a shortcut. Re-adding a helper here is the first
+ * step of undoing that, which is why the absence is written down rather than left as a gap.
  */
-export function supportsPictureInPicture(
-  pipDocument: PictureInPictureDocument | null | undefined,
-  video: PictureInPictureVideo | null | undefined,
-): boolean {
-  if (!pipDocument || !video) return false;
-  if (pipDocument.pictureInPictureEnabled !== true) return false;
-  if (video.disablePictureInPicture === true) return false;
-  return typeof video.requestPictureInPicture === "function" && typeof pipDocument.exitPictureInPicture === "function";
-}
-
-/**
- * Enter or leave Picture-in-Picture.
- *
- * Shaped like `toggleFullscreen`: the document owns the truth about which element is presented, a
- * refusal is a transient outcome reported to the caller, and the return value names the intent
- * rather than the result — the player's own `enterpictureinpicture` / `leavepictureinpicture`
- * events are what move the UI, so a request the browser declines leaves no state claiming it
- * succeeded.
- */
-export function togglePictureInPicture(
-  video: PictureInPictureVideo,
-  pipDocument: PictureInPictureDocument,
-  onFailure: () => void,
-): "enter" | "exit" | "unsupported" {
-  if (!supportsPictureInPicture(pipDocument, video)) return "unsupported";
-  if (pipDocument.pictureInPictureElement === video) {
-    const exit = pipDocument.exitPictureInPicture as () => Promise<unknown>;
-    void Promise.resolve(exit.call(pipDocument)).catch(onFailure);
-    return "exit";
-  }
-  const request = video.requestPictureInPicture as () => Promise<unknown>;
-  void Promise.resolve(request.call(video)).catch(onFailure);
-  return "enter";
-}
 
 /**
  * Put playback back the way it was, without asking the element where it currently is.

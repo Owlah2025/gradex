@@ -18,7 +18,6 @@ test("the player's keys do what the player says they do", () => {
     ["ArrowDown", "volumeDown"],
     ["m", "toggleMute"],
     ["f", "toggleFullscreen"],
-    ["i", "togglePictureInPicture"],
   ];
   for (const [key, shortcut] of bindings) {
     assert.equal(playerShortcutFor({ key, target: PLAYER }), shortcut, `${key} must be ${shortcut}`);
@@ -29,6 +28,24 @@ test("the player's keys do what the player says they do", () => {
 test("keys the player has no business with are left to the page", () => {
   for (const key of ["Tab", "Enter", "Escape", "a", "1", "PageDown", "Home", "End", "p"]) {
     assert.equal(playerShortcutFor({ key, target: PLAYER }), null, `${key} must not be claimed`);
+  }
+});
+
+/**
+ * `I` was the Picture-in-Picture key, and it must stay unbound.
+ *
+ * Protected Student playback refuses Picture-in-Picture because the browser presents the bare
+ * `<video>` element without the DOM watermark drawn over it. Taking the control off the bar without
+ * unbinding the key would leave the same hole open from the keyboard, so this asserts the key is
+ * claimed as nothing at all rather than merely mapped to a control that is no longer rendered.
+ */
+test("the Picture-in-Picture key is not claimed by the protected player", () => {
+  for (const key of ["i", "I"]) {
+    assert.equal(
+      playerShortcutFor({ key, target: PLAYER }),
+      null,
+      `${key} must not reach Picture-in-Picture`,
+    );
   }
 });
 

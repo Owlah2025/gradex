@@ -18,8 +18,7 @@ export type PlayerShortcut =
   | "volumeUp"
   | "volumeDown"
   | "toggleMute"
-  | "toggleFullscreen"
-  | "togglePictureInPicture";
+  | "toggleFullscreen";
 
 /**
  * What the caller knows about the element the key was pressed on.
@@ -111,7 +110,12 @@ export function targetOwnsKeyboard(target: ShortcutTarget | null | undefined): b
  *
  * Letters are matched case-insensitively so a shortcut still works with Caps Lock on or Shift
  * held. `P` is not bound: a bare `P` is close enough to the print gesture that Students press it
- * by accident, and `I` is the key the Picture-in-Picture control advertises.
+ * by accident.
+ *
+ * `I` is not bound either, and its absence is deliberate rather than an omission. It was the
+ * Picture-in-Picture key, and Picture-in-Picture is refused for protected Student playback because
+ * the browser presents the bare `<video>` element without the DOM watermark drawn over it. Binding
+ * it again would reopen that hole from the keyboard after the control had been taken off the bar.
  */
 function shortcutForKey(key: string): PlayerShortcut | null {
   switch (key) {
@@ -140,8 +144,6 @@ function shortcutForKey(key: string): PlayerShortcut | null {
       return "toggleMute";
     case "f":
       return "toggleFullscreen";
-    case "i":
-      return "togglePictureInPicture";
     default:
       return null;
   }

@@ -102,18 +102,33 @@ test("a double-click restores the pre-gesture playback state instead of toggling
   assert.equal((player.match(/setTimeout\(/g) ?? []).length, 1);
 });
 
-test("Picture-in-Picture capability and state are keyed to the mounted media element", () => {
+/**
+ * Picture-in-Picture is refused for protected Student playback, and this pins the refusal.
+ *
+ * The Student watermark is a DOM layer over the media surface. Browser PiP presents the bare
+ * `<video>` element in a window the page does not draw into, so the picture would play on without
+ * the watermark — which is precisely the surface a leak is recorded from. Removing the button is
+ * not enough on its own: the keyboard shortcut and the browser's own affordance on the element both
+ * have to go too, so all three are asserted here rather than just the visible one.
+ */
+test("Picture-in-Picture is refused for protected Student playback", () => {
   const player = code(PLAYER);
-  assert.equal(
-    effectDependencies(player, "setPictureInPictureSupported(supportsPictureInPicture"),
-    "videoElement",
-    "Picture-in-Picture capability must be keyed to the video node",
-  );
-  // The browser can be left from its own window, so its events are the only honest state.
-  assert.match(player, /addEventListener\("enterpictureinpicture", entered\)/);
-  assert.match(player, /addEventListener\("leavepictureinpicture", left\)/);
-  assert.match(player, /removeEventListener\("enterpictureinpicture", entered\)/);
-  assert.match(player, /removeEventListener\("leavepictureinpicture", left\)/);
+  // The element opts out, which also removes the browser's own menu item on the video.
+  assert.match(player, /disablePictureInPicture/, "the video element must opt out of PiP");
+  // No control, no handler, no capability state, no listeners.
+  for (const remnant of [
+    "supportsPictureInPicture",
+    "togglePictureInPictureBehavior",
+    "onTogglePictureInPicture",
+    "setPictureInPictureSupported",
+    "enterpictureinpicture",
+    "leavepictureinpicture",
+  ]) {
+    assert.doesNotMatch(player, new RegExp(remnant), `the player still carries \`${remnant}\``);
+  }
+  assert.doesNotMatch(code(CONTROLS), /PictureInPicture/, "the control bar still offers PiP");
+  // Fullscreen is deliberately untouched: it presents the container, watermark included.
+  assert.match(player, /supportsFullscreen\(playerElement, document\)/);
 });
 
 /**
@@ -178,7 +193,7 @@ test("a transient control failure still never makes the Lesson unavailable", () 
   // the element's own `error` event.
   const failures = player.match(/setFailed\(true\)/g) ?? [];
   assert.equal(failures.length, 3, "only unplayable media may make the Lesson unavailable");
-  for (const control of ["toggleMediaPlayback", "toggleFullscreenBehavior", "togglePictureInPictureBehavior"]) {
+  for (const control of ["toggleMediaPlayback", "toggleFullscreenBehavior"]) {
     assert.match(
       player,
       new RegExp(`${control}\\([^)]*\\(\\) => \\{\\}\\)`),
@@ -254,7 +269,7 @@ test("the timeline and the elapsed reading run the way time runs, in both langua
 // --- Both languages, and nothing invented ------------------------------------
 
 test("every control the player added is named in both languages", () => {
-  const added = ["speed", "rewind", "forward", "pictureInPicture", "exitPictureInPicture", "buffering"] as const;
+  const added = ["speed", "rewind", "forward", "buffering"] as const;
   for (const key of added) {
     assert.equal(typeof en.player[key], "string", `English player.${key}`);
     assert.equal(typeof ar.player[key], "string", `Arabic player.${key}`);

@@ -4,7 +4,6 @@ import {
   Maximize,
   Minimize,
   Pause,
-  PictureInPicture2,
   Play,
   RotateCcw,
   RotateCw,
@@ -37,8 +36,6 @@ export type PlayerControlLabels = {
   speed: string;
   rewind: string;
   forward: string;
-  pictureInPicture: string;
-  exitPictureInPicture: string;
   fullscreen: string;
   exitFullscreen: string;
 };
@@ -55,8 +52,6 @@ type PlayerControlsProps = {
   playbackRate: number;
   fullscreen: boolean;
   fullscreenSupported: boolean;
-  pictureInPicture: boolean;
-  pictureInPictureSupported: boolean;
   quality: QualityState;
   /** Whether the overlay is currently on screen. Hidden is still mounted, and still reachable. */
   visible: boolean;
@@ -67,7 +62,6 @@ type PlayerControlsProps = {
   onToggleMute: () => void;
   onQuality: (selectValue: string) => void;
   onPlaybackRate: (selectValue: string) => void;
-  onTogglePictureInPicture: () => void;
   onToggleFullscreen: () => void;
   /** The Student is holding the controls open — see `controls-visibility`. */
   onInteractionHold: (held: boolean) => void;
@@ -149,8 +143,6 @@ export function PlayerControls({
   playbackRate,
   fullscreen,
   fullscreenSupported,
-  pictureInPicture,
-  pictureInPictureSupported,
   quality,
   visible,
   onPlayPause,
@@ -160,7 +152,6 @@ export function PlayerControls({
   onToggleMute,
   onQuality,
   onPlaybackRate,
-  onTogglePictureInPicture,
   onToggleFullscreen,
   onInteractionHold,
   onActivity,
@@ -306,14 +297,9 @@ export function PlayerControls({
               </select>
             </label>
           ) : null}
-          {pictureInPictureSupported ? (
-            <ControlButton
-              label={pictureInPicture ? labels.exitPictureInPicture : labels.pictureInPicture}
-              onClick={onTogglePictureInPicture}
-            >
-              <PictureInPicture2 aria-hidden className="size-5" />
-            </ControlButton>
-          ) : null}
+          {/* There is deliberately no Picture-in-Picture control here. The watermark is a DOM
+              layer over the media surface and browser PiP presents the bare `<video>` element, so
+              the picture would leave the watermark behind. See `video-watermark.tsx`. */}
           {fullscreenSupported ? (
             <ControlButton label={fullscreen ? labels.exitFullscreen : labels.fullscreen} onClick={onToggleFullscreen}>
               {fullscreen ? <Minimize aria-hidden className="size-5" /> : <Maximize aria-hidden className="size-5" />}

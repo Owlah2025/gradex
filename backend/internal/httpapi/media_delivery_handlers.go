@@ -105,6 +105,9 @@ func writePlaybackManifest(c *gin.Context, manifest media.PlaybackManifest) {
 }
 
 func (h *mediaDeliveryHandlers) playbackAuthorization(c *gin.Context) {
+	if !h.allowProtectedPlaybackIssuance(c) {
+		return
+	}
 	body := c.MustGet(strictJSONBodyContextKey).(*playbackAuthorizationBody)
 	issued, err := h.delivery.IssuePlayback(c.Request.Context(), media.PlaybackRequest{
 		StudentID: c.GetString(ctxUserIDKey), LessonID: body.LessonID, AssetVersionID: body.AssetVersionID,
@@ -184,6 +187,42 @@ func (h *mediaDeliveryHandlers) materialEntry(c *gin.Context, kind media.AssetKi
 // quota cannot become a material-inventory oracle, and an unavailable limiter
 // never leaves a route that can mint a private object URL.
 func (h *mediaDeliveryHandlers) allowProtectedMaterialDownload(c *gin.Context) bool {
+	return h.allowProtectedSigning(c,
+		ratelimit.ProtectedLearningMaterialDownloadSourcePolicy(),
+		ratelimit.ProtectedLearningMaterialDownloadPolicy(),
+	)
+}
+
+// allowProtectedPlaybackIssuance applies the same FR-017 / BR-102 ceilings to
+// this route that the learning Lesson route already applies to its own.
+//
+// This endpoint mints playback sessions too, so leaving it unbounded would have
+// left the bounded route beside an unbounded one reaching the same signer --
+// exactly the "open a fresh quota by using the other door" shape the Student and
+// source policies exist to close. The policies are the established ones, keyed
+// the same way, so the two doors share one quota rather than each having their
+// own: a Student who has spent their issuances on the Lesson route has spent
+// them here as well.
+//
+// The ceilings are sized for issuance abuse, not for study: reloading a page,
+// moving between Lessons, and recovering from a dropped network all stay far
+// inside them.
+func (h *mediaDeliveryHandlers) allowProtectedPlaybackIssuance(c *gin.Context) bool {
+	return h.allowProtectedSigning(c,
+		ratelimit.ProtectedLearningPlaybackSourcePolicy(),
+		ratelimit.ProtectedLearningPlaybackPolicy(),
+	)
+}
+
+// allowProtectedSigning decides the source ceiling and then the Student ceiling
+// before a route may sign anything, in that fixed order.
+//
+// Deciding before authorization is deliberate: a throttled caller learns nothing
+// about entitlement, Course inventory, or media identity, and quota state never
+// becomes an authorization input. A limiter that cannot decide refuses with the
+// uniform protected response, so no signed capability is ever issued on an
+// undecided ceiling.
+func (h *mediaDeliveryHandlers) allowProtectedSigning(c *gin.Context, sourcePolicy, studentPolicy ratelimit.Policy) bool {
 	// The production composition always supplies this established limiter for
 	// media signing. Test-only router seams may omit it when their subject is
 	// route authorization rather than rate limiting.
@@ -194,8 +233,8 @@ func (h *mediaDeliveryHandlers) allowProtectedMaterialDownload(c *gin.Context) b
 		policy ratelimit.Policy
 		input  ratelimit.Input
 	}{
-		{ratelimit.ProtectedLearningMaterialDownloadSourcePolicy(), ratelimit.Input{ClientIP: c.ClientIP()}},
-		{ratelimit.ProtectedLearningMaterialDownloadPolicy(), ratelimit.Input{Identifier: c.GetString(ctxUserIDKey)}},
+		{sourcePolicy, ratelimit.Input{ClientIP: c.ClientIP()}},
+		{studentPolicy, ratelimit.Input{Identifier: c.GetString(ctxUserIDKey)}},
 	} {
 		decision := h.rateLimiter.Decide(c.Request.Context(), check.policy, check.input)
 		c.Set(limiterOutcomeContextKey, string(decision.Outcome))

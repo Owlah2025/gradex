@@ -180,6 +180,12 @@ type PlaybackAuthorization struct {
 	ManifestURL     string    `json:"manifest_url"`
 	AssetVersionID  string    `json:"asset_version_id"`
 	ExpiresAt       time.Time `json:"expires_at"`
+	// Watermark is the server-decided Student identity the protected player
+	// renders over the video (see delivery_watermark.go). It is a pointer and
+	// omitted when empty because Admin review playback deliberately carries no
+	// Student identity: an Admin reviewing a submitted Lesson must never be
+	// handed a watermark, and absence is how that stays true by construction.
+	Watermark *PlaybackWatermark `json:"watermark,omitempty"`
 }
 
 // PlaybackManifest carries only the rewritten HLS manifest text. Video
@@ -253,6 +259,14 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 	if !decision.Allowed {
 		return PlaybackAuthorization{}, denyProtected(decision.Reason)
 	}
+	// The watermark identity is read only here, after the decision above allowed
+	// this Student to watch this exact version. The client contributes nothing to
+	// it, and a Student whose identity cannot be read receives no authorization
+	// rather than an unwatermarked one.
+	watermark, err := s.playbackWatermark(ctx, request.StudentID)
+	if err != nil {
+		return PlaybackAuthorization{}, ErrProtectedUnavailable
+	}
 	now := s.now().UTC()
 	expiresAt := now.Add(s.signatureLifetime)
 	playbackSession := s.playbackSession(request.StudentID, request.LessonID, target.assetVersionID, expiresAt)
@@ -261,6 +275,7 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 		ManifestURL:     "/api/v1/media/playback-manifests/" + playbackSession + "/index.m3u8",
 		AssetVersionID:  target.assetVersionID,
 		ExpiresAt:       expiresAt,
+		Watermark:       watermark,
 	}, nil
 }
 

@@ -1212,8 +1212,6 @@ export const ar: Dictionary = {
     speed: "سرعة التشغيل",
     rewind: "الرجوع 10 ثوانٍ",
     forward: "التقدّم 10 ثوانٍ",
-    pictureInPicture: "صورة داخل صورة",
-    exitPictureInPicture: "إنهاء صورة داخل صورة",
     buffering: "جارٍ التحميل",
   },
   why: {

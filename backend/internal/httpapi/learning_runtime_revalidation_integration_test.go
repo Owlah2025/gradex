@@ -320,13 +320,46 @@ func TestLearningPayloadsExposeNoS5AuthorizationDecision(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	want := []string{"asset_version_id", "expires_at", "manifest_url", "playback_session"}
+	// `watermark` is an S4 issuance field like the other four: it is the identity the protected
+	// player draws over the picture, decided server-side after the entitlement decision and
+	// carrying none of it. It is enumerated here rather than tolerated, so the payload stays a
+	// closed world.
+	want := []string{"asset_version_id", "expires_at", "manifest_url", "playback_session", "watermark"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("learning playback exposed an S5 authorization decision: keys=%v want S4 issuance=%v", keys, want)
 	}
-	for _, forbidden := range []string{"allowed", "capability", "decision", "entitlement", "entitlement_id", "scope"} {
-		if _, ok := payload[forbidden]; ok {
-			t.Fatalf("learning payload leaked client-representable S5 authorization field %q", forbidden)
+	forbidden := []string{"allowed", "capability", "decision", "entitlement", "entitlement_id", "scope"}
+	for _, field := range forbidden {
+		if _, ok := payload[field]; ok {
+			t.Fatalf("learning payload leaked client-representable S5 authorization field %q", field)
+		}
+	}
+
+	// The same closed world applies inside the watermark, which is the one nested object on this
+	// response and therefore the one place a new field could arrive unexamined.
+	var watermark map[string]json.RawMessage
+	if err := json.Unmarshal(payload["watermark"], &watermark); err != nil {
+		t.Fatalf("decoding S4 playback watermark: %v", err)
+	}
+	watermarkKeys := make([]string, 0, len(watermark))
+	for key := range watermark {
+		watermarkKeys = append(watermarkKeys, key)
+	}
+	sort.Strings(watermarkKeys)
+	wantWatermark := []string{"code", "display_name", "masked_identifier"}
+	if !reflect.DeepEqual(watermarkKeys, wantWatermark) {
+		t.Fatalf("playback watermark exposed unexpected fields: keys=%v want %v", watermarkKeys, wantWatermark)
+	}
+	for _, field := range append(forbidden, "account_id", "student_id", "email", "session", "playback_session", "token") {
+		if _, ok := watermark[field]; ok {
+			t.Fatalf("playback watermark leaked %q", field)
+		}
+	}
+	// The visible identity is never the Account, and never the capability beside it.
+	rendered := string(payload["watermark"])
+	for _, secret := range []string{f.studentID, string(payload["playback_session"]), string(payload["asset_version_id"])} {
+		if secret != "" && secret != `""` && strings.Contains(rendered, strings.Trim(secret, `"`)) {
+			t.Fatalf("playback watermark carried a protected identifier: %s", rendered)
 		}
 	}
 }

@@ -12,11 +12,9 @@ import {
   setMediaVolume,
   setQualityLevel,
   supportsFullscreen,
-  supportsPictureInPicture,
   toggleFullscreen,
   toggleMediaMute,
   toggleMediaPlayback,
-  togglePictureInPicture,
 } from "./player-controls-behavior";
 
 test("play and pause call the media element and handle rejected play promises generically", async () => {
@@ -147,58 +145,7 @@ test("fullscreen capability is a property of the element, and is false before th
   assert.equal(supportsFullscreen(container, null), false);
 });
 
-test("Picture-in-Picture is offered only when the API, the document and the element all allow it", () => {
-  const video = { requestPictureInPicture: async () => {} };
-  const pipDocument = {
-    pictureInPictureEnabled: true,
-    pictureInPictureElement: null as unknown,
-    exitPictureInPicture: async () => {},
-  };
 
-  assert.equal(supportsPictureInPicture(pipDocument, video), true);
-  // No API at all — the control must not be rendered.
-  assert.equal(supportsPictureInPicture(pipDocument, {}), false);
-  // Disabled by permissions policy.
-  assert.equal(supportsPictureInPicture({ ...pipDocument, pictureInPictureEnabled: false }, video), false);
-  assert.equal(supportsPictureInPicture({ exitPictureInPicture: async () => {} }, video), false);
-  // The element itself opts out.
-  assert.equal(supportsPictureInPicture(pipDocument, { ...video, disablePictureInPicture: true }), false);
-  // Nothing mounted yet.
-  assert.equal(supportsPictureInPicture(pipDocument, null), false);
-  assert.equal(supportsPictureInPicture(null, video), false);
-});
-
-test("Picture-in-Picture enters, exits, and keeps a refusal from claiming success", async () => {
-  let entered = 0;
-  let exited = 0;
-  let failures = 0;
-  const video = { requestPictureInPicture: async () => { entered += 1; } };
-  const pipDocument = {
-    pictureInPictureEnabled: true,
-    pictureInPictureElement: null as unknown,
-    exitPictureInPicture: async () => { exited += 1; },
-  };
-
-  assert.equal(togglePictureInPicture(video, pipDocument, () => { failures += 1; }), "enter");
-  await Promise.resolve();
-  assert.equal(entered, 1);
-
-  // The document owns the truth about which element is presented.
-  pipDocument.pictureInPictureElement = video;
-  assert.equal(togglePictureInPicture(video, pipDocument, () => { failures += 1; }), "exit");
-  await Promise.resolve();
-  assert.equal(exited, 1);
-
-  // An unsupported browser is told so rather than throwing at the Student.
-  assert.equal(togglePictureInPicture({}, pipDocument, () => { failures += 1; }), "unsupported");
-  assert.equal(failures, 0);
-
-  const refusing = { requestPictureInPicture: async () => { throw new Error("PiP refused"); } };
-  togglePictureInPicture(refusing, { ...pipDocument, pictureInPictureElement: null }, () => { failures += 1; });
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(failures, 1, "a refusal is reported to the caller, not swallowed");
-});
 
 /* ------------------------------------- the media-surface click gesture ---- */
 
