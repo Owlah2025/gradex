@@ -24,9 +24,13 @@ var ErrProtectedUnavailable = errors.New("protected media is unavailable")
 // malware-scan evidence, or D-088 trusted-validation evidence. It is an inner
 // join, so an asset with neither is invisible to delivery.
 //
-// Public preview deliberately does not use it. D-088 keeps every public preview
-// scanner-gated, so IssuePreview joins scan_attempts directly and no validation
-// evidence can satisfy it.
+// Public preview uses it too. D-088 originally kept every public preview
+// scanner-gated; D-096 admits the MP4 public preview to the trusted profile, so
+// a preview may now reach delivery on trusted-validation provenance. What keeps
+// that honest is not the provenance test here but the readiness rule: a preview
+// admitted on validation evidence cannot reach READY without successful FFmpeg
+// processing over the exact stored object version, in both the service and the
+// lifecycle trigger.
 //
 // It is a compile-time constant spliced into queries that already bind their
 // own parameters; it carries no caller input.
@@ -549,8 +553,8 @@ func (s *DeliveryService) IssuePreview(ctx context.Context, assetVersionID strin
 
 // IssueCoursePreview signs only the current live preview for the requested
 // public Course. The Course identifier is not an authorization grant: the
-// query still proves lifecycle, revision, exact scanner evidence, kind,
-// visibility, and retirement state before issuing the short-lived URL.
+// query still proves lifecycle, revision, exact-version safety provenance,
+// kind, visibility, and retirement state before issuing the short-lived URL.
 func (s *DeliveryService) IssueCoursePreview(ctx context.Context, courseID string) (PreviewAuthorization, error) {
 	if courseID == "" {
 		return PreviewAuthorization{}, ErrProtectedUnavailable
@@ -559,9 +563,11 @@ func (s *DeliveryService) IssueCoursePreview(ctx context.Context, courseID strin
 }
 
 func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, targetID string) (PreviewAuthorization, error) {
-	// A public preview stays scanner-gated under D-088. This join is
-	// deliberately scan_attempts and not ExactVersionProvenanceJoin: no
-	// trusted-validation evidence may ever make bytes publicly readable.
+	// D-096 admits the MP4 public preview to the trusted profile, so this join
+	// accepts either legitimate provenance for these exact bytes. It does not
+	// widen what may be signed: lifecycle, revision lineage, kind, visibility,
+	// retirement, content type, and READY are all still proved below, and a
+	// trusted preview only reaches READY after successful FFmpeg processing.
 	var target deliveryTarget
 	err := s.db.QueryRow(ctx, `
 		SELECT cr.preview_asset_version_id::text, mav.kind, mav.state, mav.storage_object_key, ma.retired_at
@@ -569,10 +575,7 @@ func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, tar
 		JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id
 		JOIN media_asset_versions mav ON mav.id = cr.preview_asset_version_id
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
-		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-			AND scan.asset_version_id = mav.id
-			AND scan.storage_object_version = mav.storage_object_version
-			AND scan.outcome = 'PASSED'
+	`+ExactVersionProvenanceJoin+`
 		WHERE `+targetPredicate+`
 		  AND `+catalogpublic.PublishedOnly("c", "cr")+`
 		  AND cr.state = 'APPROVED'

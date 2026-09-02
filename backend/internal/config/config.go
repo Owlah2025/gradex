@@ -80,11 +80,13 @@ func (r ServiceRole) RequiresRedis() bool { return true }
 // `SCANNER` keeps ordinary Instructor upload available but fail-closed behind
 // malware scanning. `ADMIN_CATALOGUE` disables Instructor upload and accepts
 // only an audited Admin procedure carrying exact out-of-band scan evidence.
-// `TRUSTED_INSTRUCTOR` is the bounded D-088 launch profile: an ACTIVE vetted
-// Instructor may upload the approved MP4 Lesson video and PDF/DOCX Lesson
-// Resource types, which progress on exact-version validation evidence rather
-// than malware scanning. Every other kind, type, public preview, and Lab
-// Material stays scanner-gated in every mode.
+// `TRUSTED_INSTRUCTOR` is the bounded D-088 launch profile as amended by D-096:
+// an ACTIVE vetted Instructor may upload the approved MP4 Lesson video, PDF/DOCX
+// Lesson Resource, and MP4 public Course preview types, which progress on
+// exact-version validation evidence rather than malware scanning. A trusted
+// preview additionally requires successful FFmpeg processing before it is
+// deliverable. Every other kind and type, including every non-MP4 preview and
+// every Lab Material, stays scanner-gated in every mode.
 type MediaOperatingMode string
 
 const (

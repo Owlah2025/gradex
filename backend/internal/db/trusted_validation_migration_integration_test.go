@@ -384,15 +384,35 @@ func TestTrustedValidationDatabaseGuardsProvenance(t *testing.T) {
 		}
 	})
 
-	t.Run("public preview cannot carry validation provenance", func(t *testing.T) {
+	// D-096 admits the MP4 public preview to the profile, and immediately puts
+	// it under the Lesson-video processing requirement: it may be VALIDATED, but
+	// the direct VALIDATED -> READY edge is closed to it.
+	t.Run("MP4 public preview carries validation provenance but cannot skip processing", func(t *testing.T) {
 		f := seedTrustedAsset(t, "PREVIEW", "video/mp4")
+		attemptID := f.recordValidationWith(t, f.truthfulEvidence())
+		if _, err := f.pool.Exec(ctx, `
+			UPDATE media_asset_versions SET state = 'VALIDATED', successful_validation_attempt_id = $1::uuid
+			WHERE id = $2::uuid
+		`, attemptID, f.versionID); err != nil {
+			t.Fatalf("MP4 PREVIEW validation provenance = %v, want it accepted under D-096", err)
+		}
+		_, err := f.pool.Exec(ctx, `
+			UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid
+		`, f.versionID)
+		if err == nil || !strings.Contains(err.Error(), "invalid media asset version state transition") {
+			t.Fatalf("VALIDATED -> READY on a preview = %v, want a transition refusal", err)
+		}
+	})
+
+	t.Run("non-MP4 public preview cannot carry validation provenance", func(t *testing.T) {
+		f := seedTrustedAsset(t, "PREVIEW", "application/pdf")
 		attemptID := f.recordValidationWith(t, f.truthfulEvidence())
 		_, err := f.pool.Exec(ctx, `
 			UPDATE media_asset_versions SET state = 'VALIDATED', successful_validation_attempt_id = $1::uuid
 			WHERE id = $2::uuid
 		`, attemptID, f.versionID)
 		if err == nil || !strings.Contains(err.Error(), "outside the D-088 trusted-validation profile") {
-			t.Fatalf("PREVIEW validation provenance = %v, want a profile refusal", err)
+			t.Fatalf("non-MP4 PREVIEW validation provenance = %v, want a profile refusal", err)
 		}
 	})
 

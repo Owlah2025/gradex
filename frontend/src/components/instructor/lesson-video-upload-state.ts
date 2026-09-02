@@ -1,22 +1,17 @@
-import { isReadyState, isTerminalState } from "../../lib/api/media-upload";
+import {
+  isMediaProcessing,
+  recoverMediaPhase,
+  type RecoveredMediaPhase,
+} from "./media-upload-phase";
 
-export type RecoveredLessonVideoPhase =
-  | "IDLE"
-  | "PROCESSING_BACKGROUND"
-  | "READY"
-  | "FAILED";
+/**
+ * Lesson video's view of the shared media recovery model. The rules live in
+ * media-upload-phase so the public preview, which now has the same durable
+ * completion + background processing lifecycle, cannot drift into a second
+ * slightly different idea of what a reload should show.
+ */
+export type RecoveredLessonVideoPhase = RecoveredMediaPhase;
 
-export function recoverLessonVideoPhase(
-  assetVersionID?: string,
-  assetState?: string,
-): RecoveredLessonVideoPhase {
-  if (!assetVersionID) return "IDLE";
-  // Older READY-only authoring responses did not project media state.
-  if (!assetState || isReadyState(assetState)) return "READY";
-  if (assetState === "UPLOADED" || isTerminalState(assetState)) return "FAILED";
-  return "PROCESSING_BACKGROUND";
-}
+export const recoverLessonVideoPhase = recoverMediaPhase;
 
-export function isLessonVideoProcessing(assetVersionID?: string, assetState?: string): boolean {
-  return recoverLessonVideoPhase(assetVersionID, assetState) === "PROCESSING_BACKGROUND";
-}
+export const isLessonVideoProcessing = isMediaProcessing;

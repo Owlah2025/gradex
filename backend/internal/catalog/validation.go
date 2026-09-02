@@ -321,8 +321,10 @@ func validateLessonFileDependency(ctx context.Context, req submissionValidationR
 }
 
 // validatePreviewAsset is the separate-public-media boundary. The supplied
-// version must be a READY, scanner-cleared PREVIEW asset for this Course and
-// must have been uploaded for this revision or one of its ancestors. The
+// version must be a READY PREVIEW asset for this Course carrying legitimate
+// exact-version safety provenance — a successful malware scan, or the D-096
+// trusted validation that an MP4 preview may now use — and must have been
+// uploaded for this revision or one of its ancestors. The
 // latter permits a candidate to inherit live Preview A unchanged, while the
 // semantic set command requires a replacement Preview B to originate in B.
 //
@@ -358,10 +360,7 @@ func validatePreviewAsset(
 		SELECT mav.id::text
 		FROM media_asset_versions mav
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
-		JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-			AND scan.asset_version_id = mav.id
-			AND scan.storage_object_version = mav.storage_object_version
-			AND scan.outcome = 'PASSED'
+	`+media.ExactVersionProvenanceJoin+`
 		WHERE mav.id = $1::uuid
 			AND ma.course_id = $2::uuid
 			AND mav.kind = 'PREVIEW'

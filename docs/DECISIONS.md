@@ -2921,10 +2921,14 @@ automated exposure gate while preserving T035a sanitization and production behav
 ## D-088 — Launch permits validated uploads from vetted Instructors without malware scanning
 
 **Date:** 2026-08-14
-**Status:** Active. Supersedes only the mandatory-malware-scanning launch requirement in D-019,
-BR-104, LG-014, and API/security design §7.1 for the bounded trusted-Instructor launch
-profile described below. All unrelated content-safety, authorization, storage, review, moderation,
-privacy, and processing requirements remain in force.
+**Status:** Active, amended on 2026-09-02 by
+[D-096](#d-096--the-trusted-instructor-profile-admits-the-mp4-public-preview-under-the-video-processing-requirement),
+which adds the MP4 public Course preview to the item-3 allowlist and puts it under the item-6
+processing requirement. Every other part of this decision, including the item-3 exclusions and the
+item-9 reconsideration triggers, remains in force. Supersedes only the mandatory-malware-scanning
+launch requirement in D-019, BR-104, LG-014, and API/security design §7.1 for the bounded
+trusted-Instructor launch profile described below. All unrelated content-safety, authorization,
+storage, review, moderation, privacy, and processing requirements remain in force.
 
 **Finding:** Gradex launch content is authored only by explicitly invited, vetted Instructors whose
 accounts are created through the controlled staff-onboarding flow. The Product Owner has determined
@@ -3575,3 +3579,60 @@ capacity re-test and authority reconciliation before expansion.
 
 **Source:** Founder authorization supplied for SY-09 on 2026-08-24, reconciled against
 [`PRD.md`](PRD.md), [`LAUNCH_GATES.md`](LAUNCH_GATES.md), and the existing LG-019 launch evidence.
+
+## D-096 — The trusted-Instructor profile admits the MP4 public preview under the video-processing requirement
+
+**Date:** 2026-09-02
+**Status:** Active. Amends
+[D-088](#d-088--launch-permits-validated-uploads-from-vetted-instructors-without-malware-scanning)
+items 3 and 6 only. Every other D-088 term, and every unrelated content-safety, authorization,
+storage, review, moderation, privacy, and processing requirement, remains in force.
+
+**Finding:** Production runs `MEDIA_OPERATING_MODE=TRUSTED_INSTRUCTOR`. The Instructor public-preview
+authoring journey sends `kind=PREVIEW` with `content_type=video/mp4`, which the D-088 profile does
+not admit, so `POST /api/v1/media/uploads` refused every public preview with `422` before any storage
+upload began. A Course could therefore be authored, submitted, approved, and published in production
+but could never carry the public preview the catalogue is designed around. The only ways to reach the
+capability were to change the production operating mode — which would reopen the whole scanner
+dependency D-088 deferred — or to leave a designed, reachable product capability permanently broken.
+
+**Decision:**
+
+1. `PREVIEW` + `video/mp4` joins the D-088 item-3 allowlist. No other preview content type is
+   admitted, and no other kind is added. Lab Materials and every non-MP4 preview remain
+   scanner-gated in every operating mode.
+2. A trusted public preview follows the same exact-version validation as every other D-088 upload:
+   private quarantine, configured size bound, actual stored object size, declared type against the
+   real file format, and SHA-256 over the exact stored version. Validation failure leaves the Asset
+   Version non-deliverable.
+3. A trusted public preview is placed under the D-088 item-6 processing requirement rather than the
+   item-7 direct-to-`READY` rule. It must complete the existing trusted FFmpeg path, and `READY`
+   requires successful processing evidence and a trusted duration. The `VALIDATED -> READY` edge is
+   closed for `PREVIEW` in both the service and the lifecycle trigger.
+4. Public preview delivery and public-preview nomination accept either legitimate exact-version
+   provenance — a successful malware scan, or D-088 trusted validation. Neither is recorded as the
+   other, and lifecycle, revision lineage, kind, visibility, retirement, content type, and `READY`
+   are all still proved before a preview is signed or nominated.
+5. Scanner-mode behavior is unchanged. A `PREVIEW` carrying scan provenance still becomes `READY`
+   from `SCAN_PASSED` with no processing requirement, exactly as before this decision.
+6. Admin Catalogue mode is unchanged and still refuses Instructor upload.
+
+**Accepted risk:** an MP4 public preview may now become publicly readable without a malware scan.
+This is the first D-088 admission whose bytes reach unauthenticated readers, which is why item 3
+above is a requirement rather than a preference: the object must survive a real FFmpeg decode of the
+exact validated bytes before it is deliverable, and the file-format proof, checksum, size bound, and
+private quarantine all still apply. The D-088 §9 reconsideration triggers are unchanged and now
+carry more weight, because the exposed surface is public rather than entitlement-checked.
+
+**Alternatives rejected:** changing production `MEDIA_OPERATING_MODE` (rejected — reopens the
+scanner dependency D-088 deferred, for one media kind); adding `PREVIEW` to the profile without the
+processing requirement (rejected — a validated preview would become `READY` with no FFmpeg evidence,
+publishing an unscanned, undecoded object to the public); admitting every preview content type
+(rejected — the processing guarantee is a video guarantee, and a PDF or image preview would gain
+public reach with neither a scan nor a decode); leaving the capability broken (rejected — the
+catalogue is designed around a Course preview, and the failure is silent to the Instructor).
+
+**Source:** This session; see
+[D-088](#d-088--launch-permits-validated-uploads-from-vetted-instructors-without-malware-scanning),
+[BUSINESS_RULES.md](BUSINESS_RULES.md) BR-104 and BR-144, and migration
+`0031_trusted_public_preview`.

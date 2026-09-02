@@ -762,6 +762,8 @@ export function CourseBuilder() {
                   courseID={selectedCourse.id}
                   revisionID={revision.id}
                   hasPreview={Boolean(revision.preview_asset_version_id)}
+                  previewAssetVersionID={revision.preview_asset_version_id}
+                  previewAssetState={revision.preview_asset_state}
                   locale={locale}
                   onChanged={refreshSelectedCourse}
                 />

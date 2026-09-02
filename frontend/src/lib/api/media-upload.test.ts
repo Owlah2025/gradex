@@ -6,6 +6,7 @@ import {
   beginResourceUpload,
   beginVideoUpload,
   completeAndSelectLessonVideo,
+  completeAndSelectPublicPreview,
   completeUpload,
   describeAssetState,
   isTerminalState,
@@ -541,6 +542,217 @@ test("an authoring command without a CSRF token never reaches the network", asyn
       /CSRF/,
     );
     assert.equal(called, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a preview completion and revision selection use one revision-scoped request", async () => {
+  const originalFetch = globalThis.fetch;
+  let url = "";
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = async (requestURL, init) => {
+    url = String(requestURL);
+    body = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        selected: true,
+        asset_version_id: ASSET_VERSION_ID,
+        state: "VALIDATED",
+        duplicate: false,
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const completion = await completeAndSelectPublicPreview({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "public-preview-completion-1",
+      storageObjectKey: "quarantine/course/preview/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 4096,
+      sha256: "c".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    assert.equal(completion.selected, true);
+    // Selected while still validating: the revision holds the asset long before
+    // FFmpeg finishes, which is the whole point of the combined operation.
+    assert.equal(completion.state, "VALIDATED");
+    assert.equal(
+      url,
+      `/api/v1/courses/${COURSE_ID}/revisions/${REVISION_ID}/public-preview/upload-completions`,
+    );
+    assert.deepEqual(body, {
+      asset_version_id: ASSET_VERSION_ID,
+      provider_event_id: "public-preview-completion-1",
+      storage_object_key: "quarantine/course/preview/source",
+      storage_object_version: "object-v1",
+      content_type: "video/mp4",
+      size_bytes: 4096,
+      sha256_hex: "c".repeat(64),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an uncertain preview completion retry reuses identical idempotency evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    requests.push(String(init?.body));
+    if (requests.length === 1) throw new TypeError("connection closed before response");
+    return new Response(
+      JSON.stringify({
+        asset_version_id: ASSET_VERSION_ID,
+        state: "PROCESSING",
+        duplicate: true,
+        selected: true,
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const completion = await completeAndSelectPublicPreview({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "stable-preview-event-id",
+      storageObjectKey: "quarantine/course/preview/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 4096,
+      sha256: "d".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    // The duplicate completion still carried the selection the first attempt
+    // never reached.
+    assert.equal(completion.duplicate, true);
+    assert.equal(completion.selected, true);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0], requests[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a rejected preview completion is not retried into a second upload", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return new Response(
+      JSON.stringify({
+        type: "about:blank",
+        title: "Not authorized",
+        status: 403,
+        code: "NOT_AUTHORIZED",
+      }),
+      { status: 403, headers: { "content-type": "application/problem+json" } },
+    );
+  };
+  try {
+    await assert.rejects(
+      completeAndSelectPublicPreview({
+        courseID: COURSE_ID,
+        revisionID: REVISION_ID,
+        assetVersionID: ASSET_VERSION_ID,
+        providerEventID: "refused-preview-event-id",
+        storageObjectKey: "quarantine/course/preview/source",
+        storageObjectVersion: "object-v1",
+        contentType: "video/mp4",
+        sizeBytes: 4096,
+        sha256: "e".repeat(64),
+        locale: "en",
+        csrf: "csrf-token",
+      }),
+    );
+    assert.equal(attempts, 1, "a 4xx is a decision, not a hiccup to retry");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a 5xx preview completion is retried once with the same evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    requests.push(String(init?.body));
+    if (requests.length === 1) {
+      return new Response(
+        JSON.stringify({
+          type: "about:blank",
+          title: "Unavailable",
+          status: 503,
+          code: "DEPENDENCY_UNAVAILABLE",
+        }),
+        { status: 503, headers: { "content-type": "application/problem+json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        asset_version_id: ASSET_VERSION_ID,
+        state: "PROCESSING",
+        duplicate: true,
+        selected: true,
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const completion = await completeAndSelectPublicPreview({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "unavailable-preview-event-id",
+      storageObjectKey: "quarantine/course/preview/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 4096,
+      sha256: "f".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    assert.equal(completion.selected, true);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0], requests[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a superseded preview completion reports the winner rather than replacing it", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        asset_version_id: ASSET_VERSION_ID,
+        state: "PROCESSING",
+        duplicate: false,
+        selected: false,
+      }),
+      { status: 200 },
+    );
+  try {
+    const completion = await completeAndSelectPublicPreview({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "late-preview-event-id",
+      storageObjectKey: "quarantine/course/preview/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 4096,
+      sha256: "0".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    assert.equal(completion.selected, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

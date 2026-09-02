@@ -186,6 +186,8 @@ func (f *d5Fixture) seedReadyProtectedLessonFileAsset(t *testing.T, kind LessonF
 
 // seedPreviewAsset creates the distinct, scanner-cleared PREVIEW asset that a
 // revision can expose publicly. It deliberately has no Lesson relation.
+// seedTrustedPreviewAsset below builds the D-096 counterpart, whose provenance
+// is trusted validation plus real processing rather than a malware scan.
 func (f *d5Fixture) seedPreviewAsset(t *testing.T, versionID, revisionID string) {
 	f.seedPreviewAssetFor(t, f.courseID, f.ownerID, versionID, revisionID)
 }
@@ -222,6 +224,75 @@ func (f *d5Fixture) seedPreviewAssetFor(t *testing.T, courseID, ownerID, version
 	}
 	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid`, versionID); err != nil {
 		t.Fatalf("making preview ready: %v", err)
+	}
+}
+
+// seedTrustedPreviewAsset builds a READY MP4 preview whose only safety
+// provenance is D-096 trusted validation, followed by the FFmpeg evidence such
+// a preview owes. No scan attempt exists for it anywhere.
+func (f *d5Fixture) seedTrustedPreviewAsset(t *testing.T, versionID, revisionID string) {
+	t.Helper()
+	assetID := uuid.NewString()
+	key := "quarantine/" + f.courseID + "/" + versionID + "/source"
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_assets (
+			id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility
+		) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')
+	`, assetID, f.ownerID, f.courseID, revisionID); err != nil {
+		t.Fatalf("seeding trusted preview asset: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024, repeat('a', 64))
+	`, versionID, assetID, key); err != nil {
+		t.Fatalf("seeding trusted preview version: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO upload_intents (
+			asset_version_id, expected_object_key, expected_content_type,
+			expected_size_bytes, max_size_bytes, expires_at
+		) VALUES ($1::uuid, $2, 'video/mp4', 1024, 52428800, now() + interval '15 minutes')
+	`, versionID, key); err != nil {
+		t.Fatalf("seeding trusted preview intent: %v", err)
+	}
+	var validationID string
+	if err := f.p.QueryRow(f.ctx, `
+		INSERT INTO validation_attempts (
+			asset_version_id, attempt_number, work_id, storage_object_version, outcome,
+			validator_identity, profile, declared_content_type, verified_size_bytes,
+			max_size_bytes, sha256_hex
+		) VALUES ($1::uuid, 1, $2, 'fixture-v1', 'PASSED', 'gradex-media-exact-version-validator',
+			'D-088-TRUSTED-INSTRUCTOR', 'video/mp4', 1024, 52428800, repeat('a', 64))
+		RETURNING id::text
+	`, versionID, "validation:"+versionID).Scan(&validationID); err != nil {
+		t.Fatalf("seeding trusted preview validation: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		UPDATE media_asset_versions
+		SET state = 'VALIDATED', successful_validation_attempt_id = $1::uuid
+		WHERE id = $2::uuid
+	`, validationID, versionID); err != nil {
+		t.Fatalf("validating the trusted preview: %v", err)
+	}
+	processingID := uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO processing_attempts (
+			id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms
+		) VALUES ($1::uuid, $2::uuid, $3, 'SUCCEEDED', 'preview/hls', 1, 45000)
+	`, processingID, versionID, "process:"+versionID); err != nil {
+		t.Fatalf("seeding trusted preview processing: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("claiming the trusted preview for processing: %v", err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		UPDATE media_asset_versions
+		SET successful_processing_attempt_id = $1::uuid, trusted_duration_ms = 45000, state = 'READY'
+		WHERE id = $2::uuid
+	`, processingID, versionID); err != nil {
+		t.Fatalf("making the trusted preview ready: %v", err)
 	}
 }
 
@@ -1615,4 +1686,40 @@ func TestD5ExactFourRaces(t *testing.T) {
 			t.Fatal("rejected candidate lacks matching rejection outbox event")
 		}
 	})
+}
+
+// D-096. A preview whose provenance is trusted validation plus real processing
+// is as nominable as a scanner-cleared one; the revision-binding and ownership
+// invariants around it are unchanged.
+func TestPublicPreviewDesignationAcceptsTrustedValidationProvenance(t *testing.T) {
+	f := newD5Fixture(t)
+	candidate := f.candidate(t)
+
+	trusted := uuid.NewString()
+	f.seedTrustedPreviewAsset(t, trusted, candidate.ID)
+	selected, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID,
+		PreviewAssetVersionID: trusted, OwnerAccountID: f.ownerID,
+	}, f.ownerID)
+	if err != nil || selected.PreviewAssetVersionID == nil || *selected.PreviewAssetVersionID != trusted {
+		t.Fatalf("trusted preview selection=%+v err=%v", selected, err)
+	}
+
+	// Revision binding still holds: a trusted preview created for another
+	// Course's revision is refused exactly as a scanned one is.
+	foreignCourseID, foreignRevisionID := uuid.NewString(), uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')`, foreignCourseID, f.ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'أجنبي', 'Foreign')`, foreignRevisionID, foreignCourseID); err != nil {
+		t.Fatal(err)
+	}
+	foreign := uuid.NewString()
+	f.seedPreviewAssetFor(t, foreignCourseID, f.ownerID, foreign, foreignRevisionID)
+	if _, err := f.repo.SetPreviewAsset(f.ctx, f.validator, PreviewAssetRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID,
+		PreviewAssetVersionID: foreign, OwnerAccountID: f.ownerID,
+	}, f.ownerID); !errors.Is(err, ErrAssetVersionInvalid) {
+		t.Fatalf("foreign trusted preview error=%v, want %v", err, ErrAssetVersionInvalid)
+	}
 }

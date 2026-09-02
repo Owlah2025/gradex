@@ -50,7 +50,8 @@ const (
 	ReportModerationSchemaVersion       = TransactionalEmailMonitorTerminalSchemaVersion + 1
 	StudentEmailOTPSchemaVersion        = ReportModerationSchemaVersion + 1
 	AuthenticatedPurchaseSchemaVersion  = StudentEmailOTPSchemaVersion + 1
-	MaxSchemaVersion                    = AuthenticatedPurchaseSchemaVersion
+	TrustedPublicPreviewSchemaVersion   = AuthenticatedPurchaseSchemaVersion + 1
+	MaxSchemaVersion                    = TrustedPublicPreviewSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

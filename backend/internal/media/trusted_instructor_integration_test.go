@@ -146,6 +146,67 @@ func (f *trustedInstructorFixture) mustStage(
 	return request
 }
 
+// draftRevision seeds one editable Course revision, which is what a public
+// preview upload must bind to.
+func (f *trustedInstructorFixture) draftRevision(t *testing.T) string {
+	t.Helper()
+	revisionID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+		VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'معاينة', 'Preview')
+	`, revisionID, f.courseID); err != nil {
+		t.Fatalf("seeding a draft Course revision: %v", err)
+	}
+	return revisionID
+}
+
+// stagePreview is stage() for a public preview: Course-level and revision-bound
+// rather than Lesson-bound.
+func (f *trustedInstructorFixture) stagePreview(
+	t *testing.T, service *Service, revisionID, contentType string, body []byte, objectVersion string,
+) (CompleteUploadRequest, error) {
+	t.Helper()
+	ticket, err := service.BeginUpload(f.ctx, UploadRequest{
+		OwnerAccountID: f.instructorID, CourseID: f.courseID, RevisionID: revisionID,
+		Kind: KindPreview, ContentType: contentType, SizeBytes: int64(len(body)),
+	})
+	if err != nil {
+		return CompleteUploadRequest{}, err
+	}
+	key := fmt.Sprintf("quarantine/%s/%s/source", f.courseID, ticket.AssetVersionID)
+	f.store.put(key, objectVersion, body)
+	sum := sha256.Sum256(body)
+	return CompleteUploadRequest{
+		OwnerAccountID: f.instructorID, AssetVersionID: ticket.AssetVersionID,
+		ProviderEventID: "upload-" + ticket.AssetVersionID, StorageObjectKey: key,
+		StorageObjectVersion: objectVersion, ContentType: contentType,
+		SizeBytes: int64(len(body)), SHA256Hex: hex.EncodeToString(sum[:]),
+	}, nil
+}
+
+func (f *trustedInstructorFixture) mustStagePreview(
+	t *testing.T, revisionID, objectVersion string,
+) CompleteUploadRequest {
+	t.Helper()
+	request, err := f.stagePreview(t, f.trusted, revisionID, "video/mp4", trustedMP4(), objectVersion)
+	if err != nil {
+		t.Fatalf("staging a trusted public preview: %v", err)
+	}
+	return request
+}
+
+func previewTranscodeOperation(t *testing.T, f *trustedInstructorFixture, assetVersionID string) string {
+	t.Helper()
+	var operationID string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT safe_payload->>'operation_id' FROM outbox_events
+		WHERE event_type = 'media.transcode_requested' AND aggregate_id = $1::uuid
+	`, assetVersionID).Scan(&operationID); err != nil {
+		t.Fatalf("reading the transcode operation ID: %v", err)
+	}
+	return operationID
+}
+
 func countEvents(t *testing.T, f *trustedInstructorFixture, eventType, assetVersionID string) int {
 	t.Helper()
 	var count int
@@ -306,8 +367,8 @@ func TestD088TrustedModeRefusesEverythingOutsideTheProfile(t *testing.T) {
 		kind        AssetKind
 		contentType string
 	}{
-		"public preview video": {KindPreview, "video/mp4"},
 		"public preview pdf":   {KindPreview, "application/pdf"},
+		"public preview image": {KindPreview, "image/png"},
 		"lab material pdf":     {KindLabMaterial, "application/pdf"},
 		"lab material archive": {KindLabMaterial, "application/zip"},
 		"quicktime video":      {KindVideo, "video/quicktime"},
@@ -760,4 +821,160 @@ func officePackage(t *testing.T, parts map[string]string) []byte {
 		t.Fatalf("closing the package: %v", err)
 	}
 	return buffer.Bytes()
+}
+
+// D-096, end to end. An MP4 public preview from a vetted Instructor is admitted
+// to the trusted profile, validates against the exact stored object version,
+// and then owes exactly what a Lesson video owes: real FFmpeg evidence before
+// READY. Nothing on the path records or implies malware scanning.
+func TestD096TrustedPublicPreviewValidatesThenProcessesToReady(t *testing.T) {
+	f := newTrustedInstructorFixture(t)
+	revisionID := f.draftRevision(t)
+	request := f.mustStagePreview(t, revisionID, "preview-v1")
+
+	completed, err := f.trusted.CompleteUpload(f.ctx, request)
+	if err != nil {
+		t.Fatalf("completing a trusted public-preview upload: %v", err)
+	}
+	if completed.State != StateValidated {
+		t.Fatalf("state after completion = %q, want VALIDATED", completed.State)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateValidated {
+		t.Fatalf("persisted state = %q, want VALIDATED; a preview must never be READY on validation alone", got)
+	}
+	assertNoScanEvidence(t, f, request.AssetVersionID)
+	assertValidationEvidence(t, f, request)
+	if transcodes := countEvents(t, f, "media.transcode_requested", request.AssetVersionID); transcodes != 1 {
+		t.Fatalf("media.transcode_requested events = %d, want exactly 1", transcodes)
+	}
+
+	// The preview stays bound to the revision it was uploaded for, and public
+	// rather than protected.
+	var visibility, originRevision string
+	var lessonID *string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT ma.visibility::text, ma.preview_origin_revision_id::text, ma.lesson_id::text
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE mav.id = $1::uuid
+	`, request.AssetVersionID).Scan(&visibility, &originRevision, &lessonID); err != nil {
+		t.Fatalf("reading the preview binding: %v", err)
+	}
+	if visibility != "PUBLIC_PREVIEW" || originRevision != revisionID || lessonID != nil {
+		t.Fatalf("preview binding visibility=%q origin=%q lesson=%v, want PUBLIC_PREVIEW bound to %s with no Lesson",
+			visibility, originRevision, lessonID, revisionID)
+	}
+
+	operationID := previewTranscodeOperation(t, f, request.AssetVersionID)
+	worker := trustedWorker(t, f, func(_ context.Context, object ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{
+			TrustedDurationMS: 45000,
+			OutputPrefix:      "media/" + object.AssetVersionID + "/hls",
+			Renditions: []Rendition{{
+				Name: "720p", StorageObjectKey: "media/" + object.AssetVersionID + "/hls/720p/playlist.m3u8",
+				Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 45000,
+			}},
+		}, nil
+	})
+	if err := worker.Transcode(f.ctx, request.AssetVersionID, operationID); err != nil {
+		t.Fatalf("transcoding a validated public preview: %v", err)
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateReady {
+		t.Fatalf("state after processing = %q, want READY", got)
+	}
+	assertNoScanEvidence(t, f, request.AssetVersionID)
+
+	var processingAttempt *string
+	var duration *int64
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT successful_processing_attempt_id::text, trusted_duration_ms
+		FROM media_asset_versions WHERE id = $1::uuid
+	`, request.AssetVersionID).Scan(&processingAttempt, &duration); err != nil {
+		t.Fatalf("reading preview processing provenance: %v", err)
+	}
+	if processingAttempt == nil || duration == nil || *duration != 45000 {
+		t.Fatal("a READY trusted preview lacks successful processing evidence")
+	}
+}
+
+// The readiness gate, proved by failure rather than by inspection: a preview
+// whose processing fails must never become deliverable.
+func TestD096TrustedPublicPreviewCannotBecomeReadyWithoutProcessing(t *testing.T) {
+	f := newTrustedInstructorFixture(t)
+	revisionID := f.draftRevision(t)
+	request := f.mustStagePreview(t, revisionID, "preview-failed-v1")
+	if _, err := f.trusted.CompleteUpload(f.ctx, request); err != nil {
+		t.Fatalf("completing a trusted public-preview upload: %v", err)
+	}
+	operationID := previewTranscodeOperation(t, f, request.AssetVersionID)
+
+	worker := trustedWorker(t, f, func(_ context.Context, _ ObjectVersion) (TranscodeResult, error) {
+		return TranscodeResult{}, errors.New("ffmpeg refused the source")
+	})
+	// The worker surfaces the processor's own failure after recording it.
+	if err := worker.Transcode(f.ctx, request.AssetVersionID, operationID); err == nil {
+		t.Fatal("a failed preview transcode reported success")
+	}
+	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateProcessFailed {
+		t.Fatalf("state after failed processing = %q, want PROCESS_FAILED", got)
+	}
+
+	// The database refuses the shortcut as well, so a direct write cannot make
+	// an unprocessed preview deliverable.
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid
+	`, request.AssetVersionID); err == nil {
+		t.Fatal("an unprocessed public preview was forced to READY")
+	}
+}
+
+// The profile stays narrow. A non-MP4 preview is refused at the boundary, and
+// the database refuses to attach validation provenance to one even if the
+// service were bypassed.
+func TestD096TrustedProfileAdmitsOnlyMP4PublicPreviews(t *testing.T) {
+	f := newTrustedInstructorFixture(t)
+	revisionID := f.draftRevision(t)
+	for name, contentType := range map[string]string{
+		"pdf":       "application/pdf",
+		"quicktime": "video/quicktime",
+		"png":       "image/png",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := f.stagePreview(t, f.trusted, revisionID, contentType, trustedPDF(), "preview-"+name)
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("BeginUpload(PREVIEW, %s) = %v, want a validation refusal", contentType, err)
+			}
+		})
+	}
+}
+
+// Scanner mode is untouched by D-096: the same preview upload still enters
+// quarantine behind a scan-work intent, records no validation evidence, and
+// reaches READY through the scanner path with no FFmpeg requirement.
+func TestD096ScannerModePublicPreviewIsUnchanged(t *testing.T) {
+	f := newTrustedInstructorFixture(t)
+	revisionID := f.draftRevision(t)
+	request, err := f.stagePreview(t, f.service, revisionID, "video/mp4", trustedMP4(), "scanner-preview-v1")
+	if err != nil {
+		t.Fatalf("staging a scanner-mode public preview: %v", err)
+	}
+	completed, err := f.service.CompleteUpload(f.ctx, request)
+	if err != nil {
+		t.Fatalf("completing a scanner-mode public-preview upload: %v", err)
+	}
+	if completed.State != StateQuarantined {
+		t.Fatalf("scanner-mode state after completion = %q, want QUARANTINED", completed.State)
+	}
+	if scans := countEvents(t, f, "media.scan_requested", request.AssetVersionID); scans != 1 {
+		t.Fatalf("media.scan_requested events = %d, want exactly 1", scans)
+	}
+	var validationAttempts int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT count(*) FROM validation_attempts WHERE asset_version_id = $1::uuid
+	`, request.AssetVersionID).Scan(&validationAttempts); err != nil {
+		t.Fatalf("counting validation attempts: %v", err)
+	}
+	if validationAttempts != 0 {
+		t.Fatalf("validation attempts = %d, want 0 in scanner mode", validationAttempts)
+	}
 }

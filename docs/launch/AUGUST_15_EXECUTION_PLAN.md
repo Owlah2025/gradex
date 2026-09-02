@@ -198,7 +198,8 @@ Each is authorised, auditable, documented, and safe:
    Admin issues them directly through an audited operation.
 8. **Lesson-media upload** — under D-088, an ACTIVE vetted Instructor may upload only approved MP4
    Lesson video and PDF/DOCX Lesson Resources through the exact-version trusted-validation path.
-   Public previews and uploads outside that bounded profile remain scanner-gated; when such content
+   Uploads outside that bounded profile remain scanner-gated, as does every non-MP4 public preview
+   (D-096 admits the MP4 preview under the video-processing requirement); when such content
    is required before an integrated scanner is available, the Admin catalogue/out-of-band scanning
    procedure remains the fail-closed fallback.
 

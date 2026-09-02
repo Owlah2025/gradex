@@ -70,6 +70,11 @@ type lessonVideoUploadCompletionBody struct {
 	AssetVersionID string `json:"asset_version_id" binding:"required"`
 }
 
+type publicPreviewUploadCompletionBody struct {
+	mediaCompletionBody
+	AssetVersionID string `json:"asset_version_id" binding:"required"`
+}
+
 type lessonFileBody struct {
 	FileID         string                 `json:"file_id"`
 	Kind           catalog.LessonFileKind `json:"kind"`
@@ -571,6 +576,55 @@ func (h *authoringHandlers) completeLessonVideoUpload(c *gin.Context) {
 		"state":            result.state,
 		"duplicate":        result.duplicate,
 		"selected":         result.selected,
+	})
+}
+
+// completePublicPreviewUpload completes the exact public-preview upload and
+// durably selects it for this editable revision in one request.
+//
+// D-096 put a trusted preview on the FFmpeg path, so the browser can no longer
+// be the thing that remembers to select the asset once processing finishes. It
+// selects now, while the asset is still VALIDATED or PROCESSING; the READY-only
+// submission, approval, and public-delivery gates are untouched.
+func (h *authoringHandlers) completePublicPreviewUpload(c *gin.Context) {
+	if h.mediaService == nil {
+		writeProblem(c, problem.DependencyUnavailable())
+		return
+	}
+	accountID := c.GetString(ctxUserIDKey)
+	body := c.MustGet(strictJSONBodyContextKey).(*publicPreviewUploadCompletionBody)
+	result, err := runPublicPreviewUploadCompletion(
+		c.Request.Context(), h.mediaService, h.repo,
+		publicPreviewUploadCompletionRequest{
+			completion: media.CompleteUploadRequest{
+				OwnerAccountID: accountID, AssetVersionID: body.AssetVersionID,
+				ProviderEventID: body.ProviderEventID, StorageObjectKey: body.StorageObjectKey,
+				StorageObjectVersion: body.StorageObjectVersion, ContentType: body.ContentType,
+				SizeBytes: body.SizeBytes, SHA256Hex: body.SHA256Hex,
+			},
+			selection: catalog.ClaimPublicPreviewUploadRequest{
+				CourseID: c.Param("id"), RevisionID: c.Param("revisionId"),
+				PreviewAssetVersionID: body.AssetVersionID, OwnerAccountID: accountID,
+			},
+			actorDescriptor: accountID,
+		},
+	)
+	if err != nil {
+		var completionError *publicPreviewUploadCompletionError
+		if errors.As(err, &completionError) && completionError.stage == publicPreviewMediaCompletionStage {
+			writeMediaProblem(c, err)
+		} else {
+			h.handleCatalogError(c, err)
+		}
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"asset_version_id": result.assetVersionID,
+		"state":            result.state,
+		"duplicate":        result.duplicate,
+		"selected":         result.selected,
+		"revision":         result.revision,
 	})
 }
 

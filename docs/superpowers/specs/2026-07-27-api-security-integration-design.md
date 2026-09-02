@@ -563,7 +563,7 @@ required exact-version validation and remains available only through the existin
 Entitlement-checked protected-download boundary. Validation failure leaves the Asset Version
 non-deliverable.
 
-Public previews and every upload outside the D-088 trusted-Instructor profile remain scanner-gated.
+Every upload outside the D-088 trusted-Instructor profile remains scanner-gated. D-096 admits the MP4 public preview to that profile, where it must additionally complete trusted video processing before it is deliverable; every non-MP4 preview stays scanner-gated.
 For those assets, quarantine atomically appends one stable scanning operation to the transactional
 outbox, and no public preview, protected delivery, Course approval dependent on that asset, or
 `READY` transition is possible until the exact quarantined object has verified clean scan evidence.

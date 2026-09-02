@@ -147,7 +147,7 @@ func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (Uploa
 	}
 	if s.operatingMode == OperatingModeTrustedInstructor && !TrustedProfileAdmits(request.Kind, request.ContentType) {
 		return UploadTicket{}, fmt.Errorf(
-			"%w: this deployment accepts only MP4 Lesson video and PDF or DOCX Lesson Resources",
+			"%w: this deployment accepts only MP4 Lesson video, PDF or DOCX Lesson Resources, and an MP4 public Course preview",
 			ErrValidation)
 	}
 	return s.beginUploadForOwner(ctx, request)
@@ -510,7 +510,7 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	`, record.assetVersionID, logicalAssetID, request.Kind, record.objectKey, record.objectVersion, request.ContentType, request.SizeBytes); err != nil {
 		return fmt.Errorf("creating media asset version: %w", err)
 	}
-	intentCreatedAt, err := reserveLessonVideoIntentOrder(ctx, tx, request)
+	intentCreatedAt, err := reserveUploadIntentOrder(ctx, tx, request)
 	if err != nil {
 		return err
 	}
@@ -531,13 +531,31 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	return nil
 }
 
-func reserveLessonVideoIntentOrder(ctx context.Context, tx pgx.Tx, request UploadRequest) (*time.Time, error) {
-	if request.Kind != KindVideo || request.LessonID == "" {
+// reserveUploadIntentOrder gives the replaceable media buckets a strictly
+// increasing intent order.
+//
+// Selection asks "is a newer completed upload already chosen?", so the answer
+// has to come from something durable and monotonic rather than from whichever
+// completion callback happened to arrive first. Two intents created in the same
+// clock tick would otherwise tie, and the tiebreaker — a random UUID — is not
+// chronological, so a stale upload could win.
+//
+// Two buckets need it: Lesson video, which is one asset per Lesson, and the
+// public preview, which is one asset per Course revision. Everything else is
+// additive and has no selection to lose.
+func reserveUploadIntentOrder(ctx context.Context, tx pgx.Tx, request UploadRequest) (*time.Time, error) {
+	var scopeID string
+	switch {
+	case request.Kind == KindVideo && request.LessonID != "":
+		scopeID = request.LessonID
+	case request.Kind == KindPreview && request.RevisionID != "":
+		scopeID = request.RevisionID
+	default:
 		return nil, nil
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`,
-		lessonVideoIntentLockClass, lessonAggregateLockKey(request.LessonID, request.Kind)); err != nil {
-		return nil, fmt.Errorf("locking Lesson video intent order: %w", err)
+		replaceableIntentLockClass, lessonAggregateLockKey(scopeID, request.Kind)); err != nil {
+		return nil, fmt.Errorf("locking %s intent order: %w", request.Kind, err)
 	}
 	var createdAt time.Time
 	if err := tx.QueryRow(ctx, `
@@ -548,14 +566,21 @@ func reserveLessonVideoIntentOrder(ctx context.Context, tx pgx.Tx, request Uploa
 		FROM upload_intents ui
 		JOIN media_asset_versions mav ON mav.id = ui.asset_version_id
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
-		WHERE ma.course_id = $1::uuid AND ma.lesson_id = $2::uuid AND ma.kind = 'VIDEO'
-	`, request.CourseID, request.LessonID).Scan(&createdAt); err != nil {
-		return nil, fmt.Errorf("reserving Lesson video intent order: %w", err)
+		WHERE ma.course_id = $1::uuid
+		  AND ma.kind = $2::media_asset_kind
+		  AND (
+			($2 = 'VIDEO' AND ma.lesson_id = $3::uuid)
+			OR ($2 = 'PREVIEW' AND ma.preview_origin_revision_id = $3::uuid)
+		  )
+	`, request.CourseID, request.Kind, scopeID).Scan(&createdAt); err != nil {
+		return nil, fmt.Errorf("reserving %s intent order: %w", request.Kind, err)
 	}
 	return &createdAt, nil
 }
 
-const lessonVideoIntentLockClass int32 = 0x766964 // "vid"
+// One advisory namespace for both replaceable buckets. The key already mixes
+// the kind in, so a Lesson video and a public preview cannot collide.
+const replaceableIntentLockClass int32 = 0x766964 // "vid"
 
 func (s *Service) ensureLogicalAsset(ctx context.Context, tx pgx.Tx, request UploadRequest) (string, error) {
 	if request.LogicalAssetID == "" {

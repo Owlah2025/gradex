@@ -14,6 +14,9 @@ func TestTrustedProfileAdmitsOnlyTheApprovedLessonMediaTypes(t *testing.T) {
 		{KindVideo, "VIDEO/MP4"},
 		{KindResource, "application/pdf"},
 		{KindResource, ContentTypeDOCX},
+		// D-096. The public preview joins the profile for MP4 only.
+		{KindPreview, "video/mp4"},
+		{KindPreview, "Video/MP4"},
 	}
 	for _, tc := range admitted {
 		if !TrustedProfileAdmits(tc.kind, tc.contentType) {
@@ -26,8 +29,9 @@ func TestTrustedProfileAdmitsOnlyTheApprovedLessonMediaTypes(t *testing.T) {
 		kind        AssetKind
 		contentType string
 	}{
-		{"public preview video", KindPreview, "video/mp4"},
 		{"public preview pdf", KindPreview, "application/pdf"},
+		{"public preview quicktime", KindPreview, "video/quicktime"},
+		{"public preview image", KindPreview, "image/png"},
 		{"lab material archive", KindLabMaterial, "application/zip"},
 		{"lab material pdf", KindLabMaterial, "application/pdf"},
 		{"quicktime video", KindVideo, "video/quicktime"},
@@ -48,11 +52,14 @@ func TestTrustedProfileAdmitsOnlyTheApprovedLessonMediaTypes(t *testing.T) {
 	}
 }
 
-// A trusted Lesson Resource becomes READY straight from VALIDATED; a trusted
-// Lesson video still owes the FFmpeg evidence and must go through PROCESSING.
-func TestTrustedValidationRequiresProcessingOnlyForVideo(t *testing.T) {
-	if !trustedRequiresProcessing(KindVideo) {
-		t.Fatal("a trusted video skipped processing")
+// A trusted Lesson Resource becomes READY straight from VALIDATED. A trusted
+// Lesson video and, under D-096, a trusted public preview both still owe the
+// FFmpeg evidence and must go through PROCESSING.
+func TestTrustedValidationRequiresProcessingForEveryVideoKind(t *testing.T) {
+	for _, kind := range []AssetKind{KindVideo, KindPreview} {
+		if !trustedRequiresProcessing(kind) {
+			t.Fatalf("a trusted %s skipped processing", kind)
+		}
 	}
 	if trustedRequiresProcessing(KindResource) {
 		t.Fatal("a trusted Lesson Resource was sent to processing")

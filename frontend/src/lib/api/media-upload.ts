@@ -240,7 +240,13 @@ export async function beginResourceUpload(
   return beginUpload({ ...input, kind: "RESOURCE" });
 }
 
-/** Begins a separate scanner-gated public-preview upload for one editable revision. */
+/**
+ * Begins a separate public-preview upload for one editable revision. The
+ * preview travels its own storage and authorization path, away from protected
+ * Lesson media. Whether the bytes are cleared by a malware scan or by D-096
+ * trusted validation is a deployment decision the server makes; either way the
+ * preview only becomes deliverable after successful video processing.
+ */
 export async function beginPublicPreviewUpload(
   input: LocalisedInput & {
     courseID: string;
@@ -447,6 +453,71 @@ export async function completeAndSelectLessonVideo(
   try {
     return await send();
   } catch (error) {
+    if (error instanceof ProblemError && error.problem.status < 500) throw error;
+  }
+  return send();
+}
+
+export type PublicPreviewCompletionResult = CompletionResult & {
+  selected: boolean;
+  revision?: unknown;
+};
+
+/**
+ * Completes an exact public-preview upload and durably selects it for the
+ * revision in one idempotent browser operation — the same contract Lesson
+ * video uses, for the same reason.
+ *
+ * D-096 sends a trusted preview through FFmpeg, which can outlast the tab. The
+ * server therefore selects the preview as soon as the upload is complete,
+ * rather than waiting for the browser to come back after processing. Retrying
+ * transport or 5xx failures reuses identical evidence, including the provider
+ * event identifier, so a retry converges instead of creating a second upload.
+ */
+export async function completeAndSelectPublicPreview(
+  input: LocalisedInput & {
+    courseID: string;
+    revisionID: string;
+    assetVersionID: string;
+    providerEventID: string;
+    storageObjectKey: string;
+    storageObjectVersion: string;
+    contentType: string;
+    sizeBytes: number;
+    sha256: string;
+  },
+): Promise<PublicPreviewCompletionResult> {
+  const route = `/courses/${encodeURIComponent(input.courseID)}/revisions/${encodeURIComponent(input.revisionID)}/public-preview/upload-completions`;
+  const body = {
+    asset_version_id: input.assetVersionID,
+    provider_event_id: input.providerEventID,
+    storage_object_key: input.storageObjectKey,
+    storage_object_version: input.storageObjectVersion,
+    content_type: input.contentType,
+    size_bytes: input.sizeBytes,
+    sha256_hex: input.sha256,
+  };
+  const send = async () => {
+    const result = await authenticatedRequest<PublicPreviewCompletionResult>(
+      route,
+      "POST",
+      input.locale,
+      input.csrf,
+      body,
+    );
+    if (result === null) {
+      throw new Error(
+        input.locale === "ar"
+          ? "لم يؤكد الخادم اكتمال رفع المعاينة واختيارها"
+          : "The server did not confirm the public preview upload and selection",
+      );
+    }
+    return result;
+  };
+  try {
+    return await send();
+  } catch (error) {
+    // A 4xx is a decision, not a hiccup. Retrying it would only repeat it.
     if (error instanceof ProblemError && error.problem.status < 500) throw error;
   }
   return send();

@@ -199,16 +199,20 @@ func (r *Repository) GetCourseRevisionGraph(ctx context.Context, courseID string
 
 func (r *Repository) loadRevisionGraphByID(ctx context.Context, revID string) (*CourseRevision, error) {
 	query := `
-		SELECT id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en, description_ar, description_en,
-		       major_term_id, subject_term_id, study_year, preview_asset_version_id,
-		       submitted_at, reviewed_at, reviewed_by_account_id, review_reason, created_at, updated_at
-		FROM course_revisions
-		WHERE id = $1::uuid
+		SELECT cr.id, cr.course_id, cr.based_on_revision_id, cr.state, cr.revision_number,
+		       cr.title_ar, cr.title_en, cr.description_ar, cr.description_en,
+		       cr.major_term_id, cr.subject_term_id, cr.study_year, cr.preview_asset_version_id,
+		       preview.state::text,
+		       cr.submitted_at, cr.reviewed_at, cr.reviewed_by_account_id, cr.review_reason,
+		       cr.created_at, cr.updated_at
+		FROM course_revisions cr
+		LEFT JOIN media_asset_versions preview ON preview.id = cr.preview_asset_version_id
+		WHERE cr.id = $1::uuid
 	`
 	var rev CourseRevision
 	err := r.pool.QueryRow(ctx, query, revID).Scan(
 		&rev.ID, &rev.CourseID, &rev.BasedOnRevisionID, &rev.State, &rev.RevisionNumber, &rev.TitleAr, &rev.TitleEn, &rev.DescriptionAr, &rev.DescriptionEn,
-		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID,
+		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID, &rev.PreviewAssetState,
 		&rev.SubmittedAt, &rev.ReviewedAt, &rev.ReviewedByAccountID, &rev.ReviewReason, &rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -838,16 +842,20 @@ func (r *Repository) PreviewAdminLesson(
 
 func (r *Repository) loadRevisionGraphByIDTx(ctx context.Context, tx pgx.Tx, revID string) (*CourseRevision, error) {
 	query := `
-		SELECT id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en, description_ar, description_en,
-		       major_term_id, subject_term_id, study_year, preview_asset_version_id,
-		       submitted_at, reviewed_at, reviewed_by_account_id, review_reason, created_at, updated_at
-		FROM course_revisions
-		WHERE id = $1::uuid
+		SELECT cr.id, cr.course_id, cr.based_on_revision_id, cr.state, cr.revision_number,
+		       cr.title_ar, cr.title_en, cr.description_ar, cr.description_en,
+		       cr.major_term_id, cr.subject_term_id, cr.study_year, cr.preview_asset_version_id,
+		       preview.state::text,
+		       cr.submitted_at, cr.reviewed_at, cr.reviewed_by_account_id, cr.review_reason,
+		       cr.created_at, cr.updated_at
+		FROM course_revisions cr
+		LEFT JOIN media_asset_versions preview ON preview.id = cr.preview_asset_version_id
+		WHERE cr.id = $1::uuid
 	`
 	var rev CourseRevision
 	err := tx.QueryRow(ctx, query, revID).Scan(
 		&rev.ID, &rev.CourseID, &rev.BasedOnRevisionID, &rev.State, &rev.RevisionNumber, &rev.TitleAr, &rev.TitleEn, &rev.DescriptionAr, &rev.DescriptionEn,
-		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID,
+		&rev.MajorTermID, &rev.SubjectTermID, &rev.StudyYear, &rev.PreviewAssetVersionID, &rev.PreviewAssetState,
 		&rev.SubmittedAt, &rev.ReviewedAt, &rev.ReviewedByAccountID, &rev.ReviewReason, &rev.CreatedAt, &rev.UpdatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

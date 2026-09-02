@@ -84,6 +84,9 @@ export type CourseRevisionWire = {
 	study_year?: string;
 	/** Separate public-preview Asset Version; never a Lesson asset. */
 	preview_asset_version_id?: string;
+	/** Current media state of the selected preview, so a reload can tell
+	 *  processing from ready without holding a poll open. */
+	preview_asset_state?: string;
 	/**
 	 * The Admin's change-request/rejection reason for this revision.
 	 *

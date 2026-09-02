@@ -33,11 +33,12 @@ func (k AssetKind) Valid() bool {
 // Scanner mode keeps normal Instructor upload available but fail-closed behind
 // malware scanning. Admin catalogue mode disables Instructor upload and accepts
 // only an audited Admin procedure with exact out-of-band scan evidence.
-// Trusted-Instructor mode is the bounded D-088 launch profile: an ACTIVE vetted
-// Instructor may upload only the approved MP4 Lesson video and PDF/DOCX Lesson
-// Resource types, which progress on exact-version validation evidence instead
-// of malware scanning. Everything outside that profile stays scanner-gated in
-// every mode.
+// Trusted-Instructor mode is the bounded D-088 launch profile as amended by
+// D-096: an ACTIVE vetted Instructor may upload only the approved MP4 Lesson
+// video, PDF/DOCX Lesson Resource, and MP4 public Course preview types, which
+// progress on exact-version validation evidence instead of malware scanning. A
+// trusted preview still owes successful FFmpeg processing before READY.
+// Everything outside that profile stays scanner-gated in every mode.
 type OperatingMode string
 
 const (

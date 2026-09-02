@@ -651,9 +651,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("authenticated purchase schema = %d, want one past student email OTP %d",
 			AuthenticatedPurchaseSchemaVersion, StudentEmailOTPSchemaVersion)
 	}
-	if MaxSchemaVersion != AuthenticatedPurchaseSchemaVersion {
+	if TrustedPublicPreviewSchemaVersion != AuthenticatedPurchaseSchemaVersion+1 {
+		t.Fatalf("trusted public preview schema = %d, want one past authenticated purchase %d",
+			TrustedPublicPreviewSchemaVersion, AuthenticatedPurchaseSchemaVersion)
+	}
+	if MaxSchemaVersion != TrustedPublicPreviewSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, AuthenticatedPurchaseSchemaVersion)
+			MaxSchemaVersion, TrustedPublicPreviewSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

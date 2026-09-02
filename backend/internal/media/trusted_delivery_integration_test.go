@@ -125,33 +125,242 @@ func TestD088ValidatedResourceIsDeliverableButStillEntitlementChecked(t *testing
 	})
 }
 
-// D-088 §7 and the amended BR-104 keep every public preview scanner-gated. A
-// preview cannot even hold validation provenance, so this asserts the outcome
-// end to end: a preview that only ever passed validation is never public.
-func TestD088PublicPreviewStaysScannerGated(t *testing.T) {
-	f := newDeliveryFixture(t)
+// D-096 admits the MP4 public preview to the trusted profile. What replaced the
+// old scanner gate is a processing gate: a preview reaches the public only
+// after real FFmpeg evidence over the exact stored object version, so these
+// tests assert both halves — the trusted preview is deliverable, and the
+// unprocessed one is not.
+
+// validatedPreview seeds a PREVIEW Asset Version whose only provenance is D-096
+// trusted validation. It stops at VALIDATED; the caller decides whether real
+// processing evidence follows.
+func (f *deliveryFixture) validatedPreview(t *testing.T, contentType string) string {
+	t.Helper()
+	assetID, versionID := uuid.NewString(), uuid.NewString()
+	key := "quarantine/" + f.courseID + "/" + versionID + "/source"
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_assets (
+			id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility
+		) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')
+	`, assetID, f.instructorID, f.courseID, f.revision); err != nil {
+		t.Fatalf("seeding a validated preview asset: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'v1', $4, 12, repeat('a', 64))
+	`, versionID, assetID, key, contentType); err != nil {
+		t.Fatalf("seeding a validated preview version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO upload_intents (
+			asset_version_id, expected_object_key, expected_content_type,
+			expected_size_bytes, max_size_bytes, expires_at
+		) VALUES ($1::uuid, $2, $3, 12, 52428800, now() + interval '15 minutes')
+	`, versionID, key, contentType); err != nil {
+		t.Fatalf("seeding the preview upload intent: %v", err)
+	}
 	var attemptID string
-	err := f.pool.QueryRow(f.ctx, `
+	if err := f.pool.QueryRow(f.ctx, `
 		INSERT INTO validation_attempts (
 			asset_version_id, attempt_number, work_id, storage_object_version, outcome,
 			validator_identity, profile, declared_content_type, verified_size_bytes,
 			max_size_bytes, sha256_hex
 		) VALUES ($1::uuid, 1, $2, 'v1', 'PASSED', 'gradex-media-exact-version-validator',
-			$3, 'video/mp4', 12, 52428800, repeat('a', 64))
+			$3, $4, 12, 52428800, repeat('a', 64))
 		RETURNING id::text
-	`, f.preview, "validation-preview:"+f.preview, TrustedValidationProfile).Scan(&attemptID)
-	if err != nil {
+	`, versionID, "validation-preview:"+versionID, TrustedValidationProfile, contentType).Scan(&attemptID); err != nil {
 		t.Fatalf("seeding preview validation evidence: %v", err)
 	}
-	// The database refuses to attach it: a PREVIEW is outside the D-088 profile.
 	if _, err := f.pool.Exec(f.ctx, `
-		UPDATE media_asset_versions SET successful_validation_attempt_id = $1::uuid WHERE id = $2::uuid
-	`, attemptID, f.preview); err == nil {
-		t.Fatal("a public preview accepted trusted-validation provenance")
+		UPDATE media_asset_versions
+		SET state = 'VALIDATED', successful_validation_attempt_id = $1::uuid
+		WHERE id = $2::uuid
+	`, attemptID, versionID); err != nil {
+		t.Fatalf("validating the preview version: %v", err)
+	}
+	return versionID
+}
+
+// processPreview records the FFmpeg evidence a trusted preview owes and takes
+// it to READY, the same shape the worker writes.
+func (f *deliveryFixture) processPreview(t *testing.T, versionID string) {
+	t.Helper()
+	processingID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO processing_attempts (
+			id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms
+		) VALUES ($1::uuid, $2::uuid, $3, 'SUCCEEDED', 'preview/hls', 1, 45000)
+	`, processingID, versionID, "process-preview:"+versionID); err != nil {
+		t.Fatalf("seeding preview processing evidence: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatalf("claiming the preview for processing: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions
+		SET successful_processing_attempt_id = $1::uuid, trusted_duration_ms = 45000, state = 'READY'
+		WHERE id = $2::uuid
+	`, processingID, versionID); err != nil {
+		t.Fatalf("making the trusted preview READY: %v", err)
+	}
+}
+
+func (f *deliveryFixture) publishPreview(t *testing.T, versionID string) {
+	t.Helper()
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid
+	`, versionID, f.revision); err != nil {
+		t.Fatalf("publishing the preview: %v", err)
+	}
+}
+
+func TestD096ProcessedTrustedPreviewIsPubliclyDeliverable(t *testing.T) {
+	f := newDeliveryFixture(t)
+	preview := f.validatedPreview(t, "video/mp4")
+	f.processPreview(t, preview)
+	f.publishPreview(t, preview)
+
+	issued, err := f.delivery.IssuePreview(f.ctx, preview)
+	if err != nil {
+		t.Fatalf("issuing a processed trusted preview: %v", err)
+	}
+	if issued.URL == "" {
+		t.Fatal("a processed trusted preview produced no signed URL")
+	}
+	byCourse, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID)
+	if err != nil || byCourse.URL == "" {
+		t.Fatalf("IssueCoursePreview = %+v, %v; want the live trusted preview", byCourse, err)
 	}
 
-	// The fixture preview reached READY through a real scan, so it stays public.
-	// Removing that scan provenance must remove the preview from public reach.
+	// Trusted validation is not scan evidence and must never be recorded as it.
+	var scanProvenance *string
+	var scanAttempts int
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT successful_scan_attempt_id::text FROM media_asset_versions WHERE id = $1::uuid
+	`, preview).Scan(&scanProvenance); err != nil {
+		t.Fatalf("reading preview scan provenance: %v", err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM scan_attempts WHERE asset_version_id = $1::uuid`, preview).Scan(&scanAttempts); err != nil {
+		t.Fatalf("counting preview scan attempts: %v", err)
+	}
+	if scanProvenance != nil || scanAttempts != 0 {
+		t.Fatal("the trusted preview path fabricated scan evidence")
+	}
+}
+
+// The gate that replaced the scanner gate. A preview the Instructor's revision
+// already selected — which now happens as soon as the upload completes — is not
+// public until processing has actually succeeded.
+func TestD096UnprocessedTrustedPreviewIsNotPublic(t *testing.T) {
+	f := newDeliveryFixture(t)
+	preview := f.validatedPreview(t, "video/mp4")
+	f.publishPreview(t, preview)
+
+	assertPreviewNotPublic := func(t *testing.T, stage string) {
+		t.Helper()
+		if _, err := f.delivery.IssuePreview(f.ctx, preview); !errors.Is(err, ErrProtectedUnavailable) {
+			t.Fatalf("IssuePreview on a %s preview = %v, want ErrProtectedUnavailable", stage, err)
+		}
+		if _, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); !errors.Is(err, ErrProtectedUnavailable) {
+			t.Fatalf("a %s preview was reachable through the public Course", stage)
+		}
+	}
+
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions SET state = 'READY' WHERE id = $1::uuid
+	`, preview); err == nil {
+		t.Fatal("a validated preview reached READY with no processing evidence")
+	}
+	assertPreviewNotPublic(t, "VALIDATED")
+
+	// Mid-processing: selected on the revision, still not public.
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid
+	`, preview); err != nil {
+		t.Fatalf("claiming the preview for processing: %v", err)
+	}
+	assertPreviewNotPublic(t, "PROCESSING")
+
+	// Terminal failure: still selected on the draft, permanently not public.
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions SET state = 'PROCESS_FAILED' WHERE id = $1::uuid
+	`, preview); err != nil {
+		t.Fatalf("failing the preview processing: %v", err)
+	}
+	assertPreviewNotPublic(t, "PROCESS_FAILED")
+
+	var stillSelected string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT preview_asset_version_id::text FROM course_revisions WHERE id = $1::uuid
+	`, f.revision).Scan(&stillSelected); err != nil {
+		t.Fatalf("reading the selected preview: %v", err)
+	}
+	if stillSelected != preview {
+		t.Fatalf("selected preview = %s, want the failed %s to stay visible to its author", stillSelected, preview)
+	}
+}
+
+// The profile stays narrow at the database boundary: a non-MP4 preview cannot
+// hold validation provenance at all, so it remains scanner-gated.
+func TestD096NonMP4PreviewCannotHoldValidationProvenance(t *testing.T) {
+	f := newDeliveryFixture(t)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("unexpected panic: %v", recovered)
+		}
+	}()
+	assetID, versionID := uuid.NewString(), uuid.NewString()
+	key := "quarantine/" + f.courseID + "/" + versionID + "/source"
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_assets (
+			id, kind, owner_account_id, course_id, preview_origin_revision_id, visibility
+		) VALUES ($1::uuid, 'PREVIEW', $2::uuid, $3::uuid, $4::uuid, 'PUBLIC_PREVIEW')
+	`, assetID, f.instructorID, f.courseID, f.revision); err != nil {
+		t.Fatalf("seeding a non-MP4 preview asset: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'QUARANTINED', $3, 'v1', 'application/pdf', 12, repeat('a', 64))
+	`, versionID, assetID, key); err != nil {
+		t.Fatalf("seeding a non-MP4 preview version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO upload_intents (
+			asset_version_id, expected_object_key, expected_content_type,
+			expected_size_bytes, max_size_bytes, expires_at
+		) VALUES ($1::uuid, $2, 'application/pdf', 12, 52428800, now() + interval '15 minutes')
+	`, versionID, key); err != nil {
+		t.Fatalf("seeding the non-MP4 preview intent: %v", err)
+	}
+	var attemptID string
+	if err := f.pool.QueryRow(f.ctx, `
+		INSERT INTO validation_attempts (
+			asset_version_id, attempt_number, work_id, storage_object_version, outcome,
+			validator_identity, profile, declared_content_type, verified_size_bytes,
+			max_size_bytes, sha256_hex
+		) VALUES ($1::uuid, 1, $2, 'v1', 'PASSED', 'gradex-media-exact-version-validator',
+			$3, 'application/pdf', 12, 52428800, repeat('a', 64))
+		RETURNING id::text
+	`, versionID, "validation-preview:"+versionID, TrustedValidationProfile).Scan(&attemptID); err != nil {
+		t.Fatalf("seeding non-MP4 preview validation evidence: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions
+		SET state = 'VALIDATED', successful_validation_attempt_id = $1::uuid
+		WHERE id = $2::uuid
+	`, attemptID, versionID); err == nil {
+		t.Fatal("a non-MP4 public preview accepted trusted-validation provenance")
+	}
+}
+
+// The scanner path is unchanged: the fixture preview reached READY through a
+// real scan with no processing evidence, and it stays public and immutable.
+func TestD096ScannerPreviewDeliveryIsUnchanged(t *testing.T) {
+	f := newDeliveryFixture(t)
 	if _, err := f.delivery.IssuePreview(f.ctx, f.preview); err != nil {
 		t.Fatalf("a scanned preview was unavailable: %v", err)
 	}

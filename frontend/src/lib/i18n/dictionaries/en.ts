@@ -1735,6 +1735,10 @@ export const en = {
         replace: "Replace public preview",
         remove: "Remove public preview",
         processing: "Preparing your public preview…",
+        processingBackground:
+          "Public preview uploaded successfully. Processing continues in the background. You can leave this page.",
+        uploadInterrupted: "The public preview upload did not finish. Choose the file again.",
+        superseded: "A newer completed public preview upload is selected for this revision.",
         upload: "Uploading public preview",
         ready: "Public preview is ready for review.",
         removed: "The public preview was removed from this revision.",
