@@ -8,6 +8,7 @@ FROM node:22.22.3-alpine3.22 AS build
 
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_OPTIONS=--no-network-family-autoselection
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
