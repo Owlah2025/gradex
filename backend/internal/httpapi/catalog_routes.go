@@ -35,6 +35,9 @@ func mountCatalogRoutes(
 		assetValidator: foundation.assetValidator,
 		logger:         logger,
 	}
+	if mediaFoundation != nil {
+		h.mediaService = mediaFoundation.service
+	}
 
 	reviewH := &reviewHandlers{
 		repo:           foundation.repository,
@@ -108,6 +111,11 @@ func mountCatalogRoutes(
 		ownedMutationGroup.PATCH("/revisions/:revisionId/lessons/:lessonId", h.updateLesson)
 		ownedMutationGroup.DELETE("/revisions/:revisionId/lessons/:lessonId", h.deleteLesson)
 		ownedMutationGroup.PUT("/revisions/:revisionId/lessons/:lessonId/video", h.setLessonVideo)
+		ownedMutationGroup.POST(
+			"/revisions/:revisionId/lessons/:lessonId/video/upload-completions",
+			strictJSONMiddleware(func() any { return &lessonVideoUploadCompletionBody{} }, mediaRequestBodyLimit),
+			h.completeLessonVideoUpload,
+		)
 		ownedMutationGroup.PUT("/revisions/:revisionId/lessons/:lessonId/files", h.addLessonFile)
 		ownedMutationGroup.DELETE("/revisions/:revisionId/lessons/:lessonId/files", h.deleteLessonFile)
 		ownedMutationGroup.PUT("/revisions/:revisionId/preview", h.setPreviewAsset)

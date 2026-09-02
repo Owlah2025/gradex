@@ -307,6 +307,64 @@ func TestPublicPreviewUploadIsSeparateAndBoundToItsEditableCourseRevision(t *tes
 	}
 }
 
+func TestBeginLessonVideoUploadDoesNotClaimLessonAndOrdersReplacementIntents(t *testing.T) {
+	f := newMediaFixture(t)
+	revisionID, sectionIdentityID, sectionRowID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	lessonIdentityID, lessonRowID, existingVideoID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	seedStatements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en)
+		  VALUES ($1::uuid, $2::uuid, 'DRAFT', 1, 'مقرر', 'Course')`, []any{revisionID, f.courseID}},
+		{`INSERT INTO course_section_identities (id, course_id) VALUES ($1::uuid, $2::uuid)`, []any{sectionIdentityID, f.courseID}},
+		{`INSERT INTO course_sections (id, revision_id, course_id, section_identity_id, title_ar, title_en, position)
+		  VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'قسم', 'Section', 0)`, []any{sectionRowID, revisionID, f.courseID, sectionIdentityID}},
+		{`INSERT INTO course_lesson_identities (id, course_id, section_identity_id)
+		  VALUES ($1::uuid, $2::uuid, $3::uuid)`, []any{lessonIdentityID, f.courseID, sectionIdentityID}},
+		{`INSERT INTO course_lessons (
+			id, section_id, course_id, section_identity_id, lesson_identity_id,
+			title_ar, title_en, position, video_asset_version_id
+		  ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 'درس', 'Lesson', 0, $6::uuid)`, []any{lessonRowID, sectionRowID, f.courseID, sectionIdentityID, lessonIdentityID, existingVideoID}},
+	}
+	for _, statement := range seedStatements {
+		if _, err := f.pool.Exec(f.ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seeding Lesson video target: %v", err)
+		}
+	}
+
+	begin := func() UploadTicket {
+		ticket, err := f.service.BeginUpload(f.ctx, UploadRequest{
+			OwnerAccountID: f.instructorID, CourseID: f.courseID, LessonID: lessonIdentityID,
+			Kind: KindVideo, ContentType: "video/mp4", SizeBytes: 1024,
+		})
+		if err != nil {
+			t.Fatalf("BeginUpload: %v", err)
+		}
+		return ticket
+	}
+	first, second := begin(), begin()
+
+	var selected string
+	if err := f.pool.QueryRow(f.ctx, `SELECT video_asset_version_id::text FROM course_lessons WHERE id = $1::uuid`, lessonRowID).Scan(&selected); err != nil {
+		t.Fatalf("reading selected Lesson video: %v", err)
+	}
+	if selected != existingVideoID {
+		t.Fatalf("BeginUpload selected %s, want existing %s unchanged", selected, existingVideoID)
+	}
+
+	var firstCreatedAt, secondCreatedAt time.Time
+	if err := f.pool.QueryRow(f.ctx, `SELECT created_at FROM upload_intents WHERE asset_version_id = $1::uuid`, first.AssetVersionID).Scan(&firstCreatedAt); err != nil {
+		t.Fatalf("reading first intent order: %v", err)
+	}
+	if err := f.pool.QueryRow(f.ctx, `SELECT created_at FROM upload_intents WHERE asset_version_id = $1::uuid`, second.AssetVersionID).Scan(&secondCreatedAt); err != nil {
+		t.Fatalf("reading second intent order: %v", err)
+	}
+	if !secondCreatedAt.After(firstCreatedAt) {
+		t.Fatalf("intent order first=%s second=%s, want strict creation order", firstCreatedAt, secondCreatedAt)
+	}
+}
+
 func scanWorkID(t *testing.T, pool *pgxpool.Pool, versionID string, offset int) string {
 	t.Helper()
 	var workID string

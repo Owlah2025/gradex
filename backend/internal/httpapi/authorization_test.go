@@ -313,6 +313,10 @@ type RouteMatrixEntry struct {
 	Class  RouteClass
 }
 
+const lessonVideoUploadCompletionPath = "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video/upload-completions"
+
+const lessonVideoUploadCompletionRoute = "POST " + lessonVideoUploadCompletionPath
+
 var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"GET /healthz":                             {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
 	"GET /readyz":                              {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
@@ -385,6 +389,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PATCH /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":          {Method: http.MethodPatch, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId", Class: ClassOwnershipProtected},
 	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":         {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video", Class: ClassOwnershipProtected},
+	lessonVideoUploadCompletionRoute:                                             {Method: http.MethodPost, Path: lessonVideoUploadCompletionPath, Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
 	"DELETE /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files":   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files", Class: ClassOwnershipProtected},
 	"PUT /api/v1/courses/:id/revisions/:revisionId/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},

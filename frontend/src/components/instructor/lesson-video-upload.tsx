@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useRef, useState } from "react";
-import { setLessonVideo } from "@/lib/api/authoring";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ACCEPTED_VIDEO_CONTENT_TYPES,
   beginVideoUpload,
-  completeVideoUpload,
+  completeAndSelectLessonVideo,
   describeAssetState,
   isReadyState,
   newProviderEventID,
+  ProcessingObservationTimeoutError,
   sha256Hex,
   uploadFileToStorage,
   validateSelectedVideo,
@@ -18,16 +18,26 @@ import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
+import { recoverLessonVideoPhase } from "./lesson-video-upload-state";
 
 type Phase = Extract<
   UploadPhase,
-  "IDLE" | "PREPARING" | "UPLOADING" | "PROCESSING" | "ATTACHING" | "READY" | "FAILED"
+  | "IDLE"
+  | "PREPARING"
+  | "UPLOADING"
+  | "PROCESSING"
+  | "PROCESSING_BACKGROUND"
+  | "ATTACHING"
+  | "READY"
+  | "FAILED"
 >;
 
 export type LessonVideoUploadProps = {
   courseID: string;
   revisionID: string;
   lessonID: string;
+  assetVersionID?: string;
+  assetState?: string;
   locale: "ar" | "en";
   onAttached: () => void | Promise<void>;
 };
@@ -36,25 +46,53 @@ export type LessonVideoUploadProps = {
  * Instructor-facing MP4 upload for one Lesson.
  *
  * It drives the existing media contract end to end — intent, direct upload to
- * private storage, completion evidence, bounded processing poll, then the
- * Course revision video attachment — and reports only what the server
+ * private storage, completion evidence, durable Course revision selection,
+ * then a bounded processing poll — and reports only what the server
  * confirmed. Nothing is shown as attached on the strength of local state.
  */
 export function LessonVideoUpload({
   courseID,
   revisionID,
   lessonID,
+  assetVersionID,
+  assetState,
   locale,
   onAttached,
 }: LessonVideoUploadProps) {
   const { t } = useLocale();
   const media = t.instructor.media;
-  const [phase, setPhase] = useState<Phase>("IDLE");
+  const initialPhase = recoverLessonVideoPhase(assetVersionID, assetState);
+  const [phase, setPhase] = useState<Phase>(initialPhase);
   const [progress, setProgress] = useState(0);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(() => {
+    if (initialPhase === "READY") return media.videoAttached;
+    if (initialPhase === "PROCESSING_BACKGROUND") return media.videoProcessingBackground;
+    if (initialPhase === "FAILED") {
+      return assetState === "UPLOADED"
+        ? media.videoUploadInterrupted
+        : describeAssetState(assetState || "PROCESS_FAILED", locale);
+    }
+    return null;
+  });
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const activeAssetVersionID = useRef<string | null>(null);
 
   const busy = isUploadBusy(phase);
+
+  useEffect(() => {
+    if (activeAssetVersionID.current === assetVersionID) return;
+    const recovered = recoverLessonVideoPhase(assetVersionID, assetState);
+    setPhase(recovered);
+    if (recovered === "READY") setMessage(media.videoAttached);
+    else if (recovered === "PROCESSING_BACKGROUND") setMessage(media.videoProcessingBackground);
+    else if (recovered === "FAILED") {
+      setMessage(
+        assetState === "UPLOADED"
+          ? media.videoUploadInterrupted
+          : describeAssetState(assetState || "PROCESS_FAILED", locale),
+      );
+    } else setMessage(null);
+  }, [assetState, assetVersionID, locale, media]);
 
   const run = async (file: File) => {
     const rejection = validateSelectedVideo(file, locale);
@@ -82,6 +120,7 @@ export function LessonVideoUpload({
         locale,
         csrf,
       });
+      activeAssetVersionID.current = ticket.asset_version_id;
 
       // The digest is computed before the PUT so the completion evidence
       // describes the bytes this browser actually sent.
@@ -90,8 +129,11 @@ export function LessonVideoUpload({
       setPhase("UPLOADING");
       const uploaded = await uploadFileToStorage(ticket.upload_url, file, file.type, setProgress);
 
-      setPhase("PROCESSING");
-      await completeVideoUpload({
+      setPhase("ATTACHING");
+      const completion = await completeAndSelectLessonVideo({
+        courseID,
+        revisionID,
+        lessonID,
         assetVersionID: ticket.asset_version_id,
         providerEventID: newProviderEventID(),
         storageObjectKey: ticket.storage_object_key,
@@ -102,28 +144,35 @@ export function LessonVideoUpload({
         locale,
         csrf,
       });
-
-      const status = await waitForProcessing(ticket.asset_version_id, locale);
-      if (!isReadyState(status.state)) {
-        setPhase("FAILED");
-        setMessage(describeAssetState(status.state, locale));
+      await onAttached();
+      if (!completion.selected) {
+        activeAssetVersionID.current = null;
+        setPhase("IDLE");
+        setMessage(media.videoSuperseded);
         return;
       }
 
-      setPhase("ATTACHING");
-      await setLessonVideo({
-        courseID,
-        revisionID,
-        lessonID,
-        assetVersionID: ticket.asset_version_id,
-        locale,
-        csrf,
-      });
+      setPhase("PROCESSING");
+      const status = await waitForProcessing(ticket.asset_version_id, locale);
+      if (!isReadyState(status.state)) {
+        activeAssetVersionID.current = null;
+        setPhase("FAILED");
+        setMessage(describeAssetState(status.state, locale));
+        await onAttached();
+        return;
+      }
 
+      activeAssetVersionID.current = null;
       setPhase("READY");
       setMessage(media.videoAttached);
       await onAttached();
     } catch (error) {
+      activeAssetVersionID.current = null;
+      if (error instanceof ProcessingObservationTimeoutError) {
+        setPhase("PROCESSING_BACKGROUND");
+        setMessage(media.videoProcessingBackground);
+        return;
+      }
       setPhase("FAILED");
       setMessage(describeApiError(error, locale));
     }
@@ -160,12 +209,16 @@ export function LessonVideoUpload({
         labels={media}
         phaseTestID={`lesson-video-phase-${lessonID}`}
         messageTestID={`lesson-video-message-${lessonID}`}
-        onRetry={() => {
-          setPhase("IDLE");
-          setMessage(null);
-          setProgress(0);
-          fileInput.current?.click();
-        }}
+        onRetry={
+          phase === "FAILED"
+            ? () => {
+                setPhase("IDLE");
+                setMessage(null);
+                setProgress(0);
+                fileInput.current?.click();
+              }
+            : undefined
+        }
       />
     </div>
   );

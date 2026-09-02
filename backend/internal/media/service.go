@@ -510,15 +510,19 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	`, record.assetVersionID, logicalAssetID, request.Kind, record.objectKey, record.objectVersion, request.ContentType, request.SizeBytes); err != nil {
 		return fmt.Errorf("creating media asset version: %w", err)
 	}
+	intentCreatedAt, err := reserveLessonVideoIntentOrder(ctx, tx, request)
+	if err != nil {
+		return err
+	}
 	// The intent stores the bound that actually applies to this bucket, not the
 	// deployment ceiling, so completion re-checks the same number the request
 	// was admitted against.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO upload_intents (
 			asset_version_id, expected_object_key, expected_content_type,
-			expected_size_bytes, max_size_bytes, expires_at
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6)
-	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.limits.perFile(request.Kind), record.expiresAt); err != nil {
+			expected_size_bytes, max_size_bytes, expires_at, created_at
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, COALESCE($7, now()))
+	`, record.assetVersionID, record.objectKey, request.ContentType, request.SizeBytes, s.limits.perFile(request.Kind), record.expiresAt, intentCreatedAt); err != nil {
 		return fmt.Errorf("creating media upload intent: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -526,6 +530,32 @@ func (s *Service) persistUpload(ctx context.Context, request UploadRequest, reco
 	}
 	return nil
 }
+
+func reserveLessonVideoIntentOrder(ctx context.Context, tx pgx.Tx, request UploadRequest) (*time.Time, error) {
+	if request.Kind != KindVideo || request.LessonID == "" {
+		return nil, nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`,
+		lessonVideoIntentLockClass, lessonAggregateLockKey(request.LessonID, request.Kind)); err != nil {
+		return nil, fmt.Errorf("locking Lesson video intent order: %w", err)
+	}
+	var createdAt time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT GREATEST(
+			clock_timestamp(),
+			COALESCE(MAX(ui.created_at) + interval '1 microsecond', '-infinity'::timestamptz)
+		)
+		FROM upload_intents ui
+		JOIN media_asset_versions mav ON mav.id = ui.asset_version_id
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE ma.course_id = $1::uuid AND ma.lesson_id = $2::uuid AND ma.kind = 'VIDEO'
+	`, request.CourseID, request.LessonID).Scan(&createdAt); err != nil {
+		return nil, fmt.Errorf("reserving Lesson video intent order: %w", err)
+	}
+	return &createdAt, nil
+}
+
+const lessonVideoIntentLockClass int32 = 0x766964 // "vid"
 
 func (s *Service) ensureLogicalAsset(ctx context.Context, tx pgx.Tx, request UploadRequest) (string, error) {
 	if request.LogicalAssetID == "" {

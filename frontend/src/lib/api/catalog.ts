@@ -44,6 +44,7 @@ export type LessonWire = {
   title_en: string;
   position: number;
   video_asset_version_id?: string;
+  video_asset_state?: string;
   files?: LessonFileWire[];
 };
 

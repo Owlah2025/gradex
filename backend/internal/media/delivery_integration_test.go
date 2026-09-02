@@ -320,6 +320,53 @@ func mustRevisionID(t *testing.T, f *deliveryFixture) string {
 	return revisionID
 }
 
+func TestNonReadySelectedLessonVideoIsUnavailableToStudentsAndAdminPreview(t *testing.T) {
+	f := newDeliveryFixture(t)
+	assetID, versionID := uuid.NewString(), uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, $4::uuid, 'PROTECTED')
+	`, assetID, f.instructorID, f.courseID, f.lesson); err != nil {
+		t.Fatalf("seeding processing video asset: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes
+		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)
+	`, versionID, assetID, "quarantine/"+f.courseID+"/"+versionID+"/source"); err != nil {
+		t.Fatalf("seeding processing video version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE course_lessons SET video_asset_version_id = $1::uuid
+		WHERE course_id = $2::uuid AND lesson_identity_id = $3::uuid
+	`, versionID, f.courseID, f.lesson); err != nil {
+		t.Fatalf("selecting processing video: %v", err)
+	}
+
+	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
+		StudentID: f.student, LessonID: f.lesson, AssetVersionID: versionID,
+	}); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("student processing playback error = %v, want %v", err, ErrProtectedUnavailable)
+	}
+
+	admin := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name)
+		VALUES ($1::uuid, $2, $2, 'ADMIN', 'ACTIVE', 'Review Admin')
+	`, admin, admin+"@example.test"); err != nil {
+		t.Fatalf("seeding review Admin: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE id = $1::uuid`, f.revision); err != nil {
+		t.Fatalf("making revision reviewable: %v", err)
+	}
+	if _, err := f.delivery.IssueAdminReviewPlayback(f.ctx, AdminReviewPlaybackRequest{
+		AdminAccountID: admin, CourseID: f.courseID, RevisionID: f.revision, LessonID: f.lesson,
+	}); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("Admin processing preview error = %v, want %v", err, ErrProtectedUnavailable)
+	}
+}
+
 func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{

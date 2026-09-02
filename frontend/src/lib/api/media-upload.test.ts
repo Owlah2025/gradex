@@ -5,13 +5,16 @@ import {
 	beginPublicPreviewUpload,
   beginResourceUpload,
   beginVideoUpload,
+  completeAndSelectLessonVideo,
   completeUpload,
   describeAssetState,
   isTerminalState,
+  ProcessingObservationTimeoutError,
   resourceContentType,
   storageObjectVersionFromUploadHeaders,
   uploadFileToStorage,
   validateSelectedResource,
+  waitForProcessing,
 } from "./media-upload";
 import { addLessonFile, deleteLessonFile } from "./authoring";
 
@@ -295,6 +298,98 @@ test("completion sends the exact-object evidence the API verifies against", asyn
   }
 });
 
+test("a video completion and Lesson selection use one revision-scoped request", async () => {
+  const originalFetch = globalThis.fetch;
+  let url = "";
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = async (requestURL, init) => {
+    url = String(requestURL);
+    body = JSON.parse(String(init?.body));
+    return new Response(
+      JSON.stringify({
+        selected: true,
+        asset_version_id: ASSET_VERSION_ID,
+        state: "PROCESSING",
+        duplicate: false,
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const completion = await completeAndSelectLessonVideo({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      lessonID: LESSON_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "lesson-video-completion-1",
+      storageObjectKey: "quarantine/course/video/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 8192,
+      sha256: "a".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    assert.equal(completion.selected, true);
+    assert.equal(completion.state, "PROCESSING");
+    assert.equal(
+      url,
+      `/api/v1/courses/${COURSE_ID}/revisions/${REVISION_ID}/lessons/${LESSON_ID}/video/upload-completions`,
+    );
+    assert.deepEqual(body, {
+      asset_version_id: ASSET_VERSION_ID,
+      provider_event_id: "lesson-video-completion-1",
+      storage_object_key: "quarantine/course/video/source",
+      storage_object_version: "object-v1",
+      content_type: "video/mp4",
+      size_bytes: 8192,
+      sha256_hex: "a".repeat(64),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an uncertain combined completion retry reuses identical idempotency evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = async (_url, init) => {
+    requests.push(String(init?.body));
+    if (requests.length === 1) throw new TypeError("connection closed before response");
+    return new Response(
+      JSON.stringify({
+        asset_version_id: ASSET_VERSION_ID,
+        state: "PROCESSING",
+        duplicate: true,
+        selected: true,
+      }),
+      { status: 200 },
+    );
+  };
+  try {
+    const completion = await completeAndSelectLessonVideo({
+      courseID: COURSE_ID,
+      revisionID: REVISION_ID,
+      lessonID: LESSON_ID,
+      assetVersionID: ASSET_VERSION_ID,
+      providerEventID: "stable-event-id",
+      storageObjectKey: "quarantine/course/video/source",
+      storageObjectVersion: "object-v1",
+      contentType: "video/mp4",
+      sizeBytes: 8192,
+      sha256: "b".repeat(64),
+      locale: "en",
+      csrf: "csrf-token",
+    });
+    assert.equal(completion.duplicate, true);
+    assert.equal(completion.selected, true);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0], requests[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("the API's own failure states stop the poll and read as plain sentences", () => {
   // PROCESS_FAILED is the API's spelling. Polling past it would leave a failed
   // upload spinning until the timeout instead of reporting what happened.
@@ -312,6 +407,35 @@ test("the API's own failure states stop the poll and read as plain sentences", (
   assert.match(describeAssetState("SCAN_ERROR", "en"), /could not be checked/);
   assert.ok(describeAssetState("PROCESS_FAILED", "ar").length > 0);
   assert.ok(!describeAssetState("PROCESS_FAILED", "ar").includes("could not"));
+});
+
+test("a bounded processing observation reports a typed nonterminal timeout", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        asset_version_id: ASSET_VERSION_ID,
+        logical_asset_id: "8c9d0e12-4444-4d5e-9f60-718293a4b5c6",
+        kind: "VIDEO",
+        state: "PROCESSING",
+        size_bytes: 8192,
+        created_at: "2026-09-02T12:00:00Z",
+        deliverable: false,
+      }),
+      { status: 200 },
+    );
+  try {
+    await assert.rejects(
+      waitForProcessing(ASSET_VERSION_ID, "en", { intervalMs: 1, timeoutMs: 0 }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProcessingObservationTimeoutError);
+        assert.equal(error.status.state, "PROCESSING");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("attaching a resource uses the existing lesson-files authoring route", async () => {

@@ -11,6 +11,7 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/common/empty-state";
 import { LessonVideoUpload } from "./lesson-video-upload";
+import { isLessonVideoProcessing } from "./lesson-video-upload-state";
 import { LessonResourceUpload } from "./lesson-resource-upload";
 
 type CurriculumLabels = Dictionary["instructor"]["curriculum"];
@@ -341,7 +342,13 @@ function LessonRow({
   onRequestDelete: () => void;
   onContentChanged: () => void | Promise<void>;
 }) {
-  const hasVideo = Boolean(lesson.video_asset_version_id);
+  const videoProcessing = isLessonVideoProcessing(
+    lesson.video_asset_version_id,
+    lesson.video_asset_state,
+  );
+  const hasVideo = Boolean(lesson.video_asset_version_id) &&
+    !videoProcessing &&
+    (!lesson.video_asset_state || lesson.video_asset_state === "READY");
   const labMaterials = (lesson.files ?? []).filter((file) => file.kind === "LAB_MATERIAL");
 
   return (
@@ -381,7 +388,11 @@ function LessonRow({
             ) : (
               <CircleDashed className="size-3.5 shrink-0" aria-hidden />
             )}
-            {hasVideo ? labels.videoAttached : labels.videoMissing}
+            {hasVideo
+              ? labels.videoAttached
+              : videoProcessing
+                ? labels.videoProcessing
+                : labels.videoMissing}
           </span>
           <Button
             type="button"
@@ -422,6 +433,8 @@ function LessonRow({
           courseID={courseID}
           revisionID={revisionID}
           lessonID={lesson.id}
+          assetVersionID={lesson.video_asset_version_id}
+          assetState={lesson.video_asset_state}
           locale={locale}
           onAttached={onContentChanged}
         />

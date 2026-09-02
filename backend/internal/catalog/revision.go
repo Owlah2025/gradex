@@ -152,6 +152,7 @@ type Lesson struct {
 	TitleEn             string       `json:"title_en"`
 	Position            int          `json:"position"`
 	VideoAssetVersionID *string      `json:"video_asset_version_id,omitempty"`
+	VideoAssetState     *string      `json:"video_asset_state,omitempty"`
 	CreatedAt           time.Time    `json:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at"`
 	Files               []LessonFile `json:"files"`

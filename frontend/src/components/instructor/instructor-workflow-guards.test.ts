@@ -68,7 +68,9 @@ test("no Instructor surface renders a course, revision or media identifier", () 
 test("the lesson row reports whether a video is attached, not which asset it is", () => {
   const curriculum = readSource(`${INSTRUCTOR_DIR}/curriculum-builder.tsx`);
   assert.match(curriculum, /const hasVideo = Boolean\(lesson\.video_asset_version_id\)/);
-  assert.match(curriculum, /labels\.videoAttached : labels\.videoMissing/);
+  assert.match(curriculum, /labels\.videoAttached/);
+  assert.match(curriculum, /labels\.videoProcessing/);
+  assert.match(curriculum, /labels\.videoMissing/);
   // The identifier survives only as a boolean data attribute for tests and support.
   assert.match(curriculum, /data-video-attached=/);
 });

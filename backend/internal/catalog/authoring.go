@@ -846,10 +846,13 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	}
 
 	lesQuery := `
-		SELECT id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
-		FROM course_lessons
-		WHERE section_id = ANY($1::uuid[])
-		ORDER BY position ASC
+		SELECT cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id,
+		       cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id,
+		       mav.state::text, cl.created_at, cl.updated_at
+		FROM course_lessons cl
+		LEFT JOIN media_asset_versions mav ON mav.id = cl.video_asset_version_id
+		WHERE cl.section_id = ANY($1::uuid[])
+		ORDER BY cl.position ASC
 	`
 	lRows, err := q.Query(ctx, lesQuery, sectionIDs)
 	if err != nil {
@@ -860,7 +863,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	lessonsBySectionID := make(map[string][]Lesson)
 	for lRows.Next() {
 		var l Lesson
-		if err := lRows.Scan(&l.ID, &l.SectionID, &l.CourseID, &l.SectionIdentityID, &l.LessonIdentityID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err := lRows.Scan(&l.ID, &l.SectionID, &l.CourseID, &l.SectionIdentityID, &l.LessonIdentityID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.VideoAssetState, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			lRows.Close()
 			return err
 		}

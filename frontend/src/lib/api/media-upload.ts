@@ -1,4 +1,5 @@
 import { authenticatedRequest } from "./http";
+import { ProblemError } from "./problem";
 
 /**
  * Browser side of the existing direct-to-storage media upload contract.
@@ -395,8 +396,61 @@ export async function completeUpload(
   return result;
 }
 
-/** Retained name for the video call site; the request is kind-independent. */
-export const completeVideoUpload = completeUpload;
+export type LessonVideoCompletionResult = CompletionResult & { selected: boolean };
+
+/**
+ * Completes an exact Lesson-video upload and durably selects it in one
+ * idempotent browser operation. Retrying transport or server failures reuses
+ * identical completion evidence, including the provider event identifier.
+ */
+export async function completeAndSelectLessonVideo(
+  input: LocalisedInput & {
+    courseID: string;
+    revisionID: string;
+    lessonID: string;
+    assetVersionID: string;
+    providerEventID: string;
+    storageObjectKey: string;
+    storageObjectVersion: string;
+    contentType: string;
+    sizeBytes: number;
+    sha256: string;
+  },
+): Promise<LessonVideoCompletionResult> {
+  const route = `/courses/${encodeURIComponent(input.courseID)}/revisions/${encodeURIComponent(input.revisionID)}/lessons/${encodeURIComponent(input.lessonID)}/video/upload-completions`;
+  const body = {
+    asset_version_id: input.assetVersionID,
+    provider_event_id: input.providerEventID,
+    storage_object_key: input.storageObjectKey,
+    storage_object_version: input.storageObjectVersion,
+    content_type: input.contentType,
+    size_bytes: input.sizeBytes,
+    sha256_hex: input.sha256,
+  };
+  const send = async () => {
+    const result = await authenticatedRequest<LessonVideoCompletionResult>(
+      route,
+      "POST",
+      input.locale,
+      input.csrf,
+      body,
+    );
+    if (result === null) {
+      throw new Error(
+        input.locale === "ar"
+          ? "لم يؤكد الخادم اكتمال رفع الفيديو واختياره"
+          : "The server did not confirm the video upload and selection",
+      );
+    }
+    return result;
+  };
+  try {
+    return await send();
+  } catch (error) {
+    if (error instanceof ProblemError && error.problem.status < 500) throw error;
+  }
+  return send();
+}
 
 export async function getMediaAssetStatus(
   assetVersionID: string,
@@ -420,6 +474,20 @@ export type ProcessingPollOptions = {
   signal?: AbortSignal;
 };
 
+export class ProcessingObservationTimeoutError extends Error {
+  readonly status: MediaAssetStatus;
+
+  constructor(status: MediaAssetStatus, locale: "ar" | "en") {
+    super(
+      locale === "ar"
+        ? "انتهت مهلة معالجة الفيديو. حالة الأصل لا تزال قيد المعالجة."
+        : "Timed out waiting for video processing. The asset is still being processed.",
+    );
+    this.name = "ProcessingObservationTimeoutError";
+    this.status = status;
+  }
+}
+
 /**
  * Polls the media status route until the Asset Version reaches a terminal
  * state or the bound elapses. Bounded on purpose: launch does not add a
@@ -442,11 +510,7 @@ export async function waitForProcessing(
     options.onState?.(status.state);
     if (isTerminalState(status.state)) return status;
     if (Date.now() + intervalMs > deadline) {
-      throw new Error(
-        locale === "ar"
-          ? "انتهت مهلة معالجة الفيديو. حالة الأصل لا تزال قيد المعالجة."
-          : "Timed out waiting for video processing. The asset is still being processed.",
-      );
+      throw new ProcessingObservationTimeoutError(status, locale);
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

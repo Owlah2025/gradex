@@ -9,12 +9,14 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
 
 type authoringHandlers struct {
 	repo           *catalog.Repository
 	assetValidator catalog.AssetVersionValidator
+	mediaService   *media.Service
 	logger         *logging.Logger
 }
 
@@ -61,6 +63,11 @@ type lessonBody struct {
 
 type setVideoBody struct {
 	VideoAssetVersionID string `json:"video_asset_version_id"`
+}
+
+type lessonVideoUploadCompletionBody struct {
+	mediaCompletionBody
+	AssetVersionID string `json:"asset_version_id" binding:"required"`
 }
 
 type lessonFileBody struct {
@@ -524,6 +531,47 @@ func (h *authoringHandlers) setLessonVideo(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, les)
+}
+
+func (h *authoringHandlers) completeLessonVideoUpload(c *gin.Context) {
+	if h.mediaService == nil {
+		writeProblem(c, problem.DependencyUnavailable())
+		return
+	}
+	accountID := c.GetString(ctxUserIDKey)
+	body := c.MustGet(strictJSONBodyContextKey).(*lessonVideoUploadCompletionBody)
+	result, err := runLessonVideoUploadCompletion(
+		c.Request.Context(), h.mediaService, h.repo,
+		lessonVideoUploadCompletionRequest{
+			completion: media.CompleteUploadRequest{
+				OwnerAccountID: accountID, AssetVersionID: body.AssetVersionID,
+				ProviderEventID: body.ProviderEventID, StorageObjectKey: body.StorageObjectKey,
+				StorageObjectVersion: body.StorageObjectVersion, ContentType: body.ContentType,
+				SizeBytes: body.SizeBytes, SHA256Hex: body.SHA256Hex,
+			},
+			selection: catalog.ClaimLessonVideoUploadRequest{
+				CourseID: c.Param("id"), RevisionID: c.Param("revisionId"), LessonID: c.Param("lessonId"),
+				VideoAssetVersionID: body.AssetVersionID, OwnerAccountID: accountID,
+			},
+			actorDescriptor: accountID,
+		},
+	)
+	if err != nil {
+		var completionError *lessonVideoUploadCompletionError
+		if errors.As(err, &completionError) && completionError.stage == lessonVideoMediaCompletionStage {
+			writeMediaProblem(c, err)
+		} else {
+			h.handleCatalogError(c, err)
+		}
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"asset_version_id": result.assetVersionID,
+		"state":            result.state,
+		"duplicate":        result.duplicate,
+		"selected":         result.selected,
+	})
 }
 
 func (h *authoringHandlers) addLessonFile(c *gin.Context) {

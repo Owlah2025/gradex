@@ -11,6 +11,7 @@ export type UploadPhase =
   | "PREPARING"
   | "UPLOADING"
   | "PROCESSING"
+  | "PROCESSING_BACKGROUND"
   | "CHECKING"
   | "ATTACHING"
   | "READY"

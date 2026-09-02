@@ -4,6 +4,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
@@ -28,6 +32,7 @@ type privilegedAuditFixture struct {
 	courseID, revisionID                   string
 	sectionID, lessonID, fileID, termID    string
 	majorID, subjectID, videoID, previewID string
+	uploadVideoID                          string
 }
 
 type privilegedAuditExpectation struct {
@@ -119,6 +124,53 @@ func TestProductionInstructorMutationRoutesCommitAuditEvidence(t *testing.T) {
 	}
 }
 
+func TestLessonVideoCombinedCompletionConvergesAfterMediaOnlyCommit(t *testing.T) {
+	// Production regression: a server interruption after media completion must
+	// converge through the same browser request instead of orphaning the video.
+	f := newPrivilegedAuditFixture(t)
+	prepareAuditLessonVideoUpload(t, f)
+	const routeKey = http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video/upload-completions"
+	scenario := instructorAuditScenarios()[routeKey]
+	var route gin.RouteInfo
+	for _, candidate := range catalogMutationRoutes(f.engine) {
+		if candidate.Method+" "+candidate.Path == routeKey {
+			route = candidate
+			break
+		}
+	}
+	if route.Path == "" {
+		t.Fatalf("combined Lesson video route %s is not mounted", routeKey)
+	}
+	body := scenario.body(f)
+	for attempt := 1; attempt <= 2; attempt++ {
+		response := f.instructorRequest(t, route, body)
+		var result struct {
+			AssetVersionID string `json:"asset_version_id"`
+			State          string `json:"state"`
+			Duplicate      bool   `json:"duplicate"`
+			Selected       bool   `json:"selected"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			response.Body.Close()
+			t.Fatalf("decoding combined completion attempt %d: %v", attempt, err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || result.AssetVersionID != f.uploadVideoID || result.State != "QUARANTINED" || !result.Duplicate || !result.Selected {
+			t.Fatalf("combined completion attempt %d: status=%d result=%+v", attempt, response.StatusCode, result)
+		}
+	}
+	var selected string
+	if err := f.pool.QueryRow(f.ctx, `
+		SELECT video_asset_version_id::text FROM course_lessons
+		WHERE lesson_identity_id = $1::uuid AND course_id = $2::uuid
+	`, f.lessonID, f.courseID).Scan(&selected); err != nil {
+		t.Fatalf("reading selected video after combined retry: %v", err)
+	}
+	if selected != f.uploadVideoID {
+		t.Fatalf("selected video = %s, want %s", selected, f.uploadVideoID)
+	}
+}
+
 func instructorAuditScenarios() map[string]instructorAuditScenario {
 	return map[string]instructorAuditScenario{
 		http.MethodPost + " /api/v1/courses": {prepare: prepareAuditAcademicCatalog, body: func(f *privilegedAuditFixture) string {
@@ -149,6 +201,13 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		}, status: http.StatusOK, action: "LESSON_UPDATED", targetType: "LESSON"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":    {prepare: prepareAuditLesson, body: emptyAuditBody, status: http.StatusNoContent, action: "LESSON_DELETED", targetType: "LESSON"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video": {prepare: prepareAuditLesson, body: func(f *privilegedAuditFixture) string { return fmt.Sprintf(`{"video_asset_version_id":%q}`, f.videoID) }, status: http.StatusOK, action: "LESSON_VIDEO_ATTACHED", targetType: "LESSON"},
+		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video/upload-completions": {prepare: prepareAuditLessonVideoUpload, body: func(f *privilegedAuditFixture) string {
+			return fmt.Sprintf(
+				`{"asset_version_id":%q,"provider_event_id":%q,"storage_object_key":%q,"storage_object_version":"fixture-v1","content_type":"video/mp4","size_bytes":1024,"sha256_hex":%q}`,
+				f.uploadVideoID, "audit-completion:"+f.uploadVideoID,
+				"quarantine/"+f.courseID+"/"+f.uploadVideoID+"/source", strings.Repeat("a", 64),
+			)
+		}, status: http.StatusOK, action: "LESSON_VIDEO_UPLOAD_SELECTED", targetType: "LESSON"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/files": {prepare: prepareAuditLesson, body: func(f *privilegedAuditFixture) string {
 			return fmt.Sprintf(`{"kind":"RESOURCE","asset_version_id":%q,"display_name_ar":"ملف","display_name_en":"File"}`, f.videoID)
 		}, status: http.StatusCreated, action: "LESSON_FILE_ATTACHED", targetType: "LESSON_FILE"},
@@ -420,6 +479,55 @@ func prepareAuditLesson(t *testing.T, f *privilegedAuditFixture) {
 		t.Fatalf("creating audit lesson: %v", err)
 	}
 	f.lessonID = lesson.LessonIdentityID
+}
+
+func prepareAuditLessonVideoUpload(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	prepareAuditLesson(t, f)
+	assetID, versionID := uuid.NewString(), uuid.NewString()
+	key := "quarantine/" + f.courseID + "/" + versionID + "/source"
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, $4::uuid, 'PROTECTED')
+	`, assetID, f.instructorID, f.courseID, f.lessonID); err != nil {
+		t.Fatalf("seeding audited Lesson video upload: %v", err)
+	}
+	checksum := strings.Repeat("a", 64)
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version,
+			content_type, size_bytes, sha256_hex
+		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024, $4)
+	`, versionID, assetID, key, checksum); err != nil {
+		t.Fatalf("seeding audited Lesson video version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO upload_intents (
+			asset_version_id, expected_object_key, expected_content_type, expected_size_bytes,
+			max_size_bytes, expires_at, completed_at, completion_fingerprint
+		) VALUES ($1::uuid, $2, 'video/mp4', 1024, 2048, now() + interval '1 hour', now(), $3)
+	`, versionID, key, "completed:"+versionID); err != nil {
+		t.Fatalf("seeding audited completed upload intent: %v", err)
+	}
+	providerEventID := "audit-completion:" + versionID
+	fingerprint := auditCompletionFingerprint(versionID, key, "fixture-v1", "video/mp4", 1024, checksum)
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO media_callback_receipts (
+			provider_event_id, callback_kind, asset_version_id, object_version, request_fingerprint
+		) VALUES ($1, 'UPLOAD_COMPLETED', $2::uuid, 'fixture-v1', $3)
+	`, providerEventID, versionID, fingerprint); err != nil {
+		t.Fatalf("seeding audited completion receipt: %v", err)
+	}
+	f.uploadVideoID = versionID
+}
+
+func auditCompletionFingerprint(assetVersionID, key, objectVersion, contentType string, size int64, checksum string) string {
+	digest := sha256.New()
+	for _, field := range []string{assetVersionID, key, objectVersion, contentType, fmt.Sprintf("%d", size), checksum} {
+		_, _ = digest.Write([]byte(field))
+		_, _ = digest.Write([]byte{0})
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func prepareAuditFile(t *testing.T, f *privilegedAuditFixture) {
