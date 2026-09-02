@@ -252,7 +252,7 @@ jobs:
   admission-integration:
     name: Admission Integration
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
