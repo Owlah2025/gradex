@@ -348,14 +348,26 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 			SELECT 1
 			FROM media_asset_versions mav
 			JOIN media_assets ma ON ma.id = mav.logical_asset_id
-			JOIN scan_attempts scan ON scan.id = mav.successful_scan_attempt_id
-				AND scan.asset_version_id = mav.id
-				AND scan.storage_object_version = mav.storage_object_version
-				AND scan.outcome = 'PASSED'
 			WHERE mav.id = cr.preview_asset_version_id
 				AND mav.kind = 'PREVIEW'
 				AND mav.state = 'READY'
 				AND mav.content_type = 'video/mp4'
+				AND (
+					EXISTS (
+						SELECT 1 FROM scan_attempts sa
+						WHERE sa.id = mav.successful_scan_attempt_id
+							AND sa.asset_version_id = mav.id
+							AND sa.storage_object_version = mav.storage_object_version
+							AND sa.outcome = 'PASSED'
+					)
+					OR EXISTS (
+						SELECT 1 FROM validation_attempts va
+						WHERE va.id = mav.successful_validation_attempt_id
+							AND va.asset_version_id = mav.id
+							AND va.storage_object_version = mav.storage_object_version
+							AND va.outcome = 'PASSED'
+					)
+				)
 				AND ma.kind = 'PREVIEW'
 				AND ma.course_id = c.id
 				AND ma.visibility = 'PUBLIC_PREVIEW'

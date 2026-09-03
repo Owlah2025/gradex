@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 )
 
@@ -300,6 +301,46 @@ func TestPublicPreviewClaimSurvivesBrowserExitAndProjectsWorkerState(t *testing.
 			t.Fatalf("selected preview = %v, want the failed %s", selected, versionID)
 		}
 	})
+}
+
+func TestTrustedPublicPreviewLifecycleProjectsIntoPublicCatalogue(t *testing.T) {
+	f := newD5Fixture(t)
+	candidate := f.candidate(t)
+	versionID := seedPublicPreviewUpload(
+		t, f, candidate.ID, time.Date(2026, 9, 2, 15, 0, 0, 0, time.UTC), true,
+	)
+	claimPublicPreview(t, f, candidate.ID, versionID)
+	if err := transcodePublicPreview(t, f, versionID, lessonVideoProcessor{}); err != nil {
+		t.Fatalf("Worker.Transcode: %v", err)
+	}
+	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID,
+		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
+	}); err != nil {
+		t.Fatalf("submitting trusted-preview revision: %v", err)
+	}
+	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID,
+		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+	}); err != nil {
+		t.Fatalf("approving trusted-preview revision: %v", err)
+	}
+
+	publicRepository, err := catalogpublic.NewRepository(f.p, catalogpublic.PublishedOnly)
+	if err != nil {
+		t.Fatalf("constructing public catalogue repository: %v", err)
+	}
+	detail, err := publicRepository.Detail(f.ctx, f.courseID, false)
+	if err != nil || detail == nil || !detail.HasPreview {
+		t.Fatalf("public catalogue Detail = %#v, %v; want has_preview=true", detail, err)
+	}
+	list, err := publicRepository.List(f.ctx, false, 1, 10)
+	if err != nil {
+		t.Fatalf("public catalogue List: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != f.courseID || !list.Items[0].HasPreview {
+		t.Fatalf("public catalogue List = %#v; want the trusted-preview Course with has_preview=true", list)
+	}
 }
 
 // Selecting early must not loosen anything. A preview that is merely selected
