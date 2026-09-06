@@ -389,13 +389,25 @@ func (w *Worker) Transcode(ctx context.Context, assetVersionID, operationID stri
 }
 
 func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID string) error {
-	version, applied, err := w.beginTranscode(ctx, assetVersionID)
+	version, applied, err := w.beginTranscode(ctx, assetVersionID, operationID)
 	if err != nil || !applied {
 		return err
 	}
 	processingCtx, cancel := context.WithTimeout(ctx, w.processingTimeout)
 	defer cancel()
-	result, processErr := w.process.Transcode(processingCtx, version.Object)
+	// Progress is persisted against this exact operation identity, so a report
+	// arriving late from an abandoned attempt cannot overwrite the current one.
+	// The observation channel is advisory: a processor that cannot report
+	// progress simply does not, and the attempt is unaffected.
+	var result TranscodeResult
+	var processErr error
+	if reporting, ok := w.process.(ProgressProcessor); ok {
+		result, processErr = reporting.TranscodeWithProgress(
+			processingCtx, version.Object, newProgressWriter(w.db, version.ID, operationID),
+		)
+	} else {
+		result, processErr = w.process.Transcode(processingCtx, version.Object)
+	}
 	if processErr != nil {
 		return w.recordProcessingFailure(ctx, version.ID, operationID, processErr)
 	}
@@ -408,7 +420,7 @@ func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID stri
 	return w.CompleteTranscode(ctx, version.ID, operationID, result)
 }
 
-func (w *Worker) beginTranscode(ctx context.Context, assetVersionID string) (versionRecord, bool, error) {
+func (w *Worker) beginTranscode(ctx context.Context, assetVersionID, operationID string) (versionRecord, bool, error) {
 	tx, err := w.db.Begin(ctx)
 	if err != nil {
 		return versionRecord{}, false, fmt.Errorf("beginning transcode claim: %w", err)
@@ -435,11 +447,19 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID string) (ver
 	if version.State != StateScanPassed && version.State != StateValidated {
 		return version, false, nil
 	}
+	// The claim also opens this attempt's progress observation. Resetting it to
+	// zero under a fresh operation identity is what makes a retry start from
+	// zero rather than inheriting a previous attempt's abandoned percentage.
 	claimed, err := tx.Exec(ctx, `
-		UPDATE media_asset_versions SET state = 'PROCESSING'
+		UPDATE media_asset_versions
+		SET state = 'PROCESSING',
+		    processing_stage = 'TRANSCODING',
+		    processing_progress_percent = 0,
+		    processing_updated_at = now(),
+		    processing_attempt_token = $3
 		WHERE id = $1::uuid AND state = $2::media_asset_version_state
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
-	`, assetVersionID, version.State)
+	`, assetVersionID, version.State, operationID)
 	if err != nil {
 		return versionRecord{}, false, fmt.Errorf("claiming media version for transcode: %w", err)
 	}
@@ -573,12 +593,19 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 	if err := recordRenditions(ctx, tx, completion); err != nil {
 		return err
 	}
+	// READY closes the observation at 100 in the same statement that makes the
+	// version deliverable, so no reader ever sees a READY asset still reporting
+	// a partial percentage — and the row is immutable from here on.
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions
-		SET trusted_duration_ms = $1, successful_processing_attempt_id = $2::uuid, state = 'READY'
+		SET trusted_duration_ms = $1, successful_processing_attempt_id = $2::uuid, state = 'READY',
+		    processing_stage = 'PACKAGING',
+		    processing_progress_percent = 100,
+		    processing_updated_at = now(),
+		    processing_attempt_token = $4
 		WHERE id = $3::uuid AND state = 'PROCESSING'
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
-	`, completion.result.TrustedDurationMS, attemptID, completion.assetVersionID); err != nil {
+	`, completion.result.TrustedDurationMS, attemptID, completion.assetVersionID, completion.operationID); err != nil {
 		return fmt.Errorf("marking media asset ready: %w", err)
 	}
 	return nil

@@ -33,16 +33,23 @@ type Price struct {
 }
 
 type Course struct {
-	ID                    string    `json:"id"`
-	Slug                  string    `json:"slug"`
-	Title                 string    `json:"title"`
-	InstructorDisplayName string    `json:"instructor_display_name"`
-	University            *Taxonomy `json:"university,omitempty"`
-	Major                 *Taxonomy `json:"major,omitempty"`
-	Subject               *Taxonomy `json:"subject,omitempty"`
-	StudyYear             *Taxonomy `json:"study_year,omitempty"`
-	Price                 *Price    `json:"price,omitempty"`
-	HasPreview            bool      `json:"has_preview"`
+	ID                    string     `json:"id"`
+	Slug                  string     `json:"slug"`
+	Title                 string     `json:"title"`
+	InstructorDisplayName string     `json:"instructor_display_name"`
+	University            *Taxonomy  `json:"university,omitempty"`
+	Major                 *Taxonomy  `json:"major,omitempty"`
+	Subject               *Taxonomy  `json:"subject,omitempty"`
+	StudyYear             *Taxonomy  `json:"study_year,omitempty"`
+	Price                 *Price     `json:"price,omitempty"`
+	HasPreview            bool       `json:"has_preview"`
+	Thumbnail             *Thumbnail `json:"thumbnail,omitempty"`
+}
+
+type Thumbnail struct {
+	AssetVersionID string `json:"asset_version_id"`
+	CardURL        string `json:"card_url"`
+	LargeURL       string `json:"large_url"`
 }
 
 type Section struct {
@@ -344,6 +351,10 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		COALESCE(academic_subject.official_code, subject.academic_code),
 		cr.study_year::text,
 		price.new_value_minor_units,
+        (SELECT v.id::text FROM media_asset_versions v JOIN media_assets ma ON ma.id=v.logical_asset_id
+          JOIN media_thumbnail_variants t ON t.asset_version_id=v.id
+          WHERE v.id=cr.thumbnail_asset_version_id AND v.kind='THUMBNAIL' AND ma.kind='THUMBNAIL'
+            AND ma.course_id=c.id AND ma.retired_at IS NULL AND v.state='READY'),
 		EXISTS (
 			SELECT 1
 			FROM media_asset_versions mav
@@ -408,8 +419,13 @@ func scanCourses(rows interface {
 		var item Course
 		var universityLabel, universityCode, majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
 		var amount *int64
-		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &amount, &item.HasPreview); err != nil {
+		var thumbnailID *string
+		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &amount, &thumbnailID, &item.HasPreview); err != nil {
 			return nil, fmt.Errorf("scanning public course: %w", err)
+		}
+		if thumbnailID != nil {
+			prefix := "/api/v1/catalog/courses/" + item.ID + "/thumbnails/" + *thumbnailID
+			item.Thumbnail = &Thumbnail{AssetVersionID: *thumbnailID, CardURL: prefix + "/card", LargeURL: prefix + "/large"}
 		}
 		if universityLabel != nil {
 			item.University = &Taxonomy{Label: *universityLabel, Code: universityCode}

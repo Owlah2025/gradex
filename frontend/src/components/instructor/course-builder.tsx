@@ -9,7 +9,7 @@ import { LessonVideoUpload } from "./lesson-video-upload";
 import { PublicPreviewUpload } from "./public-preview-upload";
 import { LessonResourceUpload } from "./lesson-resource-upload";
 import { ChangeRequestNotice } from "./change-request-notice";
-import { editsPublishedCourse, revisionWorkflow } from "./revision-workflow";
+import { editsPublishedCourse, publicationMode, revisionWorkflow } from "./revision-workflow";
 import { EditingPublishedNotice, RevisionWorkflowPanel } from "./revision-workflow-panel";
 import {
   addLesson,
@@ -24,6 +24,7 @@ import {
   setRevisionAudience,
   resetRevisionAudience,
   submitCourseRevision,
+  publishCourseRevision,
   updateCourseRevision,
   type CourseWire,
 } from "@/lib/api/authoring";
@@ -64,6 +65,8 @@ import { Textarea } from "@/components/ui/textarea";
  */
 const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
 
+import { CourseThumbnailUpload } from "./course-thumbnail-upload";
+
 export function CourseBuilder() {
   const { locale, t } = useLocale();
 
@@ -74,6 +77,7 @@ export function CourseBuilder() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [thumbnailBlocked, setThumbnailBlocked] = useState<Record<string, boolean>>({});
 
   // A submission rejection is reported twice: once in the page-level error
   // region, and once beside the Submit control itself. The founder's manual
@@ -118,6 +122,9 @@ export function CourseBuilder() {
   const revision = selectedCourse?.editable_revision ?? null;
   const sections = revision?.sections ?? [];
   const workflow = revisionWorkflow(selectedCourse);
+  // D-097: which act the primary control performs. Read from the same durable
+  // fact the server reads, so the studio never offers the wrong one.
+  const publication = publicationMode(selectedCourse);
   const standing = courseStanding(selectedCourse);
   const editingPublished = editsPublishedCourse(selectedCourse);
 
@@ -275,7 +282,7 @@ export function CourseBuilder() {
       setRequestedTitleEn("");
       setRequestedNote("");
       setIsCreating(false);
-      setNotice(academic ? details.created : details.createdWithRequest);
+      setNotice(`${academic ? details.created : details.createdWithRequest} ${t.courseThumbnail.createNote}`);
     });
   };
 
@@ -438,12 +445,21 @@ export function CourseBuilder() {
     });
   };
 
+  /*
+    One control, two acts. A course that has never been live goes to an
+    administrator; one that has been live is published by its own instructor
+    (D-097). The branch is on the server's own durable publication fact, and
+    the server refuses the wrong call either way, so a stale tab that picks the
+    wrong route is rejected rather than acted on.
+  */
   const handleSubmit = () => {
-    if (!selectedCourse || !revision?.id) return;
+    if (!selectedCourse || !revision?.id || thumbnailBlocked[revision.id]) return;
+    const publishesDirectly = publication === "SUBSEQUENT_PUBLICATION";
     setSubmitRejection(null);
     void command(
       async (csrf) => {
-        await submitCourseRevision({
+        const send = publishesDirectly ? publishCourseRevision : submitCourseRevision;
+        await send({
           courseID: selectedCourse.id,
           revisionID: revision.id!,
           locale,
@@ -451,7 +467,9 @@ export function CourseBuilder() {
         });
         await loadCourses(selectedCourse.id);
         await refreshSelectedCourse();
-        setNotice(instructor.submission.submitted);
+        setNotice(
+          publishesDirectly ? instructor.submission.published : instructor.submission.submitted,
+        );
       },
       {
         /*
@@ -758,6 +776,14 @@ export function CourseBuilder() {
                   </Button>
                 </form>
 
+                <CourseThumbnailUpload key={revision.id}
+                  courseID={selectedCourse.id} revisionID={revision.id}
+                  assetID={revision.thumbnail_asset_version_id} disabled={busy}
+                  unresolved={Boolean(thumbnailBlocked[revision.id])}
+                  onChanged={refreshSelectedCourse}
+                  onBlockedChange={(blocked) => setThumbnailBlocked((current) => ({ ...current, [revision.id!]: blocked }))}
+                />
+
                 <PublicPreviewUpload
                   courseID={selectedCourse.id}
                   revisionID={revision.id}
@@ -793,7 +819,8 @@ export function CourseBuilder() {
                 <SubmissionPanel
                   course={selectedCourse}
                   labels={instructor.submission}
-                  busy={busy}
+                  mode={publication}
+                  busy={busy || Boolean(thumbnailBlocked[revision.id])}
                   rejection={submitRejection}
                   onSubmit={handleSubmit}
                 />

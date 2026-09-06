@@ -514,6 +514,10 @@ func (r *Repository) CreateCandidate(
 			return fmt.Errorf("inserting candidate revision: %w", err)
 		}
 
+		if _, err := tx.Exec(ctx, `UPDATE course_revisions SET thumbnail_asset_version_id=$1::uuid WHERE id=$2::uuid`, liveRev.ThumbnailAssetVersionID, newRevID); err != nil {
+			return fmt.Errorf("copying candidate thumbnail: %w", err)
+		}
+
 		// Audience is revision-scoped publishable metadata. Explicit targets clone
 		// exactly; automatic mode has zero rows and therefore remains automatic.
 		if _, err := tx.Exec(ctx, `
@@ -799,6 +803,9 @@ type queryExecer interface {
 func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevision) error {
 	if rev == nil {
 		return nil
+	}
+	if err := q.QueryRow(ctx, `SELECT thumbnail_asset_version_id::text FROM course_revisions WHERE id=$1::uuid`, rev.ID).Scan(&rev.ThumbnailAssetVersionID); err != nil {
+		return fmt.Errorf("loading revision thumbnail: %w", err)
 	}
 	if err := loadRevisionAudience(ctx, q, rev); err != nil {
 		return err
@@ -1766,6 +1773,15 @@ func (r *Repository) SubmitCourse(
 			return err
 		}
 
+		// D-097: Admin review is the gate on a Course's FIRST publication only.
+		// A Course that has already been live once is republished by its own
+		// Instructor through PublishRevision, so a submission for review here
+		// would put a routine edit back into the Admin queue. Refused on the
+		// locked row, from the same durable fact the queue itself projects.
+		if row.LiveRevisionID != nil && *row.LiveRevisionID != "" {
+			return ErrAlreadyPublished
+		}
+
 		rev, err := r.LockCandidate(ctx, tx, courseID, revisionID)
 		if err != nil {
 			return err
@@ -1805,20 +1821,16 @@ func (r *Repository) SubmitCourse(
 			return fmt.Errorf("updating revision for submit: %w", err)
 		}
 
-		if row.LiveRevisionID == nil || *row.LiveRevisionID == "" {
-			_, err = tx.Exec(ctx, `
-				UPDATE courses
-				SET lifecycle = 'PENDING_REVIEW', updated_at = $1
-				WHERE id = $2::uuid
-			`, now, courseID)
-			if err != nil {
-				return fmt.Errorf("updating course lifecycle for submit: %w", err)
-			}
-			course.Lifecycle = LifecyclePendingReview
-		} else {
-			course.Lifecycle = CourseLifecycle(row.Lifecycle)
-			course.LiveRevisionID = row.LiveRevisionID
+		// Only a never-published Course reaches here, so the Course itself moves
+		// to PENDING_REVIEW alongside its revision.
+		if _, err = tx.Exec(ctx, `
+			UPDATE courses
+			SET lifecycle = 'PENDING_REVIEW', updated_at = $1
+			WHERE id = $2::uuid
+		`, now, courseID); err != nil {
+			return fmt.Errorf("updating course lifecycle for submit: %w", err)
 		}
+		course.Lifecycle = LifecyclePendingReview
 
 		audit := AuditEvent{
 			ActorAccountID:  &ownerAccountID,

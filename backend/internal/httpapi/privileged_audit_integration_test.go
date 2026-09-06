@@ -34,6 +34,7 @@ type privilegedAuditFixture struct {
 	majorID, subjectID, videoID, previewID string
 	uploadVideoID                          string
 	uploadPreviewID                        string
+	thumbnailID                            string
 }
 
 type privilegedAuditExpectation struct {
@@ -221,6 +222,9 @@ func TestPublicPreviewCombinedCompletionConvergesAfterMediaOnlyCommit(t *testing
 
 func instructorAuditScenarios() map[string]instructorAuditScenario {
 	return map[string]instructorAuditScenario{
+		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/thumbnail": {prepare: prepareAuditThumbnail, body: func(f *privilegedAuditFixture) string {
+			return fmt.Sprintf(`{"thumbnail_asset_version_id":%q,"expected_asset_version_id":null}`, f.thumbnailID)
+		}, status: http.StatusOK, action: "COURSE_THUMBNAIL_CHANGED", targetType: "COURSE_REVISION"},
 		http.MethodPost + " /api/v1/courses": {prepare: prepareAuditAcademicCatalog, body: func(f *privilegedAuditFixture) string {
 			// T4-B: ordinary Instructor creation is Academic Catalog based, so the
 			// audited create names its university and canonical Subject.
@@ -272,6 +276,7 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		}, status: http.StatusOK, action: "PREVIEW_ASSET_SET", targetType: "COURSE_REVISION"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/preview": {prepare: prepareAuditPreview, body: emptyAuditBody, status: http.StatusOK, action: "PREVIEW_ASSET_CLEARED", targetType: "COURSE_REVISION"},
 		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/submit":    {prepare: prepareSubmittableCourse, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_SUBMITTED", targetType: "COURSE"},
+		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/publish":   {prepare: preparePublishableRevision, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_REVISION_PUBLISHED", targetType: "COURSE"},
 	}
 }
 
@@ -656,6 +661,20 @@ func prepareSubmittableCourse(t *testing.T, f *privilegedAuditFixture) {
 	if _, err := f.repo.SetLessonVideo(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.SetVideoRequest{CourseID: f.courseID, RevisionID: f.revisionID, LessonID: f.lessonID, OwnerAccountID: f.instructorID, VideoAssetVersionID: f.videoID}, f.instructorID); err != nil {
 		t.Fatalf("attaching audit video: %v", err)
 	}
+}
+
+// preparePublishableRevision carries the fixture Course through its one Admin
+// first publication, then opens the candidate its Instructor may publish
+// themselves (D-097). The fixture's revision identifier is moved to that
+// candidate so the route under test addresses the revision it is about.
+func preparePublishableRevision(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	f.preparePublished(t)
+	candidate, err := f.repo.CreateCandidate(f.ctx, f.courseID, f.instructorID, f.instructorID)
+	if err != nil {
+		t.Fatalf("opening the subsequent candidate: %v", err)
+	}
+	f.revisionID = candidate.ID
 }
 
 func (f *privilegedAuditFixture) assertAudit(t *testing.T, want privilegedAuditExpectation) {

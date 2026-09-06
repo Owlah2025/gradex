@@ -253,16 +253,18 @@ func TestNonReadySelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
 	versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC), true)
 	claimLessonVideo(t, f, candidate.ID, versionID)
 
-	_, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
-		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-	})
-	assertSubmissionFailure(t, err)
+	// The Instructor's own publication is held to the same readiness gate the
+	// Admin approval path is: a selected but unprocessed video is not
+	// publishable by anyone.
+	assertSubmissionFailure(t, f.publish(f.ctx, candidate.ID))
 
+	// And the Admin path, reached the only way it still can be for a Course
+	// that has published — a revision forced under review out of band — refuses
+	// it identically.
 	if _, err := f.p.Exec(f.ctx, `UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE id = $1::uuid`, candidate.ID); err != nil {
 		t.Fatalf("placing candidate under review: %v", err)
 	}
-	_, err = f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+	_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
 		CourseID: f.courseID, RevisionID: candidate.ID,
 		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
 	})

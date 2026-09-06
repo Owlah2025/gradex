@@ -83,7 +83,7 @@ test.afterEach(async ({}, testInfo) => {
 
 test("C an Instructor uploads a real MP4, the worker makes it READY, and the attachment survives a reload", async ({
   browser,
-}) => {
+}, testInfo) => {
   const admin = await apiContextFor(issueRotatingSession(ADMIN));
 
   // The media suite has its own isolated database, so it creates the minimum
@@ -146,6 +146,30 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
+  const thumbnail = page.getByTestId("course-thumbnail-authoring");
+  await expect(thumbnail).toContainText("No custom thumbnail");
+  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-empty.png") });
+  await thumbnail.locator('input[type="file"]').setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg/>") });
+  await expect(thumbnail.getByRole("alert")).toContainText("Choose a JPG");
+  await thumbnail.locator('input[type="file"]').setInputFiles({ name: "large.png", mimeType: "image/png", buffer: Buffer.alloc(5 * 1024 * 1024 + 1) });
+  await expect(thumbnail.getByRole("alert")).toContainText("5 MB");
+  const thumbnailPath = path.resolve(__dirname, "../../../backend/internal/media/testdata/thumbnail.webp");
+  await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
+  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
+  await expect(thumbnail.locator("img")).toBeVisible();
+  await expect.poll(() => thumbnail.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
+  const thumbnailA = (await thumbnail.locator("img").getAttribute("src"))!.split("/").at(-2)!;
+  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-preview.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await thumbnail.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("thumbnail-instructor-mobile.png") });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/ar/instructor/courses");
+  await page.getByTestId(`owned-course-${courseID}`).click();
+  await expect(thumbnail).toContainText("صورة المقرر");
+  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-arabic.png") });
+  await page.goto("/en/instructor/courses");
+  await page.getByTestId(`owned-course-${courseID}`).click();
   // The public preview is a second, separately uploaded PREVIEW Asset Version.
   // It is intentionally completed before any Lesson exists, which proves the
   // Instructor UI cannot be selecting or reusing protected Lesson media.
@@ -184,8 +208,37 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 4. Real MP4 through the real upload contract.
   await page.getByTestId(`lesson-video-file-${lessonID}`).setInputFiles(mp4Path);
 
+  /*
+    D-098. Every processing observation the studio actually receives is
+    collected from the real status polls, so this asserts properties of the
+    server's own measurements rather than waiting for one specific percentage
+    to appear. A short fixture video can finish a transcode faster than any
+    poll interval, and a spec that demanded an intermediate frame would be a
+    timing race, not a test.
+  */
+  const observations: Array<{ state: string; stage: string | null; percent: number | null }> = [];
+  page.on("response", (response) => {
+    if (response.request().method() !== "GET") return;
+    if (!/\/api\/v1\/media\/assets\/[0-9a-f-]+$/i.test(new URL(response.url()).pathname)) return;
+    void response
+      .json()
+      .then((body: { state?: string; processing_stage?: string | null; processing_progress_percent?: number | null }) => {
+        observations.push({
+          state: body.state ?? "",
+          stage: body.processing_stage ?? null,
+          percent: typeof body.processing_progress_percent === "number" ? body.processing_progress_percent : null,
+        });
+      })
+      .catch(() => {
+        /* A non-JSON body is not an observation. */
+      });
+  });
+
   const phase = page.getByTestId(`lesson-video-phase-${lessonID}`);
   await expect(phase).toContainText(/Preparing|Uploading|Processing/, { timeout: 30_000 });
+  // Upload progress is the browser's own byte count and is shown on UPLOADING
+  // alone; processing progress replaces it once the worker takes over.
+  await expect(phase).toContainText("Processing", { timeout: 2 * 60 * 1000 });
   await expect(phase).toContainText("Ready", { timeout: 4 * 60 * 1000 });
   await expect(page.getByTestId(`lesson-video-ref-${lessonID}`)).toBeVisible();
 
@@ -212,7 +265,45 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   expect(assetVersionID, "the submitted Lesson must carry its video Asset Version").toMatch(UUID_PATTERN);
   const assetStatus = await instructorAPI.get(`/api/v1/media/assets/${assetVersionID}`);
   expect(assetStatus.status()).toBe(200);
-  expect((await assetStatus.json()).state).toBe("READY");
+  const settledStatus = (await assetStatus.json()) as {
+    state: string;
+    processing_stage: string | null;
+    processing_progress_percent: number | null;
+    processing_updated_at: string | null;
+  };
+  expect(settledStatus.state).toBe("READY");
+
+  // D-098. The persisted observation survives the reload above — this read is
+  // taken after `page.reload()`, from the server, with nothing left in the tab.
+  // A finished asset reports 100; it never reports a partial percentage.
+  expect(settledStatus.processing_progress_percent).toBe(100);
+  expect(settledStatus.processing_stage).toBe("PACKAGING");
+  expect(settledStatus.processing_updated_at, "a settled observation must carry its instant").toBeTruthy();
+
+  // Whatever the studio actually observed while the worker ran must have been
+  // real, bounded, and non-decreasing. This holds however fast the transcode
+  // was, including when it produced only the opening and closing observations.
+  expect(observations.length, "the studio must have polled the media status").toBeGreaterThan(0);
+  const measured = observations.filter((observation) => observation.percent !== null);
+  let previous = -1;
+  for (const observation of measured) {
+    expect(observation.percent!).toBeGreaterThanOrEqual(0);
+    expect(observation.percent!).toBeLessThanOrEqual(100);
+    expect(["TRANSCODING", "PACKAGING"]).toContain(observation.stage!);
+    expect(
+      observation.percent!,
+      "processing progress must never move backwards within an attempt",
+    ).toBeGreaterThanOrEqual(previous);
+    previous = observation.percent!;
+    if (observation.state === "READY") {
+      expect(observation.percent, "a READY asset must report 100").toBe(100);
+    }
+  }
+  // No observation may claim completion before the asset is actually READY.
+  for (const observation of measured) {
+    if (observation.percent === 100 && observation.stage === "PACKAGING") continue;
+    expect(observation.percent!).toBeLessThan(100);
+  }
 
   // 6. Submission uses the Course-level canonical Subject; Academic Courses
   // never populate the legacy Major/Subject/Study-Year vocabulary.
@@ -429,6 +520,13 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
   await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
 
+  const adminThumbnail = resubmittedInspector.getByTestId("review-thumbnails");
+  await expect(adminThumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
+  await expect.poll(() => adminThumbnail.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
+  await adminThumbnail.screenshot({ path: testInfo.outputPath("thumbnail-admin-candidate.png") });
+  const prematureImage = await playwrightRequest.newContext({ baseURL: frontendOrigin() });
+  expect((await prematureImage.get(`/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailA}/card`)).status()).toBe(404);
+  await prematureImage.dispose();
   // 11. Approve through the inspector, against the exact revision that was
   // successfully rendered and previewed above.
   await resubmittedInspector.getByTestId("approve-inspected-revision").click();
@@ -608,15 +706,26 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const startPanel = page.getByTestId("start-revision-panel");
   await expect(startPanel).toBeVisible();
   await expect(startPanel).toContainText("This course is published");
-  await expect(startPanel).toContainText("keeps serving until an administrator approves");
+  await expect(startPanel).toContainText("keeps serving until you publish your changes");
 
   await page.getByTestId("start-revision").click();
 
   // The studio moved into the new candidate, and says plainly that these edits are not live yet.
   await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await expect(page.getByTestId("editing-published-notice")).toContainText(
-    "Students still see the published version",
+    "Your changes remain private until you publish them",
   );
+  // D-097: the first publication went to an Admin; this one does not. The
+  // studio must offer the act the server will actually accept.
+  await expect(page.getByTestId("submission-panel")).toHaveAttribute(
+    "data-publication-mode",
+    "SUBSEQUENT_PUBLICATION",
+  );
+  await expect(page.getByTestId("submit-for-review")).toHaveText("Publish changes");
+  await expect(page.getByTestId("first-publication-note")).toHaveCount(0);
+  await page.getByTestId("submission-panel").screenshot({
+    path: testInfo.outputPath("publication-subsequent-publish-changes.png"),
+  });
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
 
   const candidateRevisionID = (await page.getByTestId("selected-course-context").getAttribute("data-revision-id"))!;
@@ -624,6 +733,30 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   expect(candidateRevisionID, "the candidate must be a new revision, not the published one").not.toBe(
     submittedRevisionID,
   );
+
+  await expect(thumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
+  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
+  let releaseThumbnail!: () => void;
+  const thumbnailGate = new Promise<void>((resolve) => { releaseThumbnail = resolve; });
+  await page.route("**/api/v1/media/uploads/*/completions", async (route) => { await thumbnailGate; await route.continue(); });
+  await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
+  await expect(thumbnail.getByRole("status")).toContainText("Processing image");
+  await expect(page.getByTestId("submit-for-review")).toBeDisabled();
+  await expect(thumbnail.getByRole("button", { name: "Replace", exact: true })).toBeDisabled();
+  await expect(thumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
+  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-replacement.png") });
+  releaseThumbnail();
+  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
+  await page.unroute("**/api/v1/media/uploads/*/completions");
+  await thumbnail.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(thumbnail.locator("img")).toHaveCount(0);
+  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
+  await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
+  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
+  const thumbnailB = (await thumbnail.locator("img").getAttribute("src"))!.split("/").at(-2)!;
+  expect(thumbnailB).not.toBe(thumbnailA);
+  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
+  expect((await anonymous.get(`/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailB}/card`)).status()).toBe(404);
 
   // Clicking again must not fork the Course: the server returns the existing candidate.
   await page.reload();
@@ -646,17 +779,23 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     "a saved DRAFT revision must not reach the public Course",
   ).not.toContain("UNPUBLISHED REVISION");
 
-  // Submitted through the studio, not the API.
+  // The server refuses to enqueue a Course that has already published, so the
+  // studio's own submit route is closed for this Course. Asserted directly,
+  // because hiding a button is not a security boundary.
+  const refusedSubmission = await instructorAPI.post(
+    `/api/v1/courses/${courseID}/revisions/${candidateRevisionID}/submit`,
+  );
+  expect(
+    refusedSubmission.status(),
+    "an already-published Course must not be submittable for review",
+  ).toBe(409);
+  expect(await refusedSubmission.text()).toContain("COURSE_ALREADY_PUBLISHED");
+
+  // Published through the studio, not the API. No Admin is involved.
   await page.getByTestId("submit-for-review").click();
   await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
-
-  // In review, the studio says so and offers no second revision.
-  await page.reload();
-  await page.getByTestId(`owned-course-${courseID}`).click();
-  await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("authoring-notice")).toContainText("Changes published.");
+  await expect(page.getByTestId("authoring-notice")).not.toContainText("administrator");
 
   // Authorization: only the owning Instructor may begin a revision.
   const otherStart = await (await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR))).put(
@@ -686,36 +825,49 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await page.getByTestId(`owned-course-${courseID}`).click();
 
-  // Revision B is now PENDING_REVIEW while A stays live.
-  const queueWithB = await admin.get("/api/v1/admin/review/queue");
-  expect(queueWithB.status()).toBe(200);
+  // Revision B is live now, and the Admin queue never saw it. The whole point
+  // of D-097 is that a routine edit to an approved Course is not a review item.
+  const queueAfterPublish = await admin.get("/api/v1/admin/review/queue");
+  expect(queueAfterPublish.status()).toBe(200);
   expect(
-    ((await queueWithB.json()) as Array<{ course_id?: string }>).some((item) => item.course_id === courseID),
-    "the pending revision must be back in the Admin review queue",
-  ).toBe(true);
+    ((await queueAfterPublish.json()) as Array<{ course_id?: string }>).some((item) => item.course_id === courseID),
+    "a routine revision of a published Course must never enter the Admin review queue",
+  ).toBe(false);
 
-  // The pending revision's title must not be public anywhere.
-  const pendingSearch = await anonymous.get(
-    `/api/v1/catalog/courses?q=${encodeURIComponent(pendingRevisionTitleEn)}`,
-  );
-  expect(pendingSearch.status()).toBe(200);
-  expect(
-    await pendingSearch.text(),
-    "a PENDING_REVIEW revision of a published Course must not leak publicly",
-  ).not.toContain("UNPUBLISHED REVISION");
-
-  // And the still-live revision A is what the public detail route serves.
-  const liveDetail = await anonymous.get(`/api/v1/catalog/courses/${courseID}`);
-  expect(liveDetail.status()).toBe(200);
-  const liveDetailBody = await liveDetail.text();
-  expect(liveDetailBody, "the public Course must still be revision A").toContain(revisedTitleEn);
-  expect(liveDetailBody).not.toContain("UNPUBLISHED REVISION");
+  // The public switched, atomically and completely: the new title is served,
+  // and no part of revision A remains mixed into it.
+  const publishedDetail = await anonymous.get(`/api/v1/catalog/courses/${courseID}`);
+  expect(publishedDetail.status()).toBe(200);
+  const publishedDetailBody = await publishedDetail.text();
+  expect(publishedDetailBody, "the public Course must now be revision B").toContain("UNPUBLISHED REVISION");
 
   // Same conclusion through the rendered public page, not only the API.
   await publicPage.goto(publicDetailURL);
-  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(revisedTitleEn);
-  await expect(publicPage.locator("body")).not.toContainText("UNPUBLISHED REVISION");
+  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(pendingRevisionTitleEn);
 
+  // The cover published with its revision, in the same switch.
+  const approvedThumbnail = (await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail;
+  expect(approvedThumbnail.asset_version_id).toBe(thumbnailB);
+  expect((await anonymous.get(approvedThumbnail.card_url)).status()).toBe(200);
+  await publicPage.goto("/en/catalog");
+  await publicPage.getByRole("searchbox").fill(pendingRevisionTitleEn);
+  const thumbnailSearch = publicPage.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/catalog/courses" && url.searchParams.get("q") === pendingRevisionTitleEn;
+  });
+  await publicPage.getByRole("button", { name: "Search" }).click();
+  await thumbnailSearch;
+  await expect(publicPage).toHaveURL((url) => url.searchParams.get("q") === pendingRevisionTitleEn);
+  const thumbnailCard = publicPage.getByRole("link").filter({ has: publicPage.getByRole("heading", { name: pendingRevisionTitleEn }) });
+  await expect(thumbnailCard.locator("img")).toHaveAttribute("src", approvedThumbnail.card_url);
+  await expect.poll(() => thumbnailCard.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
+  await expect(async () => {
+    await expect(thumbnailCard.locator("img")).toBeVisible();
+    await expect(thumbnailCard.getByRole("heading")).toBeVisible();
+    await thumbnailCard.scrollIntoViewIfNeeded();
+    await thumbnailCard.screenshot({ path: testInfo.outputPath("thumbnail-public-desktop.png"), animations: "disabled" });
+  }).toPass({ timeout: 10_000 });
+  await publicPage.screenshot({ path: testInfo.outputPath("thumbnail-public-page.png"), fullPage: true });
   await anonymous.dispose();
   await publicContext.close();
 

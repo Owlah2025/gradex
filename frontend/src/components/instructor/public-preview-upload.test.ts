@@ -37,25 +37,34 @@ test("public preview authoring binds upload and commands to the revision", () =>
   assert.match(source, /await clearPublicPreview\(\{ courseID, revisionID,/);
 });
 
-test("public preview uses one durable completion before bounded observation", () => {
+test("public preview uses one durable completion before one shared observation", () => {
   // D-096 regression: the preview now takes the FFmpeg path, so the browser
   // must not be the thing that attaches it after processing finishes.
   const complete = source.indexOf("await completeAndSelectPublicPreview({");
-  const observe = source.indexOf("await waitForProcessing(");
+  const processing = source.indexOf('setPhase("PROCESSING")');
   assert.ok(complete >= 0, "the preview must be completed and selected in one server operation");
-  assert.ok(observe > complete, "observation must follow durable selection, never precede it");
+  assert.ok(processing > complete, "observation must follow durable selection, never precede it");
   assert.doesNotMatch(source, /await setPublicPreview\(/);
   assert.doesNotMatch(source, /import \{[^}]*setPublicPreview/);
+  // One poll loop, shared with the Lesson video control and keyed on this
+  // revision's own preview asset.
+  assert.match(source, /useProcessingWatch\(\{[\s\S]{0,120}assetVersionID: previewAssetVersionID,/);
+  assert.doesNotMatch(source, /await waitForProcessing\(/);
 });
 
-test("preview observation expiry is background status, not upload failure", () => {
-  assert.match(source, /cause instanceof ProcessingObservationTimeoutError/);
-  assert.match(source, /setPhase\("PROCESSING_BACKGROUND"\)/);
-  // The timeout branch returns before any FAILED phase can be set.
-  const timeoutBranch = source.slice(source.indexOf("cause instanceof ProcessingObservationTimeoutError"));
-  const background = timeoutBranch.indexOf('setPhase("PROCESSING_BACKGROUND")');
-  const failed = timeoutBranch.indexOf('setPhase("FAILED")');
-  assert.ok(background >= 0 && background < failed);
+test("a preview run that outlives the tab is background status, not upload failure", () => {
+  // The watch simply stops at its bound; nothing turns that into a failure.
+  const watch = read("src/components/instructor/use-processing-watch.ts");
+  assert.doesNotMatch(watch, /FAILED/);
+  assert.match(source, /setMessage\(t\.processingBackground\)/);
+  // FAILED is reached only from a terminal state the server reported.
+  assert.match(source, /if \(isReadyState\(settledStatus\.state\)\) \{/);
+});
+
+test("preview processing progress is the server's own measurement", () => {
+  assert.match(source, /processing\s*\?\s*`\$\{t\.processing\} \$\{processing\.percent\}%`/);
+  assert.match(source, /data-processing-percent=/);
+  assert.doesNotMatch(source, /setInterval/);
 });
 
 test("a superseded preview upload does not replace the selected winner", () => {
@@ -67,8 +76,8 @@ test("a superseded preview upload does not replace the selected winner", () => {
 });
 
 test("a terminal processing failure is reported as the real failure", () => {
-  assert.match(source, /if \(!isReadyState\(status\.state\)\)/);
-  assert.match(source, /setMessage\(describeAssetState\(status\.state, locale\)\)/);
+  assert.match(source, /if \(isReadyState\(settledStatus\.state\)\) \{/);
+  assert.match(source, /setMessage\(describeAssetState\(settledStatus\.state, locale\)\)/);
   assert.match(source, /setPhase\("FAILED"\)/);
 });
 

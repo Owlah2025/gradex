@@ -54,6 +54,20 @@ func main() {
 			return
 		}
 	}
+	// The media pipeline writes the D-098 processing-progress observation when
+	// it claims a transcode. Against an older schema that write fails, and the
+	// claim fails with it, so every video would sit unprocessed with no failure
+	// state to show its Instructor. The worker refuses to start instead — an
+	// unstarted worker is visible; a silently non-processing one is not.
+	{
+		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.MediaProcessingProgressSchemaVersion)
+		cancel()
+		if err != nil {
+			exitWorker(logger, "media_schema_check", logging.ErrorClassOf(err))
+			return
+		}
+	}
 
 	storageClient, err := storage.New(ctx, storage.Options{
 		Endpoint:        cfg.S3Endpoint(),
@@ -160,6 +174,8 @@ func main() {
 	}
 	logger.WorkerLifecycle(logging.WorkerReady)
 
+	thumbnailCleanupDone := make(chan struct{})
+	go func() { defer close(thumbnailCleanupDone); runThumbnailCleanup(ctx, pool, storageClient, logger) }()
 	dispatcherDone := make(chan struct{})
 	go func() {
 		defer close(dispatcherDone)
@@ -178,6 +194,7 @@ func main() {
 	server.Shutdown()
 	<-dispatcherDone
 	<-emailDispatcherDone
+	<-thumbnailCleanupDone
 	logger.WorkerLifecycle(logging.WorkerStopped)
 }
 

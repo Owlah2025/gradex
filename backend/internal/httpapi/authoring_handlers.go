@@ -102,6 +102,23 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 		writeProblem(c, problem.StateConflict())
 		return
 	}
+	// D-097 publication-gate refusals. Each names itself so the studio can say
+	// which action the Course actually needs rather than reporting an opaque
+	// conflict on a button the Instructor just pressed.
+	if errors.Is(err, catalog.ErrFirstPublicationRequiresReview) {
+		writeProblem(c, problem.StateConflict().WithViolations(problem.Violation{
+			Code: "FIRST_PUBLICATION_REQUIRES_REVIEW", Location: problem.LocationPath,
+			Detail: "this course has never been published; an administrator must approve its first publication",
+		}))
+		return
+	}
+	if errors.Is(err, catalog.ErrAlreadyPublished) {
+		writeProblem(c, problem.StateConflict().WithViolations(problem.Violation{
+			Code: "COURSE_ALREADY_PUBLISHED", Location: problem.LocationPath,
+			Detail: "this course has already been published; publish the revision instead of submitting it for review",
+		}))
+		return
+	}
 	var valErr *catalog.SubmissionValidationError
 	if errors.As(err, &valErr) {
 		var violations []problem.SubmissionViolation
@@ -740,6 +757,24 @@ func (h *authoringHandlers) submitCourse(c *gin.Context) {
 
 	course, err := h.repo.SubmitCourse(c.Request.Context(), h.assetValidator, catalog.SubmitCourseRequest{
 		CourseID: courseID, RevisionID: revisionID,
+		OwnerAccountID: accountID, ActorDescriptor: accountID,
+	})
+	if err != nil {
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, course)
+}
+
+// publishCourseRevision is the D-097 Instructor self-publication route. Every
+// gate that matters — ownership, prior publication, revision identity, media
+// readiness, and the atomic pointer swap — lives in the domain command; this
+// handler carries identity and nothing else.
+func (h *authoringHandlers) publishCourseRevision(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+
+	course, err := h.repo.PublishRevision(c.Request.Context(), h.assetValidator, catalog.PublishRevisionRequest{
+		CourseID: c.Param("id"), RevisionID: c.Param("revisionId"),
 		OwnerAccountID: accountID, ActorDescriptor: accountID,
 	})
 	if err != nil {

@@ -56,6 +56,7 @@ import {
 import { ProblemError } from "@/lib/api/problem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ThumbnailImage } from "./thumbnail-image";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
@@ -452,6 +453,7 @@ export function CatalogueList() {
                 className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 <Card interactive className="flex h-full flex-col">
+                  {course.thumbnail?.card_url ? <ThumbnailImage src={course.thumbnail.card_url} className="h-[180px] w-full rounded-t-lg object-cover" /> : null}
                   <CardHeader>
                     <div className="flex flex-wrap gap-2 text-sm">
                       {[

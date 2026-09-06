@@ -13,6 +13,7 @@ export type PublicCourse = {
   study_year?: PublicTaxonomy;
   price?: PublicPrice;
   has_preview: boolean;
+  thumbnail?: { asset_version_id: string; card_url: string; large_url: string } | null;
 };
 export type PublicCourseDetail = PublicCourse & {
   description: string;

@@ -48,6 +48,9 @@ func mountCatalogRoutes(
 		reviewH.playback = mediaFoundation.AdminReviewMedia()
 	}
 
+	if mediaFoundation != nil {
+		v1.GET("/catalog/courses/:idOrSlug/thumbnails/:assetId/:variant", func(c *gin.Context) { serveThumbnail(c, mediaFoundation.service, true) })
+	}
 	ownershipMw, err := RequireCourseOwnership(foundation.ownership, logger)
 	if err != nil {
 		return fmt.Errorf("building course ownership middleware: %w", err)
@@ -84,6 +87,9 @@ func mountCatalogRoutes(
 	)
 	{
 		ownedGetGroup.GET("", h.getOwnedCourse)
+		if mediaFoundation != nil {
+			ownedGetGroup.GET("/revisions/:revisionId/thumbnails/:assetId/:variant", func(c *gin.Context) { serveThumbnail(c, mediaFoundation.service, false) })
+		}
 		ownedGetGroup.GET("/students", h.listCourseRoster)
 	}
 
@@ -123,9 +129,11 @@ func mountCatalogRoutes(
 			strictJSONMiddleware(func() any { return &publicPreviewUploadCompletionBody{} }, mediaRequestBodyLimit),
 			h.completePublicPreviewUpload,
 		)
+		ownedMutationGroup.PUT("/revisions/:revisionId/thumbnail", strictJSONMiddleware(func() any { return &thumbnailBody{} }, mediaRequestBodyLimit), h.setThumbnail)
 		ownedMutationGroup.PUT("/revisions/:revisionId/preview", h.setPreviewAsset)
 		ownedMutationGroup.DELETE("/revisions/:revisionId/preview", h.clearPreviewAsset)
 		ownedMutationGroup.POST("/revisions/:revisionId/submit", h.submitCourse)
+		ownedMutationGroup.POST("/revisions/:revisionId/publish", h.publishCourseRevision)
 	}
 
 	// Admin review GET routes under /admin/review
@@ -136,6 +144,9 @@ func mountCatalogRoutes(
 	)
 	{
 		adminReviewGetGroup.GET("/queue", reviewH.listQueue)
+		if mediaFoundation != nil {
+			adminReviewGetGroup.GET("/courses/:id/revisions/:revisionId/thumbnails/:assetId/:variant", func(c *gin.Context) { serveThumbnail(c, mediaFoundation.service, false) })
+		}
 		adminReviewGetGroup.GET("/courses/:id/revisions/:revisionId", reviewH.getCourseRevisionGraph)
 		adminReviewGetGroup.GET("/playback-manifests/:playbackSession/index.m3u8", reviewH.playbackManifest)
 		adminReviewGetGroup.GET("/playback-manifests/:playbackSession/renditions/:rendition/index.m3u8", reviewH.playbackRenditionManifest)

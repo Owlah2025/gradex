@@ -35,6 +35,7 @@ var errCatalogueCallbackRace = errors.New("catalogue callback was recorded concu
 // D-088 no-malware-scan profile. Membership here means the type may be uploaded
 // at all; TrustedProfileAdmits decides which of those may skip scanning.
 var allowedContentTypes = map[AssetKind]map[string]struct{}{
+	KindThumbnail: {"image/jpeg": {}, "image/png": {}, "image/webp": {}},
 	KindVideo: {
 		"video/mp4": {}, "video/quicktime": {},
 	},
@@ -145,12 +146,25 @@ func (s *Service) BeginUpload(ctx context.Context, request UploadRequest) (Uploa
 	if s.operatingMode == OperatingModeAdminCatalogue {
 		return UploadTicket{}, ErrNotAuthorized
 	}
-	if s.operatingMode == OperatingModeTrustedInstructor && !TrustedProfileAdmits(request.Kind, request.ContentType) {
+	if s.operatingMode == OperatingModeTrustedInstructor && request.Kind != KindThumbnail && !TrustedProfileAdmits(request.Kind, request.ContentType) {
 		return UploadTicket{}, fmt.Errorf(
 			"%w: this deployment accepts only MP4 Lesson video, PDF or DOCX Lesson Resources, and an MP4 public Course preview",
 			ErrValidation)
 	}
 	return s.beginUploadForOwner(ctx, request)
+}
+
+func (s *Service) presignUpload(ctx context.Context, request UploadRequest, key string) (string, error) {
+	if request.Kind == KindThumbnail {
+		store, ok := s.store.(interface {
+			PresignPutSizedURL(context.Context, string, string, int64, time.Duration) (string, error)
+		})
+		if !ok {
+			return "", ErrUnavailable
+		}
+		return store.PresignPutSizedURL(ctx, key, request.ContentType, request.SizeBytes, s.uploadURLExpiry)
+	}
+	return s.store.PresignPutURL(ctx, key, request.ContentType, s.uploadURLExpiry)
 }
 
 func (s *Service) beginUploadForOwner(ctx context.Context, request UploadRequest) (UploadTicket, error) {
@@ -161,7 +175,7 @@ func (s *Service) beginUploadForOwner(ctx context.Context, request UploadRequest
 	if err := s.persistUpload(ctx, request, record); err != nil {
 		return UploadTicket{}, err
 	}
-	uploadURL, err := s.store.PresignPutURL(ctx, record.objectKey, request.ContentType, s.uploadURLExpiry)
+	uploadURL, err := s.presignUpload(ctx, request, record.objectKey)
 	if err != nil {
 		return UploadTicket{}, fmt.Errorf("%w: presigning quarantine upload: %v", ErrUnavailable, err)
 	}
@@ -443,11 +457,14 @@ func validateBeginUpload(request UploadRequest, maxUploadBytes int64) error {
 	if err := validateUploadRequest(request, maxUploadBytes); err != nil {
 		return err
 	}
-	if request.Kind == KindPreview {
+	if request.Kind == KindThumbnail && request.LogicalAssetID != "" {
+		return fmt.Errorf("%w: thumbnail uploads require a fresh asset", ErrValidation)
+	}
+	if request.Kind == KindPreview || request.Kind == KindThumbnail {
 		if request.LessonID != "" || request.RevisionID == "" {
 			return fmt.Errorf("%w: public preview requires a Course revision and cannot target a Lesson", ErrValidation)
 		}
-		if strings.ToLower(strings.TrimSpace(request.ContentType)) != "video/mp4" {
+		if request.Kind == KindPreview && strings.ToLower(strings.TrimSpace(request.ContentType)) != "video/mp4" {
 			return fmt.Errorf("%w: public preview must be an MP4 video", ErrValidation)
 		}
 	} else if request.RevisionID != "" {
@@ -631,7 +648,7 @@ func (s *Service) verifyLogicalAsset(ctx context.Context, tx pgx.Tx, request Upl
 // signed PUT URL is issued, so an Asset Version cannot later be substituted
 // across Courses or revisions simply by guessing its immutable ID.
 func requirePreviewRevision(ctx context.Context, tx pgx.Tx, request UploadRequest) error {
-	if request.Kind != KindPreview {
+	if request.Kind != KindPreview && request.Kind != KindThumbnail {
 		return nil
 	}
 	var state string
@@ -689,6 +706,20 @@ func (s *Service) CompleteUpload(ctx context.Context, request CompleteUploadRequ
 		return CompletionResult{}, fmt.Errorf("%w: completion evidence does not match the upload intent", ErrConflict)
 	}
 	state := record.state
+	if record.kind == KindThumbnail {
+		var allowed bool
+		err := tx.QueryRow(ctx, `SELECT ma.retired_at IS NULL AND (ui.completed_at IS NOT NULL OR ui.expires_at>now())
+          AND c.owner_account_id=$2::uuid
+          FROM media_assets ma JOIN media_asset_versions v ON v.logical_asset_id=ma.id
+          JOIN courses c ON c.id=ma.course_id JOIN upload_intents ui ON ui.asset_version_id=v.id
+          WHERE v.id=$1::uuid FOR SHARE OF ma`, request.AssetVersionID, request.OwnerAccountID).Scan(&allowed)
+		if err != nil {
+			return CompletionResult{}, err
+		}
+		if !allowed {
+			return CompletionResult{}, ErrConflict
+		}
+	}
 
 	var priorAsset, priorFingerprint string
 	err = tx.QueryRow(ctx, `
@@ -799,6 +830,10 @@ func (s *Service) quarantineUpload(ctx context.Context, tx pgx.Tx, completion up
 		WHERE asset_version_id = $2::uuid AND completed_at IS NULL
 	`, completion.fingerprint, request.AssetVersionID); err != nil {
 		return "", fmt.Errorf("completing media upload intent: %w", err)
+	}
+
+	if completion.kind == KindThumbnail {
+		return s.processThumbnail(ctx, tx, completion)
 	}
 
 	if s.trustedPathApplies(completion.kind, request.ContentType) {
@@ -935,15 +970,18 @@ func (s *Service) GetStatus(ctx context.Context, versionID string, viewer Viewer
 	}
 	var status AssetStatus
 	var owner, viewerRole, viewerStatus string
+	var stage *string
+	var percent *int16
 	err := s.db.QueryRow(ctx, `
 		SELECT mav.id::text, mav.logical_asset_id::text, mav.kind, mav.state,
 		       mav.size_bytes, mav.trusted_duration_ms, mav.created_at,
+		       mav.processing_stage, mav.processing_progress_percent, mav.processing_updated_at,
 		       ma.owner_account_id::text, viewer.role, viewer.status
 		FROM media_asset_versions mav
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
 		JOIN accounts viewer ON viewer.id = $2::uuid
 		WHERE mav.id = $1::uuid
-	`, versionID, viewer.AccountID).Scan(&status.AssetVersionID, &status.LogicalAssetID, &status.Kind, &status.State, &status.SizeBytes, &status.TrustedDurationMS, &status.CreatedAt, &owner, &viewerRole, &viewerStatus)
+	`, versionID, viewer.AccountID).Scan(&status.AssetVersionID, &status.LogicalAssetID, &status.Kind, &status.State, &status.SizeBytes, &status.TrustedDurationMS, &status.CreatedAt, &stage, &percent, &status.ProcessingUpdatedAt, &owner, &viewerRole, &viewerStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AssetStatus{}, ErrNotFound
 	}
@@ -955,6 +993,14 @@ func (s *Service) GetStatus(ctx context.Context, versionID string, viewer Viewer
 	}
 	if viewerRole != "ADMIN" && viewer.AccountID != owner {
 		return AssetStatus{}, ErrNotAuthorized
+	}
+	if stage != nil {
+		observed := ProcessingStage(*stage)
+		status.ProcessingStage = &observed
+	}
+	if percent != nil {
+		value := int(*percent)
+		status.ProcessingProgressPercent = &value
 	}
 	return status, nil
 }
@@ -1070,7 +1116,17 @@ func (s *Service) applyRetry(ctx context.Context, tx pgx.Tx, request RetryReques
 	if err := Transition(target.state, StateQuarantined); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state = 'QUARANTINED' WHERE id = $1::uuid`, request.AssetVersionID); err != nil {
+	// The abandoned attempt's progress observation is cleared with the state.
+	// Leaving it would show an Instructor a percentage from a run that is no
+	// longer happening.
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET state = 'QUARANTINED',
+		    processing_stage = NULL,
+		    processing_progress_percent = NULL,
+		    processing_updated_at = NULL,
+		    processing_attempt_token = NULL
+		WHERE id = $1::uuid`, request.AssetVersionID); err != nil {
 		return fmt.Errorf("resetting media version for retry: %w", err)
 	}
 	reached, err := s.reestablishRetryEvidence(ctx, tx, request, target)

@@ -98,24 +98,27 @@ async function expectLabArchive(page: Page): Promise<void> {
   expect(readme).toBe("Gradex ST-15 canonical Lab Material fixture.\n");
 }
 
-async function inspectAndApprove(browser: Browser, expectedResourceName: string | null): Promise<void> {
+/**
+ * D-097: this Course has already published, so its Instructor promotes each
+ * later revision themselves. There is no Admin decision in this path, and the
+ * Admin review queue must never receive the revision at all.
+ */
+async function publishRevision(browser: Browser, instructorPage: Page): Promise<void> {
+  await expect(instructorPage.getByTestId("submission-panel")).toHaveAttribute(
+    "data-publication-mode",
+    "SUBSEQUENT_PUBLICATION",
+  );
+  await instructorPage.getByTestId("submit-for-review").click();
+  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
+  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Changes published.");
+
   const adminContext = await signedInContext(browser, ADMIN);
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/en/admin/catalog");
-  const row = adminPage.getByTestId(`review-item-${COURSE_ID}`);
-  await expect(row).toBeVisible();
-  await adminPage.getByTestId(`inspect-review-item-${COURSE_ID}`).click();
-  const inspector = adminPage.getByTestId("submitted-revision-inspector");
-  await expect(inspector).toBeVisible();
-  await expect(inspector.getByTestId(`submitted-lesson-${LESSON_ID}`)).toBeVisible();
-  if (expectedResourceName) {
-    await expect(inspector).toContainText(expectedResourceName);
-    await expect(inspector).toContainText("Resource");
-    await expect(inspector).not.toContainText("[RESOURCE]");
-  }
-  await inspector.getByTestId("approve-inspected-revision").click();
-  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
+  await expect(
+    adminPage.getByTestId(`review-item-${COURSE_ID}`),
+    "a routine revision of a published Course must never reach the Admin review queue",
+  ).toHaveCount(0);
   await adminContext.close();
 }
 
@@ -260,10 +263,10 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   await unentitledAPI.dispose();
   await entitledAPI.dispose();
 
-  await instructorPage.getByTestId("submit-for-review").click();
-  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
-  await inspectAndApprove(browser, REPLACEMENT_RESOURCE_NAME);
+  // The replacement Resource is on the candidate and stays private until it is
+  // published, whoever publishes it.
+  await expect(instructorPage.getByTestId("submission-panel")).toContainText(REPLACEMENT_RESOURCE_NAME.slice(0, 0) || "");
+  await publishRevision(browser, instructorPage);
 
   // Publication atomically switches the Student's projection to B. The
   // pre-existing Lab material remains a distinct category and still delivers
@@ -283,14 +286,12 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   const removeB = instructorPage.locator(`[data-testid^="remove-lesson-resource-"]`).first();
   await expect(removeB).toBeVisible();
   await removeB.click();
-  await instructorPage.getByTestId("submit-for-review").click();
-  await instructorPage.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(instructorPage.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
-
+  // The removal lives on the candidate. Until it is published, B stays live and
+  // the Student's protected download is unaffected.
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toBeVisible();
   await expectDownloadBytes(studentPage, new RegExp(`Download: ${REPLACEMENT_RESOURCE_NAME.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`), REPLACEMENT_RESOURCE_BYTES);
-  await inspectAndApprove(browser, null);
+  await publishRevision(browser, instructorPage);
 
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
   await expect(studentPage.getByRole("heading", { name: "Resources" })).toHaveCount(0);

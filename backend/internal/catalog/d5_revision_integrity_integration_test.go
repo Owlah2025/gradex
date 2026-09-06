@@ -58,7 +58,15 @@ func newD5Fixture(t *testing.T) *d5Fixture {
 		t.Fatalf("NewRepository: %v", err)
 	}
 
-	f := &d5Fixture{
+	f := newD5FixtureValue(repo, p, ctx, ownerID, courseID)
+
+	f.seedDependencies(t)
+	f.publishInitialRevision(t)
+	return f
+}
+
+func newD5FixtureValue(repo *Repository, p *pgxpool.Pool, ctx context.Context, ownerID, courseID string) *d5Fixture {
+	return &d5Fixture{
 		p:           p,
 		repo:        repo,
 		validator:   NewDBAssetVersionValidator(p),
@@ -79,10 +87,26 @@ func newD5Fixture(t *testing.T) *d5Fixture {
 		labOld:      "20000000-0000-0000-0000-000000000007",
 		labNew:      "20000000-0000-0000-0000-000000000008",
 	}
+}
 
+// newD5PendingFixture stops one step short: the initial revision is authored,
+// priced, and submitted, but no Admin has decided on it. It is the only shape
+// in which the Admin approve/reject race still exists, because D-097 leaves
+// Admin review on a Course's first publication alone.
+func newD5PendingFixture(t *testing.T) (*d5Fixture, string) {
+	t.Helper()
+	freshSchema(t)
+	p, _ := pool(t)
+	ctx := context.Background()
+
+	ownerID, courseID := seedInstructorAndCourse(t, p, ctx)
+	repo, err := NewRepository(p, testOutboxWriter(t))
+	if err != nil {
+		t.Fatalf("NewRepository: %v", err)
+	}
+	f := newD5FixtureValue(repo, p, ctx, ownerID, courseID)
 	f.seedDependencies(t)
-	f.publishInitialRevision(t)
-	return f
+	return f, f.authorInitialRevision(t)
 }
 
 func (f *d5Fixture) seedDependencies(t *testing.T) {
@@ -309,6 +333,21 @@ func (f *d5Fixture) seedUnreadyPreviewAsset(t *testing.T, versionID, revisionID 
 
 func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 	t.Helper()
+	revisionID := f.authorInitialRevision(t)
+	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+		CourseID: f.courseID, RevisionID: revisionID,
+		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+	}); err != nil {
+		t.Fatalf("ApproveCourse initial revision: %v", err)
+	}
+	f.liveID = revisionID
+}
+
+// authorInitialRevision authors, prices, and submits the Course's first
+// revision, and returns its identifier. It stops at PENDING_REVIEW: the first
+// publication is the Admin's decision and is taken by the caller.
+func (f *d5Fixture) authorInitialRevision(t *testing.T) string {
+	t.Helper()
 	var revisionID string
 	if err := f.p.QueryRow(f.ctx,
 		`SELECT id FROM course_revisions WHERE course_id = $1::uuid`,
@@ -404,13 +443,7 @@ func (f *d5Fixture) publishInitialRevision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetCoursePrice initial revision: %v", err)
 	}
-	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-		CourseID: f.courseID, RevisionID: revisionID,
-		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-	}); err != nil {
-		t.Fatalf("ApproveCourse initial revision: %v", err)
-	}
-	f.liveID = revisionID
+	return revisionID
 }
 
 func (f *d5Fixture) candidate(t *testing.T) *CourseRevision {
@@ -422,16 +455,27 @@ func (f *d5Fixture) candidate(t *testing.T) *CourseRevision {
 	return candidate
 }
 
-func (f *d5Fixture) submittedCandidate(t *testing.T) *CourseRevision {
+// publishableCandidate is an open editable candidate of the already-published
+// fixture Course — the exact revision its Instructor may publish themselves.
+//
+// It no longer passes through submission: D-097 refuses to enqueue a Course
+// that has already been published, because a routine edit must never become an
+// Admin review item.
+func (f *d5Fixture) publishableCandidate(t *testing.T) *CourseRevision {
 	t.Helper()
-	candidate := f.candidate(t)
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
+	return f.candidate(t)
+}
+
+// publish promotes one exact candidate through the Instructor publication
+// path. It is the same atomic primitive Admin approval uses, so the
+// revalidation, locking, rollback, and race assertions below hold it to
+// exactly the standard they held approval to.
+func (f *d5Fixture) publish(ctx context.Context, candidateID string) error {
+	_, err := f.repo.PublishRevision(ctx, f.validator, PublishRevisionRequest{
+		CourseID: f.courseID, RevisionID: candidateID,
 		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-	}); err != nil {
-		t.Fatalf("SubmitCourse candidate: %v", err)
-	}
-	return candidate
+	})
+	return err
 }
 
 func authoredFingerprint(revision *CourseRevision) string {
@@ -632,11 +676,8 @@ func TestPublicPreviewIsRevisionScopedAndSwitchesOnlyOnApproval(t *testing.T) {
 		t.Fatalf("candidate B leaked before approval: preview=%v err=%v", liveBeforeApproval.LiveRevision, err)
 	}
 
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{CourseID: f.courseID, RevisionID: candidateB.ID, OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID}); err != nil {
-		t.Fatalf("submitting candidate B: %v", err)
-	}
-	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{CourseID: f.courseID, RevisionID: candidateB.ID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID}); err != nil {
-		t.Fatalf("approving candidate B: %v", err)
+	if err := f.publish(f.ctx, candidateB.ID); err != nil {
+		t.Fatalf("publishing candidate B: %v", err)
 	}
 	liveB, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
 	if err != nil || liveB.LiveRevision == nil || liveB.LiveRevision.ID != candidateB.ID || liveB.LiveRevision.PreviewAssetVersionID == nil || *liveB.LiveRevision.PreviewAssetVersionID != f.previewNew {
@@ -651,11 +692,8 @@ func TestPublicPreviewIsRevisionScopedAndSwitchesOnlyOnApproval(t *testing.T) {
 	if err != nil || liveBeforeRemovalApproval.LiveRevision == nil || liveBeforeRemovalApproval.LiveRevision.PreviewAssetVersionID == nil || *liveBeforeRemovalApproval.LiveRevision.PreviewAssetVersionID != f.previewNew {
 		t.Fatalf("candidate preview removal changed live B early: preview=%v err=%v", liveBeforeRemovalApproval.LiveRevision, err)
 	}
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{CourseID: f.courseID, RevisionID: candidateC.ID, OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID}); err != nil {
-		t.Fatalf("submitting candidate C: %v", err)
-	}
-	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{CourseID: f.courseID, RevisionID: candidateC.ID, AdminAccountID: f.adminID, ActorDescriptor: f.adminID}); err != nil {
-		t.Fatalf("approving candidate C: %v", err)
+	if err := f.publish(f.ctx, candidateC.ID); err != nil {
+		t.Fatalf("publishing candidate C: %v", err)
 	}
 	liveC, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
 	if err != nil || liveC.LiveRevision == nil || liveC.LiveRevision.ID != candidateC.ID || liveC.LiveRevision.PreviewAssetVersionID != nil {
@@ -899,7 +937,7 @@ func (f *d5Fixture) approvalSnapshot(t *testing.T, candidateID string) approvalS
 
 func TestD5ApprovalRollbackIsAtomicAfterEveryLoadBearingStage(t *testing.T) {
 	f := newD5Fixture(t)
-	candidate := f.submittedCandidate(t)
+	candidate := f.publishableCandidate(t)
 	baseline := f.approvalSnapshot(t, candidate.ID)
 
 	for _, stage := range []approvalFailureStage{
@@ -910,13 +948,9 @@ func TestD5ApprovalRollbackIsAtomicAfterEveryLoadBearingStage(t *testing.T) {
 		approvalAfterOutbox,
 	} {
 		t.Run(string(stage), func(t *testing.T) {
-			_, err := f.repo.ApproveCourse(
-				withApprovalFailure(f.ctx, stage), f.validator, ApproveCourseRequest{
-					CourseID: f.courseID, RevisionID: candidate.ID,
-					AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-				})
+			err := f.publish(withApprovalFailure(f.ctx, stage), candidate.ID)
 			if err == nil {
-				t.Fatalf("approval unexpectedly succeeded at injected stage %s", stage)
+				t.Fatalf("publication unexpectedly succeeded at injected stage %s", stage)
 			}
 			after := f.approvalSnapshot(t, candidate.ID)
 			if after != baseline {
@@ -1046,18 +1080,15 @@ func TestD5ApprovalRevalidatesEveryDependencyClass(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			f := newD5Fixture(t)
-			candidate := f.submittedCandidate(t)
+			candidate := f.publishableCandidate(t)
 			baseline := f.approvalSnapshot(t, candidate.ID)
 			test.invalidate(t, f, candidate)
 
-			_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID,
-				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-			})
+			err := f.publish(f.ctx, candidate.ID)
 			assertSubmissionFailure(t, err)
 			after := f.approvalSnapshot(t, candidate.ID)
 			if after != baseline {
-				t.Fatalf("failed approval changed durable state: before=%+v after=%+v", baseline, after)
+				t.Fatalf("failed publication changed durable state: before=%+v after=%+v", baseline, after)
 			}
 			test.restore(t, f)
 		})
@@ -1076,7 +1107,7 @@ func TestST15ApprovalRefusesRetiredProtectedLessonFileDependencies(t *testing.T)
 		dependency := dependency
 		t.Run(dependency.name, func(t *testing.T) {
 			f := newD5Fixture(t)
-			candidate := f.submittedCandidate(t) // Valid scanned attachment at submission time.
+			candidate := f.publishableCandidate(t) // Valid scanned attachment at submission time.
 			before := f.approvalSnapshot(t, candidate.ID)
 
 			if _, err := f.p.Exec(f.ctx, `
@@ -1086,10 +1117,7 @@ func TestST15ApprovalRefusesRetiredProtectedLessonFileDependencies(t *testing.T)
 				t.Fatalf("retiring submitted %s dependency: %v", dependency.name, err)
 			}
 
-			_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID,
-				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-			})
+			err := f.publish(f.ctx, candidate.ID)
 			assertSubmissionFailure(t, err)
 			var validation *SubmissionValidationError
 			if !errors.As(err, &validation) {
@@ -1189,12 +1217,6 @@ func TestD5LiveReadersObserveCompleteOldOrNewGraph(t *testing.T) {
 
 	candidate := f.candidate(t)
 	f.mutateCandidateToNewGraph(t, candidate)
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
-		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-	}); err != nil {
-		t.Fatalf("submitting new graph: %v", err)
-	}
 	candidateGraph, err := f.repo.loadRevisionGraphByID(f.ctx, candidate.ID)
 	if err != nil {
 		t.Fatalf("loading candidate graph: %v", err)
@@ -1226,17 +1248,13 @@ func TestD5LiveReadersObserveCompleteOldOrNewGraph(t *testing.T) {
 	approvalErr := make(chan error, 1)
 	go func() {
 		<-start
-		_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-			CourseID: f.courseID, RevisionID: candidate.ID,
-			AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-		})
-		approvalErr <- err
+		approvalErr <- f.publish(f.ctx, candidate.ID)
 	}()
 	close(start)
 	readers.Wait()
 	close(results)
 	if err := <-approvalErr; err != nil {
-		t.Fatalf("ApproveCourse: %v", err)
+		t.Fatalf("PublishRevision: %v", err)
 	}
 	select {
 	case err := <-errs:
@@ -1253,19 +1271,14 @@ func TestD5LiveReadersObserveCompleteOldOrNewGraph(t *testing.T) {
 
 func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 	f := newD5Fixture(t)
-	candidate := f.submittedCandidate(t)
+	candidate := f.publishableCandidate(t)
 
 	reached := make(chan struct{}, 1)
 	release := make(chan struct{})
 	approvalDone := make(chan error, 1)
 	go func() {
-		_, err := f.repo.ApproveCourse(
-			withApprovalHold(f.ctx, approvalHold{reached: reached, release: release}),
-			f.validator, ApproveCourseRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID,
-				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-			})
-		approvalDone <- err
+		approvalDone <- f.publish(
+			withApprovalHold(f.ctx, approvalHold{reached: reached, release: release}), candidate.ID)
 	}()
 	<-reached
 
@@ -1295,14 +1308,14 @@ func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 
 	select {
 	case name := <-writeDone:
-		t.Fatalf("%s dependency write escaped the approval share lock", name)
+		t.Fatalf("%s dependency write escaped the publication share lock", name)
 	case err := <-writeErr:
 		t.Fatal(err)
 	case <-time.After(150 * time.Millisecond):
 	}
 	close(release)
 	if err := <-approvalDone; err != nil {
-		t.Fatalf("ApproveCourse: %v", err)
+		t.Fatalf("PublishRevision: %v", err)
 	}
 	for range writes {
 		select {
@@ -1310,14 +1323,14 @@ func TestD5ApprovalDependencyLocksSerializeConflictingWrites(t *testing.T) {
 		case err := <-writeErr:
 			t.Fatal(err)
 		case <-time.After(5 * time.Second):
-			t.Fatal("dependency write stayed blocked after approval commit")
+			t.Fatal("dependency write stayed blocked after the publication commit")
 		}
 	}
 }
 
-func TestD5PublishedCandidateRejectionPreservesLiveStateAndAccess(t *testing.T) {
+func TestD5PublishedCandidateEditsPreserveLiveStateAndAccess(t *testing.T) {
 	f := newD5Fixture(t)
-	candidate := f.submittedCandidate(t)
+	candidate := f.publishableCandidate(t)
 
 	var enrollmentID string
 	if err := f.p.QueryRow(f.ctx, `
@@ -1342,7 +1355,7 @@ func TestD5PublishedCandidateRejectionPreservesLiveStateAndAccess(t *testing.T) 
 
 	beforeCourse, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
 	if err != nil {
-		t.Fatalf("GetLiveCourseGraph before rejection: %v", err)
+		t.Fatalf("GetLiveCourseGraph before the edit: %v", err)
 	}
 	beforeFingerprint := authoredFingerprint(beforeCourse.LiveRevision)
 	var beforeProgress, beforeEntitlements int
@@ -1354,67 +1367,91 @@ func TestD5PublishedCandidateRejectionPreservesLiveStateAndAccess(t *testing.T) 
 		t.Fatalf("counting access rows: %v", err)
 	}
 
-	const reason = "Keep the bilingual lab instructions complete."
-	rejected, err := f.repo.RequestChanges(f.ctx, RequestChangesRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID, AdminAccountID: f.adminID,
-		Reason: reason, ActorDescriptor: f.adminID,
-	})
-	if err != nil {
-		t.Fatalf("RequestChanges: %v", err)
+	// D-097 removed the path this test used to take. A Course that has already
+	// published cannot be submitted for review, so an Admin change request on a
+	// routine edit no longer exists to be raced or rejected. What must still
+	// hold is the property the old test was really guarding: nothing an
+	// Instructor does to a candidate — a refused submission, and then a
+	// successful publication — may disturb the live revision's Student access.
+	submitErr := func() error {
+		_, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
+			CourseID: f.courseID, RevisionID: candidate.ID,
+			OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
+		})
+		return err
+	}()
+	if !errors.Is(submitErr, ErrAlreadyPublished) {
+		t.Fatalf("SubmitCourse on a published course = %v, want ErrAlreadyPublished", submitErr)
 	}
-	if rejected.Lifecycle != LifecyclePublished || rejected.LiveRevisionID == nil ||
-		*rejected.LiveRevisionID != f.liveID {
-		t.Fatalf("rejection changed returned live state: %+v", rejected)
+	queue, err := f.repo.ListReviewQueue(f.ctx)
+	if err != nil {
+		t.Fatalf("ListReviewQueue: %v", err)
+	}
+	if len(queue) != 0 {
+		t.Fatalf("review queue holds %d items after a routine edit, want 0", len(queue))
 	}
 
-	var candidateState, storedReason, lifecycle, pointer, liveState string
-	var afterProgress, afterEntitlements int
-	if err := f.p.QueryRow(f.ctx, `
-		SELECT candidate.state, candidate.review_reason, c.lifecycle,
-		       c.live_revision_id::text, live.state,
-		       (SELECT count(*) FROM progress),
-		       (SELECT count(*) FROM fake_entitlements)
-		FROM courses c
-		JOIN course_revisions candidate ON candidate.id = $2::uuid
-		JOIN course_revisions live ON live.id = c.live_revision_id
-		WHERE c.id = $1::uuid
-	`, f.courseID, candidate.ID).Scan(
-		&candidateState, &storedReason, &lifecycle, &pointer, &liveState,
-		&afterProgress, &afterEntitlements,
-	); err != nil {
-		t.Fatalf("reading rejection state: %v", err)
+	assertLiveAndAccessUnchanged := func(stage string, wantLive string, wantCandidateState RevisionState) {
+		t.Helper()
+		var candidateState, lifecycle, pointer, liveState string
+		var afterProgress, afterEntitlements int
+		if err := f.p.QueryRow(f.ctx, `
+			SELECT candidate.state, c.lifecycle,
+			       c.live_revision_id::text, live.state,
+			       (SELECT count(*) FROM progress),
+			       (SELECT count(*) FROM fake_entitlements)
+			FROM courses c
+			JOIN course_revisions candidate ON candidate.id = $2::uuid
+			JOIN course_revisions live ON live.id = c.live_revision_id
+			WHERE c.id = $1::uuid
+		`, f.courseID, candidate.ID).Scan(
+			&candidateState, &lifecycle, &pointer, &liveState,
+			&afterProgress, &afterEntitlements,
+		); err != nil {
+			t.Fatalf("reading %s state: %v", stage, err)
+		}
+		if candidateState != string(wantCandidateState) {
+			t.Fatalf("%s: candidate state = %s, want %s", stage, candidateState, wantCandidateState)
+		}
+		if lifecycle != string(LifecyclePublished) || pointer != wantLive || liveState != string(RevisionApproved) {
+			t.Fatalf("%s: lifecycle=%s pointer=%s live=%s, want PUBLISHED/%s/APPROVED",
+				stage, lifecycle, pointer, liveState, wantLive)
+		}
+		if afterProgress != beforeProgress || afterEntitlements != beforeEntitlements {
+			t.Fatalf("%s: access rows changed: before=%d/%d after=%d/%d",
+				stage, beforeProgress, beforeEntitlements, afterProgress, afterEntitlements)
+		}
 	}
-	if candidateState != string(RevisionRejected) || storedReason != reason {
-		t.Fatalf("candidate state/reason = %s/%q, want REJECTED/%q", candidateState, storedReason, reason)
-	}
-	if lifecycle != string(LifecyclePublished) || pointer != f.liveID ||
-		liveState != string(RevisionApproved) {
-		t.Fatalf("live state changed: lifecycle=%s pointer=%s live=%s", lifecycle, pointer, liveState)
-	}
-	if afterProgress != beforeProgress || afterEntitlements != beforeEntitlements {
-		t.Fatalf("access rows changed: before=%d/%d after=%d/%d",
-			beforeProgress, beforeEntitlements, afterProgress, afterEntitlements)
-	}
-	afterCourse, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
+
+	assertLiveAndAccessUnchanged("after the refused submission", f.liveID, RevisionDraft)
+	afterRefusal, err := f.repo.GetLiveCourseGraph(f.ctx, f.courseID)
 	if err != nil {
-		t.Fatalf("GetLiveCourseGraph after rejection: %v", err)
+		t.Fatalf("GetLiveCourseGraph after the refused submission: %v", err)
 	}
-	if authoredFingerprint(afterCourse.LiveRevision) != beforeFingerprint {
-		t.Fatal("rejection changed the published graph")
+	if authoredFingerprint(afterRefusal.LiveRevision) != beforeFingerprint {
+		t.Fatal("a refused submission changed the published graph")
 	}
+
+	// The Instructor's own publication then succeeds, moves the pointer, and
+	// still leaves every Student access row alone.
+	if err := f.publish(f.ctx, candidate.ID); err != nil {
+		t.Fatalf("PublishRevision: %v", err)
+	}
+	assertLiveAndAccessUnchanged("after the instructor publication", candidate.ID, RevisionApproved)
 
 	var audits, notifications int
 	if err := f.p.QueryRow(f.ctx, `
 		SELECT
 			(SELECT count(*) FROM audit_events
-			 WHERE action = 'COURSE_REVISION_REJECTED' AND metadata->>'revision_id' = $1),
+			 WHERE action = 'COURSE_REVISION_PUBLISHED' AND metadata->>'revision_id' = $1),
 			(SELECT count(*) FROM outbox_events
-			 WHERE event_type = 'catalog.course_revision_rejected' AND aggregate_id = $2::uuid)
+			 WHERE event_type = 'catalog.course_published' AND aggregate_id = $2::uuid)
 	`, candidate.ID, f.courseID).Scan(&audits, &notifications); err != nil {
-		t.Fatalf("counting rejection evidence: %v", err)
+		t.Fatalf("counting publication evidence: %v", err)
 	}
-	if audits != 1 || notifications != 1 {
-		t.Fatalf("rejection evidence = audit %d, notification %d; want 1/1", audits, notifications)
+	// Two publication notifications: the Admin's first one, and this one.
+	if audits != 1 || notifications != 2 {
+		t.Fatalf("publication evidence = audit %d, notification %d; want 1/2", audits, notifications)
 	}
 }
 
@@ -1426,14 +1463,24 @@ func requireConflict(t *testing.T, err error) {
 	}
 }
 
-func assertPendingEditAbsent(t *testing.T, f *d5Fixture, candidateID string) {
+// assertPublishedTitle proves that whatever the publication committed is what
+// went live — the whole revision, and exactly the revision the Instructor was
+// looking at when the transaction took its lock.
+func assertPublishedTitle(t *testing.T, f *d5Fixture, candidateID, want string) {
 	t.Helper()
 	graph, err := f.repo.loadRevisionGraphByID(f.ctx, candidateID)
 	if err != nil {
-		t.Fatalf("loading approved candidate: %v", err)
+		t.Fatalf("loading published candidate: %v", err)
 	}
-	if graph.TitleEn == "ILLEGAL PENDING EDIT" {
-		t.Fatal("pending-candidate mutation entered the approved graph")
+	if graph.TitleEn != want {
+		t.Fatalf("published title = %q, want %q", graph.TitleEn, want)
+	}
+	var live string
+	if err := f.p.QueryRow(f.ctx, `SELECT live_revision_id::text FROM courses WHERE id = $1::uuid`, f.courseID).Scan(&live); err != nil {
+		t.Fatalf("reading live pointer: %v", err)
+	}
+	if live != candidateID {
+		t.Fatalf("live_revision_id = %s, want the published candidate %s", live, candidateID)
 	}
 }
 
@@ -1476,29 +1523,21 @@ func TestD5ExactFourRaces(t *testing.T) {
 	})
 
 	candidate := f.candidate(t)
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
-		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-	}); err != nil {
-		t.Fatalf("submitting race-2 candidate: %v", err)
-	}
-	t.Run("2 concurrent approvals", func(t *testing.T) {
+	// A double-clicked "Publish changes" is the race an Instructor can actually
+	// produce, and it must promote the revision exactly once.
+	t.Run("2 concurrent publications", func(t *testing.T) {
 		start := make(chan struct{})
 		errs := make(chan error, 2)
 		for i := 0; i < 2; i++ {
 			go func() {
 				<-start
-				_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-					CourseID: f.courseID, RevisionID: candidate.ID,
-					AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-				})
-				errs <- err
+				errs <- f.publish(f.ctx, candidate.ID)
 			}()
 		}
 		close(start)
 		first, second := <-errs, <-errs
 		if (first == nil) == (second == nil) {
-			t.Fatalf("approvals did not produce one winner: %v / %v", first, second)
+			t.Fatalf("publications did not produce one winner: %v / %v", first, second)
 		}
 		if first != nil {
 			requireConflict(t, first)
@@ -1510,18 +1549,23 @@ func TestD5ExactFourRaces(t *testing.T) {
 			SELECT
 				(SELECT count(*) FROM course_revisions WHERE course_id = $1::uuid AND state = 'APPROVED'),
 				(SELECT count(*) FROM audit_events
-				 WHERE action = 'COURSE_PUBLISHED' AND metadata->>'revision_id' = $2)
+				 WHERE action = 'COURSE_REVISION_PUBLISHED' AND metadata->>'revision_id' = $2)
 		`, f.courseID, candidate.ID).Scan(&liveCount, &evidence); err != nil {
-			t.Fatalf("reading approval race evidence: %v", err)
+			t.Fatalf("reading publication race evidence: %v", err)
 		}
 		if liveCount != 1 || evidence != 1 {
-			t.Fatalf("approval race state/evidence = %d/%d, want 1/1", liveCount, evidence)
+			t.Fatalf("publication race state/evidence = %d/%d, want 1/1", liveCount, evidence)
 		}
 	})
 
-	t.Run("3 approval versus Instructor mutation", func(t *testing.T) {
+	// An Instructor may edit their own candidate right up to the moment they
+	// publish it: unlike an Admin review, there is no read-only window. The
+	// invariant is therefore not that one action is refused, but that the two
+	// serialise on the Course lock and the publication commits exactly the
+	// revision it locked — never a half-applied mixture of the two.
+	t.Run("3 publication versus Instructor mutation", func(t *testing.T) {
 		t.Run("mutation locks first", func(t *testing.T) {
-			candidate := f.submittedCandidate(t)
+			candidate := f.publishableCandidate(t)
 			reached := make(chan struct{}, 1)
 			release := make(chan struct{})
 			mutationResult := make(chan error, 1)
@@ -1534,7 +1578,7 @@ func TestD5ExactFourRaces(t *testing.T) {
 					f.validator,
 					UpdateRevisionRequest{
 						CourseID: f.courseID, RevisionID: candidate.ID, OwnerAccountID: f.ownerID,
-						TitleEn: "ILLEGAL PENDING EDIT",
+						TitleEn: "EDIT BEFORE PUBLICATION",
 					},
 					f.ownerID,
 				)
@@ -1542,40 +1586,36 @@ func TestD5ExactFourRaces(t *testing.T) {
 			}()
 			<-reached
 
-			approvalResult := make(chan error, 1)
+			publicationResult := make(chan error, 1)
 			go func() {
-				_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-					CourseID: f.courseID, RevisionID: candidate.ID,
-					AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-				})
-				approvalResult <- err
+				publicationResult <- f.publish(f.ctx, candidate.ID)
 			}()
 			select {
-			case err := <-approvalResult:
-				t.Fatalf("approval bypassed mutation's Course lock: %v", err)
+			case err := <-publicationResult:
+				t.Fatalf("publication bypassed mutation's Course lock: %v", err)
 			case <-time.After(100 * time.Millisecond):
 			}
 			close(release)
-			requireConflict(t, <-mutationResult)
-			if err := <-approvalResult; err != nil {
-				t.Fatalf("approval must commit after the refused mutation: %v", err)
+			if err := <-mutationResult; err != nil {
+				t.Fatalf("an edit that took the lock first must commit: %v", err)
 			}
-			assertPendingEditAbsent(t, f, candidate.ID)
+			if err := <-publicationResult; err != nil {
+				t.Fatalf("publication must commit after the edit: %v", err)
+			}
+			// The publication read the graph after the edit committed, so what
+			// went live carries it. Nothing was published from a stale read.
+			assertPublishedTitle(t, f, candidate.ID, "EDIT BEFORE PUBLICATION")
 		})
 
-		t.Run("approval locks first", func(t *testing.T) {
-			candidate := f.submittedCandidate(t)
+		t.Run("publication locks first", func(t *testing.T) {
+			candidate := f.publishableCandidate(t)
+			previousTitle := candidate.TitleEn
 			reached := make(chan struct{}, 1)
 			release := make(chan struct{})
-			approvalResult := make(chan error, 1)
+			publicationResult := make(chan error, 1)
 			go func() {
-				_, err := f.repo.ApproveCourse(
-					withApprovalHold(f.ctx, approvalHold{reached: reached, release: release}),
-					f.validator, ApproveCourseRequest{
-						CourseID: f.courseID, RevisionID: candidate.ID,
-						AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-					})
-				approvalResult <- err
+				publicationResult <- f.publish(
+					withApprovalHold(f.ctx, approvalHold{reached: reached, release: release}), candidate.ID)
 			}()
 			<-reached
 
@@ -1583,109 +1623,121 @@ func TestD5ExactFourRaces(t *testing.T) {
 			go func() {
 				_, err := f.repo.UpdateCourseRevision(f.ctx, f.validator, UpdateRevisionRequest{
 					CourseID: f.courseID, RevisionID: candidate.ID, OwnerAccountID: f.ownerID,
-					TitleEn: "ILLEGAL PENDING EDIT",
+					TitleEn: "EDIT AFTER PUBLICATION",
 				}, f.ownerID)
 				mutationResult <- err
 			}()
 			select {
 			case err := <-mutationResult:
-				t.Fatalf("mutation bypassed approval's Course lock: %v", err)
+				t.Fatalf("mutation bypassed the publication's Course lock: %v", err)
 			case <-time.After(100 * time.Millisecond):
 			}
 			close(release)
-			if err := <-approvalResult; err != nil {
-				t.Fatalf("approval must commit before the refused mutation: %v", err)
+			if err := <-publicationResult; err != nil {
+				t.Fatalf("publication must commit before the refused edit: %v", err)
 			}
+			// The revision is APPROVED and live now, so the edit that was
+			// waiting on the lock is refused rather than mutating live content.
 			requireConflict(t, <-mutationResult)
-			assertPendingEditAbsent(t, f, candidate.ID)
+			assertPublishedTitle(t, f, candidate.ID, previousTitle)
 		})
 	})
 
-	candidate = f.submittedCandidate(t)
-	t.Run("4 approval versus rejection", func(t *testing.T) {
-		var approvalOutboxBefore, rejectionOutboxBefore int
-		if err := f.p.QueryRow(f.ctx, `
-			SELECT
-				(SELECT count(*) FROM outbox_events
-				 WHERE event_type = 'catalog.course_published' AND aggregate_id = $1::uuid),
-				(SELECT count(*) FROM outbox_events
-				 WHERE event_type = 'catalog.course_revision_rejected' AND aggregate_id = $1::uuid)
-		`, f.courseID).Scan(&approvalOutboxBefore, &rejectionOutboxBefore); err != nil {
-			t.Fatalf("reading terminal-race outbox baseline: %v", err)
-		}
-		start := make(chan struct{})
-		errs := make(chan error, 2)
-		go func() {
-			<-start
-			_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID,
-				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-			})
-			errs <- err
-		}()
-		go func() {
-			<-start
-			_, err := f.repo.RequestChanges(f.ctx, RequestChangesRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID, AdminAccountID: f.adminID,
-				Reason: "Concurrent rejection", ActorDescriptor: f.adminID,
-			})
-			errs <- err
-		}()
-		close(start)
-		first, second := <-errs, <-errs
-		if (first == nil) == (second == nil) {
-			t.Fatalf("terminal actions did not produce one winner: %v / %v", first, second)
-		}
-		if first != nil {
-			requireConflict(t, first)
-		} else {
-			requireConflict(t, second)
-		}
-		var state string
-		var approvals, rejections, approvalOutbox, rejectionOutbox int
-		if err := f.p.QueryRow(f.ctx, `
-			SELECT state,
-			       (SELECT count(*) FROM audit_events
-			        WHERE action = 'COURSE_PUBLISHED' AND metadata->>'revision_id' = $1),
-			       (SELECT count(*) FROM audit_events
-			        WHERE action = 'COURSE_REVISION_REJECTED' AND metadata->>'revision_id' = $1),
-			       (SELECT count(*) FROM outbox_events
-			        WHERE event_type = 'catalog.course_published'
-			          AND safe_payload->>'course_id' = $2),
-			       (SELECT count(*) FROM outbox_events
-			        WHERE event_type = 'catalog.course_revision_rejected'
-			          AND safe_payload->>'course_id' = $2)
-			FROM course_revisions WHERE id = $1::uuid
-		`, candidate.ID, f.courseID).Scan(
-			&state, &approvals, &rejections, &approvalOutbox, &rejectionOutbox,
-		); err != nil {
-			t.Fatalf("reading terminal race evidence: %v", err)
-		}
-		if state != string(RevisionApproved) && state != string(RevisionRejected) {
-			t.Fatalf("candidate terminal state = %s", state)
-		}
-		if approvals+rejections != 1 {
-			t.Fatalf("contradictory terminal audits: approve=%d reject=%d", approvals, rejections)
-		}
-		if state == string(RevisionApproved) && approvals != 1 {
-			t.Fatal("approved candidate lacks matching approval audit")
-		}
-		if state == string(RevisionRejected) && rejections != 1 {
-			t.Fatal("rejected candidate lacks matching rejection audit")
-		}
-		approvalDelta := approvalOutbox - approvalOutboxBefore
-		rejectionDelta := rejectionOutbox - rejectionOutboxBefore
-		if approvalDelta+rejectionDelta != 1 {
-			t.Fatalf("contradictory terminal outbox evidence: approval delta=%d rejection delta=%d",
-				approvalDelta, rejectionDelta)
-		}
-		if state == string(RevisionApproved) && approvalDelta != 1 {
-			t.Fatal("approved candidate lacks matching approval outbox event")
-		}
-		if state == string(RevisionRejected) && rejectionDelta != 1 {
-			t.Fatal("rejected candidate lacks matching rejection outbox event")
-		}
-	})
+}
+
+// D-097 leaves Admin review exactly where it was on a Course's FIRST
+// publication, so approve-versus-reject is still a real race — but only there.
+// It is exercised on a Course whose first revision is genuinely pending, which
+// is now the only state in which both actions are reachable at once.
+func TestD5FirstPublicationApprovalVersusRejectionRace(t *testing.T) {
+	f, candidateID := newD5PendingFixture(t)
+	candidate := &CourseRevision{ID: candidateID}
+
+	var approvalOutboxBefore, rejectionOutboxBefore int
+	if err := f.p.QueryRow(f.ctx, `
+		SELECT
+			(SELECT count(*) FROM outbox_events
+			 WHERE event_type = 'catalog.course_published' AND aggregate_id = $1::uuid),
+			(SELECT count(*) FROM outbox_events
+			 WHERE event_type = 'catalog.course_changes_requested' AND aggregate_id = $1::uuid)
+	`, f.courseID).Scan(&approvalOutboxBefore, &rejectionOutboxBefore); err != nil {
+		t.Fatalf("reading terminal-race outbox baseline: %v", err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+			CourseID: f.courseID, RevisionID: candidate.ID,
+			AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+		})
+		errs <- err
+	}()
+	go func() {
+		<-start
+		_, err := f.repo.RequestChanges(f.ctx, RequestChangesRequest{
+			CourseID: f.courseID, RevisionID: candidate.ID, AdminAccountID: f.adminID,
+			Reason: "Concurrent rejection", ActorDescriptor: f.adminID,
+		})
+		errs <- err
+	}()
+	close(start)
+	first, second := <-errs, <-errs
+	if (first == nil) == (second == nil) {
+		t.Fatalf("terminal actions did not produce one winner: %v / %v", first, second)
+	}
+	if first != nil {
+		requireConflict(t, first)
+	} else {
+		requireConflict(t, second)
+	}
+	var state string
+	var approvals, rejections, approvalOutbox, rejectionOutbox int
+	if err := f.p.QueryRow(f.ctx, `
+		SELECT state,
+		       (SELECT count(*) FROM audit_events
+		        WHERE action = 'COURSE_PUBLISHED' AND metadata->>'revision_id' = $1),
+		       (SELECT count(*) FROM audit_events
+		        WHERE action = 'COURSE_CHANGES_REQUESTED' AND metadata->>'revision_id' = $1),
+		       (SELECT count(*) FROM outbox_events
+		        WHERE event_type = 'catalog.course_published'
+		          AND safe_payload->>'course_id' = $2),
+		       (SELECT count(*) FROM outbox_events
+		        WHERE event_type = 'catalog.course_changes_requested'
+		          AND safe_payload->>'course_id' = $2)
+		FROM course_revisions WHERE id = $1::uuid
+	`, candidate.ID, f.courseID).Scan(
+		&state, &approvals, &rejections, &approvalOutbox, &rejectionOutbox,
+	); err != nil {
+		t.Fatalf("reading terminal race evidence: %v", err)
+	}
+	// On a first publication the Admin's refusal returns the Course to its
+	// Instructor rather than rejecting a revision behind a live one, so the
+	// losing outcome here is CHANGES_REQUESTED.
+	if state != string(RevisionApproved) && state != string(RevisionChangesRequested) {
+		t.Fatalf("candidate terminal state = %s", state)
+	}
+	if approvals+rejections != 1 {
+		t.Fatalf("contradictory terminal audits: approve=%d reject=%d", approvals, rejections)
+	}
+	if state == string(RevisionApproved) && approvals != 1 {
+		t.Fatal("approved candidate lacks matching approval audit")
+	}
+	if state == string(RevisionChangesRequested) && rejections != 1 {
+		t.Fatal("returned candidate lacks matching change-request audit")
+	}
+	approvalDelta := approvalOutbox - approvalOutboxBefore
+	rejectionDelta := rejectionOutbox - rejectionOutboxBefore
+	if approvalDelta+rejectionDelta != 1 {
+		t.Fatalf("contradictory terminal outbox evidence: approval delta=%d rejection delta=%d",
+			approvalDelta, rejectionDelta)
+	}
+	if state == string(RevisionApproved) && approvalDelta != 1 {
+		t.Fatal("approved candidate lacks matching approval outbox event")
+	}
+	if state == string(RevisionChangesRequested) && rejectionDelta != 1 {
+		t.Fatal("returned candidate lacks matching change-request outbox event")
+	}
 }
 
 // D-096. A preview whose provenance is trusted validation plus real processing

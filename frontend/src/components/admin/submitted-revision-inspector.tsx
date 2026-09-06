@@ -26,6 +26,7 @@ import { LoadingState } from "@/components/common/loading-state";
 import { StatusBadge } from "@/components/common/status-badge";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceSection } from "@/components/layout/workspace-page";
+import { ReviewThumbnails } from "./review-thumbnails";
 import { ReviewLessonPreview } from "./review-lesson-preview";
 import { PricingPanel } from "./pricing-panel";
 import { TaxonomyOverrideForm } from "./taxonomy-override-form";
@@ -309,6 +310,7 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
 
       {revision && canReview ? (
         <div className="space-y-6">
+          <ReviewThumbnails courseID={item.course_id} candidate={revision} live={course?.live_revision} />
           <WorkspaceSection title={copy.details} headingLevel="h3">
             <dl className="grid gap-x-6 gap-y-4 rounded-lg border border-border bg-card p-5 md:grid-cols-2">
               <Detail

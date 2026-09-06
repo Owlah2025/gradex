@@ -322,6 +322,7 @@ const publicPreviewUploadCompletionPath = "/api/v1/courses/:id/revisions/:revisi
 const publicPreviewUploadCompletionRoute = "POST " + publicPreviewUploadCompletionPath
 
 var expectedRouteMatrix = map[string]RouteMatrixEntry{
+	"PUT /api/v1/courses/:id/revisions/:revisionId/thumbnail": {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/thumbnail", Class: ClassOwnershipProtected},
 	"GET /healthz":                             {Method: http.MethodGet, Path: "/healthz", Class: ClassAnonymous},
 	"GET /readyz":                              {Method: http.MethodGet, Path: "/readyz", Class: ClassAnonymous},
 	"GET /api/v1/session/bootstrap":            {Method: http.MethodGet, Path: "/api/v1/session/bootstrap", Class: ClassAnonymous},
@@ -400,6 +401,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"PUT /api/v1/courses/:id/revisions/:revisionId/preview":                      {Method: http.MethodPut, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
 	"DELETE /api/v1/courses/:id/revisions/:revisionId/preview":                   {Method: http.MethodDelete, Path: "/api/v1/courses/:id/revisions/:revisionId/preview", Class: ClassOwnershipProtected},
 	"POST /api/v1/courses/:id/revisions/:revisionId/submit":                      {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/submit", Class: ClassOwnershipProtected},
+	"POST /api/v1/courses/:id/revisions/:revisionId/publish":                     {Method: http.MethodPost, Path: "/api/v1/courses/:id/revisions/:revisionId/publish", Class: ClassOwnershipProtected},
 
 	"GET /api/v1/admin/review/queue":                                                                {Method: http.MethodGet, Path: "/api/v1/admin/review/queue", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/review/courses/:id/revisions/:revisionId":                                    {Method: http.MethodGet, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId", Class: ClassCapabilityProtected},

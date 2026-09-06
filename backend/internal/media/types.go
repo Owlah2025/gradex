@@ -17,11 +17,12 @@ const (
 	KindResource    AssetKind = "RESOURCE"
 	KindLabMaterial AssetKind = "LAB_MATERIAL"
 	KindPreview     AssetKind = "PREVIEW"
+	KindThumbnail   AssetKind = "THUMBNAIL"
 )
 
 func (k AssetKind) Valid() bool {
 	switch k {
-	case KindVideo, KindResource, KindLabMaterial, KindPreview:
+	case KindVideo, KindResource, KindLabMaterial, KindPreview, KindThumbnail:
 		return true
 	default:
 		return false
@@ -129,6 +130,14 @@ type AssetStatus struct {
 	SizeBytes         int64
 	TrustedDurationMS *int64
 	CreatedAt         time.Time
+
+	// The current processing attempt's own account of how far it has got.
+	// All three are nil together: either an attempt has reported a measured
+	// observation or none has, and a missing observation is reported as
+	// missing rather than as zero.
+	ProcessingStage           *ProcessingStage
+	ProcessingProgressPercent *int
+	ProcessingUpdatedAt       *time.Time
 }
 
 func (s AssetStatus) Deliverable() bool { return s.State.Deliverable() }

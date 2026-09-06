@@ -1,4 +1,27 @@
 export const en = {
+  courseThumbnail: {
+    "title": "Course thumbnail",
+    "guidance": "Wide landscape · Recommended 16:9, 1200 × 675 px · Minimum 800 × 450 px · JPG, PNG or WebP · Maximum 5 MB",
+    "upload": "Upload thumbnail",
+    "replace": "Replace",
+    "remove": "Remove",
+    "empty": "No custom thumbnail. Gradex will use the generated course cover.",
+    "preview": "Course card preview",
+    "uploading": "Uploading",
+    "processing": "Processing image…",
+    "saved": "Thumbnail selection saved.",
+    "failed": "Could not save the thumbnail. Check that the image is valid and at least 800 × 450 pixels, then try again. Reload the saved cover before submitting.",
+    "invalidType": "Choose a JPG, PNG or WebP image. SVG and animated images are not supported.",
+    "invalidSize": "Choose a non-empty image no larger than 5 MB.",
+    "oneFile": "Choose one image at a time.",
+    "reload": "Reload saved cover",
+    "imageUnavailable": "The cover could not load. Reload to try again.",
+    "approvalNote": "This is the cover submitted for review. Students see changes only after Admin approval.",
+    "changed": "Changed",
+    "live": "Current live cover",
+    "candidate": "Candidate cover",
+    "createNote": "After creating the draft, upload an optional course thumbnail in the course studio."
+},
   meta: {
     // Mirrors the Arabic counterpart exactly ("التبديل إلى الإنجليزية" = "Switch to English"),
     // so the two languages name the same control the same way.
@@ -1707,6 +1730,14 @@ export const en = {
         READY: "Ready",
         FAILED: "Upload failed",
       },
+      /*
+        Named phases of server-side processing. Only the two the worker really
+        has appear here; the percentage beside them is measured, not estimated.
+      */
+      processingStage: {
+        TRANSCODING: "Transcoding and preparing playback",
+        PACKAGING: "Preparing playback",
+      },
       videoLabel: "Lesson video",
       videoHint: "MP4 video. Every lesson needs one before the course can be submitted.",
       videoSelect: "Choose an MP4 file",
@@ -1770,6 +1801,26 @@ export const en = {
       confirmCancel: "Keep editing",
       submitted: "Submitted. An administrator will review it.",
       rejectedTitle: "This could not be submitted yet",
+      /*
+        A course that has already been published once is republished by its own
+        instructor: no queue, no second approval. Only the words for that act
+        differ, so the publish variants sit beside the submit ones rather than
+        in a parallel panel that would drift.
+      */
+      firstPublicationNote:
+        "An administrator must approve this course before its first publication.",
+      publishTitle: "Ready to publish your changes?",
+      publishLeadIncomplete: "These need finishing before your changes can be published.",
+      publishLeadReady: "Everything the studio can check is done.",
+      publishAction: "Publish changes",
+      publishing: "Publishing…",
+      publishServerNote: "Your changes remain private until you publish them.",
+      publishConfirmTitle: "Publish these changes?",
+      publishConfirmBody:
+        "This version replaces the one students see now. The previous version is kept in this course's history.",
+      publishConfirmAccept: "Publish changes",
+      published: "Changes published.",
+      publishRejectedTitle: "These changes could not be published yet",
       requirement: {
         ACADEMIC_INSTITUTION: "Choose the university this course is taught at",
         ACADEMIC_SUBJECT: "Choose the subject this course teaches",
@@ -1790,6 +1841,10 @@ export const en = {
         LESSON_VIDEO_MISSING: "Every lesson needs a video.",
         ASSET_VERSION_UNAVAILABLE:
           "One of the uploaded files is no longer available. Upload it again.",
+        FIRST_PUBLICATION_REQUIRES_REVIEW:
+          "This course has not been published before, so an administrator must approve it first.",
+        COURSE_ALREADY_PUBLISHED:
+          "This course is already published. Publish your changes instead of sending them for review.",
         ACADEMIC_INSTITUTION_MISSING: "This course needs a university.",
         ACADEMIC_SUBJECT_MISSING: "This course needs a subject.",
         ACADEMIC_SUBJECT_UNAVAILABLE:
@@ -1951,14 +2006,14 @@ export const en = {
     revision: {
       startTitle: "This course is published",
       startBody:
-        "Students see the published version. To change it, start a new revision — the published version keeps serving until an administrator approves your changes.",
+        "Students see the published version. To change it, start a new revision — the published version keeps serving until you publish your changes.",
       startAction: "Start a new revision",
       starting: "Starting…",
       startFailed:
         "The revision could not be started. Nothing was changed — try again.",
       editingPublishedTitle: "You are editing a draft revision",
       editingPublishedBody:
-        "Students still see the published version. Nothing here reaches them until you submit this revision and an administrator approves it.",
+        "Your changes remain private until you publish them. Students keep seeing the published version until then.",
       inReviewTitle: "This revision is with an administrator",
       inReviewBody:
         "It cannot be edited while it is in review. The published version is unaffected.",

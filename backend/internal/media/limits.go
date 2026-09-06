@@ -66,6 +66,8 @@ func resolveUploadLimits(options ServiceOptions) uploadLimits {
 func (l uploadLimits) perFile(kind AssetKind) int64 {
 	bucket := l.uploadMax
 	switch kind {
+	case KindThumbnail:
+		bucket = ThumbnailMaxBytes
 	case KindResource:
 		bucket = l.resourceMax
 	case KindLabMaterial:
@@ -82,6 +84,8 @@ func (l uploadLimits) perFile(kind AssetKind) int64 {
 // Lesson video is one asset per Lesson and public previews are Course-level.
 func (l uploadLimits) perLesson(kind AssetKind) int64 {
 	switch kind {
+	case KindThumbnail:
+		return 0
 	case KindResource:
 		return l.resourceLessonMax
 	case KindLabMaterial:

@@ -43,6 +43,8 @@ Read these documents in order before system design:
 | [GLOSSARY.md](GLOSSARY.md) | Canonical product and domain language |
 | [launch/PLAN.md](launch/PLAN.md) | Readiness-gated July 23–August 15 delivery schedule and daily operating protocol |
 | [launch/STATUS.md](launch/STATUS.md) | Live launch progress, carryover, blockers, gate counts, and forecast |
+| [course-thumbnails.md](course-thumbnails.md) | Course cover authoring, publication semantics, and delivery |
+| [media-processing-progress.md](media-processing-progress.md) | Upload vs processing progress, where the percentage comes from, and how it is persisted |
 | [`superpowers/specs/`](superpowers/specs/) | Technical design records; each must defer to current canonical product docs |
 | [`../specs/`](../specs/) | Feature specifications, plans, tasks, contracts, and checklists |
 | [`../frontend/README.md`](../frontend/README.md) | Current landing/frontend implementation notes |

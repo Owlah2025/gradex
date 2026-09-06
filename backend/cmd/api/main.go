@@ -280,8 +280,15 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 	}
 }
 
+// requiredSchemaVersion is the migration floor this build's routes actually
+// read. It rises with the schema whenever a shipped read depends on new
+// columns: the media status route selects the D-098 processing-progress
+// columns unconditionally, so serving against schema 33 would report ready and
+// then fail every media status poll with "column does not exist". Readiness
+// must fail closed instead, which is what keeps a half-migrated deployment out
+// of the load balancer rather than into it.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.ReportModerationSchemaVersion
+	return db.MediaProcessingProgressSchemaVersion
 }
 
 func buildLearningFoundation(

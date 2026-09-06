@@ -1,6 +1,7 @@
 "use client";
 
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
+import type { ProcessingStage } from "@/lib/api/media-upload";
 import { cn } from "@/lib/utils";
 
 type MediaLabels = Dictionary["instructor"]["media"];
@@ -38,13 +39,18 @@ export function isUploadBusy(phase: UploadPhase): boolean {
  *
  * The phase itself was set in `font-mono` at 10px, which is a debugging readout, not a status.
  *
- * The percentage appears on `UPLOADING` alone, because the browser can only measure the bytes it
- * is sending. Server-side processing reports no fraction, so none is shown — a bar creeping
- * through a phase nobody is measuring is a lie with a progress indicator on it.
+ * Two different measures reach this component and are never mixed. `progress` is the browser's own
+ * byte count for the PUT to storage, and is meaningful during UPLOADING alone. `processing` is the
+ * server's measured account of the transcode — FFmpeg's structured progress against the probed
+ * duration — and is meaningful only while the worker is actually running. Whichever one is
+ * genuinely being measured drives a determinate bar with a real `aria-valuenow`; when neither is,
+ * the bar is indeterminate and carries no value at all, because a number nobody measured is worse
+ * than no number.
  */
 export function UploadStatus({
   phase,
   progress,
+  processing,
   message,
   labels,
   phaseTestID,
@@ -54,6 +60,12 @@ export function UploadStatus({
   phase: UploadPhase;
   /** 0–1, meaningful during UPLOADING only. */
   progress: number;
+  /**
+   * The server's own processing observation, when it has one. Null means the
+   * worker has not measured anything yet — which is shown as an indeterminate
+   * stage, never as 0%.
+   */
+  processing?: { stage: ProcessingStage; percent: number } | null;
   message: string | null;
   labels: MediaLabels;
   phaseTestID?: string;
@@ -62,6 +74,16 @@ export function UploadStatus({
 }) {
   const failed = phase === "FAILED";
   const busy = isUploadBusy(phase);
+  const uploading = phase === "UPLOADING";
+  const processingPhase = phase === "PROCESSING" || phase === "PROCESSING_BACKGROUND";
+  const observation = processingPhase ? (processing ?? null) : null;
+
+  const percent = uploading
+    ? Math.round(progress * 100)
+    : observation
+      ? observation.percent
+      : null;
+  const determinate = percent !== null;
 
   return (
     <div className="space-y-1.5">
@@ -69,6 +91,8 @@ export function UploadStatus({
         <span
           data-testid={phaseTestID}
           data-upload-phase={phase}
+          data-processing-stage={observation?.stage ?? undefined}
+          data-processing-percent={observation ? String(observation.percent) : undefined}
           className={cn(
             "rounded-pill px-2 py-0.5 text-xs font-semibold",
             failed && "bg-destructive/10 text-destructive",
@@ -78,22 +102,35 @@ export function UploadStatus({
           )}
         >
           {labels.phase[phase]}
-          {phase === "UPLOADING" ? ` ${Math.round(progress * 100)}%` : ""}
+          {determinate ? ` ${percent}%` : ""}
         </span>
         {busy ? (
           <span
-            aria-hidden
+            role="progressbar"
+            aria-label={labels.phase[phase]}
+            aria-valuemin={determinate ? 0 : undefined}
+            aria-valuemax={determinate ? 100 : undefined}
+            /* Omitted entirely when nothing is being measured: an indeterminate
+               progressbar must not claim a position it does not have. */
+            aria-valuenow={determinate ? percent : undefined}
+            aria-valuetext={determinate ? `${percent}%` : undefined}
             className="h-1.5 w-24 overflow-hidden rounded-pill bg-muted"
           >
-            {/* Width tracks real bytes during UPLOADING; every other busy phase shows the bar at
-                rest rather than pretending to advance. */}
             <span
+              aria-hidden
               className="block h-full rounded-pill bg-primary transition-[width] duration-base"
-              style={{ width: phase === "UPLOADING" ? `${Math.round(progress * 100)}%` : "100%" }}
+              style={{ width: determinate ? `${percent}%` : "100%" }}
             />
           </span>
         ) : null}
       </div>
+
+      {/* The stage is named beside the number so "42%" says what is at 42%. */}
+      {observation ? (
+        <p className="text-xs leading-5 text-muted-foreground" data-testid={phaseTestID ? `${phaseTestID}-stage` : undefined}>
+          {labels.processingStage[observation.stage]}
+        </p>
+      ) : null}
 
       {message ? (
         <p

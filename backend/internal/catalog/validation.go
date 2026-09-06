@@ -89,6 +89,14 @@ func validateCourseForSubmission(
 		}
 	}
 
+	if req.revision.ThumbnailAssetVersionID != nil {
+		if err := validateThumbnail(ctx, req.tx, req.courseID, req.revision.ID, *req.revision.ThumbnailAssetVersionID, false); err != nil {
+			if !errors.Is(err, ErrAssetVersionInvalid) {
+				return nil, err
+			}
+			violations = append(violations, SubmissionViolation{Code: "ASSET_VERSION_UNAVAILABLE", Target: "asset:" + *req.revision.ThumbnailAssetVersionID, Dimension: "THUMBNAIL"})
+		}
+	}
 	// 2. Sections and Lessons completeness validation (FR-009)
 	if len(req.revision.Sections) == 0 {
 		violations = append(violations, SubmissionViolation{

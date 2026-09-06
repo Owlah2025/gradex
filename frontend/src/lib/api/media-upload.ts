@@ -60,6 +60,16 @@ export type CompletionResult = {
   duplicate?: boolean;
 };
 
+/**
+ * The processing phases the worker actually has, spelled as it reports them.
+ *
+ * There is deliberately nothing here for scanning or validation: those are
+ * separate Asset Version *states*, already carried by `state`, and neither has
+ * a measurable fraction. Inventing a percentage for them would be a lie with a
+ * progress bar on it.
+ */
+export type ProcessingStage = "TRANSCODING" | "PACKAGING";
+
 export type MediaAssetStatus = {
   asset_version_id: string;
   logical_asset_id: string;
@@ -69,7 +79,35 @@ export type MediaAssetStatus = {
   trusted_duration_ms?: number | null;
   created_at: string;
   deliverable: boolean;
+  /**
+   * Server-side processing progress for the current attempt. All three are
+   * null together until an attempt has measured something, so "no observation
+   * yet" stays distinguishable from "0% done" — the first shows an
+   * indeterminate bar, the second a determinate one at zero.
+   */
+  processing_stage?: ProcessingStage | null;
+  processing_progress_percent?: number | null;
+  processing_updated_at?: string | null;
 };
+
+/**
+ * The measured processing progress of an asset, or null when there is none to
+ * show.
+ *
+ * A percentage is reported only while the asset is genuinely being processed,
+ * and only from a persisted observation. A READY asset is complete by
+ * definition; a failed one is not progressing, and its last percentage would
+ * read as activity that has stopped.
+ */
+export function processingProgressOf(
+  status: MediaAssetStatus | null | undefined,
+): { stage: ProcessingStage; percent: number } | null {
+  if (!status || status.state !== "PROCESSING") return null;
+  const percent = status.processing_progress_percent;
+  if (!status.processing_stage || typeof percent !== "number") return null;
+  if (!Number.isFinite(percent)) return null;
+  return { stage: status.processing_stage, percent: Math.min(100, Math.max(0, Math.round(percent))) };
+}
 
 export type LocalisedInput = { locale: "ar" | "en"; csrf: string };
 
@@ -136,7 +174,7 @@ export function validateSelectedVideo(file: File, locale: "ar" | "en"): string |
   return null;
 }
 
-export type AssetKind = "VIDEO" | "RESOURCE" | "PREVIEW";
+export type AssetKind = "VIDEO" | "RESOURCE" | "PREVIEW" | "THUMBNAIL";
 
 /**
  * Resolves the content type to declare for a picked file.
@@ -542,6 +580,8 @@ export type ProcessingPollOptions = {
   intervalMs?: number;
   timeoutMs?: number;
   onState?: (state: string) => void;
+  /** Every observation, so a caller can render measured processing progress. */
+  onStatus?: (status: MediaAssetStatus) => void;
   signal?: AbortSignal;
 };
 
@@ -569,7 +609,10 @@ export async function waitForProcessing(
   locale: "ar" | "en",
   options: ProcessingPollOptions = {},
 ): Promise<MediaAssetStatus> {
-  const intervalMs = options.intervalMs ?? 3000;
+  // Processing progress moves continuously, so the default cadence is the one
+  // a person watching a bar would expect. It still stops the moment the asset
+  // reaches a terminal state, and it is still bounded overall.
+  const intervalMs = options.intervalMs ?? 1500;
   const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
   const deadline = Date.now() + timeoutMs;
 
@@ -579,6 +622,7 @@ export async function waitForProcessing(
     }
     const status = await getMediaAssetStatus(assetVersionID, locale);
     options.onState?.(status.state);
+    options.onStatus?.(status);
     if (isTerminalState(status.state)) return status;
     if (Date.now() + intervalMs > deadline) {
       throw new ProcessingObservationTimeoutError(status, locale);

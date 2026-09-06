@@ -55,3 +55,23 @@ function hasLiveRevision(course: OwnedCourseSummary): boolean {
 export function editsPublishedCourse(course: OwnedCourseSummary | null | undefined): boolean {
   return Boolean(course) && hasLiveRevision(course!) && Boolean(course?.editable_revision?.id);
 }
+
+/**
+ * Which publication act this Course's open candidate performs.
+ *
+ * D-097: Admin review gates a Course's FIRST publication only. Afterwards the
+ * Instructor publishes each revision themselves.
+ *
+ * The rule reads `live_revision_id` — the same durable fact the server reads —
+ * and never the Course lifecycle, because a Course that was published and then
+ * delisted, archived, or suspended has still been published. Getting that wrong
+ * would offer "Submit for review" on a course the server would refuse to
+ * enqueue, or "Publish changes" on one it would refuse to publish.
+ *
+ * This decides wording, not permission: the server enforces both directions.
+ */
+export type PublicationMode = "FIRST_PUBLICATION" | "SUBSEQUENT_PUBLICATION";
+
+export function publicationMode(course: OwnedCourseSummary | null | undefined): PublicationMode {
+  return course && hasLiveRevision(course) ? "SUBSEQUENT_PUBLICATION" : "FIRST_PUBLICATION";
+}

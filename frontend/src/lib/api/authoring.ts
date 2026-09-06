@@ -407,6 +407,29 @@ export async function submitCourseRevision(
   return requireResult(submitted, input.locale);
 }
 
+/**
+ * Publishes one exact candidate revision of an already-published Course.
+ *
+ * D-097: Admin review gates a Course's first publication only. Once a Course
+ * has been live, its Instructor promotes each later revision themselves. The
+ * server still decides — ownership, prior publication, revision identity,
+ * completeness, and media readiness are all re-checked inside the publishing
+ * transaction — so a Course that has never been approved is refused here no
+ * matter which control the browser offered.
+ */
+export async function publishCourseRevision(
+  input: AuthoringInput & { courseID: string; revisionID: string },
+): Promise<CourseWire> {
+  requireCSRF(input);
+  const published = await authenticatedRequest<CourseWire>(
+    `${path.revision(input.courseID, input.revisionID)}/publish`,
+    "POST",
+    input.locale,
+    input.csrf,
+  );
+  return requireResult(published, input.locale);
+}
+
 export { getOwnedCourses, getOwnedCourseDetail } from "./catalog";
 export type {
   CourseRevisionWire,

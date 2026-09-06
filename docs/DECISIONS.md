@@ -3636,3 +3636,123 @@ catalogue is designed around a Course preview, and the failure is silent to the 
 [D-088](#d-088--launch-permits-validated-uploads-from-vetted-instructors-without-malware-scanning),
 [BUSINESS_RULES.md](BUSINESS_RULES.md) BR-104 and BR-144, and migration
 `0031_trusted_public_preview`.
+
+## D-097 — Admin review gates a Course's first publication only
+
+**Date:** 2026-09-06
+**Status:** Active. Amends
+[BR-017](BUSINESS_RULES.md), BR-061, BR-070, BR-071, and BR-091 in
+[`BUSINESS_RULES.md`](BUSINESS_RULES.md). Supersedes nothing about revisioning, atomicity,
+authorization, media safety, or Admin lifecycle control.
+
+**Finding:** Every revision of every Course went through the Admin queue, including a corrected typo
+in a description or a replacement cover on a Course that had already been approved and published.
+The Instructor could not ship a fix without an Admin, and the Admin queue filled with items that
+carried no decision worth making. The gate that matters — nobody puts an unreviewed Course in front
+of Students — is a gate on the Course's *first* publication, not on each of its revisions.
+
+**Decision:**
+
+1. A Course must pass Admin review before it becomes public for the first time. That path is
+   unchanged: author, submit, Admin approves the exact revision, the revision becomes live.
+2. Once a Course has been live at least once, its Instructor publishes each later revision
+   themselves. No Admin decision is involved and no review item is created.
+3. The persisted fact that decides which applies is `courses.live_revision_id`. It is set only when
+   a revision goes live and is never cleared, so it survives delisting, archival, emergency access
+   suspension, and retirement. Migration `0025` already recorded it as the canonical
+   publication-history fact and the review queue already projected it; no new column, flag, or
+   backfill is introduced, and every Course that has ever published — including one migrated in
+   already published — is recognised as such with no reapproval.
+4. Both paths promote the revision through one internal primitive. Lock the Course, verify the
+   actor, verify the revision belongs to the Course and descends from exactly the revision that is
+   live now, revalidate the whole graph against committed state, supersede the previous revision,
+   approve the candidate, swap `live_revision_id`, write Audit, emit the outbox intent — all in one
+   transaction. Only the authorization and eligibility gates in front of it differ. There is no
+   second pointer-switch implementation to keep in step.
+5. Revisioning is unchanged. Editing never mutates the live revision. A candidate stays private
+   until it is published, and publication is an explicit act, never a side effect of saving a field.
+6. `SubmitCourse` refuses a Course that has already published. A routine edit therefore cannot enter
+   the Admin review queue at all, rather than entering it and being filtered out of the view.
+7. Instructor self-publication additionally requires the Course to be `PUBLISHED` and neither
+   access-suspended nor retired. An Instructor cannot relist a delisted Course, unarchive an
+   archived one, or publish through an emergency suspension by shipping an edit.
+8. Media safety is untouched. Publication revalidates completeness and Asset Version readiness for
+   whichever actor is publishing, so a still-processing video blocks the Instructor exactly as it
+   blocked the Admin.
+9. Audit distinguishes the two: `COURSE_PUBLISHED` with `first_publication: true` and actor role
+   `ADMIN`, and `COURSE_REVISION_PUBLISHED` with `first_publication: false` and actor role
+   `INSTRUCTOR`. Both record the exact Course, revision, actor, and instant. Historical
+   `COURSE_CHANGES_REQUESTED` and `COURSE_REVISION_REJECTED` records are retained unchanged.
+
+**Accepted risk:** an approved Instructor can change published content without a second review. That
+is the point of the decision, and it is bounded: the Instructor was already vetted at first
+publication, every publication is audited with its exact revision, every superseded revision is
+retained, and Admin retains delist, archive, retire, emergency access suspension, and owner
+reassignment. What an Instructor gains is the ability to publish their own revision; what they do
+not gain is any Admin lifecycle power.
+
+**Alternatives rejected:** auto-publishing each field save (rejected — half-finished edits would
+reach Students, and the candidate/live distinction is what makes rollback and atomicity possible);
+keeping submission available but hiding subsequent revisions from the queue (rejected — the revision
+would sit in `PENDING_REVIEW` with nobody able to act on it and its Instructor unable to publish it);
+adding a `first_published_at` column (rejected — `live_revision_id` already carries the fact
+durably, and a second representation of one fact is a second thing that can disagree).
+
+**Source:** This session; see [`BUSINESS_RULES.md`](BUSINESS_RULES.md) BR-017/061/070/071,
+[`course-thumbnails.md`](course-thumbnails.md), and `internal/catalog/publication.go`.
+
+## D-098 — Video processing reports real, persisted progress
+
+**Date:** 2026-09-06
+**Status:** Active. Amends BR-091 in [`BUSINESS_RULES.md`](BUSINESS_RULES.md). Changes nothing about
+scanning, validation, deliverability, or the conditions for `READY`.
+
+**Finding:** Once an Instructor's bytes finished uploading, the only thing the studio could say was
+that the asset was `PROCESSING`. A transcode that takes minutes was indistinguishable from one that
+had hung, and a page reload lost even the fact that a run was under way — the control came back
+showing nothing. The upload had a real percentage because the browser measured it; the far longer
+phase after it had none.
+
+**Decision:**
+
+1. Upload progress and processing progress stay separate concepts and are never merged into one
+   percentage. The browser measures the first; the worker measures the second.
+2. Processing progress is derived from measured work, never from elapsed time. FFmpeg's structured
+   `-progress` stream reports the media time it has written; the ffprobe duration of the exact
+   source object says what the whole job is; the HLS ladder is rendered one rung at a time, so the
+   attempt is `(finished rungs + this rung's fraction) / total rungs`. FFmpeg's human-oriented
+   status line is never parsed.
+3. Only the two phases the pipeline actually has are representable: `TRANSCODING` and `PACKAGING`.
+   Quarantine, scanning, and validation are already visible as Asset Version states and are not
+   restated as fabricated percentages.
+4. The observation is persisted on `media_asset_versions` — stage, percentage, instant, and the
+   attempt's operation identity — so a reload reads it back rather than reconstructing it. All four
+   are written together or not at all.
+5. Writes are throttled: an observation lands when the percentage advances by at least one point,
+   when a second has elapsed, or when the stage changes. A one-hour transcode costs tens of writes,
+   not thousands.
+6. Progress is monotonic within an attempt and bounded to 0–100, enforced both in the writer and in
+   the statement's own `WHERE` clause. A new attempt resets it under a new operation identity, so a
+   late write from an abandoned attempt lands nowhere. An Admin retry clears the observation
+   outright rather than leaving a percentage from a run that is no longer happening.
+7. `READY` closes the observation at 100 in the same statement that makes the version deliverable.
+   `PROCESS_FAILED` retains the last measured point — it says how far the attempt got — while the
+   state makes it unambiguous that nothing is still running.
+8. The observation rides the existing media status route the authoring client already polls, behind
+   exactly the authorization the asset itself is behind. No new endpoint, and no WebSocket or SSE is
+   introduced for it.
+
+**Accepted risk:** the reported percentage is the transcode's own account of itself, so a rung that
+stalls stops advancing rather than reporting a stall. That is the honest failure mode, and the
+persisted instant lets a reader see that nothing has moved.
+
+**Alternatives rejected:** a client-side timer that creeps toward 100 (rejected — it is a fabricated
+number wearing a progress bar, and it lies hardest exactly when a job has hung); parsing FFmpeg's
+stderr status line (rejected — that is a presentation format FFmpeg is free to change, and a
+structured stream already exists); a separate progress table (rejected — one in-flight attempt over
+one immutable object is a property of the Asset Version, and a side table would add a join to the
+hot read and a second lifetime to reason about); a WebSocket (rejected — the route is already
+polled, and one more transport for one more field is a poor trade).
+
+**Source:** This session; see [`media-processing-progress.md`](media-processing-progress.md),
+migration `0034_media_processing_progress`, and `internal/media/progress.go`.

@@ -191,15 +191,22 @@ func (h *mediaHandlers) status(c *gin.Context) {
 		writeMediaProblem(c, err)
 		return
 	}
+	// Processing progress rides the status route the authoring client already
+	// polls rather than a second endpoint. The three fields are reported
+	// exactly as persisted — null when no attempt has measured anything — so a
+	// client can distinguish "no observation yet" from "0% done".
 	c.JSON(http.StatusOK, gin.H{
-		"asset_version_id":    status.AssetVersionID,
-		"logical_asset_id":    status.LogicalAssetID,
-		"kind":                status.Kind,
-		"state":               status.State,
-		"size_bytes":          status.SizeBytes,
-		"trusted_duration_ms": status.TrustedDurationMS,
-		"created_at":          status.CreatedAt,
-		"deliverable":         status.Deliverable(),
+		"asset_version_id":            status.AssetVersionID,
+		"logical_asset_id":            status.LogicalAssetID,
+		"kind":                        status.Kind,
+		"state":                       status.State,
+		"size_bytes":                  status.SizeBytes,
+		"trusted_duration_ms":         status.TrustedDurationMS,
+		"created_at":                  status.CreatedAt,
+		"deliverable":                 status.Deliverable(),
+		"processing_stage":            status.ProcessingStage,
+		"processing_progress_percent": status.ProcessingProgressPercent,
+		"processing_updated_at":       status.ProcessingUpdatedAt,
 	})
 }
 

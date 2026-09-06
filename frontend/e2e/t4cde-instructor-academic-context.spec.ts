@@ -274,12 +274,16 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     expect(owned.live_revision.id).toBe(liveRevision1);
     expect(owned.live_revision.audience.programs).toHaveLength(2);
     expect(owned.editable_revision.audience.programs).toHaveLength(1);
+    // D-097: this Course has already published, so the Instructor publishes the
+    // revision themselves. The control is the same one; the act it performs is
+    // the one the server accepts for a Course with publication history.
+    await expect(page.getByTestId("submission-panel")).toHaveAttribute(
+      "data-publication-mode",
+      "SUBSEQUENT_PUBLICATION",
+    );
     await page.getByTestId("submit-for-review").click();
     await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-    const secondReview = await openAdminReview(browser, courseID);
-    await expect(secondReview.page.getByTestId("submitted-academic-audience").locator("li")).toHaveCount(1);
-    await approveInspected(secondReview.page, false);
-    await secondReview.context.close();
+    await expect(page.getByTestId("authoring-notice")).toContainText("Changes published.");
     owned = await (await instructorAPI.get(`/api/v1/courses/${courseID}`)).json() as any;
     expect(owned.live_revision.audience.programs).toHaveLength(1);
     expect(owned.academic_context.subject.official_code).toBe(originalSubject);

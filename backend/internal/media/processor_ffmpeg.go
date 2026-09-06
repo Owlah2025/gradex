@@ -76,7 +76,19 @@ var hlsLadder = []hlsRung{
 	{Name: "240p", Width: 426, Height: 240, VideoKbps: 400, AudioKbps: 96},
 }
 
-func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (result TranscodeResult, err error) {
+// Transcode runs the pipeline without reporting progress. It exists for
+// callers that have nowhere to put an observation; the worker uses
+// TranscodeWithProgress.
+func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (TranscodeResult, error) {
+	return p.TranscodeWithProgress(ctx, object, nil)
+}
+
+// TranscodeWithProgress is the same pipeline, reporting real measured progress
+// into sink as it goes. Progress is derived from FFmpeg's own structured
+// `-progress` stream against the ffprobe duration of the exact source object —
+// never from elapsed time — so a stalled encode stops advancing rather than
+// creeping toward a number nobody measured.
+func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object ObjectVersion, sink ProgressSink) (result TranscodeResult, err error) {
 	if !object.valid() {
 		return TranscodeResult{}, ErrStaleScanEvidence
 	}
@@ -117,9 +129,13 @@ func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (
 		return TranscodeResult{}, fmt.Errorf("creating HLS scratch directory: %w", err)
 	}
 	defer os.RemoveAll(outDir)
-	if err := p.renderHLS(processingCtx, localPath, outDir, metadata.rungs); err != nil {
+	if err := p.renderHLS(processingCtx, localPath, outDir, metadata, sink); err != nil {
 		return TranscodeResult{}, err
 	}
+	// Uploading the finished ladder is its own phase. It has no continuous
+	// measure worth trusting, so it reports the stage at the point transcoding
+	// reached rather than inventing a second fraction.
+	reportProgress(processingCtx, sink, StagePackaging, 99)
 	if err := p.uploadHLS(processingCtx, outDir, prefix); err != nil {
 		return TranscodeResult{}, err
 	}
@@ -145,13 +161,26 @@ func trustedMediaMetadata(probe processorProbe) (processingMetadata, error) {
 	return processingMetadata{}, fmt.Errorf("ffprobe did not return a video height")
 }
 
-func (p *FFmpegProcessor) renderHLS(ctx context.Context, input, outDir string, rungs []hlsRung) error {
-	for _, rung := range rungs {
-		if err := p.transcodeRung(ctx, input, outDir, rung); err != nil {
+func (p *FFmpegProcessor) renderHLS(ctx context.Context, input, outDir string, metadata processingMetadata, sink ProgressSink) error {
+	duration := time.Duration(metadata.durationMS) * time.Millisecond
+	count := len(metadata.rungs)
+	reportProgress(ctx, sink, StageTranscoding, 0)
+	for index, rung := range metadata.rungs {
+		if err := p.transcodeRung(ctx, input, outDir, rung, func(processed time.Duration) {
+			reportProgress(ctx, sink, StageTranscoding, rungProgressPercent(index, count, processed, duration))
+		}); err != nil {
 			return err
 		}
+		reportProgress(ctx, sink, StageTranscoding, rungProgressPercent(index+1, count, 0, duration))
 	}
-	return writeMediaMaster(filepath.Join(outDir, "master.m3u8"), rungs)
+	return writeMediaMaster(filepath.Join(outDir, "master.m3u8"), metadata.rungs)
+}
+
+func reportProgress(ctx context.Context, sink ProgressSink, stage ProcessingStage, percent int) {
+	if sink == nil {
+		return
+	}
+	sink.Progress(ctx, stage, percent)
 }
 
 func (p *FFmpegProcessor) uploadHLS(ctx context.Context, outDir, prefix string) error {
@@ -199,13 +228,16 @@ func (p *FFmpegProcessor) probe(ctx context.Context, localPath string) (processo
 	return probe, nil
 }
 
-func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir string, rung hlsRung) error {
+func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir string, rung hlsRung, onProcessed func(time.Duration)) error {
 	directory := filepath.Join(outDir, rung.Name)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return fmt.Errorf("creating HLS rendition directory: %w", err)
 	}
 	videoKbps := fmt.Sprintf("%dk", rung.VideoKbps)
 	args := []string{
+		// The machine-readable progress stream on stdout, and the human status
+		// line off. Only the structured form is ever parsed.
+		"-progress", "pipe:1", "-nostats",
 		"-y", "-i", input,
 		"-vf", fmt.Sprintf("scale=w=%d:h=%d:force_original_aspect_ratio=decrease:force_divisible_by=2", rung.Width, rung.Height),
 		"-c:v", "libx264", "-profile:v", "main", "-crf", "20", "-sc_threshold", "0",
@@ -217,8 +249,20 @@ func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir strin
 		filepath.Join(directory, "playlist.m3u8"),
 	}
 	cmd := exec.CommandContext(ctx, p.ffmpegPath, args...)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg rendition %s failed: %w (%s)", rung.Name, err, truncateMediaOutput(string(output), 2000))
+	progress, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("opening ffmpeg progress stream: %w", err)
+	}
+	var diagnostics strings.Builder
+	cmd.Stderr = &diagnostics
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting ffmpeg rendition %s: %w", rung.Name, err)
+	}
+	// Drained on this goroutine so FFmpeg is never blocked writing to a full
+	// pipe, and so the reader has finished before Wait reaps the process.
+	_ = scanFFmpegProgress(progress, onProcessed)
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("ffmpeg rendition %s failed: %w (%s)", rung.Name, err, truncateMediaOutput(diagnostics.String(), 2000))
 	}
 	return nil
 }

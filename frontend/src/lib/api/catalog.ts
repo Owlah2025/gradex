@@ -71,6 +71,7 @@ export type RevisionAudienceWire = {
 };
 
 export type CourseRevisionWire = {
+  thumbnail_asset_version_id?: string | null;
 	id?: string;
 	course_id?: string;
 	state?: string;

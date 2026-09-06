@@ -8,6 +8,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { submissionReadiness, type ReadinessRequirement } from "./submission-readiness";
+import type { PublicationMode } from "./revision-workflow";
 
 type SubmissionLabels = Dictionary["instructor"]["submission"];
 
@@ -39,12 +40,20 @@ const MAX_NAMED_OFFENDERS = 3;
 export function SubmissionPanel({
   course,
   labels,
+  mode,
   busy,
   rejection,
   onSubmit,
 }: {
   course: CourseWire;
   labels: SubmissionLabels;
+  /**
+   * Which act this panel performs. A course that has never been live is
+   * submitted for review; one that has been live is published by its own
+   * instructor. Only the words and the confirmation differ — the checklist,
+   * the readiness rules, and the server's authority over all of it do not.
+   */
+  mode: PublicationMode;
   busy: boolean;
   /** The server's own refusal, already translated. */
   rejection: { reasons: string[]; detail?: string | null } | null;
@@ -53,6 +62,32 @@ export function SubmissionPanel({
   const { locale } = useLocale();
   const [confirming, setConfirming] = useState(false);
   const rejectionRef = useRef<HTMLDivElement | null>(null);
+  const publishing = mode === "SUBSEQUENT_PUBLICATION";
+  const copy = publishing
+    ? {
+        title: labels.publishTitle,
+        leadReady: labels.publishLeadReady,
+        leadIncomplete: labels.publishLeadIncomplete,
+        action: labels.publishAction,
+        pending: labels.publishing,
+        serverNote: labels.publishServerNote,
+        confirmTitle: labels.publishConfirmTitle,
+        confirmBody: labels.publishConfirmBody,
+        confirmAccept: labels.publishConfirmAccept,
+        rejectedTitle: labels.publishRejectedTitle,
+      }
+    : {
+        title: labels.title,
+        leadReady: labels.leadReady,
+        leadIncomplete: labels.leadIncomplete,
+        action: labels.submitAction,
+        pending: labels.submitting,
+        serverNote: labels.serverNote,
+        confirmTitle: labels.confirmTitle,
+        confirmBody: labels.confirmBody,
+        confirmAccept: labels.confirmAccept,
+        rejectedTitle: labels.rejectedTitle,
+      };
 
   /*
     The rejection is brought to the click. The founder's manual test pressed Submit near the
@@ -84,11 +119,12 @@ export function SubmissionPanel({
       className="rounded-lg border border-border bg-card p-5"
       aria-labelledby="submission-title"
       data-testid="submission-panel"
+      data-publication-mode={mode}
       data-submission-ready={readiness.ready ? "true" : "false"}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h3 id="submission-title" className="font-display text-base font-bold text-foreground">
-          {labels.title}
+          {copy.title}
         </h3>
         {/*
           A count, not a percentage. Requirements are neither equally sized nor equally weighted,
@@ -99,8 +135,16 @@ export function SubmissionPanel({
         </p>
       </div>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        {readiness.ready ? labels.leadReady : labels.leadIncomplete}
+        {readiness.ready ? copy.leadReady : copy.leadIncomplete}
       </p>
+      {publishing ? null : (
+        /* Said once, plainly, on the only course it applies to: the first
+           publication is the administrator's decision, and nothing on this
+           screen changes that. */
+        <p className="mt-2 text-sm leading-6 text-muted-foreground" data-testid="first-publication-note">
+          {labels.firstPublicationNote}
+        </p>
+      )}
 
       <ul className="mt-4 space-y-2.5" data-testid="readiness-checklist">
         {readiness.requirements.map((requirement) => (
@@ -112,9 +156,11 @@ export function SubmissionPanel({
         ))}
       </ul>
 
-      <p className="mt-4 text-sm text-muted-foreground" data-testid="submission-price-note">
-        {labels.adminOwnsPrice}
-      </p>
+      {publishing ? null : (
+        <p className="mt-4 text-sm text-muted-foreground" data-testid="submission-price-note">
+          {labels.adminOwnsPrice}
+        </p>
+      )}
 
       <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border pt-4">
         <Button
@@ -123,9 +169,9 @@ export function SubmissionPanel({
           onClick={() => setConfirming(true)}
           data-testid="submit-for-review"
         >
-          {busy ? labels.submitting : labels.submitAction}
+          {busy ? copy.pending : copy.action}
         </Button>
-        <p className="text-xs text-muted-foreground">{labels.serverNote}</p>
+        <p className="text-xs text-muted-foreground">{copy.serverNote}</p>
       </div>
 
       {rejection ? (
@@ -137,7 +183,7 @@ export function SubmissionPanel({
           data-testid="submit-error"
           className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
         >
-          <p className="font-display text-sm font-bold text-foreground">{labels.rejectedTitle}</p>
+          <p className="font-display text-sm font-bold text-foreground">{copy.rejectedTitle}</p>
           {rejection.reasons.length > 0 ? (
             <ul className="mt-2 space-y-1 text-sm leading-6 text-foreground">
               {rejection.reasons.map((reason) => (
@@ -158,9 +204,9 @@ export function SubmissionPanel({
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={labels.confirmTitle}
-        body={labels.confirmBody}
-        confirmLabel={labels.confirmAccept}
+        title={copy.confirmTitle}
+        body={copy.confirmBody}
+        confirmLabel={copy.confirmAccept}
         cancelLabel={labels.confirmCancel}
         tone="default"
         busy={busy}

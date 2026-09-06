@@ -20,6 +20,7 @@ import {
   waitForProcessing,
 } from "@/lib/api/media-upload";
 import { recoverMediaPhase } from "./media-upload-phase";
+import { useProcessingWatch } from "./use-processing-watch";
 
 type Phase =
   | "IDLE"
@@ -90,6 +91,29 @@ export function PublicPreviewUpload({
   const activeAssetVersionID = useRef<string | null>(null);
   const busy = ["PREPARING", "UPLOADING", "ATTACHING", "PROCESSING"].includes(phase);
 
+  /*
+    The same single watch the Lesson video uses, for the same reason: a trusted
+    preview goes through FFmpeg, which outlasts the tab. Keyed on the asset the
+    server says is selected, so a reload resumes the real run and its measured
+    progress instead of starting from nothing.
+  */
+  const processing = useProcessingWatch({
+    assetVersionID: previewAssetVersionID,
+    active: phase === "PROCESSING" || phase === "PROCESSING_BACKGROUND",
+    locale,
+    onSettled: (settledStatus) => {
+      activeAssetVersionID.current = null;
+      if (isReadyState(settledStatus.state)) {
+        setPhase("READY");
+        setMessage(t.ready);
+      } else {
+        setPhase("FAILED");
+        setMessage(describeAssetState(settledStatus.state, locale));
+      }
+      void onChanged();
+    },
+  });
+
   useEffect(() => {
     if (activeAssetVersionID.current === previewAssetVersionID) return;
     setPhase(recoverMediaPhase(previewAssetVersionID, previewAssetState));
@@ -157,29 +181,12 @@ export function PublicPreviewUpload({
         return;
       }
 
+      // The upload is stored and the revision already points at it; the worker
+      // owns the rest. The watch above reports it, here and after a reload.
       setPhase("PROCESSING");
-      const status = await waitForProcessing(ticket.asset_version_id, locale);
-      if (!isReadyState(status.state)) {
-        activeAssetVersionID.current = null;
-        setPhase("FAILED");
-        setMessage(describeAssetState(status.state, locale));
-        await onChanged();
-        return;
-      }
-
-      activeAssetVersionID.current = null;
-      setPhase("READY");
-      setMessage(t.ready);
-      await onChanged();
+      setMessage(t.processingBackground);
     } catch (cause) {
       activeAssetVersionID.current = null;
-      if (cause instanceof ProcessingObservationTimeoutError) {
-        // The upload succeeded and the revision already points at it. Only the
-        // watching stopped.
-        setPhase("PROCESSING_BACKGROUND");
-        setMessage(t.processingBackground);
-        return;
-      }
       setPhase("FAILED");
       setMessage(describeApiError(cause, locale) || t.failed);
     }
@@ -206,13 +213,18 @@ export function PublicPreviewUpload({
     }
   }
 
+  // The percentage shown is always one somebody measured: the browser's byte
+  // count while uploading, the worker's own account while processing, and no
+  // number at all in between.
   const status =
     phase === "PREPARING" || phase === "ATTACHING"
       ? t.processing
       : phase === "UPLOADING"
         ? `${t.upload} ${Math.round(progress * 100)}%`
-        : phase === "PROCESSING"
-          ? t.processing
+        : phase === "PROCESSING" || phase === "PROCESSING_BACKGROUND"
+          ? processing
+            ? `${t.processing} ${processing.percent}%`
+            : t.processing
           : message;
 
   return (
@@ -277,6 +289,8 @@ export function PublicPreviewUpload({
           role={phase === "FAILED" ? "alert" : "status"}
           data-testid="public-preview-message"
           data-upload-phase={phase}
+          data-processing-stage={processing?.stage ?? undefined}
+          data-processing-percent={processing ? String(processing.percent) : undefined}
           className={
             phase === "FAILED"
               ? "mt-3 text-sm font-medium text-destructive"

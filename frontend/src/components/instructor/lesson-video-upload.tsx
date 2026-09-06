@@ -8,17 +8,16 @@ import {
   describeAssetState,
   isReadyState,
   newProviderEventID,
-  ProcessingObservationTimeoutError,
   sha256Hex,
   uploadFileToStorage,
   validateSelectedVideo,
-  waitForProcessing,
 } from "@/lib/api/media-upload";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { describeApiError } from "@/lib/api/api-error";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { UploadStatus, isUploadBusy, type UploadPhase } from "./upload-status";
 import { recoverLessonVideoPhase } from "./lesson-video-upload-state";
+import { useProcessingWatch } from "./use-processing-watch";
 
 type Phase = Extract<
   UploadPhase,
@@ -78,6 +77,31 @@ export function LessonVideoUpload({
   const activeAssetVersionID = useRef<string | null>(null);
 
   const busy = isUploadBusy(phase);
+
+  /*
+    Processing is watched from the asset the server says is selected, not from
+    the run this tab happens to have started. That is what makes a reload
+    recover: the page comes back, sees a selected video that is still
+    processing, and picks the same measured progress back up — rather than
+    showing a stalled 0% because the local upload state is gone.
+  */
+  const watching = phase === "PROCESSING" || phase === "PROCESSING_BACKGROUND";
+  const processing = useProcessingWatch({
+    assetVersionID,
+    active: watching,
+    locale,
+    onSettled: (status) => {
+      activeAssetVersionID.current = null;
+      if (isReadyState(status.state)) {
+        setPhase("READY");
+        setMessage(media.videoAttached);
+      } else {
+        setPhase("FAILED");
+        setMessage(describeAssetState(status.state, locale));
+      }
+      void onAttached();
+    },
+  });
 
   useEffect(() => {
     if (activeAssetVersionID.current === assetVersionID) return;
@@ -152,27 +176,17 @@ export function LessonVideoUpload({
         return;
       }
 
+      /*
+        The upload is done and durably selected; from here the worker owns the
+        outcome. The single watch above takes it from here — one poll loop per
+        asset, whether this tab started the run or found it already in flight
+        after a reload. Nothing waits inline, so there is no second loop racing
+        the first and no request left running when this control unmounts.
+      */
       setPhase("PROCESSING");
-      const status = await waitForProcessing(ticket.asset_version_id, locale);
-      if (!isReadyState(status.state)) {
-        activeAssetVersionID.current = null;
-        setPhase("FAILED");
-        setMessage(describeAssetState(status.state, locale));
-        await onAttached();
-        return;
-      }
-
-      activeAssetVersionID.current = null;
-      setPhase("READY");
-      setMessage(media.videoAttached);
-      await onAttached();
+      setMessage(media.videoProcessingBackground);
     } catch (error) {
       activeAssetVersionID.current = null;
-      if (error instanceof ProcessingObservationTimeoutError) {
-        setPhase("PROCESSING_BACKGROUND");
-        setMessage(media.videoProcessingBackground);
-        return;
-      }
       setPhase("FAILED");
       setMessage(describeApiError(error, locale));
     }
@@ -205,6 +219,7 @@ export function LessonVideoUpload({
       <UploadStatus
         phase={phase}
         progress={progress}
+        processing={processing}
         message={message}
         labels={media}
         phaseTestID={`lesson-video-phase-${lessonID}`}

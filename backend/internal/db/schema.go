@@ -23,35 +23,37 @@ import (
 const TransactionalEmailMonitorTerminalSchemaVersion = 27
 
 const (
-	MinSchemaVersion                    = 2
-	SessionSchemaVersion                = 4
-	AdmissionSchemaVersion              = 5
-	AuthenticatedSessionSchemaVersion   = 6
-	PasswordRecoverySchemaVersion       = 7
-	StaffLifecycleSchemaVersion         = 8
-	CourseAuthoringSchemaVersion        = 9
-	RevisionIntegritySchemaVersion      = 10
-	CatalogSearchSchemaVersion          = 11
-	MediaAndEntitlementSchemaVersion    = 12
-	EnrollmentSchemaVersion             = 13
-	ProtectedLearningSchemaVersion      = 14
-	CourseAccessGrantSchemaVersion      = 15
-	TransactionalEmailSchemaVersion     = 16
-	EmailActivationSchemaVersion        = 17
-	MailpitEmailSchemaVersion           = 18
-	MediaValidatedStateSchemaVersion    = 19
-	TrustedValidationSchemaVersion      = 20
-	ManualPurchaseRequestsSchemaVersion = 21
-	RevisionScopedPreviewSchemaVersion  = 22
-	AcademicCatalogSchemaVersion        = 23
-	StudentAcademicProfileSchemaVersion = 24
-	CourseAcademicIdentitySchemaVersion = 25
-	SubjectCodeIdentitySchemaVersion    = 26
-	ReportModerationSchemaVersion       = TransactionalEmailMonitorTerminalSchemaVersion + 1
-	StudentEmailOTPSchemaVersion        = ReportModerationSchemaVersion + 1
-	AuthenticatedPurchaseSchemaVersion  = StudentEmailOTPSchemaVersion + 1
-	TrustedPublicPreviewSchemaVersion   = AuthenticatedPurchaseSchemaVersion + 1
-	MaxSchemaVersion                    = TrustedPublicPreviewSchemaVersion
+	MinSchemaVersion                     = 2
+	SessionSchemaVersion                 = 4
+	AdmissionSchemaVersion               = 5
+	AuthenticatedSessionSchemaVersion    = 6
+	PasswordRecoverySchemaVersion        = 7
+	StaffLifecycleSchemaVersion          = 8
+	CourseAuthoringSchemaVersion         = 9
+	RevisionIntegritySchemaVersion       = 10
+	CatalogSearchSchemaVersion           = 11
+	MediaAndEntitlementSchemaVersion     = 12
+	EnrollmentSchemaVersion              = 13
+	ProtectedLearningSchemaVersion       = 14
+	CourseAccessGrantSchemaVersion       = 15
+	TransactionalEmailSchemaVersion      = 16
+	EmailActivationSchemaVersion         = 17
+	MailpitEmailSchemaVersion            = 18
+	MediaValidatedStateSchemaVersion     = 19
+	TrustedValidationSchemaVersion       = 20
+	ManualPurchaseRequestsSchemaVersion  = 21
+	RevisionScopedPreviewSchemaVersion   = 22
+	AcademicCatalogSchemaVersion         = 23
+	StudentAcademicProfileSchemaVersion  = 24
+	CourseAcademicIdentitySchemaVersion  = 25
+	SubjectCodeIdentitySchemaVersion     = 26
+	ReportModerationSchemaVersion        = TransactionalEmailMonitorTerminalSchemaVersion + 1
+	StudentEmailOTPSchemaVersion         = ReportModerationSchemaVersion + 1
+	AuthenticatedPurchaseSchemaVersion   = StudentEmailOTPSchemaVersion + 1
+	TrustedPublicPreviewSchemaVersion    = AuthenticatedPurchaseSchemaVersion + 1
+	CourseThumbnailSchemaVersion         = 33
+	MediaProcessingProgressSchemaVersion = CourseThumbnailSchemaVersion + 1
+	MaxSchemaVersion                     = MediaProcessingProgressSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

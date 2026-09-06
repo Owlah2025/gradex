@@ -313,17 +313,8 @@ func TestTrustedPublicPreviewLifecycleProjectsIntoPublicCatalogue(t *testing.T) 
 	if err := transcodePublicPreview(t, f, versionID, lessonVideoProcessor{}); err != nil {
 		t.Fatalf("Worker.Transcode: %v", err)
 	}
-	if _, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
-		OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-	}); err != nil {
-		t.Fatalf("submitting trusted-preview revision: %v", err)
-	}
-	if _, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
-		CourseID: f.courseID, RevisionID: candidate.ID,
-		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
-	}); err != nil {
-		t.Fatalf("approving trusted-preview revision: %v", err)
+	if err := f.publish(f.ctx, candidate.ID); err != nil {
+		t.Fatalf("publishing trusted-preview revision: %v", err)
 	}
 
 	publicRepository, err := catalogpublic.NewRepository(f.p, catalogpublic.PublishedOnly)
@@ -362,18 +353,14 @@ func TestNonReadySelectedPublicPreviewCannotPassLifecycleGates(t *testing.T) {
 			claimPublicPreview(t, f, candidate.ID, versionID)
 			prepare(t, f, versionID)
 
-			_, err := f.repo.SubmitCourse(f.ctx, f.validator, SubmitCourseRequest{
-				CourseID: f.courseID, RevisionID: candidate.ID,
-				OwnerAccountID: f.ownerID, ActorDescriptor: f.ownerID,
-			})
-			assertSubmissionFailure(t, err)
+			assertSubmissionFailure(t, f.publish(f.ctx, candidate.ID))
 
 			if _, err := f.p.Exec(f.ctx, `
 				UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE id = $1::uuid
 			`, candidate.ID); err != nil {
 				t.Fatalf("placing candidate under review: %v", err)
 			}
-			_, err = f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+			_, err := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
 				CourseID: f.courseID, RevisionID: candidate.ID,
 				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
 			})
