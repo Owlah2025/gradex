@@ -187,8 +187,8 @@ func TestMigrateUpDownUp(t *testing.T) {
 	}
 	// Migrating up goes to the newest migration, which is what this build
 	// declares as its maximum supported version.
-	if state.Version != MaxSchemaVersion {
-		t.Errorf("version = %d, want %d", state.Version, MaxSchemaVersion)
+	if state.Version != newestShippedSchemaVersion {
+		t.Errorf("version = %d, want %d", state.Version, newestShippedSchemaVersion)
 	}
 	if state.Dirty {
 		t.Error("schema is dirty immediately after a successful up")
@@ -632,6 +632,15 @@ func TestProtectedLearningRollbackRestoresPreCutoverSchema(t *testing.T) {
 	assertProtectedLearningSchema(t, pool)
 }
 
+// newestShippedSchemaVersion is the highest migration in this build's own
+// migrations directory. Until the rollback anchor it was identical to
+// MaxSchemaVersion, and most assertions below used the two interchangeably.
+// The anchor separates them deliberately: it ships migrations through 31 and
+// tolerates a database as new as 34, so every assertion about "where `up`
+// lands" means this constant, while assertions about "what this build will
+// serve" mean MaxSchemaVersion.
+const newestShippedSchemaVersion = TrustedPublicPreviewSchemaVersion
+
 func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	// Tests elsewhere compare the live database state to MaxSchemaVersion,
 	// rather than a literal. This makes the capability boundary explicit too.
@@ -655,9 +664,18 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("trusted public preview schema = %d, want one past authenticated purchase %d",
 			TrustedPublicPreviewSchemaVersion, AuthenticatedPurchaseSchemaVersion)
 	}
-	if MaxSchemaVersion != TrustedPublicPreviewSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, TrustedPublicPreviewSchemaVersion)
+	// The anchor's contract: it ships nothing past 31 and tolerates up to 34.
+	if newestShippedSchemaVersion != TrustedPublicPreviewSchemaVersion {
+		t.Fatalf("newest shipped schema = %d, want %d",
+			newestShippedSchemaVersion, TrustedPublicPreviewSchemaVersion)
+	}
+	if MaxSchemaVersion != ForwardCompatibleSchemaCeiling {
+		t.Fatalf("MaxSchemaVersion = %d, want the forward-compatible ceiling %d",
+			MaxSchemaVersion, ForwardCompatibleSchemaCeiling)
+	}
+	if MaxSchemaVersion < newestShippedSchemaVersion {
+		t.Fatalf("ceiling %d is below the newest shipped migration %d",
+			MaxSchemaVersion, newestShippedSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -756,12 +774,12 @@ func TestTransactionalEmailMonitorTerminalMigrationIsAdditiveAndReversible(t *te
 	if err := m.Up(); err != nil {
 		t.Fatalf("migrating to current schema: %v", err)
 	}
-	assertStateAndIndex("after up", MaxSchemaVersion, true)
+	assertStateAndIndex("after up", newestShippedSchemaVersion, true)
 
 	if err := m.Up(); !errors.Is(err, migrate.ErrNoChange) {
 		t.Fatalf("reapplying current migrations: %v, want ErrNoChange", err)
 	}
-	assertStateAndIndex("after repeated up", MaxSchemaVersion, true)
+	assertStateAndIndex("after repeated up", newestShippedSchemaVersion, true)
 
 	if err := m.Migrate(uint(SubjectCodeIdentitySchemaVersion)); err != nil {
 		t.Fatalf("rolling back migration 0027: %v", err)
@@ -815,10 +833,10 @@ func TestManualPurchaseRollbackGuardRefusesLivePurchaseEntitlementWithoutDirtyin
 	}
 	state, err := ReadSchemaState(ctx, pool)
 	// The property is that a refused rollback leaves the fully-migrated marker
-	// untouched and clean, so this tracks MaxSchemaVersion rather than whichever
-	// migration happened to be last when the test was written.
-	if err != nil || state.Version != MaxSchemaVersion || state.Dirty {
-		t.Fatalf("schema marker after refused rollback = %+v (err=%v), want clean version %d", state, err, MaxSchemaVersion)
+	// untouched and clean, so this tracks the newest shipped migration rather
+	// than whichever migration happened to be last when the test was written.
+	if err != nil || state.Version != newestShippedSchemaVersion || state.Dirty {
+		t.Fatalf("schema marker after refused rollback = %+v (err=%v), want clean version %d", state, err, newestShippedSchemaVersion)
 	}
 	if !tableExists(t, pool, "purchase_requests") {
 		t.Fatal("purchase request schema changed before rollback guard refused")

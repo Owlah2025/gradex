@@ -51,7 +51,22 @@ const (
 	StudentEmailOTPSchemaVersion        = ReportModerationSchemaVersion + 1
 	AuthenticatedPurchaseSchemaVersion  = StudentEmailOTPSchemaVersion + 1
 	TrustedPublicPreviewSchemaVersion   = AuthenticatedPurchaseSchemaVersion + 1
-	MaxSchemaVersion                    = TrustedPublicPreviewSchemaVersion
+
+	// ForwardCompatibleSchemaCeiling is the highest schema version this build
+	// tolerates without knowing the migrations that produced it.
+	//
+	// This build is the D-097/D-098 rollback anchor. It carries no feature of
+	// that release: what it adds is the ability to serve on the schema that
+	// release leaves behind, so an application-only rollback never requires a
+	// down-migration. Migrations 0032-0034 are additive to everything this
+	// build reads — new columns it never selects, new tables it never joins,
+	// new triggers that pass trivially because it never writes the columns they
+	// guard, and one new `media_asset_kind` enum value that reaches none of its
+	// queries. Raising the ceiling is therefore the whole compatibility change,
+	// and it is deliberately the only one.
+	ForwardCompatibleSchemaCeiling = 34
+
+	MaxSchemaVersion = ForwardCompatibleSchemaCeiling
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

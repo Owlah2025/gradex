@@ -1250,8 +1250,10 @@ func TestD7MigrationContainsMediaAndEntitlementInvariants(t *testing.T) {
 	if err := f.pool.QueryRow(f.ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&version); err != nil {
 		t.Fatalf("reading schema version: %v", err)
 	}
-	if version != int64(db.MaxSchemaVersion) {
-		t.Fatalf("schema version = %d, want %d", version, db.MaxSchemaVersion)
+	// The newest migration this build ships. The rollback anchor tolerates a
+	// higher schema than it ships, so this is not MaxSchemaVersion.
+	if version != int64(db.TrustedPublicPreviewSchemaVersion) {
+		t.Fatalf("schema version = %d, want %d", version, db.TrustedPublicPreviewSchemaVersion)
 	}
 	var nullable string
 	if err := f.pool.QueryRow(f.ctx, `

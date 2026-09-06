@@ -79,9 +79,11 @@ func TestDownRefusesLivePurchaseEntitlementBeforeMigrationStateChanges(t *testin
 
 	version, dirty, err := m.Version()
 	// Tracks the fully-migrated top rather than a literal, so adding an additive
-	// migration cannot make a refused-rollback guard look broken.
-	if err != nil || version != db.MaxSchemaVersion || dirty {
-		t.Fatalf("schema state after refused command down = version=%d dirty=%t err=%v, want clean %d", version, dirty, err, db.MaxSchemaVersion)
+	// migration cannot make a refused-rollback guard look broken. That top is
+	// the newest migration this build ships, which the rollback anchor
+	// deliberately separates from the highest schema it will serve.
+	if err != nil || version != db.TrustedPublicPreviewSchemaVersion || dirty {
+		t.Fatalf("schema state after refused command down = version=%d dirty=%t err=%v, want clean %d", version, dirty, err, db.TrustedPublicPreviewSchemaVersion)
 	}
 	var requests, grants int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM purchase_requests").Scan(&requests); err != nil || requests != 0 {
