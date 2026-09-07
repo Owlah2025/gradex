@@ -27,6 +27,11 @@ ENV PORT=3000
 
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
+# `next build` copies neither `public/` nor `.next/static` into the standalone
+# output, so both have to be placed beside `server.js` here. Without this the
+# hero's video and poster are 404s in the built image while working in `next
+# dev`, which serves `public/` from the source tree.
+COPY --from=build --chown=node:node /app/public ./public
 
 USER node
 EXPOSE 3000
