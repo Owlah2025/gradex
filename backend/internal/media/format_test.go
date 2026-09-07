@@ -233,3 +233,22 @@ func TestPDFValidationUsesActualBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestRecognizedVideoContainerMismatchIsTypedWithoutOverclassifyingUnknownBytes(t *testing.T) {
+	webm := []byte{0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00, 0x00, 0x00, 0x42, 0x82, 0x85, 'w', 'e', 'b', 'm', 0x00}
+	if !contentTypeMismatch(webm, "video/mp4") {
+		t.Fatal("recognized WebM bytes were not classified as an MP4 content-type mismatch")
+	}
+	if contentTypeMismatch(webm, "video/webm") {
+		t.Fatal("matching WebM content was classified as a mismatch")
+	}
+	if contentTypeMismatch([]byte{0x00, 0xff, 0x01, 0x7f, 0x80, 0xfe}, "video/mp4") {
+		t.Fatal("unknown bytes were overclassified as a content-type mismatch")
+	}
+	if contentTypeMismatch([]byte("%PDF-1.7\n"), "video/mp4") {
+		t.Fatal("non-video bytes were classified as a typed video mismatch")
+	}
+	if contentTypeMismatch(webm, "application/pdf") {
+		t.Fatal("video bytes for a non-video declaration were overclassified")
+	}
+}

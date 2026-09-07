@@ -1,4 +1,11 @@
 import { ProblemError } from "./problem";
+import { ar } from "../i18n/dictionaries/ar";
+import { en } from "../i18n/dictionaries/en";
+
+const localizedMediaValidation = {
+  en: en.instructor.media,
+  ar: ar.instructor.media,
+} as const;
 
 /**
  * Renders a server failure as text an Instructor can act on.
@@ -15,17 +22,31 @@ export function describeApiError(error: unknown, locale: "ar" | "en"): string {
       // A submission rejection reports `violations`, each naming the missing
       // requirement and the object it applies to; other failures report field
       // `errors`. Both are surfaced, because either one is the server's reason.
-      violations?: Array<{ code?: string; target?: string; dimension?: string }>;
+      violations?: Array<{
+        code?: string;
+        target?: string;
+        dimension?: string;
+      }>;
     };
     const base = problem.detail || problem.title;
+    const contentTypeMismatch = (problem.violations ?? problem.errors ?? []).find(
+      (violation) =>
+        violation.code === "CONTENT_TYPE_MISMATCH" ||
+        violation.code === "VIDEO_CONTENT_TYPE_MISMATCH",
+    );
+    if (contentTypeMismatch) {
+      const copy = localizedMediaValidation[locale];
+      return contentTypeMismatch.code === "CONTENT_TYPE_MISMATCH"
+        ? copy.videoContentTypeMismatch
+        : copy.contentTypeMismatch;
+    }
     const violations = ([...(problem.violations ?? []), ...(problem.errors ?? [])] as Array<
       Record<"code" | "target" | "dimension" | "detail", string | undefined>
-    >)
-      .map((violation) =>
-        [violation.code, violation.target, violation.dimension, violation.detail]
-          .filter(Boolean)
-          .join(" · "),
-      )
+    >).map((violation) =>
+      [violation.code, violation.target, violation.dimension, violation.detail]
+        .filter(Boolean)
+        .join(" · "),
+    )
       .filter(Boolean);
     if (violations.length > 0) {
       return `${base}: ${violations.join(" | ")}`;

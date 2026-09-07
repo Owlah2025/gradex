@@ -1621,6 +1621,9 @@ export const ar: Dictionary = {
       videoProcessingBackground:
         "تم رفع الفيديو بنجاح. تستمر المعالجة في الخلفية، ويمكنك مغادرة هذه الصفحة.",
       videoUploadInterrupted: "لم يكتمل رفع الفيديو. اختر الملف مرة أخرى.",
+      videoContentTypeMismatch:
+        "الملف المحدد ليس بصيغة MP4 صحيحة. اختر ملف فيديو MP4 صالحًا.",
+      contentTypeMismatch: "الملف المحدد لا يطابق الصيغة المطلوبة. اختر ملفًا بالصيغة الصحيحة.",
       videoSuperseded: "تم اختيار فيديو أحدث اكتمل رفعه لهذا الدرس.",
       resourceLabel: "مرفق الدرس",
       resourceHint: "ملف PDF أو DOCX. اختياري — أضف ملازم أو تمارين أو شرائح.",

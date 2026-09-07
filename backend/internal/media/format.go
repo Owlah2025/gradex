@@ -215,6 +215,38 @@ func contentMatchesDeclaredType(prefix []byte, declared string) bool {
 	}
 }
 
+// contentTypeMismatch recognizes only the supported video containers that can
+// be distinguished from malformed or unknown bytes. Unknown bytes continue
+// through the generic validation response rather than being overclassified.
+func contentTypeMismatch(prefix []byte, declared string) bool {
+	normalizedDeclared := strings.ToLower(strings.TrimSpace(declared))
+	if normalizedDeclared != "video/mp4" && normalizedDeclared != "video/quicktime" {
+		return false
+	}
+	actual := recognizedVideoContentType(prefix)
+	return actual != "" && !strings.EqualFold(actual, normalizedDeclared)
+}
+
+func recognizedVideoContentType(prefix []byte) string {
+	switch {
+	case hasMP4FileTypeBox(prefix):
+		return "video/mp4"
+	case hasWebMFileTypeHeader(prefix):
+		return "video/webm"
+	default:
+		return ""
+	}
+}
+
+func hasWebMFileTypeHeader(prefix []byte) bool {
+	if len(prefix) < 16 || !bytes.HasPrefix(prefix, []byte{0x1a, 0x45, 0xdf, 0xa3}) {
+		return false
+	}
+	// WebM's EBML document type is the bounded, recognizable marker. A bare
+	// EBML header is not enough to classify arbitrary Matroska-like bytes.
+	return bytes.Contains(prefix, []byte{0x42, 0x82, 0x85, 'w', 'e', 'b', 'm'})
+}
+
 // hasMP4FileTypeBox accepts only a bounded ISO-BMFF file-type signature for
 // video/mp4. A client declaration, extension, or generic octet-stream probe
 // is not evidence that arbitrary bytes are an MP4 file.

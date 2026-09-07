@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,10 +59,30 @@ var (
 	ErrNotFound               = errors.New("media asset not found")
 	ErrNotAuthorized          = errors.New("media asset not authorized")
 	ErrValidation             = errors.New("media validation failed")
+	ErrContentTypeMismatch    = errors.New("media content type mismatch")
 	ErrConflict               = errors.New("media state conflict")
 	ErrUnavailable            = errors.New("media dependency unavailable")
 	ErrConcurrentModification = errors.New("media concurrent modification")
 )
+
+// ContentTypeMismatchError is returned only when the stored bytes are a
+// recognized video container that contradicts the declared content type. The
+// declared type is allowlisted by the upload intent and is safe for the HTTP
+// layer to use when choosing a public violation message.
+type ContentTypeMismatchError struct {
+	DeclaredContentType string
+	ActualContentType   string
+}
+
+func (e *ContentTypeMismatchError) Error() string {
+	return fmt.Sprintf("%s: stored %s does not match declared %s", ErrContentTypeMismatch, e.ActualContentType, e.DeclaredContentType)
+}
+
+func (e *ContentTypeMismatchError) Unwrap() error { return ErrValidation }
+
+func (e *ContentTypeMismatchError) Is(target error) bool {
+	return target == ErrContentTypeMismatch
+}
 
 // ObjectStore is the narrow storage capability the media pipeline needs. The
 // concrete S3/MinIO client implements it; tests can provide a contract fake.

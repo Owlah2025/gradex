@@ -1745,6 +1745,9 @@ export const en = {
       videoProcessingBackground:
         "Video uploaded successfully. Processing continues in the background. You can leave this page.",
       videoUploadInterrupted: "The video upload did not finish. Choose the file again.",
+      videoContentTypeMismatch:
+        "The selected file does not match the required MP4 format. Choose a valid MP4 video.",
+      contentTypeMismatch: "The selected file does not match the required format. Choose a valid file.",
       videoSuperseded: "A newer completed video upload is selected for this lesson.",
       resourceLabel: "Lesson resource",
       resourceHint: "PDF or DOCX. Optional â attach handouts, problem sets or slides.",

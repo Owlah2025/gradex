@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -236,7 +237,7 @@ func writeMediaProblem(c *gin.Context, err error) {
 	case errors.Is(err, media.ErrNotFound):
 		writeProblem(c, problem.NotFound())
 	case errors.Is(err, media.ErrValidation):
-		writeProblem(c, problem.ValidationFailed())
+		writeProblem(c, mediaValidationProblem(err))
 	case errors.Is(err, media.ErrUnavailable):
 		writeProblem(c, problem.DependencyUnavailable())
 	case errors.Is(err, media.ErrConcurrentModification):
@@ -248,4 +249,25 @@ func writeMediaProblem(c *gin.Context, err error) {
 	default:
 		writeProblem(c, problem.Internal(""))
 	}
+}
+
+func mediaValidationProblem(err error) problem.Problem {
+	var mismatch *media.ContentTypeMismatchError
+	if !errors.As(err, &mismatch) {
+		return problem.ValidationFailed()
+	}
+
+	detail := "The selected file does not match the required format. Choose a valid file."
+	code := "VIDEO_CONTENT_TYPE_MISMATCH"
+	if strings.EqualFold(mismatch.DeclaredContentType, "video/mp4") {
+		code = "CONTENT_TYPE_MISMATCH"
+		detail = "The selected file does not match the required MP4 format. Choose a valid MP4 video."
+	}
+	return problem.ValidationFailed().WithViolations(problem.Violation{
+		Code:      code,
+		Detail:    detail,
+		Location:  problem.LocationBody,
+		Pointer:   "/content_type",
+		Parameter: "content_type",
+	})
 }

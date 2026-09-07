@@ -928,6 +928,12 @@ func (s *Service) verifyObjectContent(ctx context.Context, request CompleteUploa
 		return fmt.Errorf("%w: inspecting uploaded object: %v", ErrUnavailable, err)
 	}
 	if !contentMatchesDeclaredType(prefix, request.ContentType) {
+		if contentTypeMismatch(prefix, request.ContentType) {
+			return &ContentTypeMismatchError{
+				DeclaredContentType: strings.ToLower(strings.TrimSpace(request.ContentType)),
+				ActualContentType:   recognizedVideoContentType(prefix),
+			}
+		}
 		return fmt.Errorf("%w: uploaded bytes do not match the declared content type", ErrValidation)
 	}
 	return nil
