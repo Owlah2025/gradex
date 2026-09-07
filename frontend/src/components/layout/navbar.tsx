@@ -51,9 +51,13 @@ export function Navbar() {
           ))}
         </nav>
 
-        <div className="ms-auto flex items-center gap-2.5">
+        <div className="ms-auto flex items-center gap-2">
           <LanguageToggle />
           <ThemeToggle />
+          {/* Separates the two utility switches from the journey controls, so the primary action
+              reads as the end of the bar rather than as the fifth item in one undifferentiated
+              row. Decorative — the grouping is already carried by the landmarks around it. */}
+          <span aria-hidden className="mx-1 hidden h-6 w-px bg-border lg:block" />
           <div className="hidden lg:block">
             <AuthActions />
           </div>

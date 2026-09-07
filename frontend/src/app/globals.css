@@ -153,4 +153,225 @@
     direction: ltr;
     unicode-bidi: isolate;
   }
+
+  /**
+   * A scroll container with no visible scrollbar.
+   *
+   * The catalogue carousel hides its bar so the row reads as product cards rather than a scrolling
+   * pane; scrollability stays discoverable through the peeking next card and the arrow controls,
+   * and the element is still a real scroll container — keyboard, wheel and touch all work.
+   */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /**
+   * Neighbour-push hover for the course rail.
+   *
+   * Hovering one card makes the immediate neighbours lean away, so the hovered course appears to
+   * open a little space around itself. It is pointer-only and motion-only, and transform-based, so
+   * it never moves a scroll-snap point or reflows the row: only paint moves, never layout. It is
+   * silent on touch and under reduced motion, where the query below simply does not match.
+   *
+   * `--gx-push` is the physical distance a right-hand neighbour travels, flipped in RTL so the
+   * effect is described in *screen* space, not source order — in both directions the card
+   * physically left of the hovered one goes left and the one physically right goes right. Because
+   * the DOM order reverses under RTL, `li:hover + li` (the next sibling) is the visual *left*
+   * neighbour there, which is why the sign, not the selector, is what changes. Second-nearest
+   * neighbours move a fraction as far, so the displacement fades outward instead of ending abruptly.
+   */
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    .course-rail > li {
+      transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    /* The hovered card rises toward the reader and its cover eases in; neighbours are the two `li`
+       flanking it, moving physically away. `data-push` is set by the rail's hover index (see
+       `FeaturedCourses`), already resolved to a *physical* direction, so RTL needs no special case
+       here — "left" is left in both writing directions. Transforms live on the `li` (horizontal
+       push) and its `> a` (lift), so they never fight for the same element's `transform`. */
+    .course-rail > li[data-push="active"] {
+      z-index: 2;
+    }
+    .course-rail > li[data-push="active"] > a {
+      transform: translateY(-6px) scale(1.02);
+    }
+    .course-rail > li[data-push="active"] [data-cover] {
+      transform: scale(1.03);
+    }
+    .course-rail > li[data-push="left"] {
+      transform: translateX(-14px);
+    }
+    .course-rail > li[data-push="right"] {
+      transform: translateX(14px);
+    }
+    .course-rail > li[data-push="left-2"] {
+      transform: translateX(-6px);
+    }
+    .course-rail > li[data-push="right-2"] {
+      transform: translateX(6px);
+    }
+  }
+
+  /**
+   * Hero media, dissolving into the hero background as it approaches the text.
+   *
+   * The fade has to run *towards the copy*, which is the opposite edge in each language, so the
+   * direction is bound to `dir` rather than baked into one gradient. Doing this with `text-align`
+   * or a flipped `order` alone would leave the Arabic hero fading away from its own headline.
+   *
+   * A second gradient softens the top and bottom edges so the media reads as part of the band
+   * rather than as a rectangle laid on top of it. `mask-composite: intersect` is what combines
+   * them; both are listed unprefixed and `-webkit-` prefixed for Safari.
+   */
+  @media (min-width: 1024px) {
+    .hero-media-mask {
+      -webkit-mask-image: linear-gradient(
+          to left,
+          #000 0%,
+          #000 46%,
+          rgba(0, 0, 0, 0.55) 72%,
+          transparent 96%
+        ),
+        linear-gradient(to bottom, transparent 0%, #000 12%, #000 84%, transparent 100%);
+      mask-image: linear-gradient(
+          to left,
+          #000 0%,
+          #000 46%,
+          rgba(0, 0, 0, 0.55) 72%,
+          transparent 96%
+        ),
+        linear-gradient(to bottom, transparent 0%, #000 12%, #000 84%, transparent 100%);
+      -webkit-mask-composite: source-in;
+      mask-composite: intersect;
+    }
+
+    [dir="rtl"] .hero-media-mask {
+      -webkit-mask-image: linear-gradient(
+          to right,
+          #000 0%,
+          #000 46%,
+          rgba(0, 0, 0, 0.55) 72%,
+          transparent 96%
+        ),
+        linear-gradient(to bottom, transparent 0%, #000 12%, #000 84%, transparent 100%);
+      mask-image: linear-gradient(
+          to right,
+          #000 0%,
+          #000 46%,
+          rgba(0, 0, 0, 0.55) 72%,
+          transparent 96%
+        ),
+        linear-gradient(to bottom, transparent 0%, #000 12%, #000 84%, transparent 100%);
+    }
+  }
+
+  /**
+   * Sticky section stacking, for the Hero → Personalization → Courses story only.
+   *
+   * The three sections are siblings inside one `.stack` parent and the first two are
+   * `position: sticky`. A sticky element is pinned for as long as its *containing block* is on
+   * screen, so each one holds at the header edge while the next scrolls up over it — ascending
+   * `z-index` and an opaque surface on each are the whole of the "covers" effect. No extra spacer
+   * height, no scroll listener, no measurement, nothing that can drop a frame.
+   *
+   * The last section is deliberately not sticky: it carries the stack away and the page returns to
+   * ordinary scrolling underneath it.
+   *
+   * `top` clears the 64px header, and the same value is `scroll-margin-top` so an anchor or a
+   * programmatic `scrollIntoView` lands on the section rather than under the header.
+   */
+  .stack {
+    position: relative;
+  }
+
+  .stack-layer,
+  .stack-tail {
+    scroll-margin-top: 4rem;
+  }
+
+  /**
+   * Pinning is a large-screen composition, and this is not a stylistic preference.
+   *
+   * A `position: sticky` element taller than the space below `top` pins with its own lower edge
+   * permanently out of reach — the reader cannot scroll to it, because scrolling moves the page and
+   * the element is holding still. On a 375px phone the personalization step is a column of chips
+   * and does exceed that height, so pinning it there would make the last option in the list
+   * literally unclickable.
+   *
+   * So below `lg` the three sections scroll normally, one after another, which is the right answer
+   * on a phone anyway: the stack exists to show two surfaces at once, and there is no room for two.
+   */
+  @media (min-width: 1024px) {
+    .stack-layer {
+      position: sticky;
+      top: 4rem;
+    }
+  }
+
+  /**
+   * The recede, as progressive enhancement.
+   *
+   * A covered section dips to 97% and dims while the section above it rises — the movement that
+   * makes the stack read as depth rather than as two panels that happen to overlap. Where
+   * scroll-driven animation is unsupported the sections still stack; the enhancement is the dip,
+   * never the covering itself.
+   *
+   * The timeline belongs to the *covering* section, not the receding one, and that is the whole
+   * reason `timeline-scope` is here. A `position: sticky` subject reports view progress against its
+   * pinned box, which stops advancing at exactly the moment this needs to animate — so the
+   * pinned section reads a timeline published by the sibling that is actually moving. Its `entry`
+   * range is precisely "rising from the bottom of the viewport until it reaches the top", which is
+   * when the section underneath should give way.
+   *
+   * The browser runs this off the main thread against real scroll position: no handler, no layout
+   * read, and it stays exact if the reader scrolls backwards or flings.
+   */
+  @supports (animation-timeline: view()) {
+    @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+      .stack {
+        timeline-scope: --gx-stack-2, --gx-stack-3;
+      }
+
+      .stack-covers-2 {
+        view-timeline-name: --gx-stack-2;
+        view-timeline-axis: block;
+      }
+
+      .stack-covers-3 {
+        view-timeline-name: --gx-stack-3;
+        view-timeline-axis: block;
+      }
+
+      .stack-recedes-under-2,
+      .stack-recedes-under-3 {
+        animation: gx-stack-recede linear both;
+        animation-range: entry 15% entry 100%;
+        transform-origin: 50% 0;
+        will-change: transform;
+      }
+
+      .stack-recedes-under-2 {
+        animation-timeline: --gx-stack-2;
+      }
+
+      .stack-recedes-under-3 {
+        animation-timeline: --gx-stack-3;
+      }
+    }
+  }
+}
+
+@keyframes gx-stack-recede {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.97);
+    opacity: 0.7;
+  }
 }

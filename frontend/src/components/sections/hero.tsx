@@ -2,105 +2,139 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { CheckSquare, Check, Languages, Wallet } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Container } from "@/components/layout/container";
 import { Button } from "@/components/ui/button";
 import { Eyebrow } from "@/components/ui/typography";
 import { Scribble } from "@/components/brand/scribble";
-import { BirdMark } from "@/components/brand/bird-mark";
+import { HeroMedia } from "./hero-media";
+import { HeroAcademicPrompt } from "@/components/academic/hero-academic-prompt";
+import { useLandingJourney } from "@/components/landing/landing-journey";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { routes } from "@/components/layout/nav-items";
+import { cn } from "@/lib/utils";
+import { PERSONALIZE_ANCHOR } from "@/components/landing/anchors";
 
-const TRUST_ICONS = [Languages, CheckSquare, Wallet, Check];
-
+/**
+ * The landing page's first three seconds.
+ *
+ * ## What was cut, and why
+ *
+ * The hero used to carry four trust pills, two equally weighted buttons and a subtitle naming three
+ * separate product facts. Everything in it was true and none of it was the point: a student landing
+ * here is deciding whether Gradex knows their university, and that decision is made by the headline
+ * or not at all. So there is one heading, one line under it, one dominant action, and a single
+ * quiet line of reassurance — and the four facts moved into that one line rather than being drawn
+ * as four boxes competing with the H1.
+ *
+ * ## The composition, in both directions
+ *
+ * Copy on the inline-start side, media filling the inline-end half of the *viewport* — not a card
+ * beside the text — and dissolving into the navy band as it approaches the words. The mask that
+ * does the dissolving is bound to `dir` (see `.hero-media-mask`), so Arabic is a genuine mirror:
+ * the copy sits right, the media fills the left, and the fade still runs towards the headline
+ * rather than away from it.
+ *
+ * Below `lg` the media stops being a background and becomes an ordinary block under the copy, at a
+ * height that leaves the headline owning the first screen. It is one element in one place in the
+ * DOM at every breakpoint, so nothing is mounted twice and no video is ever decoded twice.
+ */
 export function Hero() {
-  const { locale, t } = useLocale();
+  const { locale, dir, t } = useLocale();
+  const Arrow = dir === "rtl" ? ArrowLeft : ArrowRight;
+  const journey = useLandingJourney();
 
   return (
     <section
       aria-labelledby="hero-title"
-      className="relative overflow-hidden bg-gx-navy text-white"
+      className="relative isolate flex min-h-[calc(100svh-4rem)] flex-col overflow-hidden bg-gx-navy text-white"
     >
       {/* Brand glow — one gradient moment per view. */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_90%_at_85%_10%,rgba(79,124,255,0.28),transparent_55%),radial-gradient(90%_80%_at_10%_100%,rgba(255,126,77,0.12),transparent_50%)]"
       />
-      <Container className="relative grid items-center gap-10 py-16 md:py-24 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14">
-        <div>
+
+      {/* Media. Absolute and full-bleed from `lg`; an ordinary block below it (see the DOM order —
+          it follows the copy, so the small-screen stacking needs no reordering). */}
+      <div className="hero-media-mask pointer-events-none order-2 h-[46svh] min-h-[280px] px-5 pb-12 sm:px-6 lg:absolute lg:inset-y-0 lg:end-0 lg:order-none lg:m-0 lg:h-auto lg:w-[54%] lg:p-0">
+        <HeroMedia className="lg:absolute lg:inset-0" />
+      </div>
+
+      {/**
+       * Centred, then lifted.
+       *
+       * The extra bottom padding is what raises the copy off the true vertical centre: the band
+       * below it now carries the university strip, and a headline centred against the whole hero
+       * sat lower than it looked like it should against the part of the hero that is actually
+       * empty. It also opens the room the strip needed to come up out of the very bottom edge.
+       */}
+      {/**
+       * A wider measure than the shared container, on very wide screens only.
+       *
+       * The hero is the one full-bleed band on the page — the media runs off the viewport edge —
+       * so holding the copy to the 1200px column left it stranded in the middle with ~375px of
+       * dead navy outboard of it at 1900px. The band gets its own measure so the headline sits
+       * nearer the edge it belongs to, while every other section keeps the shared one.
+       */}
+      <Container className="relative z-10 order-1 flex flex-1 flex-col justify-center py-14 md:py-20 lg:py-20 lg:pb-44 2xl:max-w-[92rem]">
+        {/* A wider measure on large screens: the headline sets to longer lines, which in Arabic
+            carries it further into the band rather than stacking it against its own edge. */}
+        <div className="max-w-[34rem] lg:max-w-[39rem]">
           <Eyebrow className="text-gx-blue-200">{t.hero.eyebrow}</Eyebrow>
+
+          {/**
+           * Two leadings, because Arabic and Latin do not have the same one.
+           *
+           * At 1.08 the Arabic headline's lines physically overlapped — Arabic sets taller than
+           * Latin at the same font size and its descenders run below the baseline, so a leading
+           * tuned to make an English display line feel tight collides outright. The Scribble under
+           * the accent word went with it, landing across the middle of the line above.
+           */}
           <h1
             id="hero-title"
-            className="mt-4 font-display text-[clamp(2.5rem,6vw,4.25rem)] font-extrabold leading-[1.1] text-white [text-wrap:balance]"
+            className={cn(
+              "mt-4 font-display text-[clamp(2.5rem,6.2vw,4.25rem)] font-extrabold text-white [text-wrap:balance]",
+              dir === "rtl" ? "leading-[1.42]" : "leading-[1.08]",
+            )}
           >
             {t.hero.titleLead}{" "}
             <Scribble>{t.hero.titleAccent}</Scribble>
           </h1>
-          <p className="mt-5 max-w-[32rem] text-[clamp(1.03rem,1.7vw,1.25rem)] leading-relaxed text-white/80">
+
+          <p className="mt-6 max-w-[30rem] text-[clamp(1.03rem,1.7vw,1.2rem)] leading-relaxed text-white/80">
             {t.hero.subtitle}
           </p>
 
-          <div className="mt-8 flex flex-col gap-3.5 sm:flex-row">
+          <div className="mt-9 flex flex-col gap-3.5 sm:flex-row sm:items-center">
+            {/* A plain anchor, not a route. The personalization it opens is on this page, so this
+                has to be an in-page jump — and as an `href` it keeps working before hydration and
+                honours the reader's own scroll-behaviour preference. */}
             <Button asChild variant="accent" size="lg" className="max-sm:w-full">
-              <Link href={routes.catalogue(locale)}>{t.nav.browse}</Link>
+              <a href={`#${PERSONALIZE_ANCHOR}`}>
+                {t.hero.primaryCta}
+                <Arrow aria-hidden />
+              </a>
             </Button>
             <Button asChild variant="onDark" size="lg" className="max-sm:w-full">
-              <Link href={routes.register}>{t.nav.register}</Link>
+              <Link href={routes.catalogue(locale)}>{t.hero.secondaryCta}</Link>
             </Button>
           </div>
 
-          <ul
-            aria-label={t.hero.trustAria}
-            className="mt-9 flex flex-wrap gap-x-6 gap-y-2.5"
-          >
-            {t.hero.trust.map((item, i) => {
-              const Icon = TRUST_ICONS[i] ?? Check;
-              return (
-                <li key={item} className="flex items-center gap-2 text-sm text-white/80">
-                  <Icon className="size-[17px] text-gx-orange-200" aria-hidden />
-                  {item}
-                </li>
-              );
-            })}
-          </ul>
+          <p className="mt-7 text-sm leading-relaxed text-white/60">{t.hero.trustNote}</p>
         </div>
-
-        {/* Visual: course-card mock + code island + ascending bird (no photos). */}
-        <HeroVisual />
       </Container>
+
+      {/**
+       * The academic onboarding, layered over the band.
+       *
+       * A sibling of the copy rather than a child of it, and absolutely positioned inside this
+       * section: the trigger sits at the hero's bottom edge, centred in both writing directions,
+       * and the card it opens floats over the whole band. Nothing it renders is in normal flow, so
+       * the hero's height and every line inside it are identical whether the card is closed, open
+       * or resolved.
+       */}
+      <HeroAcademicPrompt onResolved={() => journey?.scrollToCourses()} />
     </section>
-  );
-}
-
-function HeroVisual() {
-  return (
-    <div aria-hidden className="relative hidden h-[440px] sm:block">
-      <div className="absolute start-0 top-6 w-[270px] rounded-lg bg-white p-4 text-gx-navy shadow-lg">
-        <div className="flex h-[110px] items-end rounded-md bg-gradient-brand p-2.5">
-          <BirdMark className="size-12 text-white/90" />
-        </div>
-        <div className="mt-4 h-3 w-4/5 rounded bg-gx-ink-100" />
-        <div className="mt-2 h-3 w-3/5 rounded bg-gx-ink-100" />
-      </div>
-
-      <div
-        dir="ltr"
-        className="absolute bottom-2 end-0 w-[250px] rounded-lg border border-white/10 bg-[#0b1622] p-4 text-start font-mono text-[12.5px] leading-relaxed shadow-lg"
-      >
-        <span className="text-gx-ink-400">{"// lab 03 — arrays"}</span>
-        <br />
-        <span className="text-gx-blue-300">function</span>{" "}
-        <span className="text-[#8fd3b6]">average</span>(xs){" {"}
-        <br />
-        &nbsp;&nbsp;<span className="text-gx-blue-300">return</span> sum(xs) / xs.
-        <span className="text-[#8fd3b6]">length</span>;
-        <br />
-        {"}"}
-        <br />
-        <span className="text-gx-ink-400">{"// grade: passed ✓"}</span>
-      </div>
-
-      <BirdMark className="absolute end-9 top-0 size-[120px] motion-safe:animate-bird-float" />
-    </div>
   );
 }

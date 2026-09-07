@@ -42,6 +42,7 @@ export const en = {
     login: "Log in",
     register: "Create account",
     browse: "Browse courses",
+    findMyCourses: "Find my courses",
     dashboard: "Go to dashboard",
     instructorStudio: "Instructor Studio",
     adminWorkspace: "Admin workspace",
@@ -1166,17 +1167,14 @@ export const en = {
   },
   hero: {
     eyebrow: "University courses · Kuwait",
-    titleLead: "Graduate with",
-    titleAccent: "excellence.",
+    titleLead: "Your course, explained the",
+    titleAccent: "right way.",
     subtitle:
-      "Browse published Course details in Arabic or English, then learn through authorized Course access.",
-    trustAria: "What Gradex makes clear before you request access",
-    trust: [
-      "Arabic & English",
-      "Published course details",
-      "KWD prices when configured",
-      "Authorized learning access",
-    ],
+      "Courses built around your university\u2019s own study plan \u2014 from the lecture to the exam.",
+    primaryCta: "Find my courses",
+    secondaryCta: "Browse all courses",
+    trustNote:
+      "Arabic and English · Prices in KWD · No account needed to browse",
   },
   courses: {
     loading: "Loading published courses…",
@@ -1187,7 +1185,26 @@ export const en = {
     eyebrow: "Courses",
     title: "Start where your semester is.",
     subtitle: "Browse the Courses currently published by Gradex.",
+    personalizedEyebrow: "Your results",
+    personalizedTitle: "Courses for you",
+    personalizedSubtitle:
+      "Published for the university and program you picked, straight from the live catalogue.",
     browseAll: "Browse all courses",
+    /**
+     * Deliberately not "Browse all courses" a second time.
+     *
+     * The hero already offers that name for the unfiltered catalogue. This link goes somewhere
+     * else — the catalogue still narrowed to the reader's own university and program — and two
+     * controls sharing one name while leading to different lists is exactly the ambiguity a screen
+     * reader cannot resolve, because the name is all it has.
+     */
+    browseAllPersonalized: "See all your courses",
+    previewShort: "Preview",
+    carouselLabel: "Courses",
+    carouselPrevious: "Previous courses",
+    carouselNext: "Next courses",
+    viewAll: "View all courses",
+    viewAllCount: "View all {count} courses",
     view: "View",
     labsIncluded: "Labs included",
     new: "New",
@@ -2033,8 +2050,21 @@ export const en = {
   },
   academicContext: {
     eyebrow: "Personalize",
-    title: "Which university are you studying at?",
-    lead: "Tell us your university and program, and the catalogue will lead with the courses that belong to your study plan. You can change it whenever you like.",
+    title: "Let\u2019s find your courses",
+    lead: "Two taps and the catalogue leads with the courses that belong to your own study plan.",
+    universityQuestion: "Which university do you study at?",
+    programQuestion: "What do you study?",
+    // Dismisses the hero prompt without answering. Secondary by design: it is an exit, not a
+    // second call to action.
+    skipForNow: "Skip for now",
+    showMore: "Show more",
+    // Closes the floating card and returns the hero to focus. Not a dismissal of the offer: the
+    // trigger stays where it was.
+    closePrompt: "Close",
+    resolving: "Finding your courses\u2026",
+    resolved: "Here are your courses.",
+    anyProgramChoice: "Not sure yet",
+    stepAria: "Choosing your academic context",
     notAnAccount: "No account needed. Your choice stays on this device until you decide to sign up.",
     universityLabel: "University",
     programLabel: "Program",

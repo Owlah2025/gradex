@@ -18,7 +18,7 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 import { useSessionView } from "@/lib/identity/use-session";
 
 export function MobileNav() {
-  const { locale, t } = useLocale();
+  const { locale, dir, t } = useLocale();
   const pathname = usePathname();
   const session = useSessionView();
   // Parity with the desktop bar is the requirement, not a nicety: below `lg`
@@ -41,8 +41,11 @@ export function MobileNav() {
           <Menu className="size-5" aria-hidden />
         </Button>
       </SheetTrigger>
-      <SheetContent side="right" closeLabel={t.meta.closeMenu}>
-        <SheetTitle className="sr-only">{t.nav.browse}</SheetTitle>
+      {/* The sheet enters from the side the trigger is on, which is the inline end in both
+          languages — so Arabic opens from the left rather than sliding in from the opposite side of
+          the screen to the button that was pressed. */}
+      <SheetContent side={dir === "rtl" ? "left" : "right"} closeLabel={t.meta.closeMenu}>
+        <SheetTitle className="sr-only">{t.nav.primaryNavigation}</SheetTitle>
         <nav
           aria-label={t.nav.primaryNavigation}
           className="mt-8 flex flex-col gap-1"

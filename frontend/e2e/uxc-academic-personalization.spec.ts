@@ -155,6 +155,65 @@ async function saveComputerScienceProfile(api: APIRequestContext): Promise<void>
   expect(saved.status(), await saved.text()).toBe(200);
 }
 
+/**
+ * The landing personalization is a progressive chooser inside the hero, not a form in a section.
+ *
+ * One question is shown at a time, each answer is a real button, and answering the last one *is*
+ * the submission — so these helpers press options by their visible name rather than selecting from
+ * a list and then pressing Submit. What is being exercised is unchanged: the real option endpoints,
+ * the real slugs, and the same stored slug pair at the end.
+ */
+/**
+ * The university step, which for a first-time visitor is the strip in the hero.
+ *
+ * The landing page loads with the card closed: the universities Gradex covers are offered as a logo
+ * strip at the bottom of the hero, and pressing one *is* answering "which university" — the card
+ * opens on the major step already. A visitor who has already chosen reopens the card from the
+ * resolved control instead, and answers the university question inside it.
+ *
+ * Pressed with a real mouse click at the control's own coordinates, deliberately.
+ *
+ * An earlier version of this helper dispatched `.click()` through the DOM to dodge Playwright's
+ * actionability scroll, and that hid a real defect: the hero's copy column shared the strip's
+ * `z-index` and was painted over it, so every press landed on the column instead. A scripted click
+ * fires the handler regardless of what is on top, and reported success the whole time.
+ */
+function universityChoice(page: Page, name: string) {
+  const inStrip = page.getByTestId("hero-academic-strip").getByRole("button", { name });
+  const inCard = page.getByTestId("academic-picker-institution").getByRole("button", { name });
+  return { inStrip, inCard };
+}
+
+async function chooseUniversity(page: Page, name: string) {
+  const { inStrip, inCard } = universityChoice(page, name);
+  if (await inCard.isVisible().catch(() => false)) {
+    await inCard.click();
+  } else {
+    const box = await inStrip.boundingBox();
+    if (!box) throw new Error("the university strip is not on screen to be pressed");
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await expect(page.getByTestId("hero-academic-prompt")).toBeVisible();
+}
+
+function programChoice(page: Page, name: string) {
+  return page.getByTestId("academic-picker-program").getByRole("button", { name });
+}
+
+/**
+ * Answers both questions on the landing page and waits for the results to be personalised.
+ *
+ * The wait is on the courses section retitling itself, which is the observable consequence of the
+ * context resolving — not on a navigation, because completing the questions no longer leaves the
+ * page.
+ */
+async function personalise(page: Page, university: string, program: string) {
+  await chooseUniversity(page, university);
+  await expect(page.getByTestId("academic-picker-institution")).toContainText(university);
+  await programChoice(page, program).click();
+  await expect(page.getByTestId("featured-courses-context")).toBeVisible();
+}
+
 async function seedLocale(context: BrowserContext, locale: "ar" | "en") {
   await context.addInitScript((selected) => {
     window.localStorage.setItem("gradex.locale", selected);
@@ -195,41 +254,70 @@ test.describe("UX-C anonymous academic personalisation", () => {
     const errors = watchConsole(page);
 
     await page.goto("/");
-    const picker = page.getByTestId("academic-picker");
-    await expect(picker).toBeVisible();
+    // Closed on arrival: the hero loads sharp, with the university strip as the whole offer.
+    await expect(page.getByTestId("hero-academic-prompt")).toHaveCount(0);
+    const strip = page.getByTestId("hero-academic-strip");
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText(UNIVERSITY_EN);
+
+    // Visible is not the same as pressable. The hero layers a full-height copy column over this
+    // band, and when the two shared a stacking level the column silently took every press.
+    const onTop = await page
+      .locator(`[data-value="${UNIVERSITY_SLUG}"]`)
+      .evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        return hit instanceof Element && hit.closest("[data-value]") === node;
+      });
+    expect(onTop, "the university strip is covered by another hero layer").toBe(true);
 
     // The options are the real ones. Nothing here types a slug.
     const programs = await publicPrograms();
     expect(programs.length, "the launch manifest must expose programs").toBeGreaterThan(0);
     expect(programs.map((item) => item.slug)).toContain(PROGRAM_SLUG);
 
-    const university = page.getByTestId("academic-picker-institution");
-    await expect(university).toBeVisible();
-    await university.selectOption({ label: UNIVERSITY_EN });
+    // One question at a time: the program chooser does not exist until a university is named.
+    await expect(page.getByTestId("academic-picker-program")).toHaveCount(0);
+    // Pressing a university in the strip answers the first question and opens the card on the
+    // second — the university is confirmed, never re-asked.
+    await chooseUniversity(page, UNIVERSITY_EN);
+    await expect(page.getByTestId("academic-picker-institution")).toContainText(UNIVERSITY_EN);
 
     const program = page.getByTestId("academic-picker-program");
     await expect(program).toContainText(PROGRAM_EN);
-    await program.selectOption(PROGRAM_SLUG);
+    // No Next, and no Submit: choosing the program is the completion.
+    await expect(page.getByRole("button", { name: "Show my courses" })).toHaveCount(0);
+    await programChoice(page, PROGRAM_EN).click();
 
-    await page.getByRole("button", { name: "Show my courses" }).click();
-
-    // The catalogue is now addressed by the selection, so the link is shareable and Back works.
-    await page.waitForURL(
-      new RegExp(`/en/catalog\\?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`),
-    );
-    const bar = page.getByTestId("catalogue-academic-context");
-    await expect(bar).toBeVisible();
-    await expect(bar.getByTestId("academic-context-names")).toContainText(UNIVERSITY_EN);
-    await expect(bar.getByTestId("academic-context-names")).toContainText(PROGRAM_EN);
+    // The reader stays on the landing page and the courses below are now theirs, named by the
+    // context that produced them.
+    await expect(page).toHaveURL(/\/$/);
+    const resolved = page.getByTestId("featured-courses-context");
+    await expect(resolved).toBeVisible();
+    await expect(resolved.getByTestId("academic-context-names")).toContainText(UNIVERSITY_EN);
+    await expect(resolved.getByTestId("academic-context-names")).toContainText(PROGRAM_EN);
+    await expect(page.getByRole("heading", { name: "Courses for you" })).toBeVisible();
 
     // What was stored is the slug pair, and it says so is a device-local preference.
     const stored = await readStored(page);
     expect(stored?.version).toBe(1);
     expect(stored?.institutionSlug).toBe(UNIVERSITY_SLUG);
     expect(stored?.programSlug).toBe(PROGRAM_SLUG);
-    await expect(bar.getByTestId("academic-context-provenance")).toContainText(
-      "Saved on this device",
+    // The resolved context is a compact chip in the hero now, so what proves the choice was stored
+    // device-locally is the stored value itself plus the catalogue bar further down, both asserted
+    // here already — not a provenance line the compact form deliberately does not carry.
+    await expect(page.getByTestId("hero-academic-trigger")).toContainText(UNIVERSITY_EN);
+
+    // The shareable, addressed catalogue is still exactly where the results point.
+    await expect(page.getByTestId("featured-courses-view-all")).toHaveAttribute(
+      "href",
+      `/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`,
     );
+    await page.goto(`/en/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`);
+    const bar = page.getByTestId("catalogue-academic-context");
+    await expect(bar).toBeVisible();
+    await expect(bar.getByTestId("academic-context-names")).toContainText(UNIVERSITY_EN);
+    await expect(bar.getByTestId("academic-context-names")).toContainText(PROGRAM_EN);
 
     await bar.screenshot({ path: "playwright-report/uxc-academic-catalogue-bar-en.png" });
     await page.goto(`/ar/catalog?institution=${UNIVERSITY_SLUG}&program=${PROGRAM_SLUG}`);
@@ -246,14 +334,14 @@ test.describe("UX-C anonymous academic personalisation", () => {
     const page = await context.newPage();
 
     await page.goto("/");
-    const university = page.getByTestId("academic-picker-institution");
+    await chooseUniversity(page, UNIVERSITY_EN);
     const program = page.getByTestId("academic-picker-program");
-
-    await university.selectOption({ label: UNIVERSITY_EN });
     await expect(program).toContainText(PROGRAM_EN);
 
-    const offered = await program.locator("option").evaluateAll((nodes) =>
-      nodes.map((node) => (node as HTMLOptionElement).value).filter((value) => value !== ""),
+    // Every option carries the public slug it stands for. The last one is the deliberate
+    // "not sure yet" answer, which stands for no program at all and so carries no slug.
+    const offered = await program.locator("button[data-value]").evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLElement).dataset.value ?? ""),
     );
     const real = (await publicPrograms()).map((item) => item.slug);
     expect(offered.sort()).toEqual(real.sort());
@@ -277,12 +365,12 @@ test.describe("UX-C anonymous academic personalisation", () => {
 
     // Landing page, reached by ordinary navigation, still knows the context.
     await page.goto("/");
-    await expect(page.getByTestId("academic-context-panel-summary")).toBeVisible();
+    await expect(page.getByTestId("hero-academic-trigger")).toBeVisible();
     await expect(
-      page.getByTestId("academic-context-panel-summary").getByTestId("academic-context-names"),
+      page.getByTestId("hero-academic-trigger").getByTestId("academic-context-names"),
     ).toContainText(UNIVERSITY_EN);
     await page
-      .getByTestId("academic-context-panel-summary")
+      .getByTestId("hero-academic-trigger")
       .screenshot({ path: "playwright-report/uxc-academic-landing-summary-en.png" });
 
     // A Course page keeps a way back into the same narrowed catalogue.
@@ -443,12 +531,7 @@ test.describe("UX-C anonymous academic personalisation", () => {
     });
 
     await page.goto("/");
-    await page.getByTestId("academic-picker-institution").selectOption({ label: UNIVERSITY_EN });
-    const program = page.getByTestId("academic-picker-program");
-    await expect(program).toContainText(PROGRAM_EN);
-    await program.selectOption(PROGRAM_SLUG);
-    await page.getByRole("button", { name: "Show my courses" }).click();
-    await page.waitForURL(new RegExp(`institution=${UNIVERSITY_SLUG}`));
+    await personalise(page, UNIVERSITY_EN, PROGRAM_EN);
 
     await page.goto("/register");
     await expect(page.getByRole("heading").first()).toBeVisible();
@@ -470,29 +553,24 @@ test.describe("UX-C anonymous academic personalisation", () => {
     const page = await context.newPage();
     await page.goto("/");
 
-    const university = page.getByTestId("academic-picker-institution");
-    await expect(university).toBeVisible();
-    // Every control is named by a real <label>, not by placement.
-    await expect(page.getByLabel("University", { exact: true })).toBeVisible();
-    await expect(page.getByLabel(/Program/)).toBeVisible();
-
-    // The university is chosen explicitly rather than left to the single-institution shortcut. That
-    // shortcut is real product behaviour, but it is conditional on the catalogue holding exactly one
-    // institution — and earlier specs in this suite create more — so a keyboard test that depended
-    // on it was asserting the fixture rather than the control.
-    await university.selectOption({ label: UNIVERSITY_EN });
-
-    // The program chooser is disabled until its options exist, and a disabled control is correctly
-    // skipped by Tab. Wait for it to become operable rather than racing the request that fills it.
-    const program = page.getByTestId("academic-picker-program");
-    await expect(program).toBeEnabled();
-
+    // The strip's options are real buttons, reachable and operable from the keyboard alone.
+    const university = universityChoice(page, UNIVERSITY_EN).inStrip;
     await university.focus();
     await expect(university).toBeFocused();
-    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+
+    // Answering opens the card on the next question, with the answered one confirmed on it.
+    const programGroup = page.getByRole("group", { name: "What do you study?" });
+    await expect(programGroup).toBeVisible();
+    await expect(page.getByTestId("academic-picker-institution")).toContainText(UNIVERSITY_EN);
+
+    // Reachable by Tab alone, and operable by Enter alone — which completes the whole flow without
+    // a pointer and without a submit control to find.
+    const program = programChoice(page, PROGRAM_EN);
+    await program.focus();
     await expect(program).toBeFocused();
-    await page.keyboard.press("Tab");
-    await expect(page.getByRole("button", { name: "Show my courses" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("featured-courses-context")).toBeVisible();
     await context.close();
   });
 
@@ -663,11 +741,11 @@ test.describe("UX-C anonymous academic personalisation", () => {
       await page.goto(url);
       await expect(
         name === "landing"
-          ? page.locator("#academic-context")
+          ? page.locator("#personalize")
           : page.getByTestId("catalogue-academic-context"),
       ).toBeVisible();
       const results = await new AxeBuilder({ page })
-        .include(name === "landing" ? "#academic-context" : "[data-testid='catalogue-academic-context']")
+        .include(name === "landing" ? "#personalize" : "[data-testid='catalogue-academic-context']")
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .analyze();
       // The rule id alone is not enough to act on, so the failure carries the offending nodes.
@@ -735,10 +813,10 @@ test.describe("UX-C anonymous academic personalisation", () => {
 
     // The landing page, where the cost of a wasted round trip is highest.
     await page.goto("/");
-    await expect(page.getByTestId("academic-context-panel-summary")).toBeVisible();
+    await expect(page.getByTestId("hero-academic-trigger")).toBeVisible();
     // Personalisation still happens, from the stored preference alone.
     await expect(
-      page.getByTestId("academic-context-panel-summary").getByTestId("academic-context-names"),
+      page.getByTestId("hero-academic-trigger").getByTestId("academic-context-names"),
     ).toContainText(UNIVERSITY_EN);
     // And the courses resolved without waiting on a profile that cannot exist.
     await expect(page.getByTestId("featured-courses-loading")).toHaveCount(0);
@@ -860,7 +938,7 @@ test.describe("UX-C anonymous academic personalisation", () => {
 
     // Anonymous first: the preference personalises, and nothing is asked of any account.
     await page.goto("/");
-    await expect(page.getByTestId("academic-context-panel-summary")).toBeVisible();
+    await expect(page.getByTestId("hero-academic-trigger")).toBeVisible();
     expect(reads, "an anonymous visitor read a profile").toEqual([]);
 
     // Then the same browser becomes authenticated.
@@ -895,7 +973,7 @@ test.describe("UX-C anonymous academic personalisation", () => {
         const page = await context.newPage();
         await page.goto("/");
 
-        const picker = page.getByTestId("academic-picker");
+        const picker = page.getByTestId("hero-academic-strip");
         await expect(picker).toBeVisible();
         const box = (await picker.boundingBox())!;
         expect(box.width).toBeLessThanOrEqual(viewport.width);
@@ -906,10 +984,9 @@ test.describe("UX-C anonymous academic personalisation", () => {
         );
         expect(overflow, "the page scrolls sideways").toBeLessThanOrEqual(1);
 
-        // The panel sits below the hero, so the evidence is the section itself rather than whatever
-        // happens to be at the top of the viewport.
-        await page.locator("#academic-context").scrollIntoViewIfNeeded();
-        await page.locator("#academic-context").screenshot({
+        // The prompt sits inside the hero, so the evidence is the hero band itself.
+        await page.locator("#personalize").scrollIntoViewIfNeeded();
+        await page.locator('[aria-labelledby="hero-title"]').screenshot({
           path: `playwright-report/uxc-academic-${viewport.name}-${locale}.png`,
         });
         await context.close();

@@ -16,32 +16,43 @@ import { academicContext } from "@/lib/academic/anonymous-context";
 import type { AnonymousAcademicContext } from "@/lib/academic/anonymous-context";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
-import { Field } from "@/components/ui/field";
-import { Select } from "@/components/ui/select";
 import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
+import { ChoiceChip, ChoiceGrid, ContextQuestion } from "./context-question";
+import { SelectedAnswer } from "./selected-academic-context";
 
 /**
  * Choosing a university and a program, before there is an account.
  *
- * ## Why two native selects and not a combobox
+ * ## Why this is not a form any more
  *
- * The launch catalogue holds one institution and five programs. A search-and-filter listbox at that
- * volume adds a widget to learn, a keyboard model to reimplement, a popover to anchor correctly in
- * RTL, and a mobile experience worse than the platform's own picker — in exchange for filtering a
- * list that fits on screen. Native `<select>` keeps type-ahead, the iOS/Android wheel, screen-reader
- * naming, and RTL alignment for free, which is what this control actually needs.
+ * It was two native `<select>`s and a Submit button, and the reasoning for the selects still holds
+ * for a *filter row* — but this is the first thing a visitor is asked on the landing page, and
+ * there the shape was wrong. Two dropdowns and a submit is a form: it asks for everything at once,
+ * it says nothing back until it is completed, and it puts a button between the reader and the
+ * courses they came for.
  *
- * That is a decision about *this* data, not a principle. If the institution list grows past what a
- * reader can scan, this is the component that should gain a searchable listbox, and the identity it
- * produces — a pair of slugs — would not change.
+ * What replaced it asks one question at a time and answers immediately. The options are the same
+ * options, from the same two endpoints, producing the same slug pair — nothing about the identity
+ * this component yields has changed. Only the number of decisions held open at once has.
+ *
+ * There is no Submit because there is nothing left to submit: a program is the last fact needed, so
+ * choosing one *is* the completion. `onResolve` fires from the choice itself.
  *
  * ## Dependence
  *
- * Programs are fetched per institution and re-fetched whenever it changes, and any program held
- * from a previous institution is dropped at the same moment rather than carried into a combination
- * the option list cannot render. Nothing here can offer a program that does not belong to the
- * selected university.
+ * Unchanged and still the load-bearing rule. Programs are fetched per institution and re-fetched
+ * whenever it changes, and any program held from a previous institution is dropped in the same
+ * update rather than carried into a combination the option list cannot render. Nothing here can
+ * offer a program that does not belong to the selected university.
+ *
+ * ## The single-university case
+ *
+ * The launch catalogue holds one institution. Asking a question with one answer is friction with no
+ * information in it, so it is answered on the reader's behalf — derived from the response, never
+ * from a hardcoded slug — and shown as an answered step rather than hidden. The reader still sees
+ * where Gradex thinks they study; they are simply not asked to type it. A second university turns
+ * the step back into a real question by itself, with no code change.
  */
 
 type ProgramState =
@@ -58,8 +69,7 @@ type InstitutionState =
 export function AcademicContextPicker({
   idPrefix,
   initial,
-  submitLabel,
-  onSubmit,
+  onResolve,
   onSkip,
   skipLabel,
   autoFocus = false,
@@ -67,8 +77,8 @@ export function AcademicContextPicker({
   /** Distinguishes this instance's control ids, so two pickers can coexist on one page. */
   idPrefix: string;
   initial: AnonymousAcademicContext | null;
-  submitLabel: string;
-  onSubmit: (context: AnonymousAcademicContext) => void;
+  /** Fires the moment the context is complete. There is no separate submit. */
+  onResolve: (context: AnonymousAcademicContext) => void;
   /** Omitted where there is nothing to skip to — the catalogue's own change control, for instance. */
   onSkip?: () => void;
   skipLabel?: string;
@@ -85,10 +95,18 @@ export function AcademicContextPicker({
   const [institutionSlug, setInstitutionSlug] = React.useState(
     initial?.institutionSlug ?? "",
   );
-  const [programSlug, setProgramSlug] = React.useState(initial?.programSlug ?? "");
   const [attempt, setAttempt] = React.useState(0);
   const [programAttempt, setProgramAttempt] = React.useState(0);
-  const institutionRef = React.useRef<HTMLSelectElement>(null);
+  /**
+   * Whether the reader has moved past the first question in *this* visit to the picker.
+   *
+   * It is what the reveal animation is keyed on. Without it, a returning visitor who presses
+   * "Change" watches the program question animate in as though they had just answered the
+   * university one, and a single-university catalogue plays the reveal on first paint for a step
+   * nobody took.
+   */
+  const [advanced, setAdvanced] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -97,8 +115,6 @@ export function AcademicContextPicker({
       .then((items) => {
         if (cancelled) return;
         setInstitutions({ kind: "ready", items });
-        // One launch institution: choosing it removes a step that has only one answer. Derived from
-        // the response, never from a hardcoded slug, so a second university changes this by itself.
         setInstitutionSlug((current) =>
           current === "" && items.length === 1 ? items[0].slug : current,
         );
@@ -120,15 +136,7 @@ export function AcademicContextPicker({
     setPrograms({ kind: "loading" });
     getPublicPrograms(institutionSlug, language)
       .then((items) => {
-        if (cancelled) return;
-        setPrograms({ kind: "ready", items });
-        // A program carried in from storage or from a previous university survives only if this
-        // university actually offers it. Anything else is dropped rather than silently submitted.
-        setProgramSlug((current) =>
-          current !== "" && !items.some((item) => item.slug === current)
-            ? ""
-            : current,
-        );
+        if (!cancelled) setPrograms({ kind: "ready", items });
       })
       .catch(() => {
         if (!cancelled) setPrograms({ kind: "failed" });
@@ -138,45 +146,68 @@ export function AcademicContextPicker({
     };
   }, [institutionSlug, language, programAttempt]);
 
+  /**
+   * Focus follows the reader into whichever question is actually open.
+   *
+   * `autoFocus` here means "the reader asked for this back" — from the panel's own Change control or
+   * from the one above the results — and two things about that are easy to get wrong.
+   *
+   * The step waiting for them is not always the first one: a visitor who already named their
+   * university reopens on the *program* question, so focusing the university chooser would target
+   * markup that is not rendered. The active question is the one carrying the group role in either
+   * case, so that is what is asked for rather than a step named by index.
+   *
+   * And the questions are not on screen when this component mounts. Reopening remounts it into its
+   * loading state, so a focus attempt that ran only on mount reached a group that did not exist yet
+   * and left focus on the document — the reader was scrolled to a control they then had to find by
+   * tabbing from the top of the page. So it waits for the options, and the ref makes it happen
+   * exactly once per request rather than on every subsequent load.
+   */
+  const focusClaimed = React.useRef(false);
   React.useEffect(() => {
-    if (autoFocus) institutionRef.current?.focus();
-  }, [autoFocus]);
+    if (!autoFocus) {
+      focusClaimed.current = false;
+      return;
+    }
+    if (focusClaimed.current) return;
+    const target = rootRef.current?.querySelector<HTMLElement>('[role="group"] button');
+    if (!target) return;
+    focusClaimed.current = true;
+    target.focus();
+  }, [autoFocus, institutions.kind, programs.kind]);
 
-  function changeInstitution(next: string) {
-    setInstitutionSlug(next);
-    // Cleared in the same update as the parent, so no render ever shows a program belonging to a
-    // university that is no longer selected.
-    setProgramSlug("");
-  }
+  const chosen =
+    institutions.kind === "ready"
+      ? institutions.items.find((item) => item.slug === institutionSlug)
+      : undefined;
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  /**
+   * Completes the context and hands it up.
+   *
+   * Both languages are cached together: the identity is the slug pair and has to survive a locale
+   * switch, so a single-language label cache would have to be discarded at exactly that moment.
+   */
+  function resolve(program: ProgramOption | null) {
     if (institutionSlug === "") return;
-    const institution =
-      institutions.kind === "ready"
-        ? institutions.items.find((item) => item.slug === institutionSlug)
-        : undefined;
-    const program =
-      programs.kind === "ready"
-        ? programs.items.find((item) => item.slug === programSlug)
-        : undefined;
-    // Both languages are cached together: the identity is the slug pair and has to survive a locale
-    // switch, so a single-language label cache would have to be discarded at exactly that moment.
-    onSubmit(
-      academicContext(institutionSlug, programSlug, {
-        institutionAr: institution?.name_ar ?? "",
-        institutionEn: institution?.name_en ?? "",
+    onResolve(
+      academicContext(institutionSlug, program?.slug ?? "", {
+        institutionAr: chosen?.name_ar ?? "",
+        institutionEn: chosen?.name_en ?? "",
         programAr: program?.name_ar ?? "",
         programEn: program?.name_en ?? "",
       }),
     );
   }
 
-  const institutionID = `${idPrefix}-institution`;
-  const programID = `${idPrefix}-program`;
-  const noInstitutions =
-    institutions.kind === "ready" && institutions.items.length === 0;
-  const noPrograms = programs.kind === "ready" && programs.items.length === 0;
+  function chooseInstitution(slug: string) {
+    setInstitutionSlug(slug);
+    setAdvanced(true);
+  }
+
+  function reopenInstitution() {
+    setInstitutionSlug("");
+    setAdvanced(false);
+  }
 
   if (institutions.kind === "loading") {
     return <LoadingState label={copy.loading} testID="academic-picker-loading" />;
@@ -193,90 +224,111 @@ export function AcademicContextPicker({
     );
   }
 
-  if (noInstitutions) {
+  if (institutions.items.length === 0) {
     return (
-      <p role="status" className="text-sm text-muted-foreground" data-testid="academic-picker-empty">
+      <p
+        role="status"
+        className="text-sm text-muted-foreground"
+        data-testid="academic-picker-empty"
+      >
         {copy.noInstitutions}
       </p>
     );
   }
 
+  const universityQuestionID = `${idPrefix}-university`;
+  const programQuestionID = `${idPrefix}-program`;
+  const answered = institutionSlug !== "" && chosen !== undefined;
+  const noPrograms = programs.kind === "ready" && programs.items.length === 0;
+
   return (
-    <form onSubmit={submit} data-testid="academic-picker" className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label={copy.universityLabel} htmlFor={institutionID}>
-          <Select
-            id={institutionID}
-            ref={institutionRef}
-            value={institutionSlug}
-            onChange={(event) => changeInstitution(event.target.value)}
-            data-testid="academic-picker-institution"
-          >
-            <option value="">{copy.chooseUniversity}</option>
-            {institutions.items.map((option) => (
-              <option key={option.slug} value={option.slug}>
-                {institutionName(option, language)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field
-          label={copy.programLabel}
-          htmlFor={programID}
-          hint={
-            institutionSlug === ""
-              ? copy.chooseUniversity
-              : programs.kind === "loading"
-                ? copy.loadingPrograms
-                : noPrograms
-                  ? copy.noPrograms
-                  : copy.programOptional
-          }
-        >
-          <Select
-            id={programID}
-            value={programSlug}
-            disabled={institutionSlug === "" || programs.kind !== "ready" || noPrograms}
-            onChange={(event) => setProgramSlug(event.target.value)}
-            data-testid="academic-picker-program"
-          >
-            <option value="">{copy.anyProgram}</option>
-            {programs.kind === "ready" &&
-              programs.items.map((option) => {
-                const college = programContext(option, language);
-                return (
-                  <option key={option.slug} value={option.slug}>
-                    {programName(option, language)}
-                    {college === "" ? "" : ` · ${college}`}
-                  </option>
-                );
-              })}
-          </Select>
-        </Field>
-      </div>
-
-      {/* A failed program list is recoverable on its own: the university is still chosen and its
-          courses are still reachable, so this refuses only the one request that failed. */}
-      {programs.kind === "failed" && (
-        <ErrorState
-          testID="academic-picker-programs-error"
-          title={copy.programsFailed}
-          retryLabel={copy.retry}
-          onRetry={() => setProgramAttempt((count) => count + 1)}
+    <div ref={rootRef} data-testid="academic-picker" className="space-y-6">
+      {answered ? (
+        <SelectedAnswer
+          testID="academic-picker-institution"
+          label={copy.universityLabel}
+          value={institutionName(chosen, language)}
+          // Nothing to reopen when the catalogue offers one university.
+          onChange={institutions.items.length > 1 ? reopenInstitution : undefined}
+          changeLabel={copy.change}
+          changeAria={copy.changeAria}
         />
+      ) : (
+        <ContextQuestion id={universityQuestionID} question={copy.universityQuestion}>
+          <div data-testid="academic-picker-institution">
+            <ChoiceGrid>
+              {institutions.items.map((option) => (
+                <ChoiceChip
+                  key={option.slug}
+                  value={option.slug}
+                  onSelect={() => chooseInstitution(option.slug)}
+                >
+                  {institutionName(option, language)}
+                </ChoiceChip>
+              ))}
+            </ChoiceGrid>
+          </div>
+        </ContextQuestion>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <Button type="submit" disabled={institutionSlug === ""}>
-          {submitLabel}
+      {answered ? (
+        <ContextQuestion
+          id={programQuestionID}
+          question={copy.programQuestion}
+          hint={noPrograms ? copy.noPrograms : undefined}
+          appear={advanced}
+        >
+          {programs.kind === "loading" ? (
+            <LoadingState label={copy.loadingPrograms} testID="academic-picker-programs-loading" />
+          ) : programs.kind === "failed" ? (
+            // Recoverable on its own: the university is still chosen and its courses are still
+            // reachable, so this refuses only the one request that failed.
+            <ErrorState
+              testID="academic-picker-programs-error"
+              title={copy.programsFailed}
+              retryLabel={copy.retry}
+              onRetry={() => setProgramAttempt((count) => count + 1)}
+            />
+          ) : (
+            <div data-testid="academic-picker-program">
+              <ChoiceGrid>
+                {programs.kind === "ready" &&
+                  programs.items.map((option) => {
+                    const college = programContext(option, language);
+                    return (
+                      <ChoiceChip
+                        key={option.slug}
+                        value={option.slug}
+                        detail={college === "" ? undefined : college}
+                        selected={
+                          initial?.institutionSlug === institutionSlug &&
+                          initial?.programSlug === option.slug
+                        }
+                        onSelect={() => resolve(option)}
+                      >
+                        {programName(option, language)}
+                      </ChoiceChip>
+                    );
+                  })}
+                {/* The program is genuinely optional — a university on its own already narrows the
+                    catalogue — so "not sure" resolves rather than dead-ends. */}
+                <ChoiceChip
+                  selected={initial?.institutionSlug === institutionSlug && initial?.programSlug === ""}
+                  onSelect={() => resolve(null)}
+                >
+                  {copy.anyProgramChoice}
+                </ChoiceChip>
+              </ChoiceGrid>
+            </div>
+          )}
+        </ContextQuestion>
+      ) : null}
+
+      {onSkip && skipLabel ? (
+        <Button type="button" variant="ghost" size="sm" onClick={onSkip} className="-ms-2">
+          {skipLabel}
         </Button>
-        {onSkip && skipLabel ? (
-          <Button type="button" variant="ghost" onClick={onSkip}>
-            {skipLabel}
-          </Button>
-        ) : null}
-      </div>
-    </form>
+      ) : null}
+    </div>
   );
 }

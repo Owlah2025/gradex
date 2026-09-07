@@ -18,7 +18,7 @@ test("the landing featured surface is backed by the published catalogue client, 
   // The call now also carries the visitor's academic filters. What this asserts is unchanged: the
   // landing reads the real, locale-aware catalogue client rather than a fixture.
   assert.match(featured, /getPublicCourses\(\s*locale\b/, "the landing must request the authoritative locale-aware catalogue");
-  assert.match(featured, /result\.items\.slice\(0, 3\)/, "the landing must render a bounded real response, not a static replacement");
+  assert.match(featured, /result\.items\.slice\(0, 9\)/, "the landing must render a bounded real response, not a static replacement");
   assert.match(featured, /featured-courses-loading/, "the loading state must remain rendered");
   assert.match(featured, /featured-courses-error/, "the failed state must remain distinct from empty");
   assert.match(featured, /emptyTitle/, "the empty state must remain reachable");
