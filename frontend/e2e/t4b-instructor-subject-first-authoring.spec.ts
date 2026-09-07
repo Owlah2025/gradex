@@ -8,6 +8,7 @@ import {
 } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "./authoring-sections";
 
 /**
  * T4-B (MVP-F20) Instructor Subject-first authoring — real browser journeys.
@@ -122,6 +123,7 @@ async function createAcademicCourse(page: Page, titleEn: string, code = SHARED_S
   await page.getByTestId("new-course-description-en").fill("Description");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
   expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
   return courseID!;
@@ -142,6 +144,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     const session = await signIn(context, INSTRUCTOR);
     const page = await context.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     await page.getByTestId("toggle-new-course").click();
 
     // The university comes from the catalog, not from the frontend.
@@ -177,6 +180,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-description-en").fill("Description");
     await page.getByTestId("create-course").click();
     await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+    await openAuthoringSections(page);
 
     // What the server actually stored.
     const api = await apiFor(session);
@@ -210,6 +214,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     const session = await signIn(context, INSTRUCTOR);
     const page = await context.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     await page.getByTestId("toggle-new-course").click();
 
     // A Subject several Programs require reports all of them.
@@ -235,6 +240,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-title-en").fill(`Unmapped Course ${Date.now()}`);
     await page.getByTestId("create-course").click();
     await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+    await openAuthoringSections(page);
 
     // And displaying an audience wrote no target rows.
     const api = await apiFor(session);
@@ -251,6 +257,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     const session = await signIn(context, INSTRUCTOR);
     const page = await context.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     const courseID = await createAcademicCourse(page, `Correctable Course ${Date.now()}`);
 
     const api = await apiFor(session);
@@ -317,6 +324,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     // The studio's new-Course form offers a university and a Subject, and no
     // legacy classification control at all.
     await openStudio(page);
+    await openAuthoringSections(page);
     await page.getByTestId("toggle-new-course").click();
     await expect(page.getByTestId("new-course-institution")).toBeVisible();
     await expect(page.getByTestId("new-course-subject-search")).toBeVisible();
@@ -336,6 +344,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
     await page.getByTestId("new-course-title-en").fill(`Guarded Course ${Date.now()}`);
     await page.getByTestId("create-course").click();
     await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+    await openAuthoringSections(page);
 
     const created = (await (await api.get("/api/v1/courses")).json())[0];
     const terms = await (await api.get("/api/v1/taxonomy/terms")).json();
@@ -349,6 +358,7 @@ test.describe("T4-B Instructor Subject-first authoring", () => {
 
     // And the Academic Course shows no legacy taxonomy panel.
     await openStudio(page);
+    await openAuthoringSections(page);
     await expect(page.getByTestId("academic-course-context")).toBeVisible();
 
     await api.dispose();

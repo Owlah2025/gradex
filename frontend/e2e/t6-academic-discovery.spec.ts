@@ -9,6 +9,7 @@ import {
 } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "./authoring-sections";
 
 /**
  * T6 — Academic Course Discovery, real browser journey.
@@ -113,6 +114,7 @@ async function publishAcademicCourse(
   await page.getByTestId("new-course-description-en").fill("Academic discovery journey course.");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
 
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;

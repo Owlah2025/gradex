@@ -257,9 +257,17 @@ test("the launch price is presented as an administrator's decision", () => {
 
 test("editing is offered on the server's editability, not on a revision merely existing", () => {
   const builder = readSource(`${INSTRUCTOR_DIR}/course-builder.tsx`);
+  // The gate is named once and used once. Authoring V2 moved the authoring panels inside a
+  // disclosure workflow, so what has to hold is that the workflow itself is only reachable through
+  // the server's own editability fact — not that a particular ternary is spelled a particular way.
   assert.match(
     builder,
-    /revision\?\.id && standing\.editable \?/,
+    /const editableWorkflow = Boolean\(revisionID && standing\.editable && plan\);/,
+    "the authoring workflow's gate no longer reads the server's editability",
+  );
+  assert.match(
+    builder,
+    /\{editableWorkflow && revision\?\.id && plan \? \(/,
     "a submitted revision still exists; the studio must not offer to edit it",
   );
   assert.match(builder, /SubmittedCourseSummary/);

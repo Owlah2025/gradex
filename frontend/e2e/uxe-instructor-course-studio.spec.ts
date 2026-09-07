@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import fs from "node:fs";
 import path from "node:path";
+import { openAuthoringSections } from "./authoring-sections";
 
 /**
  * UX-E — the Instructor Course Studio, in a real browser.
@@ -197,12 +198,26 @@ async function serveStudio(page: Page, payload: ReturnType<typeof course>) {
   await page.route("**/api/v1/taxonomy/terms**", (route) => route.fulfill({ json: [] }));
 }
 
-async function openStudio(page: Page, locale: "ar" | "en") {
+/**
+ * Opens the studio on the seeded course.
+ *
+ * Authoring V2 presents the studio's parts as disclosures, opened on arrival at the first
+ * unfinished one. Everything this suite asserts is inside those panels rather than about how they
+ * are revealed, so by default all five are opened first. The evidence screenshots pass
+ * `sections: false`, because what they are evidence *of* is the studio as an instructor meets it.
+ */
+async function openStudio(
+  page: Page,
+  locale: "ar" | "en",
+  options?: { sections?: boolean },
+) {
   await page.addInitScript((selected) => {
     window.localStorage.setItem("gradex.locale", selected as string);
   }, locale);
   await page.goto(`/${locale}/instructor/courses`);
   await expect(page.getByTestId(`owned-course-${COURSE_ID}`)).toBeVisible();
+  if (options?.sections === false) return;
+  await openAuthoringSections(page);
 }
 
 /** Everything a reader can actually see, with markup and attributes excluded. */
@@ -577,7 +592,7 @@ for (const locale of ["en", "ar"] as const) {
   ] as const) {
     test(`${label} has no accessibility violations in ${locale}`, async ({ page }) => {
       await serveStudio(page, payload);
-      await openStudio(page, locale);
+      await openStudio(page, locale, { sections: false });
       await expect(page.getByTestId("course-standing")).toBeVisible();
 
       const results = await new AxeBuilder({ page })
@@ -684,7 +699,7 @@ for (const [name, payload, width, height] of SHOTS) {
     test(`evidence: ${name} at ${width}px in ${locale}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height });
       await serveStudio(page, payload);
-      await openStudio(page, locale);
+      await openStudio(page, locale, { sections: false });
       await expect(page.getByTestId("course-standing")).toBeVisible();
 
       /*

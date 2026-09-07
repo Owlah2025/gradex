@@ -9,6 +9,7 @@ import {
 } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "./authoring-sections";
 
 const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000-0000-0000-000000000003" };
 const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
@@ -86,6 +87,7 @@ async function createAcademicCourse(page: Page, title: string): Promise<{ course
   await page.getByTestId("new-course-description-en").fill("Academic context journey");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const selected = page.getByTestId("selected-course-context");
   const courseID = (await selected.getAttribute("data-course-id"))!;
   const revisionID = (await selected.getAttribute("data-revision-id"))!;
@@ -163,6 +165,7 @@ async function createMissingSubjectCourse(
   await page.getByTestId("new-course-description-en").fill("Continue drafting while pending");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("subject request was sent for review");
+  await openAuthoringSections(page);
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   await expect(page.getByTestId("subject-request-pending")).toContainText("Subject request under review", { timeout: 15_000 });
   return courseID;
@@ -181,6 +184,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const instructorAPI = await apiFor(instructorSession);
     const page = await instructorContext.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
 
     const title = `T4 Academic Lifecycle ${Date.now()}`;
     const { courseID, revisionID } = await createAcademicCourse(page, title);
@@ -223,6 +227,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await makeRevisionPublishable(instructorAPI, courseID, revisionID);
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await page.getByTestId("submit-for-review").click();
     await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
     await expect(page.getByTestId("authoring-notice")).toContainText("An administrator will review it");
@@ -263,7 +268,9 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     // C3 — candidate clones two targets; edit to one while live R1 stays two.
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await page.getByTestId("start-revision").click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Chosen programs");
     await page.getByTestId("academic-course-edit-audience").click();
     const checked = page.locator('[data-testid="academic-course-audience-option"]:checked');
@@ -292,7 +299,9 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     // automatic inference without mutating the live one-target revision.
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await page.getByTestId("start-revision").click();
+    await openAuthoringSections(page);
     await page.getByTestId("academic-course-use-automatic-audience").click();
     await expect(page.getByTestId("academic-course-audience-mode")).toContainText("Programs that see this course");
     owned = await (await instructorAPI.get(`/api/v1/courses/${courseID}`)).json() as any;
@@ -312,6 +321,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const instructorAPI = await apiFor(instructorSession);
     const page = await instructorContext.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     const title = `T4D Link ${Date.now()}`;
     const courseID = await createMissingSubjectCourse(page, title, "0418-321");
 
@@ -331,6 +341,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("academic-course-subject")).toContainText(ALT_SUBJECT_CODE);
     const detail = await (await instructorAPI.get(`/api/v1/courses/${courseID}`)).json() as any;
     const submit = await instructorAPI.post(`/api/v1/courses/${courseID}/revisions/${detail.editable_revision.id}/submit`);
@@ -348,6 +359,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const instructorAPI = await apiFor(instructorSession);
     const page = await instructorContext.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     const title = `T4D New ${Date.now()}`;
     const code = `T4D-${Date.now()}`;
     const courseID = await createMissingSubjectCourse(page, title, code);
@@ -382,6 +394,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     await signIn(instructorContext, INSTRUCTOR);
     const page = await instructorContext.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     const title = `T4D Reject ${Date.now()}`;
     const courseID = await createMissingSubjectCourse(page, title, `REJECT-${Date.now()}`);
 
@@ -398,6 +411,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("subject-request-rejected")).toContainText("Use the official university title.");
     await expect(page.getByTestId("revision-state")).toContainText("Draft");
 
@@ -411,6 +425,7 @@ test.describe("T4-C/D/E Instructor Academic Context", () => {
     const instructorAPI = await apiFor(instructorSession);
     const page = await instructorContext.newPage();
     await openStudio(page);
+    await openAuthoringSections(page);
     const title = `T4D Race ${Date.now()}`;
     const courseID = await createMissingSubjectCourse(page, title, `RACE-${Date.now()}`);
 

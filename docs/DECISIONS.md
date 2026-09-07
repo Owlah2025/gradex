@@ -3818,3 +3818,110 @@ recording a reviewer to satisfy the seat field (rejected — that is fabricated 
 
 **Source:** This session; see `internal/httpapi/review_handlers.go`,
 `internal/media/delivery.go`, and `src/components/learning/`.
+
+## D-100 — The password minimum is eight characters
+
+**Date:** 2026-09-08
+**Status:** Active. Amends the length half of [BR-002](BUSINESS_RULES.md#1-user--auth-rules) and the
+password policy resolved in `specs/002-auth-rbac/spec.md` §265. It changes nothing else about how a
+password is screened, hashed, stored, reset, or rate-limited.
+
+**Finding:** The product asked for fifteen characters. That figure came from the original policy
+resolution, not from a measurement, and on the surfaces where it is actually met — registration on a
+phone, a reset link opened on a phone, an instructor accepting an invitation — it is the longest
+password requirement a reader is likely to have encountered anywhere. The Product Owner set the
+intended minimum at eight.
+
+**Decision:**
+
+1. `identity.MinPasswordRunes` is `8`. It is the single backend authority and every credential-
+   writing path already reaches it through `prepareCredential`, so registration, password reset, the
+   mandatory and voluntary change, staff-invitation acceptance and bootstrap move together by
+   construction rather than by five separate edits.
+2. `passwordMinimum` in `frontend/src/lib/identity/validation.ts` is `8` and is the single client
+   authority. Every form's `minLength`, every client-side refusal, and both languages' statements of
+   the rule are derived from it.
+3. **Nothing else changes.** The maximum stays at 128 runes; the common-value denylist, the
+   compromised-range screening seam, Argon2id parameters, reuse refusal, session invalidation on
+   reset, reset-token single use and expiry, the anti-enumeration responses, and every rate limit
+   are untouched.
+4. Agreement between the two layers is asserted by a test that reads the Go constant out of
+   `backend/internal/identity/password.go` and compares it with the TypeScript one, so the two
+   cannot drift into a state where one accepts a password the other refuses.
+
+**Deployment:** This decision authorizes **no** production deployment and no production data change.
+Existing stored credentials are unaffected: the minimum is a rule about new plaintexts, and no
+account is required to re-establish a password because of it.
+
+**Alternatives rejected:** lowering the frontend copy only (rejected — it produces the exact defect
+this is written to prevent, a form that accepts what the server refuses); making the minimum
+configurable (rejected — a password floor is a product decision, not a deployment parameter, and a
+per-environment floor is a per-environment security posture nobody would be able to state).
+
+**Source:** This session; see `backend/internal/identity/password.go`,
+`frontend/src/lib/identity/validation.ts`.
+
+## D-101 — Instructor Authoring V2 is authorized as a presentation-only workflow change
+
+**Date:** 2026-09-08
+**Status:** Active. A named exception to the paused UI/UX phase ([`docs/ux/README.md`](ux/README.md))
+and to the `MVP-Fxx`-only work list under
+[D-089](#d-089--mvp-functional-completion-work-is-authorized-one-remediation-tranche-at-a-time), in
+the same shape as [D-099](#d-099--the-course-learning-experience-revamp-is-explicitly-authorized-as-a-scoped-exception).
+It reopens neither and authorizes no other visual work.
+
+**Finding:** The Course Authoring Studio presented every part of a course at once — details, cover,
+public preview, curriculum, submission — as one column of stacked panels. Everything needed was
+present and nothing said what was finished, what was next, or whether what was on screen had been
+saved. The two states an instructor most needs are the two the surface could not express: "this part
+is done" and "this is not saved yet".
+
+**Decision:**
+
+1. Scope is **presentation and workflow only**. The authoring panels themselves, their endpoints,
+   their payloads and their validation are unchanged; they are the same components, rendered inside
+   disclosures.
+2. **No database migration, no schema change, no new lifecycle state, no new endpoint, and no
+   authorization change.** `DRAFT`, `PENDING_REVIEW`, `APPROVED`, `CHANGES_REQUESTED` and
+   `SUPERSEDED` keep their exact meanings, the candidate/live revision model is untouched, and
+   resources remain lesson-owned exactly as [D-099](#d-099--the-course-learning-experience-revamp-is-explicitly-authorized-as-a-scoped-exception)
+   established. Any finding to the contrary stops the work and returns here.
+3. Section completion is derived from `submissionReadiness`, which is a reading of the server's own
+   `catalog/validation.go`. No completion state is invented, and none is inferred from whether a
+   panel has been opened. The server stays authoritative over submission; the client's readiness is
+   supportive and says so.
+4. A section collapses only after an intentional progression the server accepted — a details save,
+   or an explicit Continue. Never on blur, focus, field change, or a background refresh. Any section
+   can be reopened at any time: this is a disclosure, not a wizard, and nothing is locked.
+5. A collapsed section still reports its own outstanding requirements. A validation problem is never
+   hidden behind a closed header.
+6. Save state is derived, not tracked: "unsaved" is the form differing from the revision the server
+   returned, and "saved" is set only from the resolved call. The single unsaved-work protection is
+   the browser's own prompt. No authored content is written to local storage.
+7. Reordering is **not** implemented and no affordance for it is offered. The curriculum's component
+   boundaries are left where a future reorder control could be added; no drag handle, no reorder
+   button, no reorder endpoint, and no change to `position` persistence.
+8. Announcements are **not** implemented, in any form, including a placeholder.
+
+**Seats:** Claude holds the builder seat for this exception. **The reviewer seat is unassigned.**
+This work is therefore *not* reviewed and *not* closed: per [CLAUDE.md](../CLAUDE.md#seats) a slice
+closes on a recorded reviewer verdict against one exact commit range, and none exists. No verdict is
+implied or recorded here.
+
+**Deployment:** This decision authorizes **no** production deployment, no push, and no production
+data change. Release-gate authority is unchanged and remains where it already sits.
+
+**Accepted risk:** the existing instructor suites assert against the authoring panels rather than
+against how they are revealed, so they now open the disclosures first through one shared helper
+(`frontend/e2e/authoring-sections.ts`). That helper suppresses exactly the behaviour this decision
+introduces, so the behaviour is asserted separately and only in
+`frontend/e2e/instructor-authoring-workflow.spec.ts`.
+
+**Alternatives rejected:** a linear wizard (rejected — an instructor correcting one title on a built
+course would have to walk forward through four steps to reach it); collapsing on blur or on autosave
+(rejected — a disclosure that moves while someone is typing is worse than one that never moves);
+inventing completion from whether a section was opened (rejected — it makes the indicator a record of
+navigation rather than of the course).
+
+**Source:** This session; see `frontend/src/components/instructor/authoring-plan.ts`,
+`authoring-workflow.tsx`, `authoring-save-state.tsx`, and `course-builder.tsx`.

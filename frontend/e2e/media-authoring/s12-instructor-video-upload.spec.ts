@@ -6,6 +6,7 @@ import { test, expect, request as playwrightRequest, type APIRequestContext } fr
 import { issueRotatingSession } from "../rotating-students";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
 import { captureFailureDiagnostic, recordMediaAssetVersionID } from "./diagnostics";
+import { openAuthoringSections } from "../authoring-sections";
 
 /**
  * Real Instructor video journey.
@@ -144,6 +145,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-en").fill("Real media journey");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
   const thumbnail = page.getByTestId("course-thumbnail-authoring");
@@ -166,10 +168,12 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/ar/instructor/courses");
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
   await expect(thumbnail).toContainText("صورة المقرر");
   await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-arabic.png") });
   await page.goto("/en/instructor/courses");
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
   // The public preview is a second, separately uploaded PREVIEW Asset Version.
   // It is intentionally completed before any Lesson exists, which proves the
   // Instructor UI cannot be selecting or reusing protected Lesson media.
@@ -245,6 +249,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 5. The attachment is server state, not a rendering of what just happened.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
   const attached = page.getByTestId(`lesson-video-ref-${lessonID}`);
   await expect(attached).toBeVisible();
   await expect(attached).toHaveAttribute("data-video-attached", "true");
@@ -441,6 +446,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // already had open. No deep link, no revision ID, no developer tools.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
 
   // The standing notice is present, and carries the Admin's exact words.
   const changeRequest = page.getByTestId("change-request-notice");
@@ -625,6 +631,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-description-en").fill("Draft that must stay private");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const draftCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(draftCourseID).toMatch(UUID_PATTERN);
   await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
@@ -699,6 +706,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // the click is the point; substituting a raw request would prove nothing about the product.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
 
   // A published Course is no longer a dead end: it offers the next step, and explains that the
   // published version keeps serving.
@@ -709,6 +717,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(startPanel).toContainText("keeps serving until you publish your changes");
 
   await page.getByTestId("start-revision").click();
+  await openAuthoringSections(page);
 
   // The studio moved into the new candidate, and says plainly that these edits are not live yet.
   await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
@@ -761,6 +770,7 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // Clicking again must not fork the Course: the server returns the existing candidate.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
   await expect(page.getByTestId("selected-course-context")).toHaveAttribute("data-revision-id", candidateRevisionID);
 
@@ -820,10 +830,12 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // A never-published Course has no live revision to clone, so the action must not be offered:
   // the studio already has an editable DRAFT there and `CreateCandidate` would refuse anyway.
   await page.getByTestId(`owned-course-${draftCourseID}`).click();
+  await openAuthoringSections(page);
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
   await expect(page.getByTestId("editing-published-notice")).toHaveCount(0);
   await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
 
   // Revision B is live now, and the Admin queue never saw it. The whole point
   // of D-097 is that a routine edit to an approved Course is not a review item.

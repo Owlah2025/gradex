@@ -5,6 +5,7 @@ import path from "path";
 import { test, expect, request as playwrightRequest, type Browser, type Page } from "@playwright/test";
 import { issueRotatingSession } from "../rotating-students";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "../authoring-sections";
 
 /**
  * D-098 visual evidence for real video processing progress.
@@ -115,6 +116,7 @@ test("processing progress is real, visible, accessible, and localized", async ({
   await page.getByTestId("new-course-description-en").fill("Processing progress evidence");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
 
   // A never-published Course offers the Admin gate, in those words.
@@ -187,6 +189,7 @@ test("processing progress is real, visible, accessible, and localized", async ({
   //    the tab remembers it, so what comes back is the persisted observation.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(page);
   const recovered = page.getByTestId(`lesson-video-phase-${lessonID}`);
   await expect(recovered).toContainText(/Processing|Ready/, { timeout: 60_000 });
   if ((await recovered.textContent())?.includes("Processing")) {
@@ -212,6 +215,7 @@ test("processing progress is real, visible, accessible, and localized", async ({
   await arabicPage.setViewportSize({ width: 390, height: 844 });
   await arabicPage.goto(`/ar/instructor/courses`);
   await arabicPage.getByTestId(`owned-course-${courseID}`).click();
+  await openAuthoringSections(arabicPage);
   await expect(arabicPage.locator("html")).toHaveAttribute("dir", "rtl");
   await arabicPage.getByTestId(`lesson-video-file-${lessonID}`).setInputFiles(mp4);
   const arabicPhase = arabicPage.getByTestId(`lesson-video-phase-${lessonID}`);

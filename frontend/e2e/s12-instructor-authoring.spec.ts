@@ -1,6 +1,7 @@
 import { test, expect, request as playwrightRequest, type APIRequestContext, type Page } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "./authoring-sections";
 
 /**
  * Instructor Course Authoring Studio — persisted-workflow acceptance.
@@ -89,6 +90,7 @@ async function createCourse(page: Page, titleEn: string, titleAr: string): Promi
   await page.getByTestId("create-course").click();
 
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const courseID = await page.getByTestId("selected-course-context").getAttribute("data-course-id");
   expect(courseID, "the studio must retain a server-issued Course ID without displaying it").toMatch(UUID_PATTERN);
   return courseID!;
@@ -160,6 +162,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     const page = await context.newPage();
 
     await openStudio(page);
+    await openAuthoringSections(page);
     const title = `Video Upload Manual Test ${Date.now()}`;
     const courseID = await createCourse(page, title, "اختبار رفع الفيديو");
 
@@ -168,6 +171,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     await page.reload();
     await expect(page.getByTestId(`owned-course-${courseID}`)).toContainText(title);
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("selected-course-context")).toHaveAttribute("data-course-id", courseID);
     // The removed local-demo fixture must not reappear anywhere in production UI.
     await expect(page.locator("body")).not.toContainText("Local Demo Drafts");
@@ -182,6 +186,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     const page = await context.newPage();
 
     await openStudio(page);
+    await openAuthoringSections(page);
     const courseID = await createCourse(page, `Structured Course ${Date.now()}`, "دورة ذات بنية");
 
     await page.getByTestId("section-title-ar").fill("القسم الأول");
@@ -193,6 +198,7 @@ test.describe("S12 Instructor authoring persistence", () => {
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
 
     const sectionBlock = page.locator('[data-testid^="section-"]').first();
@@ -206,6 +212,7 @@ test.describe("S12 Instructor authoring persistence", () => {
 
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.getByTestId("curriculum").getByText("Section One")).toBeVisible();
     await expect(page.getByTestId("curriculum").getByText("Lesson One")).toBeVisible();
     await expect(page.locator('[data-testid^="lesson-video-none-"]').first()).toBeVisible();
@@ -219,6 +226,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     const page = await ownerContext.newPage();
 
     await openStudio(page);
+    await openAuthoringSections(page);
     const courseID = await createCourse(page, `Ownership Course ${Date.now()}`, "دورة الملكية");
     const revisionID = (await page.getByTestId("selected-course-context").getAttribute("data-revision-id"))!;
     expect(revisionID).toMatch(UUID_PATTERN);
@@ -245,6 +253,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     // The refusals changed nothing: the owner still sees exactly what it authored.
     await page.reload();
     await page.getByTestId(`owned-course-${courseID}`).click();
+    await openAuthoringSections(page);
     await expect(page.locator("body")).not.toContainText("Intruding section");
 
     await otherInstructor.dispose();
@@ -258,6 +267,7 @@ test.describe("S12 Instructor authoring persistence", () => {
     const page = await context.newPage();
 
     await openStudio(page);
+    await openAuthoringSections(page);
     await createCourse(page, `Incomplete Course ${Date.now()}`, "دورة غير مكتملة");
 
     await page.getByTestId("submit-for-review").click();

@@ -852,6 +852,32 @@ Fast-follow gates are outside this count. Recalculate from
 
 ## Latest Verified Checks
 
+- **Auth UX and Instructor Authoring V2, 2026-09-08, on `authoring-v2-auth-ux-20260908` at base
+  `458b8c6024a5f69cdfa6258fc7d3ae8ded3625c8`.** Authorized by
+  [D-100](../DECISIONS.md#d-100--the-password-minimum-is-eight-characters) and
+  [D-101](../DECISIONS.md#d-101--instructor-authoring-v2-is-authorized-as-a-presentation-only-workflow-change).
+  **DATABASE MIGRATIONS: NONE** — schema stays at `0034`. No backend endpoint, payload, lifecycle
+  state, or authorization rule changed; the only backend edit is the password minimum constant and
+  its tests.
+  Backend `go build ./...`, `go vet ./...`, `go test ./...` and
+  `go test -tags=integration -count=1 ./...` all pass against real PostgreSQL. Frontend `npm ci`,
+  `npx tsc --noEmit`, `npm run lint` (no warnings or errors), `npm test` (765 of 765 `node:test`
+  cases) and `npm run build` pass with `.next` removed first. `scripts/docs-guard.sh` ok across 258
+  Markdown files; `scripts/expose-guard.sh` ok with 19 approved `Expose` call sites, 1
+  password-plaintext boundary and 2 reviewed plaintext reads.
+  Browser verification is real-stack Playwright, not inspection: the new
+  `instructor-authoring-workflow` suite passes 20 of 20 including axe with zero violations in both
+  languages at 1440/1024/768/390, and the new `auth-password-and-recovery` suite passes 12 of 12
+  including the Arabic reveal-control geometry that was the reported defect. The existing instructor
+  suites pass — `uxe-instructor-course-studio` 53 of 53, `s12-instructor-authoring`,
+  `t4b`, `t4cde`, `t6`, `s14`, `instructor-course-roster` 19 of 19 with `t4cde` re-run at 5 of 5,
+  and the media-authoring config 7 of 7 with real object storage, worker and ffmpeg. Regression over
+  the just-shipped features — `uxh-public-auth-account`, `s13-mandatory-password-change`,
+  `uxi-global-sweep`, `uxf-student-learning`, `uxd-course-detail`, `s5-course-home`,
+  `s5-lesson-player` — is 196 passed, 1 skipped, 0 failed.
+  **This work is not reviewed, not merged, not pushed and not deployed.** The reviewer seat is
+  unassigned; per [CLAUDE.md](../../CLAUDE.md#seats) that is review `UNAVAILABLE`, not approval.
+
 - **Start-of-day D3 reconciliation at `93eb745`, 2026-07-28.** Backend `gofmt` clean, `go build ./...`,
   `go vet ./...`, `go vet -tags=integration ./...`, and `go test ./...` all pass with
   `GOCACHE=/tmp/gradex-go-cache`. Frontend `typecheck`, `lint`, and 21 of 21 `node:test` cases pass.

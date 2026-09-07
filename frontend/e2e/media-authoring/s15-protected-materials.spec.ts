@@ -8,6 +8,7 @@ import { issueRotatingSession } from "../rotating-students";
 import { queryLearningState } from "../../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
 import { captureFailureDiagnostic } from "./diagnostics";
+import { openAuthoringSections } from "../authoring-sections";
 
 /**
  * ST-15 — real protected Resource and Lab Material delivery.
@@ -176,8 +177,10 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   const instructorPage = await instructorContext.newPage();
   await instructorPage.goto("/en/instructor/courses");
   await instructorPage.getByTestId(`owned-course-${COURSE_ID}`).click();
+  await openAuthoringSections(instructorPage);
   await expect(instructorPage.getByTestId("start-revision-panel")).toBeVisible();
   await instructorPage.getByTestId("start-revision").click();
+  await openAuthoringSections(instructorPage);
   await expect(instructorPage.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
 
   const removeA = instructorPage.locator(`[data-testid^="remove-lesson-resource-"]`).first();
@@ -244,10 +247,15 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // rather than the no-longer-editable published summary it first observed.
   await instructorPage.reload();
   await instructorPage.getByTestId(`owned-course-${COURSE_ID}`).click();
+  await openAuthoringSections(instructorPage);
   await expect(instructorPage.getByTestId("taxonomy-course")).toBeVisible();
   await instructorPage.getByTestId("taxonomy-course").selectOption(COURSE_ID);
-  await instructorPage.getByLabel("Major").selectOption({ label: "ST15 Engineering" });
-  await instructorPage.getByLabel("Subject").selectOption({ label: "Protected Materials (ST15)" });
+  // Scoped to the legacy taxonomy panel. "Subject" is also the academic identity's own field
+  // label, and both are on the page at once now that the authoring sections are open, so an
+  // unscoped label lookup is ambiguous rather than wrong.
+  const taxonomyPanel = instructorPage.locator('[aria-labelledby="legacy-taxonomy-title"]');
+  await taxonomyPanel.getByLabel("Major").selectOption({ label: "ST15 Engineering" });
+  await taxonomyPanel.getByLabel("Subject").selectOption({ label: "Protected Materials (ST15)" });
   await instructorPage.getByRole("button", { name: "Save Taxonomy" }).click();
   await expect(instructorPage.getByText("Taxonomy saved for the named revision")).toBeVisible();
   await instructorPage.getByTestId("revision-study-year").selectOption("YEAR_1");
@@ -300,7 +308,9 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // while the independently modelled Lab Material remains available.
   await instructorPage.reload();
   await instructorPage.getByTestId(`owned-course-${COURSE_ID}`).click();
+  await openAuthoringSections(instructorPage);
   await instructorPage.getByTestId("start-revision").click();
+  await openAuthoringSections(instructorPage);
   const removeB = instructorPage.locator(`[data-testid^="remove-lesson-resource-"]`).first();
   await expect(removeB).toBeVisible();
   await removeB.click();

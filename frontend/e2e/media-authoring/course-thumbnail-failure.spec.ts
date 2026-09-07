@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
+import { openAuthoringSections } from "../authoring-sections";
 
 test("thumbnail failure keeps the saved cover and blocks submission until reconciled", async ({ page }) => {
   const courseID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -20,6 +21,7 @@ test("thumbnail failure keeps the saved cover and blocks submission until reconc
   await page.route(`**/thumbnails/${assetID}/card`, (route) => route.fulfill({ contentType: "image/webp", path: path.resolve(__dirname, "../../../backend/internal/media/testdata/thumbnail.webp") }));
   await page.route("**/api/v1/media/uploads", (route) => route.fulfill({ status: 503, contentType: "application/problem+json", json: { status: 503, code: "DEPENDENCY_UNAVAILABLE", title: "Unavailable", type: "about:blank" } }));
   await page.goto("/en/instructor/courses");
+  await openAuthoringSections(page);
   const thumbnail = page.getByTestId("course-thumbnail-authoring");
   await expect(thumbnail.locator("img")).toBeVisible();
   await expect(page.getByTestId("submit-for-review")).toBeEnabled();

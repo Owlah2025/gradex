@@ -7,6 +7,7 @@ import { issueRotatingSession } from "../rotating-students";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
 import { RUN_STATE_FILE_PATH } from "../../src/lib/api/e2e-infrastructure";
 import { captureFailureDiagnostic } from "./diagnostics";
+import { openAuthoringSections } from "../authoring-sections";
 
 /**
  * The Admin candidate course-preview journey, with nothing simulated.
@@ -163,6 +164,7 @@ test("an Admin plays the real public preview belonging to the candidate revision
   await page.getByTestId("new-course-description-en").fill("Candidate preview journey");
   await page.getByTestId("create-course").click();
   await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await openAuthoringSections(page);
   const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
 

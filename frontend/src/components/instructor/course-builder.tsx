@@ -42,6 +42,13 @@ import { CourseStandingBanner } from "./course-standing-banner";
 import { SubmittedCourseSummary } from "./submitted-course-summary";
 import { describeSubmissionRejection } from "./submission-readiness";
 import { CurriculumBuilder } from "./curriculum-builder";
+import { authoringPlan } from "./authoring-plan";
+import {
+  AuthoringAdvanceOn,
+  AuthoringContinue,
+  AuthoringWorkflow,
+} from "./authoring-workflow";
+import { AuthoringSaveStateLine, type AuthoringSaveState } from "./authoring-save-state";
 import { ErrorState } from "@/components/common/error-state";
 import { EmptyState } from "@/components/common/empty-state";
 import {
@@ -111,6 +118,19 @@ export function CourseBuilder() {
 
   const [detailStudyYear, setDetailStudyYear] = useState("");
 
+  /**
+   * Save feedback for the course-details form.
+   *
+   * `SAVED` is set from the resolved server call and nothing else, and "unsaved" is *derived* by
+   * comparing the form against the revision the server returned rather than tracked as a flag, so
+   * the studio cannot claim a state the server has not reached.
+   */
+  const [detailsOutcome, setDetailsOutcome] = useState<"NONE" | "SAVING" | "SAVED" | "FAILED">(
+    "NONE",
+  );
+  /** Incremented when the server accepts a details save; the disclosure advances once per step. */
+  const [basicsAdvanceToken, setBasicsAdvanceToken] = useState(0);
+
   const [secTitleAr, setSecTitleAr] = useState("");
   const [secTitleEn, setSecTitleEn] = useState("");
   const [lessonDrafts, setLessonDrafts] = useState<Record<string, { ar: string; en: string }>>({});
@@ -170,6 +190,7 @@ export function CourseBuilder() {
     setDetailDescAr(revision?.description_ar ?? "");
     setDetailDescEn(revision?.description_en ?? "");
     setDetailStudyYear(revision?.study_year ?? "");
+    setDetailsOutcome("NONE");
   }, [
     revision?.id,
     revision?.title_ar,
@@ -358,6 +379,7 @@ export function CourseBuilder() {
   const handleSaveRevision = (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedCourse || !revision?.id) return;
+    setDetailsOutcome("SAVING");
     void command(async (csrf) => {
       await updateCourseRevision({
         courseID: selectedCourse.id,
@@ -376,6 +398,15 @@ export function CourseBuilder() {
       });
       await refreshSelectedCourse();
       setNotice(details.saved);
+      setDetailsOutcome("SAVED");
+      // The disclosure advances only from here: after an intentional submit that the server
+      // accepted. Nothing about focus, blur or typing reaches this line.
+      setBasicsAdvanceToken((token) => token + 1);
+    }, {
+      onFailure: () => {
+        setDetailsOutcome("FAILED");
+        return false;
+      },
     });
   };
 
@@ -511,6 +542,71 @@ export function CourseBuilder() {
   const instructor = t.instructor;
   const studio = instructor.studio;
   const details = instructor.details;
+  const authoring = instructor.authoring;
+
+  /**
+   * Whether the details form differs from the revision the server last returned.
+   *
+   * Derived, not tracked. An "edited" flag has to be cleared by every path that saves, and the one
+   * that forgets leaves a studio permanently claiming unsaved work — or worse, claiming none.
+   */
+  const detailsDirty =
+    Boolean(revision) &&
+    (detailTitleAr !== (revision?.title_ar ?? "") ||
+      detailTitleEn !== (revision?.title_en ?? "") ||
+      detailDescAr !== (revision?.description_ar ?? "") ||
+      detailDescEn !== (revision?.description_en ?? "") ||
+      detailStudyYear !== (revision?.study_year ?? ""));
+
+  const saveState: AuthoringSaveState =
+    detailsOutcome === "SAVING"
+      ? "SAVING"
+      : detailsOutcome === "FAILED"
+        ? "FAILED"
+        : detailsDirty
+          ? "UNSAVED"
+          : detailsOutcome === "SAVED"
+            ? "SAVED"
+            : "IDLE";
+
+  /*
+    The one unsaved-work protection, and deliberately the smallest one that is honest: the browser's
+    own prompt, raised only while the form genuinely differs from the server's copy. Nothing is
+    cached, nothing is written to local storage, and no course content leaves the tab — a draft
+    cache would be a second source of truth for authored material that the server does not know
+    about, which is a larger problem than the one it solves.
+  */
+  useEffect(() => {
+    if (!detailsDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [detailsDirty]);
+
+  const untitled = useCallback(
+    (kind: "section" | "lesson", position: number) =>
+      kind === "section"
+        ? `${instructor.submission.untitledSection} ${position}`
+        : `${instructor.submission.untitledLesson} ${position}`,
+    [instructor.submission],
+  );
+
+  const revisionID = revision?.id ?? null;
+  const plan = useMemo(
+    () =>
+      selectedCourse && revisionID
+        ? authoringPlan(selectedCourse, locale, untitled, {
+            thumbnailUnresolved: Boolean(thumbnailBlocked[revisionID]),
+          })
+        : null,
+    [selectedCourse, revisionID, locale, untitled, thumbnailBlocked],
+  );
+
+  /** Whether the authoring workflow owns this course's panels on this render. */
+  const editableWorkflow = Boolean(revisionID && standing.editable && plan);
 
   return (
     <WorkspacePage className="space-y-8">
@@ -649,21 +745,29 @@ export function CourseBuilder() {
 
             {showRoster ? <CourseRoster courseID={selectedCourse.id} /> : null}
 
-            {isAcademicCourse(selectedCourse) && (
-              <AcademicCourseContextPanel
-                course={selectedCourse}
-                labels={instructor.academic}
-                busy={busy}
-                onChangeSubject={handleChangeSubject}
-                onCustomizeAudience={handleCustomizeAudience}
-                onResetAudience={handleResetAudience}
-                onRequestSubject={handleRequestSubject}
-              />
+            {/*
+              The academic identity and the price belong to the course whatever state it is in, so
+              a revision that is with an administrator still shows both. While the revision *is*
+              editable they live inside the authoring workflow's own section, which is where the
+              controls that change them belong; rendering them here as well would put the same two
+              panels on the screen twice.
+            */}
+            {!editableWorkflow && (
+              <>
+                {isAcademicCourse(selectedCourse) && (
+                  <AcademicCourseContextPanel
+                    course={selectedCourse}
+                    labels={instructor.academic}
+                    busy={busy}
+                    onChangeSubject={handleChangeSubject}
+                    onCustomizeAudience={handleCustomizeAudience}
+                    onResetAudience={handleResetAudience}
+                    onRequestSubject={handleRequestSubject}
+                  />
+                )}
+                <CoursePricingSummary course={selectedCourse} labels={instructor.price} />
+              </>
             )}
-
-            {/* The launch price is an Admin decision, stated beside the course it applies to
-                rather than in a second panel with a second copy of the course list. */}
-            <CoursePricingSummary course={selectedCourse} labels={instructor.price} />
 
             {/* Standing notice, not a toast: the Instructor usually returns in a later session. */}
             <ChangeRequestNotice revision={revision} labels={t.instructor.changeRequest} />
@@ -676,155 +780,199 @@ export function CourseBuilder() {
               revision still exists, so this used to render the whole authoring form — every input
               live, Submit underneath — for a revision the server refuses every write to.
             */}
-            {revision?.id && standing.editable ? (
-              <>
-                <form
-                  onSubmit={handleSaveRevision}
-                  className="space-y-4"
-                  data-testid="revision-form"
-                  aria-labelledby="revision-details-title"
-                >
-                  <div>
-                    <h3
-                      id="revision-details-title"
-                      className="font-display text-base font-bold text-foreground"
+            {editableWorkflow && revision?.id && plan ? (
+              <AuthoringWorkflow
+                plan={plan}
+                labels={authoring}
+                curriculumLabels={instructor.curriculum}
+                courseID={selectedCourse.id}
+              >
+                {{
+                  BASICS: (
+                    <form
+                      onSubmit={handleSaveRevision}
+                      className="space-y-4"
+                      data-testid="revision-form"
+                      aria-label={authoring.section.BASICS.title}
                     >
-                      {details.detailsTitle}
-                    </h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{details.detailsLead}</p>
-                  </div>
-                  {/*
-                    Visible labels, not `aria-label`. These four fields were named only to a screen
-                    reader; a sighted Instructor met two identical empty boxes and had to guess
-                    which was Arabic from the caret direction.
-                  */}
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <Field label={details.titleAr} htmlFor="revision-title-ar">
-                      <Input
-                        id="revision-title-ar"
-                        type="text"
-                        lang="ar"
-                        dir="rtl"
-                        value={detailTitleAr}
-                        onChange={(event) => setDetailTitleAr(event.target.value)}
-                        data-testid="revision-title-ar"
+                      {/*
+                        Visible labels, not `aria-label`. These four fields were named only to a
+                        screen reader; a sighted Instructor met two identical empty boxes and had to
+                        guess which was Arabic from the caret direction.
+                      */}
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <Field label={details.titleAr} htmlFor="revision-title-ar">
+                          <Input
+                            id="revision-title-ar"
+                            type="text"
+                            lang="ar"
+                            dir="rtl"
+                            value={detailTitleAr}
+                            onChange={(event) => setDetailTitleAr(event.target.value)}
+                            data-testid="revision-title-ar"
+                          />
+                        </Field>
+                        <Field label={details.titleEn} htmlFor="revision-title-en">
+                          <Input
+                            id="revision-title-en"
+                            type="text"
+                            lang="en"
+                            dir="ltr"
+                            value={detailTitleEn}
+                            onChange={(event) => setDetailTitleEn(event.target.value)}
+                            data-testid="revision-title-en"
+                          />
+                        </Field>
+                        <Field label={details.descriptionAr} htmlFor="revision-description-ar">
+                          <Textarea
+                            id="revision-description-ar"
+                            lang="ar"
+                            dir="rtl"
+                            rows={3}
+                            value={detailDescAr}
+                            onChange={(event) => setDetailDescAr(event.target.value)}
+                            data-testid="revision-description-ar"
+                          />
+                        </Field>
+                        <Field label={details.descriptionEn} htmlFor="revision-description-en">
+                          <Textarea
+                            id="revision-description-en"
+                            lang="en"
+                            dir="ltr"
+                            rows={3}
+                            value={detailDescEn}
+                            onChange={(event) => setDetailDescEn(event.target.value)}
+                            data-testid="revision-description-en"
+                          />
+                        </Field>
+                      </div>
+                      {/*
+                        Legacy study year (D-093 §6). This is part of the legacy classification,
+                        which an Academic Course does not carry and must never be asked for — the
+                        server refuses it there. It stays available for existing legacy Courses
+                        until T5.
+                      */}
+                      {!isAcademicCourse(selectedCourse) && (
+                        <Field
+                          label={details.studyYear}
+                          htmlFor="revision-study-year"
+                          className="max-w-xs"
+                        >
+                          <Select
+                            id="revision-study-year"
+                            value={detailStudyYear}
+                            onChange={(event) => setDetailStudyYear(event.target.value)}
+                            data-testid="revision-study-year"
+                          >
+                            <option value="">{details.studyYearUnset}</option>
+                            {STUDY_YEARS.map((year) => (
+                              <option key={year} value={year}>
+                                {details.studyYears[year]}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={busy}
+                          data-testid="save-revision"
+                        >
+                          {busy ? details.saving : authoring.saveAndContinue}
+                        </Button>
+                        <AuthoringSaveStateLine state={saveState} labels={authoring} />
+                      </div>
+                      <AuthoringAdvanceOn section="BASICS" token={basicsAdvanceToken} />
+                    </form>
+                  ),
+                  DETAILS: (
+                    <div className="space-y-5">
+                      {isAcademicCourse(selectedCourse) && (
+                        <AcademicCourseContextPanel
+                          course={selectedCourse}
+                          labels={instructor.academic}
+                          busy={busy}
+                          onChangeSubject={handleChangeSubject}
+                          onCustomizeAudience={handleCustomizeAudience}
+                          onResetAudience={handleResetAudience}
+                          onRequestSubject={handleRequestSubject}
+                        />
+                      )}
+                      {/* The launch price is an Admin decision, stated beside the course it applies
+                          to rather than in a second panel with a second copy of the course list. */}
+                      <CoursePricingSummary course={selectedCourse} labels={instructor.price} />
+                      <AuthoringContinue section="DETAILS" label={authoring.continueAction} />
+                    </div>
+                  ),
+                  PREVIEW: (
+                    <div className="space-y-5">
+                      <CourseThumbnailUpload
+                        key={revision.id}
+                        courseID={selectedCourse.id}
+                        revisionID={revision.id}
+                        assetID={revision.thumbnail_asset_version_id}
+                        disabled={busy}
+                        unresolved={Boolean(thumbnailBlocked[revision.id])}
+                        onChanged={refreshSelectedCourse}
+                        onBlockedChange={(blocked) =>
+                          setThumbnailBlocked((current) => ({ ...current, [revision.id!]: blocked }))
+                        }
                       />
-                    </Field>
-                    <Field label={details.titleEn} htmlFor="revision-title-en">
-                      <Input
-                        id="revision-title-en"
-                        type="text"
-                        lang="en"
-                        dir="ltr"
-                        value={detailTitleEn}
-                        onChange={(event) => setDetailTitleEn(event.target.value)}
-                        data-testid="revision-title-en"
+                      {/* The public preview is the Course's own trailer and is uploaded here. A
+                          Lesson video is a different act, on a different object, inside the
+                          curriculum — the two are never offered by the same control. */}
+                      <PublicPreviewUpload
+                        courseID={selectedCourse.id}
+                        revisionID={revision.id}
+                        hasPreview={Boolean(revision.preview_asset_version_id)}
+                        previewAssetVersionID={revision.preview_asset_version_id}
+                        previewAssetState={revision.preview_asset_state}
+                        locale={locale}
+                        onChanged={refreshSelectedCourse}
                       />
-                    </Field>
-                    <Field label={details.descriptionAr} htmlFor="revision-description-ar">
-                      <Textarea
-                        id="revision-description-ar"
-                        lang="ar"
-                        dir="rtl"
-                        rows={3}
-                        value={detailDescAr}
-                        onChange={(event) => setDetailDescAr(event.target.value)}
-                        data-testid="revision-description-ar"
+                      <AuthoringContinue section="PREVIEW" label={authoring.continueAction} />
+                    </div>
+                  ),
+                  CURRICULUM: (
+                    <div className="space-y-5">
+                      <CurriculumBuilder
+                        revision={revision}
+                        courseID={selectedCourse.id}
+                        busy={busy}
+                        labels={instructor.curriculum}
+                        lessonDrafts={lessonDrafts}
+                        sectionTitleAr={secTitleAr}
+                        sectionTitleEn={secTitleEn}
+                        onSectionTitleChange={(patch) => {
+                          if (patch.ar !== undefined) setSecTitleAr(patch.ar);
+                          if (patch.en !== undefined) setSecTitleEn(patch.en);
+                        }}
+                        onLessonDraftChange={(sectionID, draft) =>
+                          setLessonDrafts((current) => ({ ...current, [sectionID]: draft }))
+                        }
+                        onAddSection={handleAddSection}
+                        onAddLesson={handleAddLesson}
+                        onDeleteSection={handleDeleteSection}
+                        onDeleteLesson={handleDeleteLesson}
+                        onContentChanged={refreshSelectedCourse}
                       />
-                    </Field>
-                    <Field label={details.descriptionEn} htmlFor="revision-description-en">
-                      <Textarea
-                        id="revision-description-en"
-                        lang="en"
-                        dir="ltr"
-                        rows={3}
-                        value={detailDescEn}
-                        onChange={(event) => setDetailDescEn(event.target.value)}
-                        data-testid="revision-description-en"
-                      />
-                    </Field>
-                  </div>
-                  {/*
-                    Legacy study year (D-093 §6). This is part of the legacy
-                    classification, which an Academic Course does not carry and
-                    must never be asked for — the server refuses it there. It
-                    stays available for existing legacy Courses until T5.
-                  */}
-                  {!isAcademicCourse(selectedCourse) && (
-                    <Field
-                      label={details.studyYear}
-                      htmlFor="revision-study-year"
-                      className="max-w-xs"
-                    >
-                      <Select
-                        id="revision-study-year"
-                        value={detailStudyYear}
-                        onChange={(event) => setDetailStudyYear(event.target.value)}
-                        data-testid="revision-study-year"
-                      >
-                        <option value="">{details.studyYearUnset}</option>
-                        {STUDY_YEARS.map((year) => (
-                          <option key={year} value={year}>
-                            {details.studyYears[year]}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
-                  )}
-                  <Button type="submit" size="sm" disabled={busy} data-testid="save-revision">
-                    {busy ? details.saving : details.saveAction}
-                  </Button>
-                </form>
-
-                <CourseThumbnailUpload key={revision.id}
-                  courseID={selectedCourse.id} revisionID={revision.id}
-                  assetID={revision.thumbnail_asset_version_id} disabled={busy}
-                  unresolved={Boolean(thumbnailBlocked[revision.id])}
-                  onChanged={refreshSelectedCourse}
-                  onBlockedChange={(blocked) => setThumbnailBlocked((current) => ({ ...current, [revision.id!]: blocked }))}
-                />
-
-                <PublicPreviewUpload
-                  courseID={selectedCourse.id}
-                  revisionID={revision.id}
-                  hasPreview={Boolean(revision.preview_asset_version_id)}
-                  previewAssetVersionID={revision.preview_asset_version_id}
-                  previewAssetState={revision.preview_asset_state}
-                  locale={locale}
-                  onChanged={refreshSelectedCourse}
-                />
-
-                <CurriculumBuilder
-                  revision={revision}
-                  courseID={selectedCourse.id}
-                  busy={busy}
-                  labels={instructor.curriculum}
-                  lessonDrafts={lessonDrafts}
-                  sectionTitleAr={secTitleAr}
-                  sectionTitleEn={secTitleEn}
-                  onSectionTitleChange={(patch) => {
-                    if (patch.ar !== undefined) setSecTitleAr(patch.ar);
-                    if (patch.en !== undefined) setSecTitleEn(patch.en);
-                  }}
-                  onLessonDraftChange={(sectionID, draft) =>
-                    setLessonDrafts((current) => ({ ...current, [sectionID]: draft }))
-                  }
-                  onAddSection={handleAddSection}
-                  onAddLesson={handleAddLesson}
-                  onDeleteSection={handleDeleteSection}
-                  onDeleteLesson={handleDeleteLesson}
-                  onContentChanged={refreshSelectedCourse}
-                />
-
-                <SubmissionPanel
-                  course={selectedCourse}
-                  labels={instructor.submission}
-                  mode={publication}
-                  busy={busy || Boolean(thumbnailBlocked[revision.id])}
-                  rejection={submitRejection}
-                  onSubmit={handleSubmit}
-                />
-              </>
+                      <AuthoringContinue section="CURRICULUM" label={authoring.continueAction} />
+                    </div>
+                  ),
+                  REVIEW: (
+                    <SubmissionPanel
+                      course={selectedCourse}
+                      labels={instructor.submission}
+                      mode={publication}
+                      busy={busy || Boolean(thumbnailBlocked[revision.id])}
+                      rejection={submitRejection}
+                      onSubmit={handleSubmit}
+                    />
+                  ),
+                }}
+              </AuthoringWorkflow>
             ) : standing.stage === "IN_REVIEW" && revision ? (
               <SubmittedCourseSummary revision={revision} labels={instructor.submitted} />
             ) : (

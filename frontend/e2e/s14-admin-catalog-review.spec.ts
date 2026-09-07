@@ -1,6 +1,7 @@
 import { test, expect, request as playwrightRequest, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test";
 import { issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
+import { openAuthoringSections } from "./authoring-sections";
 
 /**
  * Admin Catalog review surface — server-backed acceptance.
@@ -254,6 +255,7 @@ test.describe("S14 Admin Catalog review surface", () => {
     await page.getByTestId("new-course-description-en").fill("Incomplete");
     await page.getByTestId("create-course").click();
     await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+    await openAuthoringSections(page);
 
     const submit = page.getByTestId("submit-for-review");
     await submit.click();
