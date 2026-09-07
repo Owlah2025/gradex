@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { en } from "../../lib/i18n/dictionaries/en";
 import { ar } from "../../lib/i18n/dictionaries/ar";
+import { passwordMinimum } from "../../lib/identity/validation";
 
 /**
  * The public, authentication and account surfaces.
@@ -460,12 +461,18 @@ test("every screen that asks for a password states the rule before enforcing it"
       `${surface} refuses a password by a rule it never showed`,
     );
   }
-  // One statement of the rule, in one place, in both languages.
-  assert.equal(
-    en.auth.common.passwordRule.includes("15"),
-    true,
-    "the shared password rule does not state the minimum length",
-  );
+  // One statement of the rule, in one place, in both languages, and stating the
+  // number the client actually enforces rather than a literal that can rot away
+  // from it. D-100 moved that number once already.
+  for (const [language, rule] of [
+    ["English", en.auth.common.passwordRule],
+    ["Arabic", ar.auth.common.passwordRule],
+  ] as const) {
+    assert.ok(
+      rule.includes(String(passwordMinimum)),
+      `the ${language} password rule does not state the enforced minimum length`,
+    );
+  }
   assert.notEqual(
     ar.auth.common.passwordRule,
     en.auth.common.passwordRule,
@@ -478,7 +485,7 @@ test("a password field can be read back on every screen that asks for one", () =
     const source = readSource(surface);
     assert.ok(
       source.includes("PasswordInput"),
-      `${surface} asks for a 15-character password blind`,
+      `${surface} asks for a password blind`,
     );
     assert.ok(
       !/type="password"/.test(source),

@@ -118,7 +118,11 @@ func TestProductionHIBPRegistrationRejectionsCreateNoFacts(t *testing.T) {
 		providerToken string
 	}{
 		"policy invalid": {
-			password: "too short",
+			// Below the minimum, and nothing else wrong with it: the point of the case is
+			// that the length rule refuses it before the provider is ever consulted. D-100
+			// lowered that minimum to eight, so the previous nine-character fixture had
+			// quietly become a valid password.
+			password: "short12",
 			respond: func(_ string) http.HandlerFunc {
 				return func(w http.ResponseWriter, _ *http.Request) {
 					t.Error("policy-invalid password reached the provider")

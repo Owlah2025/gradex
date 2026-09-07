@@ -17,15 +17,24 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/config"
 )
 
-// Password policy, resolved in specs/002-auth-rbac/spec.md §265: 15–128 Unicode
-// characters including spaces, common/compromised rejection, Argon2id, and no
-// composition or periodic-rotation rule.
+// Password policy, resolved in specs/002-auth-rbac/spec.md §265 and amended by
+// D-100: 8–128 Unicode characters including spaces, common/compromised
+// rejection, Argon2id, and no composition or periodic-rotation rule.
+//
+// The minimum is the one number D-100 moves. Every other protection around a
+// password — the common-value denylist below, the compromised-range seam in
+// compromised.go, Argon2id, reuse refusal, session invalidation, reset-token
+// handling, and the request rate limits — is unchanged, because a shorter floor
+// is a usability decision and not a reason to drop any of them.
 //
 // The bounds are counted in runes, not bytes. A byte-length check would reject
 // a compliant Arabic passphrase — every character costs two bytes — which on an
 // Arabic-default platform is not a hypothetical.
+//
+// This constant is the single backend authority. Nothing outside this file may
+// restate the number; handlers and validators read it from here.
 const (
-	MinPasswordRunes = 15
+	MinPasswordRunes = 8
 	MaxPasswordRunes = 128
 )
 

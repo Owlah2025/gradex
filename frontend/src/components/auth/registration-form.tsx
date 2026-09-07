@@ -14,6 +14,7 @@ import {
 } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import {
+  passwordMinimum,
   validDisplayName,
   validEmail,
   validPassword,
@@ -192,6 +193,12 @@ export function RegistrationForm() {
           id="password"
           ref={refs.password}
           autoComplete="new-password"
+          // Stated to the browser and to assistive technology as well as to the
+          // reader, and taken from the same constant `validPassword` enforces —
+          // the form is `noValidate`, so this describes the rule rather than
+          // policing it, and the localized refusal below stays the one the
+          // reader is actually shown.
+          minLength={passwordMinimum}
           value={fields.password}
           onChange={(event) => setFields({ ...fields, password: event.target.value })}
           aria-invalid={Boolean(errors.password)}

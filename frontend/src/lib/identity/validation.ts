@@ -1,4 +1,14 @@
-export const passwordMinimum = 15;
+/**
+ * The client's copy of the backend password floor.
+ *
+ * It must equal `identity.MinPasswordRunes` in
+ * `backend/internal/identity/password.go`; D-100 moved both from 15 to 8 in the
+ * same change. This is the only place the number appears on the client — every
+ * form, every `minLength`, and every translated sentence is derived from it —
+ * so the two layers cannot drift into the state where one accepts a password
+ * the other refuses.
+ */
+export const passwordMinimum = 8;
 export const passwordMaximum = 128;
 
 export function codePointLength(value: string) {

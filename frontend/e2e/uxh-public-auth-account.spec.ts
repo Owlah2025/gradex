@@ -551,7 +551,7 @@ test.describe("UX-H invitation entry", () => {
     await page.goto("/staff/accept#token=an-open-invitation-credential");
     await expect(page.getByTestId("staff-invitation-role")).toHaveText("Instructor");
     // The rule is stated, not discovered by being refused.
-    await expect(page.locator("#staff-password-hint")).toContainText("15");
+    await expect(page.locator("#staff-password-hint")).toContainText("8");
     expect(await readableText(page)).not.toContain("INSTRUCTOR");
     await context.close();
   });

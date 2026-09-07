@@ -7,7 +7,8 @@ import (
 	"testing"
 )
 
-// A compliant password used across tests: 15+ runes, no common substring.
+// A compliant password used across tests: comfortably above the minimum, no
+// common substring.
 const goodPassword = "correct-horse-battery-staple-7"
 
 func TestValidatePasswordLengthBounds(t *testing.T) {
@@ -39,15 +40,58 @@ func TestValidatePasswordLengthBounds(t *testing.T) {
 // The policy is specified in Unicode characters. A byte-length check would
 // reject a compliant Arabic passphrase, since each character costs two bytes —
 // on an Arabic-default platform that is a real rejection, not a hypothetical.
+// D-100 moved the minimum from 15 to 8. The bound is asserted as a literal
+// rather than through the constant, so a future edit to the constant alone
+// cannot silently move the shipped policy: the two must be changed together and
+// the change is visible in the diff.
+func TestPasswordMinimumIsEightCharacters(t *testing.T) {
+	if MinPasswordRunes != 8 {
+		t.Fatalf("the password minimum is %d; D-100 fixes it at 8", MinPasswordRunes)
+	}
+	if MaxPasswordRunes != 128 {
+		t.Fatalf("the password maximum is %d; D-100 leaves it at 128", MaxPasswordRunes)
+	}
+
+	// Seven characters, and nothing else wrong with them.
+	if err := ValidatePassword("frt9xqz"); err == nil {
+		t.Fatal("a seven-character password was accepted")
+	} else if !errors.Is(err, ErrPasswordPolicy) {
+		t.Fatalf("expected ErrPasswordPolicy for a short password, got %v", err)
+	}
+
+	// Exactly eight, and nothing else wrong with them.
+	if err := ValidatePassword("frt9xqzm"); err != nil {
+		t.Fatalf("an eight-character password was rejected: %v", err)
+	}
+}
+
+// Shortening the minimum is a usability decision and must not have relaxed any
+// other rule. Each of these is rejected at the new floor exactly as before.
+func TestShorterMinimumDidNotRelaxTheOtherRules(t *testing.T) {
+	for name, password := range map[string]string{
+		"common value at the new minimum":     "qwerty12",
+		"product name at the new minimum":     "gradex99",
+		"common value well above the minimum": "letmein-please-now",
+		"over the maximum":                    strings.Repeat("x", MaxPasswordRunes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidatePassword(password); err == nil {
+				t.Fatalf("expected %q to still be rejected", password)
+			}
+		})
+	}
+}
+
 func TestValidatePasswordCountsRunesNotBytes(t *testing.T) {
-	// 16 Arabic characters: 16 runes, 32 bytes. Above the 15-rune minimum.
+	// 16 Arabic characters: 16 runes, 32 bytes. Above the rune minimum.
 	arabic := "كلمةسرطويلةجدااا"
 
 	if got := len([]rune(arabic)); got < MinPasswordRunes {
 		t.Fatalf("test fixture is only %d runes; it must exceed the %d-rune minimum", got, MinPasswordRunes)
 	}
-	if len(arabic) <= MinPasswordRunes {
-		t.Fatalf("test fixture is %d bytes; it must be multi-byte for this test to mean anything", len(arabic))
+	if len(arabic) <= len([]rune(arabic)) {
+		t.Fatalf("test fixture is %d bytes for %d runes; it must be multi-byte for this test to mean anything",
+			len(arabic), len([]rune(arabic)))
 	}
 
 	if err := ValidatePassword(arabic); err != nil {

@@ -896,7 +896,7 @@ export const en = {
       creating: "Creating account…",
       invalidName: "Enter a name using 2–50 Arabic or Latin characters.",
       invalidEmail: "Enter a complete email address.",
-      invalidPassword: "Use between 15 and 128 characters.",
+      invalidPassword: "Use between 8 and 128 characters.",
       acceptPolicies: "Accept each current policy to continue.",
       failed: "The account request could not be accepted.",
     },
@@ -988,6 +988,16 @@ export const en = {
         "Password reset is temporarily unavailable. Try again shortly.",
       failed: "The request could not be completed. Try again shortly.",
       backToSignIn: "Back to sign in",
+      // The accepted screen replaces the form rather than sitting above it.
+      // Leaving a filled address and a live Send control on screen after a
+      // request the server already took made a completed step look like one
+      // that had not happened.
+      resend: "Send it again",
+      resending: "Sending again…",
+      resent: "Sent again. It can take a minute to arrive; check the spam folder.",
+      // Deliberately not "we emailed you": the same words have to be true for
+      // an address with no account behind it.
+      acceptedNext: "Open the link from that message to choose a new password.",
     },
     /**
      * The staff invitation acceptance screen.
@@ -1017,7 +1027,7 @@ export const en = {
       completing: "Creating your account…",
       mismatch: "Both password fields must match.",
       invalidName: "Enter a name using 2–50 Arabic or Latin characters.",
-      invalidPassword: "Use between 15 and 128 characters.",
+      invalidPassword: "Use between 8 and 128 characters.",
       failed: "Your account could not be created. Try again shortly.",
       doneTitle: "Your staff account is ready",
       doneBody: "Sign in with the email address your invitation was sent to.",
@@ -1092,7 +1102,7 @@ export const en = {
       submit: "Reset password",
       submitting: "Resetting…",
       mismatch: "Both passwords must match.",
-      weak: "Choose a longer password. Use at least 15 characters.",
+      weak: "Choose a longer password. Use at least 8 characters.",
       // One message for expired, already used, superseded, and unknown links.
       // The server refuses all four identically and the interface must not
       // narrow it back down.
@@ -1128,14 +1138,14 @@ export const en = {
       submitting: "Changing password…",
       signedInAs: "Signed in as",
       mismatch: "Both new password fields must match.",
-      weak: "Choose a longer password. Use at least 15 characters.",
+      weak: "Choose a longer password. Use at least 8 characters.",
       sameAsCurrent: "The new password must be different from the current one.",
       wrongCurrent: "The current password is incorrect.",
       // One message for too short, too long, already in use on this account,
       // and found in a known breach. The server does not say which rule
       // matched and this must not guess.
       rejected:
-        "That password cannot be used. Choose a different one of at least 15 characters.",
+        "That password cannot be used. Choose a different one of at least 8 characters.",
       reauthenticate:
         "For your security, sign in again before changing your password.",
       signedOut: "Your session ended. Sign in again to change your password.",
@@ -1165,7 +1175,7 @@ export const en = {
       backToCourse: "Back to the course",
       opensInNewTab: "opens in a new tab",
       passwordRule:
-        "15–128 characters. Spaces are welcome; there are no symbol rules.",
+        "8–128 characters. Spaces are welcome; there are no symbol rules.",
       currentStep: "you are here",
       showPassword: "Show password",
       hidePassword: "Hide password",
@@ -1591,6 +1601,56 @@ export const en = {
       newCourse: "New course",
       cancelNewCourse: "Cancel",
       actionFailed: "That could not be completed.",
+    },
+    /**
+     * Authoring V2 workflow vocabulary.
+     *
+     * The section names are the ones the studio already used for the same content — "Course
+     * details", "Curriculum" — so the disclosure headings and the panels inside them agree. The
+     * state words are deliberately plain: a course part is finished, not finished, or has something
+     * wrong with it, and none of those needs a badge to say it twice.
+     */
+    authoring: {
+      progressTitle: "Course setup",
+      progressComplete: "complete",
+      progressLead:
+        "Work through the parts below in any order. Each one opens where you left it.",
+      stateComplete: "Finished",
+      stateIncomplete: "Not finished yet",
+      stateAttention: "Needs attention",
+      // Label then number: English needs one/other and Arabic needs six plural forms, and picking
+      // one for both is how "1 issues" gets shipped.
+      outstanding: "Outstanding",
+      saveAndContinue: "Save and continue",
+      continueAction: "Continue",
+      savingState: "Saving…",
+      savedState: "Saved",
+      unsavedState: "Unsaved changes",
+      failedState: "Couldn't save",
+      unsavedWarning:
+        "The course details on this screen have not been saved. Save them before leaving.",
+      section: {
+        BASICS: {
+          title: "Course basics",
+          lead: "What this course is called, and how it is described to students.",
+        },
+        DETAILS: {
+          title: "University and subject",
+          lead: "The university, the official subject, and who the course is offered to.",
+        },
+        PREVIEW: {
+          title: "Cover and preview",
+          lead: "The image students see in the catalogue, and the short video anyone can watch.",
+        },
+        CURRICULUM: {
+          title: "Curriculum",
+          lead: "Sections, lessons, lesson videos and the files that belong to each lesson.",
+        },
+        REVIEW: {
+          title: "Review and submit",
+          lead: "What the server will check before this course can go live.",
+        },
+      },
     },
     /**
      * The Instructor's course directory vocabulary.
