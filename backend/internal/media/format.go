@@ -238,13 +238,119 @@ func recognizedVideoContentType(prefix []byte) string {
 	}
 }
 
+// ebmlMagic is the EBML master element ID that opens every Matroska-family
+// container, WebM included. On its own it proves nothing about the DocType.
+var ebmlMagic = []byte{0x1a, 0x45, 0xdf, 0xa3}
+
+// ebmlDocTypeID is the two-byte EBML element ID of DocType.
+var ebmlDocTypeID = []byte{0x42, 0x82}
+
+// hasWebMFileTypeHeader recognizes WebM by walking the bounded EBML header and
+// reading the DocType element, rather than matching one hardcoded length
+// encoding. Real encoder output writes DocType as 0x42 0x82 0x84 "webm" (a
+// four-byte string), so a detector pinned to a single size byte silently
+// misses genuine files. The walk stays deliberately narrow: the object must
+// open with the EBML ID, the header must parse element by element, and the
+// DocType value must be exactly "webm". A bare EBML header without a DocType,
+// a Matroska DocType, and unknown or corrupt bytes are all left unclassified
+// so they continue through generic validation instead of becoming typed
+// content-type mismatches.
 func hasWebMFileTypeHeader(prefix []byte) bool {
-	if len(prefix) < 16 || !bytes.HasPrefix(prefix, []byte{0x1a, 0x45, 0xdf, 0xa3}) {
+	if len(prefix) < 16 || !bytes.HasPrefix(prefix, ebmlMagic) {
 		return false
 	}
-	// WebM's EBML document type is the bounded, recognizable marker. A bare
-	// EBML header is not enough to classify arbitrary Matroska-like bytes.
-	return bytes.Contains(prefix, []byte{0x42, 0x82, 0x85, 'w', 'e', 'b', 'm'})
+	body, ok := ebmlHeaderBody(prefix)
+	if !ok {
+		return false
+	}
+	docType, ok := ebmlHeaderDocType(body)
+	if !ok {
+		return false
+	}
+	return docType == "webm"
+}
+
+// ebmlHeaderBody returns the bytes of the EBML header master element. It fails
+// closed when the declared header size is unknown, absent, or not fully
+// present in the bounded prefix.
+func ebmlHeaderBody(prefix []byte) ([]byte, bool) {
+	rest := prefix[len(ebmlMagic):]
+	size, width, ok := readEBMLDataSize(rest)
+	if !ok {
+		return nil, false
+	}
+	rest = rest[width:]
+	if size == 0 || size > uint64(len(rest)) {
+		return nil, false
+	}
+	return rest[:size], true
+}
+
+// ebmlHeaderDocType walks the EBML header's children and returns the DocType
+// string. Every element is length-prefixed, so an element that does not parse
+// or does not fit ends the walk without a result.
+func ebmlHeaderDocType(body []byte) (string, bool) {
+	for len(body) > 0 {
+		idWidth, ok := ebmlVIntWidth(body[0])
+		if !ok || idWidth > len(body) {
+			return "", false
+		}
+		id := body[:idWidth]
+		rest := body[idWidth:]
+
+		size, sizeWidth, ok := readEBMLDataSize(rest)
+		if !ok {
+			return "", false
+		}
+		rest = rest[sizeWidth:]
+		if size > uint64(len(rest)) {
+			return "", false
+		}
+		value := rest[:size]
+
+		if bytes.Equal(id, ebmlDocTypeID) {
+			// EBML strings may be zero-padded to a fixed width.
+			return string(bytes.TrimRight(value, "\x00")), true
+		}
+		body = rest[size:]
+	}
+	return "", false
+}
+
+// readEBMLDataSize reads a variable-length integer used as an element size.
+// Unknown-length elements (all value bits set) are rejected: the header must
+// state its own bounds for the walk above to stay bounded.
+func readEBMLDataSize(b []byte) (uint64, int, bool) {
+	if len(b) == 0 {
+		return 0, 0, false
+	}
+	width, ok := ebmlVIntWidth(b[0])
+	if !ok || width > len(b) {
+		return 0, 0, false
+	}
+	value := uint64(b[0]) & (uint64(0xff) >> uint(width))
+	unknown := value == uint64(0xff)>>uint(width)
+	for _, c := range b[1:width] {
+		value = value<<8 | uint64(c)
+		if c != 0xff {
+			unknown = false
+		}
+	}
+	if unknown {
+		return 0, 0, false
+	}
+	return value, width, true
+}
+
+// ebmlVIntWidth derives a variable-length integer's byte count from the
+// position of its leading marker bit.
+func ebmlVIntWidth(first byte) (int, bool) {
+	for width := 1; width <= 8; width++ {
+		if first&(0x80>>uint(width-1)) != 0 {
+			return width, true
+		}
+	}
+	return 0, false
 }
 
 // hasMP4FileTypeBox accepts only a bounded ISO-BMFF file-type signature for

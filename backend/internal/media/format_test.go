@@ -234,8 +234,83 @@ func TestPDFValidationUsesActualBytes(t *testing.T) {
 	}
 }
 
+// realFFmpegWebMPrefix is the first 48 bytes of a WebM file produced by
+// ffmpeg (`ffmpeg -f lavfi -i testsrc -c:v libvpx out.webm`). Byte-for-byte it
+// is the canonical EBML header: the EBML ID, a one-byte header size (0x9f),
+// then EBMLVersion/EBMLReadVersion/EBMLMaxIDLength/EBMLMaxSizeLength, the
+// DocType element `42 82 84 "webm"` -- size 0x84 because "webm" is four bytes
+// long -- then DocTypeVersion/DocTypeReadVersion and the start of the Segment.
+// libvpx (VP8) and libvpx-vp9 emit an identical header here.
+var realFFmpegWebMPrefix = []byte{
+	0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81,
+	0x01, 0x42, 0xf2, 0x81, 0x04, 0x42, 0xf3, 0x81, 0x08, 0x42, 0x82, 0x84,
+	0x77, 0x65, 0x62, 0x6d, 0x42, 0x87, 0x81, 0x02, 0x42, 0x85, 0x81, 0x02,
+	0x18, 0x53, 0x80, 0x67, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0xe1,
+}
+
+// realFFmpegMatroskaPrefix is the same probe against `-f matroska` output. It
+// differs only in the DocType element: `42 82 88 "matroska"`.
+var realFFmpegMatroskaPrefix = []byte{
+	0x1a, 0x45, 0xdf, 0xa3, 0xa3, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81,
+	0x01, 0x42, 0xf2, 0x81, 0x04, 0x42, 0xf3, 0x81, 0x08, 0x42, 0x82, 0x88,
+	0x6d, 0x61, 0x74, 0x72, 0x6f, 0x73, 0x6b, 0x61, 0x42, 0x87, 0x81, 0x04,
+	0x42, 0x85, 0x81, 0x02, 0x18, 0x53, 0x80, 0x67, 0x01, 0x00, 0x00, 0x00,
+}
+
+// TestWebMDetectionMatchesRealEncoderOutput pins the detector to the DocType
+// encoding real encoders emit. The previous implementation searched for the
+// literal bytes `42 82 85 "webm"`, which no canonical four-byte DocType ever
+// contains, so every genuine ffmpeg WebM fell through to generic validation.
+func TestWebMDetectionMatchesRealEncoderOutput(t *testing.T) {
+	if !hasWebMFileTypeHeader(realFFmpegWebMPrefix) {
+		t.Fatal("real ffmpeg WebM output was not detected as WebM")
+	}
+	if got := recognizedVideoContentType(realFFmpegWebMPrefix); got != "video/webm" {
+		t.Fatalf("real ffmpeg WebM output was recognized as %q, want video/webm", got)
+	}
+	if !contentTypeMismatch(realFFmpegWebMPrefix, "video/mp4") {
+		t.Fatal("real ffmpeg WebM declared as MP4 was not a typed content-type mismatch")
+	}
+	if contentTypeMismatch(realFFmpegWebMPrefix, "video/webm") {
+		t.Fatal("real ffmpeg WebM declared as WebM was classified as a mismatch")
+	}
+}
+
+// TestWebMDetectionStaysConservative keeps the widened detection from turning
+// neighbouring or unknown byte sequences into WebM content-type mismatches.
+func TestWebMDetectionStaysConservative(t *testing.T) {
+	// A bare EBML header carrying every sibling element except DocType.
+	bareEBML := []byte{
+		0x1a, 0x45, 0xdf, 0xa3, 0x94, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81,
+		0x01, 0x42, 0xf2, 0x81, 0x04, 0x42, 0xf3, 0x81, 0x08, 0x42, 0x87, 0x81,
+		0x02, 0x42, 0x85, 0x81, 0x02,
+	}
+	// The DocType element bytes present, but not inside a parsable EBML header.
+	docTypeInJunk := append([]byte{0x1a, 0x45, 0xdf, 0xa3, 0xff, 0xff, 0xff, 0xff},
+		append([]byte{0x42, 0x82, 0x84}, []byte("webm")...)...)
+
+	for name, body := range map[string][]byte{
+		"bare EBML without DocType": bareEBML,
+		"real ffmpeg Matroska":      realFFmpegMatroskaPrefix,
+		"DocType bytes in junk":     docTypeInJunk,
+		"arbitrary bytes":           {0x00, 0xff, 0x01, 0x7f, 0x80, 0xfe, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa},
+		"truncated EBML magic":      {0x1a, 0x45, 0xdf},
+		"MP4":                       append([]byte{0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d}, bytes.Repeat([]byte{0x00}, 8)...),
+		"PDF":                       []byte("%PDF-1.7\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if hasWebMFileTypeHeader(body) {
+				t.Fatal("non-WebM bytes were detected as WebM")
+			}
+			if contentTypeMismatch(body, "video/quicktime") && recognizedVideoContentType(body) == "video/webm" {
+				t.Fatal("non-WebM bytes produced a typed WebM content-type mismatch")
+			}
+		})
+	}
+}
+
 func TestRecognizedVideoContainerMismatchIsTypedWithoutOverclassifyingUnknownBytes(t *testing.T) {
-	webm := []byte{0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x00, 0x00, 0x00, 0x42, 0x82, 0x85, 'w', 'e', 'b', 'm', 0x00}
+	webm := realFFmpegWebMPrefix
 	if !contentTypeMismatch(webm, "video/mp4") {
 		t.Fatal("recognized WebM bytes were not classified as an MP4 content-type mismatch")
 	}
