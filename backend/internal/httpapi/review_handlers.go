@@ -168,6 +168,51 @@ func (h *reviewHandlers) previewLesson(c *gin.Context) {
 	})
 }
 
+// previewCoursePreview lets an Admin watch the public preview belonging to the
+// exact candidate revision they are reviewing.
+//
+// The public preview route cannot serve this: it correctly requires the live,
+// APPROVED revision, so before publication an Admin could read that a preview
+// existed and never watch it. This is the smallest authenticated counterpart —
+// same capability gate as every other review command, same media signing
+// architecture, and a response that names the course, revision and Asset
+// Version so the client can refuse anything that is not what it asked for.
+func (h *reviewHandlers) previewCoursePreview(c *gin.Context) {
+	adminAccountID := c.GetString(ctxUserIDKey)
+	courseID := c.Param("id")
+	revisionID := c.Param("revisionId")
+
+	previewAssetVersionID, err := h.repo.PreviewAdminCoursePreview(c.Request.Context(), catalog.AdminCoursePreviewRequest{
+		CourseID: courseID, RevisionID: revisionID,
+		AdminAccountID: adminAccountID, ActorDescriptor: adminAccountID,
+	})
+	if err != nil {
+		h.handleReviewError(c, err)
+		return
+	}
+	if h.playback == nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	issued, err := h.playback.IssueAdminReviewPreview(c.Request.Context(), media.AdminReviewPreviewRequest{
+		AdminAccountID: adminAccountID, CourseID: courseID,
+		RevisionID: revisionID, AssetVersionID: previewAssetVersionID,
+	})
+	if err != nil {
+		writeProtectedUnavailable(c)
+		return
+	}
+	// The expiring URL is never cached: it is a capability with a clock on it.
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"course_id":                courseID,
+		"revision_id":              revisionID,
+		"preview_asset_version_id": previewAssetVersionID,
+		"url":                      issued.URL,
+		"expires_at":               issued.ExpiresAt,
+	})
+}
+
 func (h *reviewHandlers) playbackManifest(c *gin.Context) {
 	if h.playback == nil {
 		writeProtectedUnavailable(c)

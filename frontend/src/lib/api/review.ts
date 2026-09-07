@@ -40,6 +40,21 @@ export type AdminLessonPreview = {
   playback_url: string;
 };
 
+/**
+ * An expiring URL for the public preview owned by the exact candidate revision under review.
+ *
+ * It is issued by an authenticated Admin-only route, not by the public preview route: the public
+ * one correctly refuses anything that is not the live, approved revision. The identifiers travel
+ * back with it so the caller can refuse a response that does not describe what it asked for.
+ */
+export type AdminCoursePreview = {
+  course_id: string;
+  revision_id: string;
+  preview_asset_version_id: string;
+  url: string;
+  expires_at: string;
+};
+
 export type ReviewedCourse = OwnedCourseSummary & {
   live_revision_id?: string | null;
   editable_revision?: CourseRevisionWire;
@@ -138,6 +153,20 @@ export async function requestCourseRevisionChanges(
  * inspected revision. The returned URL is an application-owned protected
  * playback route and is held by the caller only for the active view.
  */
+/** Issues the candidate revision's own public preview for an Admin who is reviewing it. */
+export async function previewAdminCoursePreview(
+  input: ReviewInput & { courseID: string; revisionID: string },
+): Promise<AdminCoursePreview> {
+  requireCSRF(input);
+  const preview = await authenticatedRequest<AdminCoursePreview>(
+    `${revisionPath(input.courseID, input.revisionID)}/public-preview`,
+    "POST",
+    input.locale,
+    input.csrf,
+  );
+  return requireResult(preview, input.locale);
+}
+
 export async function previewAdminLesson(
   input: ReviewInput & { courseID: string; revisionID: string; lessonID: string },
 ): Promise<AdminLessonPreview> {

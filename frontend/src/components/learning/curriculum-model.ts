@@ -103,3 +103,34 @@ export function courseIsComplete(progress: {
 }): boolean {
   return progress.total_lessons > 0 && progress.completed_lessons >= progress.total_lessons;
 }
+
+/**
+ * Where a Student re-entering a Course should land.
+ *
+ * # WHY THIS IS NOT A NEW PROGRESS SEMANTIC
+ *
+ * It invents nothing. It reads the server's own ordering — sections by authored position, Lessons
+ * by authored position, exactly as the read model delivers them — and the server's own per-Lesson
+ * flags, and returns one identifier. Nothing is persisted, nothing is claimed about the Student,
+ * and no Lesson is reachable through this that a Student could not already reach by clicking the
+ * same row in the contents. It is a choice of first click, not a statement of fact.
+ *
+ * The order of preference is the order a person would use: the Lesson already part-watched, then
+ * the first one not yet finished, then the first one there is. A finished Course therefore reopens
+ * at its beginning rather than at a dead end past its end.
+ */
+export function resumeLessonID(sections: CurriculumSection[]): string | null {
+  const lessons = sections.flatMap((section) => section.lessons);
+  if (lessons.length === 0) return null;
+  const started = lessons.find((lesson) => lesson.state === "in-progress");
+  if (started) return started.lessonID;
+  const unfinished = lessons.find((lesson) => lesson.state !== "completed");
+  return (unfinished ?? lessons[0]).lessonID;
+}
+
+/** True when the Student has begun this Course at all, which decides how the entry control reads. */
+export function courseIsStarted(sections: CurriculumSection[]): boolean {
+  return sections.some((section) =>
+    section.lessons.some((lesson) => lesson.state !== "not-started"),
+  );
+}

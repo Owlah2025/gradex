@@ -26,9 +26,16 @@ type PanelProps = {
   sections: CurriculumSection[];
   currentLessonID: string;
   labels: CurriculumPanelLabels;
+  /**
+   * Per-Lesson resource controls, composed by the server and carried straight through.
+   *
+   * They arrive as already-built subtrees, so this client boundary holds no file name, download
+   * path or Asset Version — the same rule the contents themselves follow.
+   */
+  resourcesByLesson?: Record<string, React.ReactNode>;
 };
 
-function Contents({ courseID, locale, sections, currentLessonID, labels }: PanelProps) {
+function Contents({ courseID, locale, sections, currentLessonID, labels, resourcesByLesson }: PanelProps) {
   const { courseOutline: _outline, courseContents: _contents, closeCourseContents: _close, ...curriculum } = labels;
   // The contents were rendered from the read model the page loaded with, so the
   // Lesson being watched goes stale the moment it is completed. Only that one
@@ -48,6 +55,7 @@ function Contents({ courseID, locale, sections, currentLessonID, labels }: Panel
       currentLessonID={currentLessonID}
       labels={curriculum}
       headingLevel="h3"
+      resourcesByLesson={resourcesByLesson}
     />
   );
 }

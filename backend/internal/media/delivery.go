@@ -819,3 +819,76 @@ func (s *DeliveryService) buyerTag(entitlementID, assetVersionID string) string 
 	_, _ = mac.Write([]byte(assetVersionID))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
+
+// AdminReviewPreviewRequest is the exact candidate revision public preview an
+// already-authorized Admin is reviewing. Capability enforcement stays at the
+// HTTP boundary; every content rule below is proved here.
+type AdminReviewPreviewRequest struct {
+	AdminAccountID string
+	CourseID       string
+	RevisionID     string
+	AssetVersionID string
+}
+
+// IssueAdminReviewPreview signs the public preview owned by the exact submitted
+// revision an Admin is reviewing.
+//
+// # WHY THIS IS NOT IssueCoursePreview
+//
+// The public route deliberately requires `c.live_revision_id = cr.id` and
+// `cr.state = 'APPROVED'`, because a preview must not be openly published
+// before the Course is. A revision under review satisfies neither, so an Admin
+// could read that a preview existed and never watch the thing they were
+// approving. Relaxing the public predicate would have made every candidate
+// preview anonymously reachable, which is why this is a separate, authenticated
+// issuance instead.
+//
+// # WHAT IT DOES NOT RELAX
+//
+// Every other rule the public query proves is proved here too: PREVIEW kind on
+// both the Asset and its Version, `PUBLIC_PREVIEW` visibility, `video/mp4`
+// content type, READY state, a non-retired logical Asset, exact-version safety
+// provenance, and preview-origin lineage. It adds two: the revision must be the
+// exact one named, in `PENDING_REVIEW`, and the Asset Version must be the one
+// that revision points at. It grants nothing beyond one expiring URL for those
+// exact bytes, and mints no session, entitlement, or enrollment.
+func (s *DeliveryService) IssueAdminReviewPreview(ctx context.Context, request AdminReviewPreviewRequest) (PreviewAuthorization, error) {
+	if request.AdminAccountID == "" || request.CourseID == "" || request.RevisionID == "" || request.AssetVersionID == "" {
+		return PreviewAuthorization{}, ErrProtectedUnavailable
+	}
+	var target deliveryTarget
+	err := s.db.QueryRow(ctx, `
+		SELECT cr.preview_asset_version_id::text, mav.kind, mav.state, mav.storage_object_key, ma.retired_at
+		FROM courses c
+		JOIN course_revisions cr ON cr.id = $2::uuid AND cr.course_id = c.id AND cr.state = 'PENDING_REVIEW'
+		JOIN media_asset_versions mav ON mav.id = cr.preview_asset_version_id AND mav.id = $3::uuid
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+	`+ExactVersionProvenanceJoin+`
+		WHERE c.id = $1::uuid
+		  AND mav.kind = 'PREVIEW'
+		  AND ma.kind = 'PREVIEW'
+		  AND mav.content_type = 'video/mp4'
+		  AND ma.visibility = 'PUBLIC_PREVIEW'
+		  AND EXISTS (
+			WITH RECURSIVE lineage AS (
+				SELECT cr.id, cr.based_on_revision_id
+				UNION ALL
+				SELECT parent.id, parent.based_on_revision_id
+				FROM course_revisions parent
+				JOIN lineage child ON child.based_on_revision_id = parent.id
+			)
+			SELECT 1 FROM lineage WHERE lineage.id = ma.preview_origin_revision_id
+		  )
+	`, request.CourseID, request.RevisionID, request.AssetVersionID).Scan(
+		&target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.retiredAt,
+	)
+	if err != nil || target.state != StateReady || target.retiredAt != nil {
+		return PreviewAuthorization{}, ErrProtectedUnavailable
+	}
+	url, err := s.store.PresignGetURL(ctx, target.storageKey, s.signatureLifetime)
+	if err != nil {
+		return PreviewAuthorization{}, ErrProtectedUnavailable
+	}
+	now := s.now().UTC()
+	return PreviewAuthorization{URL: url, AssetVersionID: target.assetVersionID, ExpiresAt: now.Add(s.signatureLifetime)}, nil
+}

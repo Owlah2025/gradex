@@ -61,6 +61,7 @@ export function CourseCurriculum({
   labels,
   headingLevel = "h2",
   materialsByLesson,
+  resourcesByLesson,
   className,
 }: {
   courseID: string;
@@ -77,6 +78,14 @@ export function CourseCurriculum({
    * a path, only the finished subtree to place.
    */
   materialsByLesson?: Record<string, React.ReactNode>;
+  /**
+   * Per-Lesson resource controls, placed *on* the Lesson's own row rather than under it.
+   *
+   * Same rule as `materialsByLesson`: the server composes the subtree, so no download path reaches
+   * this component. The two are alternatives, not a pair — a surface with the width for an open
+   * list passes the first, a narrow column passes the second.
+   */
+  resourcesByLesson?: Record<string, React.ReactNode>;
   className?: string;
 }) {
   const [open, setOpen] = React.useState<string[]>(() =>
@@ -125,6 +134,7 @@ export function CourseCurriculum({
                     lesson={lesson}
                     current={lesson.lessonID === currentLessonID}
                     labels={labels}
+                    resources={resourcesByLesson?.[lesson.lessonID] ?? null}
                   />
                   {materialsByLesson?.[lesson.lessonID] ?? null}
                 </li>
@@ -143,12 +153,15 @@ function CurriculumRow({
   lesson,
   current,
   labels,
+  resources,
 }: {
   courseID: string;
   locale: "ar" | "en";
   lesson: CurriculumLesson;
   current: boolean;
   labels: CurriculumLabels;
+  /** The Lesson's own resource control, when the surface asked for one. */
+  resources?: React.ReactNode;
 }) {
   const Icon = stateIcon[lesson.state];
   const stateText =
@@ -159,52 +172,62 @@ function CurriculumRow({
         : labels.lessonNotStarted;
 
   return (
-    <Link
-      href={`/${locale}/learn/courses/${courseID}/lessons/${lesson.lessonID}`}
-      aria-current={current ? "location" : undefined}
-      // The row's identity and state, readable without parsing localized copy.
-      // The Lesson being watched updates here from the Progress write's own
-      // response, so a test can prove the outline followed it rather than
-      // inferring completion from a word that differs by language.
-      data-lesson-id={lesson.lessonID}
-      data-lesson-state={lesson.state}
+    // The row is a container of two independent controls, not one control. The Lesson link is the
+    // whole row minus the resource button; the resource button is a sibling, so opening the files
+    // cannot navigate and neither control is nested inside the other.
+    <div
       className={cn(
-        "flex items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        // The current row is marked by weight and a border on the reading edge as well as by tone,
-        // and says so in words below — three signals, none of them only colour.
+        "flex items-start gap-1 rounded-md transition-colors",
+        // The current row is marked by weight, a border on the reading edge and a tone — three
+        // signals, and the row also says "You are here" in words below.
         current && "border-s-2 border-primary bg-accent",
       )}
     >
-      <Icon
-        aria-hidden
-        className={cn(
-          "mt-0.5 size-[18px] shrink-0",
-          lesson.state === "completed" ? "text-primary" : "text-muted-foreground",
-        )}
-      />
-      <span className="min-w-0 flex-1">
-        <span
+      <Link
+        href={`/${locale}/learn/courses/${courseID}/lessons/${lesson.lessonID}`}
+        aria-current={current ? "location" : undefined}
+        // The row's identity and state, readable without parsing localized copy.
+        // The Lesson being watched updates here from the Progress write's own
+        // response, so a test can prove the outline followed it rather than
+        // inferring completion from a word that differs by language.
+        data-lesson-id={lesson.lessonID}
+        data-lesson-state={lesson.state}
+        className="flex min-w-0 flex-1 items-start gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Icon
+          aria-hidden
           className={cn(
-            "block break-words text-[15px] text-foreground",
-            current ? "font-display font-bold" : "font-medium",
+            "mt-0.5 size-[18px] shrink-0",
+            lesson.state === "completed" ? "text-primary" : "text-muted-foreground",
           )}
-        >
-          {lesson.title}
+        />
+        <span className="min-w-0 flex-1">
+          <span
+            className={cn(
+              "block break-words text-[15px] text-foreground",
+              current ? "font-display font-bold" : "font-medium",
+            )}
+          >
+            {lesson.title}
+          </span>
+          {/* Spaced, not dot-separated: beside Arabic-Indic digits a middle dot is indistinguishable
+              from ٠, and "· ٢ ملفات" read as twenty files rather than two. */}
+          <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+            <span>{stateText}</span>
+            {/* Said once. When the row carries its own resource control that control states the
+                count, and repeating it here put the same number twice on one line. */}
+            {!resources && lesson.materialCount > 0 ? (
+              <span>
+                {formatLearningInteger(lesson.materialCount, locale)} {labels.files}
+              </span>
+            ) : null}
+            {current ? (
+              <span className="font-display font-bold text-primary">{labels.currentLessonLabel}</span>
+            ) : null}
+          </span>
         </span>
-        {/* Spaced, not dot-separated: beside Arabic-Indic digits a middle dot is indistinguishable
-            from ٠, and "· ٢ ملفات" read as twenty files rather than two. */}
-        <span className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-muted-foreground">
-          <span>{stateText}</span>
-          {lesson.materialCount > 0 ? (
-            <span>
-              {formatLearningInteger(lesson.materialCount, locale)} {labels.files}
-            </span>
-          ) : null}
-          {current ? (
-            <span className="font-display font-bold text-primary">{labels.currentLessonLabel}</span>
-          ) : null}
-        </span>
-      </span>
-    </Link>
+      </Link>
+      {resources}
+    </div>
   );
 }

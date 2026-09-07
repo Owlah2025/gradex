@@ -2,21 +2,27 @@ import { LessonPlayer } from "@/components/learning/lesson-player";
 import { lessonPlaybackPlan } from "@/components/learning/lesson-state";
 import {
   AccessUntil,
+  LearningProgressSummary,
   LearningStatusBadge,
   LearningUnavailable,
   LessonMaterials,
   LessonNavigation,
+  MaterialsInline,
 } from "@/components/learning/learning-views";
 import { CurriculumSheet, CurriculumSidebar } from "@/components/learning/lesson-curriculum-panel";
+import { LessonResourcesPopover } from "@/components/learning/lesson-resources-popover";
+import { LearningTabs } from "@/components/learning/learning-tabs";
 import { courseCurriculum, type CurriculumSection } from "@/components/learning/curriculum-model";
 import { LessonProgressState } from "@/components/learning/lesson-progress-state";
 import { requestCourseHomeServer, requestLessonReadModelServer } from "@/lib/api/learning-server";
+import type { CourseHome } from "@/lib/api/learning";
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { LearningShell } from "@/components/learning/learning-shell";
 import { ReportTargetActions } from "@/components/learning/report-content-dialog";
 import { lessonReportTargets } from "@/components/learning/report-targets";
 import { reportLabels } from "@/components/learning/report-labels";
+import { formatLearningInteger } from "@/lib/formatters/learning";
 import {
   accessLabels,
   curriculumLabels,
@@ -24,6 +30,7 @@ import {
   learningStatusLabel,
   materialsLabels,
   navigationLabels,
+  progressLabels,
   shellLabels,
   unavailableLabels,
 } from "@/components/learning/learning-label-sets";
@@ -56,14 +63,18 @@ export default async function LessonPage({
  * It is deliberately **secondary**: the two reads are issued together, and a failure here resolves
  * to `null` rather than throwing. A Student whose Lesson loads must still get their Lesson if the
  * contents cannot be built — they lose the sidebar, not the Course.
+ *
+ * The Course read model is carried out as well as the narrowed sections, because the same read is
+ * what the contents' per-Lesson resource controls and the Course-wide progress figure are built
+ * from. Reading it twice to avoid passing it around would be two identical protected reads.
  */
 async function courseContentsFor(
   courseID: string,
   locale: "ar" | "en",
-): Promise<{ title: string; sections: CurriculumSection[] } | null> {
+): Promise<{ title: string; sections: CurriculumSection[]; home: CourseHome } | null> {
   try {
     const course = await requestCourseHomeServer(courseID, locale);
-    return { title: course.title, sections: courseCurriculum(course.sections) };
+    return { title: course.title, sections: courseCurriculum(course.sections), home: course };
   } catch {
     return null;
   }
@@ -98,33 +109,77 @@ async function LessonContent({
       courseContentsFor(courseID, locale),
     ]);
     const playbackPlan = lessonPlaybackPlan(lesson.learning_status);
+    const materials = materialsLabels(labels);
+
+    /**
+     * Each Lesson's downloads, composed here and handed to the contents already built.
+     *
+     * The download paths, the file names and the decision that access even permits a download all
+     * stay on this side of the boundary; the contents receive a subtree, never a material. Built
+     * only on an active read, for the same reason the Lesson's own materials are: an expired read
+     * carries no material to offer.
+     */
+    const resourcesByLesson =
+      contents && lesson.learning_status === "active"
+        ? Object.fromEntries(
+            contents.home.sections.flatMap((section) =>
+              section.lessons
+                .filter((entry) => entry.resources.length > 0 || entry.lab_materials.length > 0)
+                .map((entry) => [
+                  entry.lesson_id,
+                  <LessonResourcesPopover
+                    key={entry.lesson_id}
+                    label={labels.resources}
+                    accessibleLabel={`${labels.resources}: ${entry.title}`}
+                    heading={labels.materials}
+                    count={formatLearningInteger(
+                      entry.resources.length + entry.lab_materials.length,
+                      locale,
+                    )}
+                  >
+                    <MaterialsInline
+                      layout="panel"
+                      resources={entry.resources}
+                      labMaterials={entry.lab_materials}
+                      labels={materials}
+                      locale={locale}
+                    />
+                  </LessonResourcesPopover>,
+                ]),
+            ),
+          )
+        : undefined;
+
+    const curriculumPanel = contents
+      ? {
+          courseID: lesson.course_id,
+          locale,
+          sections: contents.sections,
+          currentLessonID: lesson.lesson_id,
+          resourcesByLesson,
+          labels: {
+            ...curriculumLabels(labels),
+            courseOutline: labels.courseOutline,
+            courseContents: labels.courseContents,
+            closeCourseContents: labels.closeCourseContents,
+          },
+        }
+      : null;
+
+    const reportTargets = lessonReportTargets(lesson);
+    const hasLessonFiles = lesson.resources.length > 0 || lesson.lab_materials.length > 0;
 
     return (
       <LearningShell
         locale={locale}
         dir={locale === "ar" ? "rtl" : "ltr"}
         labels={shell}
-        /* The Course used to be named in the header band as a link back to it.
-           The breadcrumb below now says the same thing and two more — which
-           Course, which Lesson, and the way up to My Learning — so keeping the
-           header copy would put two links with the same accessible name and the
-           same destination on one screen. */
       >
         <div className="mx-auto max-w-container px-5 py-6 sm:px-6 sm:py-8">
-          {/* Where this Lesson sits. The single "back to course" control said
-              one level and nothing about the level above it, so a Student two
-              screens into a Course had no page-provided route to their own
-              Courses — only the header, or the browser's history.
-
-              The Course crumb is rendered only when the contents read
-              succeeded, because that is where the Course's own title comes
-              from; without it the breadcrumb would name the Course by
-              identifier, which is not something to show a Student. */}
-          {/* The single "back to course" button that used to sit here said one
-              level and nothing about the level above it, and named the
-              destination generically. The middle crumb is the same link with
-              the Course's own title on it, so the button was a second control
-              to the same place. */}
+          {/* Where this Lesson sits. The Course crumb is rendered only when the contents read
+              succeeded, because that is where the Course's own title comes from; without it the
+              breadcrumb would name the Course by identifier, which is not something to show a
+              Student. */}
           {contents ? (
             <Breadcrumbs
               locale={locale}
@@ -137,25 +192,28 @@ async function LessonContent({
             />
           ) : null}
 
-
           {/* Content first, contents second — in the markup as well as on the screen. From `lg` the
               grid puts the contents in a second column beside the Lesson; below it they collapse to
               a single control under the header, and nothing is visually reordered behind a screen
               reader's back. */}
-          <div className="mt-4 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
+          <div className="mt-4 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-8">
             <div className="min-w-0">
+              {/* The heading band is deliberately short. Everything that used to stand between the
+                  title and the picture — the access state, the expiry, the note about how a Lesson
+                  completes — is real and is still on the page, one tab below the player. What a
+                  Student came for is the video, and it should be the first thing under the title
+                  rather than the fourth. */}
               <header>
                 <p className="font-display text-sm font-bold uppercase tracking-wide text-muted-foreground">
                   {lesson.section.title}
                 </p>
-                <h1 className="mt-2 font-display text-2xl font-bold text-foreground sm:text-3xl">
+                <h1 className="mt-1.5 font-display text-2xl font-bold text-foreground sm:text-[28px]">
                   {lesson.title}
                 </h1>
-                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
                   {/* A Lesson's own state, in an icon and a word. Completion is the server's and is
                       reached by watching, not by a control here — so there is no button that could
-                      claim a completion the server has not recorded. It follows the confirmations
-                      the player receives, so finishing a Lesson is visible without a reload. */}
+                      claim a completion the server has not recorded. */}
                   <LessonProgressState
                     lessonID={lesson.lesson_id}
                     initial={{
@@ -168,38 +226,18 @@ async function LessonContent({
                       notStarted: labels.lessonNotStarted,
                     }}
                   />
-                  <LearningStatusBadge
-                    status={lesson.learning_status}
-                    label={learningStatusLabel(lesson.learning_status, labels)}
-                    detail={learningStatusDetail(lesson.learning_status, labels)}
-                  />
                 </div>
-                <AccessUntil
-                  className="mt-2"
-                  expiresAt={lesson.expires_at}
-                  labels={accessLabels(labels)}
-                  locale={locale}
-                />
               </header>
 
-              {contents ? (
-                <div className="mt-5 lg:hidden">
-                  <CurriculumSheet
-                    courseID={lesson.course_id}
-                    locale={locale}
-                    sections={contents.sections}
-                    currentLessonID={lesson.lesson_id}
-                    labels={{
-                      ...curriculumLabels(labels),
-                      courseOutline: labels.courseOutline,
-                      courseContents: labels.courseContents,
-                      closeCourseContents: labels.closeCourseContents,
-                    }}
-                  />
+              {/* Below `lg` the contents have no column, so they sit behind one control — placed
+                  above the player, where a Student looking for the next Lesson looks first. */}
+              {curriculumPanel ? (
+                <div className="mt-4 lg:hidden">
+                  <CurriculumSheet {...curriculumPanel} />
                 </div>
               ) : null}
 
-              <div className="mt-5">
+              <div className="mt-4">
                 {playbackPlan.mountPlayer ? (
                   <LessonPlayer
                     lessonID={lesson.lesson_id}
@@ -214,19 +252,8 @@ async function LessonContent({
                 )}
               </div>
 
-              {lesson.learning_status === "active" ? (
-                <LessonMaterials
-                  className="mt-8"
-                  headingLevel="h2"
-                  resources={lesson.resources}
-                  labMaterials={lesson.lab_materials}
-                  locale={locale}
-                  labels={materialsLabels(labels)}
-                />
-              ) : null}
-
-              <p className="mt-8 text-xs text-muted-foreground">{labels.completionAutomatic}</p>
-
+              {/* Directly under the picture and never over it. An overlay control on a video is a
+                  control that disappears exactly when the video ends and the Student wants it. */}
               <LessonNavigation
                 className="mt-4"
                 courseId={lesson.course_id}
@@ -237,42 +264,98 @@ async function LessonContent({
                 nextTitle={titleForLesson(contents?.sections, lesson.navigation.next_lesson_id)}
               />
 
-              {/* One action per target this visible Lesson issued a context for, and no other. A read
-                  with no contexts mounts nothing, so its payload carries no reporting copy. */}
-              {lessonReportTargets(lesson).length > 0 ? (
-                <div className="mt-8">
-                  <ReportTargetActions
-                    targets={lessonReportTargets(lesson)}
-                    scopePrefix={`${lesson.course_id} ${lesson.lesson_id}`}
-                    locale={locale}
-                    labels={reportLabels(labels)}
-                  />
-                </div>
-              ) : null}
+              {/* Three tabs, and only three, because three are what this product has. Each panel is
+                  built here and handed over: the tab set chooses which is visible and never sees a
+                  read model or a report context. */}
+              <LearningTabs
+                className="mt-8"
+                label={labels.learningTabs}
+                // Radix cannot read this from the document, so the page that already knows the
+                // locale is the one that says it.
+                dir={locale === "ar" ? "rtl" : "ltr"}
+                tabs={[
+                  {
+                    value: "overview",
+                    label: labels.overview,
+                    content: (
+                      <div className="space-y-5">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                          <LearningStatusBadge
+                            status={lesson.learning_status}
+                            label={learningStatusLabel(lesson.learning_status, labels)}
+                            detail={learningStatusDetail(lesson.learning_status, labels)}
+                          />
+                        </div>
+                        <AccessUntil
+                          expiresAt={lesson.expires_at}
+                          labels={accessLabels(labels)}
+                          locale={locale}
+                        />
+                        {/* The Course-wide figure, which is the server's own count over the
+                            qualifying graph. Nothing is recomputed here, so this cannot disagree
+                            with the Dashboard or the Course page. */}
+                        {contents ? (
+                          <LearningProgressSummary
+                            className="max-w-sm"
+                            progress={contents.home.progress}
+                            labels={progressLabels(labels)}
+                            locale={locale}
+                          />
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">{labels.completionAutomatic}</p>
+                      </div>
+                    ),
+                  },
+                  // The Lesson's own files, in full: kind, type and size, which the compact panel
+                  // on the contents row deliberately drops. Absent entirely when the Lesson has no
+                  // files or the access to read them has ended.
+                  ...(lesson.learning_status === "active" && hasLessonFiles
+                    ? [
+                        {
+                          value: "resources",
+                          label: labels.resources,
+                          content: (
+                            <LessonMaterials
+                              headingLevel="h2"
+                              resources={lesson.resources}
+                              labMaterials={lesson.lab_materials}
+                              locale={locale}
+                              labels={materials}
+                            />
+                          ),
+                        },
+                      ]
+                    : []),
+                  // One action per target this visible Lesson issued a context for, and no other.
+                  // A read with no contexts contributes no tab, so its payload carries no
+                  // reporting copy at all.
+                  ...(reportTargets.length > 0
+                    ? [
+                        {
+                          value: "report",
+                          label: labels.reportDialogTitle,
+                          content: (
+                            <ReportTargetActions
+                              targets={reportTargets}
+                              scopePrefix={`${lesson.course_id} ${lesson.lesson_id}`}
+                              locale={locale}
+                              labels={reportLabels(labels)}
+                            />
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
             </div>
 
-            {contents ? (
-              // Sticky beneath the 64px header, exactly as Course Details holds
-              // its access card. Without it the outline scrolls *under* the
-              // sticky header, and every Lesson row that passes behind it is a
-              // partially obscured target — a real WCAG target-size failure
-              // that lands on a different row at every viewport. Holding the
-              // column below the header removes the obstruction rather than
-              // moving it, and keeps the outline visible while reading, which
-              // is what a contents column is for.
+            {curriculumPanel ? (
+              // Sticky beneath the 64px header, exactly as Course Details holds its access card.
+              // Without it the outline scrolls *under* the sticky header, and every Lesson row that
+              // passes behind it is a partially obscured target — a real WCAG target-size failure
+              // that lands on a different row at every viewport.
               <div className="hidden lg:sticky lg:top-20 lg:block">
-                <CurriculumSidebar
-                  courseID={lesson.course_id}
-                  locale={locale}
-                  sections={contents.sections}
-                  currentLessonID={lesson.lesson_id}
-                  labels={{
-                    ...curriculumLabels(labels),
-                    courseOutline: labels.courseOutline,
-                    courseContents: labels.courseContents,
-                    closeCourseContents: labels.closeCourseContents,
-                  }}
-                />
+                <CurriculumSidebar {...curriculumPanel} />
               </div>
             ) : null}
           </div>

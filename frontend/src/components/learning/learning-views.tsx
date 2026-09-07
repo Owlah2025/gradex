@@ -396,11 +396,18 @@ export function MaterialsInline({
   labMaterials,
   labels,
   locale,
+  layout = "row",
 }: {
   resources: LearningMaterial[];
   labMaterials: LearningMaterial[];
   labels: MaterialsLabels;
   locale: "ar" | "en";
+  /**
+   * `row` indents the list under the Lesson row it hangs from, which is how the Course page shows
+   * it. `panel` drops the indent because inside a popover the panel *is* the Lesson's context and
+   * an indent there is a margin against nothing.
+   */
+  layout?: "row" | "panel";
 }) {
   const items = [
     ...resources.map((item) => ({ item, kind: labels.resource })),
@@ -408,9 +415,15 @@ export function MaterialsInline({
   ];
   if (items.length === 0) return null;
   return (
-    <ul aria-label={labels.materials} className="mt-1 space-y-1 ps-9">
+    <ul
+      aria-label={labels.materials}
+      className={cn("space-y-1", layout === "row" ? "mt-1 ps-9" : "-mx-1")}
+    >
       {items.map(({ item, kind }) => (
-        <li key={item.download_authorization_path} className="flex items-start gap-2 px-2 py-1.5">
+        <li
+          key={item.download_authorization_path}
+          className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent"
+        >
           <FileText aria-hidden className="mt-1 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <MaterialDownload

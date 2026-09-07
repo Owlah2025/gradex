@@ -371,6 +371,7 @@ func privilegedAuditScenarios() map[string]privilegedAuditScenario {
 		http.MethodPost + " /api/v1/admin/review/courses/:id/revisions/:revisionId/approve":           approveAuditScenario,
 		http.MethodPost + " /api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes":   requestChangesAuditScenario,
 		http.MethodPost + " /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId": previewAuditScenario,
+		http.MethodPost + " /api/v1/admin/review/courses/:id/revisions/:revisionId/public-preview":    coursePreviewAuditScenario,
 		http.MethodPut + " /api/v1/admin/courses/:id/price":                                           coursePriceAuditScenario,
 		http.MethodPut + " /api/v1/admin/courses/:id/sections/:sectionId/price":                       sectionPriceAuditScenario,
 		http.MethodPost + " /api/v1/admin/courses/:id/delist":                                         lifecycleAuditScenario(catalog.LifecycleDelisted, "COURSE_DELISTED"),
@@ -794,6 +795,25 @@ func previewAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.Rou
 		var video string
 		if err := f.pool.QueryRow(f.ctx, `SELECT video_asset_version_id::text FROM course_lessons WHERE lesson_identity_id = $1::uuid`, f.lessonID).Scan(&video); err != nil || video != f.videoID {
 			t.Fatalf("preview fixture video = %q (err=%v), want %q", video, err, f.videoID)
+		}
+	}})
+}
+
+// coursePreviewAuditScenario proves the Admin candidate public-preview route
+// commits the same distinct Admin-preview audit evidence as the Lesson route,
+// against the revision it was asked about.
+func coursePreviewAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
+	f.preparePendingReview(t)
+	// The submitted revision has to actually own a preview for there to be one to
+	// play. Written directly because the Instructor route that attaches one is
+	// refused while a revision is under review, which is the correct rule.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, f.previewID, f.revisionID); err != nil {
+		t.Fatalf("attaching audit preview to the submitted revision: %v", err)
+	}
+	return f.execute(t, route, "", privilegedAuditExpectation{status: http.StatusOK, action: "ADMIN_CONTENT_PREVIEWED", targetType: "COURSE_REVISION_PREVIEW", targetID: f.revisionID, committed: func(t *testing.T, f *privilegedAuditFixture) {
+		var preview string
+		if err := f.pool.QueryRow(f.ctx, `SELECT preview_asset_version_id::text FROM course_revisions WHERE id = $1::uuid`, f.revisionID).Scan(&preview); err != nil || preview != f.previewID {
+			t.Fatalf("preview fixture asset = %q (err=%v), want %q", preview, err, f.previewID)
 		}
 	}})
 }
