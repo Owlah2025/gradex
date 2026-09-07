@@ -469,3 +469,74 @@ func (r *Repository) loadRevisionGraphByIDTx(ctx context.Context, tx pgx.Tx, rev
 	}
 	return &rev, nil
 }
+
+// AdminCoursePreviewRequest is the exact candidate revision whose public
+// preview an Admin is reviewing. It names no Asset Version: the Asset is
+// resolved from the revision itself, so an Admin cannot ask for a preview that
+// the reviewed revision does not own.
+type AdminCoursePreviewRequest struct {
+	CourseID        string
+	RevisionID      string
+	AdminAccountID  string
+	ActorDescriptor string
+}
+
+// PreviewAdminCoursePreview resolves the public preview Asset Version belonging
+// to the exact submitted revision under review, and audits the access on the
+// same distinct Admin-preview path as PreviewAdminLesson.
+//
+// It is the course-preview counterpart of PreviewAdminLesson and obeys the same
+// rules: it creates NO enrollment and NO entitlement, it never reads the live
+// revision, and a revision that is not PENDING_REVIEW is not previewable here.
+// The state predicate is what keeps this from becoming a second route onto
+// published content — the public route already serves that, under the
+// publication rules it must keep.
+func (r *Repository) PreviewAdminCoursePreview(
+	ctx context.Context,
+	req AdminCoursePreviewRequest,
+) (string, error) {
+	courseID := req.CourseID
+	revisionID := req.RevisionID
+	adminAccountID := req.AdminAccountID
+	if courseID == "" || revisionID == "" || adminAccountID == "" {
+		return "", errors.New("courseID, revisionID, and adminAccountID are required")
+	}
+
+	var previewAssetVersionID *string
+	err := r.pool.QueryRow(ctx, `
+		SELECT cr.preview_asset_version_id
+		FROM course_revisions cr
+		WHERE cr.id = $1::uuid AND cr.course_id = $2::uuid AND cr.state = 'PENDING_REVIEW'
+	`, revisionID, courseID).Scan(&previewAssetVersionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrCourseNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying candidate revision public preview: %w", err)
+	}
+	if previewAssetVersionID == nil || *previewAssetVersionID == "" {
+		return "", ErrCourseNotFound
+	}
+
+	err = r.ExecTx(ctx, func(tx pgx.Tx) error {
+		return WriteAuditEvent(ctx, tx, AuditEvent{
+			ActorAccountID:  &adminAccountID,
+			ActorRole:       "ADMIN",
+			ActorDescriptor: req.ActorDescriptor,
+			Action:          "ADMIN_CONTENT_PREVIEWED",
+			TargetType:      "COURSE_REVISION_PREVIEW",
+			TargetID:        revisionID,
+			Reason:          "Admin content preview",
+			Metadata: map[string]any{
+				"course_id":                courseID,
+				"revision_id":              revisionID,
+				"preview_asset_version_id": *previewAssetVersionID,
+			},
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return *previewAssetVersionID, nil
+}

@@ -79,6 +79,21 @@ function temporaryFile(name: string, bytes: Buffer): string {
   return file;
 }
 
+/**
+ * Opens the Lesson's materials panel.
+ *
+ * A Lesson's files sit under the player, one tab along from the overview the screen opens on. The
+ * tab exists only when the Lesson actually carries files, so this is called on the Lessons that
+ * have them and deliberately not on the one that does not — where its absence is itself the
+ * assertion.
+ */
+async function openLessonMaterials(page: Page, locale: "en" | "ar" = "en"): Promise<void> {
+  const tab = page.getByRole("tab", { name: locale === "ar" ? "المواد" : "Resources" });
+  await expect(tab).toBeVisible();
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
 async function expectDownloadBytes(page: Page, buttonName: RegExp, expected: Buffer): Promise<void> {
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: buttonName }).click();
@@ -139,6 +154,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // Existing published A has both canonical categories. Each product download
   // authorizes only immediately before private delivery and proves actual bytes.
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+  await openLessonMaterials(studentPage);
   await expect(studentPage.getByRole("heading", { name: "Resources" })).toBeVisible();
   await expect(studentPage.getByText("Lecture Notes PDF")).toBeVisible();
   await expect(studentPage.getByRole("heading", { name: "Lab Materials" })).toBeVisible();
@@ -242,6 +258,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // probed by an entitled Student, anonymous caller, unentitled Student, a
   // wrong Course, or a wrong Lesson.
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+  await openLessonMaterials(studentPage);
   await expect(studentPage.getByText("Lecture Notes PDF")).toBeVisible();
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toHaveCount(0);
   await expectDownloadBytes(studentPage, /Download: Lecture Notes PDF/, LIVE_RESOURCE_BYTES);
@@ -272,6 +289,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // pre-existing Lab material remains a distinct category and still delivers
   // its fixture archive through the same protected UI path.
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+  await openLessonMaterials(studentPage);
   await expect(studentPage.getByText("Lecture Notes PDF")).toHaveCount(0);
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toBeVisible();
   await expectDownloadBytes(studentPage, new RegExp(`Download: ${REPLACEMENT_RESOURCE_NAME.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`), REPLACEMENT_RESOURCE_BYTES);
@@ -289,11 +307,15 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // The removal lives on the candidate. Until it is published, B stays live and
   // the Student's protected download is unaffected.
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+  await openLessonMaterials(studentPage);
   await expect(studentPage.getByText(REPLACEMENT_RESOURCE_NAME)).toBeVisible();
   await expectDownloadBytes(studentPage, new RegExp(`Download: ${REPLACEMENT_RESOURCE_NAME.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}`), REPLACEMENT_RESOURCE_BYTES);
   await publishRevision(browser, instructorPage);
 
   await studentPage.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+  // The Lesson still carries its Lab Material, so the panel is still offered — and the Resources
+  // heading inside it is genuinely gone rather than merely unselected.
+  await openLessonMaterials(studentPage);
   await expect(studentPage.getByRole("heading", { name: "Resources" })).toHaveCount(0);
   await expect(studentPage.getByRole("heading", { name: "Lab Materials" })).toBeVisible();
   const beforeFinalLabDownload = queryLearningState(STUDENT.accountID, COURSE_ID);
@@ -304,6 +326,7 @@ test("ST-15 Resource/Lab Material protected presentation, real bytes, and revisi
   // reference becomes Student copy merely to make downloads testable.
   await studentPage.goto(`/ar/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
   await expect(studentPage.locator("html")).toHaveAttribute("dir", "rtl");
+  await openLessonMaterials(studentPage, "ar");
   await expect(studentPage.getByRole("heading", { name: "مواد المختبر" })).toBeVisible();
   await expect(studentPage.getByRole("button", { name: /تحميل: كود المختبر/ })).toBeVisible();
   expect((await studentPage.locator("main").innerText())).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);

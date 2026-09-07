@@ -410,6 +410,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/approve":                           {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/approve", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes":                   {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId":                 {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/review/courses/:id/revisions/:revisionId/public-preview":                    {Method: http.MethodPost, Path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/public-preview", Class: ClassCapabilityProtected},
 
 	"PUT /api/v1/admin/courses/:id/price":                     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/price", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/default-access-expiry":     {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/default-access-expiry", Class: ClassCapabilityProtected},

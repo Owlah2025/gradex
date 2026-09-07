@@ -233,6 +233,7 @@ export function CourseDetail({
                       watchLabel={catalogue.watchPreview}
                       failureLabel={catalogue.previewFailed}
                       retryLabel={catalogue.retry}
+                      posterURL={state.course.thumbnail?.large_url ?? null}
                     />
                   ) : null}
 

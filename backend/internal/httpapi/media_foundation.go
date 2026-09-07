@@ -28,6 +28,7 @@ type adminReviewPlaybackIssuer interface {
 	IssueAdminReviewPlayback(context.Context, media.AdminReviewPlaybackRequest) (media.PlaybackAuthorization, error)
 	IssueAdminReviewPlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
 	IssueAdminReviewPlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error)
+	IssueAdminReviewPreview(context.Context, media.AdminReviewPreviewRequest) (media.PreviewAuthorization, error)
 }
 
 // LearningMedia returns the same already-composed S4 delivery boundary used by

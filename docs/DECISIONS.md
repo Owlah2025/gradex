@@ -3756,3 +3756,65 @@ polled, and one more transport for one more field is a poor trade).
 
 **Source:** This session; see [`media-processing-progress.md`](media-processing-progress.md),
 migration `0034_media_processing_progress`, and `internal/media/progress.go`.
+
+## D-099 — The Course learning experience revamp is explicitly authorized as a scoped exception
+
+**Date:** 2026-09-07
+**Status:** Active. A named exception to the paused UI/UX phase
+([`docs/ux/README.md`](ux/README.md)) and to the `MVP-Fxx`-only work list under
+[D-089](#d-089--mvp-functional-completion-work-is-authorized-one-remediation-tranche-at-a-time).
+It does not reopen that phase and authorizes no other visual work.
+
+**Finding:** The Student learning screens put the video fourth on the page, behind the access badge,
+the expiry and a note about how completion works; the previous/next controls sat below the Lesson's
+downloads rather than under the picture; and a Lesson's files were an inline list that, in a 20rem
+contents column, outweighed the Lesson titles the column exists to offer. Separately, an Admin
+reviewing a submitted Course could read that a public preview was attached and could not watch it:
+the only route that signs a preview is the public one, which correctly requires the live, `APPROVED`
+revision. The one asset every visitor meets first was the one asset the reviewer approved unseen.
+
+**Decision:**
+
+1. The developer explicitly authorized this work in session on 2026-09-07. It is recorded here
+   because an exception that is not written down is indistinguishable from a phase that was never
+   paused.
+2. Scope is the Student Course learning experience — the Lesson screen's layout, the Course contents
+   panel, previous/next placement, per-Lesson resources, the tab region under the player — plus the
+   public Course preview's presentation and the missing Admin candidate-preview playback path. The
+   information architecture is modelled on a conventional course player; the visual identity remains
+   Gradex's own tokens.
+3. **No database migration.** `lesson_files.lesson_id` already models the Lesson–resource
+   relationship, section and lesson ordering are already authoritative and already served as
+   navigation pointers, and the candidate preview is an authorization gap rather than a schema gap.
+   Any finding to the contrary stops the work and returns here.
+4. The Admin candidate preview is a new authenticated route under the existing review capability. It
+   does not relax any rule the public preview proves — lifecycle, revision lineage, `PREVIEW` kind,
+   `PUBLIC_PREVIEW` visibility, `video/mp4`, `READY`, retirement and exact-version provenance are all
+   still proved — and adds two: the revision must be the exact one under review, in `PENDING_REVIEW`,
+   and the Asset Version must be the one that revision points at. Nothing about the public route
+   changes, and a candidate preview never becomes anonymously reachable.
+5. No feature is invented to fill the tab region. Gradex has no Q&A, notes, announcements or reviews
+   — no table, no route, no handler — so there is no tab for them. Announcements, when they are
+   built, may be added to this shell as a real feature.
+6. There remains exactly one player implementation and one canonical addressable Lesson route. The
+   Course page gains a control that opens a Lesson; it does not gain a second player.
+
+**Seats:** Claude holds the builder seat for this exception. **The reviewer seat is unassigned.**
+This work is therefore *not* reviewed and *not* closed: per [CLAUDE.md](../CLAUDE.md#seats) a slice
+closes on a recorded reviewer verdict against one exact commit range, and none exists. No verdict is
+implied or recorded here.
+
+**Deployment:** This decision authorizes **no** production deployment, no push, and no production
+data change. Release-gate authority is unchanged and remains where it already sits.
+
+**Accepted risk:** the exception is a precedent for authorizing presentation work outside the
+`MVP-Fxx` queue. It is bounded by naming the surfaces above and by the reviewer seat staying open.
+
+**Alternatives rejected:** doing the work without a record (rejected — it makes the paused phase a
+fiction, and the next reader cannot tell an authorized exception from an unauthorized one); adding an
+`MVP-Fxx` row (rejected — the tracker's queue is a functional-completion list and this is not a
+functional gap in a canonical capability, so filing it there would misreport MVP completion);
+recording a reviewer to satisfy the seat field (rejected — that is fabricated approval).
+
+**Source:** This session; see `internal/httpapi/review_handlers.go`,
+`internal/media/delivery.go`, and `src/components/learning/`.

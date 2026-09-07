@@ -43,6 +43,10 @@ const TEXT = {
     completed: "Completed",
     percent: "33%",
     completedOverTotal: "1/3",
+    overviewTab: "Overview",
+    resourcesTab: "Resources",
+    reportTab: "Report content",
+    lessonTabs: "About this lesson",
   },
   ar: {
     courseTitle: "مقدمة في البرمجة CS101",
@@ -62,6 +66,10 @@ const TEXT = {
     completed: "مكتمل",
     percent: "٣٣٪",
     completedOverTotal: "١/٣",
+    overviewTab: "نظرة عامة",
+    resourcesTab: "المواد",
+    reportTab: "الإبلاغ عن محتوى",
+    lessonTabs: "عن هذا الدرس",
   },
 } as const;
 
@@ -249,6 +257,9 @@ for (const locale of ["en", "ar"] as const) {
     page.on("request", (request) => requests.push(request.url()));
 
     await page.goto(`/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_ONE}`);
+    // The Lesson's own files live under the player, one tab along from the overview the screen
+    // opens on. Selecting the tab is the Student's own route to them and mints nothing by itself.
+    await page.getByRole("tab", { name: t.resourcesTab }).click();
     const download = page.getByRole("button", { name: /Lecture Notes PDF|ملاحظات المحاضرة/ });
     await expect(download.first()).toBeVisible();
 
@@ -262,6 +273,155 @@ for (const locale of ["en", "ar"] as const) {
     for (const identifier of IDENTIFIERS) {
       expect(text).not.toContain(identifier);
     }
+  });
+}
+
+/* --------------------------------------------- the learning shell: tabs, contents, resources */
+
+for (const locale of ["en", "ar"] as const) {
+  const t = TEXT[locale];
+
+  test(`${locale}: the picture leads, the way onward sits under it, and the rest is one tab away`, async ({
+    page,
+  }) => {
+    await page.goto(`/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_ONE}`);
+    await expect(page.locator("main")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+
+    // The player, then the navigation, then the tabs — in that vertical order, and the navigation
+    // is genuinely below the picture rather than drawn over it.
+    const player = page.locator("[data-lesson-player], [data-testid=lesson-media-loading]").first();
+    await expect(player).toBeVisible();
+    const navigation = page.getByRole("navigation", { name: locale === "ar" ? "التنقل بين الدروس" : "Lesson navigation" });
+    const tabs = page.getByTestId("learning-tabs");
+    const playerBox = await player.boundingBox();
+    const navigationBox = await navigation.boundingBox();
+    const tabsBox = await tabs.boundingBox();
+    expect(playerBox && navigationBox && tabsBox).toBeTruthy();
+    expect(navigationBox!.y, "previous/next must begin below the player").toBeGreaterThanOrEqual(
+      playerBox!.y + playerBox!.height - 1,
+    );
+    expect(tabsBox!.y).toBeGreaterThanOrEqual(navigationBox!.y + navigationBox!.height - 1);
+
+    // Three tabs, and only three: nothing here names a feature Gradex does not have.
+    const tabNames = await page.getByRole("tab").allInnerTexts();
+    expect(tabNames).toEqual([t.overviewTab, t.resourcesTab, t.reportTab]);
+    await expect(page.getByRole("tab", { name: t.overviewTab })).toHaveAttribute("aria-selected", "true");
+
+    /*
+      The tab strip is operable from the keyboard, the way a tab strip is — and in the direction the
+      reader can actually see.
+
+      This deliberately asserts *visual* movement rather than a fixed destination. The earlier
+      version expected ArrowRight to reach the same tab in both locales, which is only true when the
+      roving focus runs left-to-right; in Arabic the tabs are painted right-to-left, so that
+      expectation quietly encoded the bug as the baseline. Radix resolves direction through
+      `useDirection` — `localDir || context || "ltr"` — and reads no DOM, so an Arabic strip given no
+      `dir` moves focus opposite to what it shows.
+
+      Measuring the painted order makes the assertion locale-agnostic: whatever the script, pressing
+      ArrowRight must land on the tab drawn to the right. The middle tab is the start point because
+      it has a neighbour on both sides in both locales, so nothing here depends on wrap-around.
+    */
+    const tabCentres = await page
+      .getByRole("tab")
+      .evaluateAll((elements) =>
+        elements.map((element) => ({
+          name: (element.textContent ?? "").trim(),
+          x: element.getBoundingClientRect().left + element.getBoundingClientRect().width / 2,
+        })),
+      );
+    const painted = [...tabCentres].sort((a, b) => a.x - b.x);
+    expect(painted.length, "the strip must have three tabs to step through").toBe(3);
+    // In Arabic the painted order is the reverse of the DOM order. If it is not, the rest of this
+    // test would pass for the wrong reason.
+    expect(painted.map((tab) => tab.name)).toEqual(
+      locale === "ar" ? [...tabNames].reverse() : [...tabNames],
+    );
+
+    const [leftmost, middle, rightmost] = painted;
+    await page.getByRole("tab", { name: middle.name }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      page.getByRole("tab", { name: rightmost.name }),
+      "ArrowRight must move to the tab painted to the right",
+    ).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.getByRole("tab", { name: middle.name })).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(
+      page.getByRole("tab", { name: leftmost.name }),
+      "ArrowLeft must move to the tab painted to the left",
+    ).toBeFocused();
+
+    // Selection still follows activation, wherever the reader arrived from.
+    await page.getByRole("tab", { name: t.resourcesTab }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tab", { name: t.resourcesTab })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: /Lecture Notes PDF|ملاحظات المحاضرة/ }).first()).toBeVisible();
+
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test(`${locale}: a Lesson's files open from its own row and never navigate to it`, async ({ page }) => {
+    const authorizations: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/materials/")) authorizations.push(request.url());
+    });
+
+    await page.goto(`/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_TWO}`);
+    const sidebar = page.getByTestId("course-contents-sidebar");
+    await expect(sidebar).toBeVisible();
+
+    // Lesson 1 is the seeded Lesson with files; Lesson 3 has none, so only the row that owns files
+    // offers the control. Resources are attached to their Lesson, not to the Course.
+    const rowOne = sidebar.locator(`li`).filter({ has: page.locator(`[data-lesson-id="${LESSON_ONE}"]`) });
+    const rowThree = sidebar.locator(`li`).filter({ has: page.locator(`[data-lesson-id="${LESSON_THREE}"]`) });
+    const trigger = rowOne.getByTestId("lesson-resources-trigger");
+    await expect(trigger).toHaveCount(1);
+    await expect(rowThree.getByTestId("lesson-resources-trigger")).toHaveCount(0);
+
+    const before = page.url();
+    await trigger.click();
+    const panel = page.getByTestId("lesson-resources-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByRole("button", { name: /Lecture Notes PDF|ملاحظات المحاضرة/ })).toBeVisible();
+    // Opening the files is not opening the Lesson. This is the whole reason the control is a
+    // sibling of the link rather than a child of it.
+    expect(page.url()).toBe(before);
+    // Rendering the row, and opening the panel, must both mint nothing.
+    expect(authorizations).toEqual([]);
+
+    // Escape closes it and gives focus back to the control that opened it.
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    // And it opens from the keyboard alone.
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("lesson-resources-panel")).toBeVisible();
+    expect(page.url()).toBe(before);
+    await expectNoHorizontalOverflow(page);
+  });
+
+  test(`${locale}: the section holding the current Lesson is open, and sections answer the keyboard`, async ({
+    page,
+  }) => {
+    await page.goto(`/${locale}/learn/courses/${COURSE_ID}/lessons/${LESSON_THREE}`);
+    const sidebar = page.getByTestId("course-contents-sidebar");
+    // Lesson 3 lives in Section 2, and the Student must be able to see where they are standing.
+    const holder = sidebar.getByRole("button", { name: new RegExp(t.sectionTwo) });
+    await expect(holder).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebar.locator(`[data-lesson-id="${LESSON_THREE}"]`)).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+
+    // A section closes and reopens from the keyboard, and says which it is.
+    await holder.focus();
+    await page.keyboard.press("Enter");
+    await expect(holder).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("Enter");
+    await expect(holder).toHaveAttribute("aria-expanded", "true");
   });
 }
 

@@ -28,6 +28,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceSection } from "@/components/layout/workspace-page";
 import { ReviewThumbnails } from "./review-thumbnails";
 import { ReviewLessonPreview } from "./review-lesson-preview";
+import { ReviewCoursePreview } from "./review-course-preview";
 import { PricingPanel } from "./pricing-panel";
 import { TaxonomyOverrideForm } from "./taxonomy-override-form";
 import { AcademicReviewContext } from "./academic-review-context";
@@ -382,6 +383,35 @@ export function SubmittedRevisionInspector({ item, onClose, onReviewed }: Submit
               />
             </dl>
           </WorkspaceSection>
+
+          {/* The preview a visitor would meet first, playable by the Admin who is approving it.
+              Offered only when the submitted revision actually points at one and that Asset has
+              finished processing — an Asset that is not READY has no bytes to sign, and a control
+              that could only fail is not a control. */}
+          {revision.preview_asset_version_id && revision.preview_asset_state === "READY" ? (
+            <WorkspaceSection
+              title={copy.coursePreviewHeading}
+              headingLevel="h3"
+              testID="review-course-preview"
+            >
+              <div className="max-w-2xl rounded-lg border border-border bg-card p-4">
+                <ReviewCoursePreview
+                  courseID={item.course_id}
+                  revisionID={item.revision_id}
+                  previewAssetVersionID={revision.preview_asset_version_id}
+                  locale={locale}
+                  csrf={csrf}
+                  labels={{
+                    watch: copy.coursePreviewWatch,
+                    loading: copy.coursePreviewLoading,
+                    failed: copy.coursePreviewFailed,
+                    mismatch: copy.coursePreviewMismatch,
+                    retry: t.adminReview.retry,
+                  }}
+                />
+              </div>
+            </WorkspaceSection>
+          ) : null}
 
           <WorkspaceSection title={copy.outline} headingLevel="h3">
             {revision.sections.length === 0 ? (

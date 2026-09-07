@@ -31,6 +31,18 @@ func (*reviewDelivery) IssueAdminReviewPlayback(_ context.Context, request media
 	}, nil
 }
 
+// The candidate revision's own public preview. The stub echoes the Asset Version
+// it was handed so a test can prove the route signed the revision's preview and
+// not some other Asset; every content rule the real issuer proves is exercised
+// against the database in the media suite.
+func (*reviewDelivery) IssueAdminReviewPreview(_ context.Context, request media.AdminReviewPreviewRequest) (media.PreviewAuthorization, error) {
+	return media.PreviewAuthorization{
+		URL:            "https://storage.test/signed/review-preview/" + request.AssetVersionID,
+		AssetVersionID: request.AssetVersionID,
+		ExpiresAt:      time.Now().Add(time.Minute),
+	}, nil
+}
+
 func (*reviewDelivery) IssueAdminReviewPlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error) {
 	return media.PlaybackManifest{Contents: []byte("#EXTM3U\n#EXT-X-ENDLIST\n")}, nil
 }
@@ -556,6 +568,7 @@ func TestInstructorCannotPublishThroughReviewRoutes(t *testing.T) {
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/approve", nil},
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/request-changes", []byte(`{"reason":"unauthorized"}`)},
 		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/preview/" + lesID, nil},
+		{"POST", "/api/v1/admin/review/courses/" + courseID + "/revisions/" + revID + "/public-preview", nil},
 	}
 
 	for _, rt := range reviewRoutes {
@@ -601,4 +614,102 @@ func TestApprovalRevalidatesOwnerSuspension(t *testing.T) {
 	if resp.StatusCode == http.StatusOK {
 		t.Fatalf("Admin approve succeeded despite owner account being SUSPENDED, want failure: %v", approveRes)
 	}
+}
+
+// TestAdminCandidatePublicPreviewIsAdminOnlyAndRevisionExact covers the route an
+// Admin uses to watch the public preview attached to the revision under review.
+//
+// The public preview route cannot serve this — it requires the live, APPROVED
+// revision — so this is a separate authenticated issuance, and the two things
+// worth proving about it are that it is bound to the exact revision asked for
+// and that nothing outside the review capability can reach it.
+func TestAdminCandidatePublicPreviewIsAdminOnlyAndRevisionExact(t *testing.T) {
+	freshSchema(t)
+	p, ctx := pool(t)
+	adminID, instructorID, videoAssetID, majorTermID, subjectTermID := seedReviewDatabase(t, p, ctx)
+
+	mediaFoundation := reviewMediaFoundation(t, p)
+	instructorTS := buildTestRouterWithAccount(t, p, instructorID, identity.RoleInstructor, identity.StatusActive, WithMediaFoundation(mediaFoundation))
+	adminTS := buildTestRouterWithAccount(t, p, adminID, identity.RoleAdmin, identity.StatusActive, WithMediaFoundation(mediaFoundation))
+
+	courseID, revID := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة معاينة", "Preview Course")
+	_, _ = doAuthReq(instructorTS, "PATCH", "/api/v1/courses/"+courseID+"/revisions/"+revID, []byte(`{"major_term_id":"`+majorTermID+`","subject_term_id":"`+subjectTermID+`","study_year":"YEAR_2"}`))
+	_, secBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections", []byte(`{"title_ar":"فصل","title_en":"Section"}`))
+	secID := secBody["id"].(string)
+	_, lesBody := doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/sections/"+secID+"/lessons", []byte(`{"title_ar":"درس","title_en":"Lesson"}`))
+	lesID := lesBody["id"].(string)
+	_, _ = doAuthReq(instructorTS, "PUT", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/lessons/"+lesID+"/video", []byte(`{"video_asset_version_id":"`+videoAssetID+`"}`))
+
+	// A submitted revision that carries no public preview offers nothing to play,
+	// and says so with the same not-found refusal an unknown Course gets.
+	_, _ = doAuthReq(instructorTS, "POST", "/api/v1/courses/"+courseID+"/revisions/"+revID+"/submit", nil)
+	resp, _ := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/public-preview", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("public-preview on a revision with no preview returned %d, want 404", resp.StatusCode)
+	}
+
+	// Attach a preview to the submitted revision the way publication records it,
+	// then prove the route resolves that exact Asset Version from the revision
+	// rather than from anything the caller supplied.
+	previewAssetID := seedReviewPreviewAsset(t, p, ctx, instructorID, courseID, revID)
+	resp, body := doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/public-preview", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin public-preview returned %d: %v", resp.StatusCode, body)
+	}
+	if body["preview_asset_version_id"] != previewAssetID {
+		t.Errorf("preview named asset %v, want %s", body["preview_asset_version_id"], previewAssetID)
+	}
+	if body["revision_id"] != revID || body["course_id"] != courseID {
+		t.Errorf("preview named course/revision %v/%v, want %s/%s", body["course_id"], body["revision_id"], courseID, revID)
+	}
+	if url, _ := body["url"].(string); url == "" {
+		t.Error("preview returned no URL")
+	}
+
+	// The access is audited on the Admin-preview path, against the revision.
+	var auditCount int
+	if err := p.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action = 'ADMIN_CONTENT_PREVIEWED' AND target_type = 'COURSE_REVISION_PREVIEW' AND target_id = $1`, revID).Scan(&auditCount); err != nil || auditCount == 0 {
+		t.Fatalf("expected an audited Admin course-preview event, got count %d, err %v", auditCount, err)
+	}
+
+	// A revision identifier that is not this Course's is not previewable through
+	// this Course, and the refusal reveals nothing about which half was wrong.
+	other, _ := seedLegacyCourseFixture(t, p, ctx, instructorID, "دورة أخرى", "Other Course")
+	resp, _ = doAuthReq(adminTS, "POST", "/api/v1/admin/review/courses/"+other+"/revisions/"+revID+"/public-preview", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-course public-preview returned %d, want 404", resp.StatusCode)
+	}
+
+	// The owning Instructor holds no review capability and is refused, exactly as
+	// on every other review route.
+	resp, _ = doAuthReq(instructorTS, "POST", "/api/v1/admin/review/courses/"+courseID+"/revisions/"+revID+"/public-preview", nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("Instructor public-preview returned %d, want 403", resp.StatusCode)
+	}
+}
+
+// seedReviewPreviewAsset attaches a READY public preview to a revision the way
+// the Instructor upload path records one, so the review route has a real row to
+// resolve. It writes only the columns the route reads.
+func seedReviewPreviewAsset(t *testing.T, p *pgxpool.Pool, ctx context.Context, ownerID, courseID, revisionID string) string {
+	t.Helper()
+	var logicalID, versionID string
+	err := p.QueryRow(ctx, `
+		INSERT INTO media_assets (course_id, owner_account_id, kind, visibility, preview_origin_revision_id)
+		VALUES ($1::uuid, $2::uuid, 'PREVIEW', 'PUBLIC_PREVIEW', $3::uuid)
+		RETURNING id::text`, courseID, ownerID, revisionID).Scan(&logicalID)
+	if err != nil {
+		t.Fatalf("seeding preview logical asset: %v", err)
+	}
+	err = p.QueryRow(ctx, `
+		INSERT INTO media_asset_versions (logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
+		VALUES ($1::uuid, 'PREVIEW', 'READY', 'previews/' || $1 || '.mp4', 'fixture-v1', 'video/mp4', 1024)
+		RETURNING id::text`, logicalID).Scan(&versionID)
+	if err != nil {
+		t.Fatalf("seeding preview asset version: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, versionID, revisionID); err != nil {
+		t.Fatalf("attaching preview to revision: %v", err)
+	}
+	return versionID
 }

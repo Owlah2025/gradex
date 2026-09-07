@@ -988,3 +988,78 @@ func TestMED01PublicPreviewFollowsCanonicalCourseEligibility(t *testing.T) {
 	}
 	assertDenied("archived")
 }
+
+// TestAdminReviewCandidatePreviewIsExactRevisionAndNeverPublic pins down the one
+// new issuance path this work adds.
+//
+// The two things worth proving are complementary. An Admin reviewing a submitted
+// Course must be able to watch the preview attached to *that* revision — the
+// asset every visitor would meet first, and the one they were previously asked
+// to approve unseen. And nothing about that may widen the public route: the same
+// candidate preview must stay unreachable anonymously until the Course actually
+// publishes.
+func TestAdminReviewCandidatePreviewIsExactRevisionAndNeverPublic(t *testing.T) {
+	f := newDeliveryFixture(t)
+	admin := uuid.NewString()
+	factsBefore := f.studentLearningFacts()
+
+	// A second revision, submitted for review, carrying its own preview. The live
+	// revision and its published preview are left exactly as they were, so the two
+	// can be told apart in every assertion below.
+	candidate := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id, course_id, based_on_revision_id, state, revision_number, title_ar, title_en) VALUES ($1::uuid, $2::uuid, $3::uuid, 'PENDING_REVIEW', 2, 'مرشح', 'Candidate')`, candidate, f.courseID, f.revision); err != nil {
+		t.Fatal(err)
+	}
+	candidatePreview := f.readyPreviewForRevision(candidate)
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET preview_asset_version_id = $1::uuid WHERE id = $2::uuid`, candidatePreview, candidate); err != nil {
+		t.Fatal(err)
+	}
+
+	// The Admin gets the candidate's own preview, by name.
+	issued, err := f.delivery.IssueAdminReviewPreview(f.ctx, AdminReviewPreviewRequest{
+		AdminAccountID: admin, CourseID: f.courseID, RevisionID: candidate, AssetVersionID: candidatePreview,
+	})
+	if err != nil || issued.AssetVersionID != candidatePreview || issued.URL == "" {
+		t.Fatalf("admin candidate preview=%+v err=%v", issued, err)
+	}
+
+	// And the public routes still refuse it, because it is not published.
+	if _, err := f.delivery.IssuePreview(f.ctx, candidatePreview); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("candidate preview reachable anonymously: %v", err)
+	}
+	if public, err := f.delivery.IssueCoursePreview(f.ctx, f.courseID); err != nil || public.AssetVersionID != f.preview {
+		t.Fatalf("public course preview=%+v err=%v; must still be the live one", public, err)
+	}
+
+	// The exactness rules. Each of these names something real and is still refused,
+	// so an Admin cannot review one revision while watching another's media — and
+	// cannot reach protected Lesson video through this route at all.
+	for name, request := range map[string]AdminReviewPreviewRequest{
+		"another Course":           {AdminAccountID: admin, CourseID: uuid.NewString(), RevisionID: candidate, AssetVersionID: candidatePreview},
+		"the live revision":        {AdminAccountID: admin, CourseID: f.courseID, RevisionID: f.revision, AssetVersionID: f.preview},
+		"another preview asset":    {AdminAccountID: admin, CourseID: f.courseID, RevisionID: candidate, AssetVersionID: f.preview},
+		"a protected lesson video": {AdminAccountID: admin, CourseID: f.courseID, RevisionID: candidate, AssetVersionID: f.video},
+		"no Admin at all":          {CourseID: f.courseID, RevisionID: candidate, AssetVersionID: candidatePreview},
+	} {
+		if _, err := f.delivery.IssueAdminReviewPreview(f.ctx, request); !errors.Is(err, ErrProtectedUnavailable) {
+			t.Fatalf("%s: error=%v, want %v", name, err, ErrProtectedUnavailable)
+		}
+	}
+
+	// A revision that is not under review is not previewable here either. This is
+	// the predicate that keeps the route from becoming a second way onto content
+	// whose lifecycle has moved on.
+	if _, err := f.pool.Exec(f.ctx, `UPDATE course_revisions SET state = 'CHANGES_REQUESTED', review_reason = 'Fixture: no longer under review' WHERE id = $1::uuid`, candidate); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.delivery.IssueAdminReviewPreview(f.ctx, AdminReviewPreviewRequest{
+		AdminAccountID: admin, CourseID: f.courseID, RevisionID: candidate, AssetVersionID: candidatePreview,
+	}); !errors.Is(err, ErrProtectedUnavailable) {
+		t.Fatalf("a revision no longer under review remained previewable: %v", err)
+	}
+
+	// Watching a candidate preview grants nothing and records no relationship.
+	if factsAfter := f.studentLearningFacts(); factsAfter != factsBefore {
+		t.Fatalf("admin preview mutated entitlement, enrollment, or progress: before=%v after=%v", factsBefore, factsAfter)
+	}
+}

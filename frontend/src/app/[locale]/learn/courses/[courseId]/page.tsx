@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Play } from "lucide-react";
 import {
   AccessUntil,
   LearningProgressSummary,
@@ -8,7 +8,12 @@ import {
   MaterialsInline,
 } from "@/components/learning/learning-views";
 import { CourseCurriculum } from "@/components/learning/course-curriculum";
-import { courseCurriculum, courseIsComplete } from "@/components/learning/curriculum-model";
+import {
+  courseCurriculum,
+  courseIsComplete,
+  courseIsStarted,
+  resumeLessonID,
+} from "@/components/learning/curriculum-model";
 import { requestCourseHomeServer } from "@/lib/api/learning-server";
 import { ar } from "@/lib/i18n/dictionaries/ar";
 import { en } from "@/lib/i18n/dictionaries/en";
@@ -49,6 +54,11 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
     const course = await requestCourseHomeServer(courseId, locale);
     const sections = courseCurriculum(course.sections);
     const complete = courseIsComplete(course.progress);
+    // The one way into the learning experience from here. There is no second player on this page:
+    // the Lesson route is the canonical addressable surface and this control simply chooses which
+    // Lesson to open, from the server's own ordering and the server's own per-Lesson flags.
+    const entryLessonID = course.learning_status === "active" ? resumeLessonID(sections) : null;
+    const started = courseIsStarted(sections);
 
     // Materials are composed here, on the server, and handed to the contents already built. The
     // download paths, the file names and the decision that access even permits a download all stay
@@ -114,6 +124,21 @@ export default async function CourseHomePage({ params }: { params: Promise<{ loc
               />
             </div>
           </header>
+
+          {/* One control, above the contents, so a Student returning to a Course does not have to
+              find their place in a forty-Lesson list to carry on. It is a link to the canonical
+              Lesson route — the same destination as the matching row below it — so there is exactly
+              one learning surface and this is a shortcut into it, not a second copy of it. */}
+          {entryLessonID ? (
+            <div className="mt-6">
+              <Button asChild size="lg" data-testid="enter-course">
+                <Link href={`/${locale}/learn/courses/${course.course_id}/lessons/${entryLessonID}`}>
+                  <Play aria-hidden className="fill-current" />
+                  {started ? dictionary.learning.continueCourse : dictionary.learning.startCourse}
+                </Link>
+              </Button>
+            </div>
+          ) : null}
 
           {/* The only completion state this product can honestly show: every Lesson the server
               counts is done. No certificate, no score, no badge — none of those exist. */}

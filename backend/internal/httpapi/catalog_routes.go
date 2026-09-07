@@ -163,6 +163,10 @@ func mountCatalogRoutes(
 		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/approve", reviewH.approveCourse)
 		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/request-changes", reviewH.requestChanges)
 		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/preview/:lessonId", reviewH.previewLesson)
+		// The candidate revision's own public preview. Separate from the lesson
+		// route because it names no Lesson: the Asset is resolved from the
+		// revision under review and from nothing the caller supplies.
+		adminReviewMutationGroup.POST("/courses/:id/revisions/:revisionId/public-preview", reviewH.previewCoursePreview)
 	}
 
 	pricingH := &adminPricingHandlers{
