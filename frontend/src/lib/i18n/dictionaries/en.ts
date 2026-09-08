@@ -1780,6 +1780,17 @@ export const en = {
       emptyBody:
         "A course is built from sections, and each section holds its lessons. Add the first section to begin.",
       noLessons: "This section has no lessons yet.",
+      reorderSection: "Reorder section {title}",
+      reorderLesson: "Reorder lesson {title}",
+      dragInstructions:
+        "Press Space to pick up. Use the arrow keys to move. Press Space again to drop, or Escape to cancel.",
+      dragPicked: "Picked up {title}.",
+      dragMoved: "{title} is over position {position}.",
+      dragDropped: "Dropped {title} at position {position}. Saving order.",
+      dragCancelled: "Cancelled moving {title}.",
+      orderSaving: "Saving order…",
+      orderSaved: "Order saved",
+      orderFailed: "Couldn't reorder.",
       addSection: "Add section",
       addSectionTitleAr: "Section title (Arabic)",
       addSectionTitleEn: "Section title (English)",

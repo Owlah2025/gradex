@@ -1639,6 +1639,17 @@ export const ar: Dictionary = {
       emptyBody:
         "يُبنى المقرر من أقسام، ويضم كل قسم دروسه. أضف القسم الأول للبدء.",
       noLessons: "لا توجد دروس في هذا القسم بعد.",
+      reorderSection: "إعادة ترتيب القسم {title}",
+      reorderLesson: "إعادة ترتيب الدرس {title}",
+      dragInstructions:
+        "اضغط مفتاح المسافة لبدء النقل. استخدم مفاتيح الأسهم للتحريك. اضغط المسافة مرة أخرى للإفلات، أو Escape للإلغاء.",
+      dragPicked: "تم التقاط {title}.",
+      dragMoved: "{title} فوق الموضع {position}.",
+      dragDropped: "تم إفلات {title} في الموضع {position}. جارٍ حفظ الترتيب.",
+      dragCancelled: "أُلغي نقل {title}.",
+      orderSaving: "جارٍ حفظ الترتيب…",
+      orderSaved: "تم حفظ الترتيب",
+      orderFailed: "تعذّر تغيير الترتيب.",
       addSection: "إضافة قسم",
       addSectionTitleAr: "عنوان القسم (بالعربية)",
       addSectionTitleEn: "عنوان القسم (بالإنجليزية)",

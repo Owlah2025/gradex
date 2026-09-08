@@ -343,13 +343,13 @@ test("the studio warns before losing genuinely unsaved course details", () => {
   );
 });
 
-// Feature #7 will add reordering. Nothing here may pretend it already exists.
-test("no reordering affordance is offered before reordering exists", () => {
-  for (const file of ["authoring-workflow.tsx", "course-builder.tsx", "curriculum-builder.tsx"]) {
-    const source = readInstructorSource(file);
-    assert.ok(
-      !/dragg?able|onDragStart|GripVertical|moveSection|moveLesson|reorder/i.test(source),
-      `${file} offers a reordering affordance that has no server behind it`,
-    );
-  }
+test("D-102 reordering affordances are backed by scoped server commands", () => {
+	const curriculum = readInstructorSource("curriculum-builder.tsx");
+	const api = fs.readFileSync(path.join(process.cwd(), "src/lib/api/authoring.ts"), "utf8");
+	assert.match(curriculum, /section-drag-handle-/);
+	assert.match(curriculum, /lesson-drag-handle-/);
+	assert.match(api, /export async function reorderSections/);
+	assert.match(api, /export async function reorderLessons/);
+	assert.match(api, /section_ids: input\.sectionIDs/);
+	assert.match(api, /lesson_ids: input\.lessonIDs/);
 });

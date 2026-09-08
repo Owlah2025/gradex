@@ -13,8 +13,8 @@ import type {
  *
  * Every function here is a thin, typed call onto a route the Go API already
  * serves. Nothing in this module holds Course state: the server's response is
- * the only Course that exists, and callers re-read the owned-Course graph
- * rather than reconciling a local copy.
+ * the only persisted Course state. Callers either install that canonical
+ * response or re-read the owned-Course graph.
  */
 
 export type AuthoringInput = {
@@ -229,6 +229,20 @@ export async function updateSection(
   return requireResult(updated, input.locale);
 }
 
+export async function reorderSections(
+  input: AuthoringInput & { courseID: string; revisionID: string; sectionIDs: string[] },
+): Promise<CourseRevisionWire> {
+  requireCSRF(input);
+  const revision = await authenticatedRequest<CourseRevisionWire>(
+    `${path.revision(input.courseID, input.revisionID)}/sections/order`,
+    "PATCH",
+    input.locale,
+    input.csrf,
+    { section_ids: input.sectionIDs },
+  );
+  return requireResult(revision, input.locale);
+}
+
 export async function deleteSection(
   input: AuthoringInput & { courseID: string; revisionID: string; sectionID: string },
 ): Promise<void> {
@@ -271,6 +285,25 @@ export async function deleteLesson(
     input.locale,
     input.csrf,
   );
+}
+
+export async function reorderLessons(
+  input: AuthoringInput & {
+    courseID: string;
+    revisionID: string;
+    sectionID: string;
+    lessonIDs: string[];
+  },
+): Promise<CourseRevisionWire> {
+  requireCSRF(input);
+  const revision = await authenticatedRequest<CourseRevisionWire>(
+    `${path.revision(input.courseID, input.revisionID)}/sections/${encodeURIComponent(input.sectionID)}/lessons/order`,
+    "PATCH",
+    input.locale,
+    input.csrf,
+    { lesson_ids: input.lessonIDs },
+  );
+  return requireResult(revision, input.locale);
 }
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { TaxonomyAssignmentPanel } from "./taxonomy-assignment-panel";
 import type { AcademicSubjectSelection } from "./academic-subject-picker";
@@ -25,6 +25,8 @@ import {
   resetRevisionAudience,
   submitCourseRevision,
   publishCourseRevision,
+  reorderLessons,
+  reorderSections,
   updateCourseRevision,
   type CourseWire,
 } from "@/lib/api/authoring";
@@ -42,6 +44,7 @@ import { CourseStandingBanner } from "./course-standing-banner";
 import { SubmittedCourseSummary } from "./submitted-course-summary";
 import { describeSubmissionRejection } from "./submission-readiness";
 import { CurriculumBuilder } from "./curriculum-builder";
+import { orderLessons, orderSections, persistOptimisticOrder, replaceEditableRevision } from "./curriculum-order";
 import { authoringPlan } from "./authoring-plan";
 import {
   AuthoringAdvanceOn,
@@ -66,9 +69,9 @@ import { Textarea } from "@/components/ui/textarea";
  * Instructor Course Authoring Studio.
  *
  * Every Course, Section, and Lesson rendered here comes from the Go API and is
- * written back through it. The component holds no authored content of its own:
- * after each successful command it re-reads the owned-Course graph, so what the
- * Instructor sees is what a page reload would show.
+ * written back through it. The component holds no persisted authored content of
+ * its own: successful commands either install the server's canonical response or
+ * re-read the owned-Course graph, so a page reload produces the same content.
  */
 const STUDY_YEARS = ["PREP", "YEAR_1", "YEAR_2", "YEAR_3", "YEAR_4"] as const;
 
@@ -84,6 +87,9 @@ export function CourseBuilder() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [orderState, setOrderState] = useState<"IDLE" | "SAVING" | "SAVED" | "FAILED">("IDLE");
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const orderRequestInFlight = useRef(false);
   const [thumbnailBlocked, setThumbnailBlocked] = useState<Record<string, boolean>>({});
 
   // A submission rejection is reported twice: once in the page-level error
@@ -474,6 +480,65 @@ export function CourseBuilder() {
       });
       await refreshSelectedCourse();
     });
+  };
+
+  const handleReorderSections = async (sectionIDs: string[], movedSectionID: string) => {
+    if (!selectedCourse || !revision?.id || orderRequestInFlight.current) return;
+    const csrf = requireCSRF();
+    if (!csrf) return;
+    const before = revision;
+    orderRequestInFlight.current = true;
+    setOrderState("SAVING");
+    setOrderError(null);
+    try {
+      await persistOptimisticOrder({
+        before,
+        optimistic: { ...before, sections: orderSections(before.sections ?? [], sectionIDs) },
+        apply: (canonical) => setCourses((current) => replaceEditableRevision(current, selectedCourse.id, canonical)),
+        persist: () => reorderSections({
+          courseID: selectedCourse.id, revisionID: revision.id!, sectionIDs, locale, csrf,
+        }),
+      });
+      setOrderState("SAVED");
+    } catch (cause) {
+      setOrderError(describeApiError(cause, locale));
+      setOrderState("FAILED");
+    } finally {
+      orderRequestInFlight.current = false;
+      requestAnimationFrame(() => document.getElementById(`section-drag-handle-${movedSectionID}`)?.focus());
+    }
+  };
+
+  const handleReorderLessons = async (sectionID: string, lessonIDs: string[], movedLessonID: string) => {
+    if (!selectedCourse || !revision?.id || orderRequestInFlight.current) return;
+    const section = (revision.sections ?? []).find((candidate) => candidate.id === sectionID);
+    if (!section) return;
+    const csrf = requireCSRF();
+    if (!csrf) return;
+    const before = revision;
+    const optimisticSections = (before.sections ?? []).map((candidate) =>
+      candidate.id === sectionID ? orderLessons(candidate, lessonIDs) : candidate,
+    );
+    orderRequestInFlight.current = true;
+    setOrderState("SAVING");
+    setOrderError(null);
+    try {
+      await persistOptimisticOrder({
+        before,
+        optimistic: { ...before, sections: optimisticSections },
+        apply: (canonical) => setCourses((current) => replaceEditableRevision(current, selectedCourse.id, canonical)),
+        persist: () => reorderLessons({
+          courseID: selectedCourse.id, revisionID: revision.id!, sectionID, lessonIDs, locale, csrf,
+        }),
+      });
+      setOrderState("SAVED");
+    } catch (cause) {
+      setOrderError(describeApiError(cause, locale));
+      setOrderState("FAILED");
+    } finally {
+      orderRequestInFlight.current = false;
+      requestAnimationFrame(() => document.getElementById(`lesson-drag-handle-${movedLessonID}`)?.focus());
+    }
   };
 
   /*
@@ -940,7 +1005,9 @@ export function CourseBuilder() {
                       <CurriculumBuilder
                         revision={revision}
                         courseID={selectedCourse.id}
-                        busy={busy}
+                        busy={busy || orderState === "SAVING"}
+                        orderState={orderState}
+                        orderError={orderError}
                         labels={instructor.curriculum}
                         lessonDrafts={lessonDrafts}
                         sectionTitleAr={secTitleAr}
@@ -956,6 +1023,8 @@ export function CourseBuilder() {
                         onAddLesson={handleAddLesson}
                         onDeleteSection={handleDeleteSection}
                         onDeleteLesson={handleDeleteLesson}
+                        onReorderSections={handleReorderSections}
+                        onReorderLessons={handleReorderLessons}
                         onContentChanged={refreshSelectedCourse}
                       />
                       <AuthoringContinue section="CURRICULUM" label={authoring.continueAction} />

@@ -1,7 +1,26 @@
 "use client";
 
 import React, { useState } from "react";
-import { Check, CircleDashed } from "lucide-react";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  type Announcements,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Check, CircleDashed, GripVertical } from "lucide-react";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import type { CourseRevisionWire, LessonWire, SectionWire } from "@/lib/api/catalog";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
@@ -13,8 +32,33 @@ import { EmptyState } from "@/components/common/empty-state";
 import { LessonVideoUpload } from "./lesson-video-upload";
 import { isLessonVideoProcessing } from "./lesson-video-upload-state";
 import { LessonResourceUpload } from "./lesson-resource-upload";
+import { moveIdentity } from "./curriculum-order";
 
 type CurriculumLabels = Dictionary["instructor"]["curriculum"];
+
+function sortableAnnouncements(
+  items: { id: string; title: string }[],
+  labels: CurriculumLabels,
+): Announcements {
+  const titleFor = (id: string) => items.find((item) => item.id === id)?.title ?? id;
+  const positionFor = (id: string | number) => items.findIndex((item) => item.id === String(id)) + 1;
+  return {
+    onDragStart: ({ active }) => labels.dragPicked
+      .replace("{title}", titleFor(String(active.id))),
+    onDragOver: ({ active, over }) => over
+      ? labels.dragMoved
+          .replace("{title}", titleFor(String(active.id)))
+          .replace("{position}", String(positionFor(over.id)))
+      : undefined,
+    onDragEnd: ({ active, over }) => over
+      ? labels.dragDropped
+          .replace("{title}", titleFor(String(active.id)))
+          .replace("{position}", String(positionFor(over.id)))
+      : labels.dragCancelled.replace("{title}", titleFor(String(active.id))),
+    onDragCancel: ({ active }) => labels.dragCancelled
+      .replace("{title}", titleFor(String(active.id))),
+  };
+}
 
 export type LessonDraft = { ar: string; en: string };
 
@@ -42,6 +86,8 @@ export function CurriculumBuilder({
   revision,
   courseID,
   busy,
+  orderState,
+  orderError,
   labels,
   lessonDrafts,
   sectionTitleAr,
@@ -52,11 +98,15 @@ export function CurriculumBuilder({
   onAddLesson,
   onDeleteSection,
   onDeleteLesson,
+  onReorderSections,
+  onReorderLessons,
   onContentChanged,
 }: {
   revision: CourseRevisionWire;
   courseID: string;
   busy: boolean;
+  orderState: "IDLE" | "SAVING" | "SAVED" | "FAILED";
+  orderError: string | null;
   labels: CurriculumLabels;
   lessonDrafts: Record<string, LessonDraft>;
   sectionTitleAr: string;
@@ -67,10 +117,32 @@ export function CurriculumBuilder({
   onAddLesson: (event: React.FormEvent, sectionID: string) => void;
   onDeleteSection: (sectionID: string) => void;
   onDeleteLesson: (lessonID: string) => void;
+  onReorderSections: (sectionIDs: string[], movedSectionID: string) => void | Promise<void>;
+  onReorderLessons: (sectionID: string, lessonIDs: string[], movedLessonID: string) => void | Promise<void>;
   onContentChanged: () => void | Promise<void>;
 }) {
   const { locale } = useLocale();
   const sections = revision.sections ?? [];
+  const [activeSectionID, setActiveSectionID] = useState<string | null>(null);
+  const sectionAnnouncements = sortableAnnouncements(
+    sections.map((section) => ({
+      id: section.id,
+      title: locale === "ar" ? section.title_ar : section.title_en,
+    })),
+    labels,
+  );
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const finishSectionDrag = ({ active, over }: DragEndEvent) => {
+    setActiveSectionID(null);
+    if (busy || !over || active.id === over.id) return;
+    const next = moveIdentity(sections.map((section) => section.id), String(active.id), String(over.id));
+    void onReorderSections(next, String(active.id));
+  };
 
   /**
    * The one pending destructive action, held as a single value rather than a flag per row.
@@ -99,6 +171,20 @@ export function CurriculumBuilder({
           {labels.title}
         </h3>
         <p className="mt-1 text-sm text-muted-foreground">{labels.lead}</p>
+        {orderState !== "IDLE" ? (
+          <p
+            className={orderState === "FAILED" ? "mt-2 text-sm text-destructive" : "mt-2 text-sm text-muted-foreground"}
+            data-testid="curriculum-order-state"
+            role={orderState === "FAILED" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {orderState === "SAVING"
+              ? labels.orderSaving
+              : orderState === "SAVED"
+                ? labels.orderSaved
+                : `${labels.orderFailed}${orderError ? ` ${orderError}` : ""}`}
+          </p>
+        ) : null}
         {sections.length > 0 ? (
           <p className="mt-1 text-xs text-muted-foreground" data-testid="curriculum-counts">
             {/*
@@ -119,8 +205,20 @@ export function CurriculumBuilder({
           />
         </div>
       ) : (
-        <ol className="space-y-4">
-          {sections.map((section, index) => (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={({ active }) => setActiveSectionID(String(active.id))}
+          onDragCancel={() => setActiveSectionID(null)}
+          onDragEnd={finishSectionDrag}
+          accessibility={{
+            screenReaderInstructions: { draggable: labels.dragInstructions },
+            announcements: sectionAnnouncements,
+          }}
+        >
+          <SortableContext items={sections.map((section) => section.id)} strategy={verticalListSortingStrategy}>
+            <ol className="space-y-4">
+              {sections.map((section, index) => (
             <SectionRow
               key={section.id}
               section={section}
@@ -137,10 +235,22 @@ export function CurriculumBuilder({
               onRequestDeleteLesson={(lessonID) =>
                 setPendingDelete({ kind: "lesson", id: lessonID })
               }
+              onReorderLessons={onReorderLessons}
               onContentChanged={onContentChanged}
             />
-          ))}
-        </ol>
+              ))}
+            </ol>
+          </SortableContext>
+          <DragOverlay>
+            {activeSectionID ? (
+              <div className="rounded-lg border border-primary/40 bg-card px-4 py-3 shadow-lg">
+                <span className="text-sm font-semibold text-foreground">
+                  <bdi>{locale === "ar" ? sections.find((item) => item.id === activeSectionID)?.title_ar : sections.find((item) => item.id === activeSectionID)?.title_en}</bdi>
+                </span>
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       <form
@@ -213,6 +323,7 @@ function SectionRow({
   onAddLesson,
   onRequestDeleteSection,
   onRequestDeleteLesson,
+  onReorderLessons,
   onContentChanged,
 }: {
   section: SectionWire;
@@ -227,21 +338,61 @@ function SectionRow({
   onAddLesson: (event: React.FormEvent) => void;
   onRequestDeleteSection: () => void;
   onRequestDeleteLesson: (lessonID: string) => void;
+  onReorderLessons: (sectionID: string, lessonIDs: string[], movedLessonID: string) => void | Promise<void>;
   onContentChanged: () => void | Promise<void>;
 }) {
   const lessons = section.lessons ?? [];
   const title = locale === "ar" ? section.title_ar : section.title_en;
+  const [activeLessonID, setActiveLessonID] = useState<string | null>(null);
+  const lessonAnnouncements = sortableAnnouncements(
+    lessons.map((lesson) => ({
+      id: lesson.id,
+      title: locale === "ar" ? lesson.title_ar : lesson.title_en,
+    })),
+    labels,
+  );
+  const lessonSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: section.id,
+    disabled: busy,
+  });
+  const finishLessonDrag = ({ active, over }: DragEndEvent) => {
+    setActiveLessonID(null);
+    if (busy || !over || active.id === over.id) return;
+    const next = moveIdentity(lessons.map((lesson) => lesson.id), String(active.id), String(over.id));
+    void onReorderLessons(section.id, next, String(active.id));
+  };
 
   return (
     <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       data-testid={`section-${section.id}`}
-      className="rounded-lg border border-border bg-muted/30 p-4"
+      className={`rounded-lg border border-border bg-muted/30 p-4 ${isDragging ? "relative z-10 opacity-40" : ""}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-        <h4 className="min-w-0 font-display text-sm font-bold text-foreground">
+        <div className="flex min-w-0 items-start gap-2">
+          <button
+            id={`section-drag-handle-${section.id}`}
+            type="button"
+            {...attributes}
+            {...listeners}
+            disabled={busy}
+            aria-label={labels.reorderSection.replace("{title}", title)}
+            data-testid={`section-drag-handle-${section.id}`}
+            className="mt-0.5 inline-flex size-8 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-grab active:cursor-grabbing"
+          >
+            <GripVertical className="size-4" aria-hidden />
+          </button>
+          <h4 className="min-w-0 pt-1.5 font-display text-sm font-bold text-foreground">
           {/* The number is generated, the title is authored — the two must not merge in RTL. */}
           <span className="text-muted-foreground">{index + 1}.</span> <bdi>{title}</bdi>
         </h4>
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -261,8 +412,20 @@ function SectionRow({
             {labels.noLessons}
           </p>
         ) : (
-          <ol className="space-y-3">
-            {lessons.map((lesson, lessonIndex) => (
+          <DndContext
+            sensors={lessonSensors}
+            collisionDetection={closestCenter}
+            onDragStart={({ active }) => setActiveLessonID(String(active.id))}
+            onDragCancel={() => setActiveLessonID(null)}
+            onDragEnd={finishLessonDrag}
+            accessibility={{
+              screenReaderInstructions: { draggable: labels.dragInstructions },
+              announcements: lessonAnnouncements,
+            }}
+          >
+            <SortableContext items={lessons.map((lesson) => lesson.id)} strategy={verticalListSortingStrategy}>
+              <ol className="space-y-3">
+                {lessons.map((lesson, lessonIndex) => (
               <LessonRow
                 key={lesson.id}
                 lesson={lesson}
@@ -275,8 +438,19 @@ function SectionRow({
                 onRequestDelete={() => onRequestDeleteLesson(lesson.id)}
                 onContentChanged={onContentChanged}
               />
-            ))}
-          </ol>
+                ))}
+              </ol>
+            </SortableContext>
+            <DragOverlay>
+              {activeLessonID ? (
+                <div className="rounded-lg border border-primary/40 bg-card px-3 py-2 shadow-lg">
+                  <span className="text-sm font-semibold text-foreground">
+                    <bdi>{locale === "ar" ? lessons.find((item) => item.id === activeLessonID)?.title_ar : lessons.find((item) => item.id === activeLessonID)?.title_en}</bdi>
+                  </span>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         )}
 
         <form
@@ -350,17 +524,38 @@ function LessonRow({
     !videoProcessing &&
     (!lesson.video_asset_state || lesson.video_asset_state === "READY");
   const labMaterials = (lesson.files ?? []).filter((file) => file.kind === "LAB_MATERIAL");
+  const title = locale === "ar" ? lesson.title_ar : lesson.title_en;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: lesson.id,
+    disabled: busy,
+  });
 
   return (
     <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       data-testid={`lesson-${lesson.id}`}
-      className="rounded-lg border border-border bg-card p-3"
+      className={`rounded-lg border border-border bg-card p-3 ${isDragging ? "relative z-10 opacity-40" : ""}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-        <p className="min-w-0 text-sm font-semibold text-foreground">
+        <div className="flex min-w-0 items-start gap-2">
+          <button
+            id={`lesson-drag-handle-${lesson.id}`}
+            type="button"
+            {...attributes}
+            {...listeners}
+            disabled={busy}
+            aria-label={labels.reorderLesson.replace("{title}", title)}
+            data-testid={`lesson-drag-handle-${lesson.id}`}
+            className="inline-flex size-8 shrink-0 touch-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 cursor-grab active:cursor-grabbing"
+          >
+            <GripVertical className="size-4" aria-hidden />
+          </button>
+          <p className="min-w-0 pt-1.5 text-sm font-semibold text-foreground">
           <span className="text-muted-foreground">{index + 1}.</span>{" "}
-          <bdi>{locale === "ar" ? lesson.title_ar : lesson.title_en}</bdi>
+          <bdi>{title}</bdi>
         </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {/*
             The state, not the identifier. A dot carries the same information as the old
