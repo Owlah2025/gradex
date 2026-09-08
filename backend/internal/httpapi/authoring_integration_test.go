@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -368,6 +369,97 @@ func TestSuspendedInstructorRefusedEditing(t *testing.T) {
 	}
 	if !errors.Is(err, catalog.ErrAccountSuspended) {
 		t.Fatalf("got error %v, want ErrAccountSuspended", err)
+	}
+}
+
+func TestD102ReorderHTTPContract(t *testing.T) {
+	freshSchema(t)
+	p, ctx := pool(t)
+	ownerID := "11111111-1111-1111-1111-111111111111"
+	otherID := "22222222-2222-2222-2222-222222222222"
+	if _, err := p.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES
+		($1, 'owner@example.com', 'owner@example.com', 'INSTRUCTOR', 'ACTIVE', 'Owner'),
+		($2, 'other@example.com', 'other@example.com', 'INSTRUCTOR', 'ACTIVE', 'Other')
+	`, ownerID, otherID); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := catalog.NewRepository(p, testWriterForAuthoring(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	course, err := repo.CreateCourse(ctx, catalog.CreateCourseRequest{
+		OwnerAccountID: ownerID, TitleAr: "مقرر", TitleEn: "Course",
+		DescriptionAr: "وصف", DescriptionEn: "Description",
+	}, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisionID := course.EditableRevision.ID
+	sectionA, err := repo.AddSection(ctx, catalog.AddSectionRequest{
+		CourseID: course.ID, RevisionID: revisionID, OwnerAccountID: ownerID, TitleAr: "أ", TitleEn: "A",
+	}, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sectionB, err := repo.AddSection(ctx, catalog.AddSectionRequest{
+		CourseID: course.ID, RevisionID: revisionID, OwnerAccountID: ownerID, TitleAr: "ب", TitleEn: "B",
+	}, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lessonA, err := repo.AddLesson(ctx, catalog.AddLessonRequest{
+		CourseID: course.ID, RevisionID: revisionID, SectionID: sectionA.SectionIdentityID,
+		OwnerAccountID: ownerID, TitleAr: "١", TitleEn: "L1",
+	}, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lessonB, err := repo.AddLesson(ctx, catalog.AddLessonRequest{
+		CourseID: course.ID, RevisionID: revisionID, SectionID: sectionA.SectionIdentityID,
+		OwnerAccountID: ownerID, TitleAr: "٢", TitleEn: "L2",
+	}, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := buildTestRouterWithAccount(t, p, ownerID, identity.RoleInstructor, identity.StatusActive)
+	sectionsPath := "/api/v1/courses/" + course.ID + "/revisions/" + revisionID + "/sections/order"
+	response, body := doAuthReq(server, http.MethodPatch, sectionsPath, []byte(fmt.Sprintf(
+		`{"section_ids":[%q,%q]}`, sectionB.SectionIdentityID, sectionA.SectionIdentityID,
+	)))
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("section reorder status = %d body=%v", response.StatusCode, body)
+	}
+	sections, ok := body["sections"].([]any)
+	if !ok || len(sections) != 2 || sections[0].(map[string]any)["id"] != sectionB.SectionIdentityID {
+		t.Fatalf("canonical section response = %#v", body["sections"])
+	}
+
+	lessonsPath := "/api/v1/courses/" + course.ID + "/revisions/" + revisionID + "/sections/" + sectionA.SectionIdentityID + "/lessons/order"
+	response, body = doAuthReq(server, http.MethodPatch, lessonsPath, []byte(fmt.Sprintf(
+		`{"lesson_ids":[%q,%q]}`, lessonB.LessonIdentityID, lessonA.LessonIdentityID,
+	)))
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("lesson reorder status = %d body=%v", response.StatusCode, body)
+	}
+
+	response, body = doAuthReq(server, http.MethodPatch, lessonsPath, []byte(fmt.Sprintf(
+		`{"lesson_ids":[%q]}`, lessonA.LessonIdentityID,
+	)))
+	response.Body.Close()
+	if response.StatusCode != http.StatusUnprocessableEntity || body["code"] != "VALIDATION_FAILED" {
+		t.Fatalf("missing-ID status = %d body=%v", response.StatusCode, body)
+	}
+
+	otherServer := buildTestRouterWithAccount(t, p, otherID, identity.RoleInstructor, identity.StatusActive)
+	response, _ = doAuthReq(otherServer, http.MethodPatch, sectionsPath, []byte(fmt.Sprintf(
+		`{"section_ids":[%q,%q]}`, sectionA.SectionIdentityID, sectionB.SectionIdentityID,
+	)))
+	response.Body.Close()
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-owner status = %d, want 403", response.StatusCode)
 	}
 }
 

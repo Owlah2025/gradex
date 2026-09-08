@@ -16,6 +16,7 @@ var (
 	ErrRepositoryNil     = errors.New("database pool is required")
 	ErrCourseNotFound    = errors.New("course not found")
 	ErrLifecycleConflict = errors.New("course lifecycle conflict")
+	ErrInvalidOrder      = errors.New("ordered identity set must exactly match the authoritative set")
 )
 
 type LifecycleConflictError struct {

@@ -243,11 +243,17 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		}, status: http.StatusOK, action: "COURSE_AUDIENCE_CUSTOMIZED", targetType: "COURSE_REVISION"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/audience": {prepare: prepareAuditAudienceTarget, body: emptyAuditBody, status: http.StatusOK, action: "COURSE_AUDIENCE_AUTOMATIC", targetType: "COURSE_REVISION"},
 		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/sections":   {body: func(*privilegedAuditFixture) string { return `{"title_ar":"قسم","title_en":"Section"}` }, status: http.StatusCreated, action: "SECTION_CREATED", targetType: "SECTION"},
+		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId/sections/order": {body: func(f *privilegedAuditFixture) string {
+			return fmt.Sprintf(`{"section_ids":[%q]}`, f.sectionID)
+		}, status: http.StatusOK, action: "SECTIONS_REORDERED", targetType: "COURSE_REVISION"},
 		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId": {body: func(*privilegedAuditFixture) string {
 			return `{"title_ar":"قسم محدث","title_en":"Updated Section"}`
 		}, status: http.StatusOK, action: "SECTION_UPDATED", targetType: "SECTION"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId":       {body: emptyAuditBody, status: http.StatusNoContent, action: "SECTION_DELETED", targetType: "SECTION"},
 		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId/lessons": {body: func(*privilegedAuditFixture) string { return `{"title_ar":"درس","title_en":"Lesson"}` }, status: http.StatusCreated, action: "LESSON_CREATED", targetType: "LESSON"},
+		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId/sections/:sectionId/lessons/order": {prepare: prepareAuditLesson, body: func(f *privilegedAuditFixture) string {
+			return fmt.Sprintf(`{"lesson_ids":[%q]}`, f.lessonID)
+		}, status: http.StatusOK, action: "LESSONS_REORDERED", targetType: "SECTION"},
 		http.MethodPatch + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId": {prepare: prepareAuditLesson, body: func(*privilegedAuditFixture) string {
 			return `{"title_ar":"درس محدث","title_en":"Updated Lesson"}`
 		}, status: http.StatusOK, action: "LESSON_UPDATED", targetType: "LESSON"},

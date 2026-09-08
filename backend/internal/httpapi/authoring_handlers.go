@@ -61,6 +61,14 @@ type lessonBody struct {
 	Position *int   `json:"position"`
 }
 
+type reorderSectionsBody struct {
+	SectionIDs []string `json:"section_ids"`
+}
+
+type reorderLessonsBody struct {
+	LessonIDs []string `json:"lesson_ids"`
+}
+
 type setVideoBody struct {
 	VideoAssetVersionID string `json:"video_asset_version_id"`
 }
@@ -134,6 +142,13 @@ func (h *authoringHandlers) handleCatalogError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, catalog.ErrAssetVersionInvalid) || errors.Is(err, catalog.ErrAssetVersionNotReady) {
 		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	if errors.Is(err, catalog.ErrInvalidOrder) {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code: "ORDER_SET_MISMATCH", Location: problem.LocationBody,
+			Detail: "the ordered identity set must contain every current item exactly once",
+		}))
 		return
 	}
 	if errors.Is(err, catalog.ErrInvalidTaxonomyTerm) || errors.Is(err, catalog.ErrTaxonomyTermUnavailable) || errors.Is(err, catalog.ErrTaxonomyTermKindMismatch) {
@@ -401,6 +416,24 @@ func (h *authoringHandlers) addSection(c *gin.Context) {
 	c.JSON(http.StatusCreated, sec)
 }
 
+func (h *authoringHandlers) reorderSections(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	var body reorderSectionsBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeProblem(c, problem.Malformed())
+		return
+	}
+	revision, err := h.repo.ReorderSections(c.Request.Context(), catalog.ReorderSectionsRequest{
+		CourseID: c.Param("id"), RevisionID: c.Param("revisionId"),
+		OwnerAccountID: accountID, SectionIDs: body.SectionIDs,
+	}, accountID)
+	if err != nil {
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, revision)
+}
+
 func (h *authoringHandlers) updateSection(c *gin.Context) {
 	accountID := c.GetString(ctxUserIDKey)
 	courseID := c.Param("id")
@@ -477,6 +510,24 @@ func (h *authoringHandlers) addLesson(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, les)
+}
+
+func (h *authoringHandlers) reorderLessons(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	var body reorderLessonsBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		writeProblem(c, problem.Malformed())
+		return
+	}
+	revision, err := h.repo.ReorderLessons(c.Request.Context(), catalog.ReorderLessonsRequest{
+		CourseID: c.Param("id"), RevisionID: c.Param("revisionId"),
+		SectionID: c.Param("sectionId"), OwnerAccountID: accountID, LessonIDs: body.LessonIDs,
+	}, accountID)
+	if err != nil {
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, revision)
 }
 
 func (h *authoringHandlers) updateLesson(c *gin.Context) {
