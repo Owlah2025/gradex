@@ -7,6 +7,7 @@ import type { OwnedCourseSummary } from "../../lib/api/catalog";
 import {
   AUTHORING_SECTION_ORDER,
   authoringPlan,
+  requiresInstructorAction,
   sectionAfter,
   type AuthoringSectionKey,
 } from "./authoring-plan";
@@ -20,6 +21,7 @@ function course(overrides: {
   subject?: boolean;
   preview?: boolean;
   previewState?: string;
+  thumbnail?: boolean;
   sections?: { lessons: { video?: boolean }[] }[];
 }): OwnedCourseSummary {
   return {
@@ -33,6 +35,7 @@ function course(overrides: {
       title_en: overrides.titleEn ?? "Title",
       preview_asset_version_id: overrides.preview === false ? undefined : "preview-1",
       preview_asset_state: overrides.previewState,
+      thumbnail_asset_version_id: overrides.thumbnail ? "thumbnail-1" : undefined,
       sections: (overrides.sections ?? [{ lessons: [{ video: true }] }]).map(
         (section, sectionIndex) => ({
           id: `section-${sectionIndex}`,
@@ -76,7 +79,6 @@ test("each unmet requirement is owned by the section holding its controls", () =
   const cases: { name: string; course: OwnedCourseSummary; section: AuthoringSectionKey }[] = [
     { name: "a missing title", course: course({ titleEn: "  " }), section: "BASICS" },
     { name: "a missing subject", course: course({ subject: false }), section: "DETAILS" },
-    { name: "a missing preview", course: course({ preview: false }), section: "PREVIEW" },
     {
       name: "a lesson with no video",
       course: course({ sections: [{ lessons: [{ video: false }] }] }),
@@ -130,25 +132,133 @@ test("a section carries its own outstanding requirements so a closed header can 
   );
 });
 
-test("a thumbnail that will not resolve is attention, not unstarted work", () => {
-  const blocked = authoringPlan(course({}), "en", position, { thumbnailUnresolved: true });
-  assert.equal(stateOf(blocked, "PREVIEW"), "ATTENTION");
+/**
+ * D-101a — optional media is not a workflow blocker.
+ *
+ * The authority is the server's own submission validation,
+ * `backend/internal/catalog/validation.go`: the public preview is validated only when
+ * `PreviewAssetVersionID` is present and non-empty (§82), and the cover only when
+ * `ThumbnailAssetVersionID` is present (§92). Neither absence produces a violation, so a course
+ * carrying neither is submittable.
+ *
+ * Before this, `previewAttached === false` was reported as `INCOMPLETE`. A course the server would
+ * have accepted therefore read as "3/4 complete" and the studio opened the media section as the
+ * next thing to do — a requirement the product does not have, invented by the client.
+ *
+ * These assert the five states the section can be in and, separately, that only the real ones move
+ * the workflow.
+ */
+test("optional media that is absent is not an outstanding requirement", () => {
+  const plan = authoringPlan(
+    course({ preview: false, thumbnail: false }),
+    "en",
+    position,
+  );
 
-  const failedPreview = authoringPlan(course({ previewState: "FAILED" }), "en", position);
-  assert.equal(stateOf(failedPreview, "PREVIEW"), "ATTENTION");
-
-  // And it is distinguishable from having simply not uploaded one yet.
-  const missing = authoringPlan(course({ preview: false }), "en", position);
-  assert.equal(stateOf(missing, "PREVIEW"), "INCOMPLETE");
+  assert.equal(stateOf(plan, "PREVIEW"), "OPTIONAL", "an absent optional cover reads as unfinished");
+  assert.equal(
+    plan.sections.find((section) => section.key === "PREVIEW")!.outstanding.length,
+    0,
+    "an absent optional preview was counted as an outstanding requirement",
+  );
+  assert.equal(requiresInstructorAction("OPTIONAL"), false);
 });
 
-test("the workflow opens on the first unfinished section", () => {
+test("a course the server would accept reports itself finished and points at review", () => {
+  // Everything the server actually checks is met, and neither optional asset is attached.
+  const plan = authoringPlan(
+    course({ preview: false, thumbnail: false }),
+    "en",
+    position,
+  );
+
+  assert.equal(plan.ready, true, "the fixture is not actually server-ready");
+  assert.equal(
+    plan.completeCount,
+    plan.totalCount,
+    `a submittable course reported ${plan.completeCount}/${plan.totalCount}`,
+  );
+  assert.equal(
+    plan.nextSection,
+    "REVIEW",
+    "the studio opened optional media as the next thing to do on a submittable course",
+  );
+  assert.equal(
+    sectionAfter(plan, "BASICS"),
+    "REVIEW",
+    "progression walked into optional media rather than to review",
+  );
+});
+
+test("an attached preview is reported by its real server state", () => {
+  const ready = authoringPlan(course({ previewState: "READY" }), "en", position);
+  assert.equal(stateOf(ready, "PREVIEW"), "COMPLETE");
+  assert.equal(ready.nextSection, "REVIEW", "a ready preview blocked the workflow");
+
+  // Older authoring responses did not project a media state at all; a selected asset with no state
+  // is the ready case, exactly as `recoverMediaPhase` reads it.
+  const unstated = authoringPlan(course({}), "en", position);
+  assert.equal(stateOf(unstated, "PREVIEW"), "COMPLETE");
+
+  // Attached and still being worked on: real, visible, and not something the instructor can act on.
+  const processing = authoringPlan(course({ previewState: "PROCESSING" }), "en", position);
+  assert.equal(stateOf(processing, "PREVIEW"), "PROCESSING");
+  assert.equal(requiresInstructorAction("PROCESSING"), false);
+  assert.equal(processing.nextSection, "REVIEW", "waiting on the server was treated as a task");
+
+  // A cover on its own, with no preview, is equally acceptable to the server.
+  const coverOnly = authoringPlan(
+    course({ preview: false, thumbnail: true }),
+    "en",
+    position,
+  );
+  assert.equal(stateOf(coverOnly, "PREVIEW"), "COMPLETE");
+});
+
+test("media that failed or cannot be resolved is still surfaced as attention", () => {
+  // The server's own terminal failure states, not an invented "FAILED" literal: these are the
+  // values `isTerminalState` recognises, so this cannot pass by agreeing with itself.
+  for (const state of ["PROCESS_FAILED", "SCAN_FAILED", "SCAN_ERROR"]) {
+    const failed = authoringPlan(course({ previewState: state }), "en", position);
+    assert.equal(stateOf(failed, "PREVIEW"), "ATTENTION", `${state} was not surfaced`);
+    assert.equal(failed.nextSection, "PREVIEW", `${state} was not reachable as work`);
+  }
+
+  // `UPLOADED` means the bytes were never completed, which `recoverMediaPhase` reads as failed.
+  const abandoned = authoringPlan(course({ previewState: "UPLOADED" }), "en", position);
+  assert.equal(stateOf(abandoned, "PREVIEW"), "ATTENTION");
+
+  // The cover upload's own unresolved state blocks submission in the studio, so it is a real
+  // action even though nothing about it appears in the server's readiness rules.
+  const blockedCover = authoringPlan(
+    course({ preview: false, thumbnail: false }),
+    "en",
+    position,
+    { thumbnailUnresolved: true },
+  );
+  assert.equal(stateOf(blockedCover, "PREVIEW"), "ATTENTION");
+  assert.equal(requiresInstructorAction("ATTENTION"), true);
+  assert.equal(blockedCover.nextSection, "PREVIEW");
+  assert.notEqual(
+    blockedCover.completeCount,
+    blockedCover.totalCount,
+    "a blocking cover was counted as needing nothing",
+  );
+});
+
+test("the workflow opens on the first section the instructor must act on", () => {
   assert.equal(authoringPlan(course({ titleAr: "" }), "en", position).nextSection, "BASICS");
   assert.equal(authoringPlan(course({ subject: false }), "en", position).nextSection, "DETAILS");
-  assert.equal(authoringPlan(course({ preview: false }), "en", position).nextSection, "PREVIEW");
   assert.equal(
     authoringPlan(course({ sections: [] }), "en", position).nextSection,
     "CURRICULUM",
+  );
+  assert.equal(
+    authoringPlan(course({ preview: false, thumbnail: false }), "en", position, {
+      thumbnailUnresolved: true,
+    }).nextSection,
+    "PREVIEW",
+    "a cover that will not resolve is a real action and must still be reachable",
   );
 });
 

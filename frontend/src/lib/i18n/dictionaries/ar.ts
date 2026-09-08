@@ -1505,6 +1505,8 @@ export const ar: Dictionary = {
       stateComplete: "مكتمل",
       stateIncomplete: "غير مكتمل بعد",
       stateAttention: "يحتاج إلى معالجة",
+      stateOptional: "اختياري — لا يلزم شيء",
+      stateProcessing: "قيد المعالجة",
       outstanding: "متبقٍ",
       saveAndContinue: "حفظ ومتابعة",
       continueAction: "متابعة",

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, CircleDashed, TriangleAlert } from "lucide-react";
+import { Check, CircleDashed, Loader2, TriangleAlert } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -223,6 +223,11 @@ function SectionMarker({ state }: { state: AuthoringSectionState }) {
   if (state === "ATTENTION") {
     return <TriangleAlert className="size-4 shrink-0 text-destructive" aria-hidden />;
   }
+  if (state === "PROCESSING") {
+    return <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-hidden />;
+  }
+  // `OPTIONAL` and `INCOMPLETE` share a marker deliberately: neither is a problem, and the words
+  // beside it already say which of the two this is.
   return <CircleDashed className="size-4 shrink-0 text-muted-foreground" aria-hidden />;
 }
 
@@ -250,6 +255,14 @@ function SectionSubline({
     // The count travels with the closed header on purpose: a collapsed section that is quietly
     // holding two unmet requirements is the one thing this pattern must never do.
     parts.push(`${labels.outstanding}: ${section.outstanding.length}`);
+  } else if (section.state === "PROCESSING") {
+    // Attached and still being worked on by the server. Said plainly, because it is real, and not
+    // counted as something the instructor has to do, because it is not.
+    parts.push(labels.stateProcessing);
+  } else if (section.state === "OPTIONAL") {
+    // Nothing attached and the server asks for nothing. Naming it "not finished" would invent a
+    // requirement the product does not have.
+    parts.push(labels.stateOptional);
   } else if (section.state === "COMPLETE") {
     parts.push(labels.stateComplete);
   } else {

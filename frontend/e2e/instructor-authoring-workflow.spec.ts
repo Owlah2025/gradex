@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { expectAuthoringSectionsMounted, openAuthoringSections } from "./authoring-sections";
 
 /**
  * Instructor Authoring V2 — the disclosure workflow itself.
@@ -183,10 +184,12 @@ test.describe("arriving at the studio", () => {
     await serveStudio(page, course({ shape: "EMPTY", preview: false }));
     await openStudio(page);
 
+    // Basics, university/subject and the optional media are all settled; only the empty curriculum
+    // needs the instructor. The media section is counted because the server asks for nothing there.
     const progress = page.getByTestId("authoring-progress");
-    await expect(progress).toHaveAttribute("data-complete", "2");
+    await expect(progress).toHaveAttribute("data-complete", "3");
     await expect(progress).toHaveAttribute("data-total", "4");
-    await expect(progress).toContainText("2/4");
+    await expect(progress).toContainText("3/4");
     // No second set of controls for the same five things.
     await expect(progress.locator("button, a")).toHaveCount(0);
   });
@@ -227,18 +230,50 @@ test("a closed part still says how much is outstanding inside it", async ({ page
   await serveStudio(page, course({ shape: "SECTION_ONLY", preview: false }));
   await openStudio(page);
 
-  // Preview is the first outstanding part, so it is the one the studio opened on.
-  expect(await expanded(page, "PREVIEW")).toBe(true);
+  // The curriculum is the first part the instructor must act on, so that is where the studio
+  // opened. Optional media with nothing attached is not a step.
+  expect(await expanded(page, "CURRICULUM")).toBe(true);
+  expect(await expanded(page, "PREVIEW")).toBe(false);
 
-  // The curriculum is closed and still names its own counts and its own outstanding requirements.
-  expect(await expanded(page, "CURRICULUM")).toBe(false);
+  // A closed part still names its own counts and its own outstanding requirements.
   const curriculum = page.getByTestId("authoring-subline-CURRICULUM");
   await expect(curriculum).toContainText("Sections: 1");
   await expect(curriculum).toContainText("Lessons: 0");
   await expect(curriculum).toContainText("Outstanding: 2");
 
-  // A finished one says that instead.
+  // A finished one says that, and an optional one says what it actually is rather than borrowing
+  // the word for unfinished work.
   await expect(page.getByTestId("authoring-subline-BASICS")).toContainText("Finished");
+  await expect(page.getByTestId("authoring-subline-PREVIEW")).toContainText("Optional");
+  await expect(page.getByTestId("authoring-subline-PREVIEW")).not.toContainText("Not finished");
+});
+
+/**
+ * D-101a — the server validates a cover and a public preview only when one is attached
+ * (`backend/internal/catalog/validation.go`), so a course carrying neither is submittable. The
+ * studio used to report that course as 3/4 and open the media section as the next thing to do.
+ */
+test("a submittable course with no optional media is finished and points at review", async ({
+  page,
+}) => {
+  await serveStudio(page, course({ shape: "COMPLETE", preview: false }));
+  await openStudio(page);
+
+  const progress = page.getByTestId("authoring-progress");
+  await expect(progress).toHaveAttribute("data-complete", "4");
+  await expect(progress).toHaveAttribute("data-total", "4");
+
+  expect(await expanded(page, "REVIEW")).toBe(true);
+  expect(await expanded(page, "PREVIEW")).toBe(false);
+  await expect(page.getByTestId("submission-panel")).toHaveAttribute(
+    "data-submission-ready",
+    "true",
+  );
+
+  // And it is still there to be opened and used at any time.
+  await expect(page.getByTestId("authoring-toggle-PREVIEW")).toBeEnabled();
+  await page.getByTestId("authoring-toggle-PREVIEW").click();
+  await expect(page.getByTestId("course-thumbnail-authoring")).toBeVisible();
 });
 
 /* -------------------------------------------------------------- progression */
@@ -250,12 +285,28 @@ test.describe("progression", () => {
     await serveStudio(page, course({ shape: "SECTION_ONLY", preview: false }));
     await openStudio(page);
 
-    // Preview is the first outstanding part, so that is where the studio opened.
-    expect(await expanded(page, "PREVIEW")).toBe(true);
-    await page.getByTestId("authoring-continue-PREVIEW").click();
-
-    expect(await expanded(page, "PREVIEW")).toBe(false);
+    // The curriculum is the first part needing the instructor, so that is where the studio opened.
     expect(await expanded(page, "CURRICULUM")).toBe(true);
+    await page.getByTestId("authoring-continue-CURRICULUM").click();
+
+    expect(await expanded(page, "CURRICULUM")).toBe(false);
+    expect(await expanded(page, "REVIEW")).toBe(true);
+  });
+
+  test("Continue steps over optional media rather than into it", async ({ page }) => {
+    await serveStudio(page, course({ shape: "COMPLETE", preview: false }));
+    await openStudio(page);
+
+    // Opened by hand, since nothing sends the instructor here.
+    await page.getByTestId("authoring-toggle-BASICS").click();
+    expect(await expanded(page, "BASICS")).toBe(true);
+
+    await page.getByTestId("authoring-toggle-DETAILS").click();
+    await page.getByTestId("authoring-continue-DETAILS").click();
+
+    expect(await expanded(page, "DETAILS")).toBe(false);
+    expect(await expanded(page, "PREVIEW")).toBe(false);
+    expect(await expanded(page, "REVIEW")).toBe(true);
   });
 
   test("typing does not move anything; only an accepted save does", async ({ page }) => {
@@ -381,10 +432,19 @@ test.describe("accessibility", () => {
     await expect(page.locator("h3", { hasText: "Course basics" })).toHaveCount(1);
   });
 
-  test("the studio has no axe violations in either language", async ({ page }) => {
+  test("the studio has no axe violations in either language", async ({ page }, testInfo) => {
     for (const locale of ["en", "ar"] as const) {
       await serveStudio(page, course({ shape: "SECTION_ONLY" }));
       await openStudio(page, locale);
+      // Radix unmounts a closed disclosure, so a scan taken at arrival covers one section. All five
+      // are opened and their contents asserted present before axe runs, and the anchors are
+      // attached to the test as evidence of what was actually in the document.
+      await openAuthoringSections(page);
+      const mounted = await expectAuthoringSectionsMounted(page);
+      testInfo.annotations.push({
+        type: "axe-scope",
+        description: `${locale}: mounted authoring sections — ${mounted.join(", ")}`,
+      });
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .analyze();

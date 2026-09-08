@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import fs from "node:fs";
 import path from "node:path";
-import { openAuthoringSections } from "./authoring-sections";
+import { expectAuthoringSectionsMounted, openAuthoringSections } from "./authoring-sections";
 
 /**
  * UX-E — the Instructor Course Studio, in a real browser.
@@ -590,10 +590,24 @@ for (const locale of ["en", "ar"] as const) {
     ["a course awaiting review", course({ state: "PENDING_REVIEW" })],
     ["a course returned for changes", course({ state: "CHANGES_REQUESTED", reason: CHANGE_REASON })],
   ] as const) {
-    test(`${label} has no accessibility violations in ${locale}`, async ({ page }) => {
+    test(`${label} has no accessibility violations in ${locale}`, async ({ page }, testInfo) => {
       await serveStudio(page, payload);
-      await openStudio(page, locale, { sections: false });
+      // Every authoring disclosure is opened first. Radix unmounts a closed section, so scanning at
+      // arrival would have covered whichever single section the workflow opened on — silently less
+      // of the page than this suite covered before the disclosures existed.
+      await openStudio(page, locale);
       await expect(page.getByTestId("course-standing")).toBeVisible();
+
+      // Proof, not assumption: on a payload that has an editable revision, the content of all five
+      // sections is in the document at the moment axe runs, and the anchors are attached to the
+      // test so the coverage is inspectable rather than asserted.
+      if (await page.getByTestId("authoring-workflow").count()) {
+        const mounted = await expectAuthoringSectionsMounted(page);
+        testInfo.annotations.push({
+          type: "axe-scope",
+          description: `${locale}: mounted authoring sections — ${mounted.join(", ")}`,
+        });
+      }
 
       const results = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])

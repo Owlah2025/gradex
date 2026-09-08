@@ -1618,6 +1618,8 @@ export const en = {
       stateComplete: "Finished",
       stateIncomplete: "Not finished yet",
       stateAttention: "Needs attention",
+      stateOptional: "Optional — nothing needed",
+      stateProcessing: "Processing",
       // Label then number: English needs one/other and Arabic needs six plural forms, and picking
       // one for both is how "1 issues" gets shipped.
       outstanding: "Outstanding",

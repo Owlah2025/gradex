@@ -6,6 +6,7 @@ import {
   type ReadinessKey,
   type ReadinessRequirement,
 } from "./submission-readiness";
+import { recoverMediaPhase } from "./media-upload-phase";
 
 /**
  * The authoring workflow, derived from the course the server actually holds.
@@ -17,7 +18,8 @@ import {
  *
  *   BASICS      the revision's two titles, which is what a course is called
  *   DETAILS     the academic identity requirements the server checks at submission
- *   PREVIEW     whether a public preview asset is attached, and whether the thumbnail resolved
+ *   PREVIEW     the real media state of the cover and the public preview, both of which the
+ *               server treats as optional when absent
  *   CURRICULUM  the section, lesson and lesson-video requirements the server checks
  *   REVIEW      whether every client-checkable requirement is currently met
  *
@@ -41,12 +43,36 @@ export const AUTHORING_SECTION_ORDER = [
 export type AuthoringSectionKey = (typeof AUTHORING_SECTION_ORDER)[number];
 
 /**
- * `ATTENTION` is not "incomplete with emphasis". It is reserved for a section holding a state the
- * instructor has to resolve rather than simply has not reached yet — today, a course thumbnail that
- * failed to resolve, which blocks submission outright. Collapsing that into `INCOMPLETE` would put
- * a blocking problem behind a closed disclosure looking like unstarted work.
+ * What a section's state means, and what the workflow is entitled to do about it.
+ *
+ * The question every one of these answers is "does the instructor still have to do something
+ * here?", not "is every field populated?". The distinction is the whole of D-101a: the server
+ * validates a cover and a public preview *only if one is attached*
+ * (`backend/internal/catalog/validation.go` §82 and §92), so a course carrying neither is
+ * submittable. Reporting that course as three-quarters finished, and opening the media section as
+ * the next thing to do, invented a requirement the product does not have.
+ *
+ *   COMPLETE     finished, nothing outstanding
+ *   OPTIONAL     nothing here is required and nothing is attached — no action, and not a step
+ *   PROCESSING   attached and the server is still working on it; the instructor waits, not acts
+ *   INCOMPLETE   a real requirement is unmet and the instructor is the one who must meet it
+ *   ATTENTION    something is wrong rather than merely unstarted — a failed or unresolvable
+ *                asset — and it must never sit silently behind a closed disclosure
+ *
+ * Only `INCOMPLETE` and `ATTENTION` are *actionable*. Progress counts the sections that need
+ * nothing from the instructor, and the workflow only ever advances to one that does.
  */
-export type AuthoringSectionState = "COMPLETE" | "INCOMPLETE" | "ATTENTION";
+export type AuthoringSectionState =
+  | "COMPLETE"
+  | "OPTIONAL"
+  | "PROCESSING"
+  | "INCOMPLETE"
+  | "ATTENTION";
+
+/** Whether this state is one the instructor themselves has to resolve. */
+export function requiresInstructorAction(state: AuthoringSectionState): boolean {
+  return state === "INCOMPLETE" || state === "ATTENTION";
+}
 
 /** The workable sections. `REVIEW` reports on the others and is never counted as one of them. */
 export const AUTHORING_WORK_SECTIONS = AUTHORING_SECTION_ORDER.filter(
@@ -76,13 +102,20 @@ export type AuthoringSectionPlan = {
 
 export type AuthoringPlan = {
   sections: AuthoringSectionPlan[];
-  /** Workable sections that are complete, and how many there are. Review is not one of them. */
+  /**
+   * Workable sections that need nothing further from the instructor, and how many there are.
+   * Review is not one of them.
+   *
+   * "Settled", not "populated": a media section with nothing attached is counted, because the
+   * server asks for nothing there. Counting it as outstanding is how a submittable course came to
+   * report itself three-quarters finished.
+   */
   completeCount: number;
   totalCount: number;
   /**
-   * Where the work continues: the first workable section that is not complete, or `REVIEW` when
-   * they all are. This is what the shell opens on arrival and what it advances to on a successful
-   * progression.
+   * Where the work continues: the first workable section the instructor still has to act on, or
+   * `REVIEW` when there is none. This is what the shell opens on arrival and what it advances to
+   * on a successful progression.
    */
   nextSection: AuthoringSectionKey;
   /** Every client-checkable requirement is met. The server may still refuse. */
@@ -130,8 +163,21 @@ export function authoringPlan(
   // rather than on five open panels.
   const titlesMissing = [revision?.title_ar, revision?.title_en].filter(blank).length;
 
+  /*
+    Both of these are optional to the server when absent and validated only when present, so the
+    only thing the client may report about them is the real state of what is actually attached.
+    The phase comes from `recoverMediaPhase`, the same shared reading of the server's media state
+    that the preview and lesson-video surfaces use, rather than a second idea of what "failed"
+    means maintained here.
+  */
   const previewAttached = Boolean(revision?.preview_asset_version_id);
-  const previewFailed = revision?.preview_asset_state === "FAILED";
+  const previewPhase = recoverMediaPhase(
+    revision?.preview_asset_version_id,
+    revision?.preview_asset_state,
+  );
+  const thumbnailAttached = Boolean(revision?.thumbnail_asset_version_id);
+  // Raised by the cover upload itself when its asset cannot be resolved. It disables submission in
+  // the studio, so it is a real blocking state and not merely an empty field.
   const thumbnailUnresolved = options?.thumbnailUnresolved === true;
 
   const stateOf = (key: AuthoringSectionKey): AuthoringSectionState => {
@@ -141,8 +187,12 @@ export function authoringPlan(
           ? "COMPLETE"
           : "INCOMPLETE";
       case "PREVIEW":
-        if (thumbnailUnresolved || previewFailed) return "ATTENTION";
-        return previewAttached ? "COMPLETE" : "INCOMPLETE";
+        if (thumbnailUnresolved) return "ATTENTION";
+        if (previewAttached && previewPhase === "FAILED") return "ATTENTION";
+        if (previewAttached && previewPhase === "PROCESSING_BACKGROUND") return "PROCESSING";
+        if (previewAttached || thumbnailAttached) return "COMPLETE";
+        // Neither attached, and the server asks for neither. Nothing to do here.
+        return "OPTIONAL";
       case "REVIEW":
         return readiness.ready ? "COMPLETE" : "INCOMPLETE";
       default:
@@ -158,11 +208,12 @@ export function authoringPlan(
 
   const workable = plans.filter((plan) => plan.key !== "REVIEW");
   const nextSection =
-    workable.find((plan) => plan.state !== "COMPLETE")?.key ?? ("REVIEW" as AuthoringSectionKey);
+    workable.find((plan) => requiresInstructorAction(plan.state))?.key ??
+    ("REVIEW" as AuthoringSectionKey);
 
   return {
     sections: plans,
-    completeCount: workable.filter((plan) => plan.state === "COMPLETE").length,
+    completeCount: workable.filter((plan) => !requiresInstructorAction(plan.state)).length,
     totalCount: workable.length,
     nextSection,
     ready: readiness.ready,
@@ -189,7 +240,9 @@ export function sectionAfter(
   for (let index = start + 1; index < order.length; index += 1) {
     const candidate = plan.sections.find((section) => section.key === order[index]);
     if (!candidate) continue;
-    if (candidate.key === "REVIEW" || candidate.state !== "COMPLETE") return candidate.key;
+    if (candidate.key === "REVIEW" || requiresInstructorAction(candidate.state)) {
+      return candidate.key;
+    }
   }
   return "REVIEW";
 }

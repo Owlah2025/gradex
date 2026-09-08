@@ -51,3 +51,38 @@ export async function openAuthoringSections(page: Page): Promise<void> {
     await openAuthoringSection(page, section);
   }
 }
+
+/**
+ * One element that only exists inside each authoring disclosure's content.
+ *
+ * Radix unmounts a closed `AccordionContent`, so "the section is open" and "the section's markup is
+ * in the document" are the same statement — which is exactly why an accessibility scan taken at
+ * arrival covers one section rather than five. These are the anchors that prove the difference.
+ */
+export const AUTHORING_SECTION_CONTENT: Record<AuthoringSection, string> = {
+  BASICS: "revision-form",
+  DETAILS: "authoring-continue-DETAILS",
+  PREVIEW: "course-thumbnail-authoring",
+  CURRICULUM: "curriculum",
+  REVIEW: "submission-panel",
+};
+
+/**
+ * Asserts that every authoring disclosure's content is really mounted, and returns the anchors it
+ * found so a caller can report them as evidence rather than asserting a scan was "full".
+ *
+ * Call it immediately before an accessibility scan of the studio. A scan that runs without this is
+ * scanning whichever single section the workflow happened to open on arrival.
+ */
+export async function expectAuthoringSectionsMounted(page: Page): Promise<string[]> {
+  const mounted: string[] = [];
+  for (const section of AUTHORING_SECTIONS) {
+    const anchor = AUTHORING_SECTION_CONTENT[section];
+    await expect(
+      page.getByTestId(anchor),
+      `${section} is not mounted, so nothing inside it can be scanned`,
+    ).toBeVisible();
+    mounted.push(anchor);
+  }
+  return mounted;
+}

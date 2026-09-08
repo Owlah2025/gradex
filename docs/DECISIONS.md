@@ -3890,6 +3890,15 @@ is done" and "this is not saved yet".
    `catalog/validation.go`. No completion state is invented, and none is inferred from whether a
    panel has been opened. The server stays authoritative over submission; the client's readiness is
    supportive and says so.
+
+   Completion means "does the instructor still have to act here?", not "is every field populated?".
+   `catalog/validation.go` validates the public preview only when one is attached, and the cover
+   only when one is attached, so a course carrying neither is submittable — the media section is
+   therefore *optional* when empty and is neither counted as outstanding nor offered as the next
+   step. What is attached is reported by its real server state through the shared
+   `recoverMediaPhase`: ready, still processing, or failed, with a failed or unresolvable asset
+   still raised as attention. Reporting an absent optional asset as unfinished invented a
+   requirement the product does not have, and is refused by the tests in `authoring-plan.test.ts`.
 4. A section collapses only after an intentional progression the server accepted — a details save,
    or an explicit Continue. Never on blur, focus, field change, or a background refresh. Any section
    can be reopened at any time: this is a disclosure, not a wizard, and nothing is locked.
