@@ -3934,3 +3934,39 @@ navigation rather than of the course).
 
 **Source:** This session; see `frontend/src/components/instructor/authoring-plan.ts`,
 `authoring-workflow.tsx`, `authoring-save-state.tsx`, and `course-builder.tsx`.
+
+## D-102 — Section and same-Section Lesson reordering is server-authoritative
+
+**Date:** 2026-09-08
+**Status:** Implemented pending independent review. Reviewer unassigned; no approval is implied.
+
+**Decision:** An Instructor may reorder Sections inside one exact editable Course revision and may
+reorder Lessons only inside their current Section. Each command sends the complete ordered stable
+identity set; the server applies the existing active-Instructor ownership and editable-revision gates,
+rejects duplicates, omissions, and foreign identities, and persists canonical zero-based positions in
+one transaction. Cross-Section Lesson movement is deferred.
+
+The existing `position` columns remain the sole ordering authority. The immediate unique constraints
+are handled without a migration by first moving the locked rows above the current maximum and then
+assigning canonical positions inside the same transaction. The existing Course and revision locks
+serialize authoring mutations. There is no ETag or revision-version precondition, so concurrent valid
+commands are serialized last-committed-wins while every commit remains a complete valid permutation.
+
+Reordering mutates only `DRAFT` or `CHANGES_REQUESTED` candidates. It never changes the live revision
+pointer or live rows. Admin exact-revision reads therefore see a reordered candidate, while Student and
+public reads continue to see the live revision until the existing publication rule promotes the exact
+candidate. D-097 remains unchanged: Admin approves first publication; an Instructor publishes later
+revisions of an already-live Course.
+
+The authoring UI uses dedicated accessible drag handles with keyboard sorting, delayed touch activation,
+localized instructions and status, optimistic display, single-flight persistence, and rollback on
+failure. Canonical success replaces only the curriculum graph, so unrelated unsaved Course Details
+fields and workflow disclosures remain intact.
+
+**Database:** No migration and no schema change.
+
+**Deployment:** Not authorized. Production is not touched and no push is authorized by this decision.
+
+**Source:** D-102 implementation range beginning at production base
+`1cb6eb3ec21ef0afedeeafee7515e17c0991a70c`; see
+`docs/superpowers/specs/2026-09-08-section-lesson-reordering-v1-design.md`.
