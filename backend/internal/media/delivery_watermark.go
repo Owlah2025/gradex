@@ -15,7 +15,7 @@ import (
 // The protected-playback security model, and the exact line this file sits on.
 //
 // Free protection for a Student Lesson is layered: an entitlement decision, a
-// short-lived signed playback session, a protected HLS manifest the API renders
+// duration-bounded signed playback session, a protected HLS manifest the API renders
 // rather than stores, expiring presigned segment URLs, and — added here — a
 // Student-specific visible watermark, with browser Picture-in-Picture disabled
 // on the player so the raw video element cannot be presented without it.

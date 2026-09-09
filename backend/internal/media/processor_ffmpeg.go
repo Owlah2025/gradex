@@ -2,7 +2,9 @@ package media
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,7 +33,15 @@ type FFmpegProcessor struct {
 type ProcessingStore interface {
 	DownloadToFileVersion(context.Context, string, string) (string, func(), error)
 	PutObject(context.Context, string, []byte, string) error
+	HeadObject(context.Context, string) (sizeBytes int64, exists bool, err error)
 	DeletePrefix(context.Context, string) error
+}
+
+// CleanupAttempt removes only one immutable attempt prefix. It is used after
+// durable stale-claim recovery; cleanup failure never rolls back recovery or
+// affects a newer attempt's objects.
+func (p *FFmpegProcessor) CleanupAttempt(ctx context.Context, assetVersionID, operationID string) error {
+	return p.store.DeletePrefix(ctx, processingOutputPrefix(assetVersionID, operationID))
 }
 
 func NewFFmpegProcessor(store ProcessingStore, ffmpegPath, ffprobePath string, processingTimeout time.Duration) (*FFmpegProcessor, error) {
@@ -89,12 +99,12 @@ func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (
 // never from elapsed time — so a stalled encode stops advancing rather than
 // creeping toward a number nobody measured.
 func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object ObjectVersion, sink ProgressSink) (result TranscodeResult, err error) {
-	if !object.valid() {
+	if !object.valid() || strings.TrimSpace(object.ProcessingOperationID) == "" {
 		return TranscodeResult{}, ErrStaleScanEvidence
 	}
 	processingCtx, cancel := context.WithTimeout(ctx, p.processingTimeout)
 	defer cancel()
-	prefix := "media/" + object.AssetVersionID + "/hls"
+	prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 	completed := false
 	defer func() {
 		if completed {
@@ -112,13 +122,13 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 
 	localPath, cleanup, err := p.store.DownloadToFileVersion(processingCtx, object.StorageObjectKey, object.StorageObjectVersion)
 	if err != nil {
-		return TranscodeResult{}, fmt.Errorf("downloading exact media object: %w", err)
+		return TranscodeResult{}, fmt.Errorf("%w: downloading exact media object: %v", ErrStorageUnavailable, err)
 	}
 	defer cleanup()
 
 	probe, err := p.probe(processingCtx, localPath)
 	if err != nil {
-		return TranscodeResult{}, err
+		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
 	metadata, err := trustedMediaMetadata(probe)
 	if err != nil {
@@ -130,14 +140,14 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 	}
 	defer os.RemoveAll(outDir)
 	if err := p.renderHLS(processingCtx, localPath, outDir, metadata, sink); err != nil {
-		return TranscodeResult{}, err
+		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
 	// Uploading the finished ladder is its own phase. It has no continuous
 	// measure worth trusting, so it reports the stage at the point transcoding
 	// reached rather than inventing a second fraction.
 	reportProgress(processingCtx, sink, StagePackaging, 99)
 	if err := p.uploadHLS(processingCtx, outDir, prefix); err != nil {
-		return TranscodeResult{}, err
+		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
 	completed = true
 	return transcodeResult(prefix, metadata), nil
@@ -151,14 +161,14 @@ type processingMetadata struct {
 func trustedMediaMetadata(probe processorProbe) (processingMetadata, error) {
 	durationSeconds, err := strconv.ParseFloat(probe.Format.Duration, 64)
 	if err != nil || durationSeconds <= 0 {
-		return processingMetadata{}, fmt.Errorf("ffprobe did not return a positive trusted duration")
+		return processingMetadata{}, fmt.Errorf("%w: ffprobe did not return a positive trusted duration", ErrInvalidMedia)
 	}
 	for _, stream := range probe.Streams {
 		if stream.CodecType == "video" && stream.Height > 0 {
 			return processingMetadata{durationMS: int64(durationSeconds*1000 + 0.5), rungs: hlsRungsForHeight(stream.Height)}, nil
 		}
 	}
-	return processingMetadata{}, fmt.Errorf("ffprobe did not return a video height")
+	return processingMetadata{}, fmt.Errorf("%w: ffprobe did not return a video height", ErrInvalidMedia)
 }
 
 func (p *FFmpegProcessor) renderHLS(ctx context.Context, input, outDir string, metadata processingMetadata, sink ProgressSink) error {
@@ -191,14 +201,43 @@ func (p *FFmpegProcessor) uploadHLS(ctx context.Context, outDir, prefix string) 
 	if len(files) == 0 {
 		return fmt.Errorf("HLS processing produced no output files")
 	}
+	if err := validateLocalHLSOutput(outDir, files); err != nil {
+		return err
+	}
+	// The master is the publication marker inside the private attempt prefix.
+	// Upload it last, after every playlist and segment it can lead to.
+	sort.SliceStable(files, func(i, j int) bool {
+		if files[i] == "master.m3u8" {
+			return false
+		}
+		if files[j] == "master.m3u8" {
+			return true
+		}
+		return files[i] < files[j]
+	})
 	for _, relative := range files {
-		contents, err := os.ReadFile(filepath.Join(outDir, relative))
-		if err != nil {
-			return fmt.Errorf("reading HLS output %s: %w", relative, err)
+		if err := p.uploadVerifiedHLSObject(ctx, outDir, prefix, relative); err != nil {
+			return err
 		}
-		if err := p.store.PutObject(ctx, prefix+"/"+filepath.ToSlash(relative), contents, mediaContentType(relative)); err != nil {
-			return fmt.Errorf("storing HLS output %s: %w", relative, err)
-		}
+	}
+	return nil
+}
+
+func (p *FFmpegProcessor) uploadVerifiedHLSObject(ctx context.Context, outDir, prefix, relative string) error {
+	contents, err := os.ReadFile(filepath.Join(outDir, relative))
+	if err != nil {
+		return fmt.Errorf("reading HLS output %s: %w", relative, err)
+	}
+	key := prefix + "/" + filepath.ToSlash(relative)
+	if err := p.store.PutObject(ctx, key, contents, mediaContentType(relative)); err != nil {
+		return fmt.Errorf("%w: storing HLS output %s: %v", ErrStorageUnavailable, relative, err)
+	}
+	size, exists, err := p.store.HeadObject(ctx, key)
+	if err != nil {
+		return fmt.Errorf("%w: verifying HLS output %s: %v", ErrStorageUnavailable, relative, err)
+	}
+	if !exists || size != int64(len(contents)) {
+		return fmt.Errorf("%w: HLS output %s was not stored completely", ErrStorageUnavailable, relative)
 	}
 	return nil
 }
@@ -217,13 +256,19 @@ func transcodeResult(prefix string, metadata processingMetadata) TranscodeResult
 
 func (p *FFmpegProcessor) probe(ctx context.Context, localPath string) (processorProbe, error) {
 	cmd := exec.CommandContext(ctx, p.ffprobePath, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", localPath)
-	output, err := cmd.Output()
-	if err != nil {
-		return processorProbe{}, fmt.Errorf("ffprobe failed: %w", err)
+	diagnostics := cappedBuffer{limit: maxProcessorDiagnosticBytes}
+	output := cappedBuffer{limit: maxProbeOutputBytes}
+	cmd.Stderr = &diagnostics
+	cmd.Stdout = &output
+	if err := cmd.Run(); err != nil {
+		return processorProbe{}, fmt.Errorf("%w: ffprobe failed: %v (%s)", ErrInvalidMedia, err, diagnostics.String())
+	}
+	if output.omitted > 0 {
+		return processorProbe{}, fmt.Errorf("%w: ffprobe output exceeded %d bytes", ErrInvalidMedia, maxProbeOutputBytes)
 	}
 	var probe processorProbe
-	if err := json.Unmarshal(output, &probe); err != nil {
-		return processorProbe{}, fmt.Errorf("parsing ffprobe output: %w", err)
+	if err := json.Unmarshal(output.data, &probe); err != nil {
+		return processorProbe{}, fmt.Errorf("%w: parsing ffprobe output: %v", ErrInvalidMedia, err)
 	}
 	return probe, nil
 }
@@ -253,7 +298,7 @@ func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir strin
 	if err != nil {
 		return fmt.Errorf("opening ffmpeg progress stream: %w", err)
 	}
-	var diagnostics strings.Builder
+	diagnostics := cappedBuffer{limit: maxProcessorDiagnosticBytes}
 	cmd.Stderr = &diagnostics
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting ffmpeg rendition %s: %w", rung.Name, err)
@@ -262,7 +307,131 @@ func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir strin
 	// pipe, and so the reader has finished before Wait reaps the process.
 	_ = scanFFmpegProgress(progress, onProcessed)
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("ffmpeg rendition %s failed: %w (%s)", rung.Name, err, truncateMediaOutput(diagnostics.String(), 2000))
+		return fmt.Errorf("%w: ffmpeg rendition %s failed: %v (%s)", ErrTranscodeFailed, rung.Name, err, diagnostics.String())
+	}
+	return nil
+}
+
+const maxProcessorDiagnosticBytes = 2000
+const maxProbeOutputBytes = 1024 * 1024
+
+type cappedBuffer struct {
+	data    []byte
+	omitted int
+	limit   int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	limit := b.limit
+	if limit <= 0 {
+		limit = maxProcessorDiagnosticBytes
+	}
+	remaining := limit - len(b.data)
+	if remaining > 0 {
+		kept := len(p)
+		if kept > remaining {
+			kept = remaining
+		}
+		b.data = append(b.data, p[:kept]...)
+	}
+	if len(p) > remaining {
+		b.omitted += len(p) - max(remaining, 0)
+	}
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string {
+	text := strings.TrimSpace(string(b.data))
+	if b.omitted > 0 {
+		return fmt.Sprintf("%s [truncated %d bytes]", text, b.omitted)
+	}
+	return text
+}
+
+func classifyProcessorContext(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %v", ErrProcessTimeout, err)
+	}
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return context.Canceled
+	}
+	return err
+}
+
+// ProcessingOutputPrefix is the canonical attempt-scoped HLS prefix for one
+// (Asset Version, processing operation). It is exported because the worker
+// validates completion against exactly this value, so anything constructing a
+// TranscodeResult outside this package must derive the prefix here rather than
+// rebuild the convention and drift from it.
+func ProcessingOutputPrefix(assetVersionID, operationID string) string {
+	return processingOutputPrefix(assetVersionID, operationID)
+}
+
+func processingOutputPrefix(assetVersionID, operationID string) string {
+	sum := sha256.Sum256([]byte(operationID))
+	return fmt.Sprintf("media/%s/hls/%x", assetVersionID, sum[:12])
+}
+
+func validateLocalHLSOutput(root string, files []string) error {
+	present := make(map[string]struct{}, len(files))
+	for _, relative := range files {
+		clean, err := safeHLSRelativePath(relative)
+		if err != nil {
+			return fmt.Errorf("%w: HLS output path escapes the attempt", ErrTranscodeFailed)
+		}
+		present[clean] = struct{}{}
+	}
+	if _, ok := present["master.m3u8"]; !ok {
+		return fmt.Errorf("%w: HLS master manifest is missing", ErrTranscodeFailed)
+	}
+	for _, relative := range files {
+		if !strings.HasSuffix(relative, "/playlist.m3u8") {
+			continue
+		}
+		if err := validateLocalRendition(root, relative, present); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func safeHLSRelativePath(relative string) (string, error) {
+	clean := filepath.ToSlash(filepath.Clean(relative))
+	if clean != filepath.ToSlash(relative) || clean == "." || strings.HasPrefix(clean, "../") || filepath.IsAbs(relative) {
+		return "", ErrTranscodeFailed
+	}
+	return clean, nil
+}
+
+func validateLocalRendition(root, relative string, present map[string]struct{}) error {
+	body, err := os.ReadFile(filepath.Join(root, relative))
+	if err != nil {
+		return fmt.Errorf("reading HLS rendition manifest %s: %w", relative, err)
+	}
+	directory := filepath.ToSlash(filepath.Dir(relative))
+	segments := 0
+	for _, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if err := validateLocalSegmentReference(directory, line, present); err != nil {
+			return err
+		}
+		segments++
+	}
+	if segments == 0 {
+		return fmt.Errorf("%w: HLS rendition has no segments", ErrTranscodeFailed)
+	}
+	return nil
+}
+
+func validateLocalSegmentReference(directory, reference string, present map[string]struct{}) error {
+	if strings.Contains(reference, "://") || strings.ContainsAny(reference, "?\\/") || reference == "." || reference == ".." {
+		return fmt.Errorf("%w: HLS rendition contains an unsafe segment reference", ErrTranscodeFailed)
+	}
+	if _, ok := present[directory+"/"+reference]; !ok {
+		return fmt.Errorf("%w: HLS rendition references missing segment %s", ErrTranscodeFailed, reference)
 	}
 	return nil
 }

@@ -272,7 +272,7 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	now := s.now().UTC()
-	expiresAt := now.Add(s.signatureLifetime)
+	expiresAt := now.Add(playbackLifetime(s.signatureLifetime, target.durationMS))
 	playbackSession := s.playbackSession(request.StudentID, request.LessonID, target.assetVersionID, expiresAt)
 	return PlaybackAuthorization{
 		PlaybackSession: playbackSession,
@@ -324,7 +324,7 @@ func (s *DeliveryService) IssueAdminReviewPlayback(ctx context.Context, request 
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	now := s.now().UTC()
-	expiresAt := now.Add(s.signatureLifetime)
+	expiresAt := now.Add(playbackLifetime(s.signatureLifetime, target.durationMS))
 	playbackSession := s.adminReviewPlaybackSession(request, expiresAt)
 	return PlaybackAuthorization{
 		PlaybackSession: playbackSession,
@@ -570,7 +570,8 @@ func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, tar
 	// trusted preview only reaches READY after successful FFmpeg processing.
 	var target deliveryTarget
 	err := s.db.QueryRow(ctx, `
-		SELECT cr.preview_asset_version_id::text, mav.kind, mav.state, mav.storage_object_key, ma.retired_at
+		SELECT cr.preview_asset_version_id::text, mav.kind, mav.state, mav.storage_object_key,
+		       COALESCE(mav.trusted_duration_ms, 0), ma.retired_at
 		FROM courses c
 		JOIN course_revisions cr ON cr.id = c.live_revision_id AND cr.course_id = c.id
 		JOIN media_asset_versions mav ON mav.id = cr.preview_asset_version_id
@@ -593,16 +594,40 @@ func (s *DeliveryService) issuePreview(ctx context.Context, targetPredicate, tar
 			)
 			SELECT 1 FROM lineage WHERE lineage.id = ma.preview_origin_revision_id
 		  )
-	`, targetID).Scan(&target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.retiredAt)
+	`, targetID).Scan(&target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &target.retiredAt)
 	if err != nil || target.state != StateReady || target.retiredAt != nil {
 		return PreviewAuthorization{}, ErrProtectedUnavailable
 	}
-	url, err := s.store.PresignGetURL(ctx, target.storageKey, s.signatureLifetime)
+	lifetime := playbackLifetime(s.signatureLifetime, target.durationMS)
+	url, err := s.store.PresignGetURL(ctx, target.storageKey, lifetime)
 	if err != nil {
 		return PreviewAuthorization{}, ErrProtectedUnavailable
 	}
 	now := s.now().UTC()
-	return PreviewAuthorization{URL: url, AssetVersionID: target.assetVersionID, ExpiresAt: now.Add(s.signatureLifetime)}, nil
+	return PreviewAuthorization{URL: url, AssetVersionID: target.assetVersionID, ExpiresAt: now.Add(lifetime)}, nil
+}
+
+// maxPlaybackLifetime bounds the bearer capability a single authorization can
+// mint. Trusted duration is server-measured, but ffprobe reports the duration a
+// container declares, and a crafted upload can declare one far longer than the
+// bytes it carries. Segment URLs cannot be revoked before their absolute
+// expiry, so the lifetime is clamped rather than trusted without limit.
+const maxPlaybackLifetime = 12 * time.Hour
+
+// playbackLifetime keeps the capability valid for the trusted duration plus
+// the configured grace period. HLS rendition manifests mint every segment URL
+// up front, so a fixed five-minute expiry would otherwise break a 90-minute
+// lecture even while the player remained open. A non-positive, absurd, or
+// overflowing duration falls back to the configured grace alone.
+func playbackLifetime(grace time.Duration, durationMS int64) time.Duration {
+	if durationMS <= 0 || durationMS > int64(maxPlaybackLifetime/time.Millisecond) {
+		return grace
+	}
+	lifetime := grace + time.Duration(durationMS)*time.Millisecond
+	if lifetime <= 0 || lifetime > maxPlaybackLifetime+grace {
+		return grace
+	}
+	return lifetime
 }
 
 func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, assetVersionID string, kind AssetKind) (deliveryTarget, error) {
