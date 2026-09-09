@@ -184,6 +184,14 @@ storage preflight failure.
 
 ## Rollback boundary
 
+A schema-*advancing* release is outside the application-rollback boundary entirely and has its own
+sanctioned path, `host.sh apply-schema-release MANIFEST FROM TO`, documented in
+`deploy/hostinger/README.md`. It backs up, stops the worker and the API and proves them stopped,
+migrates with the target release image, verifies the resulting schema, and only then starts the new
+API, worker, and frontend in that order, so an old and a new worker can never overlap. Its ordering
+and failure boundaries are proven without a deployment by
+`deploy/scripts/verify-schema-release-ordering.sh`.
+
 Application rollback selects earlier immutable frontend and backend images only; it never runs a
 schema-down migration. The selected backend must support the retained forward schema or the rollback
 must fail closed. In particular, never use migration `0015_course_access_grant.down.sql` as the normal

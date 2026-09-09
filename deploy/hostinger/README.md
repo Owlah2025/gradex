@@ -553,6 +553,71 @@ A compatible selection leaves the schema unchanged and verifies the Entitlement 
 In particular, never run migration `0015_course_access_grant.down.sql` as an application rollback
 after real Course Access grants because it clears `source_invitation_id` provenance.
 
+### Schema-advancing releases
+
+`apply-release` is application-only by construction: it refuses to migrate, and it recreates the API,
+the worker, and the frontend together. A release that *moves the schema* cannot use it, and must not
+use `up-core` either — `up-core` runs the migration while the previous API and worker are still up,
+which is exactly the old-worker/new-schema overlap a lease-based release cannot tolerate.
+
+The one sanctioned path for a schema-advancing production release is:
+
+```bash
+./deploy/hostinger/host.sh apply-schema-release /protected/path/release.env 34 35
+```
+
+The `FROM` and `TO` schema versions are stated out loud, not inferred, and the command performs
+**exactly one forward step**: `34 -> 36` is refused. Widening that needs its own review.
+
+**This command opens a maintenance window on purpose.** It stops the worker and then the API before
+the migration, and public requests fail until the new API is ready. There is deliberately no
+mixed-schema availability strategy: while the schema moves, correctness comes before uptime.
+
+Before anything is stopped it proves the target manifest resolves to loaded, non-`latest` images
+whose `org.opencontainers.image.revision` labels equal the declared release SHA; that the running
+release is really the `FROM` release and its images are still present as rollback artifacts; that the
+live schema is exactly `FROM` and clean; that no migration one-shot is already running; and that the
+target backend image's maximum schema is exactly `TO`. It also reports, read-only, how many Asset
+Versions are `SCANNING` or `PROCESSING`, and warns loudly if any are — it never mutates a media row.
+
+It then executes, in this order, failing closed at every boundary:
+
+1. a fresh backup through the established `backup` procedure, verified by its own completion marker;
+2. stop the old worker, and **prove from container state that no worker is running**;
+3. stop the old API, and prove it stopped;
+4. re-prove quiescence rather than assume it;
+5. run `gradex-migrate up` as a one-shot **using the target release's backend image** — the running
+   image cannot do this, because its maximum schema version is the `FROM` version;
+6. verify the schema is exactly clean `TO` before a single new process starts. Set
+   `GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS` to a comma-separated list of `table.column` entries to
+   assert specific migrated objects as well; for D-103 that is
+   `media_asset_versions.work_claim_token`;
+7. start the new API **alone**, and require healthy, `/healthz`, `/readyz` with every dependency ok,
+   and an exact release revision;
+8. only then create the new worker, after proving *again* that no other worker is running, and that
+   it is the only worker afterwards;
+9. recreate the frontend;
+10. verify the whole deployment, including restart counts and the final schema, then persist the
+    release selection.
+
+**The old worker and the new worker never run concurrently.** That is enforced mechanically from
+container state, twice, not printed as a warning.
+
+Failure behaviour is explicit at each boundary. A failed backup stops nothing. A worker or API that
+cannot be proven stopped prevents the migration. A failed or dirty migration leaves the application
+stopped and starts nothing. An API that fails readiness prevents the worker from ever being created.
+Every abort names the stage, the state production is now in, and points at `docs/launch/RUNBOOK.md`.
+
+This command never runs a down migration and adds no flag that would allow one. The production
+refusal in `cmd/migrate`, the purchase-rollback safety check, and the supervised `0035 -> 0034`
+procedure in the runbook are untouched; rollback stays a deliberate human act.
+
+Prove the ordering and the failure boundaries without touching a deployment:
+
+```bash
+bash deploy/scripts/verify-schema-release-ordering.sh
+```
+
 Configure a protected alert webhook, then install the systemd scheduler described below. Prove real
 delivery by causing a short controlled readiness failure, invoking `monitor`, confirming delivery at
 the external destination, restoring the service, and rerunning `verify`. Record timestamps and

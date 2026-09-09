@@ -200,6 +200,18 @@ binary set that can serve it. Rollback therefore requires rolling the schema bac
 4. Start the D-103 worker.
 5. Start or deploy the D-103 frontend.
 
+On the Hostinger production host this order is not performed by hand. It is encoded in
+`./deploy/hostinger/host.sh apply-schema-release <manifest> 34 35`, which is the only sanctioned
+command for a schema-advancing release. It takes a fresh backup, stops the worker and then the API
+and proves both stopped, runs `gradex-migrate up` from the **target** release image, verifies clean
+schema `35` (set `GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS=media_asset_versions.work_claim_token` to
+assert the migrated objects as well), starts the API alone and requires its readiness, then starts
+the worker only after re-proving that no other worker is running, and finally the frontend. It opens
+an explicit maintenance window and fails closed at every boundary, pointing back at this document.
+`apply-release` cannot be used here — it is application-only and never migrates — and `up-core` must
+not be used, because it migrates while the old worker is still running. See
+`deploy/hostinger/README.md`, "Schema-advancing releases".
+
 **The D-102 worker and the D-103 worker must never run concurrently.** No old-worker/new-worker
 overlap is permitted at any point in either direction. The two disagree about who owns in-flight
 `SCANNING`/`PROCESSING` work: a D-102 worker does not observe leases or claim tokens, so running one
