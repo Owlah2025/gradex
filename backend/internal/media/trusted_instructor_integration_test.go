@@ -299,11 +299,12 @@ func TestD088TrustedVideoValidatesThenProcessesToReady(t *testing.T) {
 		t.Fatalf("reading the transcode operation ID: %v", err)
 	}
 	worker := trustedWorker(t, f, func(_ context.Context, object ObjectVersion) (TranscodeResult, error) {
+		prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 		return TranscodeResult{
 			TrustedDurationMS: 90000,
-			OutputPrefix:      "media/" + object.AssetVersionID + "/hls",
+			OutputPrefix:      prefix,
 			Renditions: []Rendition{{
-				Name: "720p", StorageObjectKey: "media/" + object.AssetVersionID + "/hls/720p/playlist.m3u8",
+				Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 				Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 90000,
 			}},
 		}, nil
@@ -867,11 +868,12 @@ func TestD096TrustedPublicPreviewValidatesThenProcessesToReady(t *testing.T) {
 
 	operationID := previewTranscodeOperation(t, f, request.AssetVersionID)
 	worker := trustedWorker(t, f, func(_ context.Context, object ObjectVersion) (TranscodeResult, error) {
+		prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 		return TranscodeResult{
 			TrustedDurationMS: 45000,
-			OutputPrefix:      "media/" + object.AssetVersionID + "/hls",
+			OutputPrefix:      prefix,
 			Renditions: []Rendition{{
-				Name: "720p", StorageObjectKey: "media/" + object.AssetVersionID + "/hls/720p/playlist.m3u8",
+				Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 				Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 45000,
 			}},
 		}, nil

@@ -244,7 +244,7 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 		Name: "240p", StorageObjectKey: "video/hls/240p/playlist.m3u8", Width: 426, Height: 240, BitrateKbps: 400,
 	})
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video})
-	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/media/playback-manifests/") || issued.ExpiresAt.Sub(f.now) != 5*time.Minute {
+	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/media/playback-manifests/") || issued.ExpiresAt.Sub(f.now) != 6*time.Minute {
 		t.Fatalf("playback issuance=%+v err=%v", issued, err)
 	}
 	manifest, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession)
@@ -336,6 +336,30 @@ func TestNonReadySelectedLessonVideoIsUnavailableToStudentsAndAdminPreview(t *te
 		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'QUARANTINED', $3, 'fixture-v1', 'video/mp4', 1024)
 	`, versionID, assetID, "quarantine/"+f.courseID+"/"+versionID+"/source"); err != nil {
 		t.Fatalf("seeding processing video version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE media_asset_versions SET state='SCANNING' WHERE id=$1::uuid`, versionID); err != nil {
+		t.Fatalf("claiming processing fixture scan: %v", err)
+	}
+	scanID := uuid.NewString()
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO scan_attempts (id,asset_version_id,attempt_number,work_id,storage_object_version,outcome,scanner_identity)
+		VALUES ($1::uuid,$2::uuid,1,$3,'fixture-v1','PASSED','delivery-fixture-scanner')
+	`, scanID, versionID, "delivery:"+scanID); err != nil {
+		t.Fatalf("recording processing fixture scan: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		UPDATE media_asset_versions SET state='SCAN_PASSED',successful_scan_attempt_id=$2::uuid WHERE id=$1::uuid
+	`, versionID, scanID); err != nil {
+		t.Fatalf("passing processing fixture scan: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE media_asset_versions SET state='PROCESSING' WHERE id=$1::uuid`, versionID); err != nil {
+		t.Fatalf("advancing processing video version: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `
+		INSERT INTO video_renditions (asset_version_id,name,storage_object_key,width,height,bitrate_kbps,duration_ms)
+		VALUES ($1::uuid,'720p',$2,1280,720,2800,60000)
+	`, versionID, "media/"+versionID+"/hls/fixture/720p/playlist.m3u8"); err != nil {
+		t.Fatalf("seeding partial processing rendition: %v", err)
 	}
 	if _, err := f.pool.Exec(f.ctx, `
 		UPDATE course_lessons SET video_asset_version_id = $1::uuid
@@ -710,8 +734,8 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	if err != nil {
 		t.Fatalf("issuing pre-expiry playback: %v", err)
 	}
-	if got := issued.ExpiresAt.Sub(f.now); got != 5*time.Minute {
-		t.Fatalf("issued signature lifetime=%s, want 5m", got)
+	if got := issued.ExpiresAt.Sub(f.now); got != 6*time.Minute {
+		t.Fatalf("issued signature lifetime=%s, want trusted duration plus 5m grace", got)
 	}
 	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
 		t.Fatalf("issuing pre-expiry master: %v", err)

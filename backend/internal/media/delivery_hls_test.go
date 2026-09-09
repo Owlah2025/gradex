@@ -9,6 +9,36 @@ import (
 	"time"
 )
 
+func TestPlaybackLifetimeCoversLongLecture(t *testing.T) {
+	if got := playbackLifetime(5*time.Minute, int64((90*time.Minute)/time.Millisecond)); got != 95*time.Minute {
+		t.Fatalf("playback lifetime = %s, want 95m", got)
+	}
+}
+
+// A container can declare any duration it likes, and ffprobe reports what it
+// declares. An issued segment URL cannot be recalled before its absolute
+// expiry, so an absurd or overflowing duration must shrink the capability back
+// to the configured grace rather than extend it.
+func TestPlaybackLifetimeRefusesToExtendBeyondTheBound(t *testing.T) {
+	grace := 5 * time.Minute
+	for _, durationMS := range []int64{
+		0,
+		-1,
+		int64(maxPlaybackLifetime/time.Millisecond) + 1,
+		int64(1_000_000 * time.Hour / time.Millisecond),
+		1 << 62,
+		-1 << 62,
+	} {
+		if got := playbackLifetime(grace, durationMS); got != grace {
+			t.Fatalf("playback lifetime for %d ms = %s, want the %s grace", durationMS, got, grace)
+		}
+	}
+	atBound := int64(maxPlaybackLifetime / time.Millisecond)
+	if got := playbackLifetime(grace, atBound); got != maxPlaybackLifetime+grace {
+		t.Fatalf("playback lifetime at the bound = %s, want %s", got, maxPlaybackLifetime+grace)
+	}
+}
+
 type hlsDeliveryStore struct {
 	keys       []string
 	expiresAt  []time.Time

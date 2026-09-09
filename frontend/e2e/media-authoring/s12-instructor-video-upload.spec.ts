@@ -2,10 +2,18 @@ import { execFileSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { test, expect, request as playwrightRequest, type APIRequestContext } from "@playwright/test";
+import {
+  test,
+  expect,
+  request as playwrightRequest,
+  type APIRequestContext,
+} from "@playwright/test";
 import { issueRotatingSession } from "../rotating-students";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
-import { captureFailureDiagnostic, recordMediaAssetVersionID } from "./diagnostics";
+import {
+  captureFailureDiagnostic,
+  recordMediaAssetVersionID,
+} from "./diagnostics";
 import { openAuthoringSections } from "../authoring-sections";
 
 /**
@@ -14,15 +22,27 @@ import { openAuthoringSections } from "../authoring-sections";
  * Nothing here is simulated. A genuine MP4 is produced by ffmpeg, the browser
  * uploads it directly to private object storage through the presigned intent,
  * the API verifies the exact stored object version, the worker scans and
- * transcodes it, and only then is the resulting Asset Version attached to the
- * Lesson. The attachment is re-read after a full page reload, and the complete
+ * transcodes it while the draft retains the durable replacement selection.
+ * The READY result is re-read after a full page reload, and the complete
  * Course is submitted and observed in the Admin review queue.
  */
 
-const INSTRUCTOR = { email: "instructor@example.test", accountID: "a0000000-0000-0000-0000-000000000003" };
-const ADMIN = { email: "admin@example.test", accountID: "a0000000-0000-0000-0000-000000000000" };
-const OTHER_INSTRUCTOR = { email: "instructor-other@example.test", accountID: "a0000000-0000-0000-0000-000000000004" };
-const STUDENT = { email: "student-unentitled@example.test", accountID: "a0000000-0000-0000-0000-000000000099" };
+const INSTRUCTOR = {
+  email: "instructor@example.test",
+  accountID: "a0000000-0000-0000-0000-000000000003",
+};
+const ADMIN = {
+  email: "admin@example.test",
+  accountID: "a0000000-0000-0000-0000-000000000000",
+};
+const OTHER_INSTRUCTOR = {
+  email: "instructor-other@example.test",
+  accountID: "a0000000-0000-0000-0000-000000000004",
+};
+const STUDENT = {
+  email: "student-unentitled@example.test",
+  accountID: "a0000000-0000-0000-0000-000000000099",
+};
 
 /**
  * The Admin's exact words. Asserted verbatim on the Instructor's screen, so this proves the real
@@ -30,7 +50,8 @@ const STUDENT = { email: "student-unentitled@example.test", accountID: "a0000000
  */
 const CHANGE_REQUEST_REASON = "Please update lesson 2 learning objectives";
 
-const UUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const UUID_PATTERN =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 /** Course titles carry a run timestamp, so they are matched literally, never as a pattern. */
 function escapeForRegExp(value: string): string {
@@ -53,18 +74,36 @@ function apiContextFor(session: Session): Promise<APIRequestContext> {
 
 /** A small but genuine H.264/AAC MP4 — real bytes with a real container. */
 function makeSampleMP4(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gradex-authoring-mp4-"));
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "gradex-authoring-mp4-"),
+  );
   const file = path.join(directory, "lesson.mp4");
   execFileSync(
     "ffmpeg",
     [
       "-y",
-      "-f", "lavfi", "-i", "testsrc=size=320x240:rate=15",
-      "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
-      "-t", "2",
-      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-      "-c:a", "aac", "-b:a", "64k",
-      "-movflags", "+faststart",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=320x240:rate=15",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:sample_rate=44100",
+      "-t",
+      "2",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "64k",
+      "-movflags",
+      "+faststart",
       file,
     ],
     { stdio: "ignore" },
@@ -76,9 +115,14 @@ test.afterEach(async ({}, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus) return;
   try {
     const artifact = captureFailureDiagnostic();
-    if (artifact) console.error(`[Media E2E Failure] sanitized diagnostic artifact: ${artifact}`);
+    if (artifact)
+      console.error(
+        `[Media E2E Failure] sanitized diagnostic artifact: ${artifact}`,
+      );
   } catch {
-    console.error("[Media E2E Failure] diagnostic collector could not complete");
+    console.error(
+      "[Media E2E Failure] diagnostic collector could not complete",
+    );
   }
 });
 
@@ -91,16 +135,25 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // canonical Academic Catalog context the normal Instructor flow requires.
   const institution = await admin.post("/api/v1/admin/academic/institutions", {
     data: {
-      country_code: "KW", slug: "media-test-university",
-      name_ar: "جامعة اختبار الوسائط", name_en: "Media Test University",
+      country_code: "KW",
+      slug: "media-test-university",
+      name_ar: "جامعة اختبار الوسائط",
+      name_en: "Media Test University",
       max_academic_level: 4,
     },
   });
   expect(institution.status(), await institution.text()).toBe(201);
-  const institutionID = (await institution.json() as { id: string }).id;
-  const subject = await admin.post(`/api/v1/admin/academic/institutions/${institutionID}/subjects`, {
-    data: { official_code: "CS101", title_ar: "برمجة", title_en: "Programming" },
-  });
+  const institutionID = ((await institution.json()) as { id: string }).id;
+  const subject = await admin.post(
+    `/api/v1/admin/academic/institutions/${institutionID}/subjects`,
+    {
+      data: {
+        official_code: "CS101",
+        title_ar: "برمجة",
+        title_en: "Programming",
+      },
+    },
+  );
   expect(subject.status(), await subject.text()).toBe(201);
 
   const context = await browser.newContext({ locale: "en-US" });
@@ -123,10 +176,16 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   const page = await context.newPage();
   page.on("response", async (response) => {
-    if (response.request().method() !== "POST" || new URL(response.url()).pathname !== "/api/v1/media/uploads" || response.status() !== 201) return;
+    if (
+      response.request().method() !== "POST" ||
+      new URL(response.url()).pathname !== "/api/v1/media/uploads" ||
+      response.status() !== 201
+    )
+      return;
     try {
-      const body = await response.json() as { asset_version_id?: unknown };
-      if (typeof body.asset_version_id === "string") recordMediaAssetVersionID(body.asset_version_id);
+      const body = (await response.json()) as { asset_version_id?: unknown };
+      if (typeof body.asset_version_id === "string")
+        recordMediaAssetVersionID(body.asset_version_id);
     } catch {}
   });
   await page.goto("/en/instructor/courses");
@@ -134,7 +193,9 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   // 1. Course
   await page.getByTestId("toggle-new-course").click();
-  await page.getByTestId("new-course-institution").selectOption({ label: "Media Test University" });
+  await page
+    .getByTestId("new-course-institution")
+    .selectOption({ label: "Media Test University" });
   await page.getByTestId("new-course-subject-search").fill("CS101");
   await expect(page.getByTestId("new-course-subject-result")).toBeVisible();
   await page.getByTestId("new-course-subject-result").click();
@@ -142,35 +203,71 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const courseTitleEn = `Real Video Course ${Date.now()}`;
   await page.getByTestId("new-course-title-en").fill(courseTitleEn);
   await page.getByTestId("new-course-description-ar").fill("وصف");
-  await page.getByTestId("new-course-description-en").fill("Real media journey");
+  await page
+    .getByTestId("new-course-description-en")
+    .fill("Real media journey");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await expect(page.getByTestId("authoring-notice")).toContainText(
+    "Course created",
+  );
   await openAuthoringSections(page);
-  const courseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
+  const courseID = (await page
+    .getByTestId("selected-course-context")
+    .getAttribute("data-course-id"))!;
   expect(courseID).toMatch(UUID_PATTERN);
   const thumbnail = page.getByTestId("course-thumbnail-authoring");
   await expect(thumbnail).toContainText("No custom thumbnail");
-  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-empty.png") });
-  await thumbnail.locator('input[type="file"]').setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: Buffer.from("<svg/>") });
+  await thumbnail.screenshot({
+    path: testInfo.outputPath("thumbnail-instructor-empty.png"),
+  });
+  await thumbnail.locator('input[type="file"]').setInputFiles({
+    name: "bad.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from("<svg/>"),
+  });
   await expect(thumbnail.getByRole("alert")).toContainText("Choose a JPG");
-  await thumbnail.locator('input[type="file"]').setInputFiles({ name: "large.png", mimeType: "image/png", buffer: Buffer.alloc(5 * 1024 * 1024 + 1) });
+  await thumbnail.locator('input[type="file"]').setInputFiles({
+    name: "large.png",
+    mimeType: "image/png",
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1),
+  });
   await expect(thumbnail.getByRole("alert")).toContainText("5 MB");
-  const thumbnailPath = path.resolve(__dirname, "../../../backend/internal/media/testdata/thumbnail.webp");
+  const thumbnailPath = path.resolve(
+    __dirname,
+    "../../../backend/internal/media/testdata/thumbnail.webp",
+  );
   await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
-  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
+  await expect(thumbnail.getByRole("status")).toContainText(
+    "Thumbnail selection saved",
+    { timeout: 30_000 },
+  );
   await expect(thumbnail.locator("img")).toBeVisible();
-  await expect.poll(() => thumbnail.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
-  const thumbnailA = (await thumbnail.locator("img").getAttribute("src"))!.split("/").at(-2)!;
-  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-preview.png") });
+  await expect
+    .poll(() =>
+      thumbnail
+        .locator("img")
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBe(800);
+  const thumbnailA = (await thumbnail.locator("img").getAttribute("src"))!
+    .split("/")
+    .at(-2)!;
+  await thumbnail.screenshot({
+    path: testInfo.outputPath("thumbnail-instructor-preview.png"),
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await thumbnail.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath("thumbnail-instructor-mobile.png") });
+  await page.screenshot({
+    path: testInfo.outputPath("thumbnail-instructor-mobile.png"),
+  });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/ar/instructor/courses");
   await page.getByTestId(`owned-course-${courseID}`).click();
   await openAuthoringSections(page);
   await expect(thumbnail).toContainText("صورة المقرر");
-  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-arabic.png") });
+  await thumbnail.screenshot({
+    path: testInfo.outputPath("thumbnail-instructor-arabic.png"),
+  });
   await page.goto("/en/instructor/courses");
   await page.getByTestId(`owned-course-${courseID}`).click();
   await openAuthoringSections(page);
@@ -179,10 +276,20 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // Instructor UI cannot be selecting or reusing protected Lesson media.
   const mp4Path = makeSampleMP4();
   const publicPreviewAuthoring = page.getByTestId("public-preview-authoring");
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("No public preview is attached");
-  await publicPreviewAuthoring.locator('input[type="file"]').setInputFiles(mp4Path);
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-message")).toContainText("Public preview is ready for review", { timeout: 4 * 60 * 1000 });
-  await expect(publicPreviewAuthoring.getByTestId("public-preview-state")).toContainText("A public preview is attached");
+  await expect(
+    publicPreviewAuthoring.getByTestId("public-preview-state"),
+  ).toContainText("No public preview is attached");
+  await publicPreviewAuthoring
+    .locator('input[type="file"]')
+    .setInputFiles(mp4Path);
+  await expect(
+    publicPreviewAuthoring.getByTestId("public-preview-message"),
+  ).toContainText("Public preview is ready for review", {
+    timeout: 4 * 60 * 1000,
+  });
+  await expect(
+    publicPreviewAuthoring.getByTestId("public-preview-state"),
+  ).toContainText("A public preview is attached");
 
   // 2. Section
   await page.getByTestId("section-title-ar").fill("القسم");
@@ -195,7 +302,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const sectionRow = page.locator('[data-testid^="section-"]').first();
   await expect(sectionRow).toBeVisible();
   await expect(sectionRow).toContainText("Media Section");
-  const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace("section-", "");
+  const sectionID = (await sectionRow.getAttribute("data-testid"))!.replace(
+    "section-",
+    "",
+  );
 
   // 3. Lesson
   await page.getByTestId(`lesson-title-ar-${sectionID}`).fill("الدرس");
@@ -210,7 +320,9 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     .getAttribute("data-testid"))!.replace("lesson-video-upload-", "");
 
   // 4. Real MP4 through the real upload contract.
-  await page.getByTestId(`lesson-video-file-${lessonID}`).setInputFiles(mp4Path);
+  await page
+    .getByTestId(`lesson-video-file-${lessonID}`)
+    .setInputFiles(mp4Path);
 
   /*
     D-098. Every processing observation the studio actually receives is
@@ -220,26 +332,46 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     poll interval, and a spec that demanded an intermediate frame would be a
     timing race, not a test.
   */
-  const observations: Array<{ state: string; stage: string | null; percent: number | null }> = [];
+  const observations: Array<{
+    state: string;
+    stage: string | null;
+    percent: number | null;
+  }> = [];
   page.on("response", (response) => {
     if (response.request().method() !== "GET") return;
-    if (!/\/api\/v1\/media\/assets\/[0-9a-f-]+$/i.test(new URL(response.url()).pathname)) return;
+    if (
+      !/\/api\/v1\/media\/assets\/[0-9a-f-]+$/i.test(
+        new URL(response.url()).pathname,
+      )
+    )
+      return;
     void response
       .json()
-      .then((body: { state?: string; processing_stage?: string | null; processing_progress_percent?: number | null }) => {
-        observations.push({
-          state: body.state ?? "",
-          stage: body.processing_stage ?? null,
-          percent: typeof body.processing_progress_percent === "number" ? body.processing_progress_percent : null,
-        });
-      })
+      .then(
+        (body: {
+          state?: string;
+          processing_stage?: string | null;
+          processing_progress_percent?: number | null;
+        }) => {
+          observations.push({
+            state: body.state ?? "",
+            stage: body.processing_stage ?? null,
+            percent:
+              typeof body.processing_progress_percent === "number"
+                ? body.processing_progress_percent
+                : null,
+          });
+        },
+      )
       .catch(() => {
         /* A non-JSON body is not an observation. */
       });
   });
 
   const phase = page.getByTestId(`lesson-video-phase-${lessonID}`);
-  await expect(phase).toContainText(/Preparing|Uploading|Processing/, { timeout: 30_000 });
+  await expect(phase).toContainText(/Preparing|Uploading|Processing/, {
+    timeout: 30_000,
+  });
   // Upload progress is the browser's own byte count and is shown on UPLOADING
   // alone; processing progress replaces it once the worker takes over.
   await expect(phase).toContainText("Processing", { timeout: 2 * 60 * 1000 });
@@ -261,14 +393,23 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const authoredCourse = await instructorAPI.get(`/api/v1/courses/${courseID}`);
   expect(authoredCourse.status()).toBe(200);
   const authoredGraph = (await authoredCourse.json()) as {
-    editable_revision?: { sections?: Array<{ lessons?: Array<{ id: string; video_asset_version_id?: string }> }> };
+    editable_revision?: {
+      sections?: Array<{
+        lessons?: Array<{ id: string; video_asset_version_id?: string }>;
+      }>;
+    };
   };
   const authoredLesson = (authoredGraph.editable_revision?.sections ?? [])
     .flatMap((section) => section.lessons ?? [])
     .find((lesson) => lesson.id === lessonID);
-  const assetVersionID = authoredLesson?.video_asset_version_id;
-  expect(assetVersionID, "the submitted Lesson must carry its video Asset Version").toMatch(UUID_PATTERN);
-  const assetStatus = await instructorAPI.get(`/api/v1/media/assets/${assetVersionID}`);
+  let assetVersionID = authoredLesson?.video_asset_version_id;
+  expect(
+    assetVersionID,
+    "the submitted Lesson must carry its video Asset Version",
+  ).toMatch(UUID_PATTERN);
+  const assetStatus = await instructorAPI.get(
+    `/api/v1/media/assets/${assetVersionID}`,
+  );
   expect(assetStatus.status()).toBe(200);
   const settledStatus = (await assetStatus.json()) as {
     state: string;
@@ -283,13 +424,21 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // A finished asset reports 100; it never reports a partial percentage.
   expect(settledStatus.processing_progress_percent).toBe(100);
   expect(settledStatus.processing_stage).toBe("PACKAGING");
-  expect(settledStatus.processing_updated_at, "a settled observation must carry its instant").toBeTruthy();
+  expect(
+    settledStatus.processing_updated_at,
+    "a settled observation must carry its instant",
+  ).toBeTruthy();
 
   // Whatever the studio actually observed while the worker ran must have been
   // real, bounded, and non-decreasing. This holds however fast the transcode
   // was, including when it produced only the opening and closing observations.
-  expect(observations.length, "the studio must have polled the media status").toBeGreaterThan(0);
-  const measured = observations.filter((observation) => observation.percent !== null);
+  expect(
+    observations.length,
+    "the studio must have polled the media status",
+  ).toBeGreaterThan(0);
+  const measured = observations.filter(
+    (observation) => observation.percent !== null,
+  );
   let previous = -1;
   for (const observation of measured) {
     expect(observation.percent!).toBeGreaterThanOrEqual(0);
@@ -306,26 +455,113 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   }
   // No observation may claim completion before the asset is actually READY.
   for (const observation of measured) {
-    if (observation.percent === 100 && observation.stage === "PACKAGING") continue;
+    if (observation.percent === 100 && observation.stage === "PACKAGING")
+      continue;
     expect(observation.percent!).toBeLessThan(100);
   }
+
+  // D-103 failure and replacement journey. The bytes carry an MP4 file-type
+  // box, so upload validation accepts the container, but the deliberately
+  // truncated file cannot be probed or transcoded. It must settle visibly in
+  // PROCESS_FAILED and never become usable media.
+  const truncatedMP4 = Buffer.from([
+    0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+    0x00, 0x00, 0x00, 0x01,
+  ]);
+  await page.getByTestId(`lesson-video-file-${lessonID}`).setInputFiles({
+    name: "truncated.mp4",
+    mimeType: "video/mp4",
+    buffer: truncatedMP4,
+  });
+  await expect(phase).toHaveAttribute("data-upload-phase", "FAILED", {
+    timeout: 2 * 60 * 1000,
+  });
+  await expect(
+    page.getByTestId(`lesson-video-message-${lessonID}`),
+  ).toContainText("could not be prepared for playback");
+  const failedGraph = (await (
+    await instructorAPI.get(`/api/v1/courses/${courseID}`)
+  ).json()) as {
+    editable_revision?: {
+      sections?: Array<{
+        lessons?: Array<{ id: string; video_asset_version_id?: string }>;
+      }>;
+    };
+  };
+  const failedVersionID = (failedGraph.editable_revision?.sections ?? [])
+    .flatMap((section) => section.lessons ?? [])
+    .find((lesson) => lesson.id === lessonID)?.video_asset_version_id;
+  expect(failedVersionID).toMatch(UUID_PATTERN);
+  expect(failedVersionID).not.toBe(assetVersionID);
+  const failedStatus = await instructorAPI.get(
+    `/api/v1/media/assets/${failedVersionID}`,
+  );
+  expect(failedStatus.status()).toBe(200);
+  const failedStatusBody = (await failedStatus.json()) as {
+    state: string;
+    failure_category?: string | null;
+  };
+  expect(failedStatusBody.state).toBe("PROCESS_FAILED");
+  expect(failedStatusBody.failure_category).toBe("INVALID_MEDIA");
+
+  // A fresh valid upload replaces the failed intent and converges on one new
+  // READY exact version. The older READY and failed workers cannot mutate this
+  // draft pointer; that stale-completion race is fault-injected in the backend
+  // integration suite where completion order is deterministic.
+  await page
+    .getByTestId(`lesson-video-file-${lessonID}`)
+    .setInputFiles(mp4Path);
+  await expect(phase).toContainText("Ready", { timeout: 4 * 60 * 1000 });
+  const replacementGraph = (await (
+    await instructorAPI.get(`/api/v1/courses/${courseID}`)
+  ).json()) as {
+    editable_revision?: {
+      sections?: Array<{
+        lessons?: Array<{ id: string; video_asset_version_id?: string }>;
+      }>;
+    };
+  };
+  const replacementVersionID = (
+    replacementGraph.editable_revision?.sections ?? []
+  )
+    .flatMap((section) => section.lessons ?? [])
+    .find((lesson) => lesson.id === lessonID)?.video_asset_version_id;
+  expect(replacementVersionID).toMatch(UUID_PATTERN);
+  expect(replacementVersionID).not.toBe(failedVersionID);
+  expect(replacementVersionID).not.toBe(assetVersionID);
+  assetVersionID = replacementVersionID;
 
   // 6. Submission uses the Course-level canonical Subject; Academic Courses
   // never populate the legacy Major/Subject/Study-Year vocabulary.
   await page.getByTestId("submit-for-review").click();
-  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
+  await page
+    .getByTestId("submit-confirm")
+    .getByTestId("confirm-accept")
+    .click();
+  await expect(page.getByTestId("authoring-notice")).toContainText(
+    "Submitted. An administrator will review it",
+  );
 
   // 7. The Admin review surface sees the submitted revision.
   const queue = await admin.get("/api/v1/admin/review/queue");
   expect(queue.status()).toBe(200);
-  const queued = (await queue.json()) as Array<{ course_id?: string; id?: string; revision_id?: string; state?: string }>;
-  const submittedQueueItem = queued.find((item) => item.course_id === courseID || item.id === courseID);
+  const queued = (await queue.json()) as Array<{
+    course_id?: string;
+    id?: string;
+    revision_id?: string;
+    state?: string;
+  }>;
+  const submittedQueueItem = queued.find(
+    (item) => item.course_id === courseID || item.id === courseID,
+  );
   expect(
     submittedQueueItem,
     `submitted Course ${courseID} must appear in the Admin review queue`,
   ).toBeTruthy();
-  expect(submittedQueueItem?.revision_id, "the queue must carry the submitted revision ID").toBeTruthy();
+  expect(
+    submittedQueueItem?.revision_id,
+    "the queue must carry the submitted revision ID",
+  ).toBeTruthy();
   const submittedRevisionID = submittedQueueItem!.revision_id!;
 
   // 8. And the Admin *screen* sees it too, not only the API. The Admin Catalog
@@ -350,12 +586,16 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const adminPage = await adminContext.newPage();
   await adminPage.goto("/en/admin/catalog");
   // The queue screen was renamed when pricing stopped being a separate panel on it.
-  await expect(adminPage.locator("h1")).toContainText("Course review & administration");
+  await expect(adminPage.locator("h1")).toContainText(
+    "Course review & administration",
+  );
 
   const row = adminPage.getByTestId(`review-item-${courseID}`);
   await expect(row).toBeVisible();
   await expect(row).toContainText(courseTitleEn);
-  await expect(adminPage.locator("body")).not.toContainText("Introduction to Programming");
+  await expect(adminPage.locator("body")).not.toContainText(
+    "Introduction to Programming",
+  );
 
   // 9. The Admin opens the exact submitted revision and reads the immutable
   // graph before making a review decision. These assertions use the Course
@@ -363,30 +603,60 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
   const inspector = adminPage.getByTestId("submitted-revision-inspector");
   await expect(inspector).toBeVisible();
-  await expect(inspector.getByTestId("submitted-title-ar")).toContainText("دورة الفيديو الحقيقية");
-  await expect(inspector.getByTestId("submitted-title-en")).toContainText(courseTitleEn);
-  await expect(inspector.getByTestId("submitted-description-ar")).toContainText("وصف");
-  await expect(inspector.getByTestId("submitted-description-en")).toContainText("Real media journey");
-  await expect(inspector.getByTestId("submitted-academic-university")).toContainText("Media Test University");
-  await expect(inspector.getByTestId("submitted-academic-subject")).toContainText("CS101");
-  await expect(inspector.getByTestId("submitted-academic-subject")).toContainText("Programming");
-  await expect(inspector.getByTestId("submitted-academic-audience")).toContainText("Automatic");
+  await expect(inspector.getByTestId("submitted-title-ar")).toContainText(
+    "دورة الفيديو الحقيقية",
+  );
+  await expect(inspector.getByTestId("submitted-title-en")).toContainText(
+    courseTitleEn,
+  );
+  await expect(inspector.getByTestId("submitted-description-ar")).toContainText(
+    "وصف",
+  );
+  await expect(inspector.getByTestId("submitted-description-en")).toContainText(
+    "Real media journey",
+  );
+  await expect(
+    inspector.getByTestId("submitted-academic-university"),
+  ).toContainText("Media Test University");
+  await expect(
+    inspector.getByTestId("submitted-academic-subject"),
+  ).toContainText("CS101");
+  await expect(
+    inspector.getByTestId("submitted-academic-subject"),
+  ).toContainText("Programming");
+  await expect(
+    inspector.getByTestId("submitted-academic-audience"),
+  ).toContainText("Automatic");
   await expect(inspector.getByTestId("submitted-study-year")).toHaveCount(0);
   await expect(inspector.getByTestId("submitted-major")).toHaveCount(0);
   // The state, in words. The enum behind it stays in the payload and out of the Admin's reading.
-  await expect(inspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
-  await expect(inspector.getByTestId("submitted-revision-state")).not.toContainText("PENDING_REVIEW");
-  await expect(inspector.getByTestId("submitted-public-preview")).toContainText("A separate public preview is attached to this version.");
-  await expect(inspector.getByTestId(`submitted-section-${sectionID}`)).toContainText("Media Section");
-  await expect(inspector.getByTestId(`submitted-lesson-${lessonID}`)).toContainText("Media Lesson");
-  await expect(inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`)).toContainText("Ready to preview");
+  await expect(inspector.getByTestId("submitted-revision-state")).toContainText(
+    "Submitted for review",
+  );
+  await expect(
+    inspector.getByTestId("submitted-revision-state"),
+  ).not.toContainText("PENDING_REVIEW");
+  await expect(inspector.getByTestId("submitted-public-preview")).toContainText(
+    "A separate public preview is attached to this version.",
+  );
+  await expect(
+    inspector.getByTestId(`submitted-section-${sectionID}`),
+  ).toContainText("Media Section");
+  await expect(
+    inspector.getByTestId(`submitted-lesson-${lessonID}`),
+  ).toContainText("Media Lesson");
+  await expect(
+    inspector.getByTestId(`submitted-lesson-media-state-${lessonID}`),
+  ).toContainText("Ready to preview");
 
   // Preview is issued through the reviewed Lesson endpoint and receives the
   // application-owned protected manifest route. The browser never receives a
   // private object-storage URL from this UI.
-  const previewResponse = adminPage.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/preview/${lessonID}`,
+  const previewResponse = adminPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/preview/${lessonID}`,
   );
   await inspector.getByTestId(`preview-submitted-lesson-${lessonID}`).click();
   expect((await previewResponse).status()).toBe(200);
@@ -396,43 +666,63 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // Pricing shares this exact submitted-revision context. The Admin chooses
   // the human titles while the stable Section identity stays inside the UI.
   await inspector.getByTestId("pricing-amount").fill("25000");
-  await inspector.getByTestId("pricing-reason").fill("Founder acceptance Course pricing");
-  const coursePriceResponse = adminPage.waitForResponse((response) =>
-    response.request().method() === "PUT" &&
-    new URL(response.url()).pathname === `/api/v1/admin/courses/${courseID}/price`,
+  await inspector
+    .getByTestId("pricing-reason")
+    .fill("Founder acceptance Course pricing");
+  const coursePriceResponse = adminPage.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/admin/courses/${courseID}/price`,
   );
   await inspector.getByTestId("pricing-submit").click();
   expect((await coursePriceResponse).status()).toBe(200);
-  await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Course price");
+  await expect(inspector.getByTestId("pricing-success")).toContainText(
+    "Successfully updated Course price",
+  );
 
   await inspector.getByTestId("pricing-scope-select").selectOption("SECTION");
   const sectionOption = inspector.getByTestId("pricing-section-select");
-  await expect(sectionOption.getByRole("option", { name: /Media Section.*القسم/ })).toHaveCount(1);
+  await expect(
+    sectionOption.getByRole("option", { name: /Media Section.*القسم/ }),
+  ).toHaveCount(1);
   await sectionOption.selectOption(sectionID);
   await inspector.getByTestId("pricing-amount").fill("10000");
-  await inspector.getByTestId("pricing-reason").fill("Founder acceptance Section pricing");
-  const sectionPriceResponse = adminPage.waitForResponse((response) =>
-    response.request().method() === "PUT" &&
-    new URL(response.url()).pathname === `/api/v1/admin/courses/${courseID}/sections/${sectionID}/price`,
+  await inspector
+    .getByTestId("pricing-reason")
+    .fill("Founder acceptance Section pricing");
+  const sectionPriceResponse = adminPage.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/admin/courses/${courseID}/sections/${sectionID}/price`,
   );
   await inspector.getByTestId("pricing-submit").click();
   expect((await sectionPriceResponse).status()).toBe(200);
-  await expect(inspector.getByTestId("pricing-success")).toContainText("Successfully updated Section price");
+  await expect(inspector.getByTestId("pricing-success")).toContainText(
+    "Successfully updated Section price",
+  );
 
   // 10. Request changes through the inspector with an explicit Instructor
   // reason. The Instructor resubmits the exact revision, then the Admin
   // reopens it and approves from that same submitted-only surface.
-  const requestChangesResponse = adminPage.waitForResponse((response) =>
-    response.request().method() === "POST" &&
-    new URL(response.url()).pathname === `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/request-changes`,
+  const requestChangesResponse = adminPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/admin/review/courses/${courseID}/revisions/${submittedRevisionID}/request-changes`,
   );
   await inspector.getByTestId("request-changes-inspected-revision").click();
   const changesDialog = adminPage.getByTestId("review-decision-confirm");
   await expect(changesDialog).toBeVisible();
-  await changesDialog.getByTestId("request-changes-reason").fill(CHANGE_REQUEST_REASON);
+  await changesDialog
+    .getByTestId("request-changes-reason")
+    .fill(CHANGE_REQUEST_REASON);
   await changesDialog.getByTestId("confirm-accept").click();
   expect((await requestChangesResponse).status()).toBe(200);
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("The change request was sent to the instructor.");
+  await expect(adminPage.getByTestId("review-action-success")).toContainText(
+    "The change request was sent to the instructor.",
+  );
 
   // ---------------------------------------------------------------------
   // MVP-F02 — the Instructor must be able to learn *why* the Course came
@@ -451,17 +741,26 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // The standing notice is present, and carries the Admin's exact words.
   const changeRequest = page.getByTestId("change-request-notice");
   await expect(changeRequest).toBeVisible();
-  await expect(page.getByTestId("change-request-reason")).toHaveText(CHANGE_REQUEST_REASON);
+  await expect(page.getByTestId("change-request-reason")).toHaveText(
+    CHANGE_REQUEST_REASON,
+  );
 
   // The state is explained in the Instructor's language; the wire enum is
   // still available for support, but it is not the explanation.
-  await expect(page.getByTestId("revision-state")).toHaveText("Changes requested");
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "CHANGES_REQUESTED");
+  await expect(page.getByTestId("revision-state")).toHaveText(
+    "Changes requested",
+  );
+  await expect(page.getByTestId("course-standing")).toHaveAttribute(
+    "data-revision-state",
+    "CHANGES_REQUESTED",
+  );
 
   // 10b. Another Instructor and a Student are refused the reason outright.
   // The reason travels with the owned-Course read, so refusing that read is
   // what protects it.
-  const otherInstructorAPI = await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR));
+  const otherInstructorAPI = await apiContextFor(
+    issueRotatingSession(OTHER_INSTRUCTOR),
+  );
   const otherRead = await otherInstructorAPI.get(`/api/v1/courses/${courseID}`);
   expect(
     otherRead.status(),
@@ -471,7 +770,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   const studentAPI = await apiContextFor(issueRotatingSession(STUDENT));
   const studentRead = await studentAPI.get(`/api/v1/courses/${courseID}`);
-  expect(studentRead.status(), "a Student must not read Instructor revision data").toBeGreaterThanOrEqual(400);
+  expect(
+    studentRead.status(),
+    "a Student must not read Instructor revision data",
+  ).toBeGreaterThanOrEqual(400);
   expect(await studentRead.text()).not.toContain(CHANGE_REQUEST_REASON);
 
   // A Student must also not be able to perform the Admin review decision.
@@ -504,15 +806,23 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("saved");
 
   await page.getByTestId("submit-for-review").click();
-  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Submitted. An administrator will review it");
+  await page
+    .getByTestId("submit-confirm")
+    .getByTestId("confirm-accept")
+    .click();
+  await expect(page.getByTestId("authoring-notice")).toContainText(
+    "Submitted. An administrator will review it",
+  );
 
   // 10d. The resolved change request must not linger. The server keeps
   // `review_reason` on the revision row after a resubmission, so a surface
   // that rendered on the reason instead of the state would still be telling
   // the Instructor to fix something they already fixed.
   await expect(page.getByTestId("revision-state")).toHaveText("In review");
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "PENDING_REVIEW");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute(
+    "data-revision-state",
+    "PENDING_REVIEW",
+  );
   await expect(page.getByTestId("change-request-notice")).toHaveCount(0);
 
   await otherInstructorAPI.dispose();
@@ -523,33 +833,68 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await adminPage.goto("/en/admin/catalog");
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toBeVisible();
   await adminPage.getByTestId(`inspect-review-item-${courseID}`).click();
-  const resubmittedInspector = adminPage.getByTestId("submitted-revision-inspector");
-  await expect(resubmittedInspector.getByTestId("submitted-revision-state")).toContainText("Submitted for review");
+  const resubmittedInspector = adminPage.getByTestId(
+    "submitted-revision-inspector",
+  );
+  await expect(
+    resubmittedInspector.getByTestId("submitted-revision-state"),
+  ).toContainText("Submitted for review");
 
   const adminThumbnail = resubmittedInspector.getByTestId("review-thumbnails");
-  await expect(adminThumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
-  await expect.poll(() => adminThumbnail.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
-  await adminThumbnail.screenshot({ path: testInfo.outputPath("thumbnail-admin-candidate.png") });
-  const prematureImage = await playwrightRequest.newContext({ baseURL: frontendOrigin() });
-  expect((await prematureImage.get(`/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailA}/card`)).status()).toBe(404);
+  await expect(adminThumbnail.locator("img")).toHaveAttribute(
+    "src",
+    new RegExp(thumbnailA),
+  );
+  await expect
+    .poll(() =>
+      adminThumbnail
+        .locator("img")
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBe(800);
+  await adminThumbnail.screenshot({
+    path: testInfo.outputPath("thumbnail-admin-candidate.png"),
+  });
+  const prematureImage = await playwrightRequest.newContext({
+    baseURL: frontendOrigin(),
+  });
+  expect(
+    (
+      await prematureImage.get(
+        `/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailA}/card`,
+      )
+    ).status(),
+  ).toBe(404);
   await prematureImage.dispose();
   // 11. Approve through the inspector, against the exact revision that was
   // successfully rendered and previewed above.
   await resubmittedInspector.getByTestId("approve-inspected-revision").click();
-  await adminPage.getByTestId("review-decision-confirm").getByTestId("confirm-accept").click();
-  await expect(adminPage.getByTestId("review-action-success")).toContainText("The course is published.");
+  await adminPage
+    .getByTestId("review-decision-confirm")
+    .getByTestId("confirm-accept")
+    .click();
+  await expect(adminPage.getByTestId("review-action-success")).toContainText(
+    "The course is published.",
+  );
   await expect(adminPage.getByTestId(`review-item-${courseID}`)).toHaveCount(0);
 
   const afterApproval = await admin.get("/api/v1/admin/review/queue");
   expect(afterApproval.status()).toBe(200);
-  const remaining = (await afterApproval.json()) as Array<{ course_id?: string }>;
+  const remaining = (await afterApproval.json()) as Array<{
+    course_id?: string;
+  }>;
   expect(
     remaining.some((item) => item.course_id === courseID),
     "an approved Course must leave the server's review queue",
   ).toBe(false);
 
-  const published = await admin.get(`/api/v1/admin/courses/${courseID}/price-history`);
-  expect(published.status(), "the approved Course must still be addressable by the Admin routes").toBe(200);
+  const published = await admin.get(
+    `/api/v1/admin/courses/${courseID}/price-history`,
+  );
+  expect(
+    published.status(),
+    "the approved Course must still be addressable by the Admin routes",
+  ).toBe(200);
 
   // ---------------------------------------------------------------------
   // MVP-F03 — the published Course must actually reach the public catalogue,
@@ -565,14 +910,18 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const publicPage = await publicContext.newPage();
 
   await publicPage.goto("/en/catalog");
-  await expect(publicPage.getByRole("heading", { name: "Catalogue", level: 1 })).toBeVisible();
+  await expect(
+    publicPage.getByRole("heading", { name: "Catalogue", level: 1 }),
+  ).toBeVisible();
 
   // Found the way a visitor finds it: by the human title, through the
   // catalogue's own search. No UUID, no slug typed by hand, no direct URL.
   await publicPage.getByRole("searchbox").fill(revisedTitleEn);
   await publicPage.getByRole("button", { name: "Search" }).click();
 
-  const publicCard = publicPage.getByRole("link", { name: new RegExp(escapeForRegExp(revisedTitleEn)) });
+  const publicCard = publicPage.getByRole("link", {
+    name: new RegExp(escapeForRegExp(revisedTitleEn)),
+  });
   await expect(publicCard).toBeVisible();
 
   // The catalogue entry carries the Admin- and Instructor-configured data,
@@ -585,42 +934,59 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   // 25000 fils, rendered KWD with three decimals (D-045 keeps price informational).
   await expect(publicResults).toContainText("25.000");
   // Informational only: no in-platform commerce may appear (D-045).
-  await expect(publicPage.locator("body")).not.toContainText(/add to cart|checkout|buy now/i);
+  await expect(publicPage.locator("body")).not.toContainText(
+    /add to cart|checkout|buy now/i,
+  );
 
   // 13. Opened through the catalogue's own affordance, not a constructed URL.
   await publicCard.click();
-  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(revisedTitleEn);
+  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(
+    revisedTitleEn,
+  );
   await expect(publicPage.locator("body")).toContainText("Media Section");
   const publicDetailURL = publicPage.url();
 
   // This is an anonymous course-scoped authorization: the browser supplies no
   // Asset Version identifier, and the public player receives the preview asset
   // only after the server resolves the approved live revision.
-  const publicPreviewResponse = publicPage.waitForResponse((response) =>
-    response.request().method() === "GET" &&
-    new URL(response.url()).pathname === `/api/v1/media/courses/${courseID}/preview`,
+  const publicPreviewResponse = publicPage.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname ===
+        `/api/v1/media/courses/${courseID}/preview`,
   );
   await publicPage.getByRole("button", { name: "Watch preview" }).click();
   const issuedPreview = await publicPreviewResponse;
   expect(issuedPreview.status()).toBe(200);
-  const previewAuthorization = await issuedPreview.json() as { url?: unknown };
+  const previewAuthorization = (await issuedPreview.json()) as {
+    url?: unknown;
+  };
   expect(typeof previewAuthorization.url).toBe("string");
   const publicPreviewPlayer = publicPage.getByTestId("public-preview-player");
   await expect(publicPreviewPlayer).toBeVisible();
-  await expect(publicPreviewPlayer).toHaveAttribute("src", previewAuthorization.url as string);
+  await expect(publicPreviewPlayer).toHaveAttribute(
+    "src",
+    previewAuthorization.url as string,
+  );
 
   // The sibling Lesson Version is a protected asset, not the public preview.
   // No anonymous browser session can turn preview authorization into Lesson
   // authorization or an entitlement.
-  const anonymousAPI = await playwrightRequest.newContext({ baseURL: frontendOrigin() });
-  const protectedLessonAsPreview = await anonymousAPI.get(`/api/v1/media/previews/${assetVersionID}`);
+  const anonymousAPI = await playwrightRequest.newContext({
+    baseURL: frontendOrigin(),
+  });
+  const protectedLessonAsPreview = await anonymousAPI.get(
+    `/api/v1/media/previews/${assetVersionID}`,
+  );
   expect(protectedLessonAsPreview.status()).toBeGreaterThanOrEqual(400);
   await anonymousAPI.dispose();
 
   // 14. Negative visibility. A Course the Instructor never submitted must not
   // be public. Created through the real studio so its state is genuine.
   await page.getByTestId("toggle-new-course").click();
-  await page.getByTestId("new-course-institution").selectOption({ label: "Media Test University" });
+  await page
+    .getByTestId("new-course-institution")
+    .selectOption({ label: "Media Test University" });
   await page.getByTestId("new-course-subject-search").fill("CS101");
   await expect(page.getByTestId("new-course-subject-result")).toBeVisible();
   await page.getByTestId("new-course-subject-result").click();
@@ -628,13 +994,22 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await page.getByTestId("new-course-title-ar").fill("دورة لم تُرسل");
   await page.getByTestId("new-course-title-en").fill(draftTitleEn);
   await page.getByTestId("new-course-description-ar").fill("مسودة");
-  await page.getByTestId("new-course-description-en").fill("Draft that must stay private");
+  await page
+    .getByTestId("new-course-description-en")
+    .fill("Draft that must stay private");
   await page.getByTestId("create-course").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Course created");
+  await expect(page.getByTestId("authoring-notice")).toContainText(
+    "Course created",
+  );
   await openAuthoringSections(page);
-  const draftCourseID = (await page.getByTestId("selected-course-context").getAttribute("data-course-id"))!;
+  const draftCourseID = (await page
+    .getByTestId("selected-course-context")
+    .getAttribute("data-course-id"))!;
   expect(draftCourseID).toMatch(UUID_PATTERN);
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute(
+    "data-revision-state",
+    "DRAFT",
+  );
 
   // The public API itself excludes it — this is the guarantee that matters.
   // `catalogpublic.PublishedOnly` is applied in SQL and the repository refuses
@@ -651,13 +1026,20 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     },
   });
 
-  const draftSearch = await anonymous.get(`/api/v1/catalog/courses?q=${encodeURIComponent(draftTitleEn)}`);
+  const draftSearch = await anonymous.get(
+    `/api/v1/catalog/courses?q=${encodeURIComponent(draftTitleEn)}`,
+  );
   expect(draftSearch.status()).toBe(200);
   const draftSearchBody = await draftSearch.text();
-  expect(draftSearchBody, "a DRAFT Course must not appear in public search").not.toContain(draftTitleEn);
+  expect(
+    draftSearchBody,
+    "a DRAFT Course must not appear in public search",
+  ).not.toContain(draftTitleEn);
   expect(draftSearchBody).not.toContain(draftCourseID);
 
-  const draftDirect = await anonymous.get(`/api/v1/catalog/courses/${draftCourseID}`);
+  const draftDirect = await anonymous.get(
+    `/api/v1/catalog/courses/${draftCourseID}`,
+  );
   expect(
     draftDirect.status(),
     "a direct public detail request for a DRAFT Course must not expose it",
@@ -682,13 +1064,20 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   // The refusal changed nothing: the Course is still published and still the
   // same public entity.
-  const stillPublic = await anonymous.get(new URL(publicDetailURL).pathname.replace("/en/catalog/", "/api/v1/catalog/courses/"));
+  const stillPublic = await anonymous.get(
+    new URL(publicDetailURL).pathname.replace(
+      "/en/catalog/",
+      "/api/v1/catalog/courses/",
+    ),
+  );
   expect(stillPublic.status()).toBe(200);
 
   // 16. Public does not mean unprotected. Course Details being anonymous must
   // not carry protected learning access; entitlement enforcement itself is
   // proved in the S5/S6 suites, so this is a boundary assertion only.
-  const anonymousLearn = await anonymous.get(`/api/v1/learn/courses/${courseID}`);
+  const anonymousLearn = await anonymous.get(
+    `/api/v1/learn/courses/${courseID}`,
+  );
   expect(
     anonymousLearn.status(),
     "a public Course Details page must not grant anonymous protected-learning reads",
@@ -714,13 +1103,18 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const startPanel = page.getByTestId("start-revision-panel");
   await expect(startPanel).toBeVisible();
   await expect(startPanel).toContainText("This course is published");
-  await expect(startPanel).toContainText("keeps serving until you publish your changes");
+  await expect(startPanel).toContainText(
+    "keeps serving until you publish your changes",
+  );
 
   await page.getByTestId("start-revision").click();
   await openAuthoringSections(page);
 
   // The studio moved into the new candidate, and says plainly that these edits are not live yet.
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute(
+    "data-revision-state",
+    "DRAFT",
+  );
   await expect(page.getByTestId("editing-published-notice")).toContainText(
     "Your changes remain private until you publish them",
   );
@@ -730,49 +1124,95 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
     "data-publication-mode",
     "SUBSEQUENT_PUBLICATION",
   );
-  await expect(page.getByTestId("submit-for-review")).toHaveText("Publish changes");
+  await expect(page.getByTestId("submit-for-review")).toHaveText(
+    "Publish changes",
+  );
   await expect(page.getByTestId("first-publication-note")).toHaveCount(0);
   await page.getByTestId("submission-panel").screenshot({
     path: testInfo.outputPath("publication-subsequent-publish-changes.png"),
   });
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
 
-  const candidateRevisionID = (await page.getByTestId("selected-course-context").getAttribute("data-revision-id"))!;
+  const candidateRevisionID = (await page
+    .getByTestId("selected-course-context")
+    .getAttribute("data-revision-id"))!;
   expect(candidateRevisionID).toMatch(UUID_PATTERN);
-  expect(candidateRevisionID, "the candidate must be a new revision, not the published one").not.toBe(
-    submittedRevisionID,
-  );
+  expect(
+    candidateRevisionID,
+    "the candidate must be a new revision, not the published one",
+  ).not.toBe(submittedRevisionID);
 
-  await expect(thumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
-  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
+  await expect(thumbnail.locator("img")).toHaveAttribute(
+    "src",
+    new RegExp(thumbnailA),
+  );
+  expect(
+    (await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json())
+      .thumbnail.asset_version_id,
+  ).toBe(thumbnailA);
   let releaseThumbnail!: () => void;
-  const thumbnailGate = new Promise<void>((resolve) => { releaseThumbnail = resolve; });
-  await page.route("**/api/v1/media/uploads/*/completions", async (route) => { await thumbnailGate; await route.continue(); });
+  const thumbnailGate = new Promise<void>((resolve) => {
+    releaseThumbnail = resolve;
+  });
+  await page.route("**/api/v1/media/uploads/*/completions", async (route) => {
+    await thumbnailGate;
+    await route.continue();
+  });
   await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
   await expect(thumbnail.getByRole("status")).toContainText("Processing image");
   await expect(page.getByTestId("submit-for-review")).toBeDisabled();
-  await expect(thumbnail.getByRole("button", { name: "Replace", exact: true })).toBeDisabled();
-  await expect(thumbnail.locator("img")).toHaveAttribute("src", new RegExp(thumbnailA));
-  await thumbnail.screenshot({ path: testInfo.outputPath("thumbnail-instructor-replacement.png") });
+  await expect(
+    thumbnail.getByRole("button", { name: "Replace", exact: true }),
+  ).toBeDisabled();
+  await expect(thumbnail.locator("img")).toHaveAttribute(
+    "src",
+    new RegExp(thumbnailA),
+  );
+  await thumbnail.screenshot({
+    path: testInfo.outputPath("thumbnail-instructor-replacement.png"),
+  });
   releaseThumbnail();
-  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
+  await expect(thumbnail.getByRole("status")).toContainText(
+    "Thumbnail selection saved",
+    { timeout: 30_000 },
+  );
   await page.unroute("**/api/v1/media/uploads/*/completions");
   await thumbnail.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(thumbnail.locator("img")).toHaveCount(0);
-  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
+  expect(
+    (await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json())
+      .thumbnail.asset_version_id,
+  ).toBe(thumbnailA);
   await thumbnail.locator('input[type="file"]').setInputFiles(thumbnailPath);
-  await expect(thumbnail.getByRole("status")).toContainText("Thumbnail selection saved", { timeout: 30_000 });
-  const thumbnailB = (await thumbnail.locator("img").getAttribute("src"))!.split("/").at(-2)!;
+  await expect(thumbnail.getByRole("status")).toContainText(
+    "Thumbnail selection saved",
+    { timeout: 30_000 },
+  );
+  const thumbnailB = (await thumbnail.locator("img").getAttribute("src"))!
+    .split("/")
+    .at(-2)!;
   expect(thumbnailB).not.toBe(thumbnailA);
-  expect((await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail.asset_version_id).toBe(thumbnailA);
-  expect((await anonymous.get(`/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailB}/card`)).status()).toBe(404);
+  expect(
+    (await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json())
+      .thumbnail.asset_version_id,
+  ).toBe(thumbnailA);
+  expect(
+    (
+      await anonymous.get(
+        `/api/v1/catalog/courses/${courseID}/thumbnails/${thumbnailB}/card`,
+      )
+    ).status(),
+  ).toBe(404);
 
   // Clicking again must not fork the Course: the server returns the existing candidate.
   await page.reload();
   await page.getByTestId(`owned-course-${courseID}`).click();
   await openAuthoringSections(page);
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
-  await expect(page.getByTestId("selected-course-context")).toHaveAttribute("data-revision-id", candidateRevisionID);
+  await expect(page.getByTestId("selected-course-context")).toHaveAttribute(
+    "data-revision-id",
+    candidateRevisionID,
+  );
 
   // Edited and saved through the normal builder.
   const pendingRevisionTitleEn = `${revisedTitleEn} UNPUBLISHED REVISION`;
@@ -782,7 +1222,9 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await expect(page.getByTestId("authoring-notice")).toContainText("saved");
 
   // Isolation while B is still a DRAFT: the public Course is untouched by the edit.
-  const draftStageDetail = await anonymous.get(`/api/v1/catalog/courses/${courseID}`);
+  const draftStageDetail = await anonymous.get(
+    `/api/v1/catalog/courses/${courseID}`,
+  );
   expect(draftStageDetail.status()).toBe(200);
   expect(
     await draftStageDetail.text(),
@@ -803,25 +1245,37 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
 
   // Published through the studio, not the API. No Admin is involved.
   await page.getByTestId("submit-for-review").click();
-  await page.getByTestId("submit-confirm").getByTestId("confirm-accept").click();
-  await expect(page.getByTestId("authoring-notice")).toContainText("Changes published.");
-  await expect(page.getByTestId("authoring-notice")).not.toContainText("administrator");
+  await page
+    .getByTestId("submit-confirm")
+    .getByTestId("confirm-accept")
+    .click();
+  await expect(page.getByTestId("authoring-notice")).toContainText(
+    "Changes published.",
+  );
+  await expect(page.getByTestId("authoring-notice")).not.toContainText(
+    "administrator",
+  );
 
   // Authorization: only the owning Instructor may begin a revision.
-  const otherStart = await (await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR))).put(
-    `/api/v1/courses/${courseID}/candidate`,
-  );
+  const otherStart = await (
+    await apiContextFor(issueRotatingSession(OTHER_INSTRUCTOR))
+  ).put(`/api/v1/courses/${courseID}/candidate`);
   expect(
     otherStart.status(),
     "a non-owning Instructor must not create a candidate revision",
   ).toBeGreaterThanOrEqual(400);
 
-  const studentStart = await (await apiContextFor(issueRotatingSession(STUDENT))).put(
+  const studentStart = await (
+    await apiContextFor(issueRotatingSession(STUDENT))
+  ).put(`/api/v1/courses/${courseID}/candidate`);
+  expect(
+    studentStart.status(),
+    "a Student must not create a candidate revision",
+  ).toBeGreaterThanOrEqual(400);
+
+  const anonymousStart = await anonymous.put(
     `/api/v1/courses/${courseID}/candidate`,
   );
-  expect(studentStart.status(), "a Student must not create a candidate revision").toBeGreaterThanOrEqual(400);
-
-  const anonymousStart = await anonymous.put(`/api/v1/courses/${courseID}/candidate`);
   expect(
     anonymousStart.status(),
     "an anonymous visitor must not create a candidate revision",
@@ -833,7 +1287,10 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   await openAuthoringSections(page);
   await expect(page.getByTestId("start-revision-panel")).toHaveCount(0);
   await expect(page.getByTestId("editing-published-notice")).toHaveCount(0);
-  await expect(page.getByTestId("course-standing")).toHaveAttribute("data-revision-state", "DRAFT");
+  await expect(page.getByTestId("course-standing")).toHaveAttribute(
+    "data-revision-state",
+    "DRAFT",
+  );
   await page.getByTestId(`owned-course-${courseID}`).click();
   await openAuthoringSections(page);
 
@@ -842,44 +1299,77 @@ test("C an Instructor uploads a real MP4, the worker makes it READY, and the att
   const queueAfterPublish = await admin.get("/api/v1/admin/review/queue");
   expect(queueAfterPublish.status()).toBe(200);
   expect(
-    ((await queueAfterPublish.json()) as Array<{ course_id?: string }>).some((item) => item.course_id === courseID),
+    ((await queueAfterPublish.json()) as Array<{ course_id?: string }>).some(
+      (item) => item.course_id === courseID,
+    ),
     "a routine revision of a published Course must never enter the Admin review queue",
   ).toBe(false);
 
   // The public switched, atomically and completely: the new title is served,
   // and no part of revision A remains mixed into it.
-  const publishedDetail = await anonymous.get(`/api/v1/catalog/courses/${courseID}`);
+  const publishedDetail = await anonymous.get(
+    `/api/v1/catalog/courses/${courseID}`,
+  );
   expect(publishedDetail.status()).toBe(200);
   const publishedDetailBody = await publishedDetail.text();
-  expect(publishedDetailBody, "the public Course must now be revision B").toContain("UNPUBLISHED REVISION");
+  expect(
+    publishedDetailBody,
+    "the public Course must now be revision B",
+  ).toContain("UNPUBLISHED REVISION");
 
   // Same conclusion through the rendered public page, not only the API.
   await publicPage.goto(publicDetailURL);
-  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(pendingRevisionTitleEn);
+  await expect(publicPage.getByRole("heading", { level: 1 })).toContainText(
+    pendingRevisionTitleEn,
+  );
 
   // The cover published with its revision, in the same switch.
-  const approvedThumbnail = (await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()).thumbnail;
+  const approvedThumbnail = (
+    await (await anonymous.get(`/api/v1/catalog/courses/${courseID}`)).json()
+  ).thumbnail;
   expect(approvedThumbnail.asset_version_id).toBe(thumbnailB);
   expect((await anonymous.get(approvedThumbnail.card_url)).status()).toBe(200);
   await publicPage.goto("/en/catalog");
   await publicPage.getByRole("searchbox").fill(pendingRevisionTitleEn);
   const thumbnailSearch = publicPage.waitForResponse((response) => {
     const url = new URL(response.url());
-    return url.pathname === "/api/v1/catalog/courses" && url.searchParams.get("q") === pendingRevisionTitleEn;
+    return (
+      url.pathname === "/api/v1/catalog/courses" &&
+      url.searchParams.get("q") === pendingRevisionTitleEn
+    );
   });
   await publicPage.getByRole("button", { name: "Search" }).click();
   await thumbnailSearch;
-  await expect(publicPage).toHaveURL((url) => url.searchParams.get("q") === pendingRevisionTitleEn);
-  const thumbnailCard = publicPage.getByRole("link").filter({ has: publicPage.getByRole("heading", { name: pendingRevisionTitleEn }) });
-  await expect(thumbnailCard.locator("img")).toHaveAttribute("src", approvedThumbnail.card_url);
-  await expect.poll(() => thumbnailCard.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(800);
+  await expect(publicPage).toHaveURL(
+    (url) => url.searchParams.get("q") === pendingRevisionTitleEn,
+  );
+  const thumbnailCard = publicPage.getByRole("link").filter({
+    has: publicPage.getByRole("heading", { name: pendingRevisionTitleEn }),
+  });
+  await expect(thumbnailCard.locator("img")).toHaveAttribute(
+    "src",
+    approvedThumbnail.card_url,
+  );
+  await expect
+    .poll(() =>
+      thumbnailCard
+        .locator("img")
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
+    .toBe(800);
   await expect(async () => {
     await expect(thumbnailCard.locator("img")).toBeVisible();
     await expect(thumbnailCard.getByRole("heading")).toBeVisible();
     await thumbnailCard.scrollIntoViewIfNeeded();
-    await thumbnailCard.screenshot({ path: testInfo.outputPath("thumbnail-public-desktop.png"), animations: "disabled" });
+    await thumbnailCard.screenshot({
+      path: testInfo.outputPath("thumbnail-public-desktop.png"),
+      animations: "disabled",
+    });
   }).toPass({ timeout: 10_000 });
-  await publicPage.screenshot({ path: testInfo.outputPath("thumbnail-public-page.png"), fullPage: true });
+  await publicPage.screenshot({
+    path: testInfo.outputPath("thumbnail-public-page.png"),
+    fullPage: true,
+  });
   await anonymous.dispose();
   await publicContext.close();
 

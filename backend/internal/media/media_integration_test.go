@@ -399,10 +399,11 @@ func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
 	}
 
 	processor := integrationProcessorFunc(func(_ context.Context, object ObjectVersion) (TranscodeResult, error) {
+		prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 		return TranscodeResult{
 			TrustedDurationMS: 123456,
-			OutputPrefix:      "media/" + object.AssetVersionID + "/hls",
-			Renditions:        []Rendition{{Name: "720p", StorageObjectKey: "media/" + object.AssetVersionID + "/hls/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+			OutputPrefix:      prefix,
+			Renditions:        []Rendition{{Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
 		}, nil
 	})
 	scanner, err := NewScannerAdapter(integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
@@ -427,8 +428,8 @@ func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
 	}
 	duplicateResult := TranscodeResult{
 		TrustedDurationMS: 123456,
-		OutputPrefix:      "media/" + request.AssetVersionID + "/hls",
-		Renditions:        []Rendition{{Name: "720p", StorageObjectKey: "media/" + request.AssetVersionID + "/hls/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+		OutputPrefix:      processingOutputPrefix(request.AssetVersionID, operationID),
+		Renditions:        []Rendition{{Name: "720p", StorageObjectKey: processingOutputPrefix(request.AssetVersionID, operationID) + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
 	}
 	if err := worker.CompleteTranscode(f.ctx, request.AssetVersionID, operationID, duplicateResult); err == nil {
 		t.Fatal("out-of-order transcode callback succeeded before PROCESSING")
@@ -717,7 +718,7 @@ func TestD7AdminRetryPreservesExactVersionScanHistoryAndConverges(t *testing.T) 
 		t.Fatalf("constructing error scanner worker: %v", err)
 	}
 	firstWorkID := scanWorkID(t, f.pool, request.AssetVersionID, 0)
-	if err := worker.scan(f.ctx, request.AssetVersionID, firstWorkID); err == nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, firstWorkID, false); err == nil {
 		t.Fatal("scanner error unexpectedly returned success")
 	}
 	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanError {
@@ -760,7 +761,7 @@ func TestD7AdminRetryPreservesExactVersionScanHistoryAndConverges(t *testing.T) 
 	if secondWorkID == firstWorkID {
 		t.Fatal("admin retry reused its prior scan work identity")
 	}
-	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID); err != nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID, false); err != nil {
 		t.Fatalf("passing retry scan: %v", err)
 	}
 	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanPassed {
@@ -807,7 +808,7 @@ func TestD7AdminRetryPreservesExactVersionScanHistoryAndConverges(t *testing.T) 
 	if transcodeEvents != 1 {
 		t.Fatalf("transcode events after successful retry = %d, want 1", transcodeEvents)
 	}
-	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID); err != nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, secondWorkID, false); err != nil {
 		t.Fatalf("replaying second scan work: %v", err)
 	}
 	if got := mediaState(t, f.pool, request.AssetVersionID); got == StateScanning {
@@ -853,7 +854,7 @@ func TestD7ConcurrentAdminRetryCreatesOneNewScanWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0)); err == nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0), false); err == nil {
 		t.Fatal("scanner error unexpectedly returned success")
 	}
 
@@ -949,7 +950,7 @@ func TestD7NonVideoRetryReturnsThroughScanningToReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0)); err == nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 0), false); err == nil {
 		t.Fatal("scanner error unexpectedly succeeded")
 	}
 	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateScanError {
@@ -967,7 +968,7 @@ func TestD7NonVideoRetryReturnsThroughScanningToReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 1)); err != nil {
+	if err := worker.scan(f.ctx, request.AssetVersionID, scanWorkID(t, f.pool, request.AssetVersionID, 1), false); err != nil {
 		t.Fatalf("passing non-video retry scan: %v", err)
 	}
 	if got := mediaState(t, f.pool, request.AssetVersionID); got != StateReady {
@@ -1196,6 +1197,9 @@ func TestD7ProcessingTimeoutBecomesProcessFailed(t *testing.T) {
 	}
 	if status.State != StateProcessFailed || status.Deliverable() {
 		t.Fatalf("processing timeout status=%+v; want non-deliverable PROCESS_FAILED", status)
+	}
+	if status.FailureCategory == nil || *status.FailureCategory != string(failureProcessTimeout) {
+		t.Fatalf("processing timeout category=%v, want %s", status.FailureCategory, failureProcessTimeout)
 	}
 }
 

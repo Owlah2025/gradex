@@ -9,6 +9,7 @@ func TestUploadValidationRequiresConfiguredTypeAndSizeBeforeAcceptance(t *testin
 		mutate func(*UploadRequest)
 	}{
 		{name: "unsupported content type", mutate: func(request *UploadRequest) { request.ContentType = "application/octet-stream" }},
+		{name: "unsupported WebM", mutate: func(request *UploadRequest) { request.ContentType = "video/webm" }},
 		{name: "zero size", mutate: func(request *UploadRequest) { request.SizeBytes = 0 }},
 		{name: "over configured limit", mutate: func(request *UploadRequest) { request.SizeBytes = 101 }},
 		{name: "unknown kind", mutate: func(request *UploadRequest) { request.Kind = AssetKind("OTHER") }},

@@ -659,9 +659,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("media processing progress schema = %d, want one past course thumbnails %d",
 			MediaProcessingProgressSchemaVersion, CourseThumbnailSchemaVersion)
 	}
-	if MaxSchemaVersion != MediaProcessingProgressSchemaVersion {
+	if MediaWorkLeaseSchemaVersion != MediaProcessingProgressSchemaVersion+1 {
+		t.Fatalf("MediaWorkLeaseSchemaVersion = %d, want %d",
+			MediaWorkLeaseSchemaVersion, MediaProcessingProgressSchemaVersion+1)
+	}
+	if MaxSchemaVersion != MediaWorkLeaseSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, MediaProcessingProgressSchemaVersion)
+			MaxSchemaVersion, MediaWorkLeaseSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -1935,4 +1939,183 @@ func TestCourseAccessGrantRollbackAndReUpgradeSafe(t *testing.T) {
 		INSERT INTO entitlements (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at, state)
 		VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, now() + interval '1 day', now() + interval '1 day', now(), 'ACTIVE')
 	`, studentCAccountID, courseID, badFKID)
+}
+
+// TestMediaWorkLeaseMigrationPreservesExistingReadyMedia is the D-103
+// backward-compatibility proof. Production carries READY Lesson video that
+// predates work leases entirely. 0035 must be purely additive over that data:
+// the deliverable row keeps its state, provenance, duration, and persisted
+// rendition keys, gains NULL claim columns and zeroed attempt counters, and
+// satisfies the new coherence constraint without any reprocessing. A migration
+// that quietly reset, invalidated, or re-queued live media would break playback
+// for every already-published Course.
+func TestMediaWorkLeaseMigrationPreservesExistingReadyMedia(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	// Stop one version short of D-103 so the row below is genuinely created by
+	// the pre-0035 schema rather than by a schema that already knows about leases.
+	if err := m.Migrate(uint(MediaProcessingProgressSchemaVersion)); err != nil {
+		t.Fatalf("migrating to pre-D-103 schema: %v", err)
+	}
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	const (
+		instructorID = "aaaaaaaa-0000-0000-0000-00000000aaaa"
+		courseID     = "bbbbbbbb-0000-0000-0000-00000000bbbb"
+		assetID      = "cccccccc-0000-0000-0000-00000000cccc"
+		versionID    = "dddddddd-0000-0000-0000-00000000dddd"
+		scanID       = "eeeeeeee-0000-0000-0000-00000000eeee"
+		processID    = "ffffffff-0000-0000-0000-00000000ffff"
+		legacyPrefix = "media/legacy-ready/hls"
+	)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, locale, email_verified_at)
+		VALUES ($1::uuid, 'd103-compat@example.test', 'd103-compat@example.test', 'INSTRUCTOR', 'ACTIVE', 'D-103 compat', 'en', now())
+	`, instructorID); err != nil {
+		t.Fatalf("seeding pre-D-103 instructor: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle) VALUES ($1::uuid, $2::uuid, 'DRAFT')
+	`, courseID, instructorID); err != nil {
+		t.Fatalf("seeding pre-D-103 course: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, 'PROTECTED')
+	`, assetID, instructorID, courseID); err != nil {
+		t.Fatalf("seeding pre-D-103 media asset: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_asset_versions (
+			id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes
+		) VALUES ($1::uuid, $2::uuid, 'VIDEO', 'UPLOADED', 'quarantine/legacy/source', 'object-v1', 'video/mp4', 1024)
+	`, versionID, assetID); err != nil {
+		t.Fatalf("seeding pre-D-103 media version: %v", err)
+	}
+	// Walk the same legal edges the pre-D-103 pipeline walked, so the resulting
+	// row is a real READY video rather than a state written straight into place.
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state='QUARANTINED' WHERE id=$1::uuid`, versionID); err != nil {
+		t.Fatalf("quarantining pre-D-103 media version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state='SCANNING' WHERE id=$1::uuid`, versionID); err != nil {
+		t.Fatalf("scanning pre-D-103 media version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity)
+		VALUES ($1::uuid, $2::uuid, 1, 'legacy-scan-work', 'object-v1', 'PASSED', 'legacy-scanner')
+	`, scanID, versionID); err != nil {
+		t.Fatalf("seeding pre-D-103 scan attempt: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE media_asset_versions SET state='SCAN_PASSED', successful_scan_attempt_id=$2::uuid WHERE id=$1::uuid
+	`, versionID, scanID); err != nil {
+		t.Fatalf("passing pre-D-103 scan: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_asset_versions SET state='PROCESSING' WHERE id=$1::uuid`, versionID); err != nil {
+		t.Fatalf("processing pre-D-103 media version: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO processing_attempts (id, asset_version_id, operation_id, state, output_prefix, rendition_count, trusted_duration_ms)
+		VALUES ($1::uuid, $2::uuid, 'legacy-operation', 'SUCCEEDED', $3, 1, 5400000)
+	`, processID, versionID, legacyPrefix); err != nil {
+		t.Fatalf("seeding pre-D-103 processing attempt: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		VALUES ($1::uuid, '720p', $2, 1280, 720, 2800, 5400000)
+	`, versionID, legacyPrefix+"/720p/playlist.m3u8"); err != nil {
+		t.Fatalf("seeding pre-D-103 rendition: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET state='READY', successful_processing_attempt_id=$2::uuid, trusted_duration_ms=5400000
+		WHERE id=$1::uuid
+	`, versionID, processID); err != nil {
+		t.Fatalf("readying pre-D-103 media version: %v", err)
+	}
+
+	if err := m.Migrate(uint(MediaWorkLeaseSchemaVersion)); err != nil {
+		t.Fatalf("applying 0035 over existing READY media: %v", err)
+	}
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil {
+		t.Fatalf("reading schema after 0035: %v", err)
+	}
+	if state.Version != MediaWorkLeaseSchemaVersion || state.Dirty {
+		t.Fatalf("schema after 0035 = %+v, want clean version %d", state, MediaWorkLeaseSchemaVersion)
+	}
+
+	var (
+		gotState        string
+		duration        int64
+		scanEvidence    string
+		processEvidence string
+		claimToken      *string
+		claimedAt       *time.Time
+		leaseExpiresAt  *time.Time
+		scanAttempts    int
+		processAttempts int
+		failureCategory *string
+		renditionKey    string
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT mav.state::text, mav.trusted_duration_ms,
+		       mav.successful_scan_attempt_id::text, mav.successful_processing_attempt_id::text,
+		       mav.work_claim_token, mav.work_claimed_at, mav.work_lease_expires_at,
+		       mav.scan_attempt_count, mav.processing_attempt_count, mav.last_failure_category,
+		       vr.storage_object_key
+		FROM media_asset_versions mav
+		JOIN video_renditions vr ON vr.asset_version_id = mav.id
+		WHERE mav.id = $1::uuid
+	`, versionID).Scan(&gotState, &duration, &scanEvidence, &processEvidence,
+		&claimToken, &claimedAt, &leaseExpiresAt,
+		&scanAttempts, &processAttempts, &failureCategory, &renditionKey); err != nil {
+		t.Fatalf("reading migrated READY media: %v", err)
+	}
+	if gotState != "READY" {
+		t.Fatalf("existing media state after 0035 = %q, want READY", gotState)
+	}
+	if duration != 5400000 || scanEvidence != scanID || processEvidence != processID {
+		t.Fatalf("0035 disturbed existing provenance: duration=%d scan=%s processing=%s", duration, scanEvidence, processEvidence)
+	}
+	// Legacy media keeps the object keys it was actually published with. D-103's
+	// attempt-scoped prefix applies to new work only; rewriting these would point
+	// live playback at objects that do not exist.
+	if renditionKey != legacyPrefix+"/720p/playlist.m3u8" {
+		t.Fatalf("0035 rewrote the persisted legacy rendition key: %s", renditionKey)
+	}
+	if claimToken != nil || claimedAt != nil || leaseExpiresAt != nil {
+		t.Fatalf("0035 invented a work claim on existing media: token=%v claimedAt=%v lease=%v", claimToken, claimedAt, leaseExpiresAt)
+	}
+	if scanAttempts != 0 || processAttempts != 0 {
+		t.Fatalf("0035 attempt counters = scan %d / processing %d, want 0 / 0", scanAttempts, processAttempts)
+	}
+	if failureCategory != nil {
+		t.Fatalf("0035 recorded a failure category on healthy media: %v", *failureCategory)
+	}
+
+	// The new coherence constraint must accept this untouched READY row and
+	// still reject a claim recorded against a state that owns no live work.
+	if _, err := pool.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET work_claim_token='illegal', work_claimed_at=now(), work_lease_expires_at=now()+interval '1 minute'
+		WHERE id=$1::uuid
+	`, versionID); err == nil {
+		t.Fatal("0035 accepted a work claim on a READY version")
+	}
+
+	// The recovery sweep must not treat pre-D-103 READY media as stale work.
+	var stale int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM media_asset_versions
+		WHERE state IN ('SCANNING','PROCESSING')
+		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
+	`).Scan(&stale); err != nil {
+		t.Fatalf("counting recoverable work after 0035: %v", err)
+	}
+	if stale != 0 {
+		t.Fatalf("0035 left %d rows looking like recoverable work", stale)
+	}
 }

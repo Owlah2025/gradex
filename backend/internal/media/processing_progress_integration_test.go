@@ -40,7 +40,7 @@ func (p progressReportingProcessor) TranscodeWithProgress(
 	if p.fail != nil {
 		return TranscodeResult{}, p.fail
 	}
-	prefix := "media/" + object.AssetVersionID + "/hls"
+	prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 	return TranscodeResult{
 		TrustedDurationMS: 123456,
 		OutputPrefix:      prefix,

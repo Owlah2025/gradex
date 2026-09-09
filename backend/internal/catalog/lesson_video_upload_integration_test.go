@@ -29,10 +29,14 @@ func (p lessonVideoProcessor) Transcode(_ context.Context, object media.ObjectVe
 	if p.failure != nil {
 		return media.TranscodeResult{}, p.failure
 	}
+	// D-103 scopes every output prefix to the exact processing operation and
+	// requires the canonical rendition playlist name, so the fake derives both
+	// instead of hardcoding the pre-D-103 shared path.
+	prefix := media.ProcessingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 	return media.TranscodeResult{
-		OutputPrefix: "media/" + object.AssetVersionID + "/hls", TrustedDurationMS: 60000,
+		OutputPrefix: prefix, TrustedDurationMS: 60000,
 		Renditions: []media.Rendition{{
-			Name: "720p", StorageObjectKey: "media/" + object.AssetVersionID + "/hls/720p/index.m3u8",
+			Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 			Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 60000,
 		}},
 	}, nil

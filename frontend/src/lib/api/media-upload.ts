@@ -88,6 +88,8 @@ export type MediaAssetStatus = {
   processing_stage?: ProcessingStage | null;
   processing_progress_percent?: number | null;
   processing_updated_at?: string | null;
+  /** Stable, non-sensitive reason class for a terminal failure. */
+  failure_category?: string | null;
 };
 
 /**
@@ -106,7 +108,10 @@ export function processingProgressOf(
   const percent = status.processing_progress_percent;
   if (!status.processing_stage || typeof percent !== "number") return null;
   if (!Number.isFinite(percent)) return null;
-  return { stage: status.processing_stage, percent: Math.min(100, Math.max(0, Math.round(percent))) };
+  return {
+    stage: status.processing_stage,
+    percent: Math.min(100, Math.max(0, Math.round(percent))),
+  };
 }
 
 export type LocalisedInput = { locale: "ar" | "en"; csrf: string };
@@ -122,7 +127,12 @@ export type LocalisedInput = { locale: "ar" | "en"; csrf: string };
  * `VALIDATED` is deliberately absent: it is a real state a D-088 video passes
  * through on its way to PROCESSING, so polling must continue past it.
  */
-const TERMINAL_STATES = new Set(["READY", "SCAN_FAILED", "SCAN_ERROR", "PROCESS_FAILED"]);
+const TERMINAL_STATES = new Set([
+  "READY",
+  "SCAN_FAILED",
+  "SCAN_ERROR",
+  "PROCESS_FAILED",
+]);
 
 /** Locale-aware explanation for a state the pipeline stopped at. */
 export function describeAssetState(state: string, locale: "ar" | "en"): string {
@@ -158,9 +168,14 @@ export function isTerminalState(state: string): boolean {
  * made. It deliberately duplicates only the cheap, obvious checks; it is not a
  * substitute for the server's content-signature and hash verification.
  */
-export function validateSelectedVideo(file: File, locale: "ar" | "en"): string | null {
+export function validateSelectedVideo(
+  file: File,
+  locale: "ar" | "en",
+): string | null {
   const isAr = locale === "ar";
-  if (!(ACCEPTED_VIDEO_CONTENT_TYPES as readonly string[]).includes(file.type)) {
+  if (
+    !(ACCEPTED_VIDEO_CONTENT_TYPES as readonly string[]).includes(file.type)
+  ) {
     return isAr ? "يجب اختيار ملف MP4." : "Select an MP4 video file.";
   }
   if (file.size <= 0) {
@@ -186,7 +201,9 @@ export type AssetKind = "VIDEO" | "RESOURCE" | "PREVIEW" | "THUMBNAIL";
  */
 export function resourceContentType(file: File): string | null {
   const declared = (file.type || "").toLowerCase();
-  if ((ACCEPTED_RESOURCE_CONTENT_TYPES as readonly string[]).includes(declared)) {
+  if (
+    (ACCEPTED_RESOURCE_CONTENT_TYPES as readonly string[]).includes(declared)
+  ) {
     return declared;
   }
   const name = file.name.toLowerCase();
@@ -209,7 +226,11 @@ export function validateSelectedResource(
   const isAr = locale === "ar";
   const contentType = resourceContentType(file);
   if (!contentType) {
-    return { error: isAr ? "يجب اختيار ملف PDF أو DOCX." : "Select a PDF or DOCX file." };
+    return {
+      error: isAr
+        ? "يجب اختيار ملف PDF أو DOCX."
+        : "Select a PDF or DOCX file.",
+    };
   }
   if (file.size <= 0) {
     return { error: isAr ? "الملف فارغ." : "The selected file is empty." };
@@ -242,7 +263,7 @@ export async function beginUpload(
     {
       course_id: input.courseID,
       lesson_id: input.lessonID,
-	  revision_id: input.revisionID,
+      revision_id: input.revisionID,
       kind: input.kind,
       content_type: input.contentType,
       size_bytes: input.sizeBytes,
@@ -250,7 +271,9 @@ export async function beginUpload(
   );
   if (ticket === null) {
     throw new Error(
-      input.locale === "ar" ? "لم يصدر الخادم تصريح رفع" : "The server issued no upload ticket",
+      input.locale === "ar"
+        ? "لم يصدر الخادم تصريح رفع"
+        : "The server issued no upload ticket",
     );
   }
   return ticket;
@@ -374,11 +397,17 @@ export function uploadFileToStorage(
         onProgress(event.loaded / event.total);
       }
     };
-    request.onerror = () => reject(new Error("The storage upload could not be completed."));
-    request.onabort = () => reject(new Error("The storage upload was cancelled."));
+    request.onerror = () =>
+      reject(new Error("The storage upload could not be completed."));
+    request.onabort = () =>
+      reject(new Error("The storage upload was cancelled."));
     request.onload = () => {
       if (request.status < 200 || request.status >= 300) {
-        reject(new Error(`The storage upload was rejected (HTTP ${request.status}).`));
+        reject(
+          new Error(
+            `The storage upload was rejected (HTTP ${request.status}).`,
+          ),
+        );
         return;
       }
       try {
@@ -399,7 +428,10 @@ export function uploadFileToStorage(
 
 /** SHA-256 over the file's bytes, as lowercase hex. */
 export async function sha256Hex(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await file.arrayBuffer(),
+  );
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
@@ -440,7 +472,9 @@ export async function completeUpload(
   return result;
 }
 
-export type LessonVideoCompletionResult = CompletionResult & { selected: boolean };
+export type LessonVideoCompletionResult = CompletionResult & {
+  selected: boolean;
+};
 
 /**
  * Completes an exact Lesson-video upload and durably selects it in one
@@ -491,7 +525,8 @@ export async function completeAndSelectLessonVideo(
   try {
     return await send();
   } catch (error) {
-    if (error instanceof ProblemError && error.problem.status < 500) throw error;
+    if (error instanceof ProblemError && error.problem.status < 500)
+      throw error;
   }
   return send();
 }
@@ -556,7 +591,8 @@ export async function completeAndSelectPublicPreview(
     return await send();
   } catch (error) {
     // A 4xx is a decision, not a hiccup. Retrying it would only repeat it.
-    if (error instanceof ProblemError && error.problem.status < 500) throw error;
+    if (error instanceof ProblemError && error.problem.status < 500)
+      throw error;
   }
   return send();
 }
@@ -571,7 +607,11 @@ export async function getMediaAssetStatus(
     locale,
   );
   if (status === null) {
-    throw new Error(locale === "ar" ? "تعذر قراءة حالة الوسائط" : "Unable to read the media status");
+    throw new Error(
+      locale === "ar"
+        ? "تعذر قراءة حالة الوسائط"
+        : "Unable to read the media status",
+    );
   }
   return status;
 }
@@ -618,7 +658,11 @@ export async function waitForProcessing(
 
   for (;;) {
     if (options.signal?.aborted) {
-      throw new Error(locale === "ar" ? "تم إيقاف المتابعة" : "Processing was no longer being watched");
+      throw new Error(
+        locale === "ar"
+          ? "تم إيقاف المتابعة"
+          : "Processing was no longer being watched",
+      );
     }
     const status = await getMediaAssetStatus(assetVersionID, locale);
     options.onState?.(status.state);

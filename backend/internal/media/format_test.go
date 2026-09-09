@@ -276,6 +276,20 @@ func TestWebMDetectionMatchesRealEncoderOutput(t *testing.T) {
 	}
 }
 
+func TestSupportedVideoContainersUseStoredBytesAsAuthority(t *testing.T) {
+	mp4 := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 1}
+	mov := []byte{0, 0, 0, 20, 'f', 't', 'y', 'p', 'q', 't', ' ', ' ', 0, 0, 0, 0, 'q', 't', ' ', ' '}
+	if !contentMatchesDeclaredType(mp4, "video/mp4") {
+		t.Fatal("stored MP4 bytes did not satisfy the MP4 declaration")
+	}
+	if !contentMatchesDeclaredType(mov, "video/quicktime") {
+		t.Fatal("stored QuickTime bytes did not satisfy the QuickTime declaration")
+	}
+	if contentMatchesDeclaredType(realFFmpegWebMPrefix, "video/mp4") {
+		t.Fatal("stored WebM bytes satisfied an MP4 declaration")
+	}
+}
+
 // TestWebMDetectionStaysConservative keeps the widened detection from turning
 // neighbouring or unknown byte sequences into WebM content-type mismatches.
 func TestWebMDetectionStaysConservative(t *testing.T) {

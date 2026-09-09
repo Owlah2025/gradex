@@ -29,6 +29,10 @@ func (*timeoutProcessingStore) PutObject(context.Context, string, []byte, string
 	return errors.New("processor must time out before writing HLS output")
 }
 
+func (*timeoutProcessingStore) HeadObject(context.Context, string) (int64, bool, error) {
+	return 0, false, errors.New("processor must time out before verifying HLS output")
+}
+
 func (s *timeoutProcessingStore) DeletePrefix(_ context.Context, prefix string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,14 +82,16 @@ func TestFFmpegProcessorBoundsCommandContextAndCleansTimedOutOutput(t *testing.T
 			ctx, cancel := tc.context()
 			defer cancel()
 			started := time.Now()
-			if _, err := processor.Transcode(ctx, ObjectVersion{AssetVersionID: "version-1", StorageObjectKey: "quarantine/version-1", StorageObjectVersion: "object-v1"}); err == nil {
+			operationID := "operation-1"
+			if _, err := processor.Transcode(ctx, ObjectVersion{AssetVersionID: "version-1", StorageObjectKey: "quarantine/version-1", StorageObjectVersion: "object-v1", ProcessingOperationID: operationID}); err == nil {
 				t.Fatal("timed-out processor unexpectedly succeeded")
 			}
 			if elapsed := time.Since(started); elapsed > time.Second {
 				t.Fatalf("CommandContext was not bounded; processing took %s", elapsed)
 			}
-			if got := store.deletedPrefixes(); len(got) != 1 || got[0] != "media/version-1/hls" {
-				t.Fatalf("partial output cleanup = %v, want [media/version-1/hls]", got)
+			wantPrefix := processingOutputPrefix("version-1", operationID)
+			if got := store.deletedPrefixes(); len(got) != 1 || got[0] != wantPrefix {
+				t.Fatalf("partial output cleanup = %v, want [%s]", got, wantPrefix)
 			}
 		})
 	}
