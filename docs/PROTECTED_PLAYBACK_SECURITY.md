@@ -31,11 +31,11 @@ attributable to the account that made them**.
 ```
 Entitlement authorization          — evaluated per request, immediately before signing
         +
-Short-lived playback session       — HMAC-signed, Student-bound, expiring
+Duration-bounded playback session  — HMAC-signed, Student/Lesson/version-bound, expiring
         +
 Protected HLS manifest             — rendered by the API, never a storage URL
         +
-Expiring signed segments           — presigned private-object URLs, direct from storage
+Expiring signed segments           — trusted duration plus configured grace, direct from storage
         +
 Student-specific dynamic watermark — server-issued identity drawn over the picture
         +
@@ -49,6 +49,18 @@ Playback issuance rate limiting    — per Student and per source address, fail-
 The first four layers are access control: they decide **who may watch, what exactly, and for how
 long**. The last four are deterrence and attribution: they do not decide access, and they are not
 security boundaries.
+
+For VOD, the API rewrites the rendition playlist with every segment URL at issuance. The playback
+session and those URLs therefore expire after the Asset Version's trusted duration plus
+`PLAYBACK_URL_EXPIRY` (five minutes by default), rather than after a fixed five minutes. A 90-minute
+lecture receives a 95-minute capability and does not fail midway. Identity, exact target, READY
+state, and entitlement are checked again whenever the API issues a master or rendition playlist;
+an already-issued storage URL remains a bearer capability until its absolute expiry.
+
+That lifetime is clamped. `ffprobe` reports the duration a container declares, so a crafted upload
+could otherwise mint a capability lasting far longer than its bytes justify. A duration that is
+non-positive, exceeds the 12-hour maximum, or would overflow the computed lifetime yields the
+configured grace alone. No client-supplied value reaches this calculation.
 
 ## The watermark
 

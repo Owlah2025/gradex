@@ -1,5 +1,14 @@
 # Gradex Launch Status
 
+> **2026-09-09 — D-103 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Video-pipeline hardening was built
+> from exact production base `b8dea967196de68914440b2092cd80daf85d9546` under [D-103](../DECISIONS.md#d-103--existing-video-pipeline-uses-durable-work-leases-and-attempt-scoped-output). It adds the single additive migration
+> `0035_media_work_leases`; no production, deployment, or push action is authorized. Reviewer status
+> is **PENDING / UNASSIGNED**, so this work is not approved and does not change the independently
+> reviewed historical range recorded below. Implementation and known limitations are documented in
+> [`2026-09-09-video-pipeline-hardening-design.md`](../superpowers/specs/2026-09-09-video-pipeline-hardening-design.md).
+>
+> ---
+
 > **2026-08-12 — CURRENT AUTHORITY. The integrated remediation software is independently approved at
 > frozen head `2c43b90fcf7a5c5913f42412fad5369911f781aa`.** [D-086](../DECISIONS.md#d-086--the-integrated-remediation-tree-is-independently-approved-one-post-review-test-fixture-correction-is-authorized)
 > closes D-084's bounded remediation and review requirement. It does not close production release,

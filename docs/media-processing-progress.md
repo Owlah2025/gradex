@@ -63,6 +63,12 @@ Progress lives on `media_asset_versions` (migration `0034_media_processing_progr
 | `processing_updated_at` | When the observation was taken |
 | `processing_attempt_token` | The operation identity of the attempt these numbers describe |
 
+Migration `0035_media_work_leases` adds the separate durable execution claim:
+`work_claim_token`, `work_claimed_at`, `work_lease_expires_at`, stage-specific
+attempt counts, and `last_failure_category`. The progress token prevents a late
+observation; the work token also prevents a late READY transition and lets the
+worker recover an expired claim.
+
 All four are written together or not at all. Existing rows are left null: an
 asset that was already `READY` has nothing to report, and one that was mid-flight
 reports nothing until its next attempt writes an observation — which is the truth,
@@ -88,8 +94,10 @@ describe how far an attempt has got.
   after being replaced changes nothing.
 - `READY` sets 100 in the same statement that makes the version deliverable. No
   reader ever sees a deliverable asset reporting partial progress.
-- `PROCESS_FAILED` retains the last measured point — it says how far the attempt
-  got — while the state makes it unambiguous that nothing is still running.
+- A processor-reported terminal `PROCESS_FAILED` retains the last measured point
+  — it says how far the attempt got — while the state makes it unambiguous that
+  nothing is still running. An expired/crashed attempt clears the observation,
+  because its final measured point is not a live run and may be retried.
 - An Admin retry clears the observation outright, along with the state.
 
 ## Throttling
@@ -120,13 +128,16 @@ GET /api/v1/media/assets/{assetVersionID}
   "deliverable": false,
   "processing_stage": "TRANSCODING",
   "processing_progress_percent": 42,
-  "processing_updated_at": "2026-09-06T10:31:04Z"
+  "processing_updated_at": "2026-09-06T10:31:04Z",
+  "failure_category": null
 }
 ```
 
-The three fields are additive and nullable. All three are null together until an
+The progress fields are additive and nullable. All three are null together until an
 attempt has measured something, so a client can distinguish "no observation yet"
 — an indeterminate bar — from "0% done" — a determinate one at zero.
+`failure_category` is also nullable and contains only a stable, non-sensitive
+reason class; it never contains FFmpeg output, an object key, or a signed URL.
 
 Authorization is unchanged and is the asset's own: the owning Instructor or an
 Admin. Progress is asset state, so it is behind exactly the gate the asset is

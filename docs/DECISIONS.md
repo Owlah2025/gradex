@@ -3970,3 +3970,44 @@ fields and workflow disclosures remain intact.
 **Source:** D-102 implementation range beginning at production base
 `1cb6eb3ec21ef0afedeeafee7515e17c0991a70c`; see
 `docs/superpowers/specs/2026-09-08-section-lesson-reordering-v1-design.md`.
+
+## D-103 — Existing video pipeline uses durable work leases and attempt-scoped output
+
+**Date:** 2026-09-09
+**Status:** Implemented pending independent review. Reviewer unassigned; no approval is implied.
+
+**Decision:** Harden the existing direct-storage/PostgreSQL-outbox/Asynq/FFmpeg pipeline rather than
+replace it. One additive migration, `0035_media_work_leases`, records claim token/time/expiry,
+stage-specific attempt counts, and a bounded failure category. Scan and processing handlers use the
+configured 15-minute default work timeout; leases add one minute of persistence grace. Expired work
+is recovered through the existing legal media states and outbox with a maximum of three stage
+attempts and 5-second, 30-second, then 2-minute availability delays.
+
+Every new HLS output prefix is scoped to the immutable Asset Version and a SHA-256-derived processing
+operation. The worker validates the local manifest/segment set, uploads the master last, HEAD-checks
+each stored object, and conditionally marks READY only while the same operation token owns
+PROCESSING. A stale worker can therefore leave, at worst, an isolated cleanup candidate; it cannot
+overwrite a new attempt, install renditions, or publish READY.
+
+The protected HLS model remains a stateless Student/Lesson/Asset-Version session plus presigned
+segments. Its lifetime is trusted media duration plus `PLAYBACK_URL_EXPIRY` (default five minutes),
+because the VOD playlist contains all segment capabilities at issuance and a fixed five-minute bound
+breaks longer lectures. Entitlement and exact target are re-evaluated when API manifests are issued;
+an already issued third-party segment URL remains usable until its absolute expiry. Because trusted
+duration originates from a container the uploader controls, the derived lifetime is clamped to a
+12-hour maximum and falls back to the configured grace for any non-positive, absurd, or overflowing
+duration. Anonymous public preview and Admin exact-candidate policies remain separate and unchanged
+in scope.
+
+The full state machine, pipeline, failure matrix, replacement behavior, retry semantics, security
+boundary, and known retention limitations are recorded in
+[`2026-09-09-video-pipeline-hardening-design.md`](superpowers/specs/2026-09-09-video-pipeline-hardening-design.md).
+
+**Database:** One additive, backwards-compatible migration: `0035_media_work_leases`. Existing READY
+media is unchanged and continues using its persisted source/rendition keys without reprocessing.
+
+**Deployment:** Not authorized. Production was not touched and no push is authorized by this
+decision.
+
+**Source:** D-103 implementation branch beginning at exact production base
+`b8dea967196de68914440b2092cd80daf85d9546`.
