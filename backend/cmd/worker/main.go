@@ -61,7 +61,7 @@ func main() {
 	// unstarted worker is visible; a silently non-processing one is not.
 	{
 		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
-		err := db.CheckSchemaAtLeast(startupCtx, pool, db.MediaProcessingProgressSchemaVersion)
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.MediaWorkLeaseSchemaVersion)
 		cancel()
 		if err != nil {
 			exitWorker(logger, "media_schema_check", logging.ErrorClassOf(err))
@@ -181,6 +181,11 @@ func main() {
 		defer close(dispatcherDone)
 		runMediaDispatcher(ctx, dispatcher, logger)
 	}()
+	mediaRecoveryDone := make(chan struct{})
+	go func() {
+		defer close(mediaRecoveryDone)
+		runMediaRecovery(ctx, worker, logger)
+	}()
 	emailDispatcherDone := make(chan struct{})
 	go func() {
 		defer close(emailDispatcherDone)
@@ -193,6 +198,7 @@ func main() {
 	logger.WorkerLifecycle(logging.WorkerDraining)
 	server.Shutdown()
 	<-dispatcherDone
+	<-mediaRecoveryDone
 	<-emailDispatcherDone
 	<-thumbnailCleanupDone
 	logger.WorkerLifecycle(logging.WorkerStopped)
@@ -294,6 +300,23 @@ func runMediaDispatcher(ctx context.Context, dispatcher *media.Dispatcher, logge
 		if _, err := dispatcher.DispatchPending(ctx, 50); err != nil {
 			logger.WorkerFailed(logging.WorkerFailureEvent{
 				Operation: "media_outbox_dispatch", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runMediaRecovery(ctx context.Context, worker *media.Worker, logger *logging.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := worker.RecoverStale(ctx, 25); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "media_stale_work_recovery", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
 			})
 		}
 		select {

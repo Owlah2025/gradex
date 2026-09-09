@@ -288,7 +288,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // must fail closed instead, which is what keeps a half-migrated deployment out
 // of the load balancer rather than into it.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.MediaProcessingProgressSchemaVersion
+	return db.MediaWorkLeaseSchemaVersion
 }
 
 func buildLearningFoundation(

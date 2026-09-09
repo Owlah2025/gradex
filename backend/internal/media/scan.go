@@ -33,6 +33,10 @@ type ObjectVersion struct {
 	AssetVersionID       string
 	StorageObjectKey     string
 	StorageObjectVersion string
+	// ProcessingOperationID is set only at the Processor boundary. It scopes
+	// output to one attempt so a worker that outlives its lease cannot overwrite
+	// a newer attempt's canonical object set.
+	ProcessingOperationID string
 }
 
 func (o ObjectVersion) valid() bool {

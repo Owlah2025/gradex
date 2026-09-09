@@ -208,6 +208,7 @@ func (h *mediaHandlers) status(c *gin.Context) {
 		"processing_stage":            status.ProcessingStage,
 		"processing_progress_percent": status.ProcessingProgressPercent,
 		"processing_updated_at":       status.ProcessingUpdatedAt,
+		"failure_category":            status.FailureCategory,
 	})
 }
 

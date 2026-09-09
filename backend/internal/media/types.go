@@ -63,6 +63,11 @@ var (
 	ErrConflict               = errors.New("media state conflict")
 	ErrUnavailable            = errors.New("media dependency unavailable")
 	ErrConcurrentModification = errors.New("media concurrent modification")
+	ErrStorageUnavailable     = errors.New("media storage unavailable")
+	ErrInvalidMedia           = errors.New("invalid media")
+	ErrProcessTimeout         = errors.New("media processing timeout")
+	ErrTranscodeFailed        = errors.New("media transcode failed")
+	ErrRetryScheduled         = errors.New("media retry scheduled")
 )
 
 // ContentTypeMismatchError is returned only when the stored bytes are a
@@ -159,6 +164,7 @@ type AssetStatus struct {
 	ProcessingStage           *ProcessingStage
 	ProcessingProgressPercent *int
 	ProcessingUpdatedAt       *time.Time
+	FailureCategory           *string
 }
 
 func (s AssetStatus) Deliverable() bool { return s.State.Deliverable() }
@@ -258,3 +264,8 @@ type OutOfBandScanEvidence struct {
 }
 
 const DefaultProcessingTimeout = 15 * time.Minute
+
+const (
+	DefaultWorkLeaseGrace = time.Minute
+	MaxWorkAttempts       = 3
+)

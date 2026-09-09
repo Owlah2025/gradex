@@ -840,7 +840,9 @@ func (s *Service) quarantineUpload(ctx context.Context, tx pgx.Tx, completion up
 		return s.applyTrustedValidation(ctx, tx, completion, "upload:"+request.ProviderEventID)
 	}
 
-	if err := s.appendScanWork(ctx, tx, request.AssetVersionID, string(completion.kind), request.ProviderEventID); err != nil {
+	if err := s.appendScanWork(ctx, tx, workSchedule{
+		assetVersionID: request.AssetVersionID, kind: completion.kind, correlation: request.ProviderEventID,
+	}); err != nil {
 		return "", err
 	}
 	if err := appendMediaAudit(ctx, tx, request.OwnerAccountID, "INSTRUCTOR", "MEDIA_UPLOAD_COMPLETED", request.AssetVersionID, "Direct upload completed into quarantine", map[string]any{"state": string(StateQuarantined)}); err != nil {
@@ -982,12 +984,13 @@ func (s *Service) GetStatus(ctx context.Context, versionID string, viewer Viewer
 		SELECT mav.id::text, mav.logical_asset_id::text, mav.kind, mav.state,
 		       mav.size_bytes, mav.trusted_duration_ms, mav.created_at,
 		       mav.processing_stage, mav.processing_progress_percent, mav.processing_updated_at,
+		       mav.last_failure_category,
 		       ma.owner_account_id::text, viewer.role, viewer.status
 		FROM media_asset_versions mav
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id
 		JOIN accounts viewer ON viewer.id = $2::uuid
 		WHERE mav.id = $1::uuid
-	`, versionID, viewer.AccountID).Scan(&status.AssetVersionID, &status.LogicalAssetID, &status.Kind, &status.State, &status.SizeBytes, &status.TrustedDurationMS, &status.CreatedAt, &stage, &percent, &status.ProcessingUpdatedAt, &owner, &viewerRole, &viewerStatus)
+	`, versionID, viewer.AccountID).Scan(&status.AssetVersionID, &status.LogicalAssetID, &status.Kind, &status.State, &status.SizeBytes, &status.TrustedDurationMS, &status.CreatedAt, &stage, &percent, &status.ProcessingUpdatedAt, &status.FailureCategory, &owner, &viewerRole, &viewerStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return AssetStatus{}, ErrNotFound
 	}
@@ -1131,7 +1134,13 @@ func (s *Service) applyRetry(ctx context.Context, tx pgx.Tx, request RetryReques
 		    processing_stage = NULL,
 		    processing_progress_percent = NULL,
 		    processing_updated_at = NULL,
-		    processing_attempt_token = NULL
+		    processing_attempt_token = NULL,
+		    work_claim_token = NULL,
+		    work_claimed_at = NULL,
+		    work_lease_expires_at = NULL,
+		    scan_attempt_count = 0,
+		    processing_attempt_count = 0,
+		    last_failure_category = NULL
 		WHERE id = $1::uuid`, request.AssetVersionID); err != nil {
 		return fmt.Errorf("resetting media version for retry: %w", err)
 	}
@@ -1152,7 +1161,9 @@ func (s *Service) applyRetry(ctx context.Context, tx pgx.Tx, request RetryReques
 // quarantine and reports the state it reached.
 func (s *Service) reestablishRetryEvidence(ctx context.Context, tx pgx.Tx, request RetryRequest, target retryTarget) (AssetVersionState, error) {
 	if !target.trusted {
-		if err := s.appendScanWork(ctx, tx, request.AssetVersionID, string(target.kind), "admin-retry"); err != nil {
+		if err := s.appendScanWork(ctx, tx, workSchedule{
+			assetVersionID: request.AssetVersionID, kind: target.kind, correlation: "admin-retry",
+		}); err != nil {
 			return "", err
 		}
 		return StateQuarantined, nil
@@ -1211,18 +1222,8 @@ func (s *Service) requireCourseOwner(ctx context.Context, tx pgx.Tx, courseID, o
 	return nil
 }
 
-func (s *Service) appendScanWork(ctx context.Context, tx pgx.Tx, assetVersionID, kind, correlation string) error {
-	eventID := uuid.NewString()
-	_, err := s.outbox.Append(ctx, tx, outbox.Event{
-		ID: eventID, Type: "media.scan_requested", SchemaVersion: 1,
-		SourceModule: mediaSourceModule, AggregateType: "MEDIA_ASSET_VERSION",
-		AggregateID: assetVersionID, AggregateRevision: 1, CorrelationID: correlation,
-		SafePayload: map[string]any{"asset_version_id": assetVersionID, "kind": kind, "scan_work_id": eventID},
-	}, ScanWork{AssetVersionID: assetVersionID, ScanWorkID: eventID})
-	if err != nil {
-		return fmt.Errorf("writing media scan outbox intent: %w", err)
-	}
-	return nil
+func (s *Service) appendScanWork(ctx context.Context, tx pgx.Tx, schedule workSchedule) error {
+	return appendScanWorkAt(ctx, tx, s.outbox, schedule)
 }
 
 func appendMediaAudit(ctx context.Context, tx pgx.Tx, actorID, actorRole, action, targetID, reason string, metadata map[string]any) error {
