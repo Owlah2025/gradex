@@ -1315,8 +1315,438 @@ apply_release() {
   note "application release $release is healthy on unchanged schema $schema_version (target max $target_max_schema) and provenance"
 }
 
+# ---------------------------------------------------------------------------
+# apply-schema-release — the one sanctioned path for a schema-ADVANCING release.
+#
+# WHY THIS IS NOT apply-release
+#   `apply_release` above is deliberately application-only. It asserts the live
+#   schema is <= the target image maximum, recreates api, worker and frontend
+#   TOGETHER, and never runs a migration. That is exactly right for a release
+#   that changes code on an unchanged schema, and exactly wrong for one that
+#   moves the schema: it would recreate the new worker while the schema is still
+#   the old one, and the migration would never run at all.
+#
+# WHY THIS IS NOT up-core
+#   `start_core` runs the migrate one-shot while the PREVIOUS api and worker are
+#   still running, then reconciles the application tier. For a release like D-103
+#   — where the old and new binaries disagree about who owns in-flight
+#   SCANNING/PROCESSING media work — that window is the fault: an old worker
+#   observing a new schema, or two workers overlapping, reintroduces exactly the
+#   duplicate-finalization the lease model exists to prevent.
+#
+# WHAT THIS COMMAND ENCODES
+#   The reviewed forward order from docs/launch/RUNBOOK.md, mechanically:
+#
+#     backup -> stop old worker -> stop old api -> prove quiescence ->
+#     migrate with the TARGET image -> verify schema -> start new api ->
+#     prove api readiness -> start new worker -> start new frontend -> verify
+#
+#   THE OLD WORKER AND THE NEW WORKER NEVER RUN CONCURRENTLY. That is proven
+#   twice, from container state, not printed as advice: once after the stop, and
+#   again immediately before the new worker is created.
+#
+#   A maintenance window is accepted on purpose. This command takes the API down
+#   before the migration and brings it back afterwards. There is no mixed-schema
+#   availability strategy here, and one must not be added casually: correctness
+#   first while the schema moves.
+#
+#   It never runs a DOWN migration. `gradex-migrate down` is refused in
+#   production by cmd/migrate itself, the production backend image does not even
+#   expose it, and the supervised 0035->0034 procedure lives in the runbook under
+#   human control. No flag here weakens any of that.
+schema_release_note() {
+  note "schema-release: $*"
+}
+
+# Every failure boundary says the same three things: where it stopped, what is
+# true now, and where the operator goes next. Nothing is repaired automatically.
+schema_release_abort() {
+  local stage="$1" message="$2" state="$3"
+  note "schema release FAILED at $stage: $message"
+  note "current state: $state"
+  note "recovery and the supervised schema rollback: docs/launch/RUNBOOK.md"
+  exit 1
+}
+
+schema_release_image_revision() {
+  docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1"
+}
+
+schema_release_container_image_revision() {
+  local container="$1" image
+  image="$(docker inspect --format '{{.Config.Image}}' "$container")" || return 1
+  [ -n "$image" ] || return 1
+  schema_release_image_revision "$image"
+}
+
+# Running containers of one Compose service in THIS project, by Compose's own
+# labels rather than by name. A stray or duplicated worker that Compose is no
+# longer tracking still carries the labels, so it is still seen here.
+schema_release_running_service_containers() {
+  docker ps --quiet \
+    --filter "label=com.docker.compose.project=$S12_PROJECT" \
+    --filter "label=com.docker.compose.service=$1"
+}
+
+# Proof, from container state, that no container of $1 is running. An absent
+# container satisfies this; a container that cannot be inspected does not.
+schema_release_assert_stopped() {
+  local service="$1" container running
+  running="$(schema_release_running_service_containers "$service")" || return 1
+  [ -z "$running" ] || return 1
+  container="$(service_id "$service")" || return 1
+  if [ -z "$container" ]; then
+    schema_release_note "$service has no container in project $S12_PROJECT"
+    return 0
+  fi
+  running="$(docker inspect --format '{{.State.Running}}' "$container")" || return 1
+  [ "$running" = false ] || return 1
+  schema_release_note "$service container $container is stopped (Running=false)"
+}
+
+# wait_for_status and wait_for_completion above call die and exit immediately.
+# This command must attribute a timeout to the boundary it happened at, so it
+# uses status-returning twins instead of exiting from inside a helper.
+schema_release_wait_status() {
+  local service="$1" wanted="$2" attempts=0 container status
+  container="$(service_id "$service")" || return 1
+  [ -n "$container" ] || return 1
+  while [ "$attempts" -lt 120 ]; do
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")" || return 1
+    [ "$status" = "$wanted" ] && return 0
+    case "$status" in
+      exited | dead | unhealthy)
+        compose logs --no-color "$service" >&2 || true
+        return 1
+        ;;
+    esac
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  return 1
+}
+
+schema_release_wait_completion() {
+  local service="$1" attempts=0 container status exit_code
+  container="$(service_id "$service")" || return 1
+  [ -n "$container" ] || return 1
+  while [ "$attempts" -lt 120 ]; do
+    status="$(docker inspect --format '{{.State.Status}}' "$container")" || return 1
+    if [ "$status" = exited ]; then
+      exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container")" || return 1
+      if [ "$exit_code" != 0 ]; then
+        compose logs --no-color "$service" >&2 || true
+        return 1
+      fi
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 2
+  done
+  return 1
+}
+
+schema_release_schema_state() {
+  docker exec "$1" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;"
+}
+
+# Optional post-migration object assertions, supplied by the operator as
+# `table.column` entries so this command stays generic. Each entry is matched
+# against a strict identifier pattern before it reaches SQL, so nothing an
+# operator types can become anything but an identifier comparison. For D-103 the
+# runbook names the exact value to pass.
+schema_release_assert_expected_columns() {
+  local postgres_id="$1" spec="${GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS:-}"
+  local entry table column present
+  if [ -z "$spec" ]; then
+    schema_release_note "no expected-column assertions requested (GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS is empty)"
+    return 0
+  fi
+  local IFS=,
+  # shellcheck disable=SC2086 # deliberate word splitting on the comma-separated list
+  set -- $spec
+  IFS=' '
+  for entry in "$@"; do
+    if ! [[ "$entry" =~ ^([a-z_][a-z0-9_]{0,62})\.([a-z_][a-z0-9_]{0,62})$ ]]; then
+      note "GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS entry is not a table.column identifier: $entry"
+      return 1
+    fi
+    table="${BASH_REMATCH[1]}"
+    column="${BASH_REMATCH[2]}"
+    present="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+      --tuples-only --no-align --command \
+      "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '$table' AND column_name = '$column';")" || return 1
+    [ "$present" = 1 ] || {
+      note "expected column $table.$column is absent after the migration"
+      return 1
+    }
+    schema_release_note "expected column $table.$column exists"
+  done
+}
+
+# Read-only observation. This command never mutates a media row and never
+# refuses a release over in-flight work; it makes the work visible before the
+# maintenance window so the operator decides with the facts in hand.
+schema_release_report_media_in_flight() {
+  local postgres_id="$1" counts scanning processing
+  if ! counts="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command \
+    "SELECT count(*) FILTER (WHERE state = 'SCANNING')::text || '|' || count(*) FILTER (WHERE state = 'PROCESSING')::text FROM media_asset_versions;")"; then
+    note "WARNING: in-flight media work could not be observed before maintenance"
+    return 0
+  fi
+  IFS='|' read -r scanning processing <<<"$counts"
+  if ! [[ "$scanning" =~ ^[0-9]+$ ]] || ! [[ "$processing" =~ ^[0-9]+$ ]]; then
+    note "WARNING: in-flight media observation returned an unreadable result: $counts"
+    return 0
+  fi
+  schema_release_note "in-flight media before maintenance: SCANNING=$scanning PROCESSING=$processing"
+  if [ "$scanning" != 0 ] || [ "$processing" != 0 ]; then
+    note "WARNING: media work is in flight (SCANNING=$scanning PROCESSING=$processing); the maintenance window will interrupt it and the new worker will recover it under the new lease semantics"
+  fi
+}
+
+apply_schema_release() {
+  [ "$#" = 3 ] || die "usage: apply-schema-release MANIFEST FROM_SCHEMA TO_SCHEMA"
+  local manifest="$1" from_schema="$2" to_schema="$3"
+  require_tools
+  load_environment
+  validate_environment
+
+  local release backend frontend proof image
+  local rollback_release rollback_backend rollback_frontend rollback_proof rollback_max
+  local postgres_id state schema_version schema_dirty target_max
+  local backup_started_at backup_completed_at api_id worker_id frontend_id readiness revision
+  local service status restarts
+
+  # ---- preconditions. Nothing is stopped and nothing is mutated below this
+  # ---- block; every failure here leaves production exactly as it was found.
+  [[ "$from_schema" =~ ^[0-9]{1,6}$ ]] || die "FROM_SCHEMA must be a schema version number"
+  [[ "$to_schema" =~ ^[0-9]{1,6}$ ]] || die "TO_SCHEMA must be a schema version number"
+  # One controlled forward step. A 34 -> 36 jump is not refused because it is
+  # impossible, but because nobody has reviewed what two migrations do to a live
+  # database in one maintenance window. Widening this needs its own review.
+  [ "$to_schema" -eq "$((from_schema + 1))" ] ||
+    die "apply-schema-release performs exactly one forward schema step; $from_schema -> $to_schema is not one step"
+
+  [ -f "$manifest" ] || die "release manifest is absent: $manifest"
+  release="$(manifest_value "$manifest" GRADEX_RELEASE_SHA)"
+  backend="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)"
+  frontend="$(manifest_value "$manifest" GRADEX_FRONTEND_IMAGE)"
+  proof="$(manifest_value "$manifest" GRADEX_PROOF_IMAGE)"
+  [[ "$release" =~ ^[0-9a-f]{40}$ ]] || die "release SHA is invalid"
+  for image in "$backend" "$frontend" "$proof"; do
+    case "$image" in
+      *:latest | *:latest@* | latest) die "a schema release refuses latest image tags" ;;
+    esac
+  done
+  docker image inspect "$backend" "$frontend" "$proof" >/dev/null 2>&1 ||
+    die "load the target release images before a schema release"
+  for image in "$backend" "$frontend" "$proof"; do
+    [ "$(schema_release_image_revision "$image")" = "$release" ] ||
+      die "image $image does not carry release revision $release"
+  done
+
+  # The rollback artifacts must exist BEFORE the migration begins, because after
+  # it begins the only way back is the supervised schema rollback plus these
+  # images. validate_environment already proved they are present locally and
+  # carry the running release's revision; what is added here is that the running
+  # release really is the FROM release.
+  rollback_release="$GRADEX_RELEASE_SHA"
+  rollback_backend="$GRADEX_BACKEND_IMAGE"
+  rollback_frontend="$GRADEX_FRONTEND_IMAGE"
+  rollback_proof="$GRADEX_PROOF_IMAGE"
+  [ "$rollback_release" != "$release" ] ||
+    die "the running release is already $release; a schema release may not be re-run against itself"
+  rollback_max="$(image_max_schema_version "$rollback_backend")"
+  [ "$rollback_max" = "$from_schema" ] ||
+    die "the running backend image supports schema through $rollback_max, not the declared FROM schema $from_schema"
+  target_max="$(image_max_schema_version "$backend")"
+  [ "$target_max" = "$to_schema" ] ||
+    die "the target backend image maximum schema is $target_max, not the declared TO schema $to_schema"
+
+  require_status postgres healthy
+  require_status redis healthy
+  postgres_id="$(service_id postgres)"
+  [ -n "$postgres_id" ] || die "PostgreSQL is absent from project $S12_PROJECT"
+  state="$(schema_release_schema_state "$postgres_id")"
+  IFS='|' read -r schema_version schema_dirty <<<"$state"
+  [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $state"
+  # A dirty schema is a previous failed migration. It is never something this
+  # command may run over.
+  [ "$schema_dirty" = false ] || die "schema is dirty: $state; resolve the previous failed migration before any release"
+  [ "$schema_version" = "$from_schema" ] ||
+    die "live schema is $schema_version, not the declared FROM schema $from_schema"
+  [ -z "$(schema_release_running_service_containers migrate)" ] ||
+    die "a migration one-shot is already running in project $S12_PROJECT"
+
+  schema_release_report_media_in_flight "$postgres_id"
+
+  note "MAINTENANCE WINDOW: this command stops the worker and the API before the migration and does not restore service until the new API is ready. Public requests will fail for the duration."
+  schema_release_note "release $rollback_release (schema $from_schema) -> $release (schema $to_schema) in project $S12_PROJECT"
+  schema_release_note "rollback artifacts: backend=$rollback_backend frontend=$rollback_frontend proof=$rollback_proof"
+
+  # ---- STEP 1 — fresh backup, immediately before anything is stopped.
+  backup_started_at="$(date +%s)"
+  if ! (create_backup); then
+    schema_release_abort "backup" "the production backup did not complete" \
+      "nothing was stopped and no migration ran; production is unchanged on schema $from_schema"
+  fi
+  backup_completed_at="$(cat "$S12_BACKUP_DIR/latest.completed-at" 2>/dev/null || true)"
+  [[ "$backup_completed_at" =~ ^[0-9]+$ ]] && [ "$backup_completed_at" -ge "$backup_started_at" ] ||
+    schema_release_abort "backup" "no backup completion marker newer than this command was written" \
+      "nothing was stopped and no migration ran; production is unchanged on schema $from_schema"
+  schema_release_note "verified fresh backup completed at $backup_completed_at"
+
+  # ---- STEP 2 — stop the old worker, and prove it.
+  compose stop worker ||
+    schema_release_abort "stop old worker" "the worker could not be stopped" \
+      "no migration ran; the API is still serving on schema $from_schema"
+  schema_release_assert_stopped worker ||
+    schema_release_abort "stop old worker" "the old worker could not be proven stopped" \
+      "no migration ran; the old worker may still be running and the schema is still $from_schema"
+
+  # ---- STEP 3 — stop the old API. The maintenance window opens here.
+  compose stop api ||
+    schema_release_abort "stop old api" "the API could not be stopped" \
+      "no migration ran; the worker is stopped and the schema is still $from_schema"
+  schema_release_assert_stopped api ||
+    schema_release_abort "stop old api" "the old API could not be proven stopped" \
+      "no migration ran; the schema is still $from_schema"
+
+  # ---- STEP 4 — quiescence, re-proven rather than assumed.
+  schema_release_assert_stopped worker ||
+    schema_release_abort "quiescence" "the old worker is running again" \
+      "no migration ran; the schema is still $from_schema"
+  schema_release_assert_stopped api ||
+    schema_release_abort "quiescence" "the old API is running again" \
+      "no migration ran; the schema is still $from_schema"
+  schema_release_note "quiescence proven: old worker stopped, old API stopped"
+
+  # ---- STEP 5 — the migration, using the TARGET release image.
+  # The migrate service takes its image from GRADEX_BACKEND_IMAGE, so exporting
+  # the target here is exactly what makes `gradex-migrate up` run the target
+  # release's tooling. The running D-102 image could not do this: its maximum
+  # schema version is the FROM version.
+  export GRADEX_BACKEND_IMAGE="$backend"
+  compose up --detach --no-deps --force-recreate migrate ||
+    schema_release_abort "migration" "the migration one-shot could not be created" \
+      "the application is stopped and the schema is still $from_schema"
+  schema_release_wait_completion migrate ||
+    schema_release_abort "migration" "the migration did not complete successfully" \
+      "the application is deliberately left stopped; the schema may be dirty and must be inspected before anything is started"
+
+  # ---- STEP 6 — the schema is verified before a single D-103 process starts.
+  state="$(schema_release_schema_state "$postgres_id")" ||
+    schema_release_abort "schema verification" "the schema state could not be read after the migration" \
+      "the application is left stopped; nothing from the new release has been started"
+  [ "$state" = "$to_schema|false" ] ||
+    schema_release_abort "schema verification" "schema is $state, expected clean version $to_schema" \
+      "the application is left stopped; nothing from the new release has been started"
+  schema_release_assert_expected_columns "$postgres_id" ||
+    schema_release_abort "schema verification" "the migration did not produce the expected schema objects" \
+      "the application is left stopped; nothing from the new release has been started"
+  schema_release_note "schema verified at clean version $to_schema"
+
+  # ---- STEP 7/8 — the new API alone, then readiness. The worker is not created
+  # ---- until the API has proven itself against the new schema.
+  compose up --detach --no-deps --force-recreate api ||
+    schema_release_abort "start new api" "the new API could not be created" \
+      "the schema is $to_schema and the worker has NOT been started; roll the schema back before restoring the previous release"
+  schema_release_wait_status api healthy ||
+    schema_release_abort "api readiness" "the new API did not become healthy" \
+      "the schema is $to_schema and the worker has NOT been started; roll the schema back before restoring the previous release"
+  api_id="$(service_id api)"
+  revision="$(schema_release_container_image_revision "$api_id")" ||
+    schema_release_abort "api readiness" "the new API image revision could not be read" \
+      "the schema is $to_schema and the worker has NOT been started"
+  [ "$revision" = "$release" ] ||
+    schema_release_abort "api readiness" "the running API carries revision $revision, not $release" \
+      "the schema is $to_schema and the worker has NOT been started"
+  docker exec "$api_id" wget -qO- http://127.0.0.1:8080/healthz >/dev/null ||
+    schema_release_abort "api readiness" "the new API did not answer /healthz" \
+      "the schema is $to_schema and the worker has NOT been started"
+  readiness="$(docker exec "$api_id" wget -qO- http://127.0.0.1:8080/readyz)" ||
+    schema_release_abort "api readiness" "the new API did not answer /readyz" \
+      "the schema is $to_schema and the worker has NOT been started"
+  printf '%s' "$readiness" |
+    jq --exit-status '.status == "ok" and .checks.postgres == "ok" and .checks.redis == "ok" and .checks.schema == "ok"' >/dev/null ||
+    schema_release_abort "api readiness" "the new API did not report every dependency ok" \
+      "the schema is $to_schema and the worker has NOT been started"
+  schema_release_note "new API is healthy and ready at revision $release"
+
+  # ---- STEP 9 — the new worker. The absence of an old worker is proven AGAIN
+  # ---- here, immediately before creation, so no overlap is possible even if
+  # ---- something restarted one during the migration.
+  schema_release_assert_stopped worker ||
+    schema_release_abort "start new worker" "a worker is running before the new worker was created" \
+      "the schema is $to_schema and the new API is serving; do not start a second worker"
+  compose up --detach --no-deps --force-recreate worker ||
+    schema_release_abort "start new worker" "the new worker could not be created" \
+      "the schema is $to_schema and the new API is serving, but the release is INCOMPLETE without its worker"
+  schema_release_wait_status worker running ||
+    schema_release_abort "start new worker" "the new worker did not reach running" \
+      "the schema is $to_schema and the new API is serving, but the release is INCOMPLETE without its worker"
+  worker_id="$(service_id worker)"
+  revision="$(schema_release_container_image_revision "$worker_id")" ||
+    schema_release_abort "start new worker" "the new worker image revision could not be read" \
+      "the release is INCOMPLETE"
+  [ "$revision" = "$release" ] ||
+    schema_release_abort "start new worker" "the running worker carries revision $revision, not $release" \
+      "the release is INCOMPLETE and a worker from another release is running; stop it"
+  [ "$(schema_release_running_service_containers worker | wc -l)" = 1 ] ||
+    schema_release_abort "start new worker" "more than one worker container is running" \
+      "workers from two releases must never overlap; stop all but the $release worker immediately"
+  schema_release_note "new worker is running at revision $release, and it is the only worker"
+
+  # ---- STEP 10 — the frontend, last.
+  export GRADEX_FRONTEND_IMAGE="$frontend"
+  compose up --detach --no-deps --force-recreate frontend ||
+    schema_release_abort "frontend" "the new frontend could not be created" \
+      "the schema, API and worker are on $release; only the frontend is not"
+  schema_release_wait_status frontend healthy ||
+    schema_release_abort "frontend" "the new frontend did not become healthy" \
+      "the schema, API and worker are on $release; only the frontend is not"
+  frontend_id="$(service_id frontend)"
+  revision="$(schema_release_container_image_revision "$frontend_id")" ||
+    schema_release_abort "frontend" "the new frontend image revision could not be read" \
+      "the schema, API and worker are on $release"
+  [ "$revision" = "$release" ] ||
+    schema_release_abort "frontend" "the running frontend carries revision $revision, not $release" \
+      "the schema, API and worker are on $release"
+
+  # ---- STEP 11 — final health across the whole deployment.
+  for service in postgres:healthy redis:healthy api:healthy frontend:healthy worker:running; do
+    schema_release_wait_status "${service%%:*}" "${service##*:}" ||
+      schema_release_abort "final health" "${service%%:*} is not ${service##*:}" \
+        "the release is on $release at schema $to_schema but the deployment is not fully healthy"
+  done
+  if [ -n "$(service_id edge)" ]; then
+    schema_release_wait_status edge running ||
+      schema_release_abort "final health" "the public edge is not running" \
+        "the release is on $release at schema $to_schema but the edge is down"
+  fi
+  for service in api worker frontend; do
+    restarts="$(docker inspect --format '{{.RestartCount}}' "$(service_id "$service")")" ||
+      schema_release_abort "final health" "$service restart count could not be read" \
+        "the release is on $release at schema $to_schema"
+    [ "$restarts" = 0 ] ||
+      schema_release_abort "final health" "$service has restarted $restarts times since creation" \
+        "the release is on $release at schema $to_schema but a service is crash-looping"
+  done
+  state="$(schema_release_schema_state "$postgres_id")"
+  [ "$state" = "$to_schema|false" ] ||
+    schema_release_abort "final health" "schema drifted to $state" \
+      "the release is on $release but the schema is not clean $to_schema"
+
+  persist_release_selection "$release" "$backend" "$frontend" "$proof"
+  note "schema release $release is live: schema $from_schema -> $to_schema, API, worker and frontend recreated in order, no worker overlap"
+  note "maintenance window is closed; run verify-core and verify to confirm private and public behaviour"
+}
+
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|apply-schema-release MANIFEST FROM_SCHEMA TO_SCHEMA|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1338,6 +1768,7 @@ case "${1:-}" in
   restore) [ "$#" -le 2 ] || usage; shift; restore_backup "$@" ;;
   verify-restore) [ "$#" = 1 ] || usage; verify_restore ;;
   apply-release) shift; apply_release "$@" ;;
+  apply-schema-release) shift; apply_schema_release "$@" ;;
   status) load_environment; compose --profile restore ps ;;
   logs) load_environment; if [ -n "${2:-}" ]; then compose logs --no-color "$2"; else compose logs --no-color; fi ;;
   stop) load_environment; compose down ;;
