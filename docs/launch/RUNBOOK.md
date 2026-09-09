@@ -195,7 +195,7 @@ binary set that can serve it. Rollback therefore requires rolling the schema bac
 **Forward deployment — in this exact order:**
 
 1. Stop or replace the old D-102 application containers.
-2. Apply the migration: `go run ./cmd/migrate up` (schema `0034` -> `0035`).
+2. Apply the migration as a controlled one-off release job: `gradex-migrate up` (schema `0034` -> `0035`).
 3. Start the D-103 API.
 4. Start the D-103 worker.
 5. Start or deploy the D-103 frontend.
@@ -206,19 +206,84 @@ overlap is permitted at any point in either direction. The two disagree about wh
 alongside D-103 reintroduces exactly the duplicate-finalization and stale-completion faults the
 lease model exists to prevent.
 
+#### Why the normal migration command cannot perform this rollback
+
+`gradex-migrate down` is **not** a valid production rollback path, and no flag should be added to make
+it one. Three separate guards stand in the way, all of them deliberate:
+
+- `cmd/migrate` refuses outright: `down migrations are not permitted when APP_ENV=production`.
+- Even outside production, the down path runs `CheckManualPurchaseRollbackSafety` for any rollback
+  from schema `21` or above. It raises if a single `purchase_requests` row or `PURCHASE_REQUEST`
+  entitlement exists, so on a live database the `35 -> 34` step is refused before any DDL runs.
+- The production backend image exposes only `gradex-migrate up`, `version`, and `max-version`. A down
+  command is not part of the documented production surface at all.
+
+`deploy/scripts/application-rollback.sh` also fails closed here by design, and correctly so: it reads
+`max-version` from the target image and dies with `schema 35 is newer than target release maximum 34`.
+Its own usage text states that schema downgrade and database rollback are intentionally unsupported.
+D-103 therefore falls **outside** the application-rollback boundary described in `deploy/README.md`;
+it needs the supervised procedure below instead.
+
+Do not modify those guards, and do not weaken purchase-rollback safety. What follows is a deliberate,
+supervised emergency operation — not a routine migration path.
+
 **Rollback — in this exact order:**
 
-1. Stop the D-103 application, API, and worker.
-2. Apply `0035_media_work_leases` **down**, returning the schema to `0034`.
-3. Deploy the D-102 binaries.
-4. Start the D-102 application, API, and worker.
-5. Verify `go run ./cmd/migrate version` reports `34`, then confirm `/readyz` and `/healthz`.
+1. **Stop the D-103 application, API, and worker first.** No D-103 worker may remain running at any
+   later step, and no D-102 worker may start before step 5.
+2. **Take and verify a backup immediately before the destructive step**, using the established
+   pre-deployment backup above (`pg_dump --format=custom` plus its `sha256sum`), or
+   `./deploy/scripts/database-recovery.sh backup` in the S12 topology. Do not proceed on an unverified
+   backup.
+3. **Apply the supervised schema rollback in one transaction.** Apply *only*
+   `0035_media_work_leases.down.sql` — never a generic sequence of older down migrations. The file
+   contains no transaction wrapper of its own, and PostgreSQL DDL is transactional, so the schema
+   change and the bookkeeping correction commit or abort together:
 
-Down-migrating `0035` drops the lease, attempt-count, and failure-category columns. It does not alter
-media state, provenance, trusted duration, or persisted rendition keys, so existing `READY` media
-stays deliverable under D-102. Any work still in `SCANNING` or `PROCESSING` at rollback loses its
-lease evidence and reverts to pre-D-103 behaviour: it will not self-recover and needs the existing
-Admin retry operation. Drain or let in-flight media work settle before rolling back.
+   ```bash
+   psql --username gradex --host <HOST> --dbname gradex \
+     --set ON_ERROR_STOP=1 --single-transaction \
+     --file backend/internal/db/migrations/0035_media_work_leases.down.sql \
+     --command 'UPDATE schema_migrations SET version = 34, dirty = false;' \
+     --command 'SELECT version, dirty FROM schema_migrations;'
+   ```
+
+   Applying the SQL alone is **not** sufficient. `schema_migrations` still reads `35`, and readiness
+   reads that marker, so D-102 would keep refusing to serve. The table holds exactly one row
+   (`version bigint`, `dirty boolean`), so the bookkeeping correction is an `UPDATE`, not an insert.
+
+4. **If the transaction fails, it has already rolled back — both the DDL and the bookkeeping.** Do not
+   retry blindly and do not continue the deployment. **D-102 stays stopped.** Diagnose, or restore the
+   backup from step 2 into a fresh database per the restore procedure above.
+5. **Prove both facts before starting any D-102 binary.** Bookkeeping and physical shape must *both*
+   be at `0034`:
+
+   ```bash
+   psql --username gradex --host <HOST> --dbname gradex --no-psqlrc --tuples-only --no-align \
+     --command 'SELECT version, dirty FROM schema_migrations;' \
+     --command "SELECT count(*) FROM information_schema.columns
+                WHERE table_name = 'media_asset_versions'
+                  AND column_name IN ('work_claim_token', 'work_claimed_at',
+                    'work_lease_expires_at', 'scan_attempt_count',
+                    'processing_attempt_count', 'last_failure_category');"
+   ```
+
+   Required: `34 | f` and a column count of `0`. If either cannot be proven, **D-102 remains stopped.**
+6. Deploy the D-102 backend and frontend artifacts, then start the D-102 API and worker.
+7. **Verify after start:** `gradex-migrate version` reports `34`; `/healthz` returns `200 OK`;
+   `/readyz` returns `200 OK`; the API and worker are running the exact intended D-102 rollback SHA;
+   the frontend rollback artifact is serving if one was part of the release; and no D-103 worker
+   remains running anywhere.
+
+**What the rollback removes, and what it does not.** Down-migrating `0035` drops only D-103's recovery
+metadata: the lease claim columns, the two attempt counters, the failure category, and their
+constraints and partial index. It does not touch media state, provenance, trusted duration, or
+rendition data, so existing `READY` media stays deliverable under D-102.
+
+**In-flight media work needs attention after rollback.** Any Asset Version still in `SCANNING` or
+`PROCESSING` loses its lease evidence and reverts to pre-D-103 behaviour: it will not self-recover,
+and it requires the existing Admin retry operation. Prefer draining or letting in-flight media work
+settle before rolling back.
 
 ---
 
