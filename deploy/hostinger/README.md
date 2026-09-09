@@ -587,7 +587,9 @@ It then executes, in this order, failing closed at every boundary:
 3. stop the old API, and prove it stopped;
 4. re-prove quiescence rather than assume it;
 5. run `gradex-migrate up` as a one-shot **using the target release's backend image** — the running
-   image cannot do this, because its maximum schema version is the `FROM` version;
+   image cannot do this, because its maximum schema version is the `FROM` version. The one-shot this
+   command starts is identified by difference against the migrate containers that existed a moment
+   earlier, so a previous run's exited container is never read as this run's result;
 6. verify the schema is exactly clean `TO` before a single new process starts. Set
    `GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS` to a comma-separated list of `table.column` entries to
    assert specific migrated objects as well; for D-103 that is
@@ -602,6 +604,41 @@ It then executes, in this order, failing closed at every boundary:
 
 **The old worker and the new worker never run concurrently.** That is enforced mechanically from
 container state, twice, not printed as a warning.
+
+#### How long the migration may take
+
+The migration gets its own wait bound, separate from the seconds-scale waits used for a container
+becoming healthy. It defaults to **3600 seconds** and is overridden with
+`GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS`, which must be an integer between 60 and 86400.
+The value is validated before anything is stopped, so a malformed bound can never surface for the
+first time with the application already down.
+
+**Reaching that bound means this command stopped waiting — not that the migration stopped.** It does
+not kill or remove the migrate container, does not roll anything back, and starts no API, worker, or
+frontend. It prints `THE MIGRATION MAY STILL BE RUNNING.`, reports the migrate container's current
+status and the current `schema_migrations` reading as read-only diagnostics, and fails.
+
+Those diagnostics cannot turn an uncertain state into a success. In particular, a reading that
+already shows the target schema does **not** mean the migration finished, and the release stays
+failed either way. Inspect the migrate one-shot and the schema state before taking any recovery
+action, and resume deliberately through the documented release or recovery procedure rather than by
+re-running the command blindly. If the migration legitimately needs longer, raise the bound.
+
+#### Container resolution
+
+A service that has been through recreations legitimately holds several historical containers. This
+command therefore states cardinality explicitly instead of assuming one id per service:
+
+- **stopped proof** — the invariant is that *no* container of the service is RUNNING. Any number of
+  stopped historical containers satisfies it and is reported as history. Inspecting only one
+  container would hide a second live one, which for the worker is exactly the fault being guarded.
+- **the container this command created** — resolved by difference against the ids present
+  immediately before, so stale history is never mistaken for the current execution.
+- **running topology** — exactly one running container, which must be the one this command created.
+  Two running workers, or a running container that is not the created one, fails hard and says so.
+
+Errors distinguish these cases: a service with several stopped containers is never reported as
+"could not be proven stopped".
 
 Failure behaviour is explicit at each boundary. A failed backup stops nothing. A worker or API that
 cannot be proven stopped prevents the migration. A failed or dirty migration leaves the application

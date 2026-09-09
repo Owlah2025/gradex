@@ -1354,6 +1354,17 @@ apply_release() {
 #   production by cmd/migrate itself, the production backend image does not even
 #   expose it, and the supervised 0035->0034 procedure lives in the runbook under
 #   human control. No flag here weakens any of that.
+
+# How long the migration one-shot may run before this command gives up WAITING
+# for it. It is deliberately its own value: the generic service waits above are
+# sized for a container becoming healthy in seconds, and inheriting that bound
+# for a schema migration would abandon a perfectly healthy migration minutes in.
+# Giving up waiting is not the same as stopping the migration — see
+# schema_release_report_migration_timeout.
+S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_DEFAULT=3600
+S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MINIMUM=60
+S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MAXIMUM=86400
+
 schema_release_note() {
   note "schema-release: $*"
 }
@@ -1368,6 +1379,21 @@ schema_release_abort() {
   exit 1
 }
 
+# Sets SCHEMA_RELEASE_MIGRATION_TIMEOUT, and dies from the CURRENT shell rather
+# than returning a value. A `die` inside a command substitution exits only the
+# substitution, and errexit does not reliably carry that failure back to the
+# caller, so a validation that must stop the command has to run here.
+schema_release_set_migration_timeout() {
+  local seconds="${GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS:-$S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_DEFAULT}"
+  [[ "$seconds" =~ ^[1-9][0-9]{0,5}$ ]] ||
+    die "GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS must be a positive integer number of seconds; got \"$seconds\""
+  [ "$seconds" -ge "$S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MINIMUM" ] ||
+    die "GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS must be at least $S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MINIMUM seconds"
+  [ "$seconds" -le "$S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MAXIMUM" ] ||
+    die "GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS must be at most $S12_SCHEMA_RELEASE_MIGRATION_TIMEOUT_MAXIMUM seconds"
+  SCHEMA_RELEASE_MIGRATION_TIMEOUT="$seconds"
+}
+
 schema_release_image_revision() {
   docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$1"
 }
@@ -1379,71 +1405,217 @@ schema_release_container_image_revision() {
   schema_release_image_revision "$image"
 }
 
-# Running containers of one Compose service in THIS project, by Compose's own
-# labels rather than by name. A stray or duplicated worker that Compose is no
-# longer tracking still carries the labels, so it is still seen here.
-schema_release_running_service_containers() {
-  docker ps --quiet \
-    --filter "label=com.docker.compose.project=$S12_PROJECT" \
-    --filter "label=com.docker.compose.service=$1"
+# ---------------------------------------------------------------------------
+# Container resolution.
+#
+# `docker compose ps --quiet SERVICE` yields a newline-delimited list, and a
+# deployment that has been through recreations legitimately holds several
+# historical containers for one service. Treating that list as a scalar feeds
+# multiple ids into `docker inspect` and produces a failure that blames the
+# wrong thing — reporting "the old worker could not be proven stopped" when the
+# only fact established is that more than one container id exists.
+#
+# So cardinality is explicit here, and it differs by question:
+#
+#   * "is this service stopped?" — the invariant is that NO container of the
+#     service is RUNNING. Any number of stopped historical containers satisfies
+#     it. Selecting one container and inspecting only that would hide a second
+#     live one, which for the worker is precisely the fault being guarded.
+#
+#   * "which container is the one I just created?" — resolved by difference
+#     against the ids that existed immediately before, so a stale exited
+#     container can never be mistaken for the current execution.
+#
+#   * "is the running topology the intended one?" — exactly one running
+#     container, or a named, accurate error.
+# ---------------------------------------------------------------------------
+
+# Sets SCHEMA_RELEASE_CONTAINERS to the container ids of service $1 in this
+# Compose project. $2 is `running` or `all`. Returns non-zero only when Docker
+# itself could not be queried, so "none" and "could not ask" stay distinct.
+schema_release_list_containers() {
+  local service="$1" scope="$2" listing
+  SCHEMA_RELEASE_CONTAINERS=()
+  case "$scope" in
+    running)
+      listing="$(docker ps --quiet --no-trunc \
+        --filter "label=com.docker.compose.project=$S12_PROJECT" \
+        --filter "label=com.docker.compose.service=$service")" || return 1
+      ;;
+    all)
+      listing="$(docker ps --all --quiet --no-trunc \
+        --filter "label=com.docker.compose.project=$S12_PROJECT" \
+        --filter "label=com.docker.compose.service=$service")" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  [ -n "$listing" ] || return 0
+  mapfile -t SCHEMA_RELEASE_CONTAINERS <<<"$listing"
 }
 
-# Proof, from container state, that no container of $1 is running. An absent
-# container satisfies this; a container that cannot be inspected does not.
+schema_release_join_containers() {
+  local joined="" id
+  for id in ${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"}; do
+    joined="${joined:+$joined, }${id:0:12}"
+  done
+  printf '%s' "$joined"
+}
+
+# The worker-overlap invariant, stated exactly: no RUNNING container of this
+# service exists. Historical stopped containers are reported, not refused.
 schema_release_assert_stopped() {
-  local service="$1" container running
-  running="$(schema_release_running_service_containers "$service")" || return 1
-  [ -z "$running" ] || return 1
-  container="$(service_id "$service")" || return 1
-  if [ -z "$container" ]; then
+  local service="$1" running_count stopped_count
+  if ! schema_release_list_containers "$service" running; then
+    note "$service: the running-container list could not be read from Docker"
+    return 1
+  fi
+  running_count="${#SCHEMA_RELEASE_CONTAINERS[@]}"
+  if [ "$running_count" -ne 0 ]; then
+    note "$service: $running_count container(s) are still RUNNING: $(schema_release_join_containers)"
+    return 1
+  fi
+  if ! schema_release_list_containers "$service" all; then
+    note "$service: the container list could not be read from Docker"
+    return 1
+  fi
+  stopped_count="${#SCHEMA_RELEASE_CONTAINERS[@]}"
+  if [ "$stopped_count" -eq 0 ]; then
     schema_release_note "$service has no container in project $S12_PROJECT"
     return 0
   fi
-  running="$(docker inspect --format '{{.State.Running}}' "$container")" || return 1
-  [ "$running" = false ] || return 1
-  schema_release_note "$service container $container is stopped (Running=false)"
+  schema_release_note "$service: no running container; $stopped_count stopped container(s) remain ($(schema_release_join_containers)), which is not a worker-overlap violation"
+}
+
+# Sets SCHEMA_RELEASE_CONTAINER to the single running container of service $1.
+schema_release_resolve_running_singleton() {
+  local service="$1" count
+  SCHEMA_RELEASE_CONTAINER=""
+  if ! schema_release_list_containers "$service" running; then
+    note "$service: the running-container list could not be read from Docker"
+    return 1
+  fi
+  count="${#SCHEMA_RELEASE_CONTAINERS[@]}"
+  case "$count" in
+    0)
+      note "$service: no running container exists in project $S12_PROJECT"
+      return 1
+      ;;
+    1)
+      SCHEMA_RELEASE_CONTAINER="${SCHEMA_RELEASE_CONTAINERS[0]}"
+      return 0
+      ;;
+    *)
+      note "$service: $count containers are running, which makes its identity ambiguous: $(schema_release_join_containers)"
+      return 1
+      ;;
+  esac
+}
+
+# Sets SCHEMA_RELEASE_CONTAINER to the container of service $1 that did NOT
+# exist before this command created it. The remaining arguments are the ids
+# observed immediately beforehand. This is what keeps a stale exited container
+# from being mistaken for the current execution.
+schema_release_resolve_created_container() {
+  local service="$1"
+  shift
+  local -a known=("$@") fresh=()
+  local id previous seen
+  SCHEMA_RELEASE_CONTAINER=""
+  if ! schema_release_list_containers "$service" all; then
+    note "$service: the container list could not be read from Docker"
+    return 1
+  fi
+  for id in ${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"}; do
+    seen=false
+    for previous in ${known[@]+"${known[@]}"}; do
+      if [ "$id" = "$previous" ]; then
+        seen=true
+        break
+      fi
+    done
+    [ "$seen" = true ] || fresh+=("$id")
+  done
+  case "${#fresh[@]}" in
+    0)
+      note "$service: the container created by this command cannot be identified; only pre-existing containers are present"
+      return 1
+      ;;
+    1)
+      SCHEMA_RELEASE_CONTAINER="${fresh[0]}"
+      return 0
+      ;;
+    *)
+      note "$service: ${#fresh[@]} new containers appeared, so the one created by this command is ambiguous"
+      return 1
+      ;;
+  esac
 }
 
 # wait_for_status and wait_for_completion above call die and exit immediately.
 # This command must attribute a timeout to the boundary it happened at, so it
-# uses status-returning twins instead of exiting from inside a helper.
-schema_release_wait_status() {
-  local service="$1" wanted="$2" attempts=0 container status
-  container="$(service_id "$service")" || return 1
-  [ -n "$container" ] || return 1
+# waits on an already-resolved container and returns a status instead.
+schema_release_wait_container_status() {
+  local container="$1" service="$2" wanted="$3" attempts=0 status
   while [ "$attempts" -lt 120 ]; do
     status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")" || return 1
     [ "$status" = "$wanted" ] && return 0
     case "$status" in
       exited | dead | unhealthy)
         compose logs --no-color "$service" >&2 || true
+        note "$service container ${container:0:12} reached $status, expected $wanted"
         return 1
         ;;
     esac
     attempts=$((attempts + 1))
     sleep 2
   done
+  note "$service container ${container:0:12} did not reach $wanted"
   return 1
 }
 
-schema_release_wait_completion() {
-  local service="$1" attempts=0 container status exit_code
-  container="$(service_id "$service")" || return 1
-  [ -n "$container" ] || return 1
-  while [ "$attempts" -lt 120 ]; do
-    status="$(docker inspect --format '{{.State.Status}}' "$container")" || return 1
+# Waits on ONE identified migration execution, for a migration-sized bound.
+# Returns 0 on clean completion, 2 when the container could not be inspected,
+# 3 when the migration ran and failed, and 4 when the wait bound elapsed while
+# the migration was still going.
+schema_release_wait_migration() {
+  local container="$1" timeout="$2" waited=0 interval=2 status exit_code
+  while [ "$waited" -lt "$timeout" ]; do
+    status="$(docker inspect --format '{{.State.Status}}' "$container")" || return 2
     if [ "$status" = exited ]; then
-      exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container")" || return 1
-      if [ "$exit_code" != 0 ]; then
-        compose logs --no-color "$service" >&2 || true
-        return 1
-      fi
-      return 0
+      exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container")" || return 2
+      [ "$exit_code" = 0 ] && return 0
+      compose logs --no-color migrate >&2 || true
+      note "the migration container ${container:0:12} exited $exit_code"
+      return 3
     fi
-    attempts=$((attempts + 1))
-    sleep 2
+    sleep "$interval"
+    waited=$((waited + interval))
   done
-  return 1
+  return 4
+}
+
+# The wait bound elapsed. This command has NOT stopped the migration and must
+# not pretend to know how it ends. Everything below is read-only, and none of it
+# can turn an uncertain state into a success: the caller aborts unconditionally.
+schema_release_report_migration_timeout() {
+  local container="$1" timeout="$2" postgres_id="$3" status state
+  note "the migration did not finish within the ${timeout}s wait bound"
+  note "THE MIGRATION MAY STILL BE RUNNING."
+  note "this command has NOT stopped, killed or removed the migrate container, and has started NO application service"
+  if status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null)"; then
+    note "diagnostic: migrate container $container is currently $status"
+  else
+    note "diagnostic: migrate container $container could not be inspected"
+  fi
+  if state="$(schema_release_schema_state "$postgres_id" 2>/dev/null)"; then
+    note "diagnostic: schema_migrations currently reads $state"
+    note "diagnostic: that is a read-only observation taken while the migration may still be in progress; it does NOT establish that the migration finished, and this release remains FAILED regardless of what it says"
+  else
+    note "diagnostic: schema_migrations could not be read"
+  fi
+  note "inspect the migrate one-shot and the schema state before taking ANY recovery action"
+  note "if the migration later completes on its own, this release still counts as failed; resume deliberately through the documented release or recovery procedure rather than by re-running this command blindly"
+  note "raise GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS if this migration legitimately needs longer than ${timeout}s"
 }
 
 schema_release_schema_state() {
@@ -1516,9 +1688,11 @@ apply_schema_release() {
 
   local release backend frontend proof image
   local rollback_release rollback_backend rollback_frontend rollback_proof rollback_max
-  local postgres_id state schema_version schema_dirty target_max
-  local backup_started_at backup_completed_at api_id worker_id frontend_id readiness revision
-  local service status restarts
+  local postgres_id state schema_version schema_dirty target_max migration_timeout
+  local backup_started_at backup_completed_at readiness revision service restarts
+  local migrate_container api_container worker_container frontend_container
+  local migration_status=0
+  local -a migrate_before=() api_before=() worker_before=() frontend_before=()
 
   # ---- preconditions. Nothing is stopped and nothing is mutated below this
   # ---- block; every failure here leaves production exactly as it was found.
@@ -1529,12 +1703,16 @@ apply_schema_release() {
   # database in one maintenance window. Widening this needs its own review.
   [ "$to_schema" -eq "$((from_schema + 1))" ] ||
     die "apply-schema-release performs exactly one forward schema step; $from_schema -> $to_schema is not one step"
+  # Validated here, before anything stops, so a malformed wait bound can never
+  # surface for the first time with the application already down.
+  schema_release_set_migration_timeout
+  migration_timeout="$SCHEMA_RELEASE_MIGRATION_TIMEOUT"
 
   [ -f "$manifest" ] || die "release manifest is absent: $manifest"
-  release="$(manifest_value "$manifest" GRADEX_RELEASE_SHA)"
-  backend="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)"
-  frontend="$(manifest_value "$manifest" GRADEX_FRONTEND_IMAGE)"
-  proof="$(manifest_value "$manifest" GRADEX_PROOF_IMAGE)"
+  release="$(manifest_value "$manifest" GRADEX_RELEASE_SHA)" || die "the release manifest is unusable"
+  backend="$(manifest_value "$manifest" GRADEX_BACKEND_IMAGE)" || die "the release manifest is unusable"
+  frontend="$(manifest_value "$manifest" GRADEX_FRONTEND_IMAGE)" || die "the release manifest is unusable"
+  proof="$(manifest_value "$manifest" GRADEX_PROOF_IMAGE)" || die "the release manifest is unusable"
   [[ "$release" =~ ^[0-9a-f]{40}$ ]] || die "release SHA is invalid"
   for image in "$backend" "$frontend" "$proof"; do
     case "$image" in
@@ -1559,18 +1737,20 @@ apply_schema_release() {
   rollback_proof="$GRADEX_PROOF_IMAGE"
   [ "$rollback_release" != "$release" ] ||
     die "the running release is already $release; a schema release may not be re-run against itself"
-  rollback_max="$(image_max_schema_version "$rollback_backend")"
+  rollback_max="$(image_max_schema_version "$rollback_backend")" || die "the running backend image maximum schema could not be read"
   [ "$rollback_max" = "$from_schema" ] ||
     die "the running backend image supports schema through $rollback_max, not the declared FROM schema $from_schema"
-  target_max="$(image_max_schema_version "$backend")"
+  target_max="$(image_max_schema_version "$backend")" || die "the target backend image maximum schema could not be read"
   [ "$target_max" = "$to_schema" ] ||
     die "the target backend image maximum schema is $target_max, not the declared TO schema $to_schema"
 
-  require_status postgres healthy
-  require_status redis healthy
-  postgres_id="$(service_id postgres)"
-  [ -n "$postgres_id" ] || die "PostgreSQL is absent from project $S12_PROJECT"
-  state="$(schema_release_schema_state "$postgres_id")"
+  schema_release_resolve_running_singleton postgres || die "PostgreSQL is not resolvable as a single running container"
+  postgres_id="$SCHEMA_RELEASE_CONTAINER"
+  schema_release_wait_container_status "$postgres_id" postgres healthy || die "PostgreSQL is not healthy"
+  schema_release_resolve_running_singleton redis || die "Redis is not resolvable as a single running container"
+  schema_release_wait_container_status "$SCHEMA_RELEASE_CONTAINER" redis healthy || die "Redis is not healthy"
+
+  state="$(schema_release_schema_state "$postgres_id")" || die "the live schema state could not be read"
   IFS='|' read -r schema_version schema_dirty <<<"$state"
   [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $state"
   # A dirty schema is a previous failed migration. It is never something this
@@ -1578,14 +1758,16 @@ apply_schema_release() {
   [ "$schema_dirty" = false ] || die "schema is dirty: $state; resolve the previous failed migration before any release"
   [ "$schema_version" = "$from_schema" ] ||
     die "live schema is $schema_version, not the declared FROM schema $from_schema"
-  [ -z "$(schema_release_running_service_containers migrate)" ] ||
-    die "a migration one-shot is already running in project $S12_PROJECT"
+  schema_release_list_containers migrate running || die "the migrate container list could not be read from Docker"
+  [ "${#SCHEMA_RELEASE_CONTAINERS[@]}" -eq 0 ] ||
+    die "a migration one-shot is already running in project $S12_PROJECT: $(schema_release_join_containers)"
 
   schema_release_report_media_in_flight "$postgres_id"
 
   note "MAINTENANCE WINDOW: this command stops the worker and the API before the migration and does not restore service until the new API is ready. Public requests will fail for the duration."
   schema_release_note "release $rollback_release (schema $from_schema) -> $release (schema $to_schema) in project $S12_PROJECT"
   schema_release_note "rollback artifacts: backend=$rollback_backend frontend=$rollback_frontend proof=$rollback_proof"
+  schema_release_note "migration wait bound: ${migration_timeout}s"
 
   # ---- STEP 1 — fresh backup, immediately before anything is stopped.
   backup_started_at="$(date +%s)"
@@ -1629,13 +1811,41 @@ apply_schema_release() {
   # the target here is exactly what makes `gradex-migrate up` run the target
   # release's tooling. The running D-102 image could not do this: its maximum
   # schema version is the FROM version.
+  #
+  # The ids present beforehand are captured so the execution this command starts
+  # is identified by difference. A previous run's exited migrate container must
+  # never be read as this run's result.
+  schema_release_list_containers migrate all ||
+    schema_release_abort "migration" "the migrate container list could not be read from Docker" \
+      "the application is stopped and the schema is still $from_schema"
+  migrate_before=(${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"})
   export GRADEX_BACKEND_IMAGE="$backend"
   compose up --detach --no-deps --force-recreate migrate ||
     schema_release_abort "migration" "the migration one-shot could not be created" \
       "the application is stopped and the schema is still $from_schema"
-  schema_release_wait_completion migrate ||
-    schema_release_abort "migration" "the migration did not complete successfully" \
-      "the application is deliberately left stopped; the schema may be dirty and must be inspected before anything is started"
+  schema_release_resolve_created_container migrate ${migrate_before[@]+"${migrate_before[@]}"} ||
+    schema_release_abort "migration" "the migrate container started by this command cannot be identified" \
+      "a migration may have been started; the application is stopped and nothing new has started. Inspect the migrate containers in project $S12_PROJECT and the schema state before taking ANY recovery action"
+  migrate_container="$SCHEMA_RELEASE_CONTAINER"
+  schema_release_note "tracking migration execution ${migrate_container:0:12}"
+
+  schema_release_wait_migration "$migrate_container" "$migration_timeout" || migration_status=$?
+  case "$migration_status" in
+    0) ;;
+    3)
+      schema_release_abort "migration" "the migration ran and failed" \
+        "the application is deliberately left stopped; the schema may be dirty and must be inspected before anything is started"
+      ;;
+    4)
+      schema_release_report_migration_timeout "$migrate_container" "$migration_timeout" "$postgres_id"
+      schema_release_abort "migration" "the wait bound elapsed while the migration was still running" \
+        "THE MIGRATION MAY STILL BE RUNNING. The application is deliberately left stopped and no API, worker or frontend has been started. Nothing was killed or rolled back"
+      ;;
+    *)
+      schema_release_abort "migration" "the migration container could not be inspected" \
+        "THE MIGRATION MAY STILL BE RUNNING. The application is deliberately left stopped and nothing new has been started"
+      ;;
+  esac
 
   # ---- STEP 6 — the schema is verified before a single D-103 process starts.
   state="$(schema_release_schema_state "$postgres_id")" ||
@@ -1651,28 +1861,41 @@ apply_schema_release() {
 
   # ---- STEP 7/8 — the new API alone, then readiness. The worker is not created
   # ---- until the API has proven itself against the new schema.
+  schema_release_list_containers api all ||
+    schema_release_abort "start new api" "the API container list could not be read from Docker" \
+      "the schema is $to_schema and the worker has NOT been started"
+  api_before=(${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"})
   compose up --detach --no-deps --force-recreate api ||
     schema_release_abort "start new api" "the new API could not be created" \
       "the schema is $to_schema and the worker has NOT been started; roll the schema back before restoring the previous release"
-  schema_release_wait_status api healthy ||
+  schema_release_resolve_created_container api ${api_before[@]+"${api_before[@]}"} ||
+    schema_release_abort "start new api" "the API container created by this command cannot be identified" \
+      "the schema is $to_schema and the worker has NOT been started"
+  api_container="$SCHEMA_RELEASE_CONTAINER"
+  schema_release_wait_container_status "$api_container" api healthy ||
     schema_release_abort "api readiness" "the new API did not become healthy" \
       "the schema is $to_schema and the worker has NOT been started; roll the schema back before restoring the previous release"
-  api_id="$(service_id api)"
-  revision="$(schema_release_container_image_revision "$api_id")" ||
+  revision="$(schema_release_container_image_revision "$api_container")" ||
     schema_release_abort "api readiness" "the new API image revision could not be read" \
       "the schema is $to_schema and the worker has NOT been started"
   [ "$revision" = "$release" ] ||
     schema_release_abort "api readiness" "the running API carries revision $revision, not $release" \
       "the schema is $to_schema and the worker has NOT been started"
-  docker exec "$api_id" wget -qO- http://127.0.0.1:8080/healthz >/dev/null ||
+  docker exec "$api_container" wget -qO- http://127.0.0.1:8080/healthz >/dev/null ||
     schema_release_abort "api readiness" "the new API did not answer /healthz" \
       "the schema is $to_schema and the worker has NOT been started"
-  readiness="$(docker exec "$api_id" wget -qO- http://127.0.0.1:8080/readyz)" ||
+  readiness="$(docker exec "$api_container" wget -qO- http://127.0.0.1:8080/readyz)" ||
     schema_release_abort "api readiness" "the new API did not answer /readyz" \
       "the schema is $to_schema and the worker has NOT been started"
   printf '%s' "$readiness" |
     jq --exit-status '.status == "ok" and .checks.postgres == "ok" and .checks.redis == "ok" and .checks.schema == "ok"' >/dev/null ||
     schema_release_abort "api readiness" "the new API did not report every dependency ok" \
+      "the schema is $to_schema and the worker has NOT been started"
+  schema_release_resolve_running_singleton api ||
+    schema_release_abort "api readiness" "the API is not running as exactly one container" \
+      "the schema is $to_schema and the worker has NOT been started"
+  [ "$SCHEMA_RELEASE_CONTAINER" = "$api_container" ] ||
+    schema_release_abort "api readiness" "the running API is not the container this command created" \
       "the schema is $to_schema and the worker has NOT been started"
   schema_release_note "new API is healthy and ready at revision $release"
 
@@ -1682,59 +1905,90 @@ apply_schema_release() {
   schema_release_assert_stopped worker ||
     schema_release_abort "start new worker" "a worker is running before the new worker was created" \
       "the schema is $to_schema and the new API is serving; do not start a second worker"
+  schema_release_list_containers worker all ||
+    schema_release_abort "start new worker" "the worker container list could not be read from Docker" \
+      "the schema is $to_schema and the new API is serving"
+  worker_before=(${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"})
   compose up --detach --no-deps --force-recreate worker ||
     schema_release_abort "start new worker" "the new worker could not be created" \
       "the schema is $to_schema and the new API is serving, but the release is INCOMPLETE without its worker"
-  schema_release_wait_status worker running ||
+  schema_release_resolve_created_container worker ${worker_before[@]+"${worker_before[@]}"} ||
+    schema_release_abort "start new worker" "the worker container created by this command cannot be identified" \
+      "the release is INCOMPLETE"
+  worker_container="$SCHEMA_RELEASE_CONTAINER"
+  schema_release_wait_container_status "$worker_container" worker running ||
     schema_release_abort "start new worker" "the new worker did not reach running" \
       "the schema is $to_schema and the new API is serving, but the release is INCOMPLETE without its worker"
-  worker_id="$(service_id worker)"
-  revision="$(schema_release_container_image_revision "$worker_id")" ||
+  revision="$(schema_release_container_image_revision "$worker_container")" ||
     schema_release_abort "start new worker" "the new worker image revision could not be read" \
       "the release is INCOMPLETE"
   [ "$revision" = "$release" ] ||
     schema_release_abort "start new worker" "the running worker carries revision $revision, not $release" \
       "the release is INCOMPLETE and a worker from another release is running; stop it"
-  [ "$(schema_release_running_service_containers worker | wc -l)" = 1 ] ||
-    schema_release_abort "start new worker" "more than one worker container is running" \
+  # Exactly one running worker, and it is the one this command created. Anything
+  # else is the overlap this whole command exists to make impossible.
+  schema_release_resolve_running_singleton worker ||
+    schema_release_abort "start new worker" "the worker is not running as exactly one container" \
+      "workers from two releases must never overlap; stop all but the $release worker immediately"
+  [ "$SCHEMA_RELEASE_CONTAINER" = "$worker_container" ] ||
+    schema_release_abort "start new worker" "the running worker is not the container this command created" \
       "workers from two releases must never overlap; stop all but the $release worker immediately"
   schema_release_note "new worker is running at revision $release, and it is the only worker"
 
   # ---- STEP 10 — the frontend, last.
+  schema_release_list_containers frontend all ||
+    schema_release_abort "frontend" "the frontend container list could not be read from Docker" \
+      "the schema, API and worker are on $release"
+  frontend_before=(${SCHEMA_RELEASE_CONTAINERS[@]+"${SCHEMA_RELEASE_CONTAINERS[@]}"})
   export GRADEX_FRONTEND_IMAGE="$frontend"
   compose up --detach --no-deps --force-recreate frontend ||
     schema_release_abort "frontend" "the new frontend could not be created" \
       "the schema, API and worker are on $release; only the frontend is not"
-  schema_release_wait_status frontend healthy ||
+  schema_release_resolve_created_container frontend ${frontend_before[@]+"${frontend_before[@]}"} ||
+    schema_release_abort "frontend" "the frontend container created by this command cannot be identified" \
+      "the schema, API and worker are on $release"
+  frontend_container="$SCHEMA_RELEASE_CONTAINER"
+  schema_release_wait_container_status "$frontend_container" frontend healthy ||
     schema_release_abort "frontend" "the new frontend did not become healthy" \
       "the schema, API and worker are on $release; only the frontend is not"
-  frontend_id="$(service_id frontend)"
-  revision="$(schema_release_container_image_revision "$frontend_id")" ||
+  revision="$(schema_release_container_image_revision "$frontend_container")" ||
     schema_release_abort "frontend" "the new frontend image revision could not be read" \
       "the schema, API and worker are on $release"
   [ "$revision" = "$release" ] ||
     schema_release_abort "frontend" "the running frontend carries revision $revision, not $release" \
       "the schema, API and worker are on $release"
+  schema_release_resolve_running_singleton frontend ||
+    schema_release_abort "frontend" "the frontend is not running as exactly one container" \
+      "the schema, API and worker are on $release"
 
   # ---- STEP 11 — final health across the whole deployment.
   for service in postgres:healthy redis:healthy api:healthy frontend:healthy worker:running; do
-    schema_release_wait_status "${service%%:*}" "${service##*:}" ||
+    schema_release_resolve_running_singleton "${service%%:*}" ||
+      schema_release_abort "final health" "${service%%:*} is not running as exactly one container" \
+        "the release is on $release at schema $to_schema but the deployment is not fully healthy"
+    schema_release_wait_container_status "$SCHEMA_RELEASE_CONTAINER" "${service%%:*}" "${service##*:}" ||
       schema_release_abort "final health" "${service%%:*} is not ${service##*:}" \
         "the release is on $release at schema $to_schema but the deployment is not fully healthy"
-  done
-  if [ -n "$(service_id edge)" ]; then
-    schema_release_wait_status edge running ||
-      schema_release_abort "final health" "the public edge is not running" \
-        "the release is on $release at schema $to_schema but the edge is down"
-  fi
-  for service in api worker frontend; do
-    restarts="$(docker inspect --format '{{.RestartCount}}' "$(service_id "$service")")" ||
-      schema_release_abort "final health" "$service restart count could not be read" \
+    restarts="$(docker inspect --format '{{.RestartCount}}' "$SCHEMA_RELEASE_CONTAINER")" ||
+      schema_release_abort "final health" "${service%%:*} restart count could not be read" \
         "the release is on $release at schema $to_schema"
     [ "$restarts" = 0 ] ||
-      schema_release_abort "final health" "$service has restarted $restarts times since creation" \
+      schema_release_abort "final health" "${service%%:*} has restarted $restarts times since creation" \
         "the release is on $release at schema $to_schema but a service is crash-looping"
   done
+  # The edge is not recreated by this command; it is only required to still be
+  # serving if this deployment has one at all.
+  schema_release_list_containers edge all ||
+    schema_release_abort "final health" "the edge container list could not be read from Docker" \
+      "the release is on $release at schema $to_schema"
+  if [ "${#SCHEMA_RELEASE_CONTAINERS[@]}" -ne 0 ]; then
+    schema_release_resolve_running_singleton edge ||
+      schema_release_abort "final health" "the public edge is not running as exactly one container" \
+        "the release is on $release at schema $to_schema but the edge is not serving"
+    schema_release_wait_container_status "$SCHEMA_RELEASE_CONTAINER" edge running ||
+      schema_release_abort "final health" "the public edge is not running" \
+        "the release is on $release at schema $to_schema but the edge is not serving"
+  fi
   state="$(schema_release_schema_state "$postgres_id")"
   [ "$state" = "$to_schema|false" ] ||
     schema_release_abort "final health" "schema drifted to $state" \
@@ -1744,6 +1998,7 @@ apply_schema_release() {
   note "schema release $release is live: schema $from_schema -> $to_schema, API, worker and frontend recreated in order, no worker overlap"
   note "maintenance window is closed; run verify-core and verify to confirm private and public behaviour"
 }
+
 
 usage() {
   printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|apply-schema-release MANIFEST FROM_SCHEMA TO_SCHEMA|status|logs [SERVICE]|stop}\n' "$0" >&2

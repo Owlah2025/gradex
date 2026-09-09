@@ -208,6 +208,11 @@ schema `35` (set `GRADEX_SCHEMA_RELEASE_EXPECTED_COLUMNS=media_asset_versions.wo
 assert the migrated objects as well), starts the API alone and requires its readiness, then starts
 the worker only after re-proving that no other worker is running, and finally the frontend. It opens
 an explicit maintenance window and fails closed at every boundary, pointing back at this document.
+If the migration outlasts its wait bound (`GRADEX_SCHEMA_RELEASE_MIGRATION_TIMEOUT_SECONDS`, default
+3600s) the command reports `THE MIGRATION MAY STILL BE RUNNING.`, kills and removes nothing, starts
+no application service, and fails: inspect the migrate one-shot and `schema_migrations` before taking
+any recovery action, and never treat a schema reading taken at that moment as proof the migration
+finished.
 `apply-release` cannot be used here — it is application-only and never migrates — and `up-core` must
 not be used, because it migrates while the old worker is still running. See
 `deploy/hostinger/README.md`, "Schema-advancing releases".
