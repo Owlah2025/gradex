@@ -168,7 +168,8 @@ If a deployment fault occurs:
 1. Roll back frontend, API, and worker artifacts to the previous approved application release.
 2. Keep the forward-compatible database schema at version 16. After real S6 grants exist, do not run
    migration `0015_course_access_grant.down.sql`: it clears `source_invitation_id` and destroys grant
-   provenance.
+   provenance. This forward-compatible assumption does **not** hold for the D-103 media schema
+   `0035_media_work_leases`; use the ordered procedure below instead.
 3. For recovery proof, create a fresh separate database and restore into it. Never use the active
    Gradex database as the routine restore-drill target:
 
@@ -183,6 +184,43 @@ Verify schema and identity/access-critical records in the restored target, then 
 Gradex instance whose `DATABASE_URL` points to that target. Database recovery and application rollback
 are separate operations. Do not add `--clean` or point the restore command at the active source
 database merely to demonstrate recovery.
+
+### D-103 media work leases (schema 0035) — ordered deployment and rollback
+
+D-102 binaries support schema `0034` only and refuse to start against `0035`; D-103 binaries require
+`0035` and refuse to start against `0034`. Both directions fail closed at the readiness schema check,
+so **application-only rollback while leaving schema 0035 in place is unsupported** — there is no
+binary set that can serve it. Rollback therefore requires rolling the schema back **first**.
+
+**Forward deployment — in this exact order:**
+
+1. Stop or replace the old D-102 application containers.
+2. Apply the migration: `go run ./cmd/migrate up` (schema `0034` -> `0035`).
+3. Start the D-103 API.
+4. Start the D-103 worker.
+5. Start or deploy the D-103 frontend.
+
+**The D-102 worker and the D-103 worker must never run concurrently.** No old-worker/new-worker
+overlap is permitted at any point in either direction. The two disagree about who owns in-flight
+`SCANNING`/`PROCESSING` work: a D-102 worker does not observe leases or claim tokens, so running one
+alongside D-103 reintroduces exactly the duplicate-finalization and stale-completion faults the
+lease model exists to prevent.
+
+**Rollback — in this exact order:**
+
+1. Stop the D-103 application, API, and worker.
+2. Apply `0035_media_work_leases` **down**, returning the schema to `0034`.
+3. Deploy the D-102 binaries.
+4. Start the D-102 application, API, and worker.
+5. Verify `go run ./cmd/migrate version` reports `34`, then confirm `/readyz` and `/healthz`.
+
+Down-migrating `0035` drops the lease, attempt-count, and failure-category columns. It does not alter
+media state, provenance, trusted duration, or persisted rendition keys, so existing `READY` media
+stays deliverable under D-102. Any work still in `SCANNING` or `PROCESSING` at rollback loses its
+lease evidence and reverts to pre-D-103 behaviour: it will not self-recover and needs the existing
+Admin retry operation. Drain or let in-flight media work settle before rolling back.
+
+---
 
 Staging and production require authenticated Redis over verified TLS. Certificate verification
 cannot be disabled. Supply `REDIS_PASSWORD` through the secret platform; add `REDIS_USERNAME` only
