@@ -64,7 +64,7 @@ type rejectInvitationBody struct {
 	Reason string `json:"reason"`
 }
 
-// createStudentPurchaseRequestBody carries the Course and nothing else.
+// createStudentPurchaseRequestBody carries exactly one server-resolved target.
 //
 // There is no email field, and adding one back would reintroduce the defect
 // this route exists to remove: the address on a purchase request decides where
@@ -73,12 +73,15 @@ type rejectInvitationBody struct {
 // same reason — the amount is read from the Course.
 type createStudentPurchaseRequestBody struct {
 	CourseID string `json:"course_id"`
+	BundleID string `json:"bundle_id"`
 }
 
 type createPurchaseRequestResponse struct {
-	Reference   string `json:"reference"`
-	WhatsAppURL string `json:"whatsapp_url"`
-	CourseTitle string `json:"course_title"`
+	Reference   string                      `json:"reference"`
+	WhatsAppURL string                      `json:"whatsapp_url"`
+	CourseTitle string                      `json:"course_title,omitempty"`
+	BundleTitle string                      `json:"bundle_title,omitempty"`
+	BundleItems []access.BundlePurchaseItem `json:"bundle_items,omitempty"`
 	// The price is echoed from the persisted snapshot so the confirmation the
 	// Student saw and the amount the request carries can be compared, rather
 	// than the browser having to trust that they matched.
@@ -198,6 +201,7 @@ func mountAccessRoutes(
 		meReadGroup.GET("/course-access-invitations", h.listStudentCourseAccessInvitations)
 		meReadGroup.GET("/course-access-invitations/:id", h.getStudentCourseAccessInvitation)
 		meReadGroup.GET("/course-access", h.getStudentCourseAccessHistory)
+		meReadGroup.GET("/purchase-requests", h.listStudentPurchaseRequests)
 	}
 
 	// Student mutations
@@ -233,6 +237,45 @@ func mountAccessRoutes(
 	return nil
 }
 
+func localizePurchaseRequests(requests []access.PurchaseRequest, locale identity.Locale) {
+	for index := range requests {
+		if locale == identity.LocaleArabic {
+			requests[index].CourseTitle = requests[index].CourseTitleAr
+			if requests[index].BundleTitleAr != nil {
+				requests[index].BundleTitle = *requests[index].BundleTitleAr
+			}
+		} else {
+			requests[index].CourseTitle = requests[index].CourseTitleEn
+			if requests[index].BundleTitleEn != nil {
+				requests[index].BundleTitle = *requests[index].BundleTitleEn
+			}
+		}
+		for itemIndex := range requests[index].BundleItems {
+			item := &requests[index].BundleItems[itemIndex]
+			item.CourseTitle = item.CourseTitleEn
+			if locale == identity.LocaleArabic {
+				item.CourseTitle = item.CourseTitleAr
+			}
+		}
+	}
+}
+
+func (h *accessHandlers) listStudentPurchaseRequests(c *gin.Context) {
+	requests, err := h.repo.ListStudentPurchaseRequests(c.Request.Context(), c.GetString(ctxUserIDKey))
+	if err != nil {
+		if errors.Is(err, access.ErrPurchaseRequesterNotEligible) {
+			writeProblem(c, problem.NotAuthorized())
+		} else {
+			writeProblem(c, problem.Internal(""))
+		}
+		return
+	}
+	locale, _ := requestedLocale(c.GetHeader("Accept-Language"))
+	localizePurchaseRequests(requests, locale)
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"purchase_requests": requests})
+}
+
 // createStudentPurchaseRequest is the one place a purchase request comes into
 // existence, and the one place the WhatsApp handoff URL is produced.
 //
@@ -243,7 +286,17 @@ func mountAccessRoutes(
 // transaction that writes the request.
 func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*createStudentPurchaseRequestBody)
-	if _, err := uuid.Parse(body.CourseID); err != nil {
+	courseSupplied := body.CourseID != ""
+	bundleSupplied := body.BundleID != ""
+	if courseSupplied == bundleSupplied {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	targetID := body.CourseID
+	if bundleSupplied {
+		targetID = body.BundleID
+	}
+	if _, err := uuid.Parse(targetID); err != nil {
 		writeProblem(c, problem.NotFound())
 		return
 	}
@@ -261,12 +314,20 @@ func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 	if h != nil && h.clock != nil {
 		now = h.clock()
 	}
-	request, err := h.repo.CreateStudentPurchaseRequest(c.Request.Context(), access.CreateStudentPurchaseRequestParams{
-		CourseID: body.CourseID, StudentAccountID: studentID, Now: now,
-	})
+	var request access.PurchaseRequest
+	var err error
+	if courseSupplied {
+		request, err = h.repo.CreateStudentPurchaseRequest(c.Request.Context(), access.CreateStudentPurchaseRequestParams{
+			CourseID: body.CourseID, StudentAccountID: studentID, Now: now,
+		})
+	} else {
+		request, err = h.repo.CreateStudentBundlePurchaseRequest(c.Request.Context(), access.CreateStudentBundlePurchaseRequestParams{
+			BundleID: body.BundleID, StudentAccountID: studentID, Now: now,
+		})
+	}
 	if err != nil {
 		switch {
-		case errors.Is(err, access.ErrCourseNotPurchasable):
+		case errors.Is(err, access.ErrCourseNotPurchasable), errors.Is(err, access.ErrBundleNotPurchasable):
 			writeProblem(c, problem.NotFound())
 		case errors.Is(err, access.ErrPurchaseRequesterNotEligible):
 			writeProblem(c, problem.NotAuthorized())
@@ -283,14 +344,37 @@ func (h *accessHandlers) createStudentPurchaseRequest(c *gin.Context) {
 		return
 	}
 	title := request.CourseTitleEn
+	bundleTitle := ""
+	if request.BundleTitleEn != nil {
+		bundleTitle = *request.BundleTitleEn
+	}
 	if locale == identity.LocaleArabic && request.CourseTitleAr != "" {
 		title = request.CourseTitleAr
+	}
+	if request.TargetKind == access.PurchaseTargetBundle {
+		title = bundleTitle
+		if locale == identity.LocaleArabic && request.BundleTitleAr != nil {
+			title = *request.BundleTitleAr
+		}
+		bundleTitle = title
+		for index := range request.BundleItems {
+			request.BundleItems[index].CourseTitle = request.BundleItems[index].CourseTitleEn
+			if locale == identity.LocaleArabic {
+				request.BundleItems[index].CourseTitle = request.BundleItems[index].CourseTitleAr
+			}
+		}
+	}
+	courseTitle := title
+	if request.TargetKind == access.PurchaseTargetBundle {
+		courseTitle = ""
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusCreated, createPurchaseRequestResponse{
 		Reference:       request.ReferenceCode,
 		WhatsAppURL:     handoff,
-		CourseTitle:     title,
+		CourseTitle:     courseTitle,
+		BundleTitle:     bundleTitle,
+		BundleItems:     request.BundleItems,
 		PriceMinorUnits: request.PriceMinorUnits,
 		Currency:        request.Currency,
 		State:           string(request.State),
@@ -320,13 +404,7 @@ func (h *accessHandlers) listAdminPurchaseRequests(c *gin.Context) {
 		return
 	}
 	locale, _ := requestedLocale(c.GetHeader("Accept-Language"))
-	for index := range requests {
-		if locale == identity.LocaleArabic {
-			requests[index].CourseTitle = requests[index].CourseTitleAr
-		} else {
-			requests[index].CourseTitle = requests[index].CourseTitleEn
-		}
-	}
+	localizePurchaseRequests(requests, locale)
 	c.JSON(http.StatusOK, adminPurchaseRequestListResponse{PurchaseRequests: requests, Total: total, Page: page, Limit: limit})
 }
 

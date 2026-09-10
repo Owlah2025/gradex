@@ -54,7 +54,8 @@ const (
 	CourseThumbnailSchemaVersion         = 33
 	MediaProcessingProgressSchemaVersion = CourseThumbnailSchemaVersion + 1
 	MediaWorkLeaseSchemaVersion          = MediaProcessingProgressSchemaVersion + 1
-	MaxSchemaVersion                     = MediaWorkLeaseSchemaVersion
+	BundlesAndOffersSchemaVersion        = MediaWorkLeaseSchemaVersion + 1
+	MaxSchemaVersion                     = BundlesAndOffersSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

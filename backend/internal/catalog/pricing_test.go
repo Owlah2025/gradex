@@ -165,3 +165,24 @@ func TestPricingValidationRules(t *testing.T) {
 		}
 	})
 }
+
+func TestCatalogPriceUsesOnlyValidOfferAsEffectivePrice(t *testing.T) {
+	offer := int64(49000)
+	price, err := NewCatalogPrice(65000, &offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if price.RegularMinorUnits != 65000 || price.EffectiveMinorUnits != 49000 || price.OfferMinorUnits == nil {
+		t.Fatalf("offer price = %#v", price)
+	}
+	regular, err := NewCatalogPrice(65000, nil)
+	if err != nil || regular.EffectiveMinorUnits != 65000 {
+		t.Fatalf("regular price = %#v, %v", regular, err)
+	}
+	for _, invalid := range []int64{-1, 0, 65000, 70000} {
+		invalid := invalid
+		if _, err := NewCatalogPrice(65000, &invalid); !errors.Is(err, ErrInvalidOfferPrice) {
+			t.Fatalf("offer %d error = %v", invalid, err)
+		}
+	}
+}

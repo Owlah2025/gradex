@@ -24,11 +24,18 @@ import (
 
 type PurchaseRequestState string
 
+type PurchaseTargetKind string
+
 const (
 	PurchaseRequestWaitingPayment    PurchaseRequestState = "WAITING_PAYMENT"
 	PurchaseRequestInvitationCreated PurchaseRequestState = "INVITATION_CREATED"
 	PurchaseRequestAccessGranted     PurchaseRequestState = "ACCESS_GRANTED"
 	PurchaseRequestCancelled         PurchaseRequestState = "CANCELLED"
+)
+
+const (
+	PurchaseTargetCourse PurchaseTargetKind = "COURSE"
+	PurchaseTargetBundle PurchaseTargetKind = "BUNDLE"
 )
 
 func (s PurchaseRequestState) Valid() bool {
@@ -55,6 +62,8 @@ var (
 	// Creating a purchase request for it would produce an operational task
 	// nobody can act on and an Admin queue entry that is already satisfied.
 	ErrCourseAlreadyAccessible = errors.New("course access is already active")
+	ErrBundleNotPurchasable    = errors.New("bundle is not available for purchase requests")
+	ErrBundleSnapshotInvalid   = errors.New("bundle purchase snapshot is incomplete or not grantable")
 )
 
 // PurchaseRequest stores facts Gradex knows about an external/manual sale. It
@@ -67,7 +76,14 @@ type PurchaseRequest struct {
 	Email                       string               `json:"email"`
 	NormalizedEmail             string               `json:"normalized_email"`
 	PriceMinorUnits             int64                `json:"price_minor_units"`
+	RegularPriceMinorUnits      *int64               `json:"regular_price_minor_units,omitempty"`
 	Currency                    string               `json:"currency"`
+	TargetKind                  PurchaseTargetKind   `json:"target_kind"`
+	BundleID                    *string              `json:"bundle_id,omitempty"`
+	BundleRevision              *int64               `json:"bundle_revision,omitempty"`
+	BundleTitleAr               *string              `json:"-"`
+	BundleTitleEn               *string              `json:"-"`
+	BundleTitle                 string               `json:"bundle_title,omitempty"`
 	State                       PurchaseRequestState `json:"state"`
 	InvitationID                *string              `json:"invitation_id,omitempty"`
 	RequestedAt                 time.Time            `json:"requested_at"`
@@ -80,6 +96,16 @@ type PurchaseRequest struct {
 	CourseTitle                 string               `json:"course_title,omitempty"`
 	AccessEndsAtSnapshot        *time.Time           `json:"-"`
 	PaymentConfirmedByAccountID *string              `json:"-"`
+	RequesterAccountID          *string              `json:"-"`
+	BundleItems                 []BundlePurchaseItem `json:"bundle_items,omitempty"`
+}
+
+type BundlePurchaseItem struct {
+	CourseID      string `json:"course_id"`
+	Position      int    `json:"position"`
+	CourseTitleAr string `json:"-"`
+	CourseTitleEn string `json:"-"`
+	CourseTitle   string `json:"course_title"`
 }
 
 type CreatePurchaseRequestParams struct {
@@ -101,6 +127,12 @@ type CreateStudentPurchaseRequestParams struct {
 	Now              time.Time
 }
 
+type CreateStudentBundlePurchaseRequestParams struct {
+	BundleID         string
+	StudentAccountID string
+	Now              time.Time
+}
+
 type ListPurchaseRequestsFilter struct {
 	Query  string
 	State  *PurchaseRequestState
@@ -118,7 +150,16 @@ type ConfirmPurchaseRequestParams struct {
 
 type ConfirmPurchaseRequestResult struct {
 	PurchaseRequest PurchaseRequest `json:"purchase_request"`
-	Invitation      Invitation      `json:"invitation"`
+	Invitation      *Invitation     `json:"invitation,omitempty"`
+	BundleGrants    []BundleGrant   `json:"bundle_grants,omitempty"`
+}
+
+type BundleGrant struct {
+	CourseID              string     `json:"course_id"`
+	EntitlementID         string     `json:"entitlement_id"`
+	Disposition           string     `json:"disposition"`
+	PreviousAccessEndsAt  *time.Time `json:"previous_access_ends_at,omitempty"`
+	ResultingAccessEndsAt time.Time  `json:"resulting_access_ends_at"`
 }
 
 // CancelPurchaseRequestParams is an Admin recovery command. It never refunds
@@ -286,13 +327,8 @@ func (r *Repository) CreateStudentPurchaseRequest(
 	return request, nil
 }
 
-// lockPurchaseRequesterTx reads and locks the requesting Account, refusing
-// anything that is not an active, verified Student.
-//
-// The role and status are re-read here rather than trusted from the session the
-// handler authenticated: a suspension or a role change committed between
-// admission and this write must take effect, and the row lock is what makes
-// that ordering deterministic.
+// lockPurchaseRequesterTx revalidates and locks the Account so suspension,
+// verification, and role changes serialize with purchase creation.
 func lockPurchaseRequesterTx(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -357,19 +393,20 @@ func createOrReuseStudentPurchaseRequestTx(
 	err := tx.QueryRow(ctx, `
 		INSERT INTO purchase_requests (
 			id, reference_code, course_id, email, normalized_email, requester_account_id,
-			course_title_ar, course_title_en, price_minor_units, currency, state,
+			course_title_ar, course_title_en, price_minor_units, regular_price_minor_units, currency, state,
 			requested_at, created_at, updated_at
 		)
 		SELECT
 			$1::uuid,
 			'GRX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)),
 			c.id, $2, $3, $6::uuid,
-			cr.title_ar, cr.title_en, price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
+			cr.title_ar, cr.title_en, COALESCE(price.offer_price_minor_units, price.new_value_minor_units),
+			price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
 			$4, $4, $4
 		  FROM courses c
 		  JOIN course_revisions cr ON cr.id = c.live_revision_id
 		  JOIN LATERAL (
-			SELECT new_value_minor_units
+			SELECT new_value_minor_units, offer_price_minor_units
 			  FROM course_price_changes
 			 WHERE course_id = c.id AND section_id IS NULL
 			 ORDER BY changed_at DESC, id DESC
@@ -384,13 +421,17 @@ func createOrReuseStudentPurchaseRequestTx(
 		          price_minor_units, currency, state, invitation_id::text,
 		          requested_at, payment_confirmed_at, invitation_created_at,
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
-		          access_ends_at_snapshot, payment_confirmed_by_account_id::text
+		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
+		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
+		          bundle_title_ar, bundle_title_en, requester_account_id::text
 	`, uuid.NewString(), email, normalizedEmail, now, courseID, studentAccountID).Scan(
 		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
+		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseRequest{}, false, ErrCourseNotPurchasable
@@ -435,7 +476,9 @@ func adoptExistingPurchaseRequestTx(
 		          price_minor_units, currency, state, invitation_id::text,
 		          requested_at, payment_confirmed_at, invitation_created_at,
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
-		          access_ends_at_snapshot, payment_confirmed_by_account_id::text
+		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
+		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
+		          bundle_title_ar, bundle_title_en, requester_account_id::text
 	`, courseID, normalizedEmail, studentAccountID)
 	request, err := scanPurchaseRequest(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -458,19 +501,20 @@ func createOrReusePurchaseRequestTx(
 	err := tx.QueryRow(ctx, `
 		INSERT INTO purchase_requests (
 			id, reference_code, course_id, email, normalized_email,
-			course_title_ar, course_title_en, price_minor_units, currency, state,
+			course_title_ar, course_title_en, price_minor_units, regular_price_minor_units, currency, state,
 			requested_at, created_at, updated_at
 		)
 		SELECT
 			$1::uuid,
 			'GRX-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 16)),
 			c.id, $2, $3,
-			cr.title_ar, cr.title_en, price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
+			cr.title_ar, cr.title_en, COALESCE(price.offer_price_minor_units, price.new_value_minor_units),
+			price.new_value_minor_units, 'KWD', 'WAITING_PAYMENT',
 			$4, $4, $4
 		  FROM courses c
 		  JOIN course_revisions cr ON cr.id = c.live_revision_id
 		  JOIN LATERAL (
-			SELECT new_value_minor_units
+			SELECT new_value_minor_units, offer_price_minor_units
 			  FROM course_price_changes
 			 WHERE course_id = c.id AND section_id IS NULL
 			 ORDER BY changed_at DESC, id DESC
@@ -484,13 +528,17 @@ func createOrReusePurchaseRequestTx(
 		          price_minor_units, currency, state, invitation_id::text,
 		          requested_at, payment_confirmed_at, invitation_created_at,
 		          access_granted_at, cancelled_at, course_title_ar, course_title_en,
-		          access_ends_at_snapshot, payment_confirmed_by_account_id::text
+		          access_ends_at_snapshot, payment_confirmed_by_account_id::text,
+		          regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
+		          bundle_title_ar, bundle_title_en, requester_account_id::text
 	`, uuid.NewString(), email, normalizedEmail, now, courseID).Scan(
 		&created, &request.ID, &request.ReferenceCode, &request.CourseID, &request.Email, &request.NormalizedEmail,
 		&request.PriceMinorUnits, &request.Currency, &request.State, &request.InvitationID,
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
+		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseRequest{}, false, ErrCourseNotPurchasable
@@ -518,18 +566,22 @@ func (r *Repository) ListPurchaseRequests(ctx context.Context, filter ListPurcha
 	if filter.State != nil && filter.State.Valid() {
 		state = string(*filter.State)
 	}
-	where := `($1 = '' OR p.reference_code ILIKE '%' || $1 || '%' OR p.normalized_email ILIKE '%' || $1 || '%' OR p.course_title_ar ILIKE '%' || $1 || '%' OR p.course_title_en ILIKE '%' || $1 || '%')
+	where := `($1 = '' OR p.reference_code ILIKE '%' || $1 || '%' OR p.normalized_email ILIKE '%' || $1 || '%'
+		OR COALESCE(p.course_title_ar, '') ILIKE '%' || $1 || '%' OR COALESCE(p.course_title_en, '') ILIKE '%' || $1 || '%'
+		OR COALESCE(p.bundle_title_ar, '') ILIKE '%' || $1 || '%' OR COALESCE(p.bundle_title_en, '') ILIKE '%' || $1 || '%')
 		AND ($2 = '' OR p.state = $2)`
 	var total int
 	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM purchase_requests p WHERE `+where, query, state).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting purchase requests: %w", err)
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT p.id::text, p.reference_code, p.course_id::text, p.email, p.normalized_email,
+		SELECT p.id::text, p.reference_code, COALESCE(p.course_id::text, ''), p.email, p.normalized_email,
 		       p.price_minor_units, p.currency, p.state, p.invitation_id::text,
 		       p.requested_at, p.payment_confirmed_at, p.invitation_created_at,
-		       p.access_granted_at, p.cancelled_at, p.course_title_ar, p.course_title_en,
-		       p.access_ends_at_snapshot, p.payment_confirmed_by_account_id::text
+		       p.access_granted_at, p.cancelled_at, COALESCE(p.course_title_ar, ''), COALESCE(p.course_title_en, ''),
+		       p.access_ends_at_snapshot, p.payment_confirmed_by_account_id::text,
+		       p.regular_price_minor_units, p.target_kind, p.bundle_id::text, p.bundle_revision,
+		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text
 		  FROM purchase_requests p
 		 WHERE `+where+`
 		 ORDER BY p.requested_at DESC
@@ -549,7 +601,79 @@ func (r *Repository) ListPurchaseRequests(ctx context.Context, filter ListPurcha
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterating purchase requests: %w", err)
 	}
+	if err := r.hydrateBundlePurchaseItems(ctx, items); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
+}
+
+func (r *Repository) ListStudentPurchaseRequests(ctx context.Context, studentAccountID string) ([]PurchaseRequest, error) {
+	if _, err := uuid.Parse(studentAccountID); err != nil {
+		return nil, ErrPurchaseRequesterNotEligible
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT p.id::text, p.reference_code, COALESCE(p.course_id::text, ''), p.email, p.normalized_email,
+		       p.price_minor_units, p.currency, p.state, p.invitation_id::text,
+		       p.requested_at, p.payment_confirmed_at, p.invitation_created_at,
+		       p.access_granted_at, p.cancelled_at, COALESCE(p.course_title_ar, ''), COALESCE(p.course_title_en, ''),
+		       p.access_ends_at_snapshot, p.payment_confirmed_by_account_id::text,
+		       p.regular_price_minor_units, p.target_kind, p.bundle_id::text, p.bundle_revision,
+		       p.bundle_title_ar, p.bundle_title_en, p.requester_account_id::text
+		FROM purchase_requests p WHERE p.requester_account_id=$1::uuid
+		ORDER BY p.requested_at DESC, p.id DESC LIMIT 100
+	`, studentAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("listing Student purchase requests: %w", err)
+	}
+	defer rows.Close()
+	items := []PurchaseRequest{}
+	for rows.Next() {
+		item, err := scanPurchaseRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.hydrateBundlePurchaseItems(ctx, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) hydrateBundlePurchaseItems(ctx context.Context, requests []PurchaseRequest) error {
+	ids := make([]string, 0)
+	requestAt := make(map[string]int)
+	for index := range requests {
+		if requests[index].TargetKind == PurchaseTargetBundle {
+			ids = append(ids, requests[index].ID)
+			requestAt[requests[index].ID] = index
+			requests[index].BundleItems = []BundlePurchaseItem{}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT purchase_request_id::text, course_id::text, position, course_title_ar, course_title_en
+		FROM purchase_request_bundle_items WHERE purchase_request_id=ANY($1::uuid[])
+		ORDER BY purchase_request_id, position, course_id
+	`, ids)
+	if err != nil {
+		return fmt.Errorf("loading Bundle request snapshots: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var requestID string
+		var item BundlePurchaseItem
+		if err := rows.Scan(&requestID, &item.CourseID, &item.Position, &item.CourseTitleAr, &item.CourseTitleEn); err != nil {
+			return err
+		}
+		requests[requestAt[requestID]].BundleItems = append(requests[requestAt[requestID]].BundleItems, item)
+	}
+	return rows.Err()
 }
 
 func scanPurchaseRequest(row interface{ Scan(...any) error }) (PurchaseRequest, error) {
@@ -560,6 +684,8 @@ func scanPurchaseRequest(row interface{ Scan(...any) error }) (PurchaseRequest, 
 		&request.RequestedAt, &request.PaymentConfirmedAt, &request.InvitationCreatedAt,
 		&request.AccessGrantedAt, &request.CancelledAt, &request.CourseTitleAr, &request.CourseTitleEn,
 		&request.AccessEndsAtSnapshot, &request.PaymentConfirmedByAccountID,
+		&request.RegularPriceMinorUnits, &request.TargetKind, &request.BundleID, &request.BundleRevision,
+		&request.BundleTitleAr, &request.BundleTitleEn, &request.RequesterAccountID,
 	); err != nil {
 		return PurchaseRequest{}, fmt.Errorf("scanning purchase request: %w", err)
 	}
@@ -598,6 +724,19 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 	if err != nil {
 		return ConfirmPurchaseRequestResult{}, err
 	}
+	if request.TargetKind == PurchaseTargetBundle {
+		grants, err := r.confirmBundlePurchaseTx(ctx, tx, &request, params.AdminAccountID, now)
+		if err != nil {
+			return ConfirmPurchaseRequestResult{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return ConfirmPurchaseRequestResult{}, fmt.Errorf("committing bundle payment confirmation: %w", err)
+		}
+		return ConfirmPurchaseRequestResult{PurchaseRequest: request, BundleGrants: grants}, nil
+	}
+	if request.TargetKind != PurchaseTargetCourse {
+		return ConfirmPurchaseRequestResult{}, ErrPurchaseRequestTransition
+	}
 	if request.State == PurchaseRequestInvitationCreated || request.State == PurchaseRequestAccessGranted {
 		invitation, err := getInvitationTx(ctx, tx, request.InvitationID)
 		if err != nil {
@@ -606,7 +745,7 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 		if err := tx.Commit(ctx); err != nil {
 			return ConfirmPurchaseRequestResult{}, fmt.Errorf("committing idempotent payment confirmation: %w", err)
 		}
-		return ConfirmPurchaseRequestResult{PurchaseRequest: request, Invitation: invitation}, nil
+		return ConfirmPurchaseRequestResult{PurchaseRequest: request, Invitation: &invitation}, nil
 	}
 	if request.State != PurchaseRequestWaitingPayment {
 		return ConfirmPurchaseRequestResult{}, ErrPurchaseRequestTransition
@@ -676,9 +815,8 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 	if err := tx.Commit(ctx); err != nil {
 		return ConfirmPurchaseRequestResult{}, fmt.Errorf("committing payment confirmation: %w", err)
 	}
-	return ConfirmPurchaseRequestResult{PurchaseRequest: request, Invitation: invitation}, nil
+	return ConfirmPurchaseRequestResult{PurchaseRequest: request, Invitation: &invitation}, nil
 }
-
 func (r *Repository) CancelPurchaseRequest(ctx context.Context, params CancelPurchaseRequestParams) (PurchaseRequest, error) {
 	if r == nil || r.pool == nil || r.outboxWriter == nil {
 		return PurchaseRequest{}, errors.New("repository is not initialized")
@@ -767,11 +905,13 @@ func (r *Repository) CancelPurchaseRequest(ctx context.Context, params CancelPur
 
 func lockPurchaseRequest(ctx context.Context, tx pgx.Tx, id string) (PurchaseRequest, error) {
 	row := tx.QueryRow(ctx, `
-		SELECT id::text, reference_code, course_id::text, email, normalized_email,
+		SELECT id::text, reference_code, COALESCE(course_id::text, ''), email, normalized_email,
 		       price_minor_units, currency, state, invitation_id::text,
 		       requested_at, payment_confirmed_at, invitation_created_at,
-		       access_granted_at, cancelled_at, course_title_ar, course_title_en,
-		       access_ends_at_snapshot, payment_confirmed_by_account_id::text
+		       access_granted_at, cancelled_at, COALESCE(course_title_ar, ''), COALESCE(course_title_en, ''),
+		       access_ends_at_snapshot, payment_confirmed_by_account_id::text,
+		       regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
+		       bundle_title_ar, bundle_title_en, requester_account_id::text
 		  FROM purchase_requests WHERE id = $1::uuid FOR UPDATE
 	`, id)
 	request, err := scanPurchaseRequest(row)
@@ -1028,11 +1168,13 @@ func (r *Repository) CompletePurchaseInvitationAcceptance(
 
 func lockPurchaseRequestByInvitation(ctx context.Context, tx pgx.Tx, invitationID string) (PurchaseRequest, error) {
 	row := tx.QueryRow(ctx, `
-		SELECT id::text, reference_code, course_id::text, email, normalized_email,
+		SELECT id::text, reference_code, COALESCE(course_id::text, ''), email, normalized_email,
 		       price_minor_units, currency, state, invitation_id::text,
 		       requested_at, payment_confirmed_at, invitation_created_at,
-		       access_granted_at, cancelled_at, course_title_ar, course_title_en,
-		       access_ends_at_snapshot, payment_confirmed_by_account_id::text
+		       access_granted_at, cancelled_at, COALESCE(course_title_ar, ''), COALESCE(course_title_en, ''),
+		       access_ends_at_snapshot, payment_confirmed_by_account_id::text,
+		       regular_price_minor_units, target_kind, bundle_id::text, bundle_revision,
+		       bundle_title_ar, bundle_title_en, requester_account_id::text
 		  FROM purchase_requests WHERE invitation_id = $1::uuid FOR UPDATE
 	`, invitationID)
 	return scanPurchaseRequest(row)
@@ -1043,11 +1185,20 @@ func WhatsAppHandoffURL(number string, request PurchaseRequest, locale identity.
 		return "", errors.New("sales WhatsApp number is not configured")
 	}
 	title := request.CourseTitleEn
+	if request.TargetKind == PurchaseTargetBundle && request.BundleTitleEn != nil {
+		title = *request.BundleTitleEn
+	}
 	if locale == identity.LocaleArabic {
 		title = request.CourseTitleAr
+		if request.TargetKind == PurchaseTargetBundle && request.BundleTitleAr != nil {
+			title = *request.BundleTitleAr
+		}
 	}
 	if title == "" {
 		title = request.CourseTitleEn
+		if request.BundleTitleEn != nil {
+			title = *request.BundleTitleEn
+		}
 	}
 	price := formatKWD(request.PriceMinorUnits)
 	message := fmt.Sprintf("Hello, I want to buy %s on Gradex.\nPrice: %s\nEmail: %s\nRequest: %s", title, price, request.Email, request.ReferenceCode)

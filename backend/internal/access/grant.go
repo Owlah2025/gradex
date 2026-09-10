@@ -29,6 +29,7 @@ type Entitlement struct {
 	CourseID                string     `json:"course_id"`
 	GrantSource             string     `json:"grant_source"`
 	SourceInvitationID      *string    `json:"source_invitation_id,omitempty"`
+	SourcePurchaseRequestID *string    `json:"source_purchase_request_id,omitempty"`
 	OriginalAccessEndsAt    time.Time  `json:"original_access_ends_at"`
 	AccessEndsAt            time.Time  `json:"access_ends_at"`
 	RevokedAt               *time.Time `json:"revoked_at,omitempty"`

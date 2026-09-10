@@ -31,6 +31,7 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 		{"identity.staff_invitation_created", TemplateStaffInvitation, true, true},
 		{"access.invitation_issued", TemplateCourseInvitation, true, true},
 		{"access.granted", TemplateAccessGranted, false, false},
+		{"access.bundle_granted", TemplateBundleGranted, false, false},
 		{"access.invitation_rejected", TemplateInviteRejected, false, false},
 		{"access.invitation_cancelled", TemplateInviteCancelled, false, false},
 		{"access.entitlement_adjusted", TemplateAccessAdjusted, false, false},

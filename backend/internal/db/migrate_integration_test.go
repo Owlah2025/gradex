@@ -129,6 +129,7 @@ var (
 	courseAccessGrantTables  = []string{"course_access_invitations"}
 	transactionalEmailTables = []string{"transactional_email_deliveries", "transactional_email_attempts"}
 	purchaseRequestTables    = []string{"purchase_requests"}
+	bundleTables             = []string{"bundles", "bundle_courses", "bundle_price_changes", "purchase_request_bundle_items", "bundle_purchase_grants"}
 )
 
 func allTables() []string {
@@ -143,7 +144,8 @@ func allTables() []string {
 	all = append(all, protectedLearningTables...)
 	all = append(all, courseAccessGrantTables...)
 	all = append(all, transactionalEmailTables...)
-	return append(all, purchaseRequestTables...)
+	all = append(all, purchaseRequestTables...)
+	return append(all, bundleTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
@@ -663,9 +665,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("MediaWorkLeaseSchemaVersion = %d, want %d",
 			MediaWorkLeaseSchemaVersion, MediaProcessingProgressSchemaVersion+1)
 	}
-	if MaxSchemaVersion != MediaWorkLeaseSchemaVersion {
+	if BundlesAndOffersSchemaVersion != MediaWorkLeaseSchemaVersion+1 {
+		t.Fatalf("BundlesAndOffersSchemaVersion = %d, want %d",
+			BundlesAndOffersSchemaVersion, MediaWorkLeaseSchemaVersion+1)
+	}
+	if MaxSchemaVersion != BundlesAndOffersSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, MediaWorkLeaseSchemaVersion)
+			MaxSchemaVersion, BundlesAndOffersSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -710,6 +716,161 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	if SubjectCodeIdentitySchemaVersion != CourseAcademicIdentitySchemaVersion+1 {
 		t.Fatalf("subject code identity schema = %d, want one past course academic identity %d",
 			SubjectCodeIdentitySchemaVersion, CourseAcademicIdentitySchemaVersion)
+	}
+}
+
+func TestBundlesAndOffersMigrationPreservesExistingCommerceAndAccess(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	if err := m.Migrate(uint(MediaWorkLeaseSchemaVersion)); err != nil {
+		t.Fatalf("migrating to schema 35: %v", err)
+	}
+	const adminID = "51000000-0000-0000-0000-000000000001"
+	const instructorID = "51000000-0000-0000-0000-000000000002"
+	const studentID = "51000000-0000-0000-0000-000000000003"
+	const courseID = "52000000-0000-0000-0000-000000000001"
+	const revisionID = "53000000-0000-0000-0000-000000000001"
+	const invitationID = "54000000-0000-0000-0000-000000000001"
+	const requestID = "55000000-0000-0000-0000-000000000001"
+	const entitlementID = "56000000-0000-0000-0000-000000000001"
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO accounts (id,email,normalized_email,role,status,display_name) VALUES ($1::uuid,'admin-migration@example.com','admin-migration@example.com','ADMIN','ACTIVE','Admin'),($2::uuid,'instructor-migration@example.com','instructor-migration@example.com','INSTRUCTOR','ACTIVE','Instructor'),($3::uuid,'student-migration@example.com','student-migration@example.com','STUDENT','ACTIVE','Student')`, []any{adminID, instructorID, studentID}},
+		{`INSERT INTO courses (id,owner_account_id,lifecycle) VALUES ($1::uuid,$2::uuid,'DRAFT')`, []any{courseID, instructorID}},
+		{`INSERT INTO course_revisions (id,course_id,state,revision_number,title_ar,title_en) VALUES ($1::uuid,$2::uuid,'APPROVED',1,'مقرر','Course')`, []any{revisionID, courseID}},
+		{`UPDATE courses SET lifecycle='PUBLISHED',live_revision_id=$1::uuid WHERE id=$2::uuid`, []any{revisionID, courseID}},
+		{`INSERT INTO course_price_changes (course_id,new_value_minor_units,changed_by_account_id,reason) VALUES ($1::uuid,70000,$2::uuid,'Existing price')`, []any{courseID, adminID}},
+		{`INSERT INTO course_access_invitations (id,email,normalized_email,course_id,created_by_account_id,accepted_by_account_id,decided_by_account_id,state,accepted_at,decided_at) VALUES ($1::uuid,'student-migration@example.com','student-migration@example.com',$2::uuid,$3::uuid,$4::uuid,$3::uuid,'APPROVED',now(),now())`, []any{invitationID, courseID, adminID, studentID}},
+		{`INSERT INTO purchase_requests (id,reference_code,course_id,email,normalized_email,requester_account_id,course_title_ar,course_title_en,price_minor_units,currency,state,requested_at) VALUES ($1::uuid,'GRX-MIGRATION',$2::uuid,'student-migration@example.com','student-migration@example.com',$3::uuid,'مقرر','Course',70000,'KWD','WAITING_PAYMENT',now())`, []any{requestID, courseID, studentID}},
+		{`INSERT INTO enrollments (student_account_id,course_id) VALUES ($1::uuid,$2::uuid)`, []any{studentID, courseID}},
+		{`INSERT INTO entitlements (id,student_account_id,scope_kind,scope_id,course_id,grant_source,source_invitation_id,original_access_ends_at,access_ends_at,retirement_eligibility_at,state) VALUES ($1::uuid,$2::uuid,'COURSE',$3::uuid,$3::uuid,'MANUAL_INVITATION',$4::uuid,now()+interval '30 days',now()+interval '30 days',now(),'ACTIVE')`, []any{entitlementID, studentID, courseID, invitationID}},
+	} {
+		if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seeding schema 35 evidence: %v", err)
+		}
+	}
+	if err := m.Migrate(uint(BundlesAndOffersSchemaVersion)); err != nil {
+		t.Fatalf("migrating 35 to 36: %v", err)
+	}
+	var price int64
+	var offer *int64
+	if err := pool.QueryRow(ctx, `SELECT new_value_minor_units,offer_price_minor_units FROM course_price_changes WHERE course_id=$1::uuid`, courseID).Scan(&price, &offer); err != nil || price != 70000 || offer != nil {
+		t.Fatalf("Course price after 0036=%d offer=%v error=%v", price, offer, err)
+	}
+	var target, preservedCourse, preservedState string
+	var bundleID, regular *string
+	if err := pool.QueryRow(ctx, `SELECT target_kind,course_id::text,bundle_id::text,regular_price_minor_units::text,state FROM purchase_requests WHERE id=$1::uuid`, requestID).Scan(&target, &preservedCourse, &bundleID, &regular, &preservedState); err != nil {
+		t.Fatal(err)
+	}
+	if target != "COURSE" || preservedCourse != courseID || bundleID != nil || regular != nil || preservedState != "WAITING_PAYMENT" {
+		t.Fatalf("historical purchase target=%s course=%s bundle=%v regular=%v state=%s", target, preservedCourse, bundleID, regular, preservedState)
+	}
+	var source, preservedEntitlement string
+	var sourcePurchase *string
+	if err := pool.QueryRow(ctx, `SELECT grant_source,id::text,source_purchase_request_id::text FROM entitlements WHERE id=$1::uuid`, entitlementID).Scan(&source, &preservedEntitlement, &sourcePurchase); err != nil {
+		t.Fatal(err)
+	}
+	if source != "MANUAL_INVITATION" || preservedEntitlement != entitlementID || sourcePurchase != nil {
+		t.Fatalf("historical entitlement source=%s id=%s purchase=%v", source, preservedEntitlement, sourcePurchase)
+	}
+	if err := m.Migrate(uint(MediaWorkLeaseSchemaVersion)); err != nil {
+		t.Fatalf("safe 0036 down migration with only historical data: %v", err)
+	}
+}
+
+// TestBundlesAndOffersRollbackRefusesToDestroyCommerceEvidence proves the 0036
+// down migration fails closed. Each case seeds exactly one class of evidence
+// that exists only at schema 36 and would be destroyed by the rollback, and
+// asserts both that the rollback is refused and that the evidence survives the
+// refusal.
+func TestBundlesAndOffersRollbackRefusesToDestroyCommerceEvidence(t *testing.T) {
+	const adminID = "61000000-0000-0000-0000-000000000001"
+	const instructorID = "61000000-0000-0000-0000-000000000002"
+	const studentID = "61000000-0000-0000-0000-000000000003"
+	const courseID = "62000000-0000-0000-0000-000000000001"
+	const revisionID = "63000000-0000-0000-0000-000000000001"
+	baseline := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO accounts (id,email,normalized_email,role,status,display_name) VALUES ($1::uuid,'admin-rollback@example.com','admin-rollback@example.com','ADMIN','ACTIVE','Admin'),($2::uuid,'instructor-rollback@example.com','instructor-rollback@example.com','INSTRUCTOR','ACTIVE','Instructor'),($3::uuid,'student-rollback@example.com','student-rollback@example.com','STUDENT','ACTIVE','Student')`, []any{adminID, instructorID, studentID}},
+		{`INSERT INTO courses (id,owner_account_id,lifecycle) VALUES ($1::uuid,$2::uuid,'DRAFT')`, []any{courseID, instructorID}},
+		{`INSERT INTO course_revisions (id,course_id,state,revision_number,title_ar,title_en) VALUES ($1::uuid,$2::uuid,'APPROVED',1,'مقرر','Course')`, []any{revisionID, courseID}},
+		{`UPDATE courses SET lifecycle='PUBLISHED',live_revision_id=$1::uuid WHERE id=$2::uuid`, []any{revisionID, courseID}},
+	}
+
+	cases := []struct {
+		name     string
+		seed     string
+		args     []any
+		survives string
+	}{
+		{
+			name:     "bundle",
+			seed:     `INSERT INTO bundles (id,title_ar,title_en,description_ar,description_en,lifecycle,created_by_account_id,updated_by_account_id) VALUES ('64000000-0000-0000-0000-000000000001'::uuid,'باقة','Bundle','وصف','Description','DRAFT',$1::uuid,$1::uuid)`,
+			args:     []any{adminID},
+			survives: `SELECT count(*) FROM bundles`,
+		},
+		{
+			name:     "course offer history",
+			seed:     `INSERT INTO course_price_changes (course_id,new_value_minor_units,offer_price_minor_units,changed_by_account_id,reason) VALUES ($1::uuid,70000,50000,$2::uuid,'Offer')`,
+			args:     []any{courseID, adminID},
+			survives: `SELECT count(*) FROM course_price_changes WHERE offer_price_minor_units IS NOT NULL`,
+		},
+		{
+			name:     "course request quote metadata",
+			seed:     `INSERT INTO purchase_requests (id,reference_code,course_id,target_kind,email,normalized_email,requester_account_id,course_title_ar,course_title_en,price_minor_units,regular_price_minor_units,currency,state,requested_at) VALUES ('65000000-0000-0000-0000-000000000001'::uuid,'GRX-ROLLBACK',$1::uuid,'COURSE','student-rollback@example.com','student-rollback@example.com',$2::uuid,'مقرر','Course',50000,70000,'KWD','WAITING_PAYMENT',now())`,
+			args:     []any{courseID, studentID},
+			survives: `SELECT count(*) FROM purchase_requests WHERE regular_price_minor_units IS NOT NULL`,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			freshDatabase(t)
+			m := openMigrator(t)
+			pool := openPool(t)
+			ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+			defer cancel()
+			if err := m.Migrate(uint(BundlesAndOffersSchemaVersion)); err != nil {
+				t.Fatalf("migrating to schema 36: %v", err)
+			}
+			for _, statement := range baseline {
+				if _, err := pool.Exec(ctx, statement.query, statement.args...); err != nil {
+					t.Fatalf("seeding rollback baseline: %v", err)
+				}
+			}
+			if _, err := pool.Exec(ctx, testCase.seed, testCase.args...); err != nil {
+				t.Fatalf("seeding 0036 commerce evidence: %v", err)
+			}
+			if err := m.Migrate(uint(MediaWorkLeaseSchemaVersion)); err == nil {
+				t.Fatal("data-bearing 0036 rollback unexpectedly succeeded")
+			}
+			// golang-migrate stamps the target version and marks it dirty before
+			// running the statements, so a refused rollback leaves a dirty marker
+			// that an operator must resolve deliberately. That is the intended
+			// fail-closed signal; what must not happen is the evidence being
+			// destroyed on the way past the guard.
+			state, err := ReadSchemaState(ctx, pool)
+			if err != nil {
+				t.Fatalf("reading schema state: %v", err)
+			}
+			if !state.Dirty {
+				t.Fatalf("schema state after refused rollback = %+v, want a dirty marker", state)
+			}
+			var surviving int
+			if err := pool.QueryRow(ctx, testCase.survives).Scan(&surviving); err != nil {
+				t.Fatalf("reading surviving evidence: %v", err)
+			}
+			if surviving != 1 {
+				t.Fatalf("surviving %s rows = %d, want 1", testCase.name, surviving)
+			}
+		})
 	}
 }
 

@@ -28,8 +28,10 @@ type Taxonomy struct {
 }
 
 type Price struct {
-	MinorUnits int64  `json:"minor_units"`
-	Currency   string `json:"currency"`
+	MinorUnits        int64  `json:"minor_units"`
+	RegularMinorUnits int64  `json:"regular_minor_units"`
+	OfferMinorUnits   *int64 `json:"offer_minor_units,omitempty"`
+	Currency          string `json:"currency"`
 }
 
 type Course struct {
@@ -350,7 +352,7 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		END,
 		COALESCE(academic_subject.official_code, subject.academic_code),
 		cr.study_year::text,
-		price.new_value_minor_units,
+			price.new_value_minor_units, price.offer_price_minor_units,
         (SELECT v.id::text FROM media_asset_versions v JOIN media_assets ma ON ma.id=v.logical_asset_id
           JOIN media_thumbnail_variants t ON t.asset_version_id=v.id
           WHERE v.id=cr.thumbnail_asset_version_id AND v.kind='THUMBNAIL' AND ma.kind='THUMBNAIL'
@@ -401,7 +403,7 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 		LEFT JOIN taxonomy_terms subject ON subject.id = cr.subject_term_id
 		LEFT JOIN institutions academic_institution ON academic_institution.id = c.institution_id
 		LEFT JOIN subjects academic_subject ON academic_subject.id = c.subject_id
-		LEFT JOIN LATERAL (SELECT new_value_minor_units FROM course_price_changes WHERE course_id = c.id AND section_id IS NULL ORDER BY changed_at DESC, id DESC LIMIT 1) price ON true
+			LEFT JOIN LATERAL (SELECT new_value_minor_units, offer_price_minor_units FROM course_price_changes WHERE course_id = c.id AND section_id IS NULL ORDER BY changed_at DESC, id DESC LIMIT 1) price ON true
 		WHERE ` + visibility + ` ` + identifier + ` ` + suffix
 }
 
@@ -418,9 +420,9 @@ func scanCourses(rows interface {
 	for rows.Next() {
 		var item Course
 		var universityLabel, universityCode, majorLabel, majorCode, subjectLabel, subjectCode, studyYear *string
-		var amount *int64
+		var regular, offer *int64
 		var thumbnailID *string
-		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &amount, &thumbnailID, &item.HasPreview); err != nil {
+		if err := rows.Scan(&item.ID, &item.Slug, &item.Title, &item.InstructorDisplayName, &universityLabel, &universityCode, &majorLabel, &majorCode, &subjectLabel, &subjectCode, &studyYear, &regular, &offer, &thumbnailID, &item.HasPreview); err != nil {
 			return nil, fmt.Errorf("scanning public course: %w", err)
 		}
 		if thumbnailID != nil {
@@ -441,8 +443,12 @@ func scanCourses(rows interface {
 				item.StudyYear = &Taxonomy{Label: label}
 			}
 		}
-		if amount != nil {
-			item.Price = &Price{MinorUnits: *amount, Currency: currencyKWD}
+		if regular != nil {
+			effective := *regular
+			if offer != nil {
+				effective = *offer
+			}
+			item.Price = &Price{MinorUnits: effective, RegularMinorUnits: *regular, OfferMinorUnits: offer, Currency: currencyKWD}
 		}
 		items = append(items, item)
 	}

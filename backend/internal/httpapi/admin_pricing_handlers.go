@@ -16,8 +16,10 @@ type adminPricingHandlers struct {
 }
 
 type setPriceBody struct {
-	PriceMinorUnits *int64 `json:"price_minor_units"`
-	Reason          string `json:"reason"`
+	PriceMinorUnits      *int64 `json:"price_minor_units"`
+	OfferPriceMinorUnits *int64 `json:"offer_price_minor_units"`
+	ClearOffer           bool   `json:"clear_offer"`
+	Reason               string `json:"reason"`
 }
 
 func parsePricingMutationBody(c *gin.Context) (*setPriceBody, bool) {
@@ -44,6 +46,17 @@ func parsePricingMutationBody(c *gin.Context) (*setPriceBody, bool) {
 		}))
 		return nil, false
 	}
+	if body.OfferPriceMinorUnits != nil && (*body.OfferPriceMinorUnits <= 0 || *body.OfferPriceMinorUnits >= *body.PriceMinorUnits) {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code: "INVALID_OFFER_PRICE", Detail: "Offer price must be positive and lower than regular price",
+			Location: problem.LocationBody, Parameter: "offer_price_minor_units",
+		}))
+		return nil, false
+	}
+	if body.ClearOffer && body.OfferPriceMinorUnits != nil {
+		writeProblem(c, problem.ValidationFailed())
+		return nil, false
+	}
 	return &body, true
 }
 
@@ -58,6 +71,13 @@ func (h *adminPricingHandlers) handlePricingError(c *gin.Context, err error) {
 			Detail:    "Price must be non-negative integer minor units",
 			Location:  problem.LocationBody,
 			Parameter: "price_minor_units",
+		}))
+		return
+	}
+	if errors.Is(err, catalog.ErrInvalidOfferPrice) {
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code: "INVALID_OFFER_PRICE", Detail: "Offer price must be positive and lower than regular price",
+			Location: problem.LocationBody, Parameter: "offer_price_minor_units",
 		}))
 		return
 	}
@@ -83,11 +103,13 @@ func (h *adminPricingHandlers) setCoursePrice(c *gin.Context) {
 	}
 
 	change, err := h.repo.SetCoursePrice(c.Request.Context(), catalog.SetCoursePriceRequest{
-		CourseID:        courseID,
-		AdminAccountID:  adminAccountID,
-		ActorDescriptor: adminAccountID,
-		PriceMinorUnits: *body.PriceMinorUnits,
-		Reason:          body.Reason,
+		CourseID:             courseID,
+		AdminAccountID:       adminAccountID,
+		ActorDescriptor:      adminAccountID,
+		PriceMinorUnits:      *body.PriceMinorUnits,
+		OfferPriceMinorUnits: body.OfferPriceMinorUnits,
+		OfferPriceSet:        body.ClearOffer || body.OfferPriceMinorUnits != nil,
+		Reason:               body.Reason,
 	})
 	if err != nil {
 		h.handlePricingError(c, err)

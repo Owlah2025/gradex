@@ -15,22 +15,26 @@ var (
 )
 
 type PriceChange struct {
-	ID                 string    `json:"id"`
-	CourseID           string    `json:"course_id"`
-	SectionID          *string   `json:"section_id,omitempty"`
-	OldValueMinorUnits *int64    `json:"old_value_minor_units"`
-	NewValueMinorUnits int64     `json:"new_value_minor_units"`
-	ChangedByAccountID string    `json:"changed_by_account_id"`
-	Reason             string    `json:"reason"`
-	ChangedAt          time.Time `json:"changed_at"`
+	ID                      string    `json:"id"`
+	CourseID                string    `json:"course_id"`
+	SectionID               *string   `json:"section_id,omitempty"`
+	OldValueMinorUnits      *int64    `json:"old_value_minor_units"`
+	NewValueMinorUnits      int64     `json:"new_value_minor_units"`
+	OldOfferPriceMinorUnits *int64    `json:"old_offer_price_minor_units"`
+	OfferPriceMinorUnits    *int64    `json:"offer_price_minor_units"`
+	ChangedByAccountID      string    `json:"changed_by_account_id"`
+	Reason                  string    `json:"reason"`
+	ChangedAt               time.Time `json:"changed_at"`
 }
 
 type SetCoursePriceRequest struct {
-	CourseID        string
-	AdminAccountID  string
-	ActorDescriptor string
-	PriceMinorUnits int64
-	Reason          string
+	CourseID             string
+	AdminAccountID       string
+	ActorDescriptor      string
+	PriceMinorUnits      int64
+	OfferPriceMinorUnits *int64
+	OfferPriceSet        bool
+	Reason               string
 }
 
 type SetSectionPriceRequest struct {
@@ -53,6 +57,10 @@ func (r *Repository) SetCoursePrice(ctx context.Context, req SetCoursePriceReque
 	if req.PriceMinorUnits < 0 {
 		return nil, ErrInvalidPrice
 	}
+	if req.OfferPriceSet && req.OfferPriceMinorUnits != nil &&
+		(*req.OfferPriceMinorUnits <= 0 || *req.OfferPriceMinorUnits >= req.PriceMinorUnits) {
+		return nil, ErrInvalidOfferPrice
+	}
 	if strings.TrimSpace(req.Reason) == "" {
 		return nil, ErrReasonRequired
 	}
@@ -64,25 +72,34 @@ func (r *Repository) SetCoursePrice(ctx context.Context, req SetCoursePriceReque
 			return err
 		}
 
-		var oldVal *int64
+		var oldVal, oldOffer *int64
 		err = tx.QueryRow(ctx, `
-			SELECT new_value_minor_units
+			SELECT new_value_minor_units, offer_price_minor_units
 			FROM course_price_changes
 			WHERE course_id = $1::uuid AND section_id IS NULL
 			ORDER BY changed_at DESC, id DESC
 			LIMIT 1
-		`, courseRow.ID).Scan(&oldVal)
+		`, courseRow.ID).Scan(&oldVal, &oldOffer)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("querying latest course price: %w", err)
+		}
+
+		offer := oldOffer
+		if req.OfferPriceSet {
+			offer = req.OfferPriceMinorUnits
+		}
+		if _, err := NewCatalogPrice(req.PriceMinorUnits, offer); err != nil {
+			return err
 		}
 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO course_price_changes (
 				course_id, section_id, old_value_minor_units, new_value_minor_units,
+				old_offer_price_minor_units, offer_price_minor_units,
 				changed_by_account_id, reason, changed_at
 			) VALUES (
 				$1::uuid, NULL, $2, $3,
-				$4::uuid, $5,
+				$4, $5, $6::uuid, $7,
 				GREATEST(
 					clock_timestamp(),
 					COALESCE(
@@ -94,9 +111,11 @@ func (r *Repository) SetCoursePrice(ctx context.Context, req SetCoursePriceReque
 				)
 			)
 			RETURNING id, course_id, section_id, old_value_minor_units, new_value_minor_units,
+			          old_offer_price_minor_units, offer_price_minor_units,
 			          changed_by_account_id, reason, changed_at
-		`, courseRow.ID, oldVal, req.PriceMinorUnits, req.AdminAccountID, req.Reason).Scan(
+		`, courseRow.ID, oldVal, req.PriceMinorUnits, oldOffer, offer, req.AdminAccountID, req.Reason).Scan(
 			&pc.ID, &pc.CourseID, &pc.SectionID, &pc.OldValueMinorUnits, &pc.NewValueMinorUnits,
+			&pc.OldOfferPriceMinorUnits, &pc.OfferPriceMinorUnits,
 			&pc.ChangedByAccountID, &pc.Reason, &pc.ChangedAt,
 		)
 		if err != nil {
@@ -113,8 +132,10 @@ func (r *Repository) SetCoursePrice(ctx context.Context, req SetCoursePriceReque
 			TargetID:        courseRow.ID,
 			Reason:          req.Reason,
 			Metadata: map[string]any{
-				"old_value_minor_units": oldVal,
-				"new_value_minor_units": req.PriceMinorUnits,
+				"old_value_minor_units":       oldVal,
+				"new_value_minor_units":       req.PriceMinorUnits,
+				"old_offer_price_minor_units": oldOffer,
+				"offer_price_minor_units":     offer,
 			},
 		}); err != nil {
 			return fmt.Errorf("writing price change audit event: %w", err)
@@ -207,9 +228,10 @@ func (r *Repository) SetSectionPrice(ctx context.Context, req SetSectionPriceReq
 		err = tx.QueryRow(ctx, `
 			INSERT INTO course_price_changes (
 				course_id, section_id, old_value_minor_units, new_value_minor_units,
+				old_offer_price_minor_units, offer_price_minor_units,
 				changed_by_account_id, reason, changed_at
 			) VALUES (
-				$1::uuid, $2::uuid, $3, $4,
+				$1::uuid, $2::uuid, $3, $4, NULL, NULL,
 				$5::uuid, $6,
 				GREATEST(
 					clock_timestamp(),
@@ -222,9 +244,11 @@ func (r *Repository) SetSectionPrice(ctx context.Context, req SetSectionPriceReq
 				)
 			)
 			RETURNING id, course_id, section_id, old_value_minor_units, new_value_minor_units,
+			          old_offer_price_minor_units, offer_price_minor_units,
 			          changed_by_account_id, reason, changed_at
 		`, courseRow.ID, req.SectionIdentityID, oldVal, req.PriceMinorUnits, req.AdminAccountID, req.Reason).Scan(
 			&pc.ID, &pc.CourseID, &pc.SectionID, &pc.OldValueMinorUnits, &pc.NewValueMinorUnits,
+			&pc.OldOfferPriceMinorUnits, &pc.OfferPriceMinorUnits,
 			&pc.ChangedByAccountID, &pc.Reason, &pc.ChangedAt,
 		)
 		if err != nil {
@@ -276,6 +300,7 @@ func (r *Repository) GetCoursePriceHistory(ctx context.Context, courseID string)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, course_id, section_id, old_value_minor_units, new_value_minor_units,
+		       old_offer_price_minor_units, offer_price_minor_units,
 		       changed_by_account_id, reason, changed_at
 		FROM course_price_changes
 		WHERE course_id = $1::uuid
@@ -291,6 +316,7 @@ func (r *Repository) GetCoursePriceHistory(ctx context.Context, courseID string)
 		var pc PriceChange
 		if err := rows.Scan(
 			&pc.ID, &pc.CourseID, &pc.SectionID, &pc.OldValueMinorUnits, &pc.NewValueMinorUnits,
+			&pc.OldOfferPriceMinorUnits, &pc.OfferPriceMinorUnits,
 			&pc.ChangedByAccountID, &pc.Reason, &pc.ChangedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scanning price change: %w", err)

@@ -428,6 +428,13 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/courses/:id/access-suspension":        {Method: http.MethodPost, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
 	"DELETE /api/v1/admin/courses/:id/access-suspension":      {Method: http.MethodDelete, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/taxonomy":                  {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/taxonomy", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/bundles":                               {Method: http.MethodGet, Path: "/api/v1/admin/bundles", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/bundles":                              {Method: http.MethodPost, Path: "/api/v1/admin/bundles", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/bundles/:id":                           {Method: http.MethodGet, Path: "/api/v1/admin/bundles/:id", Class: ClassCapabilityProtected},
+	"PUT /api/v1/admin/bundles/:id":                           {Method: http.MethodPut, Path: "/api/v1/admin/bundles/:id", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/bundles/:id/publish":                  {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/publish", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/bundles/:id/delist":                   {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/delist", Class: ClassCapabilityProtected},
+	"POST /api/v1/admin/bundles/:id/archive":                  {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/archive", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/taxonomy/terms":                       {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms", Class: ClassCapabilityProtected},
 	"PATCH /api/v1/admin/taxonomy/terms/:id":                  {Method: http.MethodPatch, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/taxonomy/terms/:id/retire":            {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms/:id/retire", Class: ClassCapabilityProtected},
@@ -452,6 +459,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	// own surface. The class change is the security change: creation is now
 	// behind a session, the session CSRF boundary, and the learning capability.
 	"POST /api/v1/me/purchase-requests": {Method: http.MethodPost, Path: "/api/v1/me/purchase-requests", Class: ClassCapabilityProtected},
+	"GET /api/v1/me/purchase-requests":  {Method: http.MethodGet, Path: "/api/v1/me/purchase-requests", Class: ClassCapabilityProtected},
 	"GET /api/v1/me/course-access":      {Method: http.MethodGet, Path: "/api/v1/me/course-access", Class: ClassCapabilityProtected},
 }
 

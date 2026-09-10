@@ -34,6 +34,8 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 	catalog.Use(publicCatalogCache())
 	catalog.GET("/courses", handlers.list)
 	catalog.GET("/courses/:idOrSlug", handlers.detail)
+	catalog.GET("/bundles", handlers.listBundles)
+	catalog.GET("/bundles/:idOrSlug", handlers.bundleDetail)
 
 	// The smallest read-only academic surface a public filter needs. It is a
 	// separate group from the Admin and Student academic endpoints on purpose:
@@ -44,6 +46,29 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 	catalog.GET("/academic-options/institutions/:slug/subjects", handlers.subjectOptions)
 	catalog.GET("/academic-options/institutions/:slug/levels", handlers.levelOptions)
 	return nil
+}
+
+func (h *publicCatalogHandlers) listBundles(c *gin.Context) {
+	page, pageSize := publicCatalogPagination(c)
+	result, err := h.repository.BrowseBundles(c.Request.Context(), publicCatalogArabic(c), page, pageSize)
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *publicCatalogHandlers) bundleDetail(c *gin.Context) {
+	bundle, err := h.repository.BundleDetail(c.Request.Context(), c.Param("idOrSlug"), publicCatalogArabic(c))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	if bundle == nil {
+		writeAnonymousProblem(c, catalogpublic.NotFound())
+		return
+	}
+	c.JSON(http.StatusOK, bundle)
 }
 
 func (h *publicCatalogHandlers) institutionOptions(c *gin.Context) {

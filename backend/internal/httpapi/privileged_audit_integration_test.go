@@ -35,6 +35,7 @@ type privilegedAuditFixture struct {
 	uploadVideoID                          string
 	uploadPreviewID                        string
 	thumbnailID                            string
+	bundleID                               string
 }
 
 type privilegedAuditExpectation struct {
@@ -369,6 +370,7 @@ func privilegedCatalogMutationRoutes(engine *gin.Engine) []gin.RouteInfo {
 func isPrivilegedCatalogMutationPath(path string) bool {
 	return strings.HasPrefix(path, "/api/v1/admin/review/") ||
 		strings.HasPrefix(path, "/api/v1/admin/courses/") ||
+		strings.HasPrefix(path, "/api/v1/admin/bundles") ||
 		strings.HasPrefix(path, "/api/v1/admin/taxonomy/terms")
 }
 
@@ -388,6 +390,11 @@ func privilegedAuditScenarios() map[string]privilegedAuditScenario {
 		http.MethodPost + " /api/v1/admin/courses/:id/owner":                                          ownerAuditScenario,
 		http.MethodPost + " /api/v1/admin/courses/:id/access-suspension":                              suspendAuditScenario,
 		http.MethodDelete + " /api/v1/admin/courses/:id/access-suspension":                            restoreAuditScenario,
+		http.MethodPost + " /api/v1/admin/bundles":                                                    createBundleAuditScenario,
+		http.MethodPut + " /api/v1/admin/bundles/:id":                                                 updateBundleAuditScenario,
+		http.MethodPost + " /api/v1/admin/bundles/:id/publish":                                        bundleLifecycleAuditScenario(catalog.BundlePublished, "BUNDLE_PUBLISHED"),
+		http.MethodPost + " /api/v1/admin/bundles/:id/delist":                                         bundleLifecycleAuditScenario(catalog.BundleDelisted, "BUNDLE_DELISTED"),
+		http.MethodPost + " /api/v1/admin/bundles/:id/archive":                                        bundleLifecycleAuditScenario(catalog.BundleArchived, "BUNDLE_ARCHIVED"),
 		http.MethodPut + " /api/v1/admin/courses/:id/taxonomy":                                        taxonomyAssignmentAuditScenario,
 		http.MethodPost + " /api/v1/admin/taxonomy/terms":                                             createTermAuditScenario,
 		http.MethodPatch + " /api/v1/admin/taxonomy/terms/:id":                                        renameTermAuditScenario,
@@ -399,7 +406,9 @@ func privilegedAuditScenarios() map[string]privilegedAuditScenario {
 func (f *privilegedAuditFixture) request(t *testing.T, route gin.RouteInfo, body string) *http.Response {
 	t.Helper()
 	path := route.Path
-	if strings.HasPrefix(path, "/api/v1/admin/taxonomy/terms/") {
+	if strings.HasPrefix(path, "/api/v1/admin/bundles/") {
+		path = strings.ReplaceAll(path, ":id", f.bundleID)
+	} else if strings.HasPrefix(path, "/api/v1/admin/taxonomy/terms/") {
 		path = strings.ReplaceAll(path, ":id", f.termID)
 	} else {
 		path = strings.ReplaceAll(path, ":id", f.courseID)
@@ -834,6 +843,75 @@ func sectionPriceAuditScenario(t *testing.T, f *privilegedAuditFixture, route gi
 	return f.execute(t, route, `{"price_minor_units":10000,"reason":"Audit proof section price"}`, privilegedAuditExpectation{status: http.StatusOK, action: "COURSE_PRICE_CHANGED", targetType: "SECTION", targetID: f.sectionID, committed: func(t *testing.T, f *privilegedAuditFixture) {
 		assertPriceChange(t, f, f.courseID, f.sectionID, 10000)
 	}})
+}
+
+func (f *privilegedAuditFixture) prepareBundleCourses(t *testing.T) []string {
+	t.Helper()
+	f.preparePublished(t)
+	const secondCourseID = "10000000-0000-0000-0000-000000000090"
+	const secondRevisionID = "10000000-0000-0000-0000-000000000091"
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO courses (id,owner_account_id,lifecycle,default_access_ends_at) VALUES ($1::uuid,$2::uuid,'DRAFT',now()+interval '90 days')`, secondCourseID, f.instructorID); err != nil {
+		t.Fatalf("preparing second Bundle Course: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `INSERT INTO course_revisions (id,course_id,state,revision_number,title_ar,title_en) VALUES ($1::uuid,$2::uuid,'APPROVED',1,'مقرر ثان','Second Course')`, secondRevisionID, secondCourseID); err != nil {
+		t.Fatalf("preparing second Bundle revision: %v", err)
+	}
+	if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET lifecycle='PUBLISHED',live_revision_id=$1::uuid WHERE id=$2::uuid`, secondRevisionID, secondCourseID); err != nil {
+		t.Fatalf("publishing second Bundle Course: %v", err)
+	}
+	return []string{f.courseID, secondCourseID}
+}
+
+func (f *privilegedAuditFixture) prepareBundle(t *testing.T) []string {
+	t.Helper()
+	courses := f.prepareBundleCourses(t)
+	bundle, err := f.repo.CreateBundle(f.ctx, catalog.CreateBundleRequest{
+		TitleAr: "باقة التدقيق", TitleEn: "Audit Bundle", DescriptionAr: "وصف", DescriptionEn: "Description",
+		CourseIDs: courses, AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+		Price: &catalog.BundlePriceInput{RegularMinorUnits: 50000, OfferMinorUnits: nil, Reason: "Audit Bundle price"},
+	})
+	if err != nil {
+		t.Fatalf("preparing Bundle: %v", err)
+	}
+	f.bundleID = bundle.ID
+	return courses
+}
+
+func createBundleAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
+	courses := f.prepareBundleCourses(t)
+	body := fmt.Sprintf(`{"title_ar":"باقة التدقيق","title_en":"Audit Bundle","description_ar":"وصف","description_en":"Description","course_ids":[%q,%q],"regular_price_minor_units":50000,"price_reason":"Audit Bundle price"}`, courses[0], courses[1])
+	f.execute(t, route, body, privilegedAuditExpectation{status: http.StatusCreated})
+	var bundleID string
+	if err := f.pool.QueryRow(f.ctx, `SELECT target_id::text FROM audit_events WHERE action='BUNDLE_CREATED' ORDER BY occurred_at DESC LIMIT 1`).Scan(&bundleID); err != nil {
+		t.Fatalf("loading created Bundle audit target: %v", err)
+	}
+	return privilegedAuditExpectation{status: http.StatusCreated, action: "BUNDLE_CREATED", targetType: "BUNDLE", targetID: bundleID}
+}
+
+func updateBundleAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
+	courses := f.prepareBundle(t)
+	body := fmt.Sprintf(`{"expected_revision":1,"title_ar":"باقة محدثة","title_en":"Updated Bundle","description_ar":"وصف","description_en":"Description","course_ids":[%q,%q],"regular_price_minor_units":51000,"price_reason":"Updated Bundle price"}`, courses[1], courses[0])
+	return f.execute(t, route, body, privilegedAuditExpectation{status: http.StatusOK, action: "BUNDLE_UPDATED", targetType: "BUNDLE", targetID: f.bundleID})
+}
+
+func bundleLifecycleAuditScenario(target catalog.BundleLifecycle, action string) privilegedAuditScenario {
+	return func(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
+		f.prepareBundle(t)
+		if target == catalog.BundleDelisted {
+			if _, err := f.repo.TransitionBundle(f.ctx, catalog.TransitionBundleRequest{
+				BundleID: f.bundleID, ExpectedRevision: 1, Target: catalog.BundlePublished,
+				AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+			}); err != nil {
+				t.Fatalf("publishing Bundle fixture: %v", err)
+			}
+		}
+		revision := 1
+		if target == catalog.BundleDelisted {
+			revision = 2
+		}
+		body := fmt.Sprintf(`{"expected_revision":%d}`, revision)
+		return f.execute(t, route, body, privilegedAuditExpectation{status: http.StatusOK, action: action, targetType: "BUNDLE", targetID: f.bundleID})
+	}
 }
 
 func lifecycleAuditScenario(target catalog.CourseLifecycle, action string) privilegedAuditScenario {

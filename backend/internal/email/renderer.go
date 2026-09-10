@@ -21,6 +21,7 @@ const (
 	TemplateStaffInvitation  = "staff-invitation-v1"
 	TemplateCourseInvitation = "course-access-invitation-v1"
 	TemplateAccessGranted    = "course-access-granted-v1"
+	TemplateBundleGranted    = "bundle-access-granted-v1"
 	TemplateInviteRejected   = "course-access-invitation-rejected-v1"
 	TemplateInviteCancelled  = "course-access-invitation-cancelled-v1"
 	TemplateAccessAdjusted   = "course-access-adjusted-v1"
@@ -35,6 +36,7 @@ var eventTemplates = map[string]string{
 	"identity.staff_invitation_created":          TemplateStaffInvitation,
 	"access.invitation_issued":                   TemplateCourseInvitation,
 	"access.granted":                             TemplateAccessGranted,
+	"access.bundle_granted":                      TemplateBundleGranted,
 	"access.invitation_rejected":                 TemplateInviteRejected,
 	"access.invitation_cancelled":                TemplateInviteCancelled,
 	"access.entitlement_adjusted":                TemplateAccessAdjusted,
@@ -136,6 +138,10 @@ var localizedTemplates = map[string]map[string]localizedTemplate{
 	TemplateAccessGranted: {
 		"en": {"Your Gradex Course access is active", "Course access granted", "An authorized Admin approved your Course Access Invitation. Your Course access is now active for the approved period.", "View access", "Your access remains subject to its recorded expiry and account status."},
 		"ar": {"تم تفعيل وصولك إلى دورة Gradex", "تم منح الوصول إلى الدورة", "اعتمد مسؤول مخوّل دعوة الوصول إلى الدورة. أصبح وصولك إلى الدورة فعالًا للفترة المعتمدة.", "عرض الوصول", "يظل الوصول خاضعًا لتاريخ الانتهاء المسجل وحالة الحساب."},
+	},
+	TemplateBundleGranted: {
+		"en": {"Your Gradex Bundle access is active", "Bundle access granted", "Your manual Bundle payment was confirmed. Access to every included Course is now available in your learning dashboard.", "View your Courses", "Each Course remains subject to its recorded access period and your account status."},
+		"ar": {"تم تفعيل وصولك إلى باقة Gradex", "تم منح الوصول إلى الباقة", "تم تأكيد دفعتك اليدوية للباقة. أصبح الوصول إلى جميع الكورسات المشمولة متاحًا الآن في لوحة التعلم.", "عرض كورساتك", "يظل كل كورس خاضعًا لفترة الوصول المسجلة وحالة حسابك."},
 	},
 	TemplateInviteRejected: {
 		"en": {"Your Gradex Course invitation was not approved", "Course invitation rejected", "An Admin reviewed the accepted Course Access Invitation and did not approve Course access. No Entitlement or Enrollment was created.", "View access status", "Contact Gradex support if you believe this needs review."},
@@ -308,7 +314,7 @@ func (r *Renderer) actionURL(request RenderRequest) (string, bool, error) {
 		return fmt.Sprintf("%s/%s/access?invitation_id=%s#token=%s", r.publicOrigin, request.Locale, url.QueryEscape(request.Event.AggregateID), credential), true, nil
 	case TemplatePasswordChanged:
 		return r.publicOrigin + "/login", false, nil
-	case TemplateAccessGranted, TemplateInviteRejected, TemplateInviteCancelled,
+	case TemplateAccessGranted, TemplateBundleGranted, TemplateInviteRejected, TemplateInviteCancelled,
 		TemplateAccessAdjusted, TemplateAccessRevoked:
 		return r.publicOrigin + "/" + request.Locale + "/access", false, nil
 	default:

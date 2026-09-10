@@ -130,6 +130,37 @@ func TestConcurrentPricingSerialization(t *testing.T) {
 	}
 }
 
+func TestCourseOfferSetPreserveAndClearUsesOnePriceHistory(t *testing.T) {
+	repo, adminID, _, courseID := setupPricingIntegrationTest(t)
+	ctx := context.Background()
+	offer := int64(49000)
+	set, err := repo.SetCoursePrice(ctx, SetCoursePriceRequest{
+		CourseID: courseID, AdminAccountID: adminID, ActorDescriptor: adminID,
+		PriceMinorUnits: 65000, OfferPriceMinorUnits: &offer, OfferPriceSet: true, Reason: "Set catalog offer",
+	})
+	if err != nil || set.OfferPriceMinorUnits == nil || *set.OfferPriceMinorUnits != offer {
+		t.Fatalf("setting offer = %#v, %v", set, err)
+	}
+	preserved, err := repo.SetCoursePrice(ctx, SetCoursePriceRequest{
+		CourseID: courseID, AdminAccountID: adminID, ActorDescriptor: adminID,
+		PriceMinorUnits: 70000, Reason: "Change regular price while preserving offer",
+	})
+	if err != nil || preserved.OfferPriceMinorUnits == nil || *preserved.OfferPriceMinorUnits != offer {
+		t.Fatalf("preserving offer = %#v, %v", preserved, err)
+	}
+	cleared, err := repo.SetCoursePrice(ctx, SetCoursePriceRequest{
+		CourseID: courseID, AdminAccountID: adminID, ActorDescriptor: adminID,
+		PriceMinorUnits: 70000, OfferPriceSet: true, Reason: "Clear catalog offer",
+	})
+	if err != nil || cleared.OfferPriceMinorUnits != nil {
+		t.Fatalf("clearing offer = %#v, %v", cleared, err)
+	}
+	var rows int
+	if err := repo.pool.QueryRow(ctx, `SELECT count(*) FROM course_price_changes WHERE course_id=$1::uuid AND section_id IS NULL`, courseID).Scan(&rows); err != nil || rows != 3 {
+		t.Fatalf("price history rows=%d error=%v", rows, err)
+	}
+}
+
 func TestCrossCourseSectionRefusal(t *testing.T) {
 	repo, adminID, instID, course1ID := setupPricingIntegrationTest(t)
 	ctx := context.Background()

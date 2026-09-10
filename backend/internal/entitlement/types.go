@@ -16,10 +16,11 @@ type GrantSource string
 const (
 	GrantSourceManualInvitation GrantSource = "MANUAL_INVITATION"
 	GrantSourcePurchaseRequest  GrantSource = "PURCHASE_REQUEST"
+	GrantSourceBundlePurchase   GrantSource = "BUNDLE_PURCHASE"
 )
 
 func (s GrantSource) Valid() bool {
-	return s == GrantSourceManualInvitation || s == GrantSourcePurchaseRequest
+	return s == GrantSourceManualInvitation || s == GrantSourcePurchaseRequest || s == GrantSourceBundlePurchase
 }
 
 type State string
@@ -41,6 +42,7 @@ type Record struct {
 	CourseID                string
 	GrantSource             GrantSource
 	SourceInvitationID      *string
+	SourcePurchaseRequestID *string
 	OriginalAccessEndsAt    time.Time
 	AccessEndsAt            time.Time
 	RevokedAt               *time.Time

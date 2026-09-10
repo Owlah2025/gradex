@@ -176,6 +176,32 @@ func mountCatalogRoutes(
 	}
 	lifecycleH := &adminLifecycleHandlers{repo: foundation.repository}
 	taxonomyH := &adminTaxonomyHandlers{repo: foundation.repository}
+	bundleH := &adminBundleHandlers{repo: foundation.repository}
+
+	adminBundleReadGroup := v1.Group("/admin/bundles")
+	adminBundleReadGroup.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+	)
+	{
+		adminBundleReadGroup.GET("", bundleH.list)
+		adminBundleReadGroup.GET("/:id", bundleH.get)
+	}
+
+	adminBundleMutationGroup := v1.Group("/admin/bundles")
+	adminBundleMutationGroup.Use(
+		sessionFoundation.requireSessionMutationSecurity(),
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapCatalogPublish),
+		requireCapability(principals, logger, identity.CapCatalogPricing),
+	)
+	{
+		adminBundleMutationGroup.POST("", strictJSONMiddleware(func() any { return &bundleMutationBody{} }, accessMutationBodyLimit), bundleH.create)
+		adminBundleMutationGroup.PUT("/:id", strictJSONMiddleware(func() any { return &bundleMutationBody{} }, accessMutationBodyLimit), bundleH.update)
+		adminBundleMutationGroup.POST("/:id/publish", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundlePublished))
+		adminBundleMutationGroup.POST("/:id/delist", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundleDelisted))
+		adminBundleMutationGroup.POST("/:id/archive", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundleArchived))
+	}
 
 	adminPricingGetGroup := v1.Group("/admin/courses/:id")
 	adminPricingGetGroup.Use(

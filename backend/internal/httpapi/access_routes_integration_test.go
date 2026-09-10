@@ -179,6 +179,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 		"me-purchase-requests", "password-reset-requests"} {
 		admissionPolicies[endpoint] = ratelimit.DevelopmentAdmissionPolicy(endpoint)
 	}
+	admissionPolicies["me-purchase-requests"] = ratelimit.StudentPurchaseRequestsPolicy()
 	admissionPolicies["password-resets"] = ratelimit.DevelopmentPasswordResetCompletionPolicy()
 	admissionPolicies["session-bootstrap"] = ratelimit.DevelopmentAnonymousBootstrapPolicy()
 	admissionPolicies["registration-policy-set"] = ratelimit.DevelopmentPolicySetReadPolicy()
