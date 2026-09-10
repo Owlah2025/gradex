@@ -4011,3 +4011,63 @@ decision.
 
 **Source:** D-103 implementation branch beginning at exact production base
 `b8dea967196de68914440b2092cd80daf85d9546`.
+
+## D-104 — Bundles V1 and Catalogue Offers V1 ship with split fulfillment and immutable commercial snapshots
+
+**Date:** 2026-09-10
+**Status:** Implemented pending independent review. Reviewer unassigned; no approval is implied.
+
+**Decision:** Add multi-Course Bundles and a regular/offer price pair to the catalogue, on the
+existing manual-payment rails. There is no gateway, KNET, card, webhook, refund, or cart in this
+work, and no coupon-code engine.
+
+Catalogue Offers V1 is a two-number price, not a discount code. Every purchasable item carries a
+server-authoritative regular price and an optional offer price. An offer must be strictly greater
+than zero and strictly lower than the regular price; the effective price is the offer when one is
+set and the regular price otherwise. All money is integer KWD fils — never a float, never a
+percentage, never an automatically expiring promotion. Public surfaces show the regular price
+struck through beside the effective price. Actual coupon codes remain deferred.
+
+Fulfillment is deliberately split by target, and the split is the decision:
+
+- **Course purchases are unchanged.** Purchase Request, external/manual payment, Admin payment
+  confirmation, Course Access Invitation, Student acceptance, then entitlement and `ACCESS_GRANTED`.
+  No Course purchase became a direct grant, and no entitlement exists before the Student accepts.
+- **Bundle purchases are direct.** Purchase Request, external/manual payment, one Admin payment
+  confirmation, and a single atomic transaction that grants every Course in the request's snapshot.
+  There is no invitation to accept and no per-Course invitation fan-out.
+
+A Bundle is a commercial aggregate, never a learning entitlement. Confirmation issues ordinary
+per-Course enrollments and entitlements, so protected learning, playback, and progress stay
+Course-based and unchanged. For each snapshot Course the transaction PRESERVES an equal-or-longer
+existing entitlement, EXTENDS a strictly shorter one in place keeping its identity and adjustment
+history, or GRANTS a new one; the disposition of every Course is recorded as Bundle grant
+provenance. Grants, provenance, audit events, the request's `ACCESS_GRANTED` transition, and the
+outbox notification co-commit. Any failure rolls back all of it: there is no partial Bundle access.
+
+Commercial snapshots are immutable. Creating a Bundle Purchase Request records, server-side and
+inside the locking transaction, the Bundle identity and revision, its Arabic and English titles, the
+regular and effective price in KWD, and the exact ordered member Course IDs with their Arabic and
+English titles. The client is never authority for price, currency, Bundle revision, membership, or
+titles. Editing or repricing the Bundle afterwards does not alter a pending request, and Bundle
+membership is not retroactive: an already-fulfilled Bundle purchase does not gain Courses added to
+the Bundle later. Admins hold sole pricing authority, and there is no pro-rata, credit, or
+difference calculation anywhere in this work.
+
+A Bundle is available for new purchase only while it is PUBLISHED, has at least two member Courses,
+has a price, and every current member satisfies the existing public Course predicate. A Bundle whose
+member stops being public leaves the public catalogue and stops accepting new purchases; existing
+requests and fulfilled history are never deleted.
+
+**Database:** One additive migration, `0036_bundles_and_offers`, applied on top of schema 35.
+Existing Course prices, purchase requests, entitlements, and D-103 media data are preserved. The
+down migration fails closed: it refuses to run once any Bundle, Bundle price, Bundle purchase
+request, `BUNDLE_PURCHASE` entitlement, Course offer history, or Course purchase request carrying
+0036-only regular-price quote metadata exists, rather than silently destroying commerce evidence.
+
+**Deployment:** Not authorized. Production was not touched and no push is authorized by this
+decision. Deploying this work requires the reviewed 35 → 36 schema-release process, not an
+application-only release.
+
+**Source:** Bundles and Offers V1 implementation branch beginning at exact production base
+`ef733f758cf7d58e2689898a70715e2fd2102e24`.

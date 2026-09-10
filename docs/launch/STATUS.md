@@ -1,5 +1,19 @@
 # Gradex Launch Status
 
+> **2026-09-10 — D-104 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Bundles V1 and Catalogue Offers V1
+> were built from exact production base `ef733f758cf7d58e2689898a70715e2fd2102e24` under
+> [D-104](../DECISIONS.md#d-104--bundles-v1-and-catalogue-offers-v1-ship-with-split-fulfillment-and-immutable-commercial-snapshots).
+> It adds the single additive migration `0036_bundles_and_offers`; no production, deployment, or push
+> action is authorized, and deploying it would require the reviewed 35 → 36 schema-release process
+> rather than an application-only release. Offers V1 is a regular/offer price pair, not a coupon-code
+> engine, which stays deferred. Course purchases remain invitation-based and unchanged; Bundle
+> purchases are fulfilled by one atomic direct grant of the request's immutable Course snapshot.
+> Reviewer status is **PENDING / UNASSIGNED**, so this work is not approved and does not change the
+> independently reviewed historical range recorded below. Implementation detail is in
+> [`2026-09-09-bundles-offers-v1-design.md`](../superpowers/specs/2026-09-09-bundles-offers-v1-design.md).
+>
+> ---
+
 > **2026-09-09 — D-103 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Video-pipeline hardening was built
 > from exact production base `b8dea967196de68914440b2092cd80daf85d9546` under [D-103](../DECISIONS.md#d-103--existing-video-pipeline-uses-durable-work-leases-and-attempt-scoped-output). It adds the single additive migration
 > `0035_media_work_leases`; no production, deployment, or push action is authorized. Reviewer status

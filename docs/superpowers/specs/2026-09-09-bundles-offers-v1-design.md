@@ -200,9 +200,13 @@ reference and forbids an invitation reference. Existing `MANUAL_INVITATION` and 
 
 ### 4.5 Rollback posture
 
-The down migration may remove 0036 only when no Bundle, Bundle purchase, Bundle grant, or Course offer
-data exists. It must fail closed instead of destroying commerce history. Clean-schema up/down/up
-remains testable. Deployment scripting and migration rollout tooling are explicitly outside this
+The down migration may remove 0036 only when no Bundle, Bundle price, Bundle purchase request,
+`BUNDLE_PURCHASE` entitlement, Course offer history, or Course purchase request carrying 0036-only
+regular-price quote metadata exists. That last case matters because every Course purchase request
+created on 0036 records the regular price its quote was taken against, and dropping the column would
+destroy the only evidence of what a Student was actually offered. It must fail closed instead of
+destroying commerce history, and a refused rollback leaves a dirty schema marker for an operator to
+resolve deliberately. Clean-schema up/down/up remains testable. Deployment scripting and migration rollout tooling are explicitly outside this
 feature; the release handoff will state that schema 0036 needs separate release-tooling support.
 
 ## 5. Bundle lifecycle and eligibility
