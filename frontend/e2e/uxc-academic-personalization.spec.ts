@@ -483,7 +483,13 @@ test.describe("UX-C anonymous academic personalisation", () => {
     );
     // The active context stays on screen, so the reader can see what produced the empty result.
     await expect(page.getByTestId("catalogue-academic-context")).toBeVisible();
-    await expect(page.getByRole("heading", { level: 3 })).toContainText(/No published courses/i);
+    // Scoped to the empty state itself. The catalogue legitimately carries a
+    // sibling Bundles section whose cards are also level-3 headings, so an
+    // unscoped level-3 lookup is ambiguous rather than wrong. What this proves
+    // is unchanged: the empty result explains itself instead of going blank.
+    await expect(
+      page.getByTestId("catalogue-empty").getByRole("heading", { level: 3 }),
+    ).toContainText(/No published courses/i);
     // The empty state's own way out, not the filter row's — the reader must be able to recover from
     // where they are looking.
     await expect(

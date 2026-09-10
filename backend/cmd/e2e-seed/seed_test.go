@@ -1156,8 +1156,137 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return fmt.Errorf("insert progress 4: %w", err)
 	}
+	if err := seedBundleCommerceFixtures(ctx, tx, adminAccountID, instructorID, courseID, passwordHash.Expose(), activeExpiry); err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
+}
+
+func seedBundleCommerceFixtures(ctx context.Context, tx pgx.Tx, adminID, instructorID, primaryCourseID, passwordHash string, accessEndsAt time.Time) error {
+	if _, err := tx.Exec(ctx, `UPDATE courses SET default_access_ends_at=$1 WHERE id=$2::uuid`, accessEndsAt, primaryCourseID); err != nil {
+		return fmt.Errorf("set Bundle primary Course access expiry: %w", err)
+	}
+	type courseFixture struct {
+		courseID, revisionID, sectionIdentityID, sectionID, lessonIdentityID, lessonID string
+		titleAr, titleEn                                                               string
+	}
+	courses := []courseFixture{
+		{"c0000000-0000-0000-0000-000000000002", "f0000000-0000-0000-0000-000000000002", "11000000-0000-0000-0000-000000000010", "22000000-0000-0000-0000-000000000010", "33000000-0000-0000-0000-000000000010", "44000000-0000-0000-0000-000000000010", "المنطق الرقمي", "Digital Logic"},
+		{"c0000000-0000-0000-0000-000000000003", "f0000000-0000-0000-0000-000000000003", "11000000-0000-0000-0000-000000000011", "22000000-0000-0000-0000-000000000011", "33000000-0000-0000-0000-000000000011", "44000000-0000-0000-0000-000000000011", "معمارية الحاسوب", "Computer Architecture"},
+	}
+	for _, course := range courses {
+		if _, err := tx.Exec(ctx, `INSERT INTO courses (id,owner_account_id,lifecycle,default_access_ends_at) VALUES ($1::uuid,$2::uuid,'DRAFT',$3)`, course.courseID, instructorID, accessEndsAt); err != nil {
+			return fmt.Errorf("insert Bundle Course: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_revisions (id,course_id,state,revision_number,title_ar,title_en,description_ar,description_en) VALUES ($1::uuid,$2::uuid,'APPROVED',1,$3,$4,$3,$4)`, course.revisionID, course.courseID, course.titleAr, course.titleEn); err != nil {
+			return fmt.Errorf("insert Bundle Course revision: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE courses SET lifecycle='PUBLISHED',live_revision_id=$1::uuid WHERE id=$2::uuid`, course.revisionID, course.courseID); err != nil {
+			return fmt.Errorf("publish Bundle Course: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_price_changes (course_id,new_value_minor_units,changed_by_account_id,reason) VALUES ($1::uuid,30000,$2::uuid,'Bundle E2E Course price')`, course.courseID, adminID); err != nil {
+			return fmt.Errorf("price Bundle Course: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_section_identities (id,course_id) VALUES ($1::uuid,$2::uuid)`, course.sectionIdentityID, course.courseID); err != nil {
+			return fmt.Errorf("insert Bundle Course Section identity: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_sections (id,revision_id,course_id,section_identity_id,title_ar,title_en,position) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'الأساسيات','Foundations',0)`, course.sectionID, course.revisionID, course.courseID, course.sectionIdentityID); err != nil {
+			return fmt.Errorf("insert Bundle Course Section: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_lesson_identities (id,course_id,section_identity_id) VALUES ($1::uuid,$2::uuid,$3::uuid)`, course.lessonIdentityID, course.courseID, course.sectionIdentityID); err != nil {
+			return fmt.Errorf("insert Bundle Course Lesson identity: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO course_lessons (id,section_id,course_id,section_identity_id,lesson_identity_id,title_ar,title_en,position) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,'الدرس الأول','First Lesson',0)`, course.lessonID, course.sectionID, course.courseID, course.sectionIdentityID, course.lessonIdentityID); err != nil {
+			return fmt.Errorf("insert Bundle Course Lesson: %w", err)
+		}
+	}
+	const bundleID = "b0000000-0000-0000-0000-000000000001"
+	if _, err := tx.Exec(ctx, `INSERT INTO bundles (id,title_ar,title_en,description_ar,description_en,lifecycle,created_by_account_id,updated_by_account_id) VALUES ($1::uuid,'باقة هندسة الحاسوب','Computer Engineering Starter Pack','ثلاثة مقررات تأسيسية في باقة واحدة.','Three foundation Courses in one Bundle.','PUBLISHED',$2::uuid,$2::uuid)`, bundleID, adminID); err != nil {
+		return fmt.Errorf("insert E2E Bundle: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO bundle_courses (bundle_id,course_id,position) VALUES ($1::uuid,$2::uuid,0),($1::uuid,$3::uuid,1),($1::uuid,$4::uuid,2)`, bundleID, primaryCourseID, courses[0].courseID, courses[1].courseID); err != nil {
+		return fmt.Errorf("insert E2E Bundle members: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO bundle_price_changes (bundle_id,new_value_minor_units,offer_price_minor_units,changed_by_account_id,reason) VALUES ($1::uuid,75000,60000,$2::uuid,'E2E Bundle offer')`, bundleID, adminID); err != nil {
+		return fmt.Errorf("insert E2E Bundle price: %w", err)
+	}
+	return seedBundleJourneyStudents(ctx, tx, adminID, primaryCourseID, passwordHash, accessEndsAt)
+}
+
+// seedBundleJourneyStudents gives each real Bundle browser journey its own
+// Student. A Bundle purchase request is unique per (Bundle, requester) while it
+// waits for payment, and confirmation mutates that Student's entitlements, so
+// sharing one Student across the snapshot, partial-ownership and concurrent
+// journeys would make them order-dependent.
+//
+// They exist for a second, sharper reason. The canonical suite runs serially
+// against one shared database, so a Bundle journey that borrowed a canonical
+// fixture Student would hand every later spec a Student it had already granted
+// access to. `student-purchase-existing` and `student-unentitled` are owned by
+// the retained manual Course purchase and S6/S11 journeys respectively; a
+// Bundle grant against either one silently breaks those. These accounts are
+// used by `bundles-offers-v1.spec.ts` alone and by no retained journey.
+func seedBundleJourneyStudents(ctx context.Context, tx pgx.Tx, adminID, primaryCourseID, passwordHash string, accessEndsAt time.Time) error {
+	const (
+		snapshotStudentID   = "a0000000-0000-0000-0000-000000000101"
+		partialStudentID    = "a0000000-0000-0000-0000-000000000102"
+		concurrentStudentID = "a0000000-0000-0000-0000-000000000103"
+	)
+	const (
+		happyStudentID = "a0000000-0000-0000-0000-000000000104"
+		offerStudentID = "a0000000-0000-0000-0000-000000000105"
+	)
+	students := []struct{ id, email, name string }{
+		{snapshotStudentID, "bundle-snapshot@example.test", "Bundle Snapshot Student"},
+		{partialStudentID, "bundle-partial@example.test", "Bundle Partial Owner Student"},
+		{concurrentStudentID, "bundle-concurrent@example.test", "Bundle Concurrent Student"},
+		{happyStudentID, "bundle-happy@example.test", "Bundle Happy Path Student"},
+		{offerStudentID, "bundle-offer@example.test", "Bundle Course Offer Student"},
+	}
+	for _, student := range students {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at)
+			VALUES ($1::uuid, $2, $2, 'STUDENT', 'ACTIVE', $3, now())
+		`, student.id, student.email, student.name); err != nil {
+			return fmt.Errorf("insert Bundle journey Student %s: %w", student.email, err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO password_credentials (account_id, password_hash, state) VALUES ($1::uuid, $2, 'ACTIVE')
+		`, student.id, passwordHash); err != nil {
+			return fmt.Errorf("insert Bundle journey Student creds %s: %w", student.email, err)
+		}
+	}
+
+	// Partial existing ownership: this Student already holds one of the three
+	// Bundle Courses, and holds it for strictly less time than the Course's own
+	// default access window. Confirming the Bundle must therefore EXTEND that
+	// one entitlement in place rather than issue a second one, and GRANT the
+	// remaining two.
+	const partialInvitationID = "c0000000-0000-0000-0000-000000000101"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO course_access_invitations (
+			id, course_id, email, normalized_email, created_by_account_id,
+			accepted_by_account_id, decided_by_account_id, state
+		) VALUES ($1::uuid, $2::uuid, 'bundle-partial@example.test', 'bundle-partial@example.test', $3::uuid, $4::uuid, $3::uuid, 'APPROVED')
+	`, partialInvitationID, primaryCourseID, adminID, partialStudentID); err != nil {
+		return fmt.Errorf("insert Bundle partial-owner invitation: %w", err)
+	}
+	shorterExpiry := accessEndsAt.Add(-30 * 24 * time.Hour)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO enrollments (student_account_id, course_id) VALUES ($1::uuid, $2::uuid)
+	`, partialStudentID, primaryCourseID); err != nil {
+		return fmt.Errorf("insert Bundle partial-owner enrollment: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO entitlements (
+			student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id,
+			original_access_ends_at, access_ends_at, retirement_eligibility_at, state
+		) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid, $4, $4, $4, 'ACTIVE')
+	`, partialStudentID, primaryCourseID, partialInvitationID, shorterExpiry); err != nil {
+		return fmt.Errorf("insert Bundle partial-owner entitlement: %w", err)
+	}
+	return nil
 }
 
 func queryInvitationTokenFromOutbox(ctx context.Context, targetPool *pgxpool.Pool, invitationID string) (string, error) {
