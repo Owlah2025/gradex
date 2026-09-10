@@ -154,7 +154,7 @@ test("instructor initials come from the display name in both scripts", () => {
  */
 test("the access card prices a course through the canonical formatter", () => {
   const source = surface("course-access-summary.tsx");
-  assert.ok(source.includes("formatFils("), "the access card must use formatFils");
+  assert.ok(source.includes("<PriceDisplay"), "the access card must use the shared price display");
   assert.ok(!source.includes("toFixed("), "no local price arithmetic on Course Details");
   assert.equal(formatFils(12500, "en"), "12.500 KWD");
   assert.equal(formatFils(12500, "ar"), "12.500 د.ك");

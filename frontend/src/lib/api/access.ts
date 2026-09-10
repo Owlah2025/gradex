@@ -115,9 +115,15 @@ export type PurchaseRequestState =
 export interface PurchaseRequest {
   id: string;
   reference: string;
-  course_id: string;
+  course_id?: string;
+  target_kind?: "COURSE" | "BUNDLE";
+  bundle_id?: string | null;
+  bundle_revision?: number | null;
+  bundle_title?: string;
+  bundle_items?: BundlePurchaseItem[];
   email: string;
   price_minor_units: number;
+  regular_price_minor_units?: number | null;
   currency: "KWD";
   state: PurchaseRequestState;
   course_title?: string;
@@ -126,6 +132,12 @@ export interface PurchaseRequest {
   payment_confirmed_at?: string | null;
   invitation_created_at?: string | null;
   access_granted_at?: string | null;
+}
+
+export interface BundlePurchaseItem {
+  course_id: string;
+  position: number;
+  course_title: string;
 }
 
 export interface PurchaseRequestListResponse {
@@ -139,7 +151,9 @@ export interface PurchaseRequestCreated {
   reference: string;
   whatsapp_url: string;
   /** Resolved to the request's language by the server. */
-  course_title: string;
+  course_title?: string;
+  bundle_title?: string;
+  bundle_items?: BundlePurchaseItem[];
   price_minor_units: number;
   currency: string;
   state: PurchaseRequestState;
@@ -149,7 +163,14 @@ export interface PurchaseRequestCreated {
 
 export interface ConfirmPurchaseRequestResult {
   purchase_request: PurchaseRequest;
-  invitation: CourseAccessInvitation;
+  invitation?: CourseAccessInvitation;
+  bundle_grants?: {
+    course_id: string;
+    entitlement_id: string;
+    disposition: "GRANTED" | "PRESERVED" | "EXTENDED";
+    previous_access_ends_at?: string;
+    resulting_access_ends_at: string;
+  }[];
 }
 
 async function resolveCSRF(csrf?: string): Promise<string> {
@@ -413,6 +434,31 @@ export async function createStudentPurchaseRequest(
     token,
     { course_id: courseId },
   ) as Promise<PurchaseRequestCreated>;
+}
+
+export async function createStudentBundlePurchaseRequest(
+  bundleId: string,
+  lang: "ar" | "en" = "en",
+  csrf?: string,
+) {
+  const token = await resolveCSRF(csrf);
+  return authenticatedRequest<PurchaseRequestCreated>(
+    "/me/purchase-requests",
+    "POST",
+    lang,
+    token,
+    { bundle_id: bundleId },
+  ) as Promise<PurchaseRequestCreated>;
+}
+
+export async function listStudentPurchaseRequests(
+  lang: "ar" | "en" = "en",
+) {
+  return authenticatedRequest<{ purchase_requests: PurchaseRequest[] }>(
+    "/me/purchase-requests",
+    "GET",
+    lang,
+  );
 }
 
 export async function listAdminPurchaseRequests(

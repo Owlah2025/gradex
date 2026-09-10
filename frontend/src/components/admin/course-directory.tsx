@@ -111,14 +111,17 @@ export function CourseDirectory() {
         title={copy.title}
         description={copy.intro}
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setAttempt((value) => value + 1)}
-            data-testid="admin-course-refresh"
-          >
-            {copy.refresh}
-          </Button>
+          <>
+            <Button asChild><Link href={`/${locale}/admin/bundles`}>{t.adminBundles.create}</Link></Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setAttempt((value) => value + 1)}
+              data-testid="admin-course-refresh"
+            >
+              {copy.refresh}
+            </Button>
+          </>
         }
       />
 
@@ -320,11 +323,16 @@ function CourseRow({ row, locale }: { row: AdminCourseRow; locale: "ar" | "en" }
           <p className="mt-3 max-w-2xl text-sm text-muted-foreground">{copy.explain[view.state]}</p>
         </div>
 
-        <Button asChild variant={view.needsReview ? "default" : "outline"}>
-          <Link href={href} data-testid={`admin-course-action-${row.id}`}>
-            {copy.actions[view.action]}
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {view.state === "PUBLISHED" ? (
+            <Button asChild variant="outline"><Link href={`/${locale}/admin/bundles?course_price=${encodeURIComponent(row.id)}`}>{t.adminBundles.editPricing}</Link></Button>
+          ) : null}
+          <Button asChild variant={view.needsReview ? "default" : "outline"}>
+            <Link href={href} data-testid={`admin-course-action-${row.id}`}>
+              {copy.actions[view.action]}
+            </Link>
+          </Button>
+        </div>
       </div>
     </li>
   );

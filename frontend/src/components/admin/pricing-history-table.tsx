@@ -78,9 +78,12 @@ export function PricingHistoryTable({
                 <TableHeaderCell scope="col">
                   {isAr ? "السعر السابق" : "Old Price"}
                 </TableHeaderCell>
-                <TableHeaderCell scope="col">
-                  {isAr ? "السعر الجديد" : "New Price"}
-                </TableHeaderCell>
+            <TableHeaderCell scope="col">
+              {isAr ? "السعر الجديد" : "New Price"}
+            </TableHeaderCell>
+            <TableHeaderCell scope="col">
+              {isAr ? "سعر العرض" : "Offer Price"}
+            </TableHeaderCell>
                 <TableHeaderCell scope="col">{isAr ? "السبب" : "Reason"}</TableHeaderCell>
                 <TableHeaderCell scope="col">{isAr ? "التاريخ" : "Timestamp"}</TableHeaderCell>
               </TableRow>
@@ -101,9 +104,12 @@ export function PricingHistoryTable({
                   {/* Weight, not colour. This is the new price beside the old one — emphasis, not
                       a success — and green on a bare card is only proved in the light theme. The
                       pricing summary reached the same conclusion for the same reason. */}
-                  <TableCell className="font-mono text-[11px] font-semibold">
-                    {formatFils(rec.new_value_minor_units, locale)}
-                  </TableCell>
+              <TableCell className="font-mono text-[11px] font-semibold">
+                {formatFils(rec.new_value_minor_units, locale)}
+              </TableCell>
+              <TableCell className="font-mono text-[11px] font-semibold">
+                {rec.offer_price_minor_units == null ? (isAr ? "لا يوجد" : "None") : formatFils(rec.offer_price_minor_units, locale)}
+              </TableCell>
                   <TableCell>{rec.reason}</TableCell>
                   <TableCell className="text-muted-foreground">
                     {formatTimestamp(rec.changed_at, locale)}

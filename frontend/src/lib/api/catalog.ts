@@ -6,6 +6,8 @@ export type PriceChangeRecord = {
   section_id?: string;
   old_value_minor_units?: number | null;
   new_value_minor_units: number;
+  old_offer_price_minor_units?: number | null;
+  offer_price_minor_units?: number | null;
   changed_by_account_id: string;
   reason: string;
   changed_at: string;
@@ -14,6 +16,8 @@ export type PriceChangeRecord = {
 export type SetCoursePriceInput = {
   courseID: string;
   priceMinorUnits: number;
+  offerPriceMinorUnits?: number | null;
+  clearOffer?: boolean;
   reason: string;
   locale: "ar" | "en";
   csrf: string;
@@ -290,7 +294,12 @@ export async function setCoursePrice(
     "PUT",
     input.locale,
     input.csrf,
-    { price_minor_units: input.priceMinorUnits, reason: input.reason },
+	{
+	  price_minor_units: input.priceMinorUnits,
+	  offer_price_minor_units: input.offerPriceMinorUnits,
+	  clear_offer: input.clearOffer ?? false,
+	  reason: input.reason,
+	},
   );
   if (res === null) {
     throw new Error(
@@ -300,6 +309,68 @@ export async function setCoursePrice(
     );
   }
   return res;
+}
+
+export type AdminBundleMember = {
+  course_id: string;
+  position: number;
+  title_ar: string;
+  title_en: string;
+  instructor_display_name: string;
+};
+
+export type AdminBundle = {
+  id: string;
+  slug: string;
+  lifecycle: "DRAFT" | "PUBLISHED" | "DELISTED" | "ARCHIVED";
+  title_ar: string;
+  title_en: string;
+  description_ar: string;
+  description_en: string;
+  revision: number;
+  course_count: number;
+  eligible: boolean;
+  price?: {
+    regular_minor_units: number;
+    offer_minor_units?: number | null;
+    effective_minor_units: number;
+    currency: "KWD";
+  };
+  members: AdminBundleMember[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type BundleMutation = {
+  title_ar: string;
+  title_en: string;
+  description_ar: string;
+  description_en: string;
+  course_ids: string[];
+  regular_price_minor_units?: number;
+  offer_price_minor_units?: number | null;
+  price_reason?: string;
+  expected_revision?: number;
+};
+
+export function listAdminBundles(locale: "ar" | "en") {
+  return authenticatedRequest<{ items: AdminBundle[] }>("/admin/bundles", "GET", locale);
+}
+
+export function getAdminBundle(id: string, locale: "ar" | "en") {
+  return authenticatedRequest<AdminBundle>(`/admin/bundles/${encodeURIComponent(id)}`, "GET", locale);
+}
+
+export function createAdminBundle(input: BundleMutation, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<AdminBundle>("/admin/bundles", "POST", locale, csrf, input);
+}
+
+export function updateAdminBundle(id: string, input: BundleMutation, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<AdminBundle>(`/admin/bundles/${encodeURIComponent(id)}`, "PUT", locale, csrf, input);
+}
+
+export function transitionAdminBundle(id: string, action: "publish" | "delist" | "archive", revision: number, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<AdminBundle>(`/admin/bundles/${encodeURIComponent(id)}/${action}`, "POST", locale, csrf, { expected_revision: revision });
 }
 
 export async function setSectionPrice(

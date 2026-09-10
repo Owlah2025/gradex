@@ -9,7 +9,7 @@ import {
   type PurchaseRequestState,
 } from "@/lib/api/access";
 import { describeApiError } from "@/lib/api/api-error";
-import { formatFils } from "@/lib/formatters/currency";
+import { PriceDisplay } from "@/components/catalog/price-display";
 import { formatDate } from "@/lib/i18n/format";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { Button } from "@/components/ui/button";
@@ -103,7 +103,7 @@ export function PurchaseRequestsPanel() {
     try {
       if (pending.kind === "confirm") {
         await confirmPurchaseRequestPayment(pending.request.id, locale);
-        setNotice({ tone: "success", text: copy.confirmed });
+        setNotice({ tone: "success", text: pending.request.target_kind === "BUNDLE" ? copy.bundleConfirmed : copy.confirmed });
       } else {
         await cancelPurchaseRequest(pending.request.id, locale);
         setNotice({ tone: "success", text: copy.cancelled });
@@ -204,8 +204,15 @@ export function PurchaseRequestsPanel() {
                   <TableCell>
                     <bdi>{request.email}</bdi>
                   </TableCell>
-                  <TableCell>{request.course_title || copy.course}</TableCell>
-                  <TableCell dir="ltr">{formatFils(request.price_minor_units, locale)}</TableCell>
+                  <TableCell>
+                    <bdi>{request.target_kind === "BUNDLE" ? request.bundle_title : (request.course_title || copy.course)}</bdi>
+                    {request.target_kind === "BUNDLE" && request.bundle_items ? (
+                      <ul className="mt-1 text-xs text-muted-foreground">
+                        {request.bundle_items.map((item) => <li key={item.course_id}><bdi>{item.course_title}</bdi></li>)}
+                      </ul>
+                    ) : null}
+                  </TableCell>
+                  <TableCell><PriceDisplay price={{ minor_units: request.price_minor_units, regular_minor_units: request.regular_price_minor_units ?? request.price_minor_units, offer_minor_units: request.regular_price_minor_units != null && request.price_minor_units < request.regular_price_minor_units ? request.price_minor_units : null, currency: "KWD" }} locale={locale} compact /></TableCell>
                   <TableCell>{formatDate(request.requested_at, locale)}</TableCell>
                   <TableCell>
                     <StatusBadge
@@ -223,9 +230,9 @@ export function PurchaseRequestsPanel() {
                           size="sm"
                           disabled={busy}
                           onClick={() => setPending({ kind: "confirm", request })}
-                          aria-label={`${copy.confirm} — ${request.reference}`}
+                          aria-label={`${request.target_kind === "BUNDLE" ? copy.bundleConfirm : copy.confirm} — ${request.reference}`}
                         >
-                          {copy.confirm}
+                          {request.target_kind === "BUNDLE" ? copy.bundleConfirm : copy.confirm}
                         </Button>
                       ) : null}
                       {request.state === "WAITING_PAYMENT" ||
@@ -257,7 +264,7 @@ export function PurchaseRequestsPanel() {
             if (!next && !busy) setPending(null);
           }}
           title={pending.kind === "confirm" ? copy.confirmTitle : copy.cancelTitle}
-          body={pending.kind === "confirm" ? copy.confirmBody : copy.cancelBody}
+          body={pending.kind === "confirm" ? (pending.request.target_kind === "BUNDLE" ? copy.bundleConfirmBody : copy.confirmBody) : copy.cancelBody}
           confirmLabel={pending.kind === "confirm" ? copy.confirmAccept : copy.cancelAccept}
           cancelLabel={copy.keep}
           tone={pending.kind === "confirm" ? "default" : "destructive"}

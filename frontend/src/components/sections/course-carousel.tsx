@@ -5,7 +5,7 @@ import { ThumbnailImage } from "@/components/catalog/thumbnail-image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Play } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { formatFilsParts } from "@/lib/formatters/currency";
+import { PriceDisplay } from "@/components/catalog/price-display";
 import { cn } from "@/lib/utils";
 import type { PublicCourse } from "@/lib/api/public-catalog";
 
@@ -178,10 +178,7 @@ export function CourseCard({
   locale: "ar" | "en";
   labels: CourseCardLabels;
 }) {
-  const price = course.price
-    ? formatFilsParts(course.price.minor_units, locale)
-    : null;
-  const level = course.study_year?.label;
+    const level = course.study_year?.label;
 
   return (
     <Link
@@ -221,17 +218,7 @@ export function CourseCard({
           ) : (
             <span aria-hidden />
           )}
-          {price && price.priced ? (
-            <p dir="ltr" className="flex items-baseline gap-1">
-              <span className="sr-only">{labels.priceGuidance}: </span>
-              <span className="font-display text-lg font-extrabold tracking-tight text-foreground">
-                {price.amount}
-              </span>
-              <span className="text-[11px] font-semibold text-muted-foreground">
-                {price.unit}
-              </span>
-            </p>
-          ) : null}
+          {course.price ? <PriceDisplay price={course.price} locale={locale} compact /> : null}
         </div>
       </div>
     </Link>

@@ -65,7 +65,8 @@ import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Container } from "@/components/layout/container";
 import { EmptyState } from "@/components/common/empty-state";
-import { formatFils } from "@/lib/formatters/currency";
+import { PriceDisplay } from "./price-display";
+import { CatalogueBundles } from "./catalogue-bundles";
 
 function CatalogueSearch({ initialQuery }: { initialQuery: string }) {
   const { locale } = useLocale();
@@ -478,17 +479,7 @@ export function CatalogueList() {
                     <Prose className="text-sm">
                       {t.instructor}: {course.instructor_display_name}
                     </Prose>
-                    {course.price && (
-                      <p className="mt-3 text-sm font-semibold text-primary">
-                        {t.price}:{" "}
-                        <span dir="ltr" className="dir-ltr font-mono">
-                          {formatFils(
-                            course.price.minor_units,
-                            locale as "ar" | "en",
-                          )}
-                        </span>
-                      </p>
-                    )}
+                    {course.price ? <PriceDisplay price={course.price} locale={locale as "ar" | "en"} className="mt-3" compact /> : null}
                     {course.has_preview && (
                       <p className="mt-3 text-sm text-primary">{t.preview}</p>
                     )}
@@ -497,6 +488,7 @@ export function CatalogueList() {
               </Link>
             ))}
           </section>
+          <CatalogueBundles />
         </Container>
       </main>
       <Footer />

@@ -9,6 +9,8 @@ import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { createStudentPurchaseRequest } from "@/lib/api/access";
 import { ProblemError } from "@/lib/api/problem";
 import { formatFils } from "@/lib/formatters/currency";
+import type { PublicPrice } from "@/lib/api/public-catalog";
+import { PriceDisplay } from "./price-display";
 import { withReturnTo } from "@/lib/identity/return-to";
 
 type Labels = Dictionary["access"]["purchase"];
@@ -43,6 +45,7 @@ export function PurchaseAction({
   courseId,
   courseTitle,
   priceMinorUnits,
+  price,
   locale,
   labels,
   authenticated,
@@ -52,6 +55,7 @@ export function PurchaseAction({
   courseTitle: string;
   /** `null` where the Course lists no price; the confirmation still states the Course. */
   priceMinorUnits: number | null;
+  price?: PublicPrice | null;
   locale: "ar" | "en";
   labels: Labels;
   /** Whether the visitor's session has resolved to a signed-in principal. */
@@ -191,7 +195,7 @@ export function PurchaseAction({
           <div className="flex flex-wrap justify-between gap-2">
             <dt className="text-muted-foreground">{labels.priceLabel}</dt>
             <dd className="font-semibold text-foreground" data-testid="purchase-price">
-              <bdi>{formatFils(priceMinorUnits, locale)}</bdi>
+              {price ? <PriceDisplay price={price} locale={locale} compact /> : <bdi>{formatFils(priceMinorUnits, locale)}</bdi>}
             </dd>
           </div>
         ) : null}

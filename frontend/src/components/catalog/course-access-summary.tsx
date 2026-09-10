@@ -5,7 +5,7 @@ import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import type { PublicCourseDetail } from "@/lib/api/public-catalog";
 import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/common/loading-state";
-import { formatFils } from "@/lib/formatters/currency";
+import { PriceDisplay } from "./price-display";
 import { CourseAccessPanel } from "./course-access-panel";
 import {
   courseAccessRelationship,
@@ -76,9 +76,7 @@ export function CourseAccessSummary({
         {course.price ? (
           <div data-testid="course-access-price">
             <p className="text-sm text-muted-foreground">{priceLabel}</p>
-            <p className="mt-1 font-display text-[26px] font-extrabold leading-none text-foreground">
-              <bdi>{formatFils(course.price.minor_units, locale)}</bdi>
-            </p>
+            <PriceDisplay price={course.price} locale={locale} className="mt-1" />
           </div>
         ) : null}
 
@@ -104,6 +102,7 @@ export function CourseAccessSummary({
                 courseId={course.id}
                 courseTitle={course.title}
                 priceMinorUnits={course.price ? course.price.minor_units : null}
+                price={course.price}
                 locale={locale}
                 labels={accessLabels.purchase}
                 // ANONYMOUS is the one awaiting-access state with no session,
@@ -168,12 +167,10 @@ export function MobileAccessBar({
     >
       <div className="mx-auto flex max-w-container items-center justify-between gap-4">
         {price ? (
-          <p className="min-w-0">
+          <div className="min-w-0">
             <span className="block text-xs text-muted-foreground">{priceLabel}</span>
-            <span className="font-display text-[17px] font-bold text-foreground">
-              <bdi>{formatFils(price.minor_units, locale)}</bdi>
-            </span>
-          </p>
+            <PriceDisplay price={price} locale={locale} compact />
+          </div>
         ) : (
           <span />
         )}

@@ -1,7 +1,13 @@
 import { isProblem, ProblemError } from "./problem";
 
 export type PublicTaxonomy = { label: string; code?: string };
-export type PublicPrice = { minor_units: number; currency: "KWD" };
+export type PublicPrice = {
+  /** Effective amount retained for existing Course clients. */
+  minor_units: number;
+  regular_minor_units?: number;
+  offer_minor_units?: number | null;
+  currency: "KWD";
+};
 export type PublicCourse = {
   id: string;
   slug: string;
@@ -20,6 +26,33 @@ export type PublicCourseDetail = PublicCourse & {
   sections: { title: string; position: number; lesson_count: number }[];
   /** Localized Program names this Course is relevant to. Never identifiers. */
   program_audience?: string[];
+};
+export type PublicBundleMember = {
+  course_id: string;
+  slug: string;
+  title: string;
+  instructor_display_name: string;
+  university?: PublicTaxonomy;
+  major?: PublicTaxonomy;
+  subject?: PublicTaxonomy;
+  study_year?: PublicTaxonomy;
+  thumbnail?: { asset_version_id: string; card_url: string; large_url: string } | null;
+  position: number;
+};
+export type PublicBundle = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  course_count: number;
+  price: PublicPrice;
+  members: PublicBundleMember[];
+};
+export type PublicBundleList = {
+  items: PublicBundle[];
+  page: number;
+  page_size: number;
+  total: number;
 };
 
 /**
@@ -160,6 +193,14 @@ export function getPublicCourse(idOrSlug: string, locale: "ar" | "en") {
     `/courses/${encodeURIComponent(idOrSlug)}`,
     locale,
   );
+}
+
+export function getPublicBundles(locale: "ar" | "en") {
+  return publicRequest<PublicBundleList>("/bundles", locale);
+}
+
+export function getPublicBundle(idOrSlug: string, locale: "ar" | "en") {
+  return publicRequest<PublicBundle>(`/bundles/${encodeURIComponent(idOrSlug)}`, locale);
 }
 
 /**
