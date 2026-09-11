@@ -123,7 +123,8 @@ an offer is present. Every existing row remains unchanged with both new columns 
 
 The latest Course-level row becomes the single Course catalogue price record: regular is
 `new_value_minor_units`, offer is `offer_price_minor_units`, and effective is offer when present,
-otherwise regular. An explicit clear writes a new history row with a `NULL` offer.
+otherwise regular. An explicit `clear_offer: true` request writes a new history row with a `NULL`
+offer; an omitted offer with `clear_offer: false` preserves the current offer.
 
 ### 4.2 Bundle aggregate
 
@@ -145,6 +146,13 @@ fils, old/new optional offer fils, Admin actor, reason, and timestamp. Constrain
 nonnegative regular price, positive offer price, and offer below regular price. Bundle price and
 membership mutations lock the Bundle row and increment its revision in the same transaction.
 
+Bundles are assembled in `DRAFT` and may be saved with no members, one member, empty descriptions,
+or no price. Titles remain required by the schema. A transition to `PUBLISHED` is the publication
+gate: both descriptions must be nonblank, the price must pass the regular/offer validation, there
+must be at least two distinct members, and every current member must satisfy the public Course
+eligibility predicate. Public Bundle reads apply the same presentation and member-eligibility gate,
+so an incomplete draft cannot become public or purchasable.
+
 ### 4.3 Purchase target and quote
 
 Extend `purchase_requests` without invalidating historical rows:
@@ -162,6 +170,11 @@ An exact-one check requires a Course target to have only `course_id` and a Bundl
 Their new regular-price snapshot remains `NULL`, because no historical data needs to be rewritten or
 invented. New Course and Bundle requests persist regular price; existing `price_minor_units` remains
 the effective quoted amount; `currency` remains `KWD`.
+
+For a Bundle target, the parent Purchase Request's requester identity, target identity, Bundle
+revision/titles, regular and effective prices, currency, reference, and request time are protected
+by a PostgreSQL `BEFORE UPDATE` trigger after INSERT. Lifecycle state and payment/access timestamps
+remain mutable for the normal confirmation and cancellation workflow.
 
 Course invitation-coherence constraints continue to require invitation fields for Course targets.
 For Bundle targets, the legal state transition is `WAITING_PAYMENT` directly to `ACCESS_GRANTED`,
@@ -253,10 +266,11 @@ Course purchase creation will snapshot both new regular and effective values. It
 fulfillment behavior remains unchanged. Bundle purchase creation snapshots Bundle revision, titles,
 regular price, effective price, currency, and ordered member Course IDs under one coherent lock.
 
-The existing Course pricing endpoint remains compatible: omission of the new offer field preserves
-the current offer when it remains valid; an explicit JSON `null` clears it; an integer sets it. A
-regular-price change that would make a preserved offer invalid is rejected unless that same request
-changes or clears the offer. New UI calls always send the intended offer state explicitly.
+The existing Course pricing endpoint remains compatible: omission of the new offer field, or a JSON
+`null` with `clear_offer: false`, preserves the current offer when it remains valid; an integer sets
+it; and `clear_offer: true` clears it. A regular-price change that would make a preserved offer
+invalid is rejected unless that same request changes or clears the offer. New UI calls send the
+intended offer state explicitly.
 
 ## 7. Concurrency and transactions
 
@@ -328,6 +342,7 @@ Admin routes:
 
 - `POST /api/v1/admin/bundles`
 - `GET /api/v1/admin/bundles`
+- `GET /api/v1/admin/bundles/courses?page=&q=` (capability-protected eligible-Course picker)
 - `GET /api/v1/admin/bundles/:id`
 - `PUT /api/v1/admin/bundles/:id`
 - `POST /api/v1/admin/bundles/:id/publish`
@@ -412,10 +427,10 @@ in SQL rather than loaded and filtered in application code.
 
 Backend unit/integration coverage will exercise Admin-only Bundle and offer mutations, member
 eligibility/minimum/duplicates/order, lifecycle/public filtering, price validation/effective price,
-Course and Bundle quote snapshots, exact-one targets, snapshot immutability, edit-after-request,
+Course and Bundle quote snapshots, database-enforced parent snapshot immutability, edit-after-request,
 direct atomic Bundle grants, partial ownership, expired-grant extension, idempotency, simultaneous
 confirmation, concurrent entitlement creation, rollback on injected failure, IDOR, migration data
-preservation, and clean-schema up/down/up.
+preservation including cleared-offer history, and clean-schema up/down/up.
 
 An explicit regression test will prove an individual Course confirmation still produces
 `INVITATION_CREATED`, creates one Course Access Invitation, grants no entitlement before Student

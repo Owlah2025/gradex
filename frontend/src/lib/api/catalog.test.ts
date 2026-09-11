@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  getAdminBundleCourses,
   getCoursePriceHistory,
   setCoursePrice,
   setSectionPrice,
@@ -15,6 +16,27 @@ import {
   renameTaxonomyTerm,
   retireTaxonomyTerm,
 } from "./catalog";
+
+test("Admin Bundle Course picker forwards bounded page and search parameters", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestURL = "";
+  globalThis.fetch = async (url) => {
+    requestURL = String(url);
+    return new Response(JSON.stringify({ items: [], page: 2, page_size: 20, total: 21, has_next: false }), { status: 200 });
+  };
+
+  try {
+    const result = await getAdminBundleCourses("en", { page: 2, search: "Picker Course 21" });
+    assert.ok(result);
+    const parsed = new URL(requestURL, "https://gradex.test");
+    assert.equal(parsed.pathname, "/api/v1/admin/bundles/courses");
+    assert.equal(parsed.searchParams.get("page"), "2");
+    assert.equal(parsed.searchParams.get("q"), "Picker Course 21");
+    assert.equal(result.has_next, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("lifecycle wrappers send the secured route and body", async () => {
   const originalFetch = globalThis.fetch;

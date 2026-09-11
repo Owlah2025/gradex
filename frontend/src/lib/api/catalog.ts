@@ -341,6 +341,27 @@ export type AdminBundle = {
   updated_at: string;
 };
 
+export type AdminBundleCourseOption = {
+  id: string;
+  title_ar: string;
+  title_en: string;
+  instructor_display_name: string;
+  price?: {
+    regular_minor_units: number;
+    offer_minor_units?: number | null;
+    effective_minor_units: number;
+    currency: "KWD";
+  };
+};
+
+export type AdminBundleCoursePage = {
+  items: AdminBundleCourseOption[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_next: boolean;
+};
+
 export type BundleMutation = {
   title_ar: string;
   title_en: string;
@@ -355,6 +376,19 @@ export type BundleMutation = {
 
 export function listAdminBundles(locale: "ar" | "en") {
   return authenticatedRequest<{ items: AdminBundle[] }>("/admin/bundles", "GET", locale);
+}
+
+export function getAdminBundleCourses(
+  locale: "ar" | "en",
+  options: { page?: number; search?: string } = {},
+) {
+  const params = new URLSearchParams({ page: String(options.page ?? 1) });
+  if (options.search?.trim()) params.set("q", options.search.trim());
+  return authenticatedRequest<AdminBundleCoursePage>(
+    `/admin/bundles/courses?${params}`,
+    "GET",
+    locale,
+  );
 }
 
 export function getAdminBundle(id: string, locale: "ar" | "en") {

@@ -4054,16 +4054,19 @@ membership is not retroactive: an already-fulfilled Bundle purchase does not gai
 the Bundle later. Admins hold sole pricing authority, and there is no pro-rata, credit, or
 difference calculation anywhere in this work.
 
-A Bundle is available for new purchase only while it is PUBLISHED, has at least two member Courses,
-has a price, and every current member satisfies the existing public Course predicate. A Bundle whose
-member stops being public leaves the public catalogue and stops accepting new purchases; existing
-requests and fulfilled history are never deleted.
+A Bundle is available for new purchase only while it is PUBLISHED, has nonblank Arabic and English
+descriptions, has at least two distinct member Courses, has a valid price, and every current member
+satisfies the existing public Course predicate. A Bundle whose member stops being public leaves the
+public catalogue and stops accepting new purchases; existing requests and fulfilled history are
+never deleted. A DRAFT may be incomplete and is not public or purchasable.
 
 **Database:** One additive migration, `0036_bundles_and_offers`, applied on top of schema 35.
 Existing Course prices, purchase requests, entitlements, and D-103 media data are preserved. The
 down migration fails closed: it refuses to run once any Bundle, Bundle price, Bundle purchase
-request, `BUNDLE_PURCHASE` entitlement, Course offer history, or Course purchase request carrying
-0036-only regular-price quote metadata exists, rather than silently destroying commerce evidence.
+request, `BUNDLE_PURCHASE` entitlement, current or cleared Course offer history, or Course purchase
+request carrying 0036-only regular-price quote metadata exists, rather than silently destroying
+commerce evidence. The parent Bundle Purchase Request commercial and identity snapshot is database
+immutable after INSERT; only lifecycle/payment/access workflow fields can transition.
 
 **Deployment:** Not authorized. Production was not touched and no push is authorized by this
 decision. Deploying this work requires the reviewed 35 → 36 schema-release process, not an

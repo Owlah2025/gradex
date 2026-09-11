@@ -1,5 +1,13 @@
 # Gradex Launch Status
 
+> **2026-09-11 — D-104 REVIEW FOLLOW-UP IMPLEMENTED, PENDING INDEPENDENT RE-REVIEW.** Follow-up
+> commits after reviewed head `f6e1f883317e6d8681986c385224aa6f1136d391` address the independent
+> B1/H1/M1–M5 findings: cleared-offer rollback evidence, database-enforced Bundle purchase snapshot
+> immutability, draft/publication gates, the Admin eligible-Course picker, purchase-history retry
+> states, exact entitlement-source matching, and focused accessibility proof. No approval is implied;
+> production, deployment, and push remain unauthorized.
+
+
 > **2026-09-10 — D-104 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Bundles V1 and Catalogue Offers V1
 > were built from exact production base `ef733f758cf7d58e2689898a70715e2fd2102e24` under
 > [D-104](../DECISIONS.md#d-104--bundles-v1-and-catalogue-offers-v1-ship-with-split-fulfillment-and-immutable-commercial-snapshots).

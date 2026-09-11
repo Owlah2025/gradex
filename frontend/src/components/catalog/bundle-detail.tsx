@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Layers3 } from "lucide-react";
 import { Navbar } from "@/components/layout/navbar";
@@ -23,16 +23,34 @@ import { ProblemError } from "@/lib/api/problem";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 type State = { kind: "loading" } | { kind: "ready"; bundle: PublicBundle } | { kind: "missing" } | { kind: "failed" };
+type PurchaseHistoryState =
+  | { kind: "loading" }
+  | { kind: "ready"; requests: PurchaseRequest[] }
+  | { kind: "anonymous" }
+  | { kind: "failed" };
 
 export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; routeLocale: "ar" | "en" }) {
   const { locale, t } = useLocale();
   const pathname = usePathname();
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [requests, setRequests] = useState<PurchaseRequest[] | null>(null);
-  const [anonymous, setAnonymous] = useState(false);
+  const [history, setHistory] = useState<PurchaseHistoryState>({ kind: "loading" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
+
+  const loadHistory = useCallback(async () => {
+    setHistory({ kind: "loading" });
+    try {
+      const result = await listStudentPurchaseRequests(routeLocale);
+      setHistory({ kind: "ready", requests: result?.purchase_requests ?? [] });
+    } catch (cause: unknown) {
+      setHistory(
+        cause instanceof ProblemError && cause.problem.status === 401
+          ? { kind: "anonymous" }
+          : { kind: "failed" },
+      );
+    }
+  }, [routeLocale]);
 
   useEffect(() => {
     let active = true;
@@ -42,17 +60,13 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
         if (!active) return;
         setState(cause instanceof ProblemError && cause.problem.status === 404 ? { kind: "missing" } : { kind: "failed" });
       });
-    listStudentPurchaseRequests(routeLocale)
-      .then((result) => { if (active) setRequests(result?.purchase_requests ?? []); })
-      .catch((cause: unknown) => {
-        if (!active) return;
-        if (cause instanceof ProblemError && cause.problem.status === 401) setAnonymous(true);
-      });
     return () => { active = false; };
   }, [idOrSlug, routeLocale]);
 
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
+
   async function requestPurchase(bundle: PublicBundle) {
-    if (inFlight.current) return;
+    if (inFlight.current || history.kind !== "ready") return;
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
@@ -68,7 +82,9 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
 
   const bundle = state.kind === "ready" ? state.bundle : null;
   const existing = bundle
-    ? requests?.find((request) => request.target_kind === "BUNDLE" && request.bundle_id === bundle.id)
+    ? history.kind === "ready"
+      ? history.requests.find((request) => request.target_kind === "BUNDLE" && request.bundle_id === bundle.id)
+      : undefined
     : undefined;
 
   return (
@@ -111,12 +127,37 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
                 <PriceDisplay price={bundle.price} locale={routeLocale} className="mt-4" />
                 <p className="mt-4 text-sm leading-6 text-muted-foreground">{t.bundles.paymentBody}</p>
                 {error ? <div className="mt-4"><Alert tone="error" title={error} /></div> : null}
+                {history.kind === "loading" ? (
+                  <p
+                    className="mt-4 text-sm text-muted-foreground"
+                    aria-live="polite"
+                    data-testid="bundle-purchase-history-loading"
+                  >
+                    {t.bundles.historyLoading}
+                  </p>
+                ) : null}
+                {history.kind === "failed" ? (
+                  <div className="mt-4">
+                    <Alert tone="error" title={t.bundles.historyFailed}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        onClick={() => void loadHistory()}
+                        data-testid="bundle-purchase-history-retry"
+                      >
+                        {t.bundles.retryHistory}
+                      </Button>
+                    </Alert>
+                  </div>
+                ) : null}
                 {existing?.state === "WAITING_PAYMENT" ? <div className="mt-4"><Alert tone="info" title={t.bundles.pending} /></div> : null}
                 {existing?.state === "ACCESS_GRANTED" ? <div className="mt-4"><Alert tone="success" title={t.bundles.granted} /></div> : null}
-                {anonymous ? (
+                {history.kind === "anonymous" ? (
                   <Button asChild className="mt-5 w-full"><Link href={`/login?returnTo=${encodeURIComponent(pathname ?? `/${locale}/catalog`)}`}>{t.access.purchase.signIn}</Link></Button>
                 ) : existing ? null : (
-                  <Button type="button" className="mt-5 w-full" disabled={submitting || requests === null} onClick={() => void requestPurchase(bundle)} data-testid="bundle-purchase-request">
+                  <Button type="button" className="mt-5 w-full" disabled={submitting || history.kind !== "ready"} onClick={() => void requestPurchase(bundle)} data-testid="bundle-purchase-request">
                     {submitting ? t.access.purchase.submitting : t.bundles.request}
                   </Button>
                 )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { WorkspacePage, WorkspacePageHeader, WorkspaceSection } from "@/components/layout/workspace-page";
@@ -12,20 +12,22 @@ import { Alert } from "@/components/ui/alert";
 import { StatusBadge } from "@/components/common/status-badge";
 import { PriceDisplay } from "@/components/catalog/price-display";
 import { bundleCourseCount } from "@/components/catalog/bundle-presentation";
-import { getPublicCourses, type PublicCourse } from "@/lib/api/public-catalog";
 import {
   createAdminBundle,
+  getAdminBundleCourses,
   getAdminBundle,
   listAdminBundles,
   setCoursePrice,
   transitionAdminBundle,
   updateAdminBundle,
+  type AdminBundleCourseOption,
+  type BundleMutation,
   type AdminBundle,
 } from "@/lib/api/catalog";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
-type CourseChoice = PublicCourse & { titleAr: string; titleEn: string };
+type CourseChoice = AdminBundleCourseOption & { titleAr: string; titleEn: string };
 type Draft = {
   id?: string;
   revision?: number;
@@ -40,6 +42,45 @@ type Draft = {
 };
 
 const emptyDraft = (): Draft => ({ titleAr: "", titleEn: "", descriptionAr: "", descriptionEn: "", courseIDs: [], regular: "", offer: "", reason: "" });
+
+function mergeCourseChoices(current: CourseChoice[], incoming: AdminBundleCourseOption[]): CourseChoice[] {
+  const byID = new Map(current.map((course) => [course.id, course]));
+  for (const course of incoming) {
+    byID.set(course.id, { ...course, titleAr: course.title_ar, titleEn: course.title_en });
+  }
+  return [...byID.values()];
+}
+
+function buildBundleMutation(draft: Draft): BundleMutation | null {
+  const regularText = draft.regular.trim();
+  const offerText = draft.offer.trim();
+  if (regularText === "" && offerText !== "") return null;
+
+  const regular = regularText === "" ? null : Number(regularText);
+  const offer = offerText === "" ? null : Number(offerText);
+  if (
+    regular !== null &&
+    (!Number.isSafeInteger(regular) ||
+      regular < 0 ||
+      (offer !== null &&
+        (!Number.isSafeInteger(offer) || offer <= 0 || offer >= regular)))
+  ) return null;
+
+  const body: BundleMutation = {
+    title_ar: draft.titleAr,
+    title_en: draft.titleEn,
+    description_ar: draft.descriptionAr,
+    description_en: draft.descriptionEn,
+    course_ids: draft.courseIDs,
+    expected_revision: draft.revision,
+  };
+  if (regular !== null) {
+    body.regular_price_minor_units = regular;
+    body.offer_price_minor_units = offer;
+    body.price_reason = draft.reason;
+  }
+  return body;
+}
 
 export function BundleWorkspace() {
   const { locale, t } = useLocale();
@@ -56,28 +97,53 @@ export function BundleWorkspace() {
   const [courseRegular, setCourseRegular] = useState("");
   const [courseOffer, setCourseOffer] = useState("");
   const [courseReason, setCourseReason] = useState("");
+  const [coursePage, setCoursePage] = useState(1);
+  const [coursePageSize, setCoursePageSize] = useState(20);
+  const [courseTotal, setCourseTotal] = useState(0);
+  const [courseLoading, setCourseLoading] = useState(true);
+  const [courseError, setCourseError] = useState<string | null>(null);
+  const courseLoadSequence = useRef(0);
 
-  const load = useCallback(async () => {
+  const loadBundles = useCallback(async () => {
     setError(null);
     try {
-      const [bundleResult, enCourses, arCourses] = await Promise.all([
-        listAdminBundles(locale), getPublicCourses("en"), getPublicCourses("ar"),
-      ]);
+      const bundleResult = await listAdminBundles(locale);
       setBundles(bundleResult?.items ?? []);
-      const arTitles = new Map(arCourses.items.map((course) => [course.id, course.title]));
-      setCourses(enCourses.items.map((course) => ({ ...course, titleEn: course.title, titleAr: arTitles.get(course.id) ?? course.title })));
     } catch {
       setError(copy.failed);
     }
   }, [copy.failed, locale]);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadCourses = useCallback(async () => {
+    const requestSequence = ++courseLoadSequence.current;
+    setCourseLoading(true);
+    setCourseError(null);
+    try {
+      const result = await getAdminBundleCourses(locale, { page: coursePage, search });
+      if (requestSequence !== courseLoadSequence.current) return;
+      if (!result) throw new Error("Eligible Course response was empty");
+      setCoursePageSize(result.page_size);
+      setCourseTotal(result.total);
+      setCourses((current) => mergeCourseChoices(current, result.items));
+    } catch {
+      if (requestSequence === courseLoadSequence.current) {
+        setCourseError(copy.coursesFailed);
+      }
+    } finally {
+      if (requestSequence === courseLoadSequence.current) {
+        setCourseLoading(false);
+      }
+    }
+  }, [coursePage, copy.coursesFailed, locale, search]);
+
+  useEffect(() => { void loadBundles(); }, [loadBundles]);
+  useEffect(() => { void loadCourses(); }, [loadCourses]);
 
   useEffect(() => {
     if (!coursePriceID || courseRegular !== "") return;
     const course = courses.find((item) => item.id === coursePriceID);
     if (!course?.price) return;
-    setCourseRegular(String(course.price.regular_minor_units ?? course.price.minor_units));
+    setCourseRegular(String(course.price.regular_minor_units ?? course.price.effective_minor_units));
     setCourseOffer(course.price.offer_minor_units == null ? "" : String(course.price.offer_minor_units));
   }, [coursePriceID, courseRegular, courses]);
 
@@ -104,32 +170,30 @@ export function BundleWorkspace() {
     event.preventDefault();
     setError(null);
     setNotice(null);
-    if (draft.courseIDs.length < 2) { setError(copy.minimum); return; }
-    const regular = Number(draft.regular);
-    const offer = draft.offer === "" ? null : Number(draft.offer);
-    if (!Number.isSafeInteger(regular) || regular < 0 || (offer !== null && (!Number.isSafeInteger(offer) || offer <= 0 || offer >= regular))) {
-      setError(copy.invalidOffer); return;
+    const body = buildBundleMutation(draft);
+    if (!body) {
+      setError(copy.invalidOffer);
+      return;
     }
     const csrf = currentCSRFToken();
-    if (!csrf) { setError(copy.failed); return; }
+    if (!csrf) {
+      setError(copy.failed);
+      return;
+    }
     setBusy(true);
     try {
-      const body = {
-        title_ar: draft.titleAr, title_en: draft.titleEn,
-        description_ar: draft.descriptionAr, description_en: draft.descriptionEn,
-        course_ids: draft.courseIDs, regular_price_minor_units: regular,
-        offer_price_minor_units: offer, price_reason: draft.reason,
-        expected_revision: draft.revision,
-      };
       const saved = draft.id
         ? await updateAdminBundle(draft.id, body, locale, csrf)
         : await createAdminBundle(body, locale, csrf);
       if (!saved) throw new Error("Bundle response was empty");
       setDraft({ ...draft, id: saved.id, revision: saved.revision });
       setNotice(copy.saved);
-      await load();
-    } catch { setError(copy.failed); }
-    finally { setBusy(false); }
+      await loadBundles();
+    } catch {
+      setError(copy.failed);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function editBundle(id: string) {
@@ -150,9 +214,14 @@ export function BundleWorkspace() {
   async function changeLifecycle(bundle: AdminBundle, action: "publish" | "delist" | "archive") {
     const csrf = currentCSRFToken(); if (!csrf) return;
     setBusy(true); setError(null);
-    try { await transitionAdminBundle(bundle.id, action, bundle.revision, locale, csrf); await load(); }
-    catch { setError(copy.failed); }
-    finally { setBusy(false); }
+    try {
+      await transitionAdminBundle(bundle.id, action, bundle.revision, locale, csrf);
+      await loadBundles();
+    } catch {
+      setError(copy.failed);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveCoursePrice(clearOffer = false) {
@@ -164,7 +233,8 @@ export function BundleWorkspace() {
       await setCoursePrice({ courseID: coursePriceID, priceMinorUnits: regular,
         offerPriceMinorUnits: clearOffer ? undefined : offer, clearOffer,
         reason: courseReason, locale, csrf });
-      setNotice(copy.saved); await load();
+      setNotice(copy.saved);
+      await loadBundles();
       if (clearOffer) setCourseOffer("");
     } catch { setError(copy.failed); }
     finally { setBusy(false); }
@@ -178,27 +248,54 @@ export function BundleWorkspace() {
 
       <WorkspaceSection testID="bundle-editor" title={draft.id ? copy.edit : copy.newTitle} className="mt-8">
         <form onSubmit={saveBundle} className="space-y-6">
+          <p className="text-sm text-muted-foreground">{copy.draftHint}</p>
           <div className="grid gap-4 md:grid-cols-2">
             <Field htmlFor="bundle-title-ar" label={copy.titleAr}><Input id="bundle-title-ar" required dir="rtl" value={draft.titleAr} onChange={(event) => setDraft({ ...draft, titleAr: event.target.value })} /></Field>
             <Field htmlFor="bundle-title-en" label={copy.titleEn}><Input id="bundle-title-en" required dir="ltr" value={draft.titleEn} onChange={(event) => setDraft({ ...draft, titleEn: event.target.value })} /></Field>
-            <Field htmlFor="bundle-description-ar" label={copy.descriptionAr}><Textarea id="bundle-description-ar" required dir="rtl" value={draft.descriptionAr} onChange={(event) => setDraft({ ...draft, descriptionAr: event.target.value })} /></Field>
-            <Field htmlFor="bundle-description-en" label={copy.descriptionEn}><Textarea id="bundle-description-en" required dir="ltr" value={draft.descriptionEn} onChange={(event) => setDraft({ ...draft, descriptionEn: event.target.value })} /></Field>
-            <Field htmlFor="bundle-regular" label={copy.regularPrice}><Input id="bundle-regular" type="number" min="0" step="1" required value={draft.regular} onChange={(event) => setDraft({ ...draft, regular: event.target.value })} /></Field>
+            <Field htmlFor="bundle-description-ar" label={copy.descriptionAr}><Textarea id="bundle-description-ar" dir="rtl" value={draft.descriptionAr} onChange={(event) => setDraft({ ...draft, descriptionAr: event.target.value })} /></Field>
+            <Field htmlFor="bundle-description-en" label={copy.descriptionEn}><Textarea id="bundle-description-en" dir="ltr" value={draft.descriptionEn} onChange={(event) => setDraft({ ...draft, descriptionEn: event.target.value })} /></Field>
+            <Field htmlFor="bundle-regular" label={copy.regularPrice}><Input id="bundle-regular" type="number" min="0" step="1" value={draft.regular} onChange={(event) => setDraft({ ...draft, regular: event.target.value })} /></Field>
             <Field htmlFor="bundle-offer" label={copy.offerPrice}><Input id="bundle-offer" type="number" min="1" step="1" value={draft.offer} onChange={(event) => setDraft({ ...draft, offer: event.target.value })} /></Field>
           </div>
-          <Field htmlFor="bundle-price-reason" label={copy.reason}><Input id="bundle-price-reason" required value={draft.reason} onChange={(event) => setDraft({ ...draft, reason: event.target.value })} /></Field>
+          <Field htmlFor="bundle-price-reason" label={copy.reason}><Input id="bundle-price-reason" value={draft.reason} onChange={(event) => setDraft({ ...draft, reason: event.target.value })} /></Field>
           <div>
             <label htmlFor="bundle-course-search" className="text-sm font-semibold">{copy.search}</label>
-            <Input id="bundle-course-search" type="search" className="mt-2 max-w-xl" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <Input id="bundle-course-search" type="search" className="mt-2 max-w-xl" value={search} onChange={(event) => { setSearch(event.target.value); setCoursePage(1); }} />
             <fieldset className="mt-4 grid max-h-64 gap-2 overflow-y-auto rounded-lg border border-border p-3 sm:grid-cols-2">
               <legend className="px-1 text-sm font-semibold">{copy.courses}</legend>
-              {visibleCourses.map((course) => (
+              {courseLoading ? (
+                <p className="text-sm text-muted-foreground" data-testid="bundle-course-loading">
+                  {copy.coursesLoading}
+                </p>
+              ) : null}
+              {courseError ? (
+                <div className="sm:col-span-2">
+                  <Alert tone="error" title={courseError}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => void loadCourses()}>
+                      {copy.retryCourses}
+                    </Button>
+                  </Alert>
+                </div>
+              ) : null}
+              {!courseLoading && !courseError && visibleCourses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{copy.noCourses}</p>
+              ) : null}
+              {!courseLoading && !courseError ? visibleCourses.map((course) => (
                 <label key={course.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md p-2 hover:bg-muted focus-within:outline focus-within:outline-2 focus-within:outline-primary">
                   <input type="checkbox" checked={draft.courseIDs.includes(course.id)} onChange={() => toggleCourse(course.id)} />
                   <span className="min-w-0"><bdi className="block truncate font-medium">{locale === "ar" ? course.titleAr : course.titleEn}</bdi><bdi className="block truncate text-xs text-muted-foreground">{locale === "ar" ? course.titleEn : course.titleAr}</bdi></span>
                 </label>
-              ))}
+              )) : null}
             </fieldset>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={courseLoading || coursePage <= 1} onClick={() => setCoursePage((current) => current - 1)} data-testid="bundle-course-page-previous">
+                {copy.previousCourses}
+              </Button>
+              <span className="text-sm text-muted-foreground" aria-live="polite" data-testid="bundle-course-page-number">{copy.coursePage.replace("{page}", String(coursePage))}</span>
+              <Button type="button" variant="outline" size="sm" disabled={courseLoading || coursePage * coursePageSize >= courseTotal} onClick={() => setCoursePage((current) => current + 1)} data-testid="bundle-course-page-next">
+                {copy.nextCourses}
+              </Button>
+            </div>
           </div>
           <div>
             <h3 className="text-sm font-semibold">{copy.selected} ({draft.courseIDs.length})</h3>
@@ -242,7 +339,7 @@ export function BundleWorkspace() {
         <form onSubmit={(event) => { event.preventDefault(); void saveCoursePrice(); }} className="grid gap-4 md:grid-cols-2">
           <Field htmlFor="course-price-course" label={copy.selectCourse}><select id="course-price-course" className="min-h-11 rounded-md border border-input bg-background px-3" required value={coursePriceID} onChange={(event) => {
             const id = event.target.value; setCoursePriceID(id); const course = courses.find((item) => item.id === id);
-            setCourseRegular(course?.price ? String(course.price.regular_minor_units ?? course.price.minor_units) : ""); setCourseOffer(course?.price?.offer_minor_units == null ? "" : String(course.price.offer_minor_units));
+            setCourseRegular(course?.price ? String(course.price.regular_minor_units ?? course.price.effective_minor_units) : ""); setCourseOffer(course?.price?.offer_minor_units == null ? "" : String(course.price.offer_minor_units));
           }}><option value="">—</option>{courses.map((course) => <option key={course.id} value={course.id}>{locale === "ar" ? course.titleAr : course.titleEn}</option>)}</select></Field>
           <Field htmlFor="course-regular" label={copy.regularPrice}><Input id="course-regular" type="number" min="0" step="1" required value={courseRegular} onChange={(event) => setCourseRegular(event.target.value)} /></Field>
           <Field htmlFor="course-offer" label={copy.offerPrice}><Input id="course-offer" type="number" min="1" step="1" value={courseOffer} onChange={(event) => setCourseOffer(event.target.value)} /></Field>

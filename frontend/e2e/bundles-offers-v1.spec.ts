@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import { issueRotatingSession } from "./rotating-students";
@@ -37,6 +38,24 @@ async function mockSession(page: Page, role: "STUDENT" | "ADMIN" | "ANONYMOUS") 
   await page.route("**/api/v1/me/academic-profile", (route) => route.fulfill({ status: 404, json: { status: 404 } }));
 }
 
+async function expectAxeClean(page: Page, label: string) {
+  const results = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(
+    results.violations.map((violation) => `${violation.id}: ${violation.help}`).join("\n"),
+    `axe violations on ${label}`,
+  ).toBe("");
+}
+
+async function tabToTestID(page: Page, testID: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await page.keyboard.press("Tab");
+    if (await page.evaluate((id) => document.activeElement?.getAttribute("data-testid") === id, testID)) return;
+  }
+  throw new Error(`Tab navigation did not reach ${testID}`);
+}
+
 test("Bundle detail shows an accessible offer and sends only Bundle identity", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await mockSession(page, "STUDENT");
@@ -48,13 +67,17 @@ test("Bundle detail shows an accessible offer and sends only Bundle identity", a
   });
   await page.route("https://wa.me/**", (route) => route.abort());
   await page.goto(`/en/catalog/bundles/${bundle.slug}`);
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
   await expect(page.getByRole("heading", { level: 1, name: bundle.title })).toBeVisible();
   await expect(page.locator("del")).toContainText("120.000 KWD");
   await expect(page.getByTestId("offer-price")).toContainText("90.000 KWD");
   await expect(page.getByRole("heading", { name: "Courses in this Bundle" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Request Bundle purchase" })).toBeEnabled();
+  await expectAxeClean(page, "English Bundle detail");
+  await page.getByRole("link", { name: "Digital Logic" }).focus();
+  await tabToTestID(page, "bundle-purchase-request");
   await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBe(true);
-  await page.getByRole("button", { name: "Request Bundle purchase" }).click();
+  await page.getByTestId("bundle-purchase-request").press("Enter");
 });
 
 test("Arabic Bundle detail uses RTL and localized commerce copy", async ({ page }) => {
@@ -67,15 +90,15 @@ test("Arabic Bundle detail uses RTL and localized commerce copy", async ({ page 
   await expect(page.getByRole("heading", { level: 1, name: "باقة الهندسة" })).toBeVisible();
   await expect(page.getByText("الكورسات المشمولة في الباقة")).toBeVisible();
   await expect(page.getByRole("link", { name: "تسجيل الدخول" })).toBeVisible();
+  await expectAxeClean(page, "Arabic Bundle detail");
   await expect(page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).resolves.toBe(true);
 });
 
 test("Admin creates an ordered bilingual Bundle from published Courses", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await mockSession(page, "ADMIN");
-  await page.route("**/api/v1/catalog/courses**", (route) => {
-    const arabic = (route.request().headers()["accept-language"] ?? "").startsWith("ar");
-    return route.fulfill({ json: { items: bundle.members.map((member) => ({ id: member.course_id, slug: member.slug, title: arabic ? `مقرر ${member.position + 1}` : member.title, instructor_display_name: member.instructor_display_name, price: { minor_units: 25000, regular_minor_units: 25000, currency: "KWD" }, has_preview: false })), page: 1, page_size: 24, total: 3 } });
+  await page.route("**/api/v1/admin/bundles/courses**", (route) => {
+    return route.fulfill({ json: { items: bundle.members.map((member) => ({ id: member.course_id, title_ar: `مقرر ${member.position + 1}`, title_en: member.title, instructor_display_name: member.instructor_display_name, price: { effective_minor_units: 25000, regular_minor_units: 25000, currency: "KWD" }, })), page: 1, page_size: 20, total: 3, has_next: false } });
   });
   await page.route("**/api/v1/admin/bundles", async (route) => {
     if (route.request().method() === "GET") return route.fulfill({ json: { items: [] } });
@@ -96,6 +119,84 @@ test("Admin creates an ordered bilingual Bundle from published Courses", async (
   await expect(page.getByText("Selected Courses (3)")).toBeVisible();
   await page.getByRole("button", { name: "Save draft" }).click();
   await expect(page.getByText("Bundle saved.")).toBeVisible();
+});
+
+test("Admin Bundle Course picker reaches page two and selects it with the keyboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockSession(page, "ADMIN");
+  const beyondPageOne = {
+    id: "20000000-0000-0000-0000-000000000099",
+    title_ar: "مقرر بعد الصفحة الأولى",
+    title_en: "Beyond Page One",
+    instructor_display_name: "Gradex Instructor",
+  };
+  const firstPage = Array.from({ length: 20 }, (_, index) => ({
+    id: `20000000-0000-0000-0000-0000000000${String(index + 10).padStart(2, "0")}`,
+    title_ar: `مقرر ${index + 1}`,
+    title_en: `Picker Course ${index + 1}`,
+    instructor_display_name: "Gradex Instructor",
+  }));
+  const requestedPages: number[] = [];
+  await page.route("**/api/v1/admin/bundles/courses**", (route) => {
+    const url = new URL(route.request().url());
+    const pageNumber = Number(url.searchParams.get("page") ?? "1");
+    requestedPages.push(pageNumber);
+    return route.fulfill({ json: { items: pageNumber === 2 ? [beyondPageOne] : firstPage, page: pageNumber, page_size: 20, total: 21, has_next: pageNumber === 1 } });
+  });
+  await page.route("**/api/v1/admin/bundles", async (route) => {
+    if (route.request().method() === "GET") return route.fulfill({ json: { items: [] } });
+    const body = route.request().postDataJSON();
+    expect(body.course_ids).toEqual([beyondPageOne.id]);
+    expect(body).not.toHaveProperty("regular_price_minor_units");
+    return route.fulfill({ status: 201, json: { id: "bundle-new", slug: "bundle-new", lifecycle: "DRAFT", title_ar: body.title_ar, title_en: body.title_en, description_ar: body.description_ar, description_en: body.description_en, revision: 1, course_count: 1, eligible: false, members: [], created_at: new Date().toISOString(), updated_at: new Date().toISOString() } });
+  });
+
+  await page.goto("/en/admin/bundles");
+  await expect(page.getByTestId("bundle-course-page-next")).toBeEnabled();
+  await expectAxeClean(page, "English Admin Bundle workspace");
+  await page.getByTestId("bundle-course-page-next").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("checkbox", { name: /Beyond Page One/ })).toBeVisible();
+  await page.getByRole("checkbox", { name: /Beyond Page One/ }).focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("checkbox", { name: /Beyond Page One/ })).toBeChecked();
+  await page.locator("#bundle-title-ar").fill("باقة تجريبية");
+  await page.locator("#bundle-title-en").fill("Keyboard Bundle");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByText("Bundle saved.")).toBeVisible();
+  expect(requestedPages).toContain(2);
+});
+
+test("Bundle detail exposes purchase-history failure and a safe retry path", async ({ page }) => {
+  await mockSession(page, "STUDENT");
+  await page.route("**/api/v1/catalog/bundles/**", (route) => route.fulfill({ json: bundle }));
+  let historyAttempts = 0;
+  let purchaseAttempts = 0;
+  await page.route("**/api/v1/me/purchase-requests", async (route) => {
+    if (route.request().method() === "GET") {
+      historyAttempts += 1;
+      if (historyAttempts === 1) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        return route.fulfill({ status: 500, json: { status: 500 } });
+      }
+      return route.fulfill({ json: { purchase_requests: [] } });
+    }
+    purchaseAttempts += 1;
+    return route.fulfill({ json: { reference: "GRX-RETRY", whatsapp_url: "https://wa.me/96500000000", state: "WAITING_PAYMENT" } });
+  });
+  await page.route("https://wa.me/**", (route) => route.abort());
+  await page.goto(`/en/catalog/bundles/${bundle.slug}`);
+  await expect(page.getByTestId("bundle-purchase-history-loading")).toBeVisible();
+  await expect(page.getByText("Your purchase history could not be checked", { exact: false })).toBeVisible();
+  await expect(page.getByTestId("bundle-purchase-request")).toBeDisabled();
+  expect(purchaseAttempts).toBe(0);
+
+  const retry = page.waitForResponse((response) => response.url().includes("/api/v1/me/purchase-requests") && response.request().method() === "GET");
+  await page.getByTestId("bundle-purchase-history-retry").click();
+  await retry;
+  await expect(page.getByTestId("bundle-purchase-request")).toBeEnabled();
+  await page.getByTestId("bundle-purchase-request").press("Enter");
+  await expect.poll(() => purchaseAttempts).toBe(1);
 });
 
 test("real Bundle request grants all snapshot Courses after one Admin confirmation", async ({ browser }) => {
@@ -236,14 +337,28 @@ async function requestRealBundle(page: Page) {
   expect((await created).status()).toBe(201);
 }
 
-async function confirmRealBundle(adminPage: Page, studentEmail: string): Promise<ConfirmationBody> {
+async function confirmRealBundle(adminPage: Page, studentEmail: string, keyboard = false): Promise<ConfirmationBody> {
   await adminPage.goto("/en/admin/course-access");
   await adminPage.locator("#purchase-request-search").fill(studentEmail);
   await adminPage.getByRole("button", { name: "Search" }).click();
   const requestRow = adminPage.getByRole("row").filter({ hasText: realBundle.title });
+  await expect(requestRow).toBeVisible();
+  await expectAxeClean(adminPage, "Admin Bundle confirmation workspace");
   const confirmed = adminPage.waitForResponse((response) => /\/api\/v1\/admin\/purchase-requests\/[^/]+\/confirm-payment$/.test(new URL(response.url()).pathname) && response.request().method() === "POST");
-  await requestRow.getByRole("button", { name: /Confirm payment & grant Bundle access/ }).click();
-  await adminPage.getByTestId("purchase-request-confirm").getByTestId("confirm-accept").click();
+  const openConfirmation = requestRow.getByRole("button", { name: /Confirm payment & grant Bundle access/ });
+  if (keyboard) {
+    await openConfirmation.focus();
+    await openConfirmation.press("Enter");
+  } else {
+    await openConfirmation.click();
+  }
+  const acceptConfirmation = adminPage.getByTestId("purchase-request-confirm").getByTestId("confirm-accept");
+  if (keyboard) {
+    await acceptConfirmation.focus();
+    await acceptConfirmation.press("Enter");
+  } else {
+    await acceptConfirmation.click();
+  }
   const response = await confirmed;
   expect(response.status()).toBe(200);
   return await response.json() as ConfirmationBody;
@@ -266,7 +381,7 @@ test("real partially owned Bundle extends the held Course and grants the rest on
     const studentPage = await studentContext.newPage();
     await requestRealBundle(studentPage);
 
-    const body = await confirmRealBundle(await adminContext.newPage(), "bundle-partial@example.test");
+    const body = await confirmRealBundle(await adminContext.newPage(), "bundle-partial@example.test", true);
     expect(body.invitation).toBeUndefined();
     expect(body.purchase_request.state).toBe("ACCESS_GRANTED");
     expect(body.bundle_grants).toHaveLength(3);
