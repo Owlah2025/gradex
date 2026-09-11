@@ -438,6 +438,7 @@ func TestRegisterExistingEmailCreatesNoAdditionalFacts(t *testing.T) {
 	}
 	if _, err := service.VerifyEmailOTP(
 		context.Background(), secondChallenge.ChallengeID, deterministicCode(0x42, 1), "request-synthetic",
+		testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatal("the synthetic duplicate challenge was usable")
 	}
@@ -530,12 +531,12 @@ func TestVerificationResendSupersedesAndConsumptionIsSingleUse(t *testing.T) {
 	}
 
 	if _, err := later.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, original, "request-consume-old",
+		context.Background(), challenge.ChallengeID, original, "request-consume-old", testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("superseded code error = %v, want ErrOTPInvalid", err)
 	}
 	grant, err := later.VerifyEmailOTP(
-		context.Background(), replacement.ChallengeID, replacementCode, "request-consume-new",
+		context.Background(), replacement.ChallengeID, replacementCode, "request-consume-new", testDeviceContext(),
 	)
 	if err != nil {
 		t.Fatalf("consuming replacement: %v", err)
@@ -544,7 +545,7 @@ func TestVerificationResendSupersedesAndConsumptionIsSingleUse(t *testing.T) {
 		t.Fatal("verification returned an incomplete session grant")
 	}
 	if _, err := later.VerifyEmailOTP(
-		context.Background(), replacement.ChallengeID, replacementCode, "request-replay",
+		context.Background(), replacement.ChallengeID, replacementCode, "request-replay", testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("replay error = %v, want ErrOTPInvalid", err)
 	}
@@ -573,8 +574,7 @@ func TestSuccessfulVerificationCreatesOneOrdinarySession(t *testing.T) {
 	challenge := mustRegister(t, service, studentRegistration())
 
 	grant, err := service.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, deterministicCode(0x44, 0), "request-verify",
-	)
+		context.Background(), challenge.ChallengeID, deterministicCode(0x44, 0), "request-verify", testDeviceContext())
 	if err != nil {
 		t.Fatalf("verifying: %v", err)
 	}
@@ -618,7 +618,7 @@ func TestVerificationRefusesToAuthenticateBeforeTheCodeIsProven(t *testing.T) {
 	challenge := mustRegister(t, service, studentRegistration())
 
 	if _, err := service.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, "000000", "request-wrong",
+		context.Background(), challenge.ChallengeID, "000000", "request-wrong", testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("wrong code error = %v, want ErrOTPInvalid", err)
 	}
@@ -652,8 +652,7 @@ func TestVerificationAttemptBudgetIsEnforcedAndRecorded(t *testing.T) {
 	for attempt := 1; attempt <= EmailOTPMaxAttempts; attempt++ {
 		_, err := service.VerifyEmailOTP(
 			context.Background(), challenge.ChallengeID, wrong,
-			"request-guess-"+string(rune('a'+attempt)),
-		)
+			"request-guess-"+string(rune('a'+attempt)), testDeviceContext())
 		wantExhausted := attempt == EmailOTPMaxAttempts
 		if wantExhausted && !errors.Is(err, ErrOTPAttemptsExhausted) {
 			t.Fatalf("attempt %d error = %v, want ErrOTPAttemptsExhausted", attempt, err)
@@ -679,7 +678,7 @@ func TestVerificationAttemptBudgetIsEnforcedAndRecorded(t *testing.T) {
 	// never existed — which is what keeps a retired handle from confirming that
 	// it once named a real pending Account.
 	if _, err := service.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, correct, "request-late-correct",
+		context.Background(), challenge.ChallengeID, correct, "request-late-correct", testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("correct code after exhaustion = %v, want ErrOTPInvalid", err)
 	}
@@ -717,8 +716,7 @@ func TestExhaustedChallengeIsRecoverableWithANewCode(t *testing.T) {
 	for attempt := 0; attempt < EmailOTPMaxAttempts; attempt++ {
 		_, _ = service.VerifyEmailOTP(
 			context.Background(), challenge.ChallengeID, "000000",
-			"request-burn-"+string(rune('a'+attempt)),
-		)
+			"request-burn-"+string(rune('a'+attempt)), testDeviceContext())
 	}
 
 	// The challenge is retired, so a challenge-keyed resend can no longer act
@@ -731,8 +729,7 @@ func TestExhaustedChallengeIsRecoverableWithANewCode(t *testing.T) {
 		t.Fatalf("recovering after exhaustion: %v", err)
 	}
 	grant, err := recovery.VerifyEmailOTP(
-		context.Background(), replacement.ChallengeID, deterministicCode(0x47, 0), "request-recovered",
-	)
+		context.Background(), replacement.ChallengeID, deterministicCode(0x47, 0), "request-recovered", testDeviceContext())
 	if err != nil {
 		t.Fatalf("verifying the recovery code: %v", err)
 	}
@@ -783,8 +780,7 @@ func TestExpiredVerificationCodeIsUniformlyInvalid(t *testing.T) {
 
 	consumer := admissionService(t, pool, issuedAt.Add(11*time.Minute), 0x70)
 	if _, err := consumer.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, deterministicCode(0x60, 0), "request-expired",
-	); !errors.Is(err, ErrOTPInvalid) {
+		context.Background(), challenge.ChallengeID, deterministicCode(0x60, 0), "request-expired", testDeviceContext()); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("expired code error = %v, want ErrOTPInvalid", err)
 	}
 }
@@ -840,8 +836,7 @@ func TestVerifyingByCodeRetiresAnUnexpiredLegacyLink(t *testing.T) {
 	insertLegacyVerificationLink(t, pool, accountID, bearer, now, time.Hour)
 
 	if _, err := service.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, deterministicCode(0x44, 0), "request-code",
-	); err != nil {
+		context.Background(), challenge.ChallengeID, deterministicCode(0x44, 0), "request-code", testDeviceContext()); err != nil {
 		t.Fatalf("verifying by code: %v", err)
 	}
 	var liveLinks int
@@ -875,8 +870,7 @@ func TestConcurrentVerificationActivatesExactlyOnce(t *testing.T) {
 			defer wait.Done()
 			_, err := service.VerifyEmailOTP(
 				context.Background(), challenge.ChallengeID, code,
-				"request-concurrent-"+string(rune('a'+index)),
-			)
+				"request-concurrent-"+string(rune('a'+index)), testDeviceContext())
 			mutex.Lock()
 			defer mutex.Unlock()
 			switch {
@@ -1008,7 +1002,7 @@ func TestUnknownVerificationRequestAndInvalidCodeMutateNothing(t *testing.T) {
 		t.Fatal("an unknown address produced no challenge, which distinguishes it")
 	}
 	if _, err := service.VerifyEmailOTP(
-		context.Background(), challenge.ChallengeID, "123456", "request-invalid",
+		context.Background(), challenge.ChallengeID, "123456", "request-invalid", testDeviceContext(),
 	); !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("synthetic challenge error = %v, want ErrOTPInvalid", err)
 	}
@@ -1027,4 +1021,17 @@ func TestUnknownVerificationRequestAndInvalidCodeMutateNothing(t *testing.T) {
 		t.Fatalf("hidden outcomes created %d facts", facts)
 	}
 	assertAdmissionCanariesAbsent(t, pool, "unknown@example.com")
+}
+
+// testDeviceContext is the browser evidence integration tests present.
+//
+// A fixed, obviously synthetic credential digest: these tests are about
+// admission and verification, and the device they arrive on only has to be
+// consistent. Device policy has its own suite, which varies this deliberately.
+func testDeviceContext() DeviceContext {
+	return DeviceContext{
+		CredentialDigest: DigestOpaqueCredential("integration-device-credential"),
+		UserAgent:        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0 Safari/537.36",
+		SourceAddress:    "203.0.113.10",
+	}
 }

@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { issueRotatingSession, queryInvitationToken } from "./rotating-students";
+import { installIssuedSession, issueRotatingSession, queryInvitationToken } from "./rotating-students";
 import { queryLearningState } from "../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 
@@ -191,17 +191,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
 
     // 10. Student A authenticates with session cookie and navigates to target returnTo
     const studentSession = issueRotatingSession({ email: STUDENT_A_EMAIL, accountID: STUDENT_A_ID });
-    await studentContext.addCookies([
-      {
-        name: studentSession.cookie_name,
-        value: studentSession.cookie_value,
-        domain: origin.hostname,
-        path: "/",
-        httpOnly: true,
-        secure: true,
-        sameSite: "Strict",
-      },
-    ]);
+    await installIssuedSession(studentContext, studentSession);
 
     await studentPage.goto(invitationUrl);
     await studentPage.waitForURL((url) => url.pathname.includes("/access"));
@@ -415,17 +405,7 @@ test.describe("S6 Course Access Grant — Real Production Launch Journey", () =>
     // Context 3: Unrelated Student B Context
     const studentBContext = await browser.newContext({ locale: "en-US" });
     const studentBSession = issueRotatingSession({ email: STUDENT_B_EMAIL, accountID: STUDENT_B_ID });
-    await studentBContext.addCookies([
-      {
-        name: studentBSession.cookie_name,
-        value: studentBSession.cookie_value,
-        domain: origin.hostname,
-        path: "/",
-        httpOnly: true,
-        secure: true,
-        sameSite: "Strict",
-      },
-    ]);
+    await installIssuedSession(studentBContext, studentBSession);
 
     const studentBPage = await studentBContext.newPage();
 

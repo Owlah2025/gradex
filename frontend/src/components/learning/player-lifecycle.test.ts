@@ -187,12 +187,13 @@ test("progress reporting and the resume position survive the rebuild", () => {
   assert.match(player, /hls\.destroy\(\)/);
 });
 
-test("a transient control failure still never makes the Lesson unavailable", () => {
-  const player = code(PLAYER);
-  // `setFailed(true)` belongs to unplayable media only: denied authorisation, unsupported HLS, and
-  // the element's own `error` event.
-  const failures = player.match(/setFailed\(true\)/g) ?? [];
-  assert.equal(failures.length, 3, "only unplayable media may make the Lesson unavailable");
+test("transient control failures stay recoverable while heartbeat authority fails closed", () => {
+	const player = code(PLAYER);
+	// `setFailed(true)` belongs to denied authorization, unsupported HLS, the media
+	// element's error event, and a heartbeat that can no longer establish authority.
+	const failures = player.match(/setFailed\(true\)/g) ?? [];
+	assert.equal(failures.length, 4, "heartbeat authority loss must stop protected media");
+	assert.match(player, /heartbeatPlayback[\s\S]*videoElement\?\.pause\(\)[\s\S]*setPlayback\(null\)/);
   for (const control of ["toggleMediaPlayback", "toggleFullscreenBehavior"]) {
     assert.match(
       player,

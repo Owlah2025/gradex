@@ -9,6 +9,7 @@ import {
 import {
   authenticateRotatingStudent,
   expiredStudentFor,
+	installIssuedSession,
   issueRotatingSession,
   queryInvitationToken,
   ACCESS_A11Y_EXPIRED_AR_TEST_SLOT,
@@ -69,19 +70,8 @@ async function signIn(
   locale: Locale,
 ): Promise<void> {
   const session = issueRotatingSession(identity);
-  const origin = new URL(frontendOrigin());
   await context.addInitScript((v) => window.localStorage.setItem("gradex.locale", v), locale);
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+	await installIssuedSession(context, session);
 }
 
 /**

@@ -1,5 +1,30 @@
 # Gradex Launch Status
 
+> **2026-09-11 — Student device security REMEDIATION APPROVED, FINAL VERIFICATION PENDING.**
+> Trusted devices (2 per Student, email-OTP confirmed, 24h
+> replacement cooldown) and one protected-video playback lease per Student account were built from
+> exact base `ef733f758cf7d58e2689898a70715e2fd2102e24` on `feature/student-device-security`.
+>
+> This work is authorized by [D-105](../DECISIONS.md#d-105--student-device-trust-and-single-protected-playback-are-student-only-controls)
+> and is outside the D-089 `MVP-Fxx` queue. The builder has not self-approved it. A recorded
+> independent reviewer verdict against an exact
+> commit range are prerequisites to merging or deploying.
+>
+> It adds the single additive migration `0036_student_trusted_devices`, following the currently
+> landed schema 35. The parallel, unlanded Bundles/Offers branch must reconcile its competing 0036
+> if it lands later; neither feature depends on the other. No production, deployment, or push action
+> is authorized until final gates and independent review are green.
+>
+> Concurrent-playback enforcement is authoritative at playback authorization and manifest
+> acquisition, and cooperative thereafter through the first-party player heartbeat. Already-issued
+> direct segment presigns cannot currently be server-revoked mid-stream; the reviewed VOD
+> HLS/presigned-segment architecture was deliberately left unchanged. This is not cryptographic or
+> DRM-grade instantaneous revocation and must not be described as such. Implementation detail,
+> security reasoning, and the full limitation list are in
+> [`2026-09-10-student-device-security-design.md`](../superpowers/specs/2026-09-10-student-device-security-design.md).
+>
+> ---
+
 > **2026-09-09 — D-103 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Video-pipeline hardening was built
 > from exact production base `b8dea967196de68914440b2092cd80daf85d9546` under [D-103](../DECISIONS.md#d-103--existing-video-pipeline-uses-durable-work-leases-and-attempt-scoped-output). It adds the single additive migration
 > `0035_media_work_leases`; no production, deployment, or push action is authorized. Reviewer status

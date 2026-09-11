@@ -2,7 +2,6 @@ package identity
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -15,7 +14,12 @@ import (
 
 // Session credential sizing. 32 bytes of CSPRNG output is the security floor
 // for a bearer-equivalent value; the cookie carries the base64url encoding.
-const sessionCredentialBytes = 32
+//
+// The generation and digest live in opaque.go, which a trusted-device
+// credential also uses. Sharing the primitive is not sharing the meaning: a
+// device credential authenticates nobody, and nothing here may be presented as
+// one or accept one in return.
+const sessionCredentialBytes = OpaqueCredentialBytes
 
 const sessionCSRFDomain = "gradex-session-csrf-v1"
 
@@ -210,20 +214,11 @@ func deriveSessionCSRFToken(
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func randomToken() (string, error) {
-	b := make([]byte, sessionCredentialBytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(b), nil
-}
+func randomToken() (string, error) { return newOpaquePlaintext() }
 
 // DigestToken is the one-way transform applied before a session value touches
 // the database. A leak of the sessions tables must not yield usable cookies.
-func DigestToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return base64.RawStdEncoding.EncodeToString(sum[:])
-}
+func DigestToken(token string) string { return DigestOpaqueCredential(token) }
 
 // Recent-authentication outcomes.
 var (

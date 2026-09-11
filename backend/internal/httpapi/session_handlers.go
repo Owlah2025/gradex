@@ -45,18 +45,37 @@ type sessionHandlers struct {
 
 func (h *sessionHandlers) login(c *gin.Context) {
 	request := c.MustGet(strictJSONBodyContextKey).(*sessionLoginRequest)
+	// The device credential is resolved — and minted when this browser has none
+	// — before the password is checked, so the work done is identical whatever
+	// the outcome. The minted value is committed to the browser only after a
+	// successful login: every hidden login failure must stay byte-identical,
+	// and a Set-Cookie on the failure path would both break that and hand a
+	// device credential to a prober who proved nothing.
+	pendingDevice, err := pendingDeviceCredentialFor(c)
+	if err != nil {
+		writeProblem(c, problem.AuthenticationUnavailable())
+		return
+	}
+	device := deviceContextFrom(c, pendingDevice.digest)
 	grant, err := h.repository.Login(c.Request.Context(), identity.LoginRequest{
 		Email: request.Email, Password: config.NewSecret(request.Password),
-		RequestID: requestid.FromContext(c.Request.Context()),
+		RequestID:              requestid.FromContext(c.Request.Context()),
+		DeviceCredentialDigest: device.CredentialDigest,
+		UserAgent:              device.UserAgent,
+		SourceAddress:          device.SourceAddress,
 	})
 	if err != nil {
 		writeSessionError(c, err)
 		return
 	}
 
+	if grant.Session.Role == identity.RoleStudent && grant.Device != nil {
+		pendingDevice.commit(c)
+	}
 	clearAnonymousCookie(c)
-	_ = auth.WriteSessionResponse(
-		c.Writer, http.StatusCreated, grant.Session, &grant.Credential, grant.CSRFToken,
+	_ = auth.WriteSessionResponseWithDevice(
+		c.Writer, http.StatusCreated, grant.Session, &grant.Credential,
+		grant.CSRFToken, grant.Device,
 	)
 }
 
@@ -66,8 +85,8 @@ func (h *sessionHandlers) resolve(c *gin.Context) {
 		writeSessionError(c, err)
 		return
 	}
-	_ = auth.WriteSessionResponse(
-		c.Writer, http.StatusOK, view.Session, nil, view.CSRFToken,
+	_ = auth.WriteSessionResponseWithDevice(
+		c.Writer, http.StatusOK, view.Session, nil, view.CSRFToken, nil,
 	)
 }
 

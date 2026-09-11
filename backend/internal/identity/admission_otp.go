@@ -387,11 +387,21 @@ func lockPendingStudentByID(
 // attempt counter is written in its own committed transaction before the
 // outcome is decided. A guessing budget that only persists on success is not a
 // budget.
+// DeviceContext is the browser evidence a request carries. It is threaded
+// through rather than read from a global so the boundary that digests the
+// cookie stays the only place a device credential plaintext exists.
+type DeviceContext struct {
+	CredentialDigest string
+	UserAgent        string
+	SourceAddress    string
+}
+
 func (s *AdmissionService) VerifyEmailOTP(
 	ctx context.Context,
 	challengeID string,
 	rawCode string,
 	requestID string,
+	device DeviceContext,
 ) (SessionGrant, error) {
 	requestID, err := validateRequestID(requestID)
 	if err != nil {
@@ -480,7 +490,14 @@ func (s *AdmissionService) VerifyEmailOTP(
 	if err := supersedeLegacyVerificationLink(ctx, tx, account.id, live.id); err != nil {
 		return SessionGrant{}, err
 	}
-	grant, err := s.sessions.IssueSessionInTransaction(ctx, tx, account.id, requestID)
+	// The code just proven is mailbox proof, so the browser that proved it
+	// becomes this Student's first trusted device in the same transaction
+	// rather than being mailed a second code for the same mailbox.
+	admission, err := s.trustVerifyingDevice(ctx, tx, account, requestID, device, now)
+	if err != nil {
+		return SessionGrant{}, err
+	}
+	grant, err := s.sessions.IssueSessionInTransaction(ctx, tx, account.id, requestID, admission)
 	if err != nil {
 		return SessionGrant{}, err
 	}
@@ -566,4 +583,32 @@ func supersedeLegacyVerificationLink(
 		return fmt.Errorf("superseding legacy verification link: %w", err)
 	}
 	return nil
+}
+
+// trustVerifyingDevice trusts the browser that completed email verification.
+//
+// It returns nil when device policy is not wired, which leaves the new family
+// pending rather than trusted — the same fail-closed direction the login path
+// takes.
+func (s *AdmissionService) trustVerifyingDevice(
+	ctx context.Context,
+	tx pgx.Tx,
+	account pendingStudent,
+	requestID string,
+	device DeviceContext,
+	now time.Time,
+) (*DeviceAdmissionResult, error) {
+	if s.devices == nil || device.CredentialDigest == "" {
+		return nil, nil
+	}
+	admission, err := s.devices.TrustFirstDeviceInTransaction(ctx, tx, DeviceAdmissionRequest{
+		AccountID: account.id, Revision: account.revision, Role: RoleStudent,
+		Email: account.email, Locale: account.locale,
+		PresentedDigest: device.CredentialDigest, UserAgent: device.UserAgent,
+		SourceAddress: device.SourceAddress, RequestID: requestID,
+	}, now)
+	if err != nil {
+		return nil, err
+	}
+	return &admission, nil
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/logging"
 	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
+	"github.com/Owlah2025/gradex/backend/internal/playback"
 	"github.com/Owlah2025/gradex/backend/internal/queue"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 	"github.com/Owlah2025/gradex/backend/internal/storage"
@@ -90,7 +91,7 @@ func main() {
 	routerOptions := pf.Options
 	sessionRepository = pf.SessionRepository
 
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter)
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
 	if err != nil {
 		log.Fatalf("building media foundation: %v", err)
 	}
@@ -288,7 +289,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // must fail closed instead, which is what keeps a half-migrated deployment out
 // of the load balancer rather than into it.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.MediaWorkLeaseSchemaVersion
+	return db.StudentTrustedDeviceSchemaVersion
 }
 
 func buildLearningFoundation(
@@ -362,7 +363,20 @@ func buildLearningFoundation(
 	return foundation, redisClient, nil
 }
 
-func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient *storage.Client, previewRateLimiter *ratelimit.Limiter) (*httpapi.MediaFoundation, error) {
+func buildMediaFoundation(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	storageClient *storage.Client,
+	previewRateLimiter *ratelimit.Limiter,
+	playbackCoordinator *playback.Coordinator,
+) (*httpapi.MediaFoundation, error) {
+	// Protected Student playback cannot be signed without an authority that can
+	// say whether this Account is already watching somewhere else. Refusing
+	// here means a misconfigured deployment fails to start rather than serving
+	// unlimited concurrent streams per Account.
+	if playbackCoordinator == nil {
+		return nil, errors.New("protected media delivery requires the playback coordinator")
+	}
 	admission := cfg.Admission()
 	writer, err := outbox.NewWriter(
 		admission.ProtectedPayloadKeyVersion(),
@@ -398,6 +412,7 @@ func buildMediaFoundation(cfg *config.Config, pool *pgxpool.Pool, storageClient 
 	delivery, err := media.NewDeliveryService(media.DeliveryOptions{
 		DB: pool, Store: storageClient, Evaluator: evaluator,
 		SignatureLifetime: cfg.PlaybackURLExpiry(), BuyerTagKey: []byte(cfg.PlaybackTokenSecret().Expose()),
+		Playback: playbackCoordinator,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("building protected media delivery: %w", err)
@@ -804,6 +819,74 @@ func buildPublicCatalogFoundation(pool *pgxpool.Pool) (*httpapi.PublicCatalogFou
 	return httpapi.NewPublicCatalogFoundation(httpapi.PublicCatalogFoundationOptions{Repository: repository})
 }
 
+// composeDevicePolicy builds the playback coordinator and the device authority
+// and closes the loop back into the session and admission services.
+func composeDevicePolicy(
+	cfg *config.Config,
+	pool *pgxpool.Pool,
+	redisConnection *queue.Connection,
+	pf *ProductionFoundations,
+	admissionFoundation *httpapi.AdmissionFoundation,
+	recoveryFoundation *httpapi.RecoveryFoundation,
+) error {
+	devicePolicy := cfg.StudentDevices()
+	redisClient := redisConnection.NewRedisClient()
+	coordinator, err := playback.NewCoordinator(redisClient, playback.Settings{
+		TTL:               devicePolicy.PlaybackLeaseTTL(),
+		HeartbeatInterval: devicePolicy.PlaybackHeartbeat(),
+	})
+	if err != nil {
+		_ = redisClient.Close()
+		return fmt.Errorf("building playback coordinator: %w", err)
+	}
+	pf.PlaybackRedis = redisClient
+	pf.Playback = coordinator
+
+	admission := cfg.Admission()
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return fmt.Errorf("building device outbox writer: %w", err)
+	}
+
+	devices, err := identity.NewDeviceService(identity.DeviceServiceOptions{
+		Pool:   pool,
+		Outbox: writer,
+		Policy: identity.DevicePolicy{
+			TrustedDeviceLimit:  devicePolicy.TrustedDeviceLimit(),
+			ReplacementCooldown: devicePolicy.ReplacementCooldown(),
+		},
+		Pepper:   admission.EmailOTPPepper(),
+		OTPTTL:   admission.EmailOTPTTL(),
+		Now:      time.Now,
+		Random:   rand.Reader,
+		Playback: coordinator,
+	})
+	if err != nil {
+		return fmt.Errorf("building device service: %w", err)
+	}
+	pf.Devices = devices
+
+	// The session authority decides a new family's device state; without this
+	// call every Student family would be created pending and protected learning
+	// would stop. Attaching here rather than at construction is what lets the
+	// device service hold a reference to the coordinator the same startup built.
+	if pf.SessionRepository != nil {
+		pf.SessionRepository.AttachDevices(devices)
+	}
+	admissionFoundation.AttachDevices(devices)
+	recoveryFoundation.AttachDevices(devices)
+
+	foundation, err := httpapi.NewDeviceFoundation(devices, time.Now)
+	if err != nil {
+		return err
+	}
+	pf.Options = append(pf.Options, httpapi.WithDeviceFoundation(foundation))
+	return nil
+}
+
 func buildAccessFoundation(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
@@ -835,9 +918,20 @@ type ProductionFoundations struct {
 	AdmissionRedis     *redis.Client
 	StaffRedis         *redis.Client
 	PreviewRateLimiter *ratelimit.Limiter
+	// Playback is the cross-instance one-video-per-account authority. It is
+	// carried out of here because protected media delivery needs the same
+	// coordinator the device service uses; two coordinators over two Redis
+	// clients would still be correct, but sharing makes it obvious that they
+	// are one authority.
+	Playback      *playback.Coordinator
+	PlaybackRedis *redis.Client
+	Devices       *identity.DeviceService
 }
 
 func (f *ProductionFoundations) Close() {
+	if f.PlaybackRedis != nil {
+		_ = f.PlaybackRedis.Close()
+	}
 	if f.SessionRedis != nil {
 		_ = f.SessionRedis.Close()
 	}
@@ -904,6 +998,19 @@ func buildProductionFoundationsWithStaffSource(
 		pf.Options = append(pf.Options, httpapi.WithAdmissionSecurityFoundation(admissionFoundation))
 	}
 	pf.Options = append(pf.Options, httpapi.WithRecoveryFoundation(recoveryFoundation))
+
+	// Student device policy and protected-playback concurrency.
+	//
+	// Composed after the session authority exists and wired back into it, which
+	// is the one place the mutual dependency between the two is resolved. With
+	// sessions disabled there is no Student login to govern, so neither is
+	// built and the device routes are simply absent.
+	if cfg.Sessions().Enabled() {
+		if err := composeDevicePolicy(cfg, pool, redisConnection, pf, admissionFoundation, recoveryFoundation); err != nil {
+			pf.Close()
+			return nil, fmt.Errorf("composing Student device policy: %w", err)
+		}
+	}
 
 	// Staff invitation and onboarding is an Admin capability, not part of public
 	// Student admission. Gating it on cfg.Admission().Enabled() coupled the two:

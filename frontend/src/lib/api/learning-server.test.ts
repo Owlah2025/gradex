@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { buildProtectedServerRequest } from "./learning-server-request";
 
-test("server protected adapter forwards only the session cookie and locale", () => {
+test("server protected adapter forwards only the session and device cookies and locale", () => {
   const request = buildProtectedServerRequest(
     "/learn/dashboard",
     "ar",
-    "__Host-gradex_anon=anonymous; __Host-gradex_session=opaque; theme=dark",
+    "__Host-gradex_anon=anonymous; __Host-gradex_session=opaque; __Host-gradex_device=devopaque; theme=dark",
   );
   const headers = request.init.headers as Record<string, string>;
 
@@ -19,7 +19,7 @@ test("server protected adapter forwards only the session cookie and locale", () 
   assert.deepEqual(headers, {
     Accept: "application/json, application/problem+json",
     "Accept-Language": "ar",
-    Cookie: "__Host-gradex_session=opaque",
+    Cookie: "__Host-gradex_session=opaque; __Host-gradex_device=devopaque",
   });
   assert.equal("Authorization" in headers, false);
   assert.equal("Host" in headers, false);

@@ -43,7 +43,12 @@ type AdmissionService struct {
 	now         func() time.Time
 	random      io.Reader
 	randomMu    sync.Mutex
+	devices     *DeviceService
 }
+
+// AttachDevices wires device policy after construction, closing the same
+// mutual dependency the session repository has.
+func (s *AdmissionService) AttachDevices(devices *DeviceService) { s.devices = devices }
 
 func NewAdmissionService(options AdmissionServiceOptions) (*AdmissionService, error) {
 	if options.Pool == nil || options.Policies == nil ||

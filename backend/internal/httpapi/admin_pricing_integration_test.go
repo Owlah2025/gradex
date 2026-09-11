@@ -56,8 +56,8 @@ func (r *tokenSessionRepo) RevokeSession(_ context.Context, _ string) error {
 func (r *tokenSessionRepo) RevokeFamily(_ context.Context, _ string) error {
 	return nil
 }
-func (r *tokenSessionRepo) Resolve(_ context.Context, sessionToken string, _ identity.CredentialUseKind, _ string) (identity.SessionView, error) {
-	v, ok := r.sessions[sessionToken]
+func (r *tokenSessionRepo) Resolve(_ context.Context, request identity.SessionResolutionRequest) (identity.SessionView, error) {
+	v, ok := r.sessions[request.CredentialDigest]
 	if !ok {
 		return identity.SessionView{}, errors.New("invalid session")
 	}
@@ -154,6 +154,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustNotApplicable,
 		},
 	}
 	instView := identity.SessionView{
@@ -165,6 +166,7 @@ func setupAdminPricingAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, 
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustNotApplicable,
 		},
 	}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
@@ -25,7 +26,20 @@ func (f fakeAuth) UserFromRequest(c *gin.Context) (string, error) {
 	// Both production authenticators publish the authenticated session; a double that does not is
 	// not modelling an authenticated request.
 	c.Set("authenticated_session", identity.Session{ID: "test-session-user-1", AccountID: "user-1", State: identity.SessionActive})
+	setTestTrustedDevice(c)
 	return "user-1", nil
+}
+
+// testTrustedDeviceID is the synthetic device every authenticated test double
+// presents. Device policy fails closed, so a double that publishes a session
+// without a device state is modelling a browser that has not completed device
+// trust — which is a different test from the one these doubles were written
+// for. The device-policy tests set this state deliberately instead.
+const testTrustedDeviceID = "00000000-0000-4000-8000-00000000d0c1"
+
+func setTestTrustedDevice(c *gin.Context) {
+	c.Set(auth.SessionDeviceTrustKey, identity.DeviceTrustEstablished)
+	c.Set(auth.SessionTrustedDeviceKey, testTrustedDeviceID)
 }
 
 // testSessionEndpointPolicies is the complete set of session rate-limit

@@ -1,3 +1,4 @@
+import { completeDeviceTrustIfRequired } from "./device-trust";
 import { expect, test } from "@playwright/test";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import {
@@ -43,6 +44,13 @@ test.describe("S5 Production-like Playwright Infrastructure Smoke Test", () => {
     expect(loginResult.status).toBe(201);
     expect(loginResult.body.role).toBe("STUDENT");
     expect(loginResult.body.display_name).toBe("Active Student");
+
+    // 2b. Confirm this browser. Signing in is no longer the last step for a
+    // device Gradex has not seen: the session comes back narrowed until an
+    // emailed code confirms it, and this smoke test is about a *signed-in*
+    // Student reaching Course Home from real PostgreSQL.
+    completeDeviceTrustIfRequired(
+      page, "student-active@example.test", loginResult.body?.device_trust, new Date());
 
     // 3. Navigate to Course Home for seeded course in browser
     const courseId = "c0000000-0000-0000-0000-000000000001";

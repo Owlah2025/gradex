@@ -9,6 +9,8 @@ import {
 } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import {
+	installIssuedSession,
+	issuedSessionCookieHeader,
   issueRotatingSession,
   studentFor,
   ACADEMIC_ONBOARDING_TEST_SLOT,
@@ -59,7 +61,7 @@ async function ensureLaunchCatalog(): Promise<void> {
     extraHTTPHeaders: {
       Accept: "application/json, application/problem+json",
       Origin: frontendOrigin(),
-      Cookie: `${session.cookie_name}=${session.cookie_value}`,
+      Cookie: issuedSessionCookieHeader(session),
       "X-CSRF-Token": session.csrf_token,
     },
   });
@@ -98,7 +100,7 @@ async function apiFor(session: ReturnType<typeof issueRotatingSession>): Promise
     extraHTTPHeaders: {
       Accept: "application/json, application/problem+json",
       Origin: frontendOrigin(),
-      Cookie: `${session.cookie_name}=${session.cookie_value}`,
+      Cookie: issuedSessionCookieHeader(session),
       "X-CSRF-Token": session.csrf_token,
     },
   });
@@ -108,18 +110,7 @@ async function attachSession(
   context: BrowserContext,
   session: ReturnType<typeof issueRotatingSession>,
 ) {
-  const origin = new URL(frontendOrigin());
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+  await installIssuedSession(context, session);
 }
 
 /** Saves a real academic profile through the real authenticated surface, with real identifiers. */

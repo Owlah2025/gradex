@@ -324,7 +324,14 @@ func TestLearningPayloadsExposeNoS5AuthorizationDecision(t *testing.T) {
 	// player draws over the picture, decided server-side after the entitlement decision and
 	// carrying none of it. It is enumerated here rather than tolerated, so the payload stays a
 	// closed world.
-	want := []string{"asset_version_id", "expires_at", "manifest_url", "playback_session", "watermark"}
+	// `heartbeat` joined them for the same reason: it is the renewal contract
+	// for the account's single protected-playback slot — an interval and an
+	// expiry the server chose — and it carries no entitlement, no Course
+	// inventory, and nothing about any other device.
+	want := []string{
+		"asset_version_id", "expires_at", "heartbeat",
+		"manifest_url", "playback_session", "watermark",
+	}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("learning playback exposed an S5 authorization decision: keys=%v want S4 issuance=%v", keys, want)
 	}

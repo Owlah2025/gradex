@@ -15,8 +15,10 @@ import (
 // or routes in test code.
 type mediaDeliveryIssuer interface {
 	IssuePlayback(context.Context, media.PlaybackRequest) (media.PlaybackAuthorization, error)
-	IssuePlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error)
-	IssuePlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error)
+	IssuePlaybackManifest(context.Context, media.PlaybackSessionRequest) (media.PlaybackManifest, error)
+	IssuePlaybackRenditionManifest(context.Context, media.PlaybackRenditionRequest) (media.PlaybackManifest, error)
+	RenewPlayback(context.Context, media.PlaybackSessionRequest) (media.PlaybackHeartbeat, error)
+	ReleasePlayback(context.Context, media.PlaybackSessionRequest) error
 	IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error)
 	IssueDownloadEntry(context.Context, media.DownloadEntryRequest) (media.DownloadAuthorization, error)
 	IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error)

@@ -663,9 +663,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("MediaWorkLeaseSchemaVersion = %d, want %d",
 			MediaWorkLeaseSchemaVersion, MediaProcessingProgressSchemaVersion+1)
 	}
-	if MaxSchemaVersion != MediaWorkLeaseSchemaVersion {
+	if StudentTrustedDeviceSchemaVersion != MediaWorkLeaseSchemaVersion+1 {
+		t.Fatalf("student trusted device schema = %d, want one past media work lease %d",
+			StudentTrustedDeviceSchemaVersion, MediaWorkLeaseSchemaVersion)
+	}
+	if MaxSchemaVersion != StudentTrustedDeviceSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, MediaWorkLeaseSchemaVersion)
+			MaxSchemaVersion, StudentTrustedDeviceSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 var (
@@ -31,6 +32,15 @@ type SessionRepositoryOptions struct {
 	CSRFKey                  []byte
 	Now                      func() time.Time
 	PasswordVerificationGate *PasswordVerificationGate
+	// Devices decides what device authority a new Student family carries.
+	//
+	// Optional at construction because Instructor-only and fixture wiring have
+	// no use for it, and absent it the repository fails *closed*: a Student
+	// family is created PENDING_DEVICE_TRUST, which grants the self-service set
+	// and nothing else. A deployment that forgets to wire device policy
+	// therefore stops protected learning rather than silently exempting every
+	// Student from the limit.
+	Devices *DeviceService
 }
 
 // SessionRepository owns family and immutable-generation transactions.
@@ -41,6 +51,7 @@ type SessionRepository struct {
 	now                      func() time.Time
 	dummyHash                string
 	passwordVerificationGate *PasswordVerificationGate
+	devices                  *DeviceService
 }
 
 // LoginRequest contains the only user-supplied credential boundary.
@@ -48,12 +59,29 @@ type LoginRequest struct {
 	Email     string
 	Password  config.Secret
 	RequestID string
+
+	// DeviceCredentialDigest is the digest of the device credential the browser
+	// presented, or empty when it presented none. The plaintext never reaches
+	// this package: the HTTP boundary digests it and mints a replacement when
+	// there was nothing to digest.
+	DeviceCredentialDigest string
+	// UserAgent names the device for the Student. It is never identity.
+	UserAgent string
+	// SourceAddress is recorded for security forensics only and is never
+	// compared to decide whether a browser matches a device.
+	SourceAddress string
 }
 
 // AuthenticatedSession contains no bearer or CSRF plaintext.
 type AuthenticatedSession struct {
-	AccountID         string
-	SessionID         string
+	AccountID string
+	SessionID string
+	// DeviceTrust and TrustedDeviceID answer "account -> active session ->
+	// trusted device" on every authenticated request. They are re-derived from
+	// the device record on each read rather than trusted from the session row,
+	// so revoking a device takes effect on the very next request.
+	DeviceTrust       SessionDeviceTrust
+	TrustedDeviceID   string
 	DisplayName       string
 	Role              Role
 	CredentialState   CredentialState
@@ -70,6 +98,10 @@ type SessionGrant struct {
 	Session    AuthenticatedSession
 	Credential config.Secret
 	CSRFToken  config.Secret
+	// Device is present when device policy applied to this grant. It tells the
+	// HTTP boundary whether to challenge the browser, show the device limit, or
+	// carry on, and never contains a credential or a code.
+	Device *DeviceAdmissionResult
 }
 
 // SessionView restores browser-memory CSRF state without rotating.
@@ -114,8 +146,18 @@ func NewSessionRepository(options SessionRepositoryOptions) (*SessionRepository,
 		now:                      options.Now,
 		dummyHash:                dummyHash,
 		passwordVerificationGate: gate,
+		devices:                  options.Devices,
 	}, nil
 }
+
+// AttachDevices wires device policy after construction.
+//
+// The two services are mutually dependent — the session authority decides a new
+// family's device state, and device trust binds an existing family — and one of
+// the two edges has to be closed after both exist. This is that edge, and it is
+// deliberately the narrower one: it can only ever tighten what a new Student
+// family is granted.
+func (r *SessionRepository) AttachDevices(devices *DeviceService) { r.devices = devices }
 
 type loginCandidate struct {
 	accountID       string
@@ -127,6 +169,10 @@ type loginCandidate struct {
 	revision        int
 	verifiedAt      *time.Time
 	passwordHash    string
+	// email and locale are read for the device-trust challenge only. They are
+	// never returned to the caller and never appear in a login response.
+	email  string
+	locale Locale
 }
 
 func (r *SessionRepository) Login(
@@ -184,7 +230,7 @@ func (r *SessionRepository) loginCandidate(
 	err = r.pool.QueryRow(ctx,
 		`SELECT a.id::text, a.display_name, a.role::text, a.status::text,
 		        c.state::text, a.session_epoch, a.revision, a.email_verified_at,
-		        c.password_hash
+		        c.password_hash, a.email, a.locale
 		   FROM accounts a
 		   JOIN password_credentials c ON c.account_id = a.id
 		  WHERE a.normalized_email = $1`,
@@ -199,6 +245,8 @@ func (r *SessionRepository) loginCandidate(
 		&candidate.revision,
 		&candidate.verifiedAt,
 		&candidate.passwordHash,
+		&candidate.email,
+		&candidate.locale,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return loginCandidate{}, false, nil
@@ -227,16 +275,40 @@ func (r *SessionRepository) createSession(
 	if err != nil {
 		return SessionGrant{}, err
 	}
+	// The protected-payload nonce is the one fallible entropy read that must
+	// happen before the transaction opens, exactly as registration does it. A
+	// login that cannot reserve one is refused rather than committing a device
+	// challenge whose code could never be mailed.
+	reservation, err := r.reserveDeviceChallengePayload(ctx, candidate)
+	if err != nil {
+		return SessionGrant{}, err
+	}
+
 	writeStarted := time.Now()
-	if err := r.persistSession(ctx, request, candidate, pending); err != nil {
+	admission, err := r.persistSession(ctx, request, candidate, pending, reservation)
+	if err != nil {
 		observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
 		return SessionGrant{}, err
 	}
 	observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
+	pending.session.DeviceTrust = admission.TrustState
+	if admission.TrustState == DeviceTrustEstablished {
+		pending.session.TrustedDeviceID = admission.DeviceID
+	}
 	return SessionGrant{
 		Session: pending.session, Credential: pending.issued.Credential,
-		CSRFToken: pending.issued.CSRFToken,
+		CSRFToken: pending.issued.CSRFToken, Device: &admission,
 	}, nil
+}
+
+func (r *SessionRepository) reserveDeviceChallengePayload(
+	ctx context.Context,
+	candidate loginCandidate,
+) (outbox.ProtectedPayloadReservation, error) {
+	if r.devices == nil || candidate.role != RoleStudent {
+		return outbox.ProtectedPayloadReservation{}, nil
+	}
+	return r.devices.reserveChallengePayload(ctx)
 }
 
 type pendingSession struct {
@@ -277,36 +349,79 @@ func (r *SessionRepository) persistSession(
 	request LoginRequest,
 	candidate loginCandidate,
 	pending pendingSession,
-) error {
+	reservation outbox.ProtectedPayloadReservation,
+) (DeviceAdmissionResult, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return fmt.Errorf("beginning login transaction: %w", err)
+		return DeviceAdmissionResult{}, fmt.Errorf("beginning login transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// This lock is also the device-policy serialization point. Two new browsers
+	// authenticating at the same instant queue here, so the second one counts
+	// the first one's device rather than racing it.
 	if err := lockLoginCandidate(ctx, tx, candidate); err != nil {
-		return err
+		return DeviceAdmissionResult{}, err
+	}
+	admission, err := r.admitDevice(ctx, tx, request, candidate, reservation)
+	if err != nil {
+		return DeviceAdmissionResult{}, err
 	}
 	if err := insertSessionFamily(
-		ctx, tx, pending.session, candidate.sessionEpoch, pending.now,
+		ctx, tx, pending.session, candidate.sessionEpoch, pending.now, admission,
 	); err != nil {
-		return err
+		return DeviceAdmissionResult{}, err
 	}
 	if err := insertSessionGeneration(
 		ctx, tx, pending.session.SessionID, 1, pending.issued, pending.now,
 	); err != nil {
-		return err
+		return DeviceAdmissionResult{}, err
 	}
 	if err := appendSessionEvent(ctx, tx, sessionEvent{
 		eventType: "SESSION_CREATED", accountID: candidate.accountID,
 		revision: candidate.revision, requestID: request.RequestID,
-		evidence: map[string]any{"generation": 1, "role": candidate.role},
+		evidence: map[string]any{
+			"generation": 1, "role": candidate.role,
+			"device_trust": string(admission.TrustState),
+		},
 	}); err != nil {
-		return err
+		return DeviceAdmissionResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing login session: %w", err)
+		return DeviceAdmissionResult{}, fmt.Errorf("committing login session: %w", err)
 	}
-	return nil
+	return admission, nil
+}
+
+// admitDevice decides what device authority this new family carries.
+//
+// With no device service wired, a Student family is created pending rather than
+// trusted. That is the fail-closed direction: a misconfigured deployment loses
+// protected learning until it is fixed, instead of quietly handing every
+// Student an unlimited number of devices.
+func (r *SessionRepository) admitDevice(
+	ctx context.Context,
+	tx pgx.Tx,
+	request LoginRequest,
+	candidate loginCandidate,
+	reservation outbox.ProtectedPayloadReservation,
+) (DeviceAdmissionResult, error) {
+	if candidate.role != RoleStudent {
+		return DeviceAdmissionResult{
+			Admission: AdmitTrustedDevice, TrustState: DeviceTrustNotApplicable,
+		}, nil
+	}
+	if r.devices == nil {
+		return DeviceAdmissionResult{
+			Admission: AdmitNewDeviceWithSlot, TrustState: DeviceTrustPending,
+		}, nil
+	}
+	return r.devices.admitInTransaction(ctx, tx, DeviceAdmissionRequest{
+		AccountID: candidate.accountID, Revision: candidate.revision,
+		Role: candidate.role, Email: candidate.email, Locale: candidate.locale,
+		PresentedDigest: request.DeviceCredentialDigest,
+		UserAgent:       request.UserAgent, SourceAddress: request.SourceAddress,
+		RequestID: request.RequestID, Reservation: reservation,
+	})
 }
 
 func lockLoginCandidate(
@@ -354,18 +469,33 @@ func insertSessionFamily(
 	session AuthenticatedSession,
 	epoch int,
 	now time.Time,
+	admission DeviceAdmissionResult,
 ) error {
+	// A new family never writes LEGACY_UNBOUND. That value exists only for rows
+	// the migration found already present, and the schema check keeps
+	// trusted_device_id and the state coherent with each other.
+	deviceID := ""
+	if admission.TrustState == DeviceTrustEstablished {
+		deviceID = admission.DeviceID
+	}
+	trustState := admission.TrustState
+	if !trustState.Valid() || trustState == DeviceTrustLegacyUnbound {
+		trustState = DeviceTrustPending
+	}
 	_, err := tx.Exec(ctx,
 		`INSERT INTO sessions
 		   (id, account_id, admitted_epoch, authenticated_at, last_activity_at,
-		    idle_expires_at, absolute_expires_at)
-		 VALUES ($1::uuid, $2::uuid, $3, $4, $4, $5, $6)`,
+		    idle_expires_at, absolute_expires_at, trusted_device_id, device_trust_state)
+		 VALUES ($1::uuid, $2::uuid, $3, $4, $4, $5, $6,
+		         NULLIF($7, '')::uuid, $8::session_device_trust_state)`,
 		session.SessionID,
 		session.AccountID,
 		epoch,
 		now,
 		session.IdleExpiresAt,
 		session.AbsoluteExpiresAt,
+		deviceID,
+		string(trustState),
 	)
 	if err != nil {
 		return fmt.Errorf("creating session family: %w", err)
@@ -412,27 +542,37 @@ func appendSessionEvent(ctx context.Context, tx pgx.Tx, event sessionEvent) erro
 }
 
 type sessionRecord struct {
-	session            AuthenticatedSession
-	accountStatus      AccountStatus
-	sessionEpoch       int
-	admittedEpoch      int
-	sessionState       SessionState
-	familyGeneration   int
-	credentialRowState string
-	credentialDigest   string
-	csrfDigest         string
-	supersededAt       *time.Time
-	staleUseCount      int
-	revision           int
+	session             AuthenticatedSession
+	accountStatus       AccountStatus
+	sessionEpoch        int
+	admittedEpoch       int
+	sessionState        SessionState
+	familyGeneration    int
+	credentialRowState  string
+	credentialDigest    string
+	csrfDigest          string
+	supersededAt        *time.Time
+	staleUseCount       int
+	revision            int
+	deviceTrustState    string
+	trustedDeviceID     *string
+	trustedDeviceDigest *string
+	deviceLive          bool
 }
 
-func (r *SessionRepository) Resolve(
-	ctx context.Context,
-	credentialDigest string,
-	useKind CredentialUseKind,
-	requestID string,
-) (SessionView, error) {
-	record, err := readSessionRecord(ctx, r.pool, credentialDigest)
+// SessionResolutionRequest carries both browser credentials used to resolve a
+// Student session. The device credential never authenticates the Account; it
+// only proves that a trusted Student family is still being presented from the
+// browser to which it was bound.
+type SessionResolutionRequest struct {
+	CredentialDigest       string
+	DeviceCredentialDigest string
+	UseKind                CredentialUseKind
+	RequestID              string
+}
+
+func (r *SessionRepository) Resolve(ctx context.Context, request SessionResolutionRequest) (SessionView, error) {
+	record, err := readSessionRecord(ctx, r.pool, request.CredentialDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionView{}, ErrAuthenticationRequired
 	}
@@ -440,11 +580,12 @@ func (r *SessionRepository) Resolve(
 		return SessionView{}, fmt.Errorf("resolving session credential: %w", err)
 	}
 	if record.credentialRowState == "SUPERSEDED" {
-		return r.resolveSuperseded(ctx, credentialDigest, useKind, requestID)
+		return r.resolveSuperseded(ctx, request.CredentialDigest, request.UseKind, request.RequestID)
 	}
 	if err := record.usable(r.now().UTC()); err != nil {
 		return SessionView{}, err
 	}
+	record.applyDeviceTrust(request.DeviceCredentialDigest)
 	csrfToken, err := r.csrfToken(record)
 	if err != nil {
 		return SessionView{}, err
@@ -482,11 +623,14 @@ const sessionRecordQuery = `SELECT a.id::text, s.id::text, a.display_name, a.rol
 		s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
 		s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
 		c.credential_digest, c.csrf_digest, c.superseded_at,
-		c.stale_use_count, a.revision
+		c.stale_use_count, a.revision,
+		s.device_trust_state::text, s.trusted_device_id::text, d.credential_digest,
+		(d.id IS NOT NULL AND d.revoked_at IS NULL AND d.trusted_at IS NOT NULL)
 	   FROM session_credentials c
 	   JOIN sessions s ON s.id = c.session_id
 	   JOIN accounts a ON a.id = s.account_id
 	   JOIN password_credentials pc ON pc.account_id = a.id
+	   LEFT JOIN identity_trusted_devices d ON d.id = s.trusted_device_id
 	  WHERE c.credential_digest = $1`
 
 func readSessionRecord(
@@ -519,11 +663,14 @@ func loadSessionGeneration(
 		        s.idle_expires_at, s.absolute_expires_at, a.status::text, a.session_epoch,
 		        s.admitted_epoch, s.state::text, s.current_generation, c.state::text,
 		        c.credential_digest, c.csrf_digest, c.superseded_at,
-		        c.stale_use_count, a.revision
+		        c.stale_use_count, a.revision,
+		        s.device_trust_state::text, s.trusted_device_id::text, d.credential_digest,
+		        (d.id IS NOT NULL AND d.revoked_at IS NULL AND d.trusted_at IS NOT NULL)
 		   FROM session_credentials c
 		   JOIN sessions s ON s.id = c.session_id
 		   JOIN accounts a ON a.id = s.account_id
 		   JOIN password_credentials pc ON pc.account_id = a.id
+		   LEFT JOIN identity_trusted_devices d ON d.id = s.trusted_device_id
 		  WHERE s.id = $1::uuid AND c.generation = $2
 		  FOR UPDATE OF c, s, a, pc`,
 		sessionID,
@@ -555,8 +702,42 @@ func scanSessionRecord(row pgx.Row) (sessionRecord, error) {
 		&record.supersededAt,
 		&record.staleUseCount,
 		&record.revision,
+		&record.deviceTrustState,
+		&record.trustedDeviceID,
+		&record.trustedDeviceDigest,
+		&record.deviceLive,
 	)
-	return record, err
+	if err != nil {
+		return record, err
+	}
+	return record, nil
+}
+
+// applyDeviceTrust turns the stored binding plus the device's current liveness
+// into the trust state authorization actually sees.
+//
+// The row can say TRUSTED while the device it names has been revoked — that is
+// precisely what happens between a revocation and this session's next request —
+// and resolving that disagreement in favour of the row would make device
+// revocation take effect only at expiry. It resolves to pending instead, which
+// leaves the Student able to trust a device again and unable to reach protected
+// learning in the meantime.
+func (r *sessionRecord) applyDeviceTrust(presentedDigest string) {
+	state := SessionDeviceTrust(r.deviceTrustState)
+	if !state.Valid() {
+		state = DeviceTrustPending
+	}
+	deviceCredentialMatches := r.trustedDeviceDigest != nil && presentedDigest != "" &&
+		OpaqueDigestEqual(*r.trustedDeviceDigest, presentedDigest)
+	if state == DeviceTrustEstablished && (!r.deviceLive || !deviceCredentialMatches) {
+		r.session.DeviceTrust = DeviceTrustPending
+		r.session.TrustedDeviceID = ""
+		return
+	}
+	r.session.DeviceTrust = state
+	if r.trustedDeviceID != nil && state == DeviceTrustEstablished {
+		r.session.TrustedDeviceID = *r.trustedDeviceID
+	}
 }
 
 // RecheckForMutation locks and revalidates the Account, family, and exact
@@ -997,11 +1178,18 @@ func (r *SessionRepository) window(role Role) config.SessionWindow {
 // The Account row is re-read here under the caller's lock rather than trusted
 // from a parameter: the session window and the admitted epoch must come from
 // the row this transaction will commit, not from a value read before it.
+// IssueSessionInTransaction mints a family inside a caller's transaction.
+//
+// The device decision is supplied rather than made here: the only caller is
+// email verification, which has just proven the Student's mailbox with a code
+// and can therefore trust the browser outright instead of mailing a second one
+// for the same mailbox seconds later.
 func (r *SessionRepository) IssueSessionInTransaction(
 	ctx context.Context,
 	tx pgx.Tx,
 	accountID string,
 	requestID string,
+	device *DeviceAdmissionResult,
 ) (SessionGrant, error) {
 	if r == nil || tx == nil {
 		return SessionGrant{}, errors.New("session repository and transaction are required")
@@ -1035,8 +1223,24 @@ func (r *SessionRepository) IssueSessionInTransaction(
 	if err != nil {
 		return SessionGrant{}, err
 	}
+	admission := DeviceAdmissionResult{
+		Admission: AdmitTrustedDevice, TrustState: DeviceTrustNotApplicable,
+	}
+	if device != nil {
+		admission = *device
+	} else if candidate.role == RoleStudent {
+		// A Student session minted here without a device decision fails closed,
+		// for the same reason a login without device policy does.
+		admission = DeviceAdmissionResult{
+			Admission: AdmitNewDeviceWithSlot, TrustState: DeviceTrustPending,
+		}
+	}
+	pending.session.DeviceTrust = admission.TrustState
+	if admission.TrustState == DeviceTrustEstablished {
+		pending.session.TrustedDeviceID = admission.DeviceID
+	}
 	if err := insertSessionFamily(
-		ctx, tx, pending.session, candidate.sessionEpoch, pending.now,
+		ctx, tx, pending.session, candidate.sessionEpoch, pending.now, admission,
 	); err != nil {
 		return SessionGrant{}, err
 	}
@@ -1059,6 +1263,6 @@ func (r *SessionRepository) IssueSessionInTransaction(
 	}
 	return SessionGrant{
 		Session: pending.session, Credential: pending.issued.Credential,
-		CSRFToken: pending.issued.CSRFToken,
+		CSRFToken: pending.issued.CSRFToken, Device: &admission,
 	}, nil
 }

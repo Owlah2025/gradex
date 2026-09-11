@@ -165,7 +165,7 @@ func TestLoginCreatesDigestOnlyFamily(t *testing.T) {
 	}
 
 	view, err := repository.Resolve(
-		context.Background(), credentialDigest, UseReadOnly, "request-resolve",
+		context.Background(), SessionResolutionRequest{CredentialDigest: credentialDigest, UseKind: UseReadOnly, RequestID: "request-resolve"},
 	)
 	if err != nil {
 		t.Fatalf("resolving current session: %v", err)
@@ -211,7 +211,7 @@ func TestCurrentSessionReadDoesNotLockAndObservesCommittedRevocation(t *testing.
 	resolved := make(chan error, 1)
 	go func() {
 		_, err := repository.Resolve(
-			context.Background(), digest, UseReadOnly, "request-before-revoke-commit",
+			context.Background(), SessionResolutionRequest{CredentialDigest: digest, UseKind: UseReadOnly, RequestID: "request-before-revoke-commit"},
 		)
 		resolved <- err
 	}()
@@ -228,7 +228,7 @@ func TestCurrentSessionReadDoesNotLockAndObservesCommittedRevocation(t *testing.
 		t.Fatalf("committing revocation: %v", err)
 	}
 	if _, err := repository.Resolve(
-		context.Background(), digest, UseReadOnly, "request-after-revoke-commit",
+		context.Background(), SessionResolutionRequest{CredentialDigest: digest, UseKind: UseReadOnly, RequestID: "request-after-revoke-commit"},
 	); !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("session resolved after committed revocation: %v", err)
 	}
@@ -247,8 +247,7 @@ func TestCurrentSessionReadRejectsExpiredFamily(t *testing.T) {
 		t.Fatalf("expiring session: %v", err)
 	}
 	if _, err := repository.Resolve(
-		context.Background(), DigestToken(grant.Credential.Expose()),
-		UseReadOnly, "request-expired",
+		context.Background(), SessionResolutionRequest{CredentialDigest: DigestToken(grant.Credential.Expose()), UseKind: UseReadOnly, RequestID: "request-expired"},
 	); !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("expired session resolved: %v", err)
 	}
@@ -327,28 +326,25 @@ func TestRenewalRotatesBothSecretsAndStaleUseRevokesFamily(t *testing.T) {
 	}
 
 	_, err = repository.Resolve(
-		context.Background(),
-		DigestToken(original.Credential.Expose()),
-		UseReadOnly,
-		"request-stale-first",
+		context.Background(), SessionResolutionRequest{
+			CredentialDigest: DigestToken(original.Credential.Expose()), UseKind: UseReadOnly, RequestID: "request-stale-first",
+		},
 	)
 	if !errors.Is(err, ErrSessionReplaced) {
 		t.Fatalf("first immediate stale read = %v, want ErrSessionReplaced", err)
 	}
 	_, err = repository.Resolve(
-		context.Background(),
-		DigestToken(original.Credential.Expose()),
-		UseReadOnly,
-		"request-stale-repeat",
+		context.Background(), SessionResolutionRequest{
+			CredentialDigest: DigestToken(original.Credential.Expose()), UseKind: UseReadOnly, RequestID: "request-stale-repeat",
+		},
 	)
 	if !errors.Is(err, ErrSessionReuseDetected) {
 		t.Fatalf("repeated stale read = %v, want ErrSessionReuseDetected", err)
 	}
 	_, err = repository.Resolve(
-		context.Background(),
-		DigestToken(replacement.Credential.Expose()),
-		UseReadOnly,
-		"request-revoked-winner",
+		context.Background(), SessionResolutionRequest{
+			CredentialDigest: DigestToken(replacement.Credential.Expose()), UseKind: UseReadOnly, RequestID: "request-revoked-winner",
+		},
 	)
 	if !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("replacement survived family revocation: %v", err)
@@ -468,8 +464,7 @@ func TestLogoutRevokesBeforeSubsequentDenial(t *testing.T) {
 		t.Fatalf("logging out: %v", err)
 	}
 	if _, err := repository.Resolve(
-		context.Background(), DigestToken(grant.Credential.Expose()),
-		UseReadOnly, "request-after-logout",
+		context.Background(), SessionResolutionRequest{CredentialDigest: DigestToken(grant.Credential.Expose()), UseKind: UseReadOnly, RequestID: "request-after-logout"},
 	); !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("post-logout resolution = %v, want ErrAuthenticationRequired", err)
 	}

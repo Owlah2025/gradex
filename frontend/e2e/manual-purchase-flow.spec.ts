@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { queryLearningState } from "../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import {
+	installIssuedSession,
   issueRotatingSession,
   queryEmailVerificationAction,
   queryInvitationToken,
@@ -288,18 +289,7 @@ test.describe("Automated manual Course purchase flow", () => {
       // A purchase request belongs to a verified Student, so the session is
       // installed before the request exists rather than after it.
       const session = issueRotatingSession(EXISTING_STUDENT);
-      const origin = new URL(frontendOrigin());
-      await studentContext.addCookies([
-        {
-          name: session.cookie_name,
-          value: session.cookie_value,
-          domain: origin.hostname,
-          path: "/",
-          httpOnly: true,
-          secure: true,
-          sameSite: "Strict",
-        },
-      ]);
+			await installIssuedSession(studentContext, session);
 
       const { response } = await purchaseFromConfirmation(studentPage, {
         email: EXISTING_STUDENT.email,

@@ -54,7 +54,7 @@ func activeStudent(t *testing.T, pool *pgxpool.Pool, verificationByte byte) {
 	challenge := mustRegister(t, admission, studentRegistration())
 	if _, err := admission.VerifyEmailOTP(
 		context.Background(), challenge.ChallengeID,
-		deterministicCode(verificationByte, 0), "request-verify-1",
+		deterministicCode(verificationByte, 0), "request-verify-1", testDeviceContext(),
 	); err != nil {
 		t.Fatalf("verifying: %v", err)
 	}

@@ -124,6 +124,11 @@ func NewRouter(
 			return nil, fmt.Errorf("mounting access routes: %w", err)
 		}
 	}
+	if routerConfig.devices != nil {
+		if err := mountDeviceRoutes(v1, routerConfig.devices, routerConfig.sessions, authenticator, principals, logger); err != nil {
+			return nil, fmt.Errorf("mounting trusted device routes: %w", err)
+		}
+	}
 	if routerConfig.academic != nil {
 		if err := mountAcademicRoutes(v1, routerConfig.academic, routerConfig.sessions, authenticator, principals, logger); err != nil {
 			return nil, fmt.Errorf("mounting academic catalog routes: %w", err)
@@ -246,6 +251,7 @@ type routerOptions struct {
 	access               *AccessFoundation
 	academic             *AcademicFoundation
 	moderation           *ModerationFoundation
+	devices              *DeviceFoundation
 }
 
 // RouterOption adds a validated optional product boundary to the router.
@@ -278,6 +284,21 @@ func WithAdmissionFoundation(foundation *AdmissionFoundation) RouterOption {
 		}
 		options.admission = foundation
 		options.mountAdmissionRoutes = true
+		return nil
+	}
+}
+
+// WithDeviceFoundation mounts the Student trusted-device surface and the
+// operator device controls.
+func WithDeviceFoundation(foundation *DeviceFoundation) RouterOption {
+	return func(options *routerOptions) error {
+		if foundation == nil {
+			return fmt.Errorf("device foundation is required")
+		}
+		if options.devices != nil {
+			return fmt.Errorf("trusted devices are already configured")
+		}
+		options.devices = foundation
 		return nil
 	}
 }

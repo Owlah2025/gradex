@@ -4011,3 +4011,48 @@ decision.
 
 **Source:** D-103 implementation branch beginning at exact production base
 `b8dea967196de68914440b2092cd80daf85d9546`.
+
+## D-105 — Student device trust and single protected playback are Student-only controls
+
+**Date:** 2026-09-11
+**Status:** Remediation approved; final verification and independent review pending.
+
+**Decision:** A Student Account may hold at most two trusted browser devices, with a 24-hour
+Student-initiated replacement cooldown, while Admin and Instructor authentication remains unchanged.
+Each browser holds a 32-byte opaque `__Host-gradex_device` credential; PostgreSQL stores only its
+SHA-256 digest. The credential authenticates nobody. A trusted Student session gains protected
+authority only while the same request presents both the session credential and the matching device
+credential.
+
+An untrusted Student login receives a restricted session for device self-service, password change,
+and logout. Device confirmation reuses the existing email OTP implementation under a distinct HMAC
+domain and encrypted email contract. Device revocation ends only sessions bound to that device and
+does not advance `accounts.session_epoch`; password recovery remains globally authoritative and also
+revokes every trusted device, clears the replacement cooldown, and releases their playback leases
+after the database transaction commits.
+
+Protected Student playback uses one atomic Redis lease per Account. Acquire, validate, renew,
+release, and device release remain distinct Lua operations using Redis time. The signed playback
+token binds the exact lease and trusted device, and every manifest, heartbeat, and release request
+must originate from that same device. Validation never creates or renews a lease. Redis failure
+fails protected playback closed. The first-party player stops on every heartbeat failure.
+
+The existing HLS limitation is explicit: authorization and manifest acquisition are authoritative,
+then enforcement is cooperative through heartbeat. Direct segment presigns already issued cannot be
+revoked mid-stream. This is account-sharing friction, not DRM.
+
+**Database:** One additive migration, `0036_student_trusted_devices`, applied after schema 35. The
+parallel Bundles/Offers branch has not landed and creates no product dependency; if it lands later,
+its competing migration must be renumbered and reverified.
+
+**Verification:** Device E2E uses a dedicated fixture pool that cannot perturb the existing rotating
+Student invitation order. The device journey must exercise the real Mailpit-delivered OTP, two
+independent browser contexts, third-device replacement, scoped revocation, same-device takeover,
+cross-device refusal, and TTL recovery. The final exact range requires independent review.
+
+**Deployment:** Authorized only after every documented release gate, migration up/down/up proof,
+full regression lane, exact-range independent review, production backup, and infrastructure
+preflight are green. No push or production action is authorized by this record alone.
+
+**Source:** Explicit Product Owner approval on 2026-09-11; implementation branch
+`feature/student-device-security` from `ef733f758cf7d58e2689898a70715e2fd2102e24`.

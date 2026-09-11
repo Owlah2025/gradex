@@ -102,6 +102,16 @@ ALLOWLIST=(
   # directly into the primitive that must have it. The dedicated boundary check
   # below pins the exact reads. Human-reviewed.
   "internal/identity/email_otp.go"
+  # The device-trust code has exactly the same one reviewed crossing as the
+  # email-verification code above: into the Code field of
+  # outbox.VerificationCodeDelivery, which is the protected half of the outbox
+  # append and is serialized only inside the encryption boundary. It is the same
+  # OTP implementation under a different purpose domain, so it is the same
+  # boundary rather than a second handling path — which is precisely what a
+  # separate device-OTP implementation would have created. The dedicated
+  # boundary check below pins the single read and the field it lands in.
+  # Human-reviewed.
+  "internal/identity/device_service.go"
 )
 
 # The one production file permitted to read a password plaintext, the marker
@@ -130,6 +140,12 @@ LOADTEST_CAPTURE_DATABASE_BOUNDARY_EXPOSURES=1
 OTP_DELIVERY_BOUNDARY_FILE="internal/identity/admission_otp.go"
 OTP_DELIVERY_BOUNDARY_CALL='Code:[[:space:]]+request\.otp\.Code\.Expose\(\),'
 OTP_DELIVERY_BOUNDARY_EXPOSURES=1
+
+# The device-trust code is the same code type reaching the same protected
+# outbox field, so it is pinned the same way and for the same reason.
+DEVICE_OTP_DELIVERY_BOUNDARY_FILE="internal/identity/device_service.go"
+DEVICE_OTP_DELIVERY_BOUNDARY_CALL='Code:[[:space:]]+otp\.Code\.Expose\(\),'
+DEVICE_OTP_DELIVERY_BOUNDARY_EXPOSURES=1
 
 # The OTP pepper is read three times, all inside its own type: twice to check
 # the key length and once to key the HMAC. Each read is pinned to the exact
@@ -349,6 +365,25 @@ if ! grep --extended-regexp --quiet -- "$OTP_DELIVERY_BOUNDARY_CALL" \
   fail=1
 fi
 
+# The device-trust code is pinned identically. Two OTP purposes share one
+# implementation deliberately; they must also share one plaintext boundary, or
+# the second purpose becomes the second handling path this check exists to
+# prevent.
+device_otp_delivery_exposures=$(cd "$BACKEND" && expose_occurrences "$DEVICE_OTP_DELIVERY_BOUNDARY_FILE")
+if [ "$device_otp_delivery_exposures" -ne "$DEVICE_OTP_DELIVERY_BOUNDARY_EXPOSURES" ]; then
+  note "expose-guard: $DEVICE_OTP_DELIVERY_BOUNDARY_FILE has $device_otp_delivery_exposures Expose() calls, expected $DEVICE_OTP_DELIVERY_BOUNDARY_EXPOSURES"
+  note "  The device-trust code is read once, into the encrypted outbox payload."
+  note "  If a second read is intended, update DEVICE_OTP_DELIVERY_BOUNDARY_EXPOSURES"
+  note "  and say in review where the plaintext goes."
+  fail=1
+fi
+if ! grep --extended-regexp --quiet -- "$DEVICE_OTP_DELIVERY_BOUNDARY_CALL" \
+  "$BACKEND/$DEVICE_OTP_DELIVERY_BOUNDARY_FILE"; then
+  note "expose-guard: the device-trust code exposure moved outside the reviewed"
+  note "  outbox.VerificationCodeDelivery.Code assignment in $DEVICE_OTP_DELIVERY_BOUNDARY_FILE"
+  fail=1
+fi
+
 # The OTP pepper is a signer key. Every read of it must be either a length check
 # or the HMAC construction; anything else is a new handling path for key
 # material that the type exists to keep unreadable.
@@ -481,6 +516,6 @@ for site in "${enqueue_sites[@]:-}"; do
 done
 
 if [ "$fail" -eq 0 ]; then
-  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary with ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads, OTP delivery boundary pinned at ${OTP_DELIVERY_BOUNDARY_EXPOSURES}, OTP pepper boundary pinned at ${OTP_PEPPER_BOUNDARY_EXPOSURES})"
+  echo "expose-guard: ok (${#call_sites[@]} approved call sites, 1 password-plaintext boundary with ${PASSWORD_BOUNDARY_EXPOSURES} reviewed plaintext reads, OTP delivery boundaries pinned at ${OTP_DELIVERY_BOUNDARY_EXPOSURES} + ${DEVICE_OTP_DELIVERY_BOUNDARY_EXPOSURES}, OTP pepper boundary pinned at ${OTP_PEPPER_BOUNDARY_EXPOSURES})"
 fi
 exit "$fail"

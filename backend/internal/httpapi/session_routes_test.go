@@ -53,9 +53,7 @@ func (r *fakeSessionRepository) Login(
 
 func (r *fakeSessionRepository) Resolve(
 	_ context.Context,
-	_ string,
-	_ identity.CredentialUseKind,
-	_ string,
+	_ identity.SessionResolutionRequest,
 ) (identity.SessionView, error) {
 	r.resolveCalls++
 	return r.view, r.resolveErr
@@ -100,6 +98,7 @@ func sessionFixture() (
 			Generation:        1,
 			IdleExpiresAt:     time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
 			AbsoluteExpiresAt: time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC),
+			DeviceTrust:       identity.DeviceTrustEstablished,
 		},
 		config.NewSecret(base64.RawURLEncoding.EncodeToString(credentialBytes)),
 		config.NewSecret(base64.RawURLEncoding.EncodeToString(csrfBytes))
@@ -204,6 +203,26 @@ func TestSessionLoginCommitsBeforeHardenedCookieAndClearsAnonymousCookie(t *test
 	}
 	if anonymous == nil || anonymous.MaxAge >= 0 {
 		t.Fatalf("anonymous cookie was not expired after commit: %#v", anonymous)
+	}
+}
+
+func TestStaffLoginDoesNotWriteADeviceCookie(t *testing.T) {
+	session, credential, csrf := sessionFixture()
+	session.Role = identity.RoleInstructor
+	repository := &fakeSessionRepository{loginGrant: identity.SessionGrant{
+		Session: session, Credential: credential, CSRFToken: csrf,
+		Device: &identity.DeviceAdmissionResult{TrustState: identity.DeviceTrustNotApplicable},
+	}}
+	router := mountedSessionRouter(t, repository, admissionRateStore{allowed: true})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, admittedLoginRequest(t, router))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("login response = %d: %s", response.Code, response.Body.String())
+	}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.DeviceCookieName {
+			t.Fatal("staff login wrote a Student device cookie")
+		}
 	}
 }
 

@@ -305,7 +305,15 @@ test("the watermark exists only while an authorization does", () => {
   const player = code(PLAYER);
   assert.match(player, /setPlayback\(null\);/, "a Lesson change clears the authorization");
   assert.match(player, /if \(!playback\) \{/, "no authorization renders the placeholder instead");
-  assert.match(player, /\}, \[lessonID, locale\]\);/, "the authorization is re-fetched per Lesson");
+  // The Lesson and the locale still drive re-authorization. `attempt` joined
+  // them so a Student whose playback was blocked by their own other device can
+  // ask again explicitly; it is bumped only by that button, never on a timer,
+  // so the player never retries its way into fighting a legitimate playback.
+  assert.match(
+    player,
+    /\}, \[lessonID, locale, attempt\]\);/,
+    "the authorization is re-fetched per Lesson, and on an explicit retry",
+  );
 });
 
 // --- Deterrence, and its honest limits ---------------------------------------

@@ -437,7 +437,13 @@ func TestReportRouteRefusesWithoutAnAuthenticatedSession(t *testing.T) {
 // sessionlessLearningAuth authenticates an Account but publishes no session.
 type sessionlessLearningAuth struct{}
 
-func (sessionlessLearningAuth) UserFromRequest(*gin.Context) (string, error) { return "user-1", nil }
+func (sessionlessLearningAuth) UserFromRequest(c *gin.Context) (string, error) {
+	// Device trust is published so this double isolates the one property it
+	// exists to test — an authenticated Account with no session — instead of
+	// being refused earlier by device policy for an unrelated reason.
+	setTestTrustedDevice(c)
+	return "user-1", nil
+}
 
 // TestReportFoundationRequiresAVerifyingContextDependency proves minting and verification are one
 // dependency: a foundation cannot be composed with an issuer that cannot verify what it minted.

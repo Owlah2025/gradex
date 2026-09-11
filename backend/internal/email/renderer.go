@@ -16,6 +16,7 @@ import (
 const (
 	TemplateVerifyEmail      = "student-email-verification-v1"
 	TemplateVerifyEmailOTP   = "student-email-verification-otp-v1"
+	TemplateDeviceTrustOTP   = "student-device-trust-otp-v1"
 	TemplatePasswordReset    = "account-password-reset-v1"
 	TemplatePasswordChanged  = "account-password-reset-completed-v1"
 	TemplateStaffInvitation  = "staff-invitation-v1"
@@ -30,6 +31,7 @@ const (
 var eventTemplates = map[string]string{
 	"identity.email_verification_requested":      TemplateVerifyEmail,
 	"identity.email_verification_code_requested": TemplateVerifyEmailOTP,
+	"identity.device_trust_code_requested":       TemplateDeviceTrustOTP,
 	"identity.password_reset_requested":          TemplatePasswordReset,
 	"identity.password_reset_completed":          TemplatePasswordChanged,
 	"identity.staff_invitation_created":          TemplateStaffInvitation,
@@ -117,6 +119,17 @@ var localizedTemplates = map[string]map[string]localizedTemplate{
 		"en": {"Your Gradex verification code", "Verify your email address", "Enter this code on the Gradex verification screen to finish creating your account.", "", "If you did not create this account, you can ignore this message. Nobody from Gradex will ever ask you for this code."},
 		"ar": {"رمز التحقق الخاص بك في Gradex", "تحقق من عنوان بريدك الإلكتروني", "أدخل هذا الرمز في شاشة التحقق في Gradex لإكمال إنشاء حسابك.", "", "إذا لم تنشئ هذا الحساب، يمكنك تجاهل هذه الرسالة. لن يطلب منك أحد من Gradex هذا الرمز أبدًا."},
 	},
+	// The device-trust code is its own message, not a variant of the
+	// verification one. The dispatcher selects rendering by contract, and one
+	// contract that could render either meaning is one branch away from telling
+	// a Student to verify their email when what actually happened is that
+	// somebody signed in to their account from a browser they have not
+	// confirmed. Saying which is the whole security value of this message: a
+	// Student who did not just sign in needs to recognise that immediately.
+	TemplateDeviceTrustOTP: {
+		"en": {"Your Gradex device confirmation code", "Confirm this device", "Enter this code on Gradex to confirm the device you just signed in from. Gradex allows two confirmed devices per account.", "", "If you did not just sign in, change your password immediately. Nobody from Gradex will ever ask you for this code."},
+		"ar": {"رمز تأكيد الجهاز في Gradex", "أكّد هذا الجهاز", "أدخل هذا الرمز في Gradex لتأكيد الجهاز الذي سجّلت الدخول منه للتو. يسمح Gradex بجهازين مؤكّدين لكل حساب.", "", "إذا لم تسجّل الدخول للتو، غيّر كلمة المرور فوراً. لن يطلب منك أحد من Gradex هذا الرمز أبداً."},
+	},
 	TemplatePasswordReset: {
 		"en": {"Reset your Gradex password", "Reset your password", "Use this link to choose a new Gradex password. The link can be used only once.", "Reset password", "If you did not request a reset, you can ignore this message."},
 		"ar": {"إعادة تعيين كلمة مرور Gradex", "أعد تعيين كلمة المرور", "استخدم هذا الرابط لاختيار كلمة مرور جديدة في Gradex. يمكن استخدام الرابط مرة واحدة فقط.", "إعادة تعيين كلمة المرور", "إذا لم تطلب إعادة التعيين، يمكنك تجاهل هذه الرسالة."},
@@ -178,7 +191,7 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 	// through the same slot as the action URL would eventually put it in an
 	// href, which is exactly what the OTP flow exists to avoid.
 	code := ""
-	if request.Template == TemplateVerifyEmailOTP {
+	if request.Template == TemplateVerifyEmailOTP || request.Template == TemplateDeviceTrustOTP {
 		code = request.Payload.VerificationToken
 	}
 	htmlBody, err := renderHTML(request.Locale, copy, actionURL, expiry, code)
@@ -280,7 +293,7 @@ func (r *Renderer) actionURL(request RenderRequest) (string, bool, error) {
 			return "", false, errors.New("verification credential is missing")
 		}
 		return r.publicOrigin + "/verify-email/result#token=" + credential, true, nil
-	case TemplateVerifyEmailOTP:
+	case TemplateVerifyEmailOTP, TemplateDeviceTrustOTP:
 		// No URL at all. The code is typed into the screen the Student already
 		// has open, so this message is not a navigation surface and carries
 		// nothing clickable that could be forwarded or phished.

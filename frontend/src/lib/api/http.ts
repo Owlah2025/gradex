@@ -88,6 +88,11 @@ export async function postJSON<T>(
  * authenticated call either carries usable session authority or must fail so
  * the caller can recover. `csrf` is the in-memory session token and is required
  * for every state-changing method. A `204` resolves to null.
+ *
+ * `extraHeaders` carries route-specific non-secret headers — today only the
+ * device-trust challenge identifier, which names a challenge and authenticates
+ * nobody. It cannot override the headers above: they are applied afterwards, so
+ * a caller cannot use it to replace the CSRF token or the content type.
  */
 export async function authenticatedRequest<T>(
   path: string,
@@ -95,8 +100,10 @@ export async function authenticatedRequest<T>(
   language: "ar" | "en",
   csrf?: string,
   body?: unknown,
+  extraHeaders?: Record<string, string>,
 ): Promise<T | null> {
   const headers: Record<string, string> = {
+    ...(extraHeaders ?? {}),
     Accept: "application/json, application/problem+json",
     "Accept-Language": language,
   };

@@ -83,10 +83,18 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 
 	now := time.Now().UTC()
 	view := func(accountID string, role identity.Role) identity.SessionView {
+		// A Student session models an ordinary browser, which in production is
+		// one that has completed device trust. Staff sessions carry the state
+		// device policy assigns them, which is that it does not apply.
+		trust := identity.DeviceTrustNotApplicable
+		if role == identity.RoleStudent {
+			trust = identity.DeviceTrustEstablished
+		}
 		return identity.SessionView{Session: identity.AuthenticatedSession{
 			AccountID: accountID, SessionID: accountID + "-session", Role: role,
 			CredentialState: identity.CredentialActive, AuthenticatedAt: now,
 			IdleExpiresAt: now.Add(24 * time.Hour), AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust: trust,
 		}}
 	}
 	adminToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x51}, 32))

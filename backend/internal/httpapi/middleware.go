@@ -13,8 +13,12 @@ import (
 )
 
 const (
-	ctxUserIDKey    = "userID"
-	ctxPrincipalKey = "principal"
+	ctxUserIDKey = "userID"
+	// ctxTrustedDeviceKey is the trusted device the calling session is bound
+	// to. Present only on routes that have already established device trust,
+	// and always resolved server-side from the session.
+	ctxTrustedDeviceKey = "trustedDeviceID"
+	ctxPrincipalKey     = "principal"
 )
 
 // requireCapability resolves the caller's Principal and applies the
@@ -68,7 +72,13 @@ func requireCapability(
 			return
 		}
 
-		decision := identity.Authorize(principal, capability)
+		// Device policy narrows the account-level decision rather than
+		// replacing it. Applying it here rather than route by route is what
+		// makes "a browser that has not completed device trust holds only the
+		// self-service capabilities" true everywhere at once, including on
+		// routes written before this feature existed. Instructor and Admin
+		// principals are returned unchanged by construction.
+		decision := identity.AuthorizeSessionDevice(principal, auth.DeviceTrustFromContext(c), capability)
 		if !decision.Allowed {
 			logger.AuthorizationDenied(logging.AuthorizationEvent{
 				RequestID:     requestid.FromContext(c.Request.Context()),
@@ -77,7 +87,14 @@ func requireCapability(
 				Capability:    string(capability),
 				DenyReason:    string(decision.Reason),
 			})
-			writeProblem(c, problem.NotAuthorized())
+			switch decision.Reason {
+			case identity.DenyDeviceTrustRequired:
+				writeProblem(c, problem.DeviceTrustRequired())
+			case identity.DenyDeviceAdoptionRequired:
+				writeProblem(c, problem.DeviceAdoptionRequired())
+			default:
+				writeProblem(c, problem.NotAuthorized())
+			}
 			return
 		}
 
@@ -111,6 +128,7 @@ func requireAuth(authenticator auth.Authenticator) gin.HandlerFunc {
 			return
 		}
 		c.Set(ctxUserIDKey, userID)
+		c.Set(ctxTrustedDeviceKey, auth.TrustedDeviceFromContext(c))
 		c.Next()
 	}
 }

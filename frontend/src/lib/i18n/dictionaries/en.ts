@@ -1347,6 +1347,45 @@ export const en = {
     reportInvalid: "Check the form and try again.",
     reportUnexpected: "The report could not be sent. Try again.",
   },
+  devices: {
+    title: "Your devices",
+    intro:
+      "Gradex lets you stay signed in on two devices, and play a course video on one of them at a time.",
+    limitLabel: "{used} of {limit} devices",
+    currentDevice: "This device",
+    lastActive: "Last active",
+    trustedSince: "Added",
+    remove: "Remove",
+    removing: "Removing…",
+    removeCurrentWarning:
+      "Removing this device signs you out of it. You can sign in again and confirm it with an emailed code.",
+    removeConfirm: "Remove this device?",
+    cancel: "Cancel",
+    empty: "No devices are confirmed on this account yet.",
+    cooldownTitle: "Device change unavailable",
+    cooldownBody:
+      "You changed a device recently, so another change is not available until {until}. Contact support if you have lost access to your devices.",
+    loadFailed: "Your devices could not be loaded. Try again.",
+    removeFailed: "That device could not be removed. Try again.",
+    // The device-trust screen, shown to a browser that has signed in but has
+    // not yet been confirmed.
+    trustTitle: "Confirm this device",
+    trustIntro: "Enter the 6-digit code sent to {email} to confirm this device.",
+    trustCode: "Verification code",
+    trustSubmit: "Confirm device",
+    trustSubmitting: "Confirming…",
+    trustResend: "Send a new code",
+    trustResent: "A new code is on its way.",
+    trustInvalid: "That code is not correct. Check it and try again.",
+    trustExhausted: "Too many attempts. Request a new code.",
+    trustUnavailable: "This device cannot be confirmed right now. Try again shortly.",
+    limitTitle: "You already have 2 trusted devices",
+    limitBody:
+      "Choose a device to remove, then enter the code sent to {email} to confirm this one.",
+    limitChoose: "Select a device to remove",
+    limitSelected: "Will be removed",
+    limitNeedsChoice: "Choose which device to remove.",
+  },
   player: {
     loading: "Preparing lesson…",
     unavailable: "This lesson could not start.",
@@ -1367,6 +1406,22 @@ export const en = {
     rewind: "Rewind 10 seconds",
     forward: "Forward 10 seconds",
     buffering: "Buffering",
+    // Protected playback is limited to one device at a time. These say what
+    // happened and what to do about it, and deliberately say nothing about the
+    // other device — not what it is, not where it is, not what it is watching.
+    blockedAnotherDeviceTitle: "Already playing on another device",
+    blockedAnotherDeviceBody:
+      "This account is currently playing a course on another device. Stop playback there or try again shortly.",
+    blockedLeaseLostTitle: "Playback stopped",
+    blockedLeaseLostBody:
+      "This lesson stopped because playback started somewhere else on your account.",
+    blockedUnavailableTitle: "Playback temporarily unavailable",
+    blockedUnavailableBody: "Playback cannot start right now. Try again shortly.",
+    blockedDeviceTrustTitle: "Confirm this device",
+    blockedDeviceTrustBody:
+      "Confirm this device before watching your courses. You can manage your devices in your account settings.",
+    blockedRetry: "Try again",
+    blockedManageDevices: "Manage devices",
   },
   why: {
     eyebrow: "Why Gradex",

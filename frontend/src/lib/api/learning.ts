@@ -145,6 +145,19 @@ export type PlaybackAuthorization = {
    * Student. Absent on an Admin review authorization, which deliberately carries no Student.
    */
   watermark?: PlaybackWatermark;
+  /**
+   * How often the player must renew the account's playback lease, and when the
+   * current lease lapses.
+   *
+   * Published by the server rather than assumed by the bundle, so the interval
+   * and the server's own TTL can never drift apart across a deployment.
+   */
+  heartbeat?: PlaybackHeartbeat;
+};
+
+export type PlaybackHeartbeat = {
+  interval_seconds: number;
+  lease_expires_at: string;
 };
 
 /** A temporary private-object capability returned only after live-graph and entitlement revalidation. */
@@ -236,6 +249,55 @@ export async function submitLearningReport(
     body,
   ).then((acknowledgement) =>
     requireLearningResponse(acknowledgement, "Report acknowledgement"),
+  );
+}
+
+/**
+ * Renews this player's claim on the account's single protected-playback slot.
+ *
+ * The lease is named by the opaque signed authorization rather than by an
+ * identifier the client holds, so a caller cannot renew a lease it was never
+ * granted. A `PLAYBACK_LEASE_LOST` refusal means a newer playback instance —
+ * another tab, or the Student's other device after this one stopped — now owns
+ * the slot, and this player must stop rather than retry.
+ */
+export async function heartbeatPlayback(
+  playbackSession: string,
+  locale: "ar" | "en",
+  csrf: string | null,
+): Promise<PlaybackHeartbeat> {
+  const effectiveCSRF = csrf || (await ensureAnonymousBrowser());
+  return authenticatedRequest<PlaybackHeartbeat>(
+    "/media/playback-heartbeats",
+    "POST",
+    locale,
+    effectiveCSRF,
+    { playback_session: playbackSession },
+  ).then((heartbeat) => {
+    if (heartbeat === null) throw new Error("Playback heartbeat was empty.");
+    return heartbeat;
+  });
+}
+
+/**
+ * Hands the account's playback slot back when this player stops.
+ *
+ * Best-effort by design: the lease carries its own TTL, so a release that never
+ * arrives costs the Student's other device a short wait rather than a stuck
+ * slot. Releasing something this caller no longer owns is a no-op server-side.
+ */
+export async function releasePlayback(
+  playbackSession: string,
+  locale: "ar" | "en",
+  csrf: string | null,
+): Promise<void> {
+  const effectiveCSRF = csrf || (await ensureAnonymousBrowser());
+  await authenticatedRequest<null>(
+    "/media/playback-releases",
+    "POST",
+    locale,
+    effectiveCSRF,
+    { playback_session: playbackSession },
   );
 }
 

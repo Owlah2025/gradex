@@ -84,6 +84,14 @@ type deliveryFixture struct {
 	studentEmail string
 }
 
+func (f *deliveryFixture) playbackSessionRequest(token string) PlaybackSessionRequest {
+	return PlaybackSessionRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), Token: token}
+}
+
+func (f *deliveryFixture) playbackRenditionRequest(token, selector string) PlaybackRenditionRequest {
+	return PlaybackRenditionRequest{PlaybackSessionRequest: f.playbackSessionRequest(token), Selector: selector}
+}
+
 func newDeliveryFixture(t *testing.T) *deliveryFixture {
 	t.Helper()
 	base := newMediaFixture(t)
@@ -137,7 +145,7 @@ func newDeliveryFixture(t *testing.T) *deliveryFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.delivery, err = NewDeliveryService(DeliveryOptions{DB: f.pool, Store: f.store, Evaluator: evaluator, SignatureLifetime: 5 * time.Minute, BuyerTagKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return f.now }})
+	f.delivery, err = NewDeliveryService(DeliveryOptions{DB: f.pool, Store: f.store, Evaluator: evaluator, SignatureLifetime: 5 * time.Minute, BuyerTagKey: []byte("01234567890123456789012345678901"), Now: func() time.Time { return f.now }, Playback: testPlaybackCoordinator(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,11 +251,11 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 	f.addVideoRendition(f.video, Rendition{
 		Name: "240p", StorageObjectKey: "video/hls/240p/playlist.m3u8", Width: 426, Height: 240, BitrateKbps: 400,
 	})
-	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video})
+	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video})
 	if err != nil || issued.AssetVersionID != f.video || !strings.HasPrefix(issued.ManifestURL, "/api/v1/media/playback-manifests/") || issued.ExpiresAt.Sub(f.now) != 6*time.Minute {
 		t.Fatalf("playback issuance=%+v err=%v", issued, err)
 	}
-	manifest, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession)
+	manifest, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession))
 	master := string(manifest.Contents)
 	if err != nil || !strings.Contains(master, "#EXT-X-STREAM-INF:BANDWIDTH=2928000,RESOLUTION=1280x720") ||
 		!strings.Contains(master, "#EXT-X-STREAM-INF:BANDWIDTH=496000,RESOLUTION=426x240") {
@@ -257,18 +265,18 @@ func TestD8ProtectedDeliveryUsesExactReadyVersionAndPerRequestEvaluation(t *test
 	if !strings.Contains(master, protected720p) || strings.Contains(master, "storage.test") || strings.Contains(master, "video/hls") {
 		t.Fatalf("playback master exposed a non-protected rendition target: %q", master)
 	}
-	variant, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p")
+	variant, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p"))
 	if err != nil || !strings.Contains(string(variant.Contents), "https://storage.test/signed/video/hls/720p/segment000.ts") {
 		t.Fatalf("playback variant=%q err=%v", variant.Contents, err)
 	}
 	replacement := f.readyAsset(KindVideo, "replacement/hls/playlist.m3u8")
-	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: replacement}); err == nil {
+	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: replacement}); err == nil {
 		t.Fatal("unreferenced replacement Asset Version received playback")
 	}
 	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}); err == nil {
+	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}); err == nil {
 		t.Fatal("new playback issuance succeeded after effective expiry")
 	}
 	if len(f.store.requestedKeys()) != 1 {
@@ -369,7 +377,8 @@ func TestNonReadySelectedLessonVideoIsUnavailableToStudentsAndAdminPreview(t *te
 	}
 
 	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: versionID,
+		StudentID: f.student,
+		DeviceID:  testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: versionID,
 	}); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("student processing playback error = %v, want %v", err, ErrProtectedUnavailable)
 	}
@@ -394,7 +403,8 @@ func TestNonReadySelectedLessonVideoIsUnavailableToStudentsAndAdminPreview(t *te
 func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student,
+		DeviceID:  testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback: %v", err)
@@ -403,17 +413,35 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 	if tampered == issued.PlaybackSession {
 		tampered = issued.PlaybackSession[:len(issued.PlaybackSession)-1] + "B"
 	}
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, tampered); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(tampered)); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("tampered session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, uuid.NewString(), issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, PlaybackSessionRequest{StudentID: uuid.NewString(), DeviceID: testDeviceID(f.student), Token: issued.PlaybackSession}); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("cross-Student session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
-	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, uuid.NewString(), issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, PlaybackRenditionRequest{PlaybackSessionRequest: PlaybackSessionRequest{StudentID: uuid.NewString(), DeviceID: testDeviceID(f.student), Token: issued.PlaybackSession}, Selector: "720p"}); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("cross-Student variant session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
+	otherDevice := PlaybackSessionRequest{
+		StudentID: f.student, DeviceID: "another-device", Token: issued.PlaybackSession,
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, otherDevice); !errors.Is(err, ErrPlaybackLeaseLost) {
+		t.Fatalf("cross-device master error=%v, want %v", err, ErrPlaybackLeaseLost)
+	}
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, PlaybackRenditionRequest{PlaybackSessionRequest: otherDevice, Selector: "720p"}); !errors.Is(err, ErrPlaybackLeaseLost) {
+		t.Fatalf("cross-device rendition error=%v, want %v", err, ErrPlaybackLeaseLost)
+	}
+	if _, err := f.delivery.RenewPlayback(f.ctx, otherDevice); !errors.Is(err, ErrPlaybackLeaseLost) {
+		t.Fatalf("cross-device heartbeat error=%v, want %v", err, ErrPlaybackLeaseLost)
+	}
+	if err := f.delivery.ReleasePlayback(f.ctx, otherDevice); !errors.Is(err, ErrPlaybackLeaseLost) {
+		t.Fatalf("cross-device release error=%v, want %v", err, ErrPlaybackLeaseLost)
+	}
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession)); err != nil {
+		t.Fatalf("cross-device replay changed the owning lease: %v", err)
+	}
 	for _, selector := range []string{"1080p", "../720p", "720p/../../private", "%2e%2e", "720p%2Fprivate"} {
-		if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, selector); !errors.Is(err, ErrProtectedUnavailable) {
+		if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, selector)); !errors.Is(err, ErrProtectedUnavailable) {
 			t.Fatalf("unsafe rendition selector %q error=%v, want %v", selector, err, ErrProtectedUnavailable)
 		}
 	}
@@ -427,7 +455,7 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			f.store.setManifest(manifest)
 			before := len(f.store.requestedKeys())
-			if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+			if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p")); !errors.Is(err, ErrProtectedUnavailable) {
 				t.Fatalf("unsafe manifest error=%v, want %v", err, ErrProtectedUnavailable)
 			}
 			if got := len(f.store.requestedKeys()); got != before {
@@ -436,10 +464,10 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 		})
 	}
 	f.now = issued.ExpiresAt
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession)); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("expired master session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
-	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p")); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("expired variant session error=%v, want %v", err, ErrProtectedUnavailable)
 	}
 }
@@ -447,18 +475,19 @@ func TestPlaybackManifestRejectsInvalidSessionsAndUnsafeReferences(t *testing.T)
 func TestPlaybackRenditionRechecksEntitlementAfterMaster(t *testing.T) {
 	f := newDeliveryFixture(t)
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student,
+		DeviceID:  testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback: %v", err)
 	}
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession)); err != nil {
 		t.Fatalf("fetching master before revocation: %v", err)
 	}
 	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p")); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("variant after entitlement revocation error=%v, want %v", err, ErrProtectedUnavailable)
 	}
 	if len(f.store.requestedKeys()) != 0 {
@@ -730,17 +759,17 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now.Add(time.Minute), f.student); err != nil {
 		t.Fatal(err)
 	}
-	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video})
+	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video})
 	if err != nil {
 		t.Fatalf("issuing pre-expiry playback: %v", err)
 	}
 	if got := issued.ExpiresAt.Sub(f.now); got != 6*time.Minute {
 		t.Fatalf("issued signature lifetime=%s, want trusted duration plus 5m grace", got)
 	}
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); err != nil {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession)); err != nil {
 		t.Fatalf("issuing pre-expiry master: %v", err)
 	}
-	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); err != nil {
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p")); err != nil {
 		t.Fatalf("issuing pre-expiry variant: %v", err)
 	}
 
@@ -751,13 +780,13 @@ func TestD8MidPlaybackExpiryKeepsIssuedSignatureWithinItsOwnBound(t *testing.T) 
 	if !f.now.Before(issued.ExpiresAt) {
 		t.Fatalf("test clock escaped issued signature lifetime: now=%s expires=%s", f.now, issued.ExpiresAt)
 	}
-	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("post-expiry re-issuance error=%v, want %v", err, ErrProtectedUnavailable)
 	}
-	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.student, issued.PlaybackSession); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackManifest(f.ctx, f.playbackSessionRequest(issued.PlaybackSession)); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("post-expiry manifest error=%v, want %v", err, ErrProtectedUnavailable)
 	}
-	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.student, issued.PlaybackSession, "720p"); !errors.Is(err, ErrProtectedUnavailable) {
+	if _, err := f.delivery.IssuePlaybackRenditionManifest(f.ctx, f.playbackRenditionRequest(issued.PlaybackSession, "720p")); !errors.Is(err, ErrProtectedUnavailable) {
 		t.Fatalf("post-expiry rendition error=%v, want %v", err, ErrProtectedUnavailable)
 	}
 	if len(f.store.requestedKeys()) != 1 {
@@ -771,38 +800,38 @@ func TestD8ProtectedDeliveryCollapsesEveryEvaluatorDenial(t *testing.T) {
 		prepare func(*deliveryFixture) PlaybackRequest
 	}{
 		{"non-existent", func(f *deliveryFixture) PlaybackRequest {
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: uuid.NewString()}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: uuid.NewString()}
 		}},
 		{"expired", func(f *deliveryFixture) PlaybackRequest {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET access_ends_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 		{"revoked", func(f *deliveryFixture) PlaybackRequest {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET state = 'REVOKED', revoked_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 		{"out-of-scope", func(f *deliveryFixture) PlaybackRequest {
 			other := uuid.NewString()
 			if _, err := f.pool.Exec(f.ctx, `INSERT INTO accounts (id, normalized_email, email, role, status, display_name, locale, email_verified_at) VALUES ($1::uuid, $2, $2, 'STUDENT', 'ACTIVE', 'Other Student', 'en', now())`, other, other+"@example.test"); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: other, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: other, DeviceID: testDeviceID(other), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 		{"account-suspended", func(f *deliveryFixture) PlaybackRequest {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE accounts SET status = 'SUSPENDED' WHERE id = $1::uuid`, f.student); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 		{"course-emergency-suspended", func(f *deliveryFixture) PlaybackRequest {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE courses SET access_suspended_at = $1, access_suspension_reason = 'fixture' WHERE id = $2::uuid`, f.now, f.courseID); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 		{"retired-ineligible", func(f *deliveryFixture) PlaybackRequest {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE media_assets SET retired_at = $1 WHERE id = (SELECT logical_asset_id FROM media_asset_versions WHERE id = $2::uuid)`, f.now, f.video); err != nil {
@@ -811,7 +840,7 @@ func TestD8ProtectedDeliveryCollapsesEveryEvaluatorDenial(t *testing.T) {
 			if _, err := f.pool.Exec(f.ctx, `UPDATE entitlements SET retirement_eligibility_at = $1 WHERE student_account_id = $2::uuid`, f.now, f.student); err != nil {
 				f.t.Fatal(err)
 			}
-			return PlaybackRequest{StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video}
+			return PlaybackRequest{StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video}
 		}},
 	}
 	for _, tc := range cases {

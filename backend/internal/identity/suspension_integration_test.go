@@ -128,7 +128,7 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 	sessionRepo := testSessionRepository(t, p, now)
 
 	// Before suspension: session is usable and resolves.
-	resolved, err := sessionRepo.Resolve(ctx, cred.CredentialDigest, UseReadOnly, "req-4a-before")
+	resolved, err := sessionRepo.Resolve(ctx, SessionResolutionRequest{CredentialDigest: cred.CredentialDigest, UseKind: UseReadOnly, RequestID: "req-4a-before"})
 	if err != nil {
 		t.Fatalf("resolving session before suspension: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestSuspensionProof4a_ImmediateEnforcement(t *testing.T) {
 	}
 
 	// Next request after suspension: session resolution MUST fail.
-	_, err = sessionRepo.Resolve(ctx, cred.CredentialDigest, UseReadOnly, "req-4a-after")
+	_, err = sessionRepo.Resolve(ctx, SessionResolutionRequest{CredentialDigest: cred.CredentialDigest, UseKind: UseReadOnly, RequestID: "req-4a-after"})
 	if !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("ResolveSession after suspension returned %v, want ErrAuthenticationRequired", err)
 	}
@@ -501,7 +501,7 @@ func TestReinstatement(t *testing.T) {
 
 	// Verify revoked sessions are NOT restored (session remains REVOKED).
 	sessionRepo := testSessionRepository(t, p, now.Add(6*time.Minute))
-	_, err = sessionRepo.Resolve(ctx, cred.CredentialDigest, UseReadOnly, "req-reinstate-check")
+	_, err = sessionRepo.Resolve(ctx, SessionResolutionRequest{CredentialDigest: cred.CredentialDigest, UseKind: UseReadOnly, RequestID: "req-reinstate-check"})
 	if !errors.Is(err, ErrAuthenticationRequired) {
 		t.Fatalf("reinstated user's old session resolved unexpectedly: %v", err)
 	}

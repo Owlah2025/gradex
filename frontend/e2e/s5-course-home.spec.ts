@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { completeDeviceTrustIfRequired } from "./device-trust";
 
 const COURSE_ID = "c0000000-0000-0000-0000-000000000001";
 const NON_EXISTENT_COURSE_ID = "c9999999-9999-9999-9999-999999999999";
@@ -14,6 +15,7 @@ const VIEWPORTS = [
  * Authenticates a student via the production login endpoints and returns session cookies.
  */
 async function authenticateStudent(context: BrowserContext, email: string) {
+  const requestedAt = new Date();
   const page = await context.newPage();
   await page.goto("/en/catalog");
 
@@ -42,6 +44,11 @@ async function authenticateStudent(context: BrowserContext, email: string) {
   }, email);
 
   expect(loginResult.status).toBe(201);
+  // Signing in is not the last step for a browser Gradex has not confirmed:
+  // the session it hands back is narrowed until an emailed code confirms this
+  // device. Completing it here keeps the fixture a *signed-in Student* rather
+  // than a half-authenticated one, which is what every assertion below assumes.
+  completeDeviceTrustIfRequired(page, email, loginResult.body?.device_trust, requestedAt);
   const cookies = await context.cookies();
   await page.close();
   return cookies;

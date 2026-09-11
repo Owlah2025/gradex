@@ -133,6 +133,15 @@ export default async function globalSetup(config?: { workers?: number }) {
       S3_ACCESS_KEY: "gradexminio",
       S3_SECRET_KEY: "gradexminio",
       AUTH_FAKE_MODE: "false",
+      // Protected-playback concurrency, compressed so a browser journey can
+      // watch a lease lapse instead of waiting out the production window.
+      //
+      // Only the *timings* move. The device limit, the replacement cooldown,
+      // the atomic acquisition, and every refusal stay exactly as production
+      // configures them — a suite that relaxed those would be asserting a
+      // different policy from the one that ships.
+      STUDENT_PLAYBACK_LEASE_TTL: "10s",
+      STUDENT_PLAYBACK_HEARTBEAT_INTERVAL: "4s",
       STUDENT_REGISTRATION_ENABLED: "true",
       REGISTRATION_POLICY_SET_ID: "e2e-policy-v1",
       PASSWORD_SCREEN_MODE: "deterministic",
