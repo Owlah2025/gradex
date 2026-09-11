@@ -1,3 +1,4 @@
+import { completeDeviceTrustIfRequired } from "./device-trust";
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { execFileSync } from "child_process";
 import fs from "fs";
@@ -192,6 +193,9 @@ async function authenticateScenarioStudent(context: BrowserContext, scenario: Sc
 
   expect(login.status).toBe(201);
   expect(login.body.role).toBe("STUDENT");
+  // A browser Gradex has not confirmed holds a narrowed session until a device
+  // is confirmed. This fixture means "a signed-in Student".
+  completeDeviceTrustIfRequired(page, scenario.email, login.body?.device_trust, new Date());
   await page.close();
   return { csrfToken: login.body.csrf_token };
 }

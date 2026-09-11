@@ -167,7 +167,7 @@ type publicCatalogRouteTripwires struct {
 // so one callback witnesses authentication, session resolution, and credential parsing.
 type publicCatalogSessionTripwire struct{ tripwires *publicCatalogRouteTripwires }
 
-func (t publicCatalogSessionTripwire) Resolve(context.Context, string, identity.CredentialUseKind, string) (identity.SessionView, error) {
+func (t publicCatalogSessionTripwire) Resolve(context.Context, identity.SessionResolutionRequest) (identity.SessionView, error) {
 	t.tripwires.authentication = true
 	t.tripwires.session = true
 	t.tripwires.credential = true

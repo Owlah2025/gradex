@@ -43,6 +43,18 @@ const (
 
 	// S6 Course Access Grant capability — Admin only.
 	CapCourseAccessGrant Capability = "COURSE_ACCESS_GRANT"
+
+	// CapDeviceManagement is a Student acting on their own trusted devices:
+	// listing them, completing a device-trust challenge, and removing one to
+	// make room for another.
+	//
+	// It is deliberately a Student capability and not an operator one. An Admin
+	// acting on someone else's devices is a security operation and is decided
+	// by CapSecurityOperations, so the two never widen into each other: a
+	// Student can never reach another Account's devices, and an operator's
+	// authority over them is audited under the subject that already exists for
+	// exactly that.
+	CapDeviceManagement Capability = "DEVICE_MANAGEMENT"
 )
 
 // AllCapabilities is the closed set, used by tests to prove the policy is total
@@ -63,6 +75,7 @@ var AllCapabilities = []Capability{
 	CapCatalogTaxonomy,
 	CapAcademicCatalog,
 	CapCourseAccessGrant,
+	CapDeviceManagement,
 }
 
 // DenyReason is the typed reason a decision was negative.
@@ -82,6 +95,12 @@ const (
 	DenyRoleLacksCapability    DenyReason = "ROLE_LACKS_CAPABILITY"
 	DenyUnknownCapability      DenyReason = "UNKNOWN_CAPABILITY"
 	DenyRecentAuthRequired     DenyReason = "RECENT_AUTH_REQUIRED"
+	// DenyDeviceTrustRequired means the browser holding this session has never
+	// been trusted for this Account and must complete device trust first.
+	DenyDeviceTrustRequired DenyReason = "DEVICE_TRUST_REQUIRED"
+	// DenyDeviceAdoptionRequired means the session predates device policy and
+	// must bind itself to a device before reaching protected learning.
+	DenyDeviceAdoptionRequired DenyReason = "DEVICE_ADOPTION_REQUIRED"
 	// DenyPrincipalNotFound is produced by the resolution step rather than by
 	// Authorize, but it is a policy outcome and belongs in the same typed set
 	// so monitoring sees one vocabulary of refusal reasons.
@@ -180,6 +199,11 @@ func Authorize(p Principal, c Capability) Decision {
 		switch c {
 		case CapLearningAccess:
 			// Again the class only; the Entitlement decision is separate.
+			return allow()
+		case CapDeviceManagement:
+			// The class only, and always scoped to the caller's own Account by
+			// the handler. Whether this browser may currently exercise it is a
+			// further, session-scoped decision made by AuthorizeSessionDevice.
 			return allow()
 		}
 		return deny(DenyRoleLacksCapability)

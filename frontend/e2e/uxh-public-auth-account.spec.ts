@@ -1,3 +1,4 @@
+import { confirmSeededDevicesFor } from "./device-trust";
 import fs from "fs";
 import path from "path";
 import AxeBuilder from "@axe-core/playwright";
@@ -10,6 +11,8 @@ import {
 } from "@playwright/test";
 import {
   genericTestSlot,
+	installIssuedSession,
+	issuedSessionCookieHeader,
   issueRotatingSession,
   studentFor,
 } from "./rotating-students";
@@ -80,18 +83,7 @@ async function injectSession(
   principal: { email: string; accountID: string },
 ) {
   const session = issueRotatingSession(principal);
-  const origin = new URL(frontendOrigin());
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+	await installIssuedSession(context, session);
   return session;
 }
 
@@ -110,7 +102,7 @@ async function ensureLaunchCatalog(): Promise<void> {
     extraHTTPHeaders: {
       Accept: "application/json, application/problem+json",
       Origin: frontendOrigin(),
-      Cookie: `${session.cookie_name}=${session.cookie_value}`,
+      Cookie: issuedSessionCookieHeader(session),
       "X-CSRF-Token": session.csrf_token,
     },
   });
@@ -144,6 +136,14 @@ async function signInStudent(page: Page, email: string, locale: "ar" | "en" = "e
   await page
     .getByRole("button", { name: locale === "ar" ? /تسجيل الدخول/ : /sign in/i })
     .click();
+  // Signing in from a browser Gradex has not confirmed lands on the device
+  // confirmation screen, not on the dashboard. That is the product's own
+  // journey, and this fixture means "a Student who is signed in and past it".
+  await page.waitForURL(/\/learn\/dashboard|\/device-trust/, { timeout: 30_000 });
+  if (/\/device-trust/.test(page.url())) {
+    confirmSeededDevicesFor(email);
+    await page.goto(`/${locale}/learn/dashboard`);
+  }
   await page.waitForURL(/\/learn\/dashboard/, { timeout: 30_000 });
 }
 

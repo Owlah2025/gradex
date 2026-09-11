@@ -27,7 +27,7 @@ type admissionCommands interface {
 	RegisterStudent(context.Context, identity.StudentRegistration) (identity.VerificationChallenge, error)
 	RequestEmailVerification(context.Context, identity.VerificationRequest) (identity.VerificationChallenge, error)
 	ResendEmailVerificationOTP(ctx context.Context, challengeID, requestID string) (identity.VerificationChallenge, error)
-	VerifyEmailOTP(ctx context.Context, challengeID, code, requestID string) (identity.SessionGrant, error)
+	VerifyEmailOTP(ctx context.Context, challengeID, code, requestID string, device identity.DeviceContext) (identity.SessionGrant, error)
 	// VerifyEmail consumes a pre-OTP emailed link. It stays on this interface
 	// for the length of the legacy window: Gradex is live, and links already in
 	// Student mailboxes when the code flow shipped must keep working until they
@@ -245,19 +245,29 @@ func (h *identityHandlers) consumeVerificationCode(
 	c *gin.Context,
 	request *verificationCodeBody,
 ) {
+	// The browser that proves the code becomes this Student's first trusted
+	// device, so it needs a device credential before the transaction runs.
+	pendingDevice, err := pendingDeviceCredentialFor(c)
+	if err != nil {
+		writeProblem(c, problem.RegistrationUnavailable())
+		return
+	}
 	grant, err := h.service.VerifyEmailOTP(
 		c.Request.Context(),
 		request.ChallengeID,
 		request.Code,
 		requestid.FromContext(c.Request.Context()),
+		deviceContextFrom(c, pendingDevice.digest),
 	)
 	if err != nil {
 		h.writeAdmissionError(c, err)
 		return
 	}
+	pendingDevice.commit(c)
 	clearAnonymousCookie(c)
-	_ = auth.WriteSessionResponse(
-		c.Writer, http.StatusCreated, grant.Session, &grant.Credential, grant.CSRFToken,
+	_ = auth.WriteSessionResponseWithDevice(
+		c.Writer, http.StatusCreated, grant.Session, &grant.Credential,
+		grant.CSRFToken, grant.Device,
 	)
 }
 

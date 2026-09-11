@@ -13,6 +13,8 @@ import {
   ACADEMIC_ONBOARDING_TEST_SLOT,
   ACADEMIC_SKIP_TEST_SLOT,
   ACADEMIC_UNDECLARED_TEST_SLOT,
+	installIssuedSession,
+	issuedSessionCookieHeader,
   issueRotatingSession,
   studentFor,
   type RotatingStudent,
@@ -41,21 +43,10 @@ const anyInstitution = "00000000-0000-0000-0000-000000000000";
 type Session = ReturnType<typeof issueRotatingSession>;
 
 async function attach(context: BrowserContext, session: Session, locale: "ar" | "en" = "en") {
-  const origin = new URL(frontendOrigin());
   await context.addInitScript((selected) => {
     window.localStorage.setItem("gradex.locale", selected);
   }, locale);
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+	await installIssuedSession(context, session);
 }
 
 async function apiFor(session: Session): Promise<APIRequestContext> {
@@ -64,7 +55,7 @@ async function apiFor(session: Session): Promise<APIRequestContext> {
     extraHTTPHeaders: {
       Accept: "application/json, application/problem+json",
       Origin: frontendOrigin(),
-      Cookie: `${session.cookie_name}=${session.cookie_value}`,
+      Cookie: issuedSessionCookieHeader(session),
       "X-CSRF-Token": session.csrf_token,
     },
   });

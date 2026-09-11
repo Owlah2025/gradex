@@ -3,11 +3,22 @@
 import Hls from "hls.js";
 import { AlertCircle, Loader2, Play } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { requestPlayback, type PlaybackAuthorization } from "@/lib/api/learning";
+import {
+  heartbeatPlayback,
+  releasePlayback,
+  requestPlayback,
+  type PlaybackAuthorization,
+} from "@/lib/api/learning";
 import { currentCSRFToken } from "@/lib/identity/session";
 import type { Dictionary } from "@/lib/i18n/dictionaries/en";
 import { cn } from "@/lib/utils";
 import { CONTROLS_IDLE_MS, controlsVisible, pointerHidden } from "./controls-visibility";
+import {
+  blockIsRetryable,
+  heartbeatIntervalMS,
+  playbackBlockOf,
+  type PlaybackBlock,
+} from "./playback-conflict";
 import {
   createSurfaceGesture,
   gestureClick,
@@ -87,6 +98,16 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
 
   const [playback, setPlayback] = useState<PlaybackAuthorization | null>(null);
   const [failed, setFailed] = useState(false);
+  /**
+   * Why protected playback is stopped, when it is stopped for a reason the
+   * Student can act on. Distinct from `failed`, which means this Lesson has no
+   * playable media at all.
+   */
+  const [blocked, setBlocked] = useState<PlaybackBlock | null>(null);
+  // Bumped to ask for a fresh authorization. A blocked player never retries on
+  // its own: the account may legitimately be playing on the other device, and a
+  // background retry loop would be this browser fighting that one for the slot.
+  const [attempt, setAttempt] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -138,15 +159,88 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
     let active = true;
     setPlayback(null);
     setFailed(false);
+    setBlocked(null);
     void requestPlayback(lessonID, locale, currentCSRFToken())
       .then((authorization) => {
         if (active) setPlayback(authorization);
       })
-      .catch(() => {
-        if (active) setFailed(true);
+      .catch((error: unknown) => {
+        if (!active) return;
+        // A playback-concurrency or device-trust refusal is a state the Student
+        // can act on, and is shown as one. Everything else keeps the existing
+        // uniform "no playable media" dead end.
+        const block = playbackBlockOf(error);
+        if (block) setBlocked(block);
+        else setFailed(true);
       });
     return () => { active = false; };
-  }, [lessonID, locale]);
+  }, [lessonID, locale, attempt]);
+
+  /**
+   * The playback heartbeat.
+   *
+   * This is not telemetry. It is the renewal that keeps this player's claim on
+   * the account's single protected-playback slot, and its failure is how a
+   * player learns it has lost that claim — because the Student started the
+   * lesson on their other device, because another tab took over, because the
+   * device was removed, or because their access ended while they were watching.
+   * In every one of those cases the correct response is to stop, not to retry:
+   * a player that kept beating would be fighting a legitimate playback
+   * elsewhere for the same slot.
+   *
+   * Already-issued media segment URLs are signed and remain fetchable until
+   * they expire, so stopping here is cooperative rather than absolute. It is
+   * what makes the first-party player behave correctly; the authoritative half
+   * is that the other device could not have *started* while this lease was
+   * alive.
+   */
+  useEffect(() => {
+    const session = playback?.playback_session;
+    if (!session) return;
+    const interval = heartbeatIntervalMS(playback?.heartbeat?.interval_seconds);
+    let active = true;
+
+    const timer = window.setInterval(() => {
+       void heartbeatPlayback(session, locale, currentCSRFToken()).catch(
+         (error: unknown) => {
+           if (!active) return;
+           const block = playbackBlockOf(error);
+	          // Every heartbeat failure means authority could not be established.
+	          // Stop before classifying the message: authentication, entitlement,
+	          // device revocation, Redis failure, and network loss all fail closed.
+           videoElement?.pause();
+           setPlaying(false);
+           setPlayback(null);
+	          if (block) setBlocked(block);
+	          else setFailed(true);
+         },
+       );
+    }, interval);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [playback, locale, videoElement]);
+
+  /**
+   * Hands the slot back when this player goes away.
+   *
+   * Best-effort, and deliberately so: the lease carries its own TTL, so a
+   * release that never arrives — a crashed tab, a closed laptop — costs the
+   * Student's other device a short wait rather than stranding the slot. What
+   * this buys is the common case, where leaving a lesson frees playback
+   * immediately instead of a minute later.
+   */
+  useEffect(() => {
+    const session = playback?.playback_session;
+    if (!session) return;
+    return () => {
+      void releasePlayback(session, locale, currentCSRFToken()).catch(() => {
+        // A failed release is not worth surfacing: the TTL covers it.
+      });
+    };
+  }, [playback, locale]);
 
   useEffect(() => {
     const video = videoElement;
@@ -462,6 +556,55 @@ export function LessonPlayer({ lessonID, locale, labels, initialPositionSeconds 
   // A Lesson with no playable media is a real dead end, so it is stated in the media's own place
   // rather than as a line of text where a player used to be — the surrounding Lesson, its contents
   // and its previous/next controls all remain usable.
+  /**
+   * Playback is stopped for a reason the Student can act on.
+   *
+   * Rendered in the media's own place, like the unavailable state, so the
+   * surrounding Lesson, its contents, and its navigation all stay usable. There
+   * is no automatic retry behind this: the account may legitimately be playing
+   * on the other device, and a background retry loop would be this browser
+   * fighting that one for the same slot.
+   */
+  if (blocked) {
+    const message =
+      blocked === "ANOTHER_DEVICE"
+        ? { title: labels.blockedAnotherDeviceTitle, body: labels.blockedAnotherDeviceBody }
+        : blocked === "LEASE_LOST"
+          ? { title: labels.blockedLeaseLostTitle, body: labels.blockedLeaseLostBody }
+          : blocked === "COORDINATION_UNAVAILABLE"
+            ? { title: labels.blockedUnavailableTitle, body: labels.blockedUnavailableBody }
+            : { title: labels.blockedDeviceTrustTitle, body: labels.blockedDeviceTrustBody };
+    return (
+      <div
+        role="alert"
+        data-testid="lesson-playback-blocked"
+        data-block={blocked}
+        className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-lg border border-border bg-muted px-6 text-center"
+      >
+        <AlertCircle aria-hidden className="size-6 text-muted-foreground" />
+        <p className="text-sm font-semibold text-foreground">{message.title}</p>
+        <p className="max-w-md text-sm text-muted-foreground">{message.body}</p>
+        {blockIsRetryable(blocked) ? (
+          <button
+            type="button"
+            data-testid="lesson-playback-retry"
+            onClick={() => setAttempt((value) => value + 1)}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background"
+          >
+            {labels.blockedRetry}
+          </button>
+        ) : (
+          <a
+            data-testid="lesson-playback-devices"
+            href={`/${locale}/learn/security`}
+            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background"
+          >
+            {labels.blockedManageDevices}
+          </a>
+        )}
+      </div>
+    );
+  }
   if (failed) {
     return (
       <div

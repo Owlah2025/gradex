@@ -1,3 +1,4 @@
+import { completeDeviceTrustIfRequired } from "./device-trust";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { execFileSync } from "child_process";
 import fs from "fs";
@@ -226,6 +227,12 @@ async function authenticateExpiredStudent(context: BrowserContext): Promise<Sess
   expect(loginResult.status).toBe(201);
   expect(typeof loginResult.body.csrf_token).toBe("string");
   expect(loginResult.body.csrf_token.length).toBeGreaterThan(0);
+
+  // A browser Gradex has not confirmed holds a narrowed session. This fixture
+  // means "a signed-in Student whose access has expired", so it finishes the
+  // confirmation the product asks for before asserting what expiry withholds.
+  completeDeviceTrustIfRequired(
+    page, "student-expired@example.test", loginResult.body?.device_trust, new Date());
 
   const cookies = await context.cookies();
   await page.close();

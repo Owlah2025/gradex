@@ -21,6 +21,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/httpapi"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -487,7 +488,7 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building test storage client: %v", err)
 	}
-	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter)
+	mediaFoundation, err := buildMediaFoundation(cfg, pool, storageClient, pf.PreviewRateLimiter, pf.Playback)
 	if err != nil {
 		t.Fatalf("building test media foundation: %v", err)
 	}
@@ -558,6 +559,18 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		{method: "POST", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/request-changes"},
 		{method: "POST", path: "/api/v1/admin/review/courses/:id/revisions/:revisionId/preview/:lessonId"},
 	}
+	requiredDeviceMutationRoutes := []struct {
+		method string
+		path   string
+	}{
+		{method: "POST", path: "/api/v1/me/devices/trust"},
+		{method: "POST", path: "/api/v1/me/devices/trust/resend"},
+		{method: "POST", path: "/api/v1/me/devices/adopt"},
+		{method: "DELETE", path: "/api/v1/me/devices/:deviceId"},
+		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/:deviceId/revocations"},
+		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/revocations"},
+		{method: "POST", path: "/api/v1/admin/students/:accountId/devices/cooldown-resets"},
+	}
 
 	surfaceMounted := make(map[string]bool)
 	d5Mounted := make(map[string]bool)
@@ -601,7 +614,6 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 			t.Fatalf("CRITICAL MISCONFIGURATION: Production router built by cmd/api is missing D5 route '%s'", key)
 		}
 	}
-
 	requiredD7Routes := []string{
 		"POST /api/v1/media/uploads",
 		"POST /api/v1/media/uploads/:id/completions",
@@ -628,6 +640,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	for _, route := range requiredD8Routes {
 		if !mounted[route] {
 			t.Fatalf("production router is missing D8 route %q", route)
+		}
+	}
+	for _, route := range requiredDeviceMutationRoutes {
+		if !mounted[route.method+" "+route.path] {
+			t.Fatalf("production router is missing device mutation route %s %s", route.method, route.path)
 		}
 	}
 
@@ -674,7 +691,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		},
 	}
 
-	for _, route := range requiredD5Routes {
+	mutationSecurityRoutes := append(append([]struct {
+		method string
+		path   string
+	}{}, requiredD5Routes...), requiredDeviceMutationRoutes...)
+	for _, route := range mutationSecurityRoutes {
 		if route.method == http.MethodGet {
 			continue
 		}
@@ -707,6 +728,12 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRequiredSchemaVersionIncludesStudentDeviceColumns(t *testing.T) {
+	if got := requiredSchemaVersion(nil); got != db.StudentTrustedDeviceSchemaVersion {
+		t.Fatalf("required schema = %d, want %d", got, db.StudentTrustedDeviceSchemaVersion)
 	}
 }
 

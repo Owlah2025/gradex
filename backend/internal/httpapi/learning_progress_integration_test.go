@@ -70,6 +70,7 @@ func (a learningIntegrationAuth) UserFromRequest(c *gin.Context) (string, error)
 		session = "test-session-" + a.studentID
 	}
 	c.Set("authenticated_session", identity.Session{ID: session, AccountID: a.studentID, State: identity.SessionActive})
+	setTestTrustedDevice(c)
 	return a.studentID, nil
 }
 
@@ -226,6 +227,7 @@ func newLearningIntegrationFixtureWith(t *testing.T, options learningFixtureOpti
 	delivery, err := media.NewDeliveryService(media.DeliveryOptions{
 		DB: pool, Store: store, Evaluator: recordingEvaluator,
 		SignatureLifetime: time.Minute, BuyerTagKey: bytes.Repeat([]byte{0x44}, 32), Now: f.clock.Now,
+		Playback: testPlaybackCoordinator(t),
 	})
 	if err != nil {
 		t.Fatalf("constructing production media delivery: %v", err)

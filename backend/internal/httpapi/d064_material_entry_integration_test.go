@@ -87,6 +87,7 @@ func TestD064ProductionMediaRouterRedirectsThenRereadsAuthority(t *testing.T) {
 	delivery, err := media.NewDeliveryService(media.DeliveryOptions{
 		DB: f.pool, Store: f.store, Evaluator: f.evaluator,
 		SignatureLifetime: time.Minute, BuyerTagKey: []byte("01234567890123456789012345678901"), Now: f.clock.Now,
+		Playback: testPlaybackCoordinator(t),
 	})
 	if err != nil {
 		t.Fatalf("creating D-064 delivery: %v", err)

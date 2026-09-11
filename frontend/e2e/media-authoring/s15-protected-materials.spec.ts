@@ -4,7 +4,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { test, expect, request as playwrightRequest, type APIRequestContext, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { issueRotatingSession } from "../rotating-students";
+import { installIssuedSession, issuedSessionCookieHeader, issueRotatingSession } from "../rotating-students";
 import { queryLearningState } from "../../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../../src/lib/api/e2e-ports";
 import { captureFailureDiagnostic } from "./diagnostics";
@@ -44,7 +44,7 @@ function apiContextFor(session: Session): Promise<APIRequestContext> {
     extraHTTPHeaders: {
       Accept: "application/json, application/problem+json",
       Origin: frontendOrigin(),
-      Cookie: `${session.cookie_name}=${session.cookie_value}`,
+      Cookie: issuedSessionCookieHeader(session),
       "X-CSRF-Token": session.csrf_token,
     },
   });
@@ -53,19 +53,10 @@ function apiContextFor(session: Session): Promise<APIRequestContext> {
 async function signedInContext(browser: Browser, account: typeof INSTRUCTOR, locale = "en"): Promise<BrowserContext> {
   const context = await browser.newContext({ locale: locale === "ar" ? "ar-EG" : "en-US" });
   const session = issueRotatingSession(account);
-  const origin = new URL(frontendOrigin());
   await context.addInitScript((selectedLocale) => {
     window.localStorage.setItem("gradex.locale", selectedLocale);
   }, locale);
-  await context.addCookies([{
-    name: session.cookie_name,
-    value: session.cookie_value,
-    domain: origin.hostname,
-    path: "/",
-    httpOnly: true,
-    secure: true,
-    sameSite: "Strict",
-  }]);
+  await installIssuedSession(context, session);
   return context;
 }
 

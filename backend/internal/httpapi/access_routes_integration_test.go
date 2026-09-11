@@ -102,6 +102,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustNotApplicable,
 		},
 	}
 	instView := identity.SessionView{
@@ -113,6 +114,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustNotApplicable,
 		},
 	}
 	studentView := identity.SessionView{
@@ -124,6 +126,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustEstablished,
 		},
 	}
 	otherStudentView := identity.SessionView{
@@ -135,6 +138,7 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 			AuthenticatedAt:   now,
 			IdleExpiresAt:     now.Add(24 * time.Hour),
 			AbsoluteExpiresAt: now.Add(24 * time.Hour),
+			DeviceTrust:       identity.DeviceTrustEstablished,
 		},
 	}
 

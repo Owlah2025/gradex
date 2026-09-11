@@ -1,11 +1,22 @@
 # Gradex Launch Status
 
-> **2026-09-11 — D-104 REVIEW FOLLOW-UP IMPLEMENTED, PENDING INDEPENDENT RE-REVIEW.** Follow-up
+> **2026-09-11 — COMBINED BUNDLES/OFFERS + D-105 RELEASE CANDIDATE PREPARATION.** The candidate is
+> based on independently approved Bundles/Offers head `8ee8d42215fd1f5671499a2e370e909ca9a4aea2`
+> and integrates the independently reviewed D-105 head
+> `e4993d639dbb55dba24404ef9be99d39a1b37e8a`. Bundles retains migration
+> `0036_bundles_and_offers`; D-105 is renumbered without behavior change to
+> `0037_student_trusted_devices`. The exact combined candidate requires fresh independent approval
+> before push or production deployment. Production has not been touched.
+>
+> ---
+
+> **2026-09-11 — D-104 REVIEW FOLLOW-UP IMPLEMENTED AND INDEPENDENTLY APPROVED.** Follow-up
 > commits after reviewed head `f6e1f883317e6d8681986c385224aa6f1136d391` address the independent
 > B1/H1/M1–M5 findings: cleared-offer rollback evidence, database-enforced Bundle purchase snapshot
 > immutability, draft/publication gates, the Admin eligible-Course picker, purchase-history retry
-> states, exact entitlement-source matching, and focused accessibility proof. No approval is implied;
-> production, deployment, and push remain unauthorized.
+> states, exact entitlement-source matching, and focused accessibility proof. The resulting exact
+> head `8ee8d42215fd1f5671499a2e370e909ca9a4aea2` received independent approval; that approval does not
+> approve a later combined candidate.
 
 
 > **2026-09-10 — D-104 IMPLEMENTED, PENDING INDEPENDENT REVIEW.** Bundles V1 and Catalogue Offers V1
@@ -19,6 +30,29 @@
 > Reviewer status is **PENDING / UNASSIGNED**, so this work is not approved and does not change the
 > independently reviewed historical range recorded below. Implementation detail is in
 > [`2026-09-09-bundles-offers-v1-design.md`](../superpowers/specs/2026-09-09-bundles-offers-v1-design.md).
+> **2026-09-11 — Student device security INDEPENDENTLY REVIEWED PASS.**
+> Trusted devices (2 per Student, email-OTP confirmed, 24h
+> replacement cooldown) and one protected-video playback lease per Student account were built from
+> exact base `ef733f758cf7d58e2689898a70715e2fd2102e24` on `feature/student-device-security`.
+>
+> This work is authorized by [D-105](../DECISIONS.md#d-105--student-device-trust-and-single-protected-playback-are-student-only-controls)
+> and is outside the D-089 `MVP-Fxx` queue. The builder has not self-approved it. A recorded
+> independent reviewer verdict covered exact head
+> `e4993d639dbb55dba24404ef9be99d39a1b37e8a`; a later combined candidate still requires its own
+> exact-range review before merging or deploying.
+>
+> It adds the single additive migration `0037_student_trusted_devices`, following
+> `0036_bundles_and_offers`. The migration renumber is integration-only; neither feature depends on
+> the other. No production, deployment, or push action is authorized until final gates and
+> independent review are green.
+>
+> Concurrent-playback enforcement is authoritative at playback authorization and manifest
+> acquisition, and cooperative thereafter through the first-party player heartbeat. Already-issued
+> direct segment presigns cannot currently be server-revoked mid-stream; the reviewed VOD
+> HLS/presigned-segment architecture was deliberately left unchanged. This is not cryptographic or
+> DRM-grade instantaneous revocation and must not be described as such. Implementation detail,
+> security reasoning, and the full limitation list are in
+> [`2026-09-10-student-device-security-design.md`](../superpowers/specs/2026-09-10-student-device-security-design.md).
 >
 > ---
 

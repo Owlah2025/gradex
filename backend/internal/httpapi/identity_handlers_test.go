@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 )
@@ -47,7 +48,7 @@ func (f *fakeAdmissionService) ResendEmailVerificationOTP(
 }
 
 func (f *fakeAdmissionService) VerifyEmailOTP(
-	context.Context, string, string, string,
+	context.Context, string, string, string, identity.DeviceContext,
 ) (identity.SessionGrant, error) {
 	return f.grant, f.codeErr
 }
@@ -110,6 +111,12 @@ func admissionHandlerRouter(t *testing.T, service *fakeAdmissionService) *gin.En
 		var request verificationConsumptionBody
 		if bindStrictJSON(c, &request, verificationConsumptionBodyLimit) {
 			handlers.consumeVerification(c, &request)
+		}
+	})
+	router.POST("/verify-code", func(c *gin.Context) {
+		var request verificationCodeBody
+		if bindStrictJSON(c, &request, verificationConsumptionBodyLimit) {
+			handlers.consumeVerificationCode(c, &request)
 		}
 	})
 	return router
@@ -294,6 +301,20 @@ func TestVerificationConsumptionReturnsSuccessWithoutSession(t *testing.T) {
 	}
 	if len(response.Result().Cookies()) != 0 {
 		t.Fatal("verification issued a session cookie")
+	}
+}
+
+func TestFailedVerificationCodeDoesNotWriteADeviceCookie(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/verify-code", strings.NewReader(
+		`{"challenge_id":"00000000-0000-4000-8000-000000000001","code":"123456"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	admissionHandlerRouter(t, &fakeAdmissionService{codeErr: identity.ErrOTPInvalid}).ServeHTTP(response, request)
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == auth.DeviceCookieName {
+			t.Fatal("failed verification wrote a device cookie")
+		}
 	}
 }
 

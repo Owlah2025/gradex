@@ -27,6 +27,49 @@ type authenticatedSessionResponse struct {
 	CSRFToken              string `json:"csrf_token"`
 	IdleExpiresAt          string `json:"idle_expires_at"`
 	AbsoluteExpiresAt      string `json:"absolute_expires_at"`
+
+	// Device reports what this browser must do before it holds ordinary
+	// Student authority. It is present only when device policy applies, and it
+	// deliberately carries no device identifier, no credential, and no code —
+	// only the state, and the masked mailbox the Student is waiting on.
+	Device *SessionDeviceResponse `json:"device_trust,omitempty"`
+}
+
+// SessionDeviceResponse is the browser-facing device-trust state.
+type SessionDeviceResponse struct {
+	State     string                  `json:"state"`
+	Admission string                  `json:"admission,omitempty"`
+	Challenge *SessionDeviceChallenge `json:"challenge,omitempty"`
+}
+
+// SessionDeviceChallenge is what a browser awaiting trust needs to render the
+// code screen: which mailbox, and how long it has.
+type SessionDeviceChallenge struct {
+	ChallengeID       string `json:"challenge_id"`
+	MaskedEmail       string `json:"masked_email"`
+	ExpiresAt         string `json:"expires_at"`
+	ResendAvailableAt string `json:"resend_available_at"`
+}
+
+// DeviceResponseFor renders the device half of a session response.
+func DeviceResponseFor(state identity.SessionDeviceTrust, admission *identity.DeviceAdmissionResult) *SessionDeviceResponse {
+	if state == "" || state == identity.DeviceTrustNotApplicable {
+		return nil
+	}
+	response := &SessionDeviceResponse{State: string(state)}
+	if admission == nil {
+		return response
+	}
+	response.Admission = string(admission.Admission)
+	if admission.Challenge != nil {
+		response.Challenge = &SessionDeviceChallenge{
+			ChallengeID:       admission.Challenge.ChallengeID,
+			MaskedEmail:       admission.Challenge.MaskedEmail,
+			ExpiresAt:         admission.Challenge.ExpiresAt.UTC().Format(time.RFC3339),
+			ResendAvailableAt: admission.Challenge.ResendAvailableAt.UTC().Format(time.RFC3339),
+		}
+	}
+	return response
 }
 
 // WriteSessionResponse is the reviewed browser-secret egress boundary. It
@@ -39,7 +82,22 @@ func WriteSessionResponse(
 	credential *config.Secret,
 	csrfToken config.Secret,
 ) error {
+	return WriteSessionResponseWithDevice(w, status, session, credential, csrfToken, nil)
+}
+
+// WriteSessionResponseWithDevice is the same boundary with the device-trust
+// state attached. Kept as a second entry point so every existing caller keeps
+// its exact behavior and only the two device-aware routes opt in.
+func WriteSessionResponseWithDevice(
+	w http.ResponseWriter,
+	status int,
+	session identity.AuthenticatedSession,
+	credential *config.Secret,
+	csrfToken config.Secret,
+	admission *identity.DeviceAdmissionResult,
+) error {
 	body, err := json.Marshal(authenticatedSessionResponse{
+		Device:                 DeviceResponseFor(session.DeviceTrust, admission),
 		Status:                 "AUTHENTICATED",
 		Role:                   session.Role,
 		DisplayName:            session.DisplayName,
@@ -63,6 +121,63 @@ func WriteSessionResponse(
 	w.WriteHeader(status)
 	_, err = w.Write(body)
 	return err
+}
+
+// The trusted-device cookie.
+//
+// It is written here, beside the session cookie, because this file is the
+// reviewed browser-secret egress boundary: the one place a config.Secret is
+// unwrapped on its way to a client. The device credential is a browser secret
+// like the session credential — unguessable, long-lived, and useless to anyone
+// who does not hold it — so it belongs to the same boundary rather than to a
+// second Expose() site in an outward-facing package.
+//
+// Cookie semantics, and why each one:
+//
+//   - __Host- prefix. The browser refuses the cookie unless it is Secure,
+//     Path=/, and carries no Domain attribute. That last part is the valuable
+//     one: no subdomain, including one an attacker manages to stand up, can set
+//     or overwrite this Account's device credential.
+//   - HttpOnly. The frontend never reads this value — every decision that
+//     depends on it is made server-side from the digest — so exposing it to
+//     script would buy nothing and would hand any XSS a copy of a credential
+//     that survives sign-out. This is the deliberate difference from the CSRF
+//     token, which the browser must read and therefore is not a cookie.
+//   - SameSite=Strict, matching the session cookie. Every request that consults
+//     the device credential is a same-origin fetch from the application itself.
+//   - A long Max-Age. Without one this would be a browser-session cookie, and
+//     every browser restart would look like a brand-new device and burn one of
+//     the Student's two slots. 400 days is the ceiling Chrome enforces, so
+//     asking for more would silently become less.
+//
+// What it is not: authentication. Presenting it proves nothing about who is
+// asking and grants no capability. Every protected request is authorized by the
+// session cookie exactly as before; this value only answers "which of your
+// browsers is this".
+const deviceCookieMaxAge = int(400 * 24 * time.Hour / time.Second)
+
+// WriteDeviceCookie hands a freshly minted device credential to the browser.
+// Callers invoke it only once the digest has been recorded against a device
+// row, so a browser never holds a credential that names nothing.
+func WriteDeviceCookie(w http.ResponseWriter, credential config.Secret) {
+	http.SetCookie(w, &http.Cookie{
+		Name: DeviceCookieName, Value: credential.Expose(), Path: "/",
+		MaxAge: deviceCookieMaxAge,
+		Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
+}
+
+// ClearDeviceCookie expires the credential in this browser.
+//
+// Used when the Student removes the device they are currently using: leaving a
+// credential behind that names a revoked record would make the next login look
+// like a returning device to the browser and like an unknown one to the server.
+func ClearDeviceCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name: DeviceCookieName, Value: "", Path: "/", MaxAge: -1,
+		Expires: time.Unix(1, 0).UTC(),
+		Secure:  true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+	})
 }
 
 // ClearSessionCookie expires the host cookie. Callers invoke this only after

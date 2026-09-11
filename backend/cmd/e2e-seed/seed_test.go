@@ -58,6 +58,8 @@ func TestMain(m *testing.M) {
 	var lessonIDParam string
 	var courseIDParam string
 	var issueSessionFlag bool
+	var trustDevicesFlag bool
+	var deviceSlotParam int
 	var issueLoadtestSessionsFlag bool
 	var issueBetaLoadtestSessionsFlag bool
 	var loadtestFixtures bool
@@ -81,6 +83,8 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&courseIDParam, "course", "", "Course ID for query")
 	flag.StringVar(&invitationIDParam, "invitation", "", "Invitation ID for query")
 	flag.BoolVar(&issueSessionFlag, "issue-session", false, "Issue a production-valid session for a seeded Student and emit its cookie and CSRF token")
+	flag.IntVar(&deviceSlotParam, "device-slot", 0, "Which of the Student's synthetic browsers to issue the session for")
+	flag.BoolVar(&trustDevicesFlag, "trust-devices", false, "Confirm a seeded Student's pending trusted devices and bind their narrowed sessions")
 	flag.BoolVar(&issueLoadtestSessionsFlag, "issue-loadtest-sessions", false, "Issue production-valid sessions for the disposable load-test Students")
 	flag.BoolVar(&issueBetaLoadtestSessionsFlag, "issue-beta-loadtest-sessions", false, "Issue production-valid sessions for the limited-paid-beta fixture")
 	flag.BoolVar(&loadtestFixtures, "loadtest", false, "Add the disposable LG-019 load-test population and emit its non-secret manifest")
@@ -223,6 +227,21 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if trustDevicesFlag {
+		if emailParam == "" {
+			log.Fatalf("-trust-devices requires -email")
+		}
+		pool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for device confirmation: %v", err)
+		}
+		defer pool.Close()
+		if err := trustPendingDevicesFor(ctx, pool, emailParam); err != nil {
+			log.Fatalf("confirming devices: %v", err)
+		}
+		os.Exit(0)
+	}
+
 	if issueSessionFlag {
 		if emailParam == "" {
 			log.Fatalf("-issue-session requires -email")
@@ -234,7 +253,7 @@ func TestMain(m *testing.M) {
 				log.Fatalf("-use-registration-password requires GRADEX_E2E_REGISTRATION_PASSWORD")
 			}
 		}
-		session, err := issueSession(ctx, targetDSN, emailParam, sessionPassword)
+		session, err := issueSession(ctx, targetDSN, emailParam, sessionPassword, deviceSlotParam)
 		if err != nil {
 			log.Fatalf("issuing session: %v", err)
 		}
@@ -1103,6 +1122,9 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	// its own Student so no execution inherits another's playback or Progress budget — or its
 	// Progress rows.
 	if err := seedRotatingStudents(ctx, tx, courseID, passwordHash.Expose(), now, activeExpiry, expiredExpiry); err != nil {
+		return err
+	}
+	if err := seedDeviceSecurityStudents(ctx, tx, courseID, passwordHash.Expose(), now, activeExpiry); err != nil {
 		return err
 	}
 

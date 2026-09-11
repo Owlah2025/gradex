@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { queryLearningState, type LearningStateSnapshot } from "../src/lib/api/e2e-progress";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 import {
+	installIssuedSession as installSessionCookies,
   issueRotatingSession,
   queryEmailVerificationAction,
   queryInvitationToken,
@@ -26,18 +27,7 @@ async function installIssuedSession(
   identity: { email: string; accountID: string },
 ) {
   const session = issueRotatingSession(identity);
-  const origin = new URL(frontendOrigin());
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+	await installSessionCookies(context, session);
   return session;
 }
 

@@ -17,7 +17,7 @@ func TestPlaybackWatermarkIsIssuedForTheAuthenticatedStudent(t *testing.T) {
 	f := newDeliveryFixture(t)
 
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback: %v", err)
@@ -51,13 +51,13 @@ func TestPlaybackWatermarkDistinguishesTwoStudentsOnOneLesson(t *testing.T) {
 	f.seedGrantFor(other, otherEmail)
 
 	mine, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback for the first Student: %v", err)
 	}
 	theirs, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: other, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: other, DeviceID: testDeviceID(other), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback for the second Student: %v", err)
@@ -79,13 +79,13 @@ func TestPlaybackWatermarkCodeIsStableAcrossSessions(t *testing.T) {
 	f := newDeliveryFixture(t)
 
 	first, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing the first playback: %v", err)
 	}
 	second, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing the second playback: %v", err)
@@ -102,7 +102,7 @@ func TestSerializedPlaybackAuthorizationLeaksNoInternalIdentifiers(t *testing.T)
 	f := newDeliveryFixture(t)
 
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: f.student, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: f.student, DeviceID: testDeviceID(f.student), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err != nil {
 		t.Fatalf("issuing playback: %v", err)
@@ -186,7 +186,7 @@ func TestDeniedPlaybackIssuesNoWatermark(t *testing.T) {
 	}
 
 	issued, err := f.delivery.IssuePlayback(f.ctx, PlaybackRequest{
-		StudentID: stranger, LessonID: f.lesson, AssetVersionID: f.video,
+		StudentID: stranger, DeviceID: testDeviceID(stranger), LessonID: f.lesson, AssetVersionID: f.video,
 	})
 	if err == nil {
 		t.Fatal("an unentitled Student received playback")

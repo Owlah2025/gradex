@@ -111,7 +111,7 @@ type dbSessionRepo struct {
 	pool *pgxpool.Pool
 }
 
-func (r dbSessionRepo) Resolve(ctx context.Context, sessionToken string, kind identity.CredentialUseKind, rawIP string) (identity.SessionView, error) {
+func (r dbSessionRepo) Resolve(context.Context, identity.SessionResolutionRequest) (identity.SessionView, error) {
 	return identity.SessionView{}, errors.New("not implemented")
 }
 
@@ -148,6 +148,7 @@ func buildTestRouterWithAccount(t *testing.T, pool *pgxpool.Pool, accountID stri
 				AuthenticatedAt:   now,
 				IdleExpiresAt:     now.Add(24 * time.Hour),
 				AbsoluteExpiresAt: now.Add(24 * time.Hour),
+				DeviceTrust:       identity.DeviceTrustNotApplicable,
 			},
 		},
 	}

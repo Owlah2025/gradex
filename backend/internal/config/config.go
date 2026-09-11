@@ -346,7 +346,57 @@ func (s SessionSettings) HighestRiskRecentAuthWindow() time.Duration {
 	return s.highestRiskRecentAuthWindow
 }
 func (s SessionSettings) StaleUseWindow() time.Duration { return s.staleUseWindow }
-func (s SessionSettings) CSRFKey() Secret               { return s.csrfKey }
+
+// StudentDeviceSettings is the whole tunable surface of Student device policy
+// and protected-playback concurrency.
+//
+// Every value is centralized here rather than being a constant in the package
+// that uses it, so the policy can be adjusted per environment without a code
+// change, and so a misconfiguration is caught once, at startup, instead of
+// producing a subtly different rule in each consumer.
+type StudentDeviceSettings struct {
+	trustedDeviceLimit  int
+	replacementCooldown time.Duration
+	playbackLeaseTTL    time.Duration
+	playbackHeartbeat   time.Duration
+}
+
+func (s StudentDeviceSettings) TrustedDeviceLimit() int            { return s.trustedDeviceLimit }
+func (s StudentDeviceSettings) ReplacementCooldown() time.Duration { return s.replacementCooldown }
+func (s StudentDeviceSettings) PlaybackLeaseTTL() time.Duration    { return s.playbackLeaseTTL }
+func (s StudentDeviceSettings) PlaybackHeartbeat() time.Duration   { return s.playbackHeartbeat }
+
+// Validate refuses a configuration that cannot work, rather than accepting it
+// and producing playback that dies mid-video or a limit that locks Students
+// out. It is called from Load, so an invalid value stops the process at
+// startup instead of surfacing as a support ticket.
+func (s StudentDeviceSettings) Validate() error {
+	if s.trustedDeviceLimit < 1 {
+		return errors.New("STUDENT_TRUSTED_DEVICE_LIMIT must be at least 1")
+	}
+	if s.trustedDeviceLimit > 10 {
+		return errors.New("STUDENT_TRUSTED_DEVICE_LIMIT above 10 defeats the policy")
+	}
+	if s.replacementCooldown < 0 {
+		return errors.New("STUDENT_DEVICE_REPLACEMENT_COOLDOWN cannot be negative")
+	}
+	if s.replacementCooldown > 30*24*time.Hour {
+		return errors.New("STUDENT_DEVICE_REPLACEMENT_COOLDOWN above 30 days would lock Students out")
+	}
+	if s.playbackHeartbeat <= 0 {
+		return errors.New("STUDENT_PLAYBACK_HEARTBEAT_INTERVAL must be positive")
+	}
+	// Two missed heartbeats have to be survivable, or ordinary jitter on a
+	// mobile network is indistinguishable from a closed tab.
+	if s.playbackLeaseTTL < 2*s.playbackHeartbeat {
+		return errors.New("STUDENT_PLAYBACK_LEASE_TTL must allow at least two heartbeat intervals")
+	}
+	if s.playbackLeaseTTL > 10*time.Minute {
+		return errors.New("STUDENT_PLAYBACK_LEASE_TTL above ten minutes would strand the account's playback slot")
+	}
+	return nil
+}
+func (s SessionSettings) CSRFKey() Secret { return s.csrfKey }
 
 // Enabled reports whether the real authenticated-session boundary is
 // configured. Development may omit it while retaining the fake auth seam;
@@ -405,7 +455,8 @@ type Config struct {
 	httpIdleTimeout  time.Duration
 	shutdownTimeout  time.Duration
 
-	sessions SessionSettings
+	sessions      SessionSettings
+	studentDevice StudentDeviceSettings
 
 	databaseURL Secret
 	redis       RedisSettings
@@ -490,6 +541,9 @@ func (c *Config) HTTPIdleTimeout() time.Duration  { return c.httpIdleTimeout }
 func (c *Config) ShutdownTimeout() time.Duration  { return c.shutdownTimeout }
 
 func (c *Config) Sessions() SessionSettings { return c.sessions }
+
+// StudentDevices is the trusted-device and playback-concurrency policy.
+func (c *Config) StudentDevices() StudentDeviceSettings { return c.studentDevice }
 
 func (c *Config) DatabaseURL() Secret  { return c.databaseURL }
 func (c *Config) Redis() RedisSettings { return c.redis }
@@ -582,6 +636,17 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 			requestTimeout:          p.duration("LOGIN_REQUEST_TIMEOUT", DefaultLoginRequestTimeout),
 		},
 
+		studentDevice: StudentDeviceSettings{
+			trustedDeviceLimit:  int(p.integer("STUDENT_TRUSTED_DEVICE_LIMIT", 2)),
+			replacementCooldown: p.duration("STUDENT_DEVICE_REPLACEMENT_COOLDOWN", 24*time.Hour),
+			// 75s and 25s give three heartbeats of headroom before a lease
+			// lapses, so a Student on a patchy connection keeps watching while
+			// a closed tab still frees the account's slot inside about a
+			// minute. Both are published to the player rather than hard-coded
+			// in the bundle, so changing either here changes live behavior.
+			playbackLeaseTTL:  p.duration("STUDENT_PLAYBACK_LEASE_TTL", 75*time.Second),
+			playbackHeartbeat: p.duration("STUDENT_PLAYBACK_HEARTBEAT_INTERVAL", 25*time.Second),
+		},
 		sessions: SessionSettings{
 			student: SessionWindow{
 				idleExpiry:     p.duration("STUDENT_SESSION_IDLE_EXPIRY", 7*24*time.Hour),
@@ -1005,6 +1070,13 @@ func validateProductionEmail(in emailSettingsInput, settings EmailSettings) erro
 func (c *Config) validate(p *parser) {
 	if !c.environment.Valid() {
 		p.errf("APP_ENV must be one of development, staging, production; got %q", c.environment)
+	}
+	// Device and playback policy fails the process at startup rather than
+	// producing a limit that locks Students out or a lease that lapses
+	// mid-video. There is deliberately no "fall back to the default" branch: a
+	// deployment that sets a value must get the value it set or an error.
+	if err := c.studentDevice.Validate(); err != nil {
+		p.errf("%s", err.Error())
 	}
 	if c.salesWhatsAppNumber == "" && c.environment != EnvDevelopment {
 		p.errf("SALES_WHATSAPP_NUMBER is required outside development")

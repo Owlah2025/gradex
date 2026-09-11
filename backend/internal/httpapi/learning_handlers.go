@@ -677,8 +677,14 @@ func (h *learningHandlers) issuePlayback(c *gin.Context) {
 	}
 	issued, err := h.foundation.media.IssuePlayback(c.Request.Context(), media.PlaybackRequest{
 		StudentID: c.GetString(ctxUserIDKey), LessonID: lessonID, AssetVersionID: versionID,
+		DeviceID: c.GetString(ctxTrustedDeviceKey), SessionID: sessionIDFrom(c),
 	})
 	if err != nil {
+		// A playback-concurrency outcome answers specifically; every other
+		// failure keeps the uniform protected refusal it has always had.
+		if writePlaybackProblem(c, err) {
+			return
+		}
 		h.logDenial(c, protectedReason(err))
 		writeProtectedUnavailable(c)
 		return

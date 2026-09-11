@@ -10,14 +10,53 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/entitlement"
+	"github.com/Owlah2025/gradex/backend/internal/playback"
 )
 
 var ErrProtectedUnavailable = errors.New("protected media is unavailable")
+
+// Playback-concurrency outcomes.
+//
+// These are deliberately separate from ErrProtectedUnavailable. The uniform
+// protected refusal exists so a caller cannot learn about entitlement, Course
+// inventory, or media identity from an error; none of that is at stake when an
+// authenticated Student is told their own account is already watching
+// something, and collapsing it into the uniform refusal would leave them with a
+// video that will not start and no explanation.
+var (
+	// ErrPlaybackConflict means another trusted device of the same Account
+	// holds the live lease. It carries nothing about that device.
+	ErrPlaybackConflict = errors.New("protected playback is active on another device")
+
+	// ErrPlaybackLeaseLost means the presented authorization no longer owns the
+	// Account's playback: it expired, or a newer instance replaced it.
+	ErrPlaybackLeaseLost = errors.New("protected playback lease is no longer held")
+
+	// ErrPlaybackCoordinationUnavailable means authoritative playback state
+	// could not be established, so nothing was decided and nothing is granted.
+	ErrPlaybackCoordinationUnavailable = errors.New("protected playback coordination is unavailable")
+)
+
+// translatePlaybackError maps the coordinator's vocabulary into this package's,
+// so no caller has to import both.
+func translatePlaybackError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, playback.ErrHeldByAnotherDevice):
+		return ErrPlaybackConflict
+	case errors.Is(err, playback.ErrLeaseNotHeld):
+		return ErrPlaybackLeaseLost
+	default:
+		return ErrPlaybackCoordinationUnavailable
+	}
+}
 
 // ExactVersionProvenanceJoin admits an Asset Version only if these exact bytes
 // carry one of the two legitimate safety provenances: successful exact-version
@@ -82,6 +121,21 @@ type EntitlementEvaluator interface {
 	EvaluateTarget(context.Context, string, string, *time.Time, time.Time) entitlement.Decision
 }
 
+// PlaybackCoordinator is the cross-instance one-video-per-account authority.
+//
+// An interface so this package does not depend on Redis, and so the two
+// operations stay distinct at the type level: acquiring is what mints a new
+// playback instance, validating is a pure check that never creates one. Merging
+// them into a single "ensure" call is precisely how a stale authorization would
+// resurrect a lease another device legitimately took.
+type PlaybackCoordinator interface {
+	Acquire(ctx context.Context, lease playback.Lease) (playback.Acquisition, error)
+	Validate(ctx context.Context, accountID, deviceID, leaseID string) error
+	Renew(ctx context.Context, accountID, deviceID, leaseID string) (time.Time, error)
+	Release(ctx context.Context, accountID, deviceID, leaseID string) error
+	Settings() playback.Settings
+}
+
 type DeliveryOptions struct {
 	DB                *pgxpool.Pool
 	Store             DeliveryStore
@@ -89,6 +143,11 @@ type DeliveryOptions struct {
 	SignatureLifetime time.Duration
 	BuyerTagKey       []byte
 	Now               func() time.Time
+	// Playback is required for Student protected playback and unused by every
+	// other path. Its absence is refused at construction rather than tolerated:
+	// a delivery service that can sign protected video but cannot coordinate it
+	// would issue an unlimited number of concurrent streams per Account.
+	Playback PlaybackCoordinator
 }
 
 type DeliveryService struct {
@@ -98,6 +157,7 @@ type DeliveryService struct {
 	signatureLifetime time.Duration
 	buyerTagKey       []byte
 	now               func() time.Time
+	playback          PlaybackCoordinator
 }
 
 func NewDeliveryService(options DeliveryOptions) (*DeliveryService, error) {
@@ -124,6 +184,7 @@ func NewDeliveryService(options DeliveryOptions) (*DeliveryService, error) {
 		db: options.DB, store: options.Store, evaluator: options.Evaluator,
 		signatureLifetime: options.SignatureLifetime,
 		buyerTagKey:       append([]byte(nil), options.BuyerTagKey...), now: now,
+		playback: options.Playback,
 	}, nil
 }
 
@@ -131,6 +192,11 @@ type PlaybackRequest struct {
 	StudentID      string
 	LessonID       string
 	AssetVersionID string
+	// DeviceID is the trusted device the calling session is bound to, and
+	// SessionID the family that asked. Both are resolved by the HTTP boundary
+	// from the session cookie; a client cannot supply either.
+	DeviceID  string
+	SessionID string
 }
 
 // AdminReviewPlaybackRequest is the exact submitted Lesson target that an
@@ -190,6 +256,32 @@ type PlaybackAuthorization struct {
 	// Student identity: an Admin reviewing a submitted Lesson must never be
 	// handed a watermark, and absence is how that stays true by construction.
 	Watermark *PlaybackWatermark `json:"watermark,omitempty"`
+	// Heartbeat tells the first-party player how often to renew the account's
+	// playback lease. It is published rather than assumed so the interval and
+	// the server's TTL cannot drift apart across a deployment. Absent for Admin
+	// review playback, which holds no lease.
+	Heartbeat *PlaybackHeartbeat `json:"heartbeat,omitempty"`
+}
+
+// PlaybackHeartbeat is the renewal contract handed to the player.
+type PlaybackHeartbeat struct {
+	IntervalSeconds int       `json:"interval_seconds"`
+	LeaseExpiresAt  time.Time `json:"lease_expires_at"`
+}
+
+// PlaybackSessionRequest binds an existing signed playback authorization to
+// the trusted device making this request. A token copied to another device of
+// the same Account must not validate, renew, or release the original device's
+// lease.
+type PlaybackSessionRequest struct {
+	StudentID string
+	DeviceID  string
+	Token     string
+}
+
+type PlaybackRenditionRequest struct {
+	PlaybackSessionRequest
+	Selector string
 }
 
 // PlaybackManifest carries only the rewritten HLS manifest text. Video
@@ -271,46 +363,103 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 	if err != nil {
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
+	// The lease is taken last, after this Student has been proven entitled to
+	// this exact version. Taking it earlier would let an unentitled request
+	// evict the Account's real playback before being refused.
+	acquisition, err := s.acquirePlayback(ctx, request)
+	if err != nil {
+		return PlaybackAuthorization{}, err
+	}
+
 	now := s.now().UTC()
 	expiresAt := now.Add(playbackLifetime(s.signatureLifetime, target.durationMS))
-	playbackSession := s.playbackSession(request.StudentID, request.LessonID, target.assetVersionID, expiresAt)
+	playbackSession := s.playbackSession(playbackSessionClaims{
+		StudentID: request.StudentID, LessonID: request.LessonID,
+		AssetVersionID: target.assetVersionID, ExpiresAt: expiresAt.Unix(),
+		DeviceID: request.DeviceID, LeaseID: acquisition.Lease.LeaseID,
+	})
 	return PlaybackAuthorization{
 		PlaybackSession: playbackSession,
 		ManifestURL:     "/api/v1/media/playback-manifests/" + playbackSession + "/index.m3u8",
 		AssetVersionID:  target.assetVersionID,
 		ExpiresAt:       expiresAt,
 		Watermark:       watermark,
+		Heartbeat: &PlaybackHeartbeat{
+			IntervalSeconds: int(s.playback.Settings().HeartbeatInterval / time.Second),
+			LeaseExpiresAt:  acquisition.Lease.ExpiresAt,
+		},
 	}, nil
 }
 
+// acquirePlayback mints one playback instance for this device.
+//
+// The lease identity is generated here rather than by the coordinator so the
+// same value can be signed into the authorization in the same step. A lease
+// nobody holds an authorization for would be a stuck slot; an authorization
+// with no matching lease would be authority over nothing.
+func (s *DeliveryService) acquirePlayback(ctx context.Context, request PlaybackRequest) (playback.Acquisition, error) {
+	if s.playback == nil || request.DeviceID == "" {
+		// Fail closed. A delivery service without coordination, or a request
+		// whose session is not bound to a trusted device, must not produce
+		// protected video.
+		return playback.Acquisition{}, ErrPlaybackCoordinationUnavailable
+	}
+	leaseID, err := uuid.NewRandom()
+	if err != nil {
+		return playback.Acquisition{}, ErrPlaybackCoordinationUnavailable
+	}
+	acquisition, err := s.playback.Acquire(ctx, playback.Lease{
+		LeaseID: leaseID.String(), AccountID: request.StudentID,
+		DeviceID: request.DeviceID, SessionID: request.SessionID,
+		LessonID: request.LessonID,
+	})
+	return acquisition, translatePlaybackError(err)
+}
+
 const maxPlaybackManifestBytes = 1024 * 1024
+
+// playbackSessionDomain separates this signature space from every other use of
+// the same key.
+//
+// The version moves to v3 because the claims now carry device and lease
+// identity, and a token minted before this change describes a playback instance
+// that holds no lease. Accepting one would be exactly the stale-authorization
+// replay the lease exists to stop, so the domain change refuses them by
+// construction. In-flight players re-request an authorization, which is the
+// same thing they already do when a signature expires.
+const playbackSessionDomain = "gradex:s4:playback-session:v3\x00"
 
 type playbackSessionClaims struct {
 	StudentID      string `json:"student_id"`
 	LessonID       string `json:"lesson_id"`
 	AssetVersionID string `json:"asset_version_id"`
 	ExpiresAt      int64  `json:"expires_at"`
+	// DeviceID and LeaseID bind this authorization to one playback instance on
+	// one trusted device. Without them a manifest request could only be checked
+	// against the Student, and every device of that Student would satisfy it.
+	DeviceID string `json:"device_id"`
+	LeaseID  string `json:"lease_id"`
 }
 
 // IssuePlaybackManifest returns a protected adaptive master generated only
 // from persisted renditions belonging to the revalidated exact Asset Version.
-func (s *DeliveryService) IssuePlaybackManifest(ctx context.Context, studentID, token string) (PlaybackManifest, error) {
-	claims, err := s.authorizeStudentPlaybackSession(ctx, studentID, token)
+func (s *DeliveryService) IssuePlaybackManifest(ctx context.Context, request PlaybackSessionRequest) (PlaybackManifest, error) {
+	claims, err := s.authorizeStudentPlaybackSession(ctx, request)
 	if err != nil {
 		return PlaybackManifest{}, err
 	}
-	root := "/api/v1/media/playback-manifests/" + token
+	root := "/api/v1/media/playback-manifests/" + request.Token
 	return s.issueMasterManifest(ctx, claims.AssetVersionID, root)
 }
 
 // IssuePlaybackRenditionManifest resolves the selector only inside the
 // authoritative rendition set loaded for the revalidated exact Asset Version.
-func (s *DeliveryService) IssuePlaybackRenditionManifest(ctx context.Context, studentID, token, selector string) (PlaybackManifest, error) {
-	claims, err := s.authorizeStudentPlaybackSession(ctx, studentID, token)
+func (s *DeliveryService) IssuePlaybackRenditionManifest(ctx context.Context, request PlaybackRenditionRequest) (PlaybackManifest, error) {
+	claims, err := s.authorizeStudentPlaybackSession(ctx, request.PlaybackSessionRequest)
 	if err != nil {
 		return PlaybackManifest{}, err
 	}
-	return s.issueRenditionManifest(ctx, claims.AssetVersionID, selector, time.Unix(claims.ExpiresAt, 0))
+	return s.issueRenditionManifest(ctx, claims.AssetVersionID, request.Selector, time.Unix(claims.ExpiresAt, 0))
 }
 
 // IssueAdminReviewPlayback creates a short-lived manifest session for the
@@ -355,21 +504,90 @@ func (s *DeliveryService) IssueAdminReviewPlaybackRenditionManifest(ctx context.
 	return s.issueRenditionManifest(ctx, claims.AssetVersionID, selector, time.Unix(claims.ExpiresAt, 0))
 }
 
-func (s *DeliveryService) authorizeStudentPlaybackSession(ctx context.Context, studentID, token string) (playbackSessionClaims, error) {
+func (s *DeliveryService) authorizeStudentPlaybackSession(ctx context.Context, request PlaybackSessionRequest) (playbackSessionClaims, error) {
 	now := s.now().UTC()
-	claims, err := s.verifyPlaybackSession(token, studentID, now)
+	claims, err := s.verifyPlaybackSession(request.Token, request.StudentID, now)
 	if err != nil {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
+	}
+	if request.DeviceID == "" || !hmac.Equal([]byte(claims.DeviceID), []byte(request.DeviceID)) {
+		return playbackSessionClaims{}, ErrPlaybackLeaseLost
 	}
 	target, err := s.loadApprovedTarget(ctx, claims.LessonID, claims.AssetVersionID, KindVideo)
 	if err != nil || !target.readyVideo() {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
 	}
-	decision := s.evaluator.EvaluateTarget(ctx, studentID, claims.LessonID, target.retiredAt, now)
+	decision := s.evaluator.EvaluateTarget(ctx, request.StudentID, claims.LessonID, target.retiredAt, now)
 	if !decision.Allowed {
 		return playbackSessionClaims{}, denyProtected(decision.Reason)
 	}
+	// The lease is validated, never acquired. A manifest request whose lease
+	// has expired or been replaced is refused and must go back through
+	// authorization, which re-checks entitlement and device trust on the way.
+	if err := s.validatePlayback(ctx, claims); err != nil {
+		return playbackSessionClaims{}, err
+	}
 	return claims, nil
+}
+
+// RenewPlayback is the player heartbeat.
+//
+// It re-runs the same authorization the manifest path does before extending
+// anything, so a heartbeat is also the runtime revalidation of a stream already
+// in progress: an Entitlement that expired, a Course version that was retired,
+// or a suspended Account all stop the renewal, and the first-party player stops
+// with it. A heartbeat that merely refreshed a TTL would keep the Account's
+// playback slot alive for a Student who is no longer allowed to watch.
+//
+// It renews only the exact lease presented. An older tab on the same device
+// holds an older lease id and is told the lease is gone, which is how it learns
+// to stop instead of fighting the newer playback for the slot.
+func (s *DeliveryService) RenewPlayback(ctx context.Context, request PlaybackSessionRequest) (PlaybackHeartbeat, error) {
+	claims, err := s.authorizeStudentPlaybackSession(ctx, request)
+	if err != nil {
+		return PlaybackHeartbeat{}, err
+	}
+	if s.playback == nil {
+		return PlaybackHeartbeat{}, ErrPlaybackCoordinationUnavailable
+	}
+	expiresAt, err := s.playback.Renew(ctx, claims.StudentID, claims.DeviceID, claims.LeaseID)
+	if err != nil {
+		return PlaybackHeartbeat{}, translatePlaybackError(err)
+	}
+	return PlaybackHeartbeat{
+		IntervalSeconds: int(s.playback.Settings().HeartbeatInterval / time.Second),
+		LeaseExpiresAt:  expiresAt,
+	}, nil
+}
+
+// ReleasePlayback is the cooperative stop: the player leaving a lesson hands
+// the slot back rather than making the Student's other device wait out the TTL.
+//
+// It deliberately does not re-check entitlement. Giving up authority is always
+// safe, and refusing to release because the Student's access just expired would
+// strand the slot for the length of the TTL.
+func (s *DeliveryService) ReleasePlayback(ctx context.Context, request PlaybackSessionRequest) error {
+	now := s.now().UTC()
+	claims, err := s.verifyPlaybackSession(request.Token, request.StudentID, now)
+	if err != nil {
+		return ErrProtectedUnavailable
+	}
+	if request.DeviceID == "" || !hmac.Equal([]byte(claims.DeviceID), []byte(request.DeviceID)) {
+		return ErrPlaybackLeaseLost
+	}
+	if s.playback == nil {
+		return ErrPlaybackCoordinationUnavailable
+	}
+	return translatePlaybackError(
+		s.playback.Release(ctx, claims.StudentID, claims.DeviceID, claims.LeaseID),
+	)
+}
+
+func (s *DeliveryService) validatePlayback(ctx context.Context, claims playbackSessionClaims) error {
+	if s.playback == nil {
+		return ErrPlaybackCoordinationUnavailable
+	}
+	return translatePlaybackError(s.playback.Validate(ctx, claims.StudentID, claims.DeviceID, claims.LeaseID))
 }
 
 func (s *DeliveryService) authorizeAdminReviewPlaybackSession(ctx context.Context, adminAccountID, token string) (adminReviewPlaybackClaims, error) {
@@ -772,12 +990,10 @@ func (s *DeliveryService) loadCurrentMaterialFileTarget(ctx context.Context, cou
 	return target, nil
 }
 
-func (s *DeliveryService) playbackSession(studentID, lessonID, assetVersionID string, expiresAt time.Time) string {
-	payload, _ := json.Marshal(playbackSessionClaims{
-		StudentID: studentID, LessonID: lessonID, AssetVersionID: assetVersionID, ExpiresAt: expiresAt.Unix(),
-	})
+func (s *DeliveryService) playbackSession(claims playbackSessionClaims) string {
+	payload, _ := json.Marshal(claims)
 	mac := hmac.New(sha256.New, s.buyerTagKey)
-	_, _ = mac.Write([]byte("gradex:s4:playback-session:v2\x00"))
+	_, _ = mac.Write([]byte(playbackSessionDomain))
 	_, _ = mac.Write(payload)
 	signature := mac.Sum(nil)
 	return base64.RawURLEncoding.EncodeToString(append(payload, signature...))
@@ -801,7 +1017,7 @@ func (s *DeliveryService) verifyPlaybackSession(token, studentID string, now tim
 	}
 	payload, signature := raw[:len(raw)-sha256.Size], raw[len(raw)-sha256.Size:]
 	mac := hmac.New(sha256.New, s.buyerTagKey)
-	_, _ = mac.Write([]byte("gradex:s4:playback-session:v2\x00"))
+	_, _ = mac.Write([]byte(playbackSessionDomain))
 	_, _ = mac.Write(payload)
 	if !hmac.Equal(signature, mac.Sum(nil)) {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
@@ -809,6 +1025,7 @@ func (s *DeliveryService) verifyPlaybackSession(token, studentID string, now tim
 	var claims playbackSessionClaims
 	if err := json.Unmarshal(payload, &claims); err != nil || claims.StudentID == "" ||
 		claims.LessonID == "" || claims.AssetVersionID == "" || claims.ExpiresAt <= 0 ||
+		claims.DeviceID == "" || claims.LeaseID == "" ||
 		claims.StudentID != studentID || !now.Before(time.Unix(claims.ExpiresAt, 0)) {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
 	}

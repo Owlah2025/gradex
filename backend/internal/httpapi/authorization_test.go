@@ -100,6 +100,7 @@ func authzRouterWithSession(t *testing.T, principals identity.PrincipalResolver,
 				ReauthenticatedAt: session.ReauthenticatedAt,
 				IdleExpiresAt:     session.IdleExpiresAt,
 				AbsoluteExpiresAt: session.AbsoluteExpiresAt,
+				DeviceTrust:       identity.DeviceTrustNotApplicable,
 			},
 		},
 	}

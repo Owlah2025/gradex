@@ -50,7 +50,7 @@ func TestD103ExpiredScanClaimIsRecoveredAndRetried(t *testing.T) {
 	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
 		t.Fatalf("CompleteUpload: %v", err)
 	}
-	now := time.Date(2026, 9, 9, 10, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	worker := recoveryWorker(t, f, &now, integrationProcessorFunc(successfulAttemptProcessor))
 	firstWork := scanWorkID(t, f.pool, request.AssetVersionID, 0)
 	if _, _, applied, err := worker.beginScan(f.ctx, request.AssetVersionID, firstWork); err != nil || !applied {
@@ -88,7 +88,7 @@ func TestD103QueuedScannerOutageSchedulesBoundedRetry(t *testing.T) {
 	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
 		t.Fatalf("CompleteUpload: %v", err)
 	}
-	now := time.Date(2026, 9, 9, 10, 30, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	scanner := mustScanner(t, integrationScannerFunc(func(context.Context, ObjectVersion) (ScanObservation, error) {
 		return ScanObservation{}, errors.New("injected scanner timeout")
 	}))
@@ -121,7 +121,7 @@ func TestD103ExpiredProcessingClaimCannotPublishAndRecoveryConverges(t *testing.
 	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
 		t.Fatalf("CompleteUpload: %v", err)
 	}
-	now := time.Date(2026, 9, 9, 11, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	worker := recoveryWorker(t, f, &now, integrationProcessorFunc(successfulAttemptProcessor))
 	if err := worker.Scan(f.ctx, request.AssetVersionID); err != nil {
 		t.Fatalf("Scan: %v", err)
@@ -166,7 +166,7 @@ func TestD103TransientStorageFailureSchedulesBoundedRetry(t *testing.T) {
 	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
 		t.Fatalf("CompleteUpload: %v", err)
 	}
-	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	worker := recoveryWorker(t, f, &now, integrationProcessorFunc(func(context.Context, ObjectVersion) (TranscodeResult, error) {
 		return TranscodeResult{}, fmt.Errorf("%w: injected source read timeout", ErrStorageUnavailable)
 	}))
@@ -192,7 +192,7 @@ func TestD103ExpiredProcessingClaimStopsAtAttemptBudget(t *testing.T) {
 	if _, err := f.service.CompleteUpload(f.ctx, request); err != nil {
 		t.Fatalf("CompleteUpload: %v", err)
 	}
-	now := time.Date(2026, 9, 9, 13, 0, 0, 0, time.UTC)
+	now := time.Now().UTC()
 	worker := recoveryWorker(t, f, &now, integrationProcessorFunc(successfulAttemptProcessor))
 	if err := worker.Scan(f.ctx, request.AssetVersionID); err != nil {
 		t.Fatalf("Scan: %v", err)

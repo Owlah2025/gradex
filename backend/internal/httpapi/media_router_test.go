@@ -38,14 +38,24 @@ func (d *refusingDelivery) IssuePlayback(context.Context, media.PlaybackRequest)
 	return media.PlaybackAuthorization{}, media.ErrProtectedUnavailable
 }
 
-func (d *refusingDelivery) IssuePlaybackManifest(context.Context, string, string) (media.PlaybackManifest, error) {
+func (d *refusingDelivery) IssuePlaybackManifest(context.Context, media.PlaybackSessionRequest) (media.PlaybackManifest, error) {
 	d.calls++
 	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
 }
 
-func (d *refusingDelivery) IssuePlaybackRenditionManifest(context.Context, string, string, string) (media.PlaybackManifest, error) {
+func (d *refusingDelivery) IssuePlaybackRenditionManifest(context.Context, media.PlaybackRenditionRequest) (media.PlaybackManifest, error) {
 	d.calls++
 	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) RenewPlayback(context.Context, media.PlaybackSessionRequest) (media.PlaybackHeartbeat, error) {
+	d.calls++
+	return media.PlaybackHeartbeat{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) ReleasePlayback(context.Context, media.PlaybackSessionRequest) error {
+	d.calls++
+	return media.ErrProtectedUnavailable
 }
 
 func (d *refusingDelivery) IssueDownload(context.Context, media.DownloadRequest) (media.DownloadAuthorization, error) {

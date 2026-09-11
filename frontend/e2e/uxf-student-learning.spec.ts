@@ -1,4 +1,5 @@
 import fs from "fs";
+import { completeDeviceTrustIfRequired } from "./device-trust";
 import path from "path";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
@@ -78,6 +79,7 @@ type Locale = keyof typeof TEXT;
 test.describe.configure({ timeout: 120_000 });
 
 async function authenticateStudent(context: BrowserContext, email: string) {
+  const requestedAt = new Date();
   const page = await context.newPage();
   await page.goto("/en/catalog");
   const result = await page.evaluate(async (studentEmail) => {
@@ -93,9 +95,13 @@ async function authenticateStudent(context: BrowserContext, email: string) {
       },
       body: JSON.stringify({ email: studentEmail, password: "StudentPassword123!" }),
     });
-    return login.status;
+    return { status: login.status, body: await login.json() };
   }, email);
-  expect(result).toBe(201);
+  expect(result.status).toBe(201);
+  // A browser Gradex has not confirmed holds a narrowed session until an
+  // emailed code confirms it. This fixture means "a signed-in Student", so it
+  // finishes the flow the product asks for.
+  completeDeviceTrustIfRequired(page, email, result.body?.device_trust, requestedAt);
   const cookies = await context.cookies();
   await page.close();
   return cookies;

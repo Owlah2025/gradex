@@ -33,8 +33,20 @@ func (f *FakeAuthenticator) UserFromRequest(c *gin.Context) (string, error) {
 		IdleExpiresAt:     now.Add(24 * time.Hour),
 		AbsoluteExpiresAt: now.Add(24 * time.Hour),
 	})
+	// The fake stands in for a fully established session, which in production
+	// means a browser that has already completed device trust. Leaving the
+	// device state unset would instead make every fake-authenticated request
+	// fail closed on device policy, which tests something the fake was never
+	// meant to model.
+	c.Set(SessionDeviceTrustKey, identity.DeviceTrustEstablished)
+	c.Set(SessionTrustedDeviceKey, fakeTrustedDeviceID)
 	return userID, nil
 }
+
+// fakeTrustedDeviceID is a fixed, obviously synthetic device identity. It is
+// never written to the database and exists only so fake-authenticated requests
+// carry the same shape a real trusted session does.
+const fakeTrustedDeviceID = "00000000-0000-4000-8000-0000000000fa"
 
 // FakeEntitlementChecker reads from the fake_entitlements table seeded by
 // scripts/seed.sql, so state survives process restarts and is inspectable

@@ -1,3 +1,4 @@
+import { completeDeviceTrustIfRequired } from "./device-trust";
 import fs from "fs";
 import path from "path";
 import {
@@ -8,7 +9,7 @@ import {
   type ConsoleMessage,
   type Page,
 } from "@playwright/test";
-import { issueRotatingSession } from "./rotating-students";
+import { installIssuedSession, issueRotatingSession } from "./rotating-students";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 
 /**
@@ -52,19 +53,8 @@ async function applySession(
   locale: "ar" | "en",
 ): Promise<void> {
   const session = issueRotatingSession(principal);
-  const origin = new URL(frontendOrigin());
   await context.addInitScript((v) => window.localStorage.setItem("gradex.locale", v), locale);
-  await context.addCookies([
-    {
-      name: session.cookie_name,
-      value: session.cookie_value,
-      domain: origin.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "Strict",
-    },
-  ]);
+	await installIssuedSession(context, session);
 }
 
 /**
@@ -84,9 +74,10 @@ async function studentCookies(context: BrowserContext) {
       headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": csrf_token },
       body: JSON.stringify({ email, password }),
     });
-    return login.status;
+    return { status: login.status, body: await login.json() };
   }, [STUDENT_ACTIVE, FIXTURE_PASSWORD]);
-  expect(status, "the Student fixture must sign in through the real session endpoint").toBe(201);
+  expect(status.status, "the Student fixture must sign in through the real session endpoint").toBe(201);
+  completeDeviceTrustIfRequired(page, STUDENT_ACTIVE, status.body?.device_trust, new Date());
   const cookies = await context.cookies();
   await page.close();
   return cookies;

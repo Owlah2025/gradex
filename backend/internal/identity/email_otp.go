@@ -104,14 +104,27 @@ func (p EmailOTPPepper) usable() bool { return len(p.key.Expose()) >= emailOTPPe
 // a challenge id ending in a digit and a code missing one would hash to the
 // same input as the honest pair.
 func (p EmailOTPPepper) digest(challengeID, code string) ([]byte, error) {
+	return p.digestFor(emailOTPDomain, challengeID, code)
+}
+
+// digestFor is the same derivation under an explicit purpose domain.
+//
+// A second consumer arrived — the trusted-device challenge — and it must not be
+// able to validate against an email-verification digest or vice versa. Rather
+// than mint a second OTP implementation with its own pepper, TTL, attempt
+// budget, and storage, the one implementation gains a domain parameter. The
+// existing caller passes the same constant it always did, so every digest
+// already in the database still verifies bit for bit, while a code recovered
+// from one purpose is worthless in the other.
+func (p EmailOTPPepper) digestFor(domain, challengeID, code string) ([]byte, error) {
 	if !p.usable() {
 		return nil, ErrOTPUnavailable
 	}
-	if challengeID == "" || code == "" {
+	if domain == "" || challengeID == "" || code == "" {
 		return nil, ErrOTPInvalid
 	}
 	mac := hmac.New(sha256.New, []byte(p.key.Expose()))
-	for _, field := range []string{emailOTPDomain, challengeID, code} {
+	for _, field := range []string{domain, challengeID, code} {
 		var length [4]byte
 		binary.BigEndian.PutUint32(length[:], uint32(len(field)))
 		mac.Write(length[:])
@@ -143,6 +156,10 @@ type emailOTPOptions struct {
 	Now    time.Time
 	TTL    time.Duration
 	Random io.Reader
+	// Domain selects the purpose this code may ever validate against. Empty
+	// means the original email-verification domain, so existing callers keep
+	// their exact behavior.
+	Domain string
 }
 
 func newEmailOTP(options emailOTPOptions) (IssuedEmailOTP, error) {
@@ -164,7 +181,11 @@ func newEmailOTP(options emailOTPOptions) (IssuedEmailOTP, error) {
 		return IssuedEmailOTP{}, err
 	}
 	challengeID := uuid.NewString()
-	digest, err := options.Pepper.digest(challengeID, code)
+	domain := options.Domain
+	if domain == "" {
+		domain = emailOTPDomain
+	}
+	digest, err := options.Pepper.digestFor(domain, challengeID, code)
 	if err != nil {
 		return IssuedEmailOTP{}, err
 	}
@@ -226,7 +247,11 @@ func NormalizeEmailOTPInput(raw string) (string, bool) {
 // constant time. A derivation failure answers "no match" rather than
 // distinguishing itself from a wrong code.
 func (p EmailOTPPepper) MatchesEmailOTP(challengeID, code string, storedDigest []byte) bool {
-	candidate, err := p.digest(challengeID, code)
+	return p.matches(emailOTPDomain, challengeID, code, storedDigest)
+}
+
+func (p EmailOTPPepper) matches(domain, challengeID, code string, storedDigest []byte) bool {
+	candidate, err := p.digestFor(domain, challengeID, code)
 	if err != nil {
 		return false
 	}

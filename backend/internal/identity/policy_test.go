@@ -86,6 +86,9 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapCatalogPublish: true, CapCatalogPricing: true, CapCatalogTaxonomy: true,
 			CapAcademicCatalog:   true,
 			CapCourseAccessGrant: true,
+			// An operator acts on another Account's devices under
+			// CapSecurityOperations, never under the Student's own subject.
+			CapDeviceManagement: false,
 		},
 		RoleInstructor: {
 			CapPasswordChange: true, CapSessionTerminate: true,
@@ -96,6 +99,7 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
 			CapAcademicCatalog:   false,
 			CapCourseAccessGrant: false,
+			CapDeviceManagement:  false,
 		},
 		RoleStudent: {
 			CapPasswordChange: true, CapSessionTerminate: true,
@@ -106,6 +110,7 @@ func TestRoleCapabilityMatrix(t *testing.T) {
 			CapCatalogPublish: false, CapCatalogPricing: false, CapCatalogTaxonomy: false,
 			CapAcademicCatalog:   false,
 			CapCourseAccessGrant: false,
+			CapDeviceManagement:  true,
 		},
 	}
 

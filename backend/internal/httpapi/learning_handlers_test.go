@@ -322,6 +322,7 @@ func (a *recordingLearningAuthenticator) UserFromRequest(c *gin.Context) (string
 		return "", a.err
 	}
 	c.Set("authenticated_session", identity.Session{ID: "test-session-user-1", AccountID: "user-1", State: identity.SessionActive})
+	setTestTrustedDevice(c)
 	return "user-1", nil
 }
 

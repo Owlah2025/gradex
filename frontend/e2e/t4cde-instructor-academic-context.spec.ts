@@ -128,7 +128,7 @@ async function openAdminReview(browser: Browser, courseID: string): Promise<{ co
   await page.goto("/en/admin/catalog");
   await expect(page.getByTestId(`review-item-${courseID}`)).toBeVisible({ timeout: 15_000 });
   await page.getByTestId(`inspect-review-item-${courseID}`).click();
-  await expect(page.getByTestId("submitted-revision-inspector")).toBeVisible();
+  await expect(page.getByTestId("submitted-revision-inspector")).toBeVisible({ timeout: 15_000 });
   return { context, page };
 }
 

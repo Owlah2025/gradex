@@ -42,7 +42,14 @@ type RecoveryService struct {
 	now         func() time.Time
 	random      io.Reader
 	randomMu    sync.Mutex
+	devices     *DeviceService
 }
+
+// AttachDevices wires recovery to the trusted-device authority after both
+// services have been constructed. Recovery remains usable without device
+// policy, while a composed Student runtime revokes both forms of remembered
+// browser authority in one transaction.
+func (s *RecoveryService) AttachDevices(devices *DeviceService) { s.devices = devices }
 
 type RecoveryServiceOptions struct {
 	Pool        *pgxpool.Pool
@@ -491,6 +498,15 @@ func (s *RecoveryService) CompletePasswordReset(
 	if err != nil {
 		return err
 	}
+	var revokedDeviceIDs []string
+	if s.devices != nil {
+		revokedDeviceIDs, err = s.devices.RevokeAllForSecurityRecovery(
+			ctx, tx, accountID, revision, DeviceRevokedByReset, requestID, now,
+		)
+		if err != nil {
+			return err
+		}
+	}
 	if err := consumeResetSecret(ctx, tx, secretID, now); err != nil {
 		return err
 	}
@@ -537,6 +553,9 @@ func (s *RecoveryService) CompletePasswordReset(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing password reset: %w", err)
+	}
+	if s.devices != nil {
+		s.devices.ReleasePlaybackForDevices(ctx, accountID, revokedDeviceIDs)
 	}
 	return nil
 }

@@ -21,12 +21,7 @@ var requiredSessionPolicyEndpoints = [...]string{
 
 type sessionCommands interface {
 	Login(context.Context, identity.LoginRequest) (identity.SessionGrant, error)
-	Resolve(
-		context.Context,
-		string,
-		identity.CredentialUseKind,
-		string,
-	) (identity.SessionView, error)
+	Resolve(context.Context, identity.SessionResolutionRequest) (identity.SessionView, error)
 	Renew(context.Context, identity.SessionMutation) (identity.SessionGrant, error)
 	Logout(context.Context, identity.SessionMutation) error
 	ChangePassword(context.Context, identity.PasswordChangeCommand) (identity.SessionGrant, error)

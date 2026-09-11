@@ -1,7 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
-import { frontendOrigin } from "../src/lib/api/e2e-ports";
-import { issueRotatingSession } from "./rotating-students";
+import { installIssuedSession, issueRotatingSession } from "./rotating-students";
 
 const bundle = {
   id: "30000000-0000-0000-0000-000000000001",
@@ -25,9 +24,8 @@ async function installSession(
   account: { accountID: string; email: string },
 ) {
   const session = issueRotatingSession(account);
-  const origin = new URL(frontendOrigin());
   await context.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
-  await context.addCookies([{ name: session.cookie_name, value: session.cookie_value, domain: origin.hostname, path: "/", httpOnly: true, secure: true, sameSite: "Strict" }]);
+  await installIssuedSession(context, session);
 }
 
 async function mockSession(page: Page, role: "STUDENT" | "ADMIN" | "ANONYMOUS") {

@@ -24,6 +24,14 @@ type mediaDeliveryHandlers struct {
 	previewRatePolicy ratelimit.Policy
 }
 
+// playbackLeaseBody names an existing playback instance by the opaque signed
+// authorization it was issued. The lease identity is read out of that
+// signature rather than accepted as a field, so a caller cannot name a lease it
+// was never granted.
+type playbackLeaseBody struct {
+	PlaybackSession string `json:"playback_session" binding:"required"`
+}
+
 type playbackAuthorizationBody struct {
 	LessonID       string `json:"lesson_id" binding:"required"`
 	AssetVersionID string `json:"asset_version_id" binding:"required"`
@@ -62,6 +70,8 @@ func mountMediaDeliveryRoutes(content *gin.RouterGroup, foundation *MediaFoundat
 	protected := content.Group("")
 	protected.Use(requireProtectedLearningAccess(authenticator, principals, logger))
 	protected.POST("/playback-authorizations", strictJSONMiddleware(func() any { return &playbackAuthorizationBody{} }, mediaRequestBodyLimit), h.playbackAuthorization)
+	protected.POST("/playback-heartbeats", strictJSONMiddleware(func() any { return &playbackLeaseBody{} }, mediaRequestBodyLimit), h.playbackHeartbeat)
+	protected.POST("/playback-releases", strictJSONMiddleware(func() any { return &playbackLeaseBody{} }, mediaRequestBodyLimit), h.playbackRelease)
 	protected.GET("/playback-manifests/:playbackSession/index.m3u8", h.playbackManifest)
 	protected.GET("/playback-manifests/:playbackSession/renditions/:rendition/index.m3u8", h.playbackRenditionManifest)
 	protected.POST("/download-authorizations", strictJSONMiddleware(func() any { return &downloadAuthorizationBody{} }, mediaRequestBodyLimit), h.downloadAuthorization)
@@ -73,11 +83,15 @@ func mountMediaDeliveryRoutes(content *gin.RouterGroup, foundation *MediaFoundat
 }
 
 func (h *mediaDeliveryHandlers) playbackManifest(c *gin.Context) {
-	manifest, err := h.delivery.IssuePlaybackManifest(
-		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("playbackSession"),
-	)
+	manifest, err := h.delivery.IssuePlaybackManifest(c.Request.Context(), media.PlaybackSessionRequest{
+		StudentID: c.GetString(ctxUserIDKey), DeviceID: c.GetString(ctxTrustedDeviceKey),
+		Token: c.Param("playbackSession"),
+	})
 	if err != nil {
 		logProtectedDeliveryDenial(c, h.logger, err)
+		if writePlaybackProblem(c, err) {
+			return
+		}
 		writeProtectedUnavailable(c)
 		return
 	}
@@ -85,11 +99,18 @@ func (h *mediaDeliveryHandlers) playbackManifest(c *gin.Context) {
 }
 
 func (h *mediaDeliveryHandlers) playbackRenditionManifest(c *gin.Context) {
-	manifest, err := h.delivery.IssuePlaybackRenditionManifest(
-		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("playbackSession"), c.Param("rendition"),
-	)
+	manifest, err := h.delivery.IssuePlaybackRenditionManifest(c.Request.Context(), media.PlaybackRenditionRequest{
+		PlaybackSessionRequest: media.PlaybackSessionRequest{
+			StudentID: c.GetString(ctxUserIDKey), DeviceID: c.GetString(ctxTrustedDeviceKey),
+			Token: c.Param("playbackSession"),
+		},
+		Selector: c.Param("rendition"),
+	})
 	if err != nil {
 		logProtectedDeliveryDenial(c, h.logger, err)
+		if writePlaybackProblem(c, err) {
+			return
+		}
 		writeProtectedUnavailable(c)
 		return
 	}
@@ -111,14 +132,62 @@ func (h *mediaDeliveryHandlers) playbackAuthorization(c *gin.Context) {
 	body := c.MustGet(strictJSONBodyContextKey).(*playbackAuthorizationBody)
 	issued, err := h.delivery.IssuePlayback(c.Request.Context(), media.PlaybackRequest{
 		StudentID: c.GetString(ctxUserIDKey), LessonID: body.LessonID, AssetVersionID: body.AssetVersionID,
+		DeviceID: c.GetString(ctxTrustedDeviceKey), SessionID: sessionIDFrom(c),
 	})
 	if err != nil {
 		logProtectedDeliveryDenial(c, h.logger, err)
+		if writePlaybackProblem(c, err) {
+			return
+		}
 		writeProtectedUnavailable(c)
 		return
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, issued)
+}
+
+// playbackHeartbeat renews the caller's own playback lease.
+//
+// It is deliberately not rate-limited by the playback-issuance policy: a
+// heartbeat every 25 seconds is the expected behavior of a working player, and
+// counting it against the ceiling on *starting* playback would stop a Student
+// mid-lesson for watching normally.
+func (h *mediaDeliveryHandlers) playbackHeartbeat(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*playbackLeaseBody)
+	heartbeat, err := h.delivery.RenewPlayback(c.Request.Context(), media.PlaybackSessionRequest{
+		StudentID: c.GetString(ctxUserIDKey), DeviceID: c.GetString(ctxTrustedDeviceKey), Token: body.PlaybackSession,
+	})
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		if writePlaybackProblem(c, err) {
+			return
+		}
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, heartbeat)
+}
+
+// playbackRelease hands the account's playback slot back.
+//
+// Releasing something the caller no longer owns answers 204 rather than an
+// error: the outcome the caller wanted is already true, and reporting a failure
+// would push a closing player into a retry it has no reason to make.
+func (h *mediaDeliveryHandlers) playbackRelease(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*playbackLeaseBody)
+	if err := h.delivery.ReleasePlayback(c.Request.Context(), media.PlaybackSessionRequest{
+		StudentID: c.GetString(ctxUserIDKey), DeviceID: c.GetString(ctxTrustedDeviceKey), Token: body.PlaybackSession,
+	}); err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		if writePlaybackProblem(c, err) {
+			return
+		}
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusNoContent)
 }
 
 func (h *mediaDeliveryHandlers) downloadAuthorization(c *gin.Context) {
@@ -337,14 +406,31 @@ func requireProtectedLearningAccess(authenticator auth.Authenticator, principals
 			writeProtectedUnavailable(c)
 			return
 		}
-		decision := identity.Authorize(principal, identity.CapLearningAccess)
+		trust := auth.DeviceTrustFromContext(c)
+		decision := identity.AuthorizeSessionDevice(principal, trust, identity.CapLearningAccess)
 		if !decision.Allowed {
 			logProtectedLearningDenial(c, logger, decision.Reason)
-			writeProtectedUnavailable(c)
+			// Device refusals answer specifically rather than with the uniform
+			// protected refusal. That refusal exists to stop a caller learning
+			// about Account state or Course inventory it has no business
+			// knowing; here the caller is an authenticated Student being told a
+			// fact about their own browser that they have to act on, and a 404
+			// would leave them with a lesson that will not open and no route
+			// forward. Nothing about content, entitlement, or any other device
+			// is disclosed by either answer.
+			switch decision.Reason {
+			case identity.DenyDeviceTrustRequired:
+				writeProblem(c, problem.DeviceTrustRequired())
+			case identity.DenyDeviceAdoptionRequired:
+				writeProblem(c, problem.DeviceAdoptionRequired())
+			default:
+				writeProtectedUnavailable(c)
+			}
 			return
 		}
 		c.Set(ctxUserIDKey, accountID)
 		c.Set(ctxPrincipalKey, principal)
+		c.Set(ctxTrustedDeviceKey, auth.TrustedDeviceFromContext(c))
 		c.Next()
 	}
 }

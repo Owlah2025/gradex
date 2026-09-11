@@ -419,3 +419,84 @@ func PurchaseAccessAlreadyActive() Problem {
 		"Access already active",
 		"You already have access to this Course.")
 }
+
+// Student trusted-device and protected-playback problems.
+//
+// These are deliberately specific where the rest of the protected surface is
+// uniform. The uniform refusal exists to stop a caller learning about Account
+// state or Course inventory it has no business knowing; none of that applies
+// here, because the caller is an authenticated Student being told something
+// about their own Account that they must act on. A generic failure would leave
+// them with a video that will not start and no way to find out why.
+//
+// What they still never disclose is anything about the *other* device: not its
+// label, not its platform, not when it started watching, not where it is.
+
+// DeviceTrustRequired means this browser authenticated but has not completed
+// device trust, so it holds only the device self-service capabilities.
+func DeviceTrustRequired() Problem {
+	return New(http.StatusForbidden, "device-trust-required",
+		"Device verification required",
+		"Verify this device with the code sent to your email before continuing.")
+}
+
+// DeviceAdoptionRequired means a session that predates device policy must bind
+// its browser to a device before reaching protected learning.
+func DeviceAdoptionRequired() Problem {
+	return New(http.StatusForbidden, "device-adoption-required",
+		"Device verification required",
+		"Confirm this device to continue watching your courses.")
+}
+
+// DeviceLimitReached means the Account already holds its full set of trusted
+// devices and the caller did not nominate one to remove.
+func DeviceLimitReached() Problem {
+	return New(http.StatusConflict, "device-limit-reached",
+		"Device limit reached",
+		"Remove one of your trusted devices before adding this one.")
+}
+
+// DeviceReplacementCooldown means a device was replaced too recently.
+func DeviceReplacementCooldown() Problem {
+	return New(http.StatusConflict, "device-replacement-cooldown",
+		"Device change unavailable",
+		"You changed a device recently. Try again later, or contact support.")
+}
+
+// DeviceNotFound covers an unknown device, one already revoked, and one that
+// belongs to a different Account. One answer for all three so device
+// identifiers cannot be enumerated.
+func DeviceNotFound() Problem {
+	return New(http.StatusNotFound, "device-not-found",
+		"Device not found",
+		"This device is no longer on your account.")
+}
+
+// PlaybackActiveOnAnotherDevice is the account-sharing refusal.
+func PlaybackActiveOnAnotherDevice() Problem {
+	return New(http.StatusConflict, "playback-already-active-on-another-device",
+		"Already playing on another device",
+		"This account is currently playing a course on another device. "+
+			"Stop playback there or try again shortly.")
+}
+
+// PlaybackLeaseLost means the playback authority the caller presented is no
+// longer current: it expired, or a newer playback instance replaced it. The
+// player stops and asks for a fresh authorization rather than retrying.
+func PlaybackLeaseLost() Problem {
+	return New(http.StatusConflict, "playback-lease-lost",
+		"Playback stopped",
+		"This playback session is no longer active. Start the lesson again.")
+}
+
+// PlaybackCoordinationUnavailable is the fail-closed answer when the shared
+// playback authority cannot be reached.
+//
+// It is a 503 and not a denial: nothing about this Student, their entitlement,
+// or another device was decided. Allowing playback instead would silently turn
+// the concurrency control off for the duration of an outage.
+func PlaybackCoordinationUnavailable() Problem {
+	return New(http.StatusServiceUnavailable, "playback-coordination-unavailable",
+		"Playback temporarily unavailable",
+		"Playback cannot start right now. Try again shortly.")
+}

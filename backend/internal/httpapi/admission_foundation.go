@@ -175,3 +175,36 @@ func (f *AdmissionFoundation) RateLimiter() *ratelimit.Limiter {
 	}
 	return f.limiter
 }
+
+// deviceAttachable is the narrow seam the admission service exposes for
+// device policy. An interface assertion rather than a wider constructor
+// parameter, because the dependency is genuinely circular — the device service
+// needs the session authority the admission service already holds — and this
+// keeps the resolution to one line in one place.
+type deviceAttachable interface {
+	AttachDevices(*identity.DeviceService)
+}
+
+// AttachDevices wires Student device policy into the admission service, so the
+// browser that proves a verification code becomes that Student's first trusted
+// device. It is a no-op when the composed service does not participate in
+// device policy.
+func (f *AdmissionFoundation) AttachDevices(devices *identity.DeviceService) {
+	if f == nil || devices == nil {
+		return
+	}
+	if attachable, ok := f.service.(deviceAttachable); ok {
+		attachable.AttachDevices(devices)
+	}
+}
+
+// AttachDevices wires password recovery to device revocation without coupling
+// the HTTP layer to recovery internals.
+func (f *RecoveryFoundation) AttachDevices(devices *identity.DeviceService) {
+	if f == nil || devices == nil {
+		return
+	}
+	if attachable, ok := f.recovery.(deviceAttachable); ok {
+		attachable.AttachDevices(devices)
+	}
+}

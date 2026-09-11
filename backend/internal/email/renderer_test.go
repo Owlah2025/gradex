@@ -26,6 +26,9 @@ func TestRendererCoversEveryFixedTemplateInArabicAndEnglish(t *testing.T) {
 	}{
 		{"identity.email_verification_requested", TemplateVerifyEmail, true, true},
 		{"identity.email_verification_code_requested", TemplateVerifyEmailOTP, true, false},
+		// Carries a credential and, like the verification code, deliberately has
+		// no URL to put it in.
+		{"identity.device_trust_code_requested", TemplateDeviceTrustOTP, true, false},
 		{"identity.password_reset_requested", TemplatePasswordReset, true, true},
 		{"identity.password_reset_completed", TemplatePasswordChanged, false, false},
 		{"identity.staff_invitation_created", TemplateStaffInvitation, true, true},

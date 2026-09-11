@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -19,18 +20,14 @@ import (
 type recordingSessionResolver struct {
 	view       identity.SessionView
 	err        error
-	gotDigest  string
-	gotUseKind identity.CredentialUseKind
+	gotRequest identity.SessionResolutionRequest
 }
 
 func (r *recordingSessionResolver) Resolve(
 	_ context.Context,
-	digest string,
-	useKind identity.CredentialUseKind,
-	_ string,
+	request identity.SessionResolutionRequest,
 ) (identity.SessionView, error) {
-	r.gotDigest = digest
-	r.gotUseKind = useKind
+	r.gotRequest = request
 	return r.view, r.err
 }
 
@@ -55,9 +52,38 @@ func TestSessionAuthenticatorPreservesUserIDSeam(t *testing.T) {
 	if userID != "account-1" {
 		t.Errorf("user ID = %q, want account-1", userID)
 	}
-	if resolver.gotDigest != identity.DigestToken(credential) ||
-		resolver.gotUseKind != identity.UseReadOnly {
-		t.Errorf("resolution input = %q/%v", resolver.gotDigest, resolver.gotUseKind)
+	if resolver.gotRequest.CredentialDigest != identity.DigestToken(credential) ||
+		resolver.gotRequest.UseKind != identity.UseReadOnly {
+		t.Errorf("resolution input = %q/%v", resolver.gotRequest.CredentialDigest, resolver.gotRequest.UseKind)
+	}
+}
+
+func TestSessionAuthenticatorPassesOnlyACanonicalDeviceDigest(t *testing.T) {
+	sessionCredential := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	deviceCredential := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	resolver := &recordingSessionResolver{view: identity.SessionView{}}
+	authenticator, err := NewSessionAuthenticator(resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCredential})
+	request.AddCookie(&http.Cookie{Name: DeviceCookieName, Value: deviceCredential})
+	if _, err := authenticator.Authenticate(request, identity.UseReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := resolver.gotRequest.DeviceCredentialDigest, identity.DigestOpaqueCredential(deviceCredential); got != want {
+		t.Fatalf("device digest = %q, want %q", got, want)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: sessionCredential})
+	request.AddCookie(&http.Cookie{Name: DeviceCookieName, Value: "malformed"})
+	if _, err := authenticator.Authenticate(request, identity.UseReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.gotRequest.DeviceCredentialDigest != "" {
+		t.Fatal("malformed device credential reached session resolution")
 	}
 }
 

@@ -3,7 +3,6 @@ package media
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestWatermarkDisplayNameShortensToFirstNameAndSurnameInitial(t *testing.T) {
@@ -130,7 +129,10 @@ func TestWatermarkCodeIsDomainSeparatedFromTheOtherDerivations(t *testing.T) {
 	if strings.HasPrefix(service.buyerTag(student, version), code) {
 		t.Fatal("the watermark code is a prefix of the buyer tag for the same input")
 	}
-	session := service.playbackSession(student, "lesson", version, time.Unix(0, 0).UTC())
+	session := service.playbackSession(playbackSessionClaims{
+		StudentID: student, LessonID: "lesson", AssetVersionID: version,
+		ExpiresAt: 0, DeviceID: "device", LeaseID: "lease",
+	})
 	if strings.Contains(session, code) {
 		t.Fatal("the watermark code appears inside the playback session token")
 	}
@@ -141,14 +143,20 @@ func TestWatermarkCodeIsDomainSeparatedFromTheOtherDerivations(t *testing.T) {
 func TestWatermarkCodeIsNotDerivedFromThePlaybackSession(t *testing.T) {
 	service := watermarkTestService(t, "delivery-key")
 	const student = "7f9c2ba4-7777-4f5a-9c1e-2b4d6e8a0c11"
-	session := service.playbackSession(student, "lesson", "version", time.Unix(0, 0).UTC())
+	session := service.playbackSession(playbackSessionClaims{
+		StudentID: student, LessonID: "lesson", AssetVersionID: "version",
+		ExpiresAt: 0, DeviceID: "device", LeaseID: "lease",
+	})
 	code := service.watermarkCode(student)
 	if strings.HasPrefix(session, code) || strings.HasSuffix(session, code) {
 		t.Fatal("the code is an end of the playback session token")
 	}
 	// The session is bound to a Lesson and an expiry; the code is bound to
 	// neither, so a second session for the same Student still shows one code.
-	later := service.playbackSession(student, "other-lesson", "version", time.Unix(0, 0).UTC())
+	later := service.playbackSession(playbackSessionClaims{
+		StudentID: student, LessonID: "other-lesson", AssetVersionID: "version",
+		ExpiresAt: 0, DeviceID: "device", LeaseID: "lease",
+	})
 	if session == later {
 		t.Fatal("the playback session did not change with its Lesson")
 	}
