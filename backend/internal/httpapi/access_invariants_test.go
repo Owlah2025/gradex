@@ -10,6 +10,19 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
+var allowedEntitlementInsertSources = map[string]struct{}{
+	"internal/access/repository.go":        {},
+	"internal/access/purchase.go":          {},
+	"internal/access/bundle_purchase.go":   {},
+	"internal/entitlement/seed_nonprod.go": {},
+}
+
+func isAllowedEntitlementInsertSource(path string) bool {
+	normalized := filepath.ToSlash(filepath.Clean(path))
+	_, allowed := allowedEntitlementInsertSources[normalized]
+	return allowed
+}
+
 func TestBatchB_AccessInvariants(t *testing.T) {
 	t.Run("Invariant 1 (T062): Entitlements originate only in canonical access transactions", func(t *testing.T) {
 		repoPath := filepath.Join("..", "..")
@@ -23,12 +36,12 @@ func TestBatchB_AccessInvariants(t *testing.T) {
 			}
 			content := string(data)
 			if strings.Contains(content, "INSERT INTO entitlements") {
-				if !strings.Contains(path, "internal/access/repository.go") && !strings.Contains(path, "internal/access/purchase.go") && !strings.Contains(path, "internal/access/bundle_purchase.go") {
-					if strings.Contains(path, "seed") || strings.Contains(path, "test") {
-						// Allowed non-production test / seed files
-					} else {
-						t.Errorf("file %s performs INSERT INTO entitlements outside a canonical access transaction", path)
-					}
+				relativePath, relativeErr := filepath.Rel(repoPath, path)
+				if relativeErr != nil {
+					return relativeErr
+				}
+				if !isAllowedEntitlementInsertSource(relativePath) {
+					t.Errorf("file %s performs INSERT INTO entitlements outside a canonical access transaction", path)
 				}
 			}
 			return nil
@@ -117,6 +130,15 @@ func TestBatchB_AccessInvariants(t *testing.T) {
 			t.Error("access_routes.go missing requireSessionMutationSecurity middleware")
 		}
 	})
+}
+
+func TestEntitlementInsertAllowSetRejectsLookalikeFilename(t *testing.T) {
+	if !isAllowedEntitlementInsertSource("internal/access/bundle_purchase.go") {
+		t.Fatal("canonical entitlement source was not allowed")
+	}
+	if isAllowedEntitlementInsertSource("internal/access/bundle_purchase.go_escape.go") {
+		t.Fatal("lookalike entitlement source filename was allowed")
+	}
 }
 
 // TestAuthenticatedPurchaseIsMeteredByAPolicyItCanSatisfy is the regression

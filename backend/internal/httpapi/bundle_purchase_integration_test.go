@@ -449,3 +449,93 @@ func TestBundlePurchaseCourseSnapshotRejectsMutation(t *testing.T) {
 		t.Fatalf("snapshot rows=%d error=%v", count, err)
 	}
 }
+
+func TestBundlePurchaseRequestCommercialSnapshotRejectsDirectMutation(t *testing.T) {
+	repo, pool, _, _, adminID, bundleID, courses := newBundlePurchaseFixture(t)
+	ctx := context.Background()
+	request, err := repo.CreateStudentBundlePurchaseRequest(ctx, access.CreateStudentBundlePurchaseRequestParams{
+		BundleID: bundleID, StudentAccountID: bundlePurchaseStudentID, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var original struct {
+		Reference, Email, NormalizedEmail, RequesterID, TargetKind, CourseID, BundleID string
+		Revision                                                                       int64
+		TitleAr, TitleEn, Currency                                                     string
+		Regular, Effective                                                             int64
+		RequestedAt                                                                    time.Time
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT reference_code, email, normalized_email, requester_account_id::text,
+		       target_kind, COALESCE(course_id::text, ''), bundle_id::text, bundle_revision,
+		       bundle_title_ar, bundle_title_en, regular_price_minor_units, price_minor_units,
+		       currency, requested_at
+		FROM purchase_requests WHERE id=$1::uuid
+	`, request.ID).Scan(
+		&original.Reference, &original.Email, &original.NormalizedEmail, &original.RequesterID,
+		&original.TargetKind, &original.CourseID, &original.BundleID, &original.Revision,
+		&original.TitleAr, &original.TitleEn, &original.Regular, &original.Effective,
+		&original.Currency, &original.RequestedAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	mutations := []struct {
+		name  string
+		query string
+		args  []any
+	}{
+		{"reference", `UPDATE purchase_requests SET reference_code='GRX-TAMPERED' WHERE id=$1::uuid`, []any{request.ID}},
+		{"email", `UPDATE purchase_requests SET email='changed@example.test' WHERE id=$1::uuid`, []any{request.ID}},
+		{"normalized email", `UPDATE purchase_requests SET normalized_email='changed@example.test' WHERE id=$1::uuid`, []any{request.ID}},
+		{"requester identity", `UPDATE purchase_requests SET requester_account_id=$2::uuid WHERE id=$1::uuid`, []any{request.ID, adminID}},
+		{"target kind", `UPDATE purchase_requests SET target_kind='COURSE' WHERE id=$1::uuid`, []any{request.ID}},
+		{"course target identity", `UPDATE purchase_requests SET course_id=$2::uuid WHERE id=$1::uuid`, []any{request.ID, courses[0]}},
+		{"bundle target identity", `UPDATE purchase_requests SET bundle_id=NULL WHERE id=$1::uuid`, []any{request.ID}},
+		{"bundle revision", `UPDATE purchase_requests SET bundle_revision=99 WHERE id=$1::uuid`, []any{request.ID}},
+		{"Arabic title", `UPDATE purchase_requests SET bundle_title_ar='عنوان متغير' WHERE id=$1::uuid`, []any{request.ID}},
+		{"English title", `UPDATE purchase_requests SET bundle_title_en='Changed title' WHERE id=$1::uuid`, []any{request.ID}},
+		{"regular price", `UPDATE purchase_requests SET regular_price_minor_units=65000 WHERE id=$1::uuid`, []any{request.ID}},
+		{"effective price", `UPDATE purchase_requests SET price_minor_units=1 WHERE id=$1::uuid`, []any{request.ID}},
+		{"currency", `UPDATE purchase_requests SET currency='USD' WHERE id=$1::uuid`, []any{request.ID}},
+		{"request time", `UPDATE purchase_requests SET requested_at=$2 WHERE id=$1::uuid`, []any{request.ID, time.Now().UTC().Add(time.Hour)}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, mutation.query, mutation.args...); err == nil {
+				t.Fatal("direct snapshot mutation unexpectedly succeeded")
+			}
+		})
+	}
+
+	var current struct {
+		Reference, Email, NormalizedEmail, RequesterID, TargetKind, CourseID, BundleID string
+		Revision                                                                       int64
+		TitleAr, TitleEn, Currency                                                     string
+		Regular, Effective                                                             int64
+		RequestedAt                                                                    time.Time
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT reference_code, email, normalized_email, requester_account_id::text,
+		       target_kind, COALESCE(course_id::text, ''), bundle_id::text, bundle_revision,
+		       bundle_title_ar, bundle_title_en, regular_price_minor_units, price_minor_units,
+		       currency, requested_at
+		FROM purchase_requests WHERE id=$1::uuid
+	`, request.ID).Scan(
+		&current.Reference, &current.Email, &current.NormalizedEmail, &current.RequesterID,
+		&current.TargetKind, &current.CourseID, &current.BundleID, &current.Revision,
+		&current.TitleAr, &current.TitleEn, &current.Regular, &current.Effective,
+		&current.Currency, &current.RequestedAt,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if current.Reference != original.Reference || current.Email != original.Email || current.NormalizedEmail != original.NormalizedEmail ||
+		current.RequesterID != original.RequesterID || current.TargetKind != original.TargetKind || current.CourseID != original.CourseID ||
+		current.BundleID != original.BundleID || current.Revision != original.Revision || current.TitleAr != original.TitleAr ||
+		current.TitleEn != original.TitleEn || current.Regular != original.Regular || current.Effective != original.Effective ||
+		current.Currency != original.Currency || !current.RequestedAt.Equal(original.RequestedAt) {
+		t.Fatalf("Bundle commercial snapshot changed: original=%+v current=%+v", original, current)
+	}
+}

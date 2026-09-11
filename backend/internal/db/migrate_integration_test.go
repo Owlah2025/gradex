@@ -823,6 +823,12 @@ func TestBundlesAndOffersRollbackRefusesToDestroyCommerceEvidence(t *testing.T) 
 			survives: `SELECT count(*) FROM course_price_changes WHERE offer_price_minor_units IS NOT NULL`,
 		},
 		{
+			name:     "cleared course offer history",
+			seed:     `INSERT INTO course_price_changes (course_id,new_value_minor_units,old_offer_price_minor_units,offer_price_minor_units,changed_by_account_id,reason) VALUES ($1::uuid,70000,50000,NULL,$2::uuid,'Cleared offer')`,
+			args:     []any{courseID, adminID},
+			survives: `SELECT count(*) FROM course_price_changes WHERE old_offer_price_minor_units IS NOT NULL AND offer_price_minor_units IS NULL`,
+		},
+		{
 			name:     "course request quote metadata",
 			seed:     `INSERT INTO purchase_requests (id,reference_code,course_id,target_kind,email,normalized_email,requester_account_id,course_title_ar,course_title_en,price_minor_units,regular_price_minor_units,currency,state,requested_at) VALUES ('65000000-0000-0000-0000-000000000001'::uuid,'GRX-ROLLBACK',$1::uuid,'COURSE','student-rollback@example.com','student-rollback@example.com',$2::uuid,'مقرر','Course',50000,70000,'KWD','WAITING_PAYMENT',now())`,
 			args:     []any{courseID, studentID},

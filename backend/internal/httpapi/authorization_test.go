@@ -429,6 +429,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"DELETE /api/v1/admin/courses/:id/access-suspension":      {Method: http.MethodDelete, Path: "/api/v1/admin/courses/:id/access-suspension", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/courses/:id/taxonomy":                  {Method: http.MethodPut, Path: "/api/v1/admin/courses/:id/taxonomy", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/bundles":                               {Method: http.MethodGet, Path: "/api/v1/admin/bundles", Class: ClassCapabilityProtected},
+	"GET /api/v1/admin/bundles/courses":                       {Method: http.MethodGet, Path: "/api/v1/admin/bundles/courses", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/bundles":                              {Method: http.MethodPost, Path: "/api/v1/admin/bundles", Class: ClassCapabilityProtected},
 	"GET /api/v1/admin/bundles/:id":                           {Method: http.MethodGet, Path: "/api/v1/admin/bundles/:id", Class: ClassCapabilityProtected},
 	"PUT /api/v1/admin/bundles/:id":                           {Method: http.MethodPut, Path: "/api/v1/admin/bundles/:id", Class: ClassCapabilityProtected},

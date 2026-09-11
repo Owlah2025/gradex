@@ -30,6 +30,7 @@ var (
 	ErrBundleVersionConflict = errors.New("bundle revision conflict")
 	ErrBundleLifecycle       = errors.New("invalid bundle lifecycle transition")
 	ErrBundlePriceRequired   = errors.New("bundle price is required")
+	ErrBundleDescription     = errors.New("Arabic and English bundle descriptions are required")
 )
 
 type BundleMember struct {
@@ -95,9 +96,6 @@ func validateBundleFields(titleAr, titleEn string, courseIDs []string) error {
 	if strings.TrimSpace(titleAr) == "" || strings.TrimSpace(titleEn) == "" {
 		return errors.New("Arabic and English bundle titles are required")
 	}
-	if len(courseIDs) < 2 {
-		return ErrBundleMemberCount
-	}
 	seen := make(map[string]struct{}, len(courseIDs))
 	for _, id := range courseIDs {
 		parsed, err := uuid.Parse(strings.TrimSpace(id))
@@ -111,6 +109,23 @@ func validateBundleFields(titleAr, titleEn string, courseIDs []string) error {
 		seen[key] = struct{}{}
 	}
 	return nil
+}
+
+func validatePublishedBundle(titleAr, titleEn, descriptionAr, descriptionEn string, courseIDs []string) error {
+	if err := validateBundleFields(titleAr, titleEn, courseIDs); err != nil {
+		return err
+	}
+	if strings.TrimSpace(descriptionAr) == "" || strings.TrimSpace(descriptionEn) == "" {
+		return ErrBundleDescription
+	}
+	if len(courseIDs) < 2 {
+		return ErrBundleMemberCount
+	}
+	return nil
+}
+
+func bundlePublicationReady(descriptionAr, descriptionEn string, courseCount int, priced bool) bool {
+	return priced && courseCount >= 2 && strings.TrimSpace(descriptionAr) != "" && strings.TrimSpace(descriptionEn) != ""
 }
 
 func (r *Repository) CreateBundle(ctx context.Context, req CreateBundleRequest) (*Bundle, error) {
@@ -172,7 +187,7 @@ func (r *Repository) CreateBundle(ctx context.Context, req CreateBundleRequest) 
 		if err != nil {
 			return err
 		}
-		bundle.Eligible = true
+		bundle.Eligible = bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), bundle.Price != nil)
 		bundle.CourseCount = len(bundle.Members)
 		result = &bundle
 		return nil
@@ -207,6 +222,11 @@ func (r *Repository) UpdateBundle(ctx context.Context, req UpdateBundleRequest) 
 		if req.ExpectedRevision < 1 || bundle.Revision != req.ExpectedRevision {
 			return ErrBundleVersionConflict
 		}
+		if bundle.Lifecycle != BundleDraft {
+			if err := validatePublishedBundle(req.TitleAr, req.TitleEn, req.DescriptionAr, req.DescriptionEn, req.CourseIDs); err != nil {
+				return err
+			}
+		}
 		if err := lockEligibleBundleCourses(ctx, tx, req.CourseIDs); err != nil {
 			return err
 		}
@@ -219,6 +239,13 @@ func (r *Repository) UpdateBundle(ctx context.Context, req UpdateBundleRequest) 
 				return err
 			}
 			bundle.Price = price
+		}
+		bundle.Price, err = loadBundlePriceTx(ctx, tx, bundle.ID)
+		if err != nil {
+			return err
+		}
+		if bundle.Lifecycle != BundleDraft && bundle.Price == nil {
+			return ErrBundlePriceRequired
 		}
 		now := time.Now().UTC()
 		err = tx.QueryRow(ctx, `
@@ -248,7 +275,7 @@ func (r *Repository) UpdateBundle(ctx context.Context, req UpdateBundleRequest) 
 		}); err != nil {
 			return err
 		}
-		bundle.Eligible = true
+		bundle.Eligible = bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), bundle.Price != nil)
 		bundle.CourseCount = len(bundle.Members)
 		result = bundle
 		return nil
@@ -274,7 +301,7 @@ func (r *Repository) TransitionBundle(ctx context.Context, req TransitionBundleR
 			if err != nil {
 				return err
 			}
-			if err := validateBundleFields(bundle.TitleAr, bundle.TitleEn, members); err != nil {
+			if err := validatePublishedBundle(bundle.TitleAr, bundle.TitleEn, bundle.DescriptionAr, bundle.DescriptionEn, members); err != nil {
 				return err
 			}
 			if err := lockEligibleBundleCourses(ctx, tx, members); err != nil {
@@ -298,6 +325,7 @@ func (r *Repository) TransitionBundle(ctx context.Context, req TransitionBundleR
 			return fmt.Errorf("transitioning bundle: %w", err)
 		}
 		bundle.Lifecycle = req.Target
+		bundle.Eligible = req.Target == BundlePublished
 		actor := req.AdminAccountID
 		action := map[BundleLifecycle]string{
 			BundlePublished: "BUNDLE_PUBLISHED", BundleDelisted: "BUNDLE_DELISTED", BundleArchived: "BUNDLE_ARCHIVED",
@@ -497,6 +525,7 @@ func (r *Repository) GetBundle(ctx context.Context, bundleID string) (*Bundle, e
 	if err != nil {
 		return nil, err
 	}
+	var memberEligible bool
 	if err := tx.QueryRow(ctx, `
 		SELECT count(bc.course_id) >= 2 AND bool_and(
 			c.lifecycle='PUBLISHED' AND c.access_suspended_at IS NULL
@@ -506,9 +535,10 @@ func (r *Repository) GetBundle(ctx context.Context, bundleID string) (*Bundle, e
 		JOIN courses c ON c.id=bc.course_id
 		LEFT JOIN course_revisions cr ON cr.id=c.live_revision_id
 		WHERE bc.bundle_id=$1::uuid
-	`, bundle.ID).Scan(&bundle.Eligible); err != nil {
+	`, bundle.ID).Scan(&memberEligible); err != nil {
 		return nil, fmt.Errorf("checking Bundle eligibility: %w", err)
 	}
+	bundle.Eligible = bundle.Price != nil && memberEligible && bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), true)
 	bundle.CourseCount = len(bundle.Members)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
@@ -522,7 +552,10 @@ func (r *Repository) ListBundles(ctx context.Context) ([]Bundle, error) {
 		       b.description_en, b.revision, b.created_at, b.updated_at,
 		       price.new_value_minor_units, price.offer_price_minor_units,
 		       count(bc.course_id),
-		       count(bc.course_id) >= 2 AND bool_and(
+			price.new_value_minor_units IS NOT NULL
+			AND length(trim(b.description_ar)) > 0
+			AND length(trim(b.description_en)) > 0
+			AND count(bc.course_id) >= 2 AND bool_and(
 		           c.lifecycle='PUBLISHED' AND c.access_suspended_at IS NULL
 		           AND c.retired_at IS NULL AND c.live_revision_id=cr.id
 		       ) AS eligible

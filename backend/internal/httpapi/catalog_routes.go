@@ -184,6 +184,7 @@ func mountCatalogRoutes(
 		requireCapability(principals, logger, identity.CapCatalogPublish),
 	)
 	{
+		adminBundleReadGroup.GET("/courses", bundleH.listEligibleCourses)
 		adminBundleReadGroup.GET("", bundleH.list)
 		adminBundleReadGroup.GET("/:id", bundleH.get)
 	}

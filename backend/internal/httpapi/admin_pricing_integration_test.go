@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -287,6 +288,76 @@ func TestCatalogMutationRouteTableRequiresSessionMutationSecurity(t *testing.T) 
 				t.Fatalf("invalid CSRF status = %d, want 403", response.StatusCode)
 			}
 		})
+	}
+}
+
+func TestAdminBundleCoursePickerPaginatesEligibleCoursesAndPreservesAuthorization(t *testing.T) {
+	ts, pool, _, instructorID, _, _, adminToken, instructorToken := setupAdminPricingAPIServer(t)
+	ctx := context.Background()
+	for index := 1; index <= 21; index++ {
+		courseID := fmt.Sprintf("70000000-0000-0000-0000-%012d", index)
+		revisionID := fmt.Sprintf("71000000-0000-0000-0000-%012d", index)
+		if _, err := pool.Exec(ctx, `INSERT INTO courses (id,owner_account_id,lifecycle) VALUES ($1::uuid,$2::uuid,'DRAFT')`, courseID, instructorID); err != nil {
+			t.Fatalf("creating picker Course %d: %v", index, err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO course_revisions (id,course_id,state,revision_number,title_ar,title_en) VALUES ($1::uuid,$2::uuid,'APPROVED',1,$3,$4)`, revisionID, courseID, fmt.Sprintf("مقرر الاختيار %d", index), fmt.Sprintf("Picker Course %d", index)); err != nil {
+			t.Fatalf("creating picker revision %d: %v", index, err)
+		}
+		if _, err := pool.Exec(ctx, `UPDATE courses SET lifecycle='PUBLISHED',live_revision_id=$1::uuid WHERE id=$2::uuid`, revisionID, courseID); err != nil {
+			t.Fatalf("publishing picker Course %d: %v", index, err)
+		}
+	}
+
+	client := ts.Client()
+	pageOne := doPricingRequest(t, client, http.MethodGet, ts.URL+"/api/v1/admin/bundles/courses?page=1", adminToken, "", "", nil)
+	var firstPage catalog.BundleCoursePage
+	if pageOne.StatusCode != http.StatusOK {
+		pageOne.Body.Close()
+		t.Fatalf("first picker page status=%d", pageOne.StatusCode)
+	}
+	if err := json.NewDecoder(pageOne.Body).Decode(&firstPage); err != nil {
+		pageOne.Body.Close()
+		t.Fatal(err)
+	}
+	pageOne.Body.Close()
+	if len(firstPage.Items) != catalog.BundleCoursePickerPageSize || firstPage.Total != 21 || !firstPage.HasNext {
+		t.Fatalf("first picker page=%+v", firstPage)
+	}
+
+	pageTwo := doPricingRequest(t, client, http.MethodGet, ts.URL+"/api/v1/admin/bundles/courses?page=2", adminToken, "", "", nil)
+	var secondPage catalog.BundleCoursePage
+	if pageTwo.StatusCode != http.StatusOK {
+		pageTwo.Body.Close()
+		t.Fatalf("second picker page status=%d", pageTwo.StatusCode)
+	}
+	if err := json.NewDecoder(pageTwo.Body).Decode(&secondPage); err != nil {
+		pageTwo.Body.Close()
+		t.Fatal(err)
+	}
+	pageTwo.Body.Close()
+	if len(secondPage.Items) != 1 || secondPage.Items[0].TitleEn != "Picker Course 21" || secondPage.HasNext {
+		t.Fatalf("second picker page=%+v", secondPage)
+	}
+
+	search := doPricingRequest(t, client, http.MethodGet, ts.URL+"/api/v1/admin/bundles/courses?q=Picker%20Course%2021", adminToken, "", "", nil)
+	var searched catalog.BundleCoursePage
+	if search.StatusCode != http.StatusOK {
+		search.Body.Close()
+		t.Fatalf("picker search status=%d", search.StatusCode)
+	}
+	if err := json.NewDecoder(search.Body).Decode(&searched); err != nil {
+		search.Body.Close()
+		t.Fatal(err)
+	}
+	search.Body.Close()
+	if len(searched.Items) != 1 || searched.Items[0].TitleEn != "Picker Course 21" {
+		t.Fatalf("picker search=%+v", searched)
+	}
+
+	denied := doPricingRequest(t, client, http.MethodGet, ts.URL+"/api/v1/admin/bundles/courses?page=2", instructorToken, "", "", nil)
+	denied.Body.Close()
+	if denied.StatusCode != http.StatusForbidden {
+		t.Fatalf("Instructor picker status=%d, want 403", denied.StatusCode)
 	}
 }
 

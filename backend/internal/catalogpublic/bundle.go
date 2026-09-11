@@ -41,6 +41,8 @@ type BundleListResult struct {
 
 func bundleEligibilitySQL(bundleAlias string) string {
 	return fmt.Sprintf(`%s.lifecycle='PUBLISHED'
+		AND length(trim(%s.description_ar)) > 0
+		AND length(trim(%s.description_en)) > 0
 		AND EXISTS (SELECT 1 FROM bundle_price_changes bp WHERE bp.bundle_id=%s.id)
 		AND (SELECT count(*) FROM bundle_courses members WHERE members.bundle_id=%s.id) >= 2
 		AND NOT EXISTS (
@@ -48,7 +50,7 @@ func bundleEligibilitySQL(bundleAlias string) string {
 			JOIN courses member_course ON member_course.id=broken.course_id
 			LEFT JOIN course_revisions member_revision ON member_revision.id=member_course.live_revision_id
 			WHERE broken.bundle_id=%s.id AND NOT (%s)
-		)`, bundleAlias, bundleAlias, bundleAlias, bundleAlias, PublishedOnly("member_course", "member_revision"))
+		)`, bundleAlias, bundleAlias, bundleAlias, bundleAlias, bundleAlias, bundleAlias, PublishedOnly("member_course", "member_revision"))
 }
 
 func (r *Repository) BrowseBundles(ctx context.Context, arabic bool, page, pageSize int) (BundleListResult, error) {

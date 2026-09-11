@@ -5,7 +5,11 @@ BEGIN
         OR EXISTS (SELECT 1 FROM bundle_price_changes)
         OR EXISTS (SELECT 1 FROM purchase_requests WHERE target_kind = 'BUNDLE')
         OR EXISTS (SELECT 1 FROM entitlements WHERE grant_source = 'BUNDLE_PURCHASE')
-        OR EXISTS (SELECT 1 FROM course_price_changes WHERE offer_price_minor_units IS NOT NULL)
+        OR EXISTS (
+            SELECT 1 FROM course_price_changes
+            WHERE offer_price_minor_units IS NOT NULL
+               OR old_offer_price_minor_units IS NOT NULL
+        )
         -- Every Course purchase request created on 0036 records the regular
         -- price its quote was taken against. Dropping the column would destroy
         -- the only evidence of what a Student was actually offered, so a
@@ -32,6 +36,9 @@ DROP TRIGGER IF EXISTS purchase_bundle_items_immutable ON purchase_request_bundl
 DROP FUNCTION IF EXISTS purchase_bundle_item_reject_mutation();
 DROP TRIGGER IF EXISTS purchase_bundle_item_target ON purchase_request_bundle_items;
 DROP FUNCTION IF EXISTS purchase_bundle_item_enforce_target();
+
+DROP TRIGGER IF EXISTS purchase_requests_bundle_snapshot_immutable ON purchase_requests;
+DROP FUNCTION IF EXISTS purchase_request_bundle_snapshot_immutable();
 DROP INDEX IF EXISTS purchase_bundle_items_order_idx;
 DROP TABLE IF EXISTS purchase_request_bundle_items;
 

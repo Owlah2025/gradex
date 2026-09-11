@@ -66,6 +66,20 @@ func TestPublicBundlesRequirePublishedAggregateAndEligibleMembers(t *testing.T) 
 	if err != nil || detail == nil || detail.ID != bundleID {
 		t.Fatalf("Bundle detail=%#v error=%v", detail, err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE bundles SET description_ar='' WHERE id=$1::uuid`, bundleID); err != nil {
+		t.Fatal(err)
+	}
+	incomplete, err := repo.BrowseBundles(ctx, false, 1, 12)
+	if err != nil || incomplete.Total != 0 || len(incomplete.Items) != 0 {
+		t.Fatalf("Bundle with incomplete bilingual description leaked=%#v error=%v", incomplete, err)
+	}
+	incompleteDetail, err := repo.BundleDetail(ctx, bundleID, false)
+	if err != nil || incompleteDetail != nil {
+		t.Fatalf("Bundle with incomplete bilingual description leaked in detail=%#v error=%v", incompleteDetail, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE bundles SET description_ar='وصف' WHERE id=$1::uuid`, bundleID); err != nil {
+		t.Fatal(err)
+	}
 	// A Bundle that is not itself PUBLISHED must never reach the public
 	// surfaces, independently of whether its members are eligible. Without this
 	// every lifecycle below would still be listed as long as its Courses were

@@ -3,6 +3,8 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -81,6 +83,21 @@ func (h *adminBundleHandlers) list(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *adminBundleHandlers) listEligibleCourses(c *gin.Context) {
+	search := strings.TrimSpace(c.Query("q"))
+	if len(search) > 200 {
+		writeProblem(c, problem.ValidationFailed())
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	result, err := h.repo.ListEligibleBundleCourses(c.Request.Context(), page, search)
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 func (h *adminBundleHandlers) get(c *gin.Context) {
 	bundle, err := h.repo.GetBundle(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -113,7 +130,7 @@ func writeBundleProblem(c *gin.Context, err error) {
 	case errors.Is(err, catalog.ErrBundleVersionConflict), errors.Is(err, catalog.ErrBundleLifecycle):
 		writeProblem(c, problem.New(http.StatusConflict, "bundle-state-conflict", "Bundle changed", "Refresh the Bundle and try again."))
 	case errors.Is(err, catalog.ErrBundleMemberCount), errors.Is(err, catalog.ErrBundleMemberInvalid),
-		errors.Is(err, catalog.ErrBundlePriceRequired), errors.Is(err, catalog.ErrInvalidPrice),
+		errors.Is(err, catalog.ErrBundleDescription), errors.Is(err, catalog.ErrBundlePriceRequired), errors.Is(err, catalog.ErrInvalidPrice),
 		errors.Is(err, catalog.ErrInvalidOfferPrice), errors.Is(err, catalog.ErrReasonRequired):
 		writeProblem(c, problem.ValidationFailed())
 	default:

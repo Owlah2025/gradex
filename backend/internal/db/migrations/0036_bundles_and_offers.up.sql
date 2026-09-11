@@ -139,6 +139,37 @@ ALTER TABLE purchase_requests
         ))
     );
 
+CREATE FUNCTION purchase_request_bundle_snapshot_immutable() RETURNS TRIGGER AS $$
+BEGIN
+    IF (OLD.target_kind = 'BUNDLE' OR NEW.target_kind = 'BUNDLE')
+       AND (
+           OLD.reference_code IS DISTINCT FROM NEW.reference_code
+           OR OLD.email IS DISTINCT FROM NEW.email
+           OR OLD.normalized_email IS DISTINCT FROM NEW.normalized_email
+           OR OLD.requester_account_id IS DISTINCT FROM NEW.requester_account_id
+           OR OLD.target_kind IS DISTINCT FROM NEW.target_kind
+           OR OLD.course_id IS DISTINCT FROM NEW.course_id
+           OR OLD.bundle_id IS DISTINCT FROM NEW.bundle_id
+           OR OLD.bundle_revision IS DISTINCT FROM NEW.bundle_revision
+           OR OLD.bundle_title_ar IS DISTINCT FROM NEW.bundle_title_ar
+           OR OLD.bundle_title_en IS DISTINCT FROM NEW.bundle_title_en
+           OR OLD.regular_price_minor_units IS DISTINCT FROM NEW.regular_price_minor_units
+           OR OLD.price_minor_units IS DISTINCT FROM NEW.price_minor_units
+           OR OLD.currency IS DISTINCT FROM NEW.currency
+           OR OLD.requested_at IS DISTINCT FROM NEW.requested_at
+       )
+    THEN
+        RAISE EXCEPTION 'Bundle purchase request commercial snapshot is immutable'
+            USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER purchase_requests_bundle_snapshot_immutable
+    BEFORE UPDATE ON purchase_requests
+    FOR EACH ROW EXECUTE FUNCTION purchase_request_bundle_snapshot_immutable();
+
 CREATE UNIQUE INDEX purchase_requests_one_active_bundle_student
     ON purchase_requests (bundle_id, requester_account_id)
     WHERE target_kind = 'BUNDLE' AND requester_account_id IS NOT NULL
