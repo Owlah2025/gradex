@@ -157,6 +157,31 @@ test("both dictionaries name every navigation destination the header renders", (
   }
 });
 
+test("Admin workspace exposes the localized Course Bundles route", () => {
+  const navigation = readSource("components/layout/role-workspace-navigation.ts");
+  const shell = readSource("components/layout/role-workspace-shell.tsx");
+  const bundlesPage = readSource("app/[locale]/admin/bundles/page.tsx");
+
+  assert.ok(
+    navigation.includes('{ key: "bundles", href: `/${locale}/admin/bundles` },'),
+    "Admin navigation has no Course Bundles route",
+  );
+  assert.ok(
+    shell.includes("bundles: t.adminBundles.title,"),
+    "Course Bundles is not mapped to the existing localized label",
+  );
+  assert.equal(en.adminBundles.title, "Course Bundles");
+  assert.equal(ar.adminBundles.title, "باقات الكورسات");
+  assert.ok(
+    bundlesPage.includes("export default function AdminBundlesPage"),
+    "the Admin Course Bundles route is missing",
+  );
+  assert.ok(
+    bundlesPage.includes("<BundleWorkspace />"),
+    "the Admin Course Bundles route renders nothing",
+  );
+});
+
 test("breadcrumbs are real links, and the current page is not one of them", () => {
   const source = readSource("components/layout/breadcrumbs.tsx");
   // A history-based control cannot be opened in a new tab, cannot be

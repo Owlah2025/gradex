@@ -9,6 +9,7 @@ export type WorkspaceNavigationKey =
   | "courseReview"
   | "adminCourses"
   | "academicCatalog"
+  | "bundles"
   | "courseAccess"
   | "courseLifecycle"
   | "reportedContent"
@@ -68,6 +69,7 @@ export function roleWorkspaceNavigation(
       { key: "adminCourses", href: `/${locale}/admin/courses` },
       { key: "courseReview", href: home },
       { key: "academicCatalog", href: `/${locale}/admin/academic-catalog` },
+      { key: "bundles", href: `/${locale}/admin/bundles` },
       { key: "courseAccess", href: `/${locale}/admin/course-access` },
       { key: "courseLifecycle", href: `/${locale}/admin/course-lifecycle` },
       { key: "reportedContent", href: `/${locale}/admin/reported-content` },

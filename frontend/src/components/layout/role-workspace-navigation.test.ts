@@ -15,6 +15,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "adminCourses", href: "/en/admin/courses" },
     { key: "courseReview", href: "/en/admin/catalog" },
     { key: "academicCatalog", href: "/en/admin/academic-catalog" },
+    { key: "bundles", href: "/en/admin/bundles" },
     { key: "courseAccess", href: "/en/admin/course-access" },
     { key: "courseLifecycle", href: "/en/admin/course-lifecycle" },
     { key: "reportedContent", href: "/en/admin/reported-content" },
@@ -24,6 +25,7 @@ test("Admin workspace navigation exposes the existing launch operations", () => 
     { key: "adminCourses", href: "/ar/admin/courses" },
     { key: "courseReview", href: "/ar/admin/catalog" },
     { key: "academicCatalog", href: "/ar/admin/academic-catalog" },
+    { key: "bundles", href: "/ar/admin/bundles" },
     { key: "courseAccess", href: "/ar/admin/course-access" },
     { key: "courseLifecycle", href: "/ar/admin/course-lifecycle" },
     { key: "reportedContent", href: "/ar/admin/reported-content" },
@@ -110,6 +112,7 @@ test("every navigation entry for every known role carries a real href", () => {
       for (const entry of roleWorkspaceNavigation(role, locale)) {
         assert.equal(typeof entry.href, "string", `${role} ${locale} ${entry.key}`);
         assert.notEqual(entry.href.length, 0, `${role} ${locale} ${entry.key}`);
+        assert.ok(entry.href.startsWith("/"), `${role} ${locale} ${entry.key}: ${entry.href}`);
         assert.ok(!entry.href.includes("undefined"), `${role} ${locale} ${entry.key}: ${entry.href}`);
       }
     }
