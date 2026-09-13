@@ -1230,15 +1230,11 @@ export const en = {
     },
   },
   hero: {
-    eyebrow: "University courses · Kuwait",
-    titleLead: "Your course, explained the",
-    titleAccent: "right way.",
-    subtitle:
-      "Courses built around your university\u2019s own study plan \u2014 from the lecture to the exam.",
+    launchBadge: "Now in Kuwait",
+    title: "Study with GradeX.\nGraduate with excellence.",
+    subtitle: "University courses built around your actual study plan.",
     primaryCta: "Find my courses",
-    secondaryCta: "Browse all courses",
-    trustNote:
-      "Arabic and English · Prices in KWD · No account needed to browse",
+    secondaryCta: "Join GradeX",
   },
   courses: {
     loading: "Loading published courses…",

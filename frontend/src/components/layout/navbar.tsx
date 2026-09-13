@@ -34,7 +34,9 @@ export function Navbar() {
         {/* The logo and the "Home" entry beside it must name one destination.
             Two controls that look like the way back and disagree about where
             that is are worse than one. */}
-        <Logo href={routes.home(locale)} ariaLabel={t.meta.logoHomeAria} />
+        <Logo href={routes.home(locale)} ariaLabel={t.meta.logoHomeAria}
+          imageSrc={pathname === routes.home(locale) ? "/media/gradex-logo-web.webp" : undefined}
+        />
 
         <nav
           aria-label={t.nav.primaryNavigation}

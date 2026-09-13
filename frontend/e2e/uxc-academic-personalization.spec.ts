@@ -714,6 +714,9 @@ test.describe("UX-C anonymous academic personalisation", () => {
     await expect(page.getByTestId("catalogue-academic-context")).toHaveCount(0);
     await expect(page.getByText("Courses relevant to your program appear first.")).toBeVisible();
 
+    await page.goto("/");
+    await expect(page.getByTestId("hero-academic-strip")).toHaveCount(0);
+
     // And the saved profile is untouched.
     expect(writes, "browsing rewrote a saved academic profile").toEqual([]);
     const after = await (await api.get("/api/v1/me/academic-profile")).json();
@@ -988,6 +991,95 @@ test.describe("UX-C anonymous academic personalisation", () => {
         });
         await context.close();
       });
+    }
+  }
+
+  const fallbackCopy = {
+    en: {
+      question: "Which university do you study at?",
+      loading: "Loading universities…",
+      failed: "Universities could not be loaded.",
+      empty: "No universities are listed yet.",
+      retry: "Try again",
+    },
+    ar: {
+      question: "في أي جامعة تدرس؟",
+      loading: "جارٍ تحميل الجامعات…",
+      failed: "تعذّر تحميل الجامعات.",
+      empty: "لا توجد جامعات مسجّلة بعد.",
+      retry: "أعد المحاولة",
+    },
+  } as const;
+  const fallbackStates = ["loading", "failed", "empty"] as const;
+  const fallbackTestIDs = {
+    loading: "hero-academic-loading",
+    failed: "hero-academic-error",
+    empty: "hero-academic-empty",
+  } as const;
+
+  for (const viewport of [
+    { name: "mobile", width: 390, height: 844 },
+    { name: "desktop", width: 1440, height: 900 },
+  ]) {
+    for (const locale of ["en", "ar"] as const) {
+      for (const state of fallbackStates) {
+        test(`selector ${state} state stays visible — ${viewport.name} ${locale}`, async ({
+          browser,
+        }) => {
+          const context = await browser.newContext({
+            locale: locale === "ar" ? "ar" : "en-US",
+            viewport: { width: viewport.width, height: viewport.height },
+          });
+          await seedLocale(context, locale);
+          const page = await context.newPage();
+
+          await page.route("**/api/v1/catalog/academic-options/institutions", async (route) => {
+            // An unresolved boundary request is the real loading state; responding with delayed
+            // fixture data would turn this into a timing test instead.
+            if (state === "loading") return;
+            if (state === "failed") {
+              await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+              return;
+            }
+            await route.fulfill({
+              status: 200,
+              contentType: "application/json",
+              body: JSON.stringify({ items: [] }),
+            });
+          });
+
+          await page.goto("/");
+          const strip = page.getByTestId("hero-academic-strip");
+          await expect(strip).toBeVisible();
+          await expect(strip).toContainText(fallbackCopy[locale].question);
+
+          const status = page.getByTestId(fallbackTestIDs[state]);
+          await expect(status).toBeVisible();
+          await expect(status).toContainText(fallbackCopy[locale][state]);
+          if (state === "failed") {
+            await expect(status.getByRole("button", { name: fallbackCopy[locale].retry })).toBeVisible();
+          }
+
+          const statusBox = (await status.boundingBox())!;
+          if (viewport.name === "desktop") {
+            const dividerBox = (await page.locator(".hero-course-divider").boundingBox())!;
+            expect(
+              dividerBox.y - (statusBox.y + statusBox.height),
+              "the selector fallback overlaps the divider",
+            ).toBeGreaterThanOrEqual(23);
+          } else {
+            expect(
+              statusBox.y + statusBox.height,
+              "the selector fallback falls below the first mobile viewport",
+            ).toBeLessThanOrEqual(viewport.height);
+          }
+
+          await page.locator('[aria-labelledby="hero-title"]').screenshot({
+            path: `playwright-report/hero-selector-${state}-${viewport.name}-${locale}.png`,
+          });
+          await context.close();
+        });
+      }
     }
   }
 });

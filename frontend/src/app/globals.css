@@ -331,7 +331,7 @@
    * read, and it stays exact if the reader scrolls backwards or flings.
    */
   @supports (animation-timeline: view()) {
-    @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+    @media (prefers-reduced-motion: no-preference) {
       .stack {
         timeline-scope: --gx-stack-2, --gx-stack-3;
       }
@@ -346,6 +346,27 @@
         view-timeline-axis: block;
       }
 
+      .hero-divider-facet {
+        animation-duration: 1s;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+        animation-timeline: --gx-stack-2;
+        animation-range: entry 0% entry 100%;
+        transform-box: fill-box;
+        transform-origin: center;
+        will-change: transform;
+      }
+
+      .hero-divider-facet-forward {
+        animation-name: gx-hero-divider-forward;
+      }
+
+      .hero-divider-facet-reverse {
+        animation-name: gx-hero-divider-reverse;
+      }
+    }
+
+    @media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
       .stack-recedes-under-2,
       .stack-recedes-under-3 {
         animation: gx-stack-recede linear both;
@@ -373,5 +394,23 @@
   to {
     transform: scale(0.97);
     opacity: 0.7;
+  }
+}
+
+@keyframes gx-hero-divider-forward {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(3px, -2px, 0);
+  }
+}
+
+@keyframes gx-hero-divider-reverse {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-2px, 3px, 0);
   }
 }

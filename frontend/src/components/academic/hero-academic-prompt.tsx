@@ -142,9 +142,6 @@ export function HeroAcademicPrompt({ onResolved }: { onResolved?: () => void }) 
     openCard();
   }, [editRequests, openCard]);
 
-  const readyInstitutions =
-    institutions.kind === "ready" ? institutions.items : [];
-
   const chosen =
     institutions.kind === "ready"
       ? institutions.items.find((item) => item.slug === institutionSlug)
@@ -399,10 +396,17 @@ export function HeroAcademicPrompt({ onResolved }: { onResolved?: () => void }) 
         ) : (
           <div className="pointer-events-auto w-full">
             <UniversityStrip
-              institutions={readyInstitutions}
+              institutions={institutions}
               language={language}
-              title={copy.universityQuestion}
+              copy={{
+                title: copy.universityQuestion,
+                loading: copy.loading,
+                loadFailed: copy.loadFailed,
+                retry: copy.retry,
+                noInstitutions: copy.noInstitutions,
+              }}
               onSelect={(slug) => openCard(slug)}
+              onRetry={retryInstitutions}
               // Lifted clear of the hero's bottom edge, where it read as a footer rather than as
               // part of the offer. The padding rather than an offset, so the gradient behind it
               // still runs to the edge instead of ending in a visible seam.

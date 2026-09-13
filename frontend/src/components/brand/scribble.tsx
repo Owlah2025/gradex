@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Scribble — hand-drawn orange underline that accents exactly one word in a
+ * Scribble — hand-drawn orange underline that accents exactly one word or phrase in a
  * heading (design-system imagery rule). Decorative only.
  */
 export function Scribble({
@@ -15,11 +15,12 @@ export function Scribble({
   return (
     <span className={cn("relative inline-block whitespace-nowrap", className)}>
       {children}
+      {/* Wrapped mobile phrases use the wrapper's wavy text decoration so each line stays attached. */}
       <svg
         viewBox="0 0 300 20"
         preserveAspectRatio="none"
         aria-hidden
-        className="absolute -bottom-[0.28em] -start-[2%] h-[0.42em] w-[104%] overflow-visible"
+        className="absolute -bottom-[0.28em] -start-[2%] hidden h-[0.42em] w-[104%] overflow-visible sm:block"
       >
         <defs>
           <linearGradient id="gx-scribble" x1="0" y1="0" x2="1" y2="0">

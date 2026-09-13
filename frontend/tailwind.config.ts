@@ -161,11 +161,16 @@ const config: Config = {
           "0%,100%": { transform: "translateY(0) rotate(-4deg)" },
           "50%": { transform: "translateY(-16px) rotate(-1deg)" },
         },
+        "hero-float": {
+          "0%,100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-8px)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 200ms ease-out",
         "accordion-up": "accordion-up 200ms ease-out",
         "bird-float": "bird-float 6s cubic-bezier(0.16,1,0.3,1) infinite",
+        "hero-float": "hero-float 5s ease-in-out infinite",
       },
     },
   },

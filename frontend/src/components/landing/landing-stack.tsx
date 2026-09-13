@@ -4,6 +4,7 @@ import * as React from "react";
 import { SectionStack, StackLayer } from "./section-stack";
 import { useLandingJourney } from "./landing-journey";
 import { COURSES_ANCHOR } from "./anchors";
+import { HeroCourseDivider } from "./hero-course-divider";
 
 /**
  * Hero → Courses, as one continuous surface.
@@ -35,8 +36,9 @@ export function LandingStack({
         tail
         id={COURSES_ANCHOR}
         ref={journey?.registerCourses}
-        className="rounded-t-xl border-t border-border bg-background shadow-lg"
+        className="bg-background"
       >
+        <HeroCourseDivider />
         {courses}
       </StackLayer>
     </SectionStack>

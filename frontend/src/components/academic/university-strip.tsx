@@ -3,8 +3,11 @@
 import * as React from "react";
 import type { InstitutionOption } from "@/lib/api/public-catalog";
 import { institutionName } from "@/components/catalog/academic-filter-state";
+import { LoadingState } from "@/components/common/loading-state";
+import { Button } from "@/components/ui/button";
 import { universityLogos } from "@/config/university-logos";
 import { cn } from "@/lib/utils";
+import type { OptionsState } from "./use-academic-options";
 
 /**
  * The universities Gradex covers, offered as the way in.
@@ -21,20 +24,27 @@ import { cn } from "@/lib/utils";
 export function UniversityStrip({
   institutions,
   language,
-  title,
+  copy,
   onSelect,
+  onRetry,
   className,
 }: {
-  institutions: InstitutionOption[];
+  institutions: OptionsState<InstitutionOption>;
   language: "ar" | "en";
-  title: string;
+  copy: {
+    title: string;
+    loading: string;
+    loadFailed: string;
+    retry: string;
+    noInstitutions: string;
+  };
   onSelect: (slug: string) => void;
+  onRetry: () => void;
   className?: string;
 }) {
-  if (institutions.length === 0) return null;
-
   return (
     <div
+      data-testid="hero-academic-strip"
       className={cn(
         // A gradient foot rather than a panel.
         //
@@ -49,36 +59,76 @@ export function UniversityStrip({
       {/* The hero's own eyebrow colour, so the question reads as part of the brand's voice rather
           than as a caption under it. */}
       <p className="text-center font-display text-[13px] font-bold tracking-[0.01em] text-gx-blue-200">
-        {title}
+        {copy.title}
       </p>
 
-      {/**
-       * Centred while it fits, scrollable once it does not.
-       *
-       * `mx-auto` on the inner row is what does both: a row narrower than the track centres itself,
-       * and a wider one starts at the inline edge and scrolls from there. `justify-center` on the
-       * scroll container would have looked identical until the list outgrew the screen, at which
-       * point it clips the leading items where no scroll can reach them.
-       *
-       * The scrollbar is hidden because the row is a handful of items on a dark band where a
-       * scrollbar reads as damage; the overflow is still keyboard- and touch-reachable.
-       */}
-      <div
-        data-testid="hero-academic-strip"
-        className="mt-2.5 flex snap-x snap-mandatory overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        <ul className="mx-auto flex max-w-container items-center gap-2 px-5">
-          {institutions.map((option) => (
-            <li key={option.slug} className="shrink-0 snap-start">
-              <UniversityChip
-                option={option}
-                language={language}
-                onSelect={() => onSelect(option.slug)}
-              />
-            </li>
-          ))}
-        </ul>
+      <div className="mt-2.5 min-h-[3.75rem]">
+        {institutions.kind === "loading" ? (
+          <LoadingState
+            label={copy.loading}
+            testID="hero-academic-loading"
+            className="flex min-h-[3.75rem] items-center justify-center py-0 text-center text-white/70"
+          />
+        ) : institutions.kind === "failed" ? (
+          <div
+            role="alert"
+            data-testid="hero-academic-error"
+            className="flex min-h-[3.75rem] flex-wrap items-center justify-center gap-x-3 gap-y-2 px-5 text-center text-sm text-white/70"
+          >
+            <span>{copy.loadFailed}</span>
+            <Button
+              type="button"
+              variant="onDark"
+              size="sm"
+              onClick={onRetry}
+              className="h-8 px-3 text-xs"
+            >
+              {copy.retry}
+            </Button>
+          </div>
+        ) : institutions.items.length === 0 ? (
+          <p
+            role="status"
+            data-testid="hero-academic-empty"
+            className="flex min-h-[3.75rem] items-center justify-center px-5 text-center text-sm text-white/70"
+          >
+            {copy.noInstitutions}
+          </p>
+        ) : (
+          <UniversityOptions
+            institutions={institutions.items}
+            language={language}
+            onSelect={onSelect}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+function UniversityOptions({
+  institutions,
+  language,
+  onSelect,
+}: {
+  institutions: InstitutionOption[];
+  language: "ar" | "en";
+  onSelect: (slug: string) => void;
+}) {
+  return (
+    // `mx-auto` centres a short row but leaves an overflowing row reachable from its inline edge.
+    <div className="flex snap-x snap-mandatory overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <ul className="mx-auto flex max-w-container items-center gap-2 px-5">
+        {institutions.map((option) => (
+          <li key={option.slug} className="shrink-0 snap-start">
+            <UniversityChip
+              option={option}
+              language={language}
+              onSelect={() => onSelect(option.slug)}
+            />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -110,7 +160,7 @@ function UniversityChip({
       onClick={onSelect}
       data-value={option.slug}
       className={cn(
-        "group flex items-center gap-2.5 rounded-pill border py-1.5 pe-4 ps-1.5",
+        "group flex items-center gap-3 rounded-pill border py-2 pe-4 ps-2",
         // Brand blue rather than plain white glass. On the navy band a neutral chip reads as
         // chrome; carrying the ramp makes the row read as Gradex offering something.
         "border-gx-blue-500/30 bg-gx-blue-500/10 supports-[backdrop-filter]:backdrop-blur-md",
@@ -120,10 +170,10 @@ function UniversityChip({
       )}
     >
       {showMark ? (
-      <span className="flex h-8 min-w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-gx-blue-500/25 px-1.5">
+      <span className="flex h-10 min-w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gx-blue-500/25 px-2">
         {logo ? (
           // Decorative: the institution's name sits beside it and is the accessible label already.
-          // A plain <img>: these are small local vector marks in a 32px slot, so `next/image` would
+          // A plain <img>: these are small local vector marks in a 40px slot, so `next/image` would
           // add a loader and a layout wrapper to optimise artwork that is already optimal.
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -144,7 +194,7 @@ function UniversityChip({
         )}
       </span>
       ) : null}
-      <span className="whitespace-nowrap font-display text-[13px] font-semibold text-white/90 transition-colors duration-base group-hover:text-white">
+      <span className="whitespace-nowrap font-display text-sm font-semibold text-white/90 transition-colors duration-base group-hover:text-white">
         {name}
       </span>
     </button>
