@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
@@ -14,7 +14,9 @@ import {
   type SessionDeviceTrust,
 } from "@/lib/api/devices";
 import { ProblemError } from "@/lib/api/problem";
+import { postAuthenticationDestination } from "@/lib/identity/return-to";
 import { currentCSRFToken, deviceTrust } from "@/lib/identity/session";
+import { useSessionView } from "@/lib/identity/use-session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 /**
@@ -36,7 +38,8 @@ import { useLocale } from "@/lib/i18n/locale-provider";
 export function DeviceTrustForm() {
   const { locale, t } = useLocale();
   const labels = t.devices;
-  const router = useRouter();
+  const searchParams = useSearchParams();
+  const session = useSessionView();
   const [trust] = React.useState<SessionDeviceTrust | null>(() => deviceTrust());
   const [code, setCode] = React.useState("");
   const [replaceDeviceID, setReplaceDeviceID] = React.useState("");
@@ -60,13 +63,14 @@ export function DeviceTrustForm() {
   // A browser that arrives here with no outstanding challenge has nothing to
   // confirm. Sending it back to sign in is the only honest move; inventing a
   // challenge identifier would produce a form that can never succeed.
-  if (!trust || !challengeID) {
+  if (!trust || !challengeID || !session) {
     return (
       <Alert tone="info" title={labels.trustUnavailable}>
         {""}
       </Alert>
     );
   }
+  const authenticatedSession = session;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -90,7 +94,14 @@ export function DeviceTrustForm() {
       // The session this browser already holds has been upgraded server-side.
       // A full navigation re-resolves it rather than trusting this page's
       // in-memory copy, which still describes the pending state.
-      window.location.assign(`/${locale}/learn/dashboard`);
+      window.location.assign(
+        postAuthenticationDestination(
+          authenticatedSession.role,
+          searchParams.get("returnTo"),
+          locale,
+          authenticatedSession.password_change_required,
+        ),
+      );
     } catch (problem) {
       setCode("");
       setError(messageFor(problem, labels));

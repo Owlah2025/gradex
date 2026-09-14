@@ -60,11 +60,12 @@ import (
 // By the same allocation identity slots 0-29 keep indices 0-299 unchanged and the
 // four new slots occupy 300-339.
 // AD-14 adds one report-resolution Student slot (34), occupying index 340-349.
-// D-106 adds six Subject-demand Student slots (35-40), occupying indices
-// 350-409. Every one is dedicated rather than shared, because each mutates
+// D-106 adds seven Subject-demand Student slots (35-41), occupying indices
+// 350-419. Every one is dedicated rather than shared, because each mutates
 // demand signals that the next reader observes: the 409 and 404 convergence
 // journeys, the Arabic journey, two Students whose differing counts give the
-// Admin sort something to order, and one that signs in through the login form.
+// Admin sort something to order, and the trusted- and untrusted-browser
+// authentication-return journeys.
 // Sharing any of them would make a run's starting state depend on which test
 // happened to run first.
 //
@@ -74,9 +75,9 @@ import (
 const (
 	// rotatingStudentPoolSize is the provisioned active pool. It must be at least
 	// rotatingTestSlots * rotatingMaxRepeats.
-	rotatingStudentPoolSize = 410
+	rotatingStudentPoolSize = 420
 	// rotatingTestSlots is the number of registered active-Student test identities.
-	rotatingTestSlots = 41
+	rotatingTestSlots = 42
 	// rotatingMaxRepeats is the greatest `--repeat-each` the pool supports.
 	rotatingMaxRepeats = 10
 

@@ -8,8 +8,11 @@ import {
   SUBJECT_DEMAND_AR_TEST_SLOT,
   SUBJECT_DEMAND_AUTH_RETURN_TEST_SLOT,
   SUBJECT_DEMAND_EN_TEST_SLOT,
+  SUBJECT_DEMAND_UNTRUSTED_AUTH_RETURN_TEST_SLOT,
   SUBJECT_DEMAND_WITHDRAW_TEST_SLOT,
+  type RotatingStudent,
 } from "./rotating-students";
+import { completeDeviceTrustScreen } from "./device-trust";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 
 /**
@@ -397,6 +400,56 @@ test("Anonymous Request completes through sign-in and returns to the Subject", a
   await context.close();
 });
 
+test("Anonymous Request survives device trust and returns to the Subject", async ({
+  browser,
+}, testInfo) => {
+  const student = studentFor(testInfo, SUBJECT_DEMAND_UNTRUSTED_AUTH_RETURN_TEST_SLOT);
+  const context = await browser.newContext({ locale: "en-US" });
+  await context.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
+  const page = await context.newPage();
+
+  await page.goto(`/en/subjects?institution=${INSTITUTION_SLUG}&availability=unserved`);
+  const detailHref = await page
+    .getByTestId("subject-card")
+    .first()
+    .getByTestId("subject-card-link")
+    .getAttribute("href");
+  expect(detailHref).toBeTruthy();
+  const subjectPath = decodeURIComponent(detailHref!);
+
+  await page.goto(detailHref!);
+  await page.getByTestId("subject-demand-sign-in").click();
+  await expect(page).toHaveURL(/\/login\?returnTo=/);
+
+  const requestedAt = new Date();
+  await page.locator("#email").fill(student.email);
+  await page.locator("#password").fill(STUDENT_PASSWORD);
+  await page.getByRole("button", { name: /sign in|log in/i }).first().click();
+
+  await page.waitForURL((url) => url.pathname === "/device-trust", { timeout: 60_000 });
+  const carried = decodeURIComponent(new URL(page.url()).searchParams.get("returnTo") ?? "");
+  expect(carried.split("?")[0], "device trust must retain the exact Subject route").toBe(
+    subjectPath,
+  );
+  expect(carried, "device trust must retain the demand intent").toContain("request=1");
+
+  await completeDeviceTrustScreen(page, student.email, requestedAt);
+  await page.waitForURL(
+    (url) =>
+      decodeURIComponent(url.pathname) === subjectPath &&
+      url.searchParams.get("request") === "1",
+    { timeout: 60_000 },
+  );
+
+  await expect(page.getByTestId("subject-demand-panel")).toBeVisible();
+  await page.getByTestId("subject-demand-submit").click();
+  await expect(page.getByTestId("subject-demand-state")).toHaveText("Requested");
+
+  await page.getByTestId("subject-demand-withdraw").click();
+  await expect(page.getByTestId("subject-demand-submit")).toBeVisible();
+  await context.close();
+});
+
 test("An unknown Subject URL is a real HTTP 404 while a real one renders", async ({ page }) => {
   const missing = await page.goto(`/en/subjects/${INSTITUTION_SLUG}/NOSUCH999`);
   expect(missing?.status(), "a missing Subject must answer 404").toBe(404);
@@ -465,7 +518,7 @@ test("Admin reads, sorts, and filters demand; staff get no Student demand contro
   // requests the next one, so the two rows carry different counts and the sort
   // has something real to order.
   const requestNth = async (
-    student: { email: string; accountID: string },
+    student: RotatingStudent,
     indexes: number[],
   ) => {
     const context = await browser.newContext({ locale: "en-US" });

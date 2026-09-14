@@ -95,7 +95,7 @@ export function LoginForm() {
       // application is the same reasoning as the restricted principal below:
       // walking into a wall of refusals is the defect this avoids.
       if (session.device_trust?.state === "PENDING_DEVICE_TRUST") {
-        router.push("/device-trust");
+        router.push(withReturnTo("/device-trust", searchParams.get("returnTo")));
         return;
       }
       // A restricted principal is routed to the mandatory password-change
