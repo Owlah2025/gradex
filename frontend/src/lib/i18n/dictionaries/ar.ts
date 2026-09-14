@@ -93,6 +93,7 @@ export const ar: Dictionary = {
     courseReview: "مراجعة المقررات وإدارتها",
     adminCourses: "المقررات",
     academicCatalog: "الكتالوج الأكاديمي",
+    subjectDemand: "طلبات المواد",
     courseAccess: "الوصول إلى المقررات",
     courseLifecycle: "حالة المقررات",
     reportedContent: "البلاغات عن المحتوى",

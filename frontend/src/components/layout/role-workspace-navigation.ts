@@ -9,6 +9,7 @@ export type WorkspaceNavigationKey =
   | "courseReview"
   | "adminCourses"
   | "academicCatalog"
+  | "subjectDemand"
   | "bundles"
   | "courseAccess"
   | "courseLifecycle"
@@ -69,6 +70,10 @@ export function roleWorkspaceNavigation(
       { key: "adminCourses", href: `/${locale}/admin/courses` },
       { key: "courseReview", href: home },
       { key: "academicCatalog", href: `/${locale}/admin/academic-catalog` },
+      // Demand sits beside the Academic Catalog rather than beside Courses: it is
+      // read against Subjects, and it answers "what should exist" rather than
+      // anything about the Courses that already do.
+      { key: "subjectDemand", href: `/${locale}/admin/subject-demand` },
       { key: "bundles", href: `/${locale}/admin/bundles` },
       { key: "courseAccess", href: `/${locale}/admin/course-access` },
       { key: "courseLifecycle", href: `/${locale}/admin/course-lifecycle` },

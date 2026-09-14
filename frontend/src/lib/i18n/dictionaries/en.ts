@@ -50,6 +50,7 @@ export const en = {
     courseReview: "Course review & administration",
     adminCourses: "Courses",
     academicCatalog: "Academic Catalog",
+    subjectDemand: "Subject Demand",
     courseAccess: "Course Access",
     courseLifecycle: "Course Lifecycle",
     reportedContent: "Reported Content",

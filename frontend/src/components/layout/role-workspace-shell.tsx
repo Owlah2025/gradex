@@ -23,6 +23,7 @@ export function RoleWorkspaceShell({
     courseReview: t.nav.courseReview,
     adminCourses: t.nav.adminCourses,
     academicCatalog: t.nav.academicCatalog,
+    subjectDemand: t.nav.subjectDemand,
     bundles: t.adminBundles.title,
     courseAccess: t.nav.courseAccess,
     courseLifecycle: t.nav.courseLifecycle,
