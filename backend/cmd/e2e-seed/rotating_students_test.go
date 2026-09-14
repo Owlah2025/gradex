@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,12 +101,45 @@ const (
 	// rotatingExpiredQueueOffsetSeconds is the same for the expired pool, chosen so every
 	// expired Invitation is older than every active one.
 	rotatingExpiredQueueOffsetSeconds = 600
+
+	// rotatingActiveQueueBand is how many active indices participate in the
+	// original Admin-queue ordering.
+	//
+	// The Admin Course Access queue is paginated newest-first, so an index's
+	// recency decides which page it lands on. T8A finds its Students (slots
+	// 30-33, indices 300-339) on page one, and that worked because those were
+	// among the newest 50 invitations when the pool held 350.
+	//
+	// Appending slots used to make the new indices the newest invitations,
+	// which silently pushed T8A's Students to the second page and failed all
+	// four of its cases with "not reachable on the Admin Course Access queue".
+	// Pinning the band to 350 keeps every legacy index's timestamp byte-identical
+	// to what it was before the pool grew; anything above it is placed below the
+	// whole band by rotatingActiveInvitationCreatedAt.
+	rotatingActiveQueueBand = 350
 )
 
 // rotatingInvitationCreatedAt places pool slot `index` in the Admin queue's ordering. Higher
 // indices are newer, so growing a pool never reorders the rows already provisioned below it.
 func rotatingInvitationCreatedAt(now time.Time, index, poolSize, offsetSeconds int) time.Time {
 	return now.Add(-time.Duration(offsetSeconds+(poolSize-1-index)) * time.Second)
+}
+
+// rotatingActiveInvitationCreatedAt places an active pool index in the Admin
+// queue's ordering, and keeps appended slots out of the queue's first pages.
+//
+// Indices inside rotatingActiveQueueBand keep exactly the timestamp they had
+// before the pool grew. Indices above it are deliberately the OLDEST active
+// invitations in the pool: a test that expects a Student on page one must not
+// be displaced by a slot appended for an unrelated feature. They remain newer
+// than every expired invitation, so the expired-older-than-active invariant
+// that rotatingExpiredQueueOffsetSeconds encodes still holds.
+func rotatingActiveInvitationCreatedAt(now time.Time, index int) time.Time {
+	if index < rotatingActiveQueueBand {
+		return rotatingInvitationCreatedAt(now, index, rotatingActiveQueueBand, rotatingActiveQueueOffsetSeconds)
+	}
+	oldestInBand := rotatingInvitationCreatedAt(now, 0, rotatingActiveQueueBand, rotatingActiveQueueOffsetSeconds)
+	return oldestInBand.Add(-time.Duration(1+index-rotatingActiveQueueBand) * time.Second)
 }
 
 // rotatingStudentID is the deterministic account identifier for pool slot `index`. Identifiers
@@ -190,7 +224,7 @@ func seedRotatingStudents(
 			INSERT INTO course_access_invitations (id, course_id, email, normalized_email, created_by_account_id, accepted_by_account_id, decided_by_account_id, state, created_at)
 			VALUES ($1, $2, $4, $4, $3, $3, $3, 'APPROVED', $5)
 		`, invID, courseID, accountID, email,
-			rotatingInvitationCreatedAt(now, index, rotatingStudentPoolSize, rotatingActiveQueueOffsetSeconds),
+			rotatingActiveInvitationCreatedAt(now, index),
 		); err != nil {
 			return fmt.Errorf("insert rotating student %d invitation: %w", index, err)
 		}
@@ -276,4 +310,60 @@ func seedRotatingExpiredStudents(
 	}
 
 	return nil
+}
+
+// Appending a slot must never change where an existing Student sits in the
+// Admin Course Access queue.
+//
+// This is the regression D-106's pool growth caused: the queue is paginated
+// newest-first, T8A finds its Students (indices 300-339) on page one, and
+// making the appended indices the newest invitations pushed them onto page two.
+// All four T8A cases failed with "not reachable on the Admin Course Access
+// queue" — a fixture change presenting as four product failures.
+func TestAppendedRotatingSlotsDoNotDisplaceTheQueue(t *testing.T) {
+	now := time.Now().UTC()
+
+	// Every legacy index keeps the exact timestamp it had when the pool was
+	// rotatingActiveQueueBand large. Byte-identical, not merely ordered the same.
+	for _, index := range []int{0, 1, 299, 300, 339, 349} {
+		legacy := rotatingInvitationCreatedAt(now, index, rotatingActiveQueueBand, rotatingActiveQueueOffsetSeconds)
+		if got := rotatingActiveInvitationCreatedAt(now, index); !got.Equal(legacy) {
+			t.Errorf("index %d created_at = %s, want the pre-growth %s", index, got, legacy)
+		}
+	}
+
+	// T8A's band must remain inside the newest 50, which is the Admin queue's
+	// first page. Anything below that and T8A cannot find its Students.
+	newest := rotatingActiveInvitationCreatedAt(now, rotatingActiveQueueBand-1)
+	for _, index := range []int{300, 339} {
+		rank := 0
+		at := rotatingActiveInvitationCreatedAt(now, index)
+		for other := 0; other < rotatingStudentPoolSize; other++ {
+			if rotatingActiveInvitationCreatedAt(now, other).After(at) {
+				rank++
+			}
+		}
+		if rank >= 50 {
+			t.Errorf("index %d sits at queue position %d; T8A needs it inside the first page of 50", index, rank)
+		}
+	}
+	if !newest.After(rotatingActiveInvitationCreatedAt(now, rotatingActiveQueueBand)) {
+		t.Error("an appended index is newer than the legacy band; it would displace the queue")
+	}
+
+	// Appended indices are older than every legacy one...
+	oldestLegacy := rotatingActiveInvitationCreatedAt(now, 0)
+	for index := rotatingActiveQueueBand; index < rotatingStudentPoolSize; index++ {
+		if !rotatingActiveInvitationCreatedAt(now, index).Before(oldestLegacy) {
+			t.Fatalf("appended index %d is not older than the legacy band", index)
+		}
+	}
+
+	// ...and still newer than every expired invitation, so the invariant
+	// rotatingExpiredQueueOffsetSeconds encodes survives the pool growth.
+	newestExpired := rotatingInvitationCreatedAt(now, rotatingExpiredPoolSize-1, rotatingExpiredPoolSize, rotatingExpiredQueueOffsetSeconds)
+	oldestActive := rotatingActiveInvitationCreatedAt(now, rotatingStudentPoolSize-1)
+	if !oldestActive.After(newestExpired) {
+		t.Errorf("oldest active %s is not newer than newest expired %s", oldestActive, newestExpired)
+	}
 }

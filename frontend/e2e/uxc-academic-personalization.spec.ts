@@ -119,7 +119,7 @@ async function saveComputerScienceProfile(api: APIRequestContext): Promise<void>
   const institution = institutions.find(
     (item: { name_en: string }) => item.name_en === UNIVERSITY_EN,
   );
-  expect(institution, "the launch catalog must expose Kuwait University").toBeTruthy();
+  expect(institution, `the launch catalog must expose ${UNIVERSITY_EN}`).toBeTruthy();
   const colleges = await (
     await api.get(`/api/v1/me/academic-options/institutions/${institution.id}/colleges`)
   ).json();
@@ -657,7 +657,15 @@ test.describe("UX-C anonymous academic personalisation", () => {
     const institutions = await (
       await api.get("/api/v1/me/academic-options/institutions")
     ).json();
-    const institution = institutions[0];
+    // Named, not institutions[0]. The list is ordered by name_en, and this test
+    // means the launch catalog specifically — the one that actually publishes a
+    // College of Science. D-106 made the catalogue multi-institution, so the
+    // first row is now whichever Institution happens to sort first, which is a
+    // property of seed data rather than of the thing under test.
+    const institution = institutions.find(
+      (item: { name_en: string }) => item.name_en === UNIVERSITY_EN,
+    );
+    expect(institution, `the launch catalog must expose ${UNIVERSITY_EN}`).toBeTruthy();
     const colleges = await (
       await api.get(`/api/v1/me/academic-options/institutions/${institution.id}/colleges`)
     ).json();
