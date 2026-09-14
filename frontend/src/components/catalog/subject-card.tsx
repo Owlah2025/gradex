@@ -9,6 +9,7 @@ import {
   subjectTitle,
   type SubjectListing,
 } from "@/lib/api/subject-catalogue";
+import type { SubjectDemandAudience } from "@/lib/identity/subject-demand-authority";
 import { SubjectDemandAction } from "./subject-demand-action";
 import type { SubjectCopy } from "./subject-copy";
 
@@ -29,14 +30,14 @@ export function SubjectCard({
   subject,
   copy,
   locale,
-  authenticated,
+  audience,
   requested,
   onDemandChange,
 }: {
   subject: SubjectListing;
   copy: SubjectCopy;
   locale: "ar" | "en";
-  authenticated: boolean;
+  audience: SubjectDemandAudience;
   requested: boolean;
   onDemandChange?: (subjectId: string, requested: boolean) => void;
 }) {
@@ -99,7 +100,7 @@ export function SubjectCard({
             subjectId={subject.subject_id}
             copy={copy}
             locale={locale}
-            authenticated={authenticated}
+            audience={audience}
             initiallyRequested={requested}
             onChange={onDemandChange}
             compact

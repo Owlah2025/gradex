@@ -7,6 +7,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { withReturnTo } from "@/lib/identity/return-to";
+import type { SubjectDemandAudience } from "@/lib/identity/subject-demand-authority";
 import { currentCSRFToken } from "@/lib/identity/session";
 import {
   alreadyRequested,
@@ -55,7 +56,7 @@ export function SubjectDemandAction({
   subjectId,
   copy,
   locale,
-  authenticated,
+  audience,
   initiallyRequested,
   onChange,
   className,
@@ -64,8 +65,11 @@ export function SubjectDemandAction({
   subjectId: string;
   copy: SubjectCopy;
   locale: "ar" | "en";
-  /** Whether the visitor's session has resolved to a signed-in principal. */
-  authenticated: boolean;
+  /**
+   * What this visitor may do, derived from the session authority model rather
+   * than from "is there a session". See subject-demand-authority.
+   */
+  audience: SubjectDemandAudience;
   /** Whether this Student already holds a live signal for the Subject. */
   initiallyRequested: boolean;
   /** Lets a parent list keep its own record of what is requested. */
@@ -177,7 +181,42 @@ export function SubjectDemandAction({
     }
   }
 
-  if (!authenticated) {
+  // UNRESOLVED renders the same shape as the actionable state but inert, so the
+  // card does not resize and does not flash "Sign in to request" at a Student
+  // who is already signed in. It is never a usable control.
+  if (audience === "UNRESOLVED") {
+    return (
+      <div className={compact ? actionRegionClassName(className) : undefined}>
+        <Button
+          type="button"
+          className={compact ? "w-full" : (className ?? "mt-6")}
+          disabled
+          aria-hidden
+          data-testid="subject-demand-pending"
+        >
+          {copy.requestCourse}
+        </Button>
+      </div>
+    );
+  }
+
+  // Signed in and the server would refuse: an Instructor, an Admin, a
+  // restricted principal, or a browser that has not completed device trust.
+  // Stating why beats rendering a button that 403s.
+  if (audience === "INELIGIBLE") {
+    return (
+      <div
+        className={compact ? actionRegionClassName(className) : (className ?? "mt-6")}
+        data-testid="subject-demand-ineligible"
+      >
+        <p className="flex min-h-11 items-center text-sm leading-6 text-muted-foreground">
+          {copy.ineligible}
+        </p>
+      </div>
+    );
+  }
+
+  if (audience === "ANONYMOUS") {
     const signInHref = withReturnTo("/login", destination);
     if (compact) {
       return (
@@ -211,22 +250,37 @@ export function SubjectDemandAction({
   if (state === "requested") {
     return (
       <section
-        className={compact ? (className ?? "") : panelClassName(className)}
+        className={compact ? actionRegionClassName(className) : panelClassName(className)}
         data-testid="subject-demand-requested"
       >
         {compact ? null : (
           <p className="text-sm leading-6 text-muted-foreground">{copy.requestedIntro}</p>
         )}
-        <div className={compact ? "flex flex-col gap-2" : "mt-4 flex flex-wrap items-center gap-3"}>
+        {/* One row of exactly the same height the Request button occupies, so a
+            card does not grow or shrink when the Student requests or withdraws.
+            The confirmation and the withdraw control share that row rather than
+            stacking below it. */}
+        <div
+          className={
+            compact
+              ? "flex min-h-11 items-center justify-between gap-2 rounded-md border border-border px-3"
+              : "mt-4 flex flex-wrap items-center gap-3"
+          }
+        >
           <span
-            className="inline-flex min-h-11 items-center rounded-md bg-secondary px-3 text-sm font-bold text-secondary-foreground"
+            className={
+              compact
+                ? "text-sm font-bold text-foreground"
+                : "inline-flex min-h-11 items-center rounded-md bg-secondary px-3 text-sm font-bold text-secondary-foreground"
+            }
             data-testid="subject-demand-state"
           >
             {copy.requested}
           </span>
           <Button
             type="button"
-            variant="outline"
+            variant={compact ? "ghost" : "outline"}
+            size={compact ? "sm" : undefined}
             onClick={withdraw}
             disabled={busy}
             data-testid="subject-demand-withdraw"
@@ -245,10 +299,10 @@ export function SubjectDemandAction({
 
   if (compact || !open) {
     return (
-      <div className={compact ? (className ?? "") : undefined}>
+      <div className={compact ? actionRegionClassName(className) : undefined}>
         <Button
           type="button"
-          className={compact ? "w-full" : (className ?? "mt-6")}
+          className={compact ? "min-h-11 w-full" : (className ?? "mt-6")}
           onClick={compact ? request : () => setOpen(true)}
           disabled={busy}
           data-testid="subject-demand-request"
@@ -313,6 +367,17 @@ export function SubjectDemandAction({
       </div>
     </section>
   );
+}
+
+/**
+ * The card's action region.
+ *
+ * Every compact state renders into a region of the same height, so a Subject
+ * card does not jump when the Student requests or withdraws and a grid of cards
+ * does not reflow around one of them.
+ */
+function actionRegionClassName(className?: string): string {
+  return ["min-h-11", className ?? ""].join(" ").trim();
 }
 
 function panelClassName(className?: string): string {

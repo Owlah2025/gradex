@@ -3,7 +3,8 @@
 import * as React from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { useSessionView } from "@/lib/identity/use-session";
+import { useSessionResolution, useSessionView } from "@/lib/identity/use-session";
+import { subjectDemandAudience } from "@/lib/identity/subject-demand-authority";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
@@ -56,7 +57,14 @@ export function SubjectCatalogue() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const session = useSessionView();
-  const authenticated = session !== null;
+  const resolution = useSessionResolution();
+  // Not `session !== null`: that conflates "signed in" with "may register
+  // demand", and would offer an actionable control to an Instructor, an Admin,
+  // a restricted principal, or an untrusted device -- each of which the server
+  // refuses. See subject-demand-authority.
+  const audience = subjectDemandAudience(session, resolution);
+  // Only an eligible Student has signals of their own to load.
+  const authenticated = audience === "ELIGIBLE_STUDENT";
 
   const institution = searchParams.get("institution") ?? "";
   const availability = readAvailability(searchParams.get("availability"));
@@ -283,7 +291,7 @@ export function SubjectCatalogue() {
                       subject={subject}
                       copy={copy}
                       locale={locale}
-                      authenticated={authenticated}
+                      audience={audience}
                       requested={requested.has(subject.subject_id)}
                       onDemandChange={onDemandChange}
                     />

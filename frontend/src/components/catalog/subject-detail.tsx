@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { useSessionView } from "@/lib/identity/use-session";
+import { useSessionResolution, useSessionView } from "@/lib/identity/use-session";
+import { subjectDemandAudience } from "@/lib/identity/subject-demand-authority";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { DisplayHeading, Prose } from "@/components/ui/typography";
@@ -44,7 +45,9 @@ export function SubjectDetail({
   const { locale } = useLocale();
   const copy = subjectCopy[locale];
   const session = useSessionView();
-  const authenticated = session !== null;
+  const resolution = useSessionResolution();
+  const audience = subjectDemandAudience(session, resolution);
+  const authenticated = audience === "ELIGIBLE_STUDENT";
 
   const [subject, setSubject] = React.useState<SubjectListing | null>(null);
   const [missing, setMissing] = React.useState(false);
@@ -181,7 +184,7 @@ export function SubjectDetail({
                     subjectId={subject.subject_id}
                     copy={copy}
                     locale={locale}
-                    authenticated={authenticated}
+                    audience={audience}
                     initiallyRequested={requested}
                     onChange={(_, isRequested) => setRequested(isRequested)}
                   />
