@@ -24,7 +24,10 @@ import (
 
 type subjectDemandHandlers struct{ repo *academic.Repository }
 
-func writeSubjectDemandError(c *gin.Context, err error) {
+// subjectLocation names where the Subject identifier came from, so a
+// malformed one is reported against the field the caller actually sent:
+// the body for a raise, the path for a withdraw.
+func writeSubjectDemandError(c *gin.Context, err error, subjectLocation string) {
 	switch {
 	case errors.Is(err, academic.ErrSubjectDemandAlreadyRaised):
 		// A conflict, not a validation failure: the request was well formed and
@@ -37,6 +40,14 @@ func writeSubjectDemandError(c *gin.Context, err error) {
 		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
 			Code: "NOTE_TOO_LONG", Location: problem.LocationBody,
 			Detail: "a note may not exceed 500 characters",
+		}))
+	case errors.Is(err, academic.ErrSubjectDemandSubjectInvalid):
+		// A malformed identifier is a client error. Left unguarded it reaches a
+		// ::uuid cast and returns 500, which both misreports whose fault it is
+		// and buries real server faults in the same signal.
+		writeProblem(c, problem.ValidationFailed().WithViolations(problem.Violation{
+			Code: "SUBJECT_INVALID", Location: subjectLocation,
+			Detail: "the subject identifier must be a UUID",
 		}))
 	default:
 		writeProblem(c, problem.Internal(""))
@@ -64,7 +75,7 @@ func (h *subjectDemandHandlers) raise(c *gin.Context) {
 	signal, err := h.repo.RaiseSubjectDemand(
 		c.Request.Context(), c.GetString(ctxUserIDKey), body.SubjectID, body.Note)
 	if err != nil {
-		writeSubjectDemandError(c, err)
+		writeSubjectDemandError(c, err, problem.LocationBody)
 		return
 	}
 	c.JSON(http.StatusCreated, signal)
@@ -74,7 +85,7 @@ func (h *subjectDemandHandlers) withdraw(c *gin.Context) {
 	err := h.repo.WithdrawSubjectDemand(
 		c.Request.Context(), c.GetString(ctxUserIDKey), c.Param("subjectId"))
 	if err != nil {
-		writeSubjectDemandError(c, err)
+		writeSubjectDemandError(c, err, problem.LocationPath)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -83,7 +94,7 @@ func (h *subjectDemandHandlers) withdraw(c *gin.Context) {
 func (h *subjectDemandHandlers) listOwn(c *gin.Context) {
 	signals, err := h.repo.ListOwnSubjectDemand(c.Request.Context(), c.GetString(ctxUserIDKey))
 	if err != nil {
-		writeSubjectDemandError(c, err)
+		writeSubjectDemandError(c, err, problem.LocationBody)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": signals})
@@ -104,7 +115,7 @@ func (h *subjectDemandHandlers) listCounts(c *gin.Context) {
 	}
 	counts, err := h.repo.ListSubjectDemandCounts(c.Request.Context(), c.Query("institution"), limit)
 	if err != nil {
-		writeSubjectDemandError(c, err)
+		writeSubjectDemandError(c, err, problem.LocationQuery)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": counts})

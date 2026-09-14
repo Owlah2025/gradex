@@ -20,6 +20,7 @@ See [D-106](../../docs/DECISIONS.md) §2.
 | `translations.json` | Hand-authored bilingual titles. 196 Arabic, 16 English. Every entry is a Gradex translation. |
 | `institutions.json` | Hand-authored institution slug and bilingual name per university. |
 | `generate_manifests.py` | Emits `manifest.yaml` + `sources.yaml` per institution. |
+| `ku_resolution.py` | Re-derives the D-106 §3 table proving all 19 scraped Kuwait University rows duplicate Subjects Kuwait University already has. Exits non-zero if any row fails to resolve, because the exclusion depends on that being total. |
 
 ## Reproduce
 
@@ -43,8 +44,11 @@ half-translated Subject.
   `CSIS_130`.
 - **Ordinals belong to both titles.** The bilingual split otherwise assigned `(1)` to whichever side
   absorbed it, which produced two PAAET Subjects both titled "Visual Programming".
-- **Kuwait University is excluded.** Its scraped codes (`DSAI 348`) are the letter form of the
-  official numeric codes already imported (`1832348`). See D-106 §3.
+- **Kuwait University is excluded.** Its scraped codes are the letter form of the official numeric
+  codes already imported. The letter prefix and the numeric prefix name the same department
+  (`CLS`→`1800`, `ISC`→`1830`, `DSAI`→`1832`, `MATH`→`0410`, `STAT`→`0480`) and the three-digit
+  course number is identical, so `DSAI 348` is `1832348`. All 19 scraped Kuwait University rows
+  resolve to existing official Subjects; none is outstanding. See D-106 §3 for the full table.
 
 ## Known gaps for a later officially sourced pass
 
@@ -52,5 +56,3 @@ half-translated Subject.
 - `max_academic_level: 4` and `has_foundation_stage: false` are schema defaults, not sourced claims.
   Several Kuwaiti private universities do run foundation programmes.
 - Institution Arabic names are Gradex renderings, not verified official wording.
-- Four Kuwait University Subjects in the source have no counterpart in the current 84-Subject launch
-  scope: `DSAI 102`, `ISC 140`, `DSAI 242`, `ISC 244`.

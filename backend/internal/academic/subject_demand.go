@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 )
 
 // Student demand for an unserved Subject (D-106 §6).
@@ -41,7 +44,25 @@ var (
 	// ErrSubjectDemandNoteTooLong mirrors the database check so the API can
 	// answer a validation problem rather than surfacing a constraint violation.
 	ErrSubjectDemandNoteTooLong = errors.New("a demand note may not exceed 500 characters")
+
+	// ErrSubjectDemandSubjectInvalid is returned when the supplied Subject
+	// identifier is not a UUID at all.
+	//
+	// It exists so a malformed identifier is a client error rather than a
+	// server error. Passing the raw value through to a ::uuid cast makes
+	// PostgreSQL raise invalid_text_representation, which every caller would
+	// see as a 500 — a typo in a request body is not a server fault, and
+	// answering it as one hides real faults in the same signal.
+	ErrSubjectDemandSubjectInvalid = errors.New("the subject identifier is not a valid UUID")
 )
+
+// validSubjectID guards every ::uuid cast in this file.
+func validSubjectID(subjectID string) error {
+	if _, err := uuid.Parse(strings.TrimSpace(subjectID)); err != nil {
+		return ErrSubjectDemandSubjectInvalid
+	}
+	return nil
+}
 
 // subjectDemandNoteLimit matches subject_demand_signals_note_length.
 const subjectDemandNoteLimit = 500
@@ -86,6 +107,9 @@ func (r *Repository) RaiseSubjectDemand(
 ) (*SubjectDemandSignal, error) {
 	if r == nil || r.pool == nil {
 		return nil, ErrRepositoryNil
+	}
+	if err := validSubjectID(subjectID); err != nil {
+		return nil, err
 	}
 	note = strings.TrimSpace(note)
 	if len([]rune(note)) > subjectDemandNoteLimit {
@@ -133,6 +157,9 @@ func (r *Repository) RaiseSubjectDemand(
 func (r *Repository) WithdrawSubjectDemand(ctx context.Context, accountID, subjectID string) error {
 	if r == nil || r.pool == nil {
 		return ErrRepositoryNil
+	}
+	if err := validSubjectID(subjectID); err != nil {
+		return err
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE subject_demand_signals SET withdrawn_at = now()
@@ -182,6 +209,12 @@ func (r *Repository) ListOwnSubjectDemand(
 
 // ListSubjectDemandCounts returns aggregate demand for Admin, highest first.
 //
+// The served flag composes catalogpublic.PublishedOnly rather than restating the
+// lifecycle condition. Publication is one rule with one owner: a second copy
+// here would keep answering the old question the day that rule changes, and
+// Admin would prioritise production against a definition of "already taught"
+// that the catalogue no longer uses.
+//
 // Individual Students are deliberately not returned here. Admin needs to know
 // what to build; a per-Student roster is a different question with a different
 // privacy weight, and nothing in the prioritisation workflow needs one.
@@ -208,9 +241,7 @@ func (r *Repository) ListSubjectDemandCounts(
 			EXISTS (
 				SELECT 1 FROM courses c
 				JOIN course_revisions cr ON cr.course_id = c.id
-				WHERE c.subject_id = s.id AND c.lifecycle = 'PUBLISHED'
-					AND c.access_suspended_at IS NULL AND c.retired_at IS NULL
-					AND c.live_revision_id = cr.id
+				WHERE c.subject_id = s.id AND `+catalogpublic.PublishedOnly("c", "cr")+`
 			)
 		FROM subject_demand_signals d
 		JOIN subjects s ON s.id = d.subject_id

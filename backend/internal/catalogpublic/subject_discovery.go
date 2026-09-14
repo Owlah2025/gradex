@@ -39,9 +39,20 @@ type SubjectCourseRef struct {
 
 // SubjectListing is one Subject as the public catalogue presents it.
 type SubjectListing struct {
+	// SubjectID is the canonical Subject identifier. It is exposed because it
+	// is the only value the demand endpoint accepts, and discovery is the only
+	// place a client can learn it: without it here, a Student who found an
+	// unserved Subject through the public catalogue would have no way to
+	// register demand against it.
+	//
+	// Publishing it costs nothing. A Subject identifier authorises nothing, is
+	// already derivable from the code-less branch of Value, and names a row
+	// whose whole purpose is to be publicly discoverable.
+	SubjectID string `json:"subject_id"`
 	// Value is the public, shareable identifier: the official code when the
 	// Subject has one, its identifier otherwise. Same authority as
 	// SubjectFilterOption.Value, so a link built from either resolves here.
+	// It is what belongs in a URL; SubjectID is what belongs in a demand call.
 	Value   string `json:"value"`
 	Code    string `json:"code,omitempty"`
 	TitleAr string `json:"title_ar"`
@@ -189,6 +200,7 @@ func (r *Repository) BrowseSubjects(
 			&coursesJSON); err != nil {
 			return SubjectPage{}, fmt.Errorf("scanning public subject: %w", err)
 		}
+		item.SubjectID = identifier
 		item.Code = code
 		item.Value = code
 		if code == "" {
@@ -246,6 +258,7 @@ func (r *Repository) SubjectDetail(
 		}
 		return nil, fmt.Errorf("reading public subject: %w", err)
 	}
+	item.SubjectID = identifier
 	item.Code = code
 	item.Value = code
 	if code == "" {

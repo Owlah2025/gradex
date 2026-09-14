@@ -4154,11 +4154,41 @@ interest against it, tells Gradex what to produce next. An empty catalogue measu
    the only thing that makes them officially sourced.
 
 3. **Kuwait University receives no scraped Subjects.** The source records Kuwait University courses
-   under a letter-prefixed scheme (`DSAI 348`, `MATH 111`) that is the same identity as the official
-   numeric scheme already imported (`1832348`, `0410111`). Importing them would fork one
-   university's code scheme and duplicate thirteen Subjects that already exist. Four source rows have
-   no counterpart in the current 84-Subject launch scope; they are recorded for an
-   officially sourced pass, not imported from this source.
+   under a letter-prefixed scheme (`DSAI 348`, `MATH 111`). That scheme is the same identity as the
+   official numeric scheme already imported: the letter prefix names the owning department and the
+   numeric prefix encodes it, so `CLS`→`1800`, `ISC`→`1830`, `DSAI`→`1832`, `MATH`→`0410`, and
+   `STAT`→`0480`, with the three-digit course number identical on both sides.
+
+   **All nineteen scraped rows resolve to Subjects Kuwait University already has.** There are no
+   unresolved rows and nothing is deferred to a later pass. Importing any of them would fork one
+   university's code scheme and duplicate a Subject that already exists:
+
+   | scraped | official | source title | official title |
+   |---|---|---|---|
+   | `CLS 109` | `1800109` | Statistics | Statistics |
+   | `DSAI 102` | `1832102` | Intro. to data science and AI | Introduction to Data Science |
+   | `DSAI 200` | `1832200` | Introduction to Artificial Intelligence | Introduction to Artificial Intelligence |
+   | `DSAI 242` | `1832242` | Data Acquisition & Management | Data Acquisition and Management |
+   | `DSAI 343` | `1832343` | Data Mining | Data Mining |
+   | `DSAI 345` | `1832345` | Data Analytics and Visualization | Data Analytics and Visualization |
+   | `DSAI 346` | `1832346` | Data and Artificial Intelligence Ethics | Data and Artificial Intelligence Ethics |
+   | `DSAI 348` | `1832348` | Machine Learning | Machine Learning |
+   | `DSAI 446` | `1832446` | Deep Learning | Deep Learning |
+   | `ISC 112` | `1830112` | Discrete Structures for Information Sciences | Discrete Structures for Information Sciences |
+   | `ISC 140` | `1830140` | Prog & Problem solving | Programming and Problem Solving |
+   | `ISC 151` | `1830151` | Information Security and Cryptography | Information Security and Cryptography |
+   | `ISC 220` | `1830220` | Database Systems I | Database Systems I |
+   | `ISC 244` | `1830244` | Application Development & Programming | Application Development and Programming |
+   | `ISC 245` | `1830245` | Data Structures & Algorithms | Data Structures and Algorithms |
+   | `MATH 101` | `0410101` | Calculus | Calculus I |
+   | `MATH 111` | `0410111` | Linear Algebra | Linear Algebra |
+   | `STAT 210` | `0480210` | Introduction to Prob | Introduction to Probability |
+   | `STAT 240` | `0480240` | Statistical Methods | Statistical Methods |
+
+   An earlier draft of this clause claimed four rows had no counterpart. That was wrong: it came
+   from an exact-title comparison that could not see the source's abbreviations
+   (`Prog & Problem solving` against `Programming and Problem Solving`). Resolving by department
+   prefix and course number leaves nothing outstanding.
 
 4. **Academic Subject and Course Offering stay separate concepts.** No placeholder, shell, or
    unpublished Course is created to give a Subject a storefront presence. A Subject with no
