@@ -171,10 +171,13 @@ func TestUnservedSubjectIsDiscoverableAndCarriesDemand(t *testing.T) {
 			if status != http.StatusUnprocessableEntity {
 				t.Errorf("raising demand for %q status = %d, want 422; body %s", malformed, status, raw)
 			}
+			// Asserted exactly, not merely "not 500": a 404 or a 204 here would
+			// also pass a not-500 check while meaning the guard never ran and
+			// the path silently accepted a value it cannot address.
 			status, raw = env.call(t, http.MethodDelete,
 				"/api/v1/me/subject-demand/"+malformed, env.studentToken, nil)
-			if status == http.StatusInternalServerError {
-				t.Errorf("withdrawing %q returned 500; body %s", malformed, raw)
+			if status != http.StatusUnprocessableEntity {
+				t.Errorf("withdrawing %q status = %d, want 422; body %s", malformed, status, raw)
 			}
 		}
 	})
