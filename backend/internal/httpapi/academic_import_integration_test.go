@@ -30,8 +30,25 @@ func TestAcademicCatalogImportAdminAPI(t *testing.T) {
 		if err := json.Unmarshal(raw, &items); err != nil {
 			t.Fatalf("decoding manifests: %v", err)
 		}
-		if len(items) != 1 || items[0]["manifest"] != "kuwait-university-launch-v1" {
-			t.Fatalf("manifests = %s; Kuwait University is the only launch institution", raw)
+		// D-106 seeds the Kuwaiti institution set, so this is no longer a
+		// single-item list. What still has to hold is that the listing offers
+		// only identifiers compiled into the binary and that Kuwait University
+		// is among them.
+		if len(items) < 2 {
+			t.Fatalf("manifests = %s; D-106 ships the Kuwaiti institution set", raw)
+		}
+		shipsKuwaitUniversity := false
+		for _, item := range items {
+			identifier, ok := item["manifest"].(string)
+			if !ok || identifier == "" {
+				t.Fatalf("a listed manifest has no identifier: %s", raw)
+			}
+			if identifier == "kuwait-university-launch-v1" {
+				shipsKuwaitUniversity = true
+			}
+		}
+		if !shipsKuwaitUniversity {
+			t.Fatalf("manifests = %s; the Kuwait University launch manifest must keep shipping", raw)
 		}
 		// The listing carries no filesystem path a caller could reuse.
 		if bytes.Contains(raw, []byte("/internal/")) || bytes.Contains(raw, []byte(".yaml")) {

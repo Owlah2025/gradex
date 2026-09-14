@@ -45,7 +45,56 @@ func mountPublicCatalogRoutes(v1 *gin.RouterGroup, foundation *PublicCatalogFoun
 	catalog.GET("/academic-options/institutions/:slug/programs", handlers.programOptions)
 	catalog.GET("/academic-options/institutions/:slug/subjects", handlers.subjectOptions)
 	catalog.GET("/academic-options/institutions/:slug/levels", handlers.levelOptions)
+
+	// Subjects as entities, not as filter values (D-106 §5). The option list
+	// above offers values that narrow a Course set and must never offer one
+	// that narrows every Course away; these two present Subjects in their own
+	// right and must never hide one for having no Course. Anonymous on purpose:
+	// a visitor has to be able to find their own course code before deciding
+	// whether Gradex is worth an account.
+	catalog.GET("/subjects", handlers.browseSubjects)
+	catalog.GET("/subjects/:institutionSlug/:value", handlers.subjectDetail)
 	return nil
+}
+
+func (h *publicCatalogHandlers) browseSubjects(c *gin.Context) {
+	page, pageSize := publicCatalogPagination(c)
+	search, _ := publicCatalogSearchQuery(c)
+	query := catalogpublic.SubjectQuery{
+		InstitutionSlug: publicCatalogFilterValue(c, "institution"),
+		Search:          search,
+		Page:            page,
+		PageSize:        pageSize,
+	}
+	// An unrecognised availability value narrows nothing rather than erroring,
+	// for the same reason an unknown filter slug yields an empty list: a stale
+	// shared link is an ordinary state, not a failure.
+	switch publicCatalogFilterValue(c, "availability") {
+	case "served":
+		query.ServedOnly = true
+	case "unserved":
+		query.UnservedOnly = true
+	}
+	result, err := h.repository.BrowseSubjects(c.Request.Context(), query, publicCatalogArabic(c))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *publicCatalogHandlers) subjectDetail(c *gin.Context) {
+	subject, err := h.repository.SubjectDetail(
+		c.Request.Context(), c.Param("institutionSlug"), c.Param("value"), publicCatalogArabic(c))
+	if err != nil {
+		writeProblem(c, problem.Internal(""))
+		return
+	}
+	if subject == nil {
+		writeAnonymousProblem(c, catalogpublic.NotFound())
+		return
+	}
+	c.JSON(http.StatusOK, subject)
 }
 
 func (h *publicCatalogHandlers) listBundles(c *gin.Context) {

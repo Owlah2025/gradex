@@ -45,6 +45,7 @@ func mountAcademicRoutes(
 	requestH := &subjectRequestHandlers{repo: foundation.repository}
 	importH := &academicImportHandlers{repo: foundation.repository}
 	profileH := &academicProfileHandlers{repo: foundation.repository}
+	demandH := &subjectDemandHandlers{repo: foundation.repository}
 
 	readGroup := v1.Group("/admin/academic")
 	readGroup.Use(
@@ -61,6 +62,11 @@ func mountAcademicRoutes(
 		readGroup.GET("/subject-requests", requestH.listAdmin)
 		// Only the identifiers an Admin may select. No path, no URL, no upload.
 		readGroup.GET("/manifests", importH.listManifests)
+		// Aggregate Student demand, for choosing which Course to produce next
+		// (D-106 §6). Counts only: prioritising production needs to know what to
+		// build, and a per-Student roster is a different question with a
+		// different privacy weight that no part of this workflow asks.
+		readGroup.GET("/subject-demand", demandH.listCounts)
 	}
 
 	mutationGroup := v1.Group("/admin/academic")
@@ -147,6 +153,9 @@ func mountAcademicRoutes(
 	)
 	{
 		meAcademicReadGroup.GET("/academic-profile", profileH.getProfile)
+		// The Student's own demand signals. Scoped to the session account, so
+		// there is no shape of call that reads another Student's.
+		meAcademicReadGroup.GET("/subject-demand", demandH.listOwn)
 		meAcademicReadGroup.GET("/academic-options/institutions", profileH.listInstitutions)
 		meAcademicReadGroup.GET("/academic-options/institutions/:institutionId/colleges", profileH.listColleges)
 		meAcademicReadGroup.GET("/academic-options/institutions/:institutionId/programs", profileH.listPrograms)
@@ -161,6 +170,11 @@ func mountAcademicRoutes(
 	{
 		meAcademicMutationGroup.PUT("/academic-profile", profileH.saveProfile)
 		meAcademicMutationGroup.POST("/academic-profile/skip", profileH.skipOnboarding)
+		// Raising and withdrawing demand carry the same CSRF and origin
+		// contract as every other Student mutation. The account always comes
+		// from the session, never from the request body.
+		meAcademicMutationGroup.POST("/subject-demand", demandH.raise)
+		meAcademicMutationGroup.DELETE("/subject-demand/:subjectId", demandH.withdraw)
 	}
 
 	return nil
