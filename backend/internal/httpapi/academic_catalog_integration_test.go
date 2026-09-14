@@ -17,6 +17,7 @@ import (
 
 	"github.com/Owlah2025/gradex/backend/internal/academic"
 	"github.com/Owlah2025/gradex/backend/internal/catalog"
+	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/health"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
@@ -141,10 +142,23 @@ func setupAcademicAPIServer(t *testing.T) *academicTestEnv {
 		t.Fatalf("NewCatalogFoundation: %v", err)
 	}
 
+	// The public catalogue is mounted here too so one environment can exercise
+	// the D-106 journey end to end: an anonymous visitor finds an unserved
+	// Subject, then a Student registers demand against it.
+	publicRepo, err := catalogpublic.NewRepository(p, catalogpublic.PublishedOnly)
+	if err != nil {
+		t.Fatalf("catalogpublic.NewRepository: %v", err)
+	}
+	publicFoundation, err := NewPublicCatalogFoundation(PublicCatalogFoundationOptions{Repository: publicRepo})
+	if err != nil {
+		t.Fatalf("NewPublicCatalogFoundation: %v", err)
+	}
+
 	r, err := NewRouter(cfg, logger, reporter, sessionFoundation.authenticator, dbPrincipalResolver{pool: p},
 		WithSessionFoundation(sessionFoundation),
 		WithAcademicFoundation(foundation),
 		WithCatalogFoundation(catalogFoundation),
+		WithPublicCatalogFoundation(publicFoundation),
 	)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
