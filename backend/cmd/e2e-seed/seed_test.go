@@ -1181,8 +1181,107 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := seedBundleCommerceFixtures(ctx, tx, adminAccountID, instructorID, courseID, passwordHash.Expose(), activeExpiry); err != nil {
 		return err
 	}
+	if err := seedSubjectCatalogueFixtures(ctx, tx, instructorID); err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
+}
+
+// Subject-catalogue fixtures for D-106.
+//
+// Deliberately more Subjects than one catalogue page holds. The public
+// catalogue pages at 24, and a suite seeded with fewer than that can never
+// tell a working pager from a broken one: every Subject would be on page one
+// whether pagination existed or not. SubjectCatalogueSeedCount is therefore a
+// contract with the spec, not a round number.
+const (
+	SubjectCatalogueInstitutionSlug = "e2e-subject-university"
+	SubjectCatalogueInstitutionAr   = "جامعة الاختبار"
+	SubjectCatalogueInstitutionEn   = "E2E Subject University"
+	// One served Subject, plus enough unserved ones to spill onto page two.
+	SubjectCatalogueSeedCount = 30
+	// The served Subject's code. Sorted ahead of every unserved Subject because
+	// it is served, not because of its code -- which is what makes the ordering
+	// contract testable.
+	SubjectCatalogueServedCode = "ZZZ 900"
+	// courses.slug is a generated column ('course-' || the id without dashes),
+	// so the Course id is pinned and the slug derived from it rather than
+	// supplied. The spec asserts this exact slug, which is what proves the card
+	// links to the real Course rather than to something it invented.
+	SubjectCatalogueServedCourseID = "c0000000-0000-0000-0000-0000000d1060"
+	SubjectCatalogueServedSlug     = "course-c00000000000000000000000000d1060"
+	// Sorts last among the unserved codes, so reaching it proves page two was
+	// actually fetched rather than guessed.
+	SubjectCatalogueLastCode = "SUB 128"
+)
+
+func seedSubjectCatalogueFixtures(ctx context.Context, tx pgx.Tx, instructorID string) error {
+	var institutionID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO institutions (country_code, slug, name_ar, name_en)
+		VALUES ('KW', $1, $2, $3)
+		RETURNING id::text`,
+		SubjectCatalogueInstitutionSlug, SubjectCatalogueInstitutionAr, SubjectCatalogueInstitutionEn,
+	).Scan(&institutionID); err != nil {
+		return fmt.Errorf("seed subject-catalogue institution: %w", err)
+	}
+
+	// Unserved Subjects. Codes are zero-padded so their lexical order matches
+	// their numeric order, which is what lets the spec name the last one.
+	for index := 0; index < SubjectCatalogueSeedCount-1; index++ {
+		code := fmt.Sprintf("SUB %03d", 100+index)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO subjects (institution_id, official_code, title_ar, title_en)
+			VALUES ($1::uuid, $2, $3, $4)`,
+			institutionID, code,
+			fmt.Sprintf("مادة %03d", 100+index),
+			fmt.Sprintf("E2E Subject %03d", 100+index),
+		); err != nil {
+			return fmt.Errorf("seed subject %s: %w", code, err)
+		}
+	}
+
+	// The one served Subject, with a real published Course behind it.
+	var servedSubjectID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO subjects (institution_id, official_code, title_ar, title_en)
+		VALUES ($1::uuid, $2, 'مادة مخدومة', 'E2E Served Subject')
+		RETURNING id::text`, institutionID, SubjectCatalogueServedCode).Scan(&servedSubjectID); err != nil {
+		return fmt.Errorf("seed served subject: %w", err)
+	}
+
+	// DRAFT first: courses_published_has_live_revision refuses a PUBLISHED
+	// Course with no live revision, so publication is the last step.
+	courseID := SubjectCatalogueServedCourseID
+	var generatedSlug string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle, classification_model, institution_id, subject_id)
+		VALUES ($1::uuid, $2::uuid, 'DRAFT', 'ACADEMIC_CATALOG', $3::uuid, $4::uuid)
+		RETURNING slug`,
+		courseID, instructorID, institutionID, servedSubjectID,
+	).Scan(&generatedSlug); err != nil {
+		return fmt.Errorf("seed served subject course: %w", err)
+	}
+	// Fail here rather than in a spec assertion: if the generated form ever
+	// changes, the constant the spec relies on is what is wrong.
+	if generatedSlug != SubjectCatalogueServedSlug {
+		return fmt.Errorf("served Course slug = %q, want %q", generatedSlug, SubjectCatalogueServedSlug)
+	}
+
+	var revisionID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1::uuid, 'APPROVED', 1, 'كورس المادة المخدومة', 'E2E Served Subject Course', 'وصف', 'Description')
+		RETURNING id::text`, courseID).Scan(&revisionID); err != nil {
+		return fmt.Errorf("seed served subject revision: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE courses SET lifecycle='PUBLISHED', live_revision_id=$2::uuid WHERE id=$1::uuid`,
+		courseID, revisionID); err != nil {
+		return fmt.Errorf("publish served subject course: %w", err)
+	}
+	return nil
 }
 
 func seedBundleCommerceFixtures(ctx context.Context, tx pgx.Tx, adminID, instructorID, primaryCourseID, passwordHash string, accessEndsAt time.Time) error {

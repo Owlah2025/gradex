@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 35;
+export const ROTATING_TEST_SLOTS = 37;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 350;
+export const ROTATING_POOL_SIZE = 370;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -118,6 +118,16 @@ export const ENTITLEMENT_PAST_DATE_TEST_SLOT = 32;
 export const ENTITLEMENT_REVOKE_TEST_SLOT = 33;
 /** AD-14 Student report submission and Admin resolution. */
 export const ADMIN_REPORTED_CONTENT_TEST_SLOT = 34;
+
+/**
+ * D-106 Subject demand, one slot per locale.
+ *
+ * Separate slots rather than one reused across the English and Arabic runs:
+ * both mutate the same Student's demand signals, so sharing would make each
+ * run's starting state depend on whether the other ran first.
+ */
+export const SUBJECT_DEMAND_EN_TEST_SLOT = 35;
+export const SUBJECT_DEMAND_AR_TEST_SLOT = 36;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

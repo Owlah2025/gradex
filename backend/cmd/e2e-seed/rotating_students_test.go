@@ -60,6 +60,10 @@ import (
 // By the same allocation identity slots 0-29 keep indices 0-299 unchanged and the
 // four new slots occupy 300-339.
 // AD-14 adds one report-resolution Student slot (34), occupying index 340-349.
+// D-106 adds two Subject-demand Student slots (35, 36) in English and Arabic,
+// occupying indices 350-369. They are separate slots rather than one reused
+// across locales because both runs mutate the same Student's demand signals,
+// and sharing would make each run's starting state depend on the other's order.
 //
 // Per-Student consumption stays far inside the production limits rather than near them: at most
 // two playback issuances of the thirty allowed per ten minutes, and at most four Progress writes
@@ -67,9 +71,9 @@ import (
 const (
 	// rotatingStudentPoolSize is the provisioned active pool. It must be at least
 	// rotatingTestSlots * rotatingMaxRepeats.
-	rotatingStudentPoolSize = 350
+	rotatingStudentPoolSize = 370
 	// rotatingTestSlots is the number of registered active-Student test identities.
-	rotatingTestSlots = 35
+	rotatingTestSlots = 37
 	// rotatingMaxRepeats is the greatest `--repeat-each` the pool supports.
 	rotatingMaxRepeats = 10
 

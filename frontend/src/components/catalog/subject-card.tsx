@@ -51,6 +51,7 @@ export function SubjectCard({
       className="flex h-full flex-col rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
       data-testid="subject-card"
       data-served={subject.served ? "true" : "false"}
+      data-subject-id={subject.subject_id}
     >
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm font-semibold text-muted-foreground">

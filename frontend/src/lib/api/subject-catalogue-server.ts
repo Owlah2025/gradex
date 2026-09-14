@@ -21,13 +21,32 @@ import type { SubjectListing } from "./subject-catalogue";
  * the same for every visitor, and sending credentials would make the response
  * principal-dependent for no gain.
  */
+/**
+ * Undoes percent-encoding a route parameter may still carry.
+ *
+ * A Subject code contains a space ("SUB 100"), so its URL segment is
+ * percent-encoded. Whether a dynamic route parameter arrives decoded is not
+ * something to assume: encoding an already-encoded value yields "SUB%2520100",
+ * which normalizes to SUB25100, matches no Subject, and 404s a Subject that
+ * exists. Decoding first makes the function idempotent over both forms.
+ */
+function decodeRouteValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // A malformed escape is not a Subject. Pass it through and let the lookup
+    // answer not-found rather than throwing a 500 at a bad URL.
+    return value;
+  }
+}
+
 export async function fetchSubjectOnServer(
   institutionSlug: string,
   value: string,
   locale: "ar" | "en",
 ): Promise<SubjectListing | null> {
   const url = new URL(
-    `/api/v1/catalog/subjects/${encodeURIComponent(institutionSlug)}/${encodeURIComponent(value)}`,
+    `/api/v1/catalog/subjects/${encodeURIComponent(decodeRouteValue(institutionSlug))}/${encodeURIComponent(decodeRouteValue(value))}`,
     apiOrigin(),
   );
 
