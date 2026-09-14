@@ -1,0 +1,93 @@
+# American University of the Middle East — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: american-university-middle-east-catalog-v1
+version: "1.0.0"
+description: >-
+  American University of the Middle East Subjects transcribed from the Gradex course catalogue.
+  9 Subjects, no curriculum structure.
+
+institution:
+  key: aum
+  slug: american-university-middle-east
+  country_code: KW
+  name_ar: "الجامعة الأمريكية في الشرق الأوسط"
+  name_en: "American University of the Middle East"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: cs-159
+    official_code: "CS 159"
+    title_ar: "تطبيقات البرمجة للمهندسين"
+    title_en: "Programming Applications for Engineers"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-165
+    official_code: "MA 165"
+    title_ar: "الهندسة التحليلية والتفاضل والتكامل ١"
+    title_en: "Analytic Geometry and Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-166
+    official_code: "MA 166"
+    title_ar: "الهندسة التحليلية والتفاضل والتكامل ٢"
+    title_en: "Analytic Geometry and Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-261
+    official_code: "MA 261"
+    title_ar: "التفاضل والتكامل متعدد المتغيرات"
+    title_en: "Multivariate Calculus"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ce-264
+    official_code: "CE 264"
+    title_ar: "برمجة C المتقدمة"
+    title_en: "Advanced C Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ce-364
+    official_code: "CE 364"
+    title_ar: "مختبر أدوات هندسة البرمجيات"
+    title_en: "Software Engineering Tools Laboratory"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ce-368
+    official_code: "CE 368"
+    title_ar: "هياكل البيانات"
+    title_en: "Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-265
+    official_code: "MA 265"
+    title_ar: "الجبر الخطي"
+    title_en: "Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-369
+    official_code: "MA 369"
+    title_ar: "الرياضيات المتقطعة لهندسة الحاسوب"
+    title_en: "Discrete Mathematics for Computer Engineering"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

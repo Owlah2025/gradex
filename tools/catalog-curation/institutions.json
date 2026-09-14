@@ -1,0 +1,17 @@
+{
+  "_note": "Institution identity for the scraped catalogue. Arabic and English names are Gradex-supplied common renderings, not verified official wording from each university, so every name_ar_source is gradex_translation. max_academic_level and has_foundation_stage are the schema defaults because no cited source states either for these institutions.",
+  "AASU":  {"slug": "abdullah-al-salem-university",       "name_en": "Abdullah Al Salem University",                     "name_ar": "جامعة عبدالله السالم"},
+  "PAAET": {"slug": "paaet",                              "name_en": "Public Authority for Applied Education and Training", "name_ar": "الهيئة العامة للتعليم التطبيقي والتدريب"},
+  "iuk":   {"slug": "international-university-kuwait",    "name_en": "International University - Kuwait",                 "name_ar": "الجامعة الدولية - الكويت"},
+  "kcst":  {"slug": "kuwait-college-science-technology",  "name_en": "Kuwait College of Science and Technology",          "name_ar": "كلية الكويت للعلوم والتكنولوجيا"},
+  "AUM":   {"slug": "american-university-middle-east",    "name_en": "American University of the Middle East",            "name_ar": "الجامعة الأمريكية في الشرق الأوسط"},
+  "gust":  {"slug": "gulf-university-science-technology", "name_en": "Gulf University for Science and Technology",        "name_ar": "جامعة الخليج للعلوم والتكنولوجيا"},
+  "cck":   {"slug": "canadian-college-kuwait",            "name_en": "Canadian College of Kuwait",                        "name_ar": "الكلية الكندية الكويتية"},
+  "bhck":  {"slug": "box-hill-college-kuwait",            "name_en": "Box Hill College Kuwait",                           "name_ar": "كلية بوكس هل الكويت"},
+  "ktech": {"slug": "kuwait-technical-college",           "name_en": "Kuwait Technical College",                          "name_ar": "الكلية التقنية الكويتية"},
+  "aou":   {"slug": "arab-open-university-kuwait",        "name_en": "Arab Open University - Kuwait",                     "name_ar": "الجامعة العربية المفتوحة - الكويت"},
+  "aiu":   {"slug": "american-international-university",  "name_en": "American International University",                 "name_ar": "الجامعة الأمريكية الدولية"},
+  "au":    {"slug": "australian-university-kuwait",       "name_en": "Australian University",                             "name_ar": "الجامعة الأسترالية"},
+  "AUK":   {"slug": "american-university-kuwait",         "name_en": "American University of Kuwait",                     "name_ar": "الجامعة الأمريكية في الكويت"},
+  "acm":   {"slug": "american-college-middle-east",       "name_en": "American College of the Middle East",               "name_ar": "كلية الشرق الأوسط الأمريكية"}
+}

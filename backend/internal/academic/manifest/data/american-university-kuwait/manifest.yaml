@@ -1,0 +1,171 @@
+# American University of Kuwait — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: american-university-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  American University of Kuwait Subjects transcribed from the Gradex course catalogue.
+  22 Subjects, no curriculum structure.
+
+institution:
+  key: auk
+  slug: american-university-kuwait
+  country_code: KW
+  name_ar: "الجامعة الأمريكية في الكويت"
+  name_en: "American University of Kuwait"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: csis-130
+    official_code: "CSIS 130"
+    title_ar: "برمجة الحاسوب ٢"
+    title_en: "Computer Programming II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-230
+    official_code: "CSIS 230"
+    title_ar: "البرمجة بلغة ثانية"
+    title_en: "Programming in a Second Language"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-255
+    official_code: "CSIS 255"
+    title_ar: "تقنيات الويب"
+    title_en: "Web Technologies"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-210
+    official_code: "CSIS 210"
+    title_ar: "هياكل البيانات والخوارزميات"
+    title_en: "Data Structures and Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-250
+    official_code: "CSIS 250"
+    title_ar: "نظم قواعد البيانات"
+    title_en: "Database Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-310
+    official_code: "CSIS 310"
+    title_ar: "مقدمة في نظم التشغيل"
+    title_en: "Introduction to Operating Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-320
+    official_code: "CSIS 320"
+    title_ar: "نظرية لغات البرمجة وتنفيذها"
+    title_en: "Theory and Implementation of Programming Languages"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-322
+    official_code: "CSIS 322"
+    title_ar: "شبكات الحاسوب ونقل البيانات"
+    title_en: "Computer Networks and Data Communication"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-389
+    official_code: "CSIS 389"
+    title_ar: "موضوعات خاصة في علوم الحاسوب"
+    title_en: "Special Topics in Computer Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-402
+    official_code: "CSIS 402"
+    title_ar: "التقنيات الأساسية لتطبيقات علم البيانات"
+    title_en: "Fundamental Techniques for Data Science Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-404
+    official_code: "CSIS 404"
+    title_ar: "التنقيب في البيانات واكتشاف المعرفة"
+    title_en: "Data Mining and Knowledge Discovery"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-405
+    official_code: "CSIS 405"
+    title_ar: "تحليل الخوارزميات"
+    title_en: "Analysis of Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-476
+    official_code: "CSIS 476"
+    title_ar: "أمن الحاسوب وضمان المعلومات"
+    title_en: "Computer Security and Information Assurance"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-406
+    official_code: "CSIS 406"
+    title_ar: "تقنيات البيانات الضخمة"
+    title_en: "Big Data Technologies"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-415
+    official_code: "CSIS 415"
+    title_ar: "الذكاء الاصطناعي"
+    title_en: "Artificial Intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-417
+    official_code: "CSIS 417"
+    title_ar: "النظم الذكية"
+    title_en: "Intelligent Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-418
+    official_code: "CSIS 418"
+    title_ar: "الرؤية الحاسوبية"
+    title_en: "Computer Vision"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-432
+    official_code: "CSIS 432"
+    title_ar: "مقدمة في الحوسبة المرنة"
+    title_en: "Introduction to Soft Computing"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-435
+    official_code: "CSIS 435"
+    title_ar: "مقدمة في تعلّم الآلة"
+    title_en: "Introduction to Machine Learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-438
+    official_code: "CSIS 438"
+    title_ar: "الشبكات العصبية والتعلّم العميق"
+    title_en: "Neural Networks and Deep Learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-493
+    official_code: "CSIS 493"
+    title_ar: "الشهادة المهنية في علم البيانات"
+    title_en: "Professional Certification in Data Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csis-495
+    official_code: "CSIS 495"
+    title_ar: "الشهادة المهنية في الذكاء الاصطناعي"
+    title_en: "Professional Certification in Artificial Intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

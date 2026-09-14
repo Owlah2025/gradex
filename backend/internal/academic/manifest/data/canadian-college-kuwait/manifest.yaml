@@ -1,0 +1,139 @@
+# Canadian College of Kuwait — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: canadian-college-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  Canadian College of Kuwait Subjects transcribed from the Gradex course catalogue.
+  20 Subjects, no curriculum structure.
+
+institution:
+  key: cck
+  slug: canadian-college-kuwait
+  country_code: KW
+  name_ar: "الكلية الكندية الكويتية"
+  name_en: "Canadian College of Kuwait"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: computer-essentials
+    title_ar: "أساسيات الحاسوب"
+    title_en: "Computer Essentials"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: database-systems
+    title_ar: "نظم قواعد البيانات"
+    title_en: "Database Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: intro-to-database
+    title_ar: "مقدمة في قواعد البيانات"
+    title_en: "Intro to Database"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: introduction-to-comp-programming
+    title_ar: "مقدمة في برمجة الحاسوب"
+    title_en: "Introduction to Comp. Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: object-oriented-programming-java
+    title_ar: "البرمجة الكائنية (جافا)"
+    title_en: "Object-Oriented Programming (Java)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: oper-system-fundamentals-gnu-linux
+    title_ar: "أساسيات نظم التشغيل (جنو/لينكس)"
+    title_en: "Oper System Fundamentals (GNU/Linux)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: technical-maths-for-computer-science
+    title_ar: "الرياضيات التقنية لعلوم الحاسوب"
+    title_en: "Technical Maths for Computer Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: web-programming
+    title_ar: "برمجة الويب"
+    title_en: "Web Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: advanced-database-topics
+    title_ar: "موضوعات متقدمة في قواعد البيانات"
+    title_en: "Advanced Database Topics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: business-programming
+    title_ar: "برمجة تطبيقات الأعمال"
+    title_en: "Business Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: network-programming
+    title_ar: "برمجة الشبكات"
+    title_en: "Network Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: obj-orient-pgm-with-dsgn-patterns
+    title_ar: "البرمجة الكائنية مع أنماط التصميم"
+    title_en: "Obj-Orient Pgm with Dsgn Patterns"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: programming-language-research-project
+    title_ar: "مشروع بحثي في لغات البرمجة"
+    title_en: "Programming Language Research Project"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: data-structure
+    title_ar: "هياكل البيانات"
+    title_en: "Data Structure"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: data-warehousing-and-data-mining
+    title_ar: "مستودعات البيانات والتنقيب فيها"
+    title_en: "Data Warehousing and Data Mining"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: discrete-mathematics-for-information-technology
+    title_ar: "الرياضيات المتقطعة لتقنية المعلومات"
+    title_en: "Discrete Mathematics for Information Technology"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: foundations-of-computer-security
+    title_ar: "أسس أمن الحاسوب"
+    title_en: "Foundations of Computer Security"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: introduction-to-programming-with-python
+    title_ar: "مقدمة في البرمجة بلغة بايثون"
+    title_en: "Introduction to Programming with Python"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: software-quality-assurance
+    title_ar: "ضمان جودة البرمجيات"
+    title_en: "Software Quality Assurance"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: search-engine-principles
+    title_ar: "مبادئ محركات البحث"
+    title_en: "Search Engine Principles"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

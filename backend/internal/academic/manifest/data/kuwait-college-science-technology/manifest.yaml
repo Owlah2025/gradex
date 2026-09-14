@@ -1,0 +1,129 @@
+# Kuwait College of Science and Technology — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: kuwait-college-science-technology-catalog-v1
+version: "1.0.0"
+description: >-
+  Kuwait College of Science and Technology Subjects transcribed from the Gradex course catalogue.
+  15 Subjects, no curriculum structure.
+
+institution:
+  key: kcst
+  slug: kuwait-college-science-technology
+  country_code: KW
+  name_ar: "كلية الكويت للعلوم والتكنولوجيا"
+  name_en: "Kuwait College of Science and Technology"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: ce100
+    official_code: "CE100"
+    title_ar: "مقدمة في نظم الحاسوب"
+    title_en: "Introduction to Computer Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs101
+    official_code: "CS101"
+    title_ar: "مقدمة في الحاسوب والبرمجة"
+    title_en: "Introduction to Computers and Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma101
+    official_code: "MA101"
+    title_ar: "الرياضيات ١"
+    title_en: "Mathematics I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma102
+    official_code: "MA102"
+    title_ar: "الرياضيات ٢"
+    title_en: "Mathematics II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ce212
+    official_code: "CE212"
+    title_ar: "تصميم المنطق الرقمي"
+    title_en: "Digital Logic Design"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs112
+    official_code: "CS112"
+    title_ar: "تجريد البيانات والبرمجة الكائنية"
+    title_en: "Data Abstraction and Object-Oriented Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs203
+    official_code: "CS203"
+    title_ar: "هياكل البيانات والكائنات"
+    title_en: "Data Structures and Objects"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma111
+    official_code: "MA111"
+    title_ar: "الرياضيات المتقطعة"
+    title_en: "Discrete Mathematics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma203
+    official_code: "MA203"
+    title_ar: "الجبر الخطي"
+    title_en: "Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma301
+    official_code: "MA301"
+    title_ar: "الاحتمالات والإحصاء"
+    title_en: "Probability and Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs341
+    official_code: "CS341"
+    title_ar: "لغات البرمجة"
+    title_en: "Programming Languages"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs371
+    official_code: "CS371"
+    title_ar: "قواعد البيانات"
+    title_en: "Databases"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs373
+    official_code: "CS373"
+    title_ar: "تحليل وتصميم الخوارزميات"
+    title_en: "Analysis and Design of Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs391
+    official_code: "CS391"
+    title_ar: "هندسة البرمجيات"
+    title_en: "Software Engineering"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cs333
+    official_code: "CS333"
+    title_ar: "نظم شبكات الحاسوب وبروتوكولاتها"
+    title_en: "Computer Network Systems and Protocols"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

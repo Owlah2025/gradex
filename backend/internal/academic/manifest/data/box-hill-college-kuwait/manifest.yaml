@@ -1,0 +1,93 @@
+# Box Hill College Kuwait — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: box-hill-college-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  Box Hill College Kuwait Subjects transcribed from the Gradex course catalogue.
+  9 Subjects, no curriculum structure.
+
+institution:
+  key: bhck
+  slug: box-hill-college-kuwait
+  country_code: KW
+  name_ar: "كلية بوكس هل الكويت"
+  name_en: "Box Hill College Kuwait"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: dbs202
+    official_code: "DBS202"
+    title_ar: "اتصالات البيانات"
+    title_en: "Data Communications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: icp101
+    official_code: "ICP101"
+    title_ar: "مقدمة في برمجة الحاسوب"
+    title_en: "Introduction to Computer Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat100
+    official_code: "MAT100"
+    title_ar: "الرياضيات الأساسية"
+    title_en: "Basic Math"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: prg101
+    official_code: "PRG101"
+    title_ar: "تجريد البيانات والبرمجة الكائنية"
+    title_en: "Data Abstraction and Object-Oriented Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: sta100
+    official_code: "STA100"
+    title_ar: "الإحصاء الأساسي"
+    title_en: "Elementary Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: wdv102
+    official_code: "WDV102"
+    title_ar: "قواعد البيانات"
+    title_en: "Databases"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: dbs102
+    official_code: "DBS102"
+    title_ar: "هياكل البيانات والخوارزميات"
+    title_en: "Data Structures and Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: dbs201
+    official_code: "DBS201"
+    title_ar: "البرمجة وهياكل البيانات"
+    title_en: "Programming & Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: prg102
+    official_code: "PRG102"
+    title_ar: "برمجة اللغات"
+    title_en: "Language Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

@@ -3169,7 +3169,9 @@ with a canonical, Institution-scoped **Academic Catalog**.
     invitation, or media-playback decisions**. Changing or clearing it never alters access.
 11. **Kuwait University is the only launch-data Institution.** Other Kuwaiti institutions were
     researched to prove the model generalises; they are not seeded until Gradex has inventory for
-    them.
+    them. **Amended by [D-106](#d-106--the-kuwaiti-institution-set-is-seeded-ahead-of-inventory-and-unserved-subjects-carry-a-public-demand-signal):** fourteen further Kuwaiti Institutions are seeded
+    ahead of inventory, because an unserved Subject is what measures demand. The provenance split
+    that D-106 §2 requires is what keeps this clause's intent intact.
 12. **Arabic primary product vocabulary.** A Gradex Course is **`الكورس`** (superseding `الدورة`) and
     a university Subject is **`المادة`**. Official university terminology such as `المقرر` may appear
     secondarily. Copy changes apply only on surfaces a tranche touches; no global copy rewrite is
@@ -4119,3 +4121,69 @@ preflight are green. No push or production action is authorized by this record a
 
 **Source:** Explicit Product Owner approval on 2026-09-11; implementation branch
 `feature/student-device-security` from `ef733f758cf7d58e2689898a70715e2fd2102e24`.
+
+## D-106 — The Kuwaiti institution set is seeded ahead of inventory, and unserved Subjects carry a public demand signal
+
+**Date:** 2026-09-14
+**Status:** Product Owner instruction; implementation in progress on
+`catalog-seed-ibntohamy-20260914`. Not reviewed, not released.
+
+**Amends:** [D-091](#d-091--gradex-adopts-an-institution-scoped-academic-catalog-and-retires-the-flat-course-taxonomy) §11.
+
+**Decision:** D-091 §11 held Kuwait University as the only launch-data Institution because other
+Kuwaiti institutions were "not seeded until Gradex has inventory for them." That condition is
+inverted here deliberately. Gradex seeds fourteen further Kuwaiti Institutions and their Subjects
+**before** holding any inventory for them, because an unserved Subject is the instrument that
+measures demand: a Student who can find their own university and their own course code, and register
+interest against it, tells Gradex what to produce next. An empty catalogue measures nothing.
+
+1. **Fourteen Institutions ship as manifests.** Abdullah Al Salem University, PAAET, International
+   University Kuwait, KCST, AUM, GUST, Canadian College of Kuwait, Box Hill College Kuwait, Kuwait
+   Technical College, Arab Open University Kuwait, AIU, Australian University, AUK, and ACM. 245
+   Subjects total. The importer's CREATE/UPDATE/NOOP contract and its refusal to delete are
+   unchanged.
+
+2. **Provenance is split and must stay legible.** Kuwait University's manifest is curated from
+   official university sources and is the only one that asserts Academic Units, Programs, Curricula,
+   or official Arabic wording. The fourteen new manifests are transcribed from the Gradex-operated
+   catalogue at `ibntohamy.pages.dev`, which is first-party Gradex data and not a publication of any
+   institution. They therefore declare Subjects only, every Arabic title is tagged
+   `gradex_translation`, and `TestOnlyKuwaitUniversityAssertsOfficialAcademicStructure` fails the
+   build if a scraped manifest ever grows a hand-written hierarchy or claims official wording.
+   Re-sourcing these Subjects from official registrar publications is a later curation pass and is
+   the only thing that makes them officially sourced.
+
+3. **Kuwait University receives no scraped Subjects.** The source records Kuwait University courses
+   under a letter-prefixed scheme (`DSAI 348`, `MATH 111`) that is the same identity as the official
+   numeric scheme already imported (`1832348`, `0410111`). Importing them would fork one
+   university's code scheme and duplicate thirteen Subjects that already exist. Four source rows have
+   no counterpart in the current 84-Subject launch scope; they are recorded for an
+   officially sourced pass, not imported from this source.
+
+4. **Academic Subject and Course Offering stay separate concepts.** No placeholder, shell, or
+   unpublished Course is created to give a Subject a storefront presence. A Subject with no
+   published Course is displayed as unserved, not as a product.
+
+5. **Unserved Subjects are publicly discoverable.** The public catalogue exposes Subjects in their
+   own right, not solely as a filter over published Courses. A Subject resolves to its real Course
+   when a published one exists for it, and to a demand-registration affordance when none does.
+
+6. **Demand is an authenticated, per-Student, per-Subject record.** Registering interest requires a
+   Student session; it is not an anonymous counter, so Admin sees who asked and a single Student
+   cannot inflate a count. A demand record grants no entitlement, reserves nothing, and promises no
+   Course. It is a production-prioritisation input and nothing else.
+
+**Reason:** The catalogue's value before launch is telling Gradex which Courses to build. Kuwaiti
+students search by their own university and course code; a catalogue that answers "not found" for
+every code outside Kuwait University cannot capture that intent, and a catalogue padded with empty
+Course shells would misrepresent inventory to sell nothing. Seeding real academic identity and
+recording unmet demand against it separates what Gradex knows from what Gradex sells.
+
+**Alternatives rejected:** Creating 268 placeholder Courses (misrepresents inventory, pollutes every
+Course lifecycle query, and would need publishing to be visible); importing scraped Kuwait University
+Subjects (forks one institution's code scheme and duplicates existing rows); anonymous demand
+counters (unattributable and trivially inflated); leaving the fourteen institutions unseeded until
+inventory exists (the condition D-091 §11 set, which forecloses the measurement that would tell
+Gradex where to build inventory).
+
+**Source:** Product Owner instruction of 2026-09-14.

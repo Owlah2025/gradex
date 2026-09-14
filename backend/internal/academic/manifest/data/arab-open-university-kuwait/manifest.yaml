@@ -1,0 +1,177 @@
+# Arab Open University - Kuwait — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: arab-open-university-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  Arab Open University - Kuwait Subjects transcribed from the Gradex course catalogue.
+  23 Subjects, no curriculum structure.
+
+institution:
+  key: aou
+  slug: arab-open-university-kuwait
+  country_code: KW
+  name_ar: "الجامعة العربية المفتوحة - الكويت"
+  name_en: "Arab Open University - Kuwait"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: gt101
+    official_code: "GT101"
+    title_ar: "أساسيات الحوسبة"
+    title_en: "Computing Essentials"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mst129
+    official_code: "MST129"
+    title_ar: "التفاضل والتكامل التطبيقي"
+    title_en: "Applied Calculus"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mt131
+    official_code: "MT131"
+    title_ar: "الرياضيات المتقطعة"
+    title_en: "Discrete Mathematics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mt132
+    official_code: "MT132"
+    title_ar: "الجبر الخطي"
+    title_en: "Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mt141
+    official_code: "MT141"
+    title_ar: "مقدمة في الاحتمالات والإحصاء"
+    title_en: "Introduction to Probability and Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm270
+    official_code: "TM270"
+    title_ar: "الذكاء الاصطناعي"
+    title_en: "Artificial intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m110
+    official_code: "M110"
+    title_ar: "البرمجة بلغة بايثون"
+    title_en: "Python Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m140
+    official_code: "M140"
+    title_ar: "مقدمة في الإحصاء"
+    title_en: "Introducing statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm105
+    official_code: "TM105"
+    title_ar: "مقدمة في البرمجة"
+    title_en: "Introduction to Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm112
+    official_code: "TM112"
+    title_ar: "مقدمة في الحوسبة وتقنية المعلومات"
+    title_en: "Introduction to Computing and Information Technology"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m218
+    official_code: "M218"
+    title_ar: "قواعد البيانات العلائقية"
+    title_en: "Relational Databases"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m238
+    official_code: "M238"
+    title_ar: "التمثيل المرئي للبيانات"
+    title_en: "Data Visualization"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m251
+    official_code: "M251"
+    title_ar: "البرمجة الكائنية باستخدام جافا"
+    title_en: "Object-Oriented Programming using Java"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: m269
+    official_code: "M269"
+    title_ar: "الخوارزميات وهياكل البيانات وقابلية الحوسبة"
+    title_en: "Algorithms Data Structures and Computability"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mst224
+    official_code: "MST224"
+    title_ar: "الطرق الرياضية"
+    title_en: "Mathematical Methods"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mt248
+    official_code: "MT248"
+    title_ar: "تحليل البيانات"
+    title_en: "Analysing data"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mt249
+    official_code: "MT249"
+    title_ar: "الإحصاء الحديث التطبيقي"
+    title_en: "Practical Modern Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm341
+    official_code: "TM341"
+    title_ar: "الرؤية الحاسوبية"
+    title_en: "Computer Vision"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tt284
+    official_code: "TT284"
+    title_ar: "تقنيات الويب"
+    title_en: "Web Technologies"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm271
+    official_code: "TM271"
+    title_ar: "تعلّم الآلة والتعلّم العميق"
+    title_en: "Machine Learning and Deep learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm340
+    official_code: "TM340"
+    title_ar: "معالجة اللغات الطبيعية"
+    title_en: "Natural Language Processing"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm351
+    official_code: "TM351"
+    title_ar: "إدارة البيانات وتحليلها"
+    title_en: "Data Management and Analysis"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tm358
+    official_code: "TM358"
+    title_ar: "تعلّم الآلة والذكاء الاصطناعي"
+    title_en: "Machine learning and artificial intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

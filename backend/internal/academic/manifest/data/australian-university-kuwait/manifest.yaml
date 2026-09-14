@@ -1,0 +1,141 @@
+# Australian University — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: australian-university-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  Australian University Subjects transcribed from the Gradex course catalogue.
+  17 Subjects, no curriculum structure.
+
+institution:
+  key: au
+  slug: australian-university-kuwait
+  country_code: KW
+  name_ar: "الجامعة الأسترالية"
+  name_en: "Australian University"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: aien120
+    official_code: "AIEN120"
+    title_ar: "برمجة الحاسوب"
+    title_en: "Computer Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: bmis110
+    official_code: "BMIS110"
+    title_ar: "تطبيقات الحاسوب في الأعمال"
+    title_en: "Business Computer Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp100
+    official_code: "COMP100"
+    title_ar: "برمجة الحاسوب"
+    title_en: "Computer Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp101
+    official_code: "COMP101"
+    title_ar: "برمجة الحاسوب المتقدمة"
+    title_en: "Advanced Computer Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math100
+    official_code: "MATH100"
+    title_ar: "التفاضل والتكامل ١"
+    title_en: "Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math101
+    official_code: "MATH101"
+    title_ar: "التفاضل والتكامل ٢"
+    title_en: "Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp201
+    official_code: "COMP201"
+    title_ar: "الجبر الخطي لتقنية المعلومات والاتصالات"
+    title_en: "Linear Algebra for ICT"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp210
+    official_code: "COMP210"
+    title_ar: "مقدمة في الذكاء الاصطناعي"
+    title_en: "Introduction to Artificial Intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp211
+    official_code: "COMP211"
+    title_ar: "مبادئ تعلّم الآلة"
+    title_en: "Principles of Machine Learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp220
+    official_code: "COMP220"
+    title_ar: "مبادئ الخوارزميات وهياكل البيانات"
+    title_en: "Principles of Algorithms and Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp230
+    official_code: "COMP230"
+    title_ar: "الحوسبة السحابية لتطبيقات الذكاء الاصطناعي"
+    title_en: "Cloud Computing for AI Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp240
+    official_code: "COMP240"
+    title_ar: "مقدمة في الأمن السيبراني"
+    title_en: "Introduction to Cybersecurity"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: comp250
+    official_code: "COMP250"
+    title_ar: "مبادئ شبكات الحاسوب وأمنها"
+    title_en: "Principles of Computer Networks and Security"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: elec230
+    official_code: "ELEC230"
+    title_ar: "المنطق الرقمي"
+    title_en: "Digital Logic"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math212
+    official_code: "MATH212"
+    title_ar: "الإحصاء وعلم البيانات"
+    title_en: "Statistics and Data Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math300
+    official_code: "MATH300"
+    title_ar: "تاريخ الأعداد ونظرية الألعاب"
+    title_en: "Numbers History and Game Theory"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: stat200
+    official_code: "STAT200"
+    title_ar: "الاحتمالات والإحصاء"
+    title_en: "Probability and Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

@@ -1,0 +1,195 @@
+# Public Authority for Applied Education and Training — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: paaet-catalog-v1
+version: "1.0.0"
+description: >-
+  Public Authority for Applied Education and Training Subjects transcribed from the Gradex course catalogue.
+  26 Subjects, no curriculum structure.
+
+institution:
+  key: paaet
+  slug: paaet
+  country_code: KW
+  name_ar: "الهيئة العامة للتعليم التطبيقي والتدريب"
+  name_en: "Public Authority for Applied Education and Training"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: 101
+    official_code: "101"
+    title_ar: "مبادئ الاحصاء"
+    title_en: "Principles of Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 102
+    official_code: "102"
+    title_ar: "أساسيات نظم الحاسب الآلي"
+    title_en: "Basics Computer Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 103
+    official_code: "103"
+    title_ar: "اساسيات برمجة"
+    title_en: "programming fundamentals"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 105
+    official_code: "105"
+    title_ar: "رياضيات (1)"
+    title_en: "Mathematics I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 106
+    official_code: "106"
+    title_ar: "رياضيات (2)"
+    title_en: "Mathematics II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 130
+    official_code: "130"
+    title_ar: "اساسيات الدوائر الكهربية"
+    title_en: "Fundamentals of Electrical Circuits"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 132
+    official_code: "132"
+    title_ar: "لغة برمجة الكمبيوتر (1)"
+    title_en: "Computer Programming Language I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 137
+    official_code: "137"
+    title_ar: "الكترونيات (1)"
+    title_en: "Electronics I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 139
+    official_code: "139"
+    title_ar: "دوائر رقمية"
+    title_en: "Digital Circuits"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 153
+    official_code: "153"
+    title_ar: "برمجة مرئية (1)"
+    title_en: "Visual Programming (1)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 222
+    official_code: "222"
+    title_ar: "نظم تشغيل الكمبيوتر"
+    title_en: "Computer Operating Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 231
+    official_code: "231"
+    title_ar: "لبرمجة من خلال الكائنات"
+    title_en: "Object-Oriented Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 234
+    official_code: "234"
+    title_ar: "عائلات الدوائر المنطقيه"
+    title_en: "Logic Circuit Families"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 235
+    official_code: "235"
+    title_ar: "لغة برمجة الكمبيوتر (2)"
+    title_en: "Computer Programming Language II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 239
+    official_code: "239"
+    title_ar: "أساسيات الميكروبروسيسر"
+    title_en: "Microprocessor Fundamentals"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 242
+    official_code: "242"
+    title_ar: "البرمجة للانترنت"
+    title_en: "Internet Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 254
+    official_code: "254"
+    title_ar: "نظم التشغيل"
+    title_en: "Operating Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 255
+    official_code: "255"
+    title_ar: "شبكات الكمبيوتر (1)"
+    title_en: "Computer Networks I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 292
+    official_code: "292"
+    title_ar: "مقدمة في قواعد البيانات"
+    title_en: "Introduction to Databases"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 349
+    official_code: "349"
+    title_ar: "هيكلة الكمبيوتر"
+    title_en: "Computer Architecture"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 354
+    official_code: "354"
+    title_ar: "شبكات الكمبيوتر (2)"
+    title_en: "Computer Networks II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ent-131
+    official_code: "ENT 131"
+    title_ar: "دوائر كهربائية (1)"
+    title_en: "ELECTRICAL CIRCUITS (1)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 173
+    official_code: "173"
+    title_ar: "برمجة متقدمة"
+    title_en: "Advance Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 203
+    official_code: "203"
+    title_ar: "فورتران وتطبيقاته"
+    title_en: "Fortran and its Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 205
+    official_code: "205"
+    title_ar: "برمجة مرئية (2)"
+    title_en: "Visual Programming (2)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: 258
+    official_code: "258"
+    title_ar: "قواعد البيانات"
+    title_en: "Data Base"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

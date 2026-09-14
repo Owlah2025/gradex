@@ -1,0 +1,169 @@
+# International University - Kuwait — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: international-university-kuwait-catalog-v1
+version: "1.0.0"
+description: >-
+  International University - Kuwait Subjects transcribed from the Gradex course catalogue.
+  22 Subjects, no curriculum structure.
+
+institution:
+  key: iuk
+  slug: international-university-kuwait
+  country_code: KW
+  name_ar: "الجامعة الدولية - الكويت"
+  name_en: "International University - Kuwait"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: cmps-101
+    official_code: "CMPS 101"
+    title_ar: "برمجة الحاسوب"
+    title_en: "Computer Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: infs-120
+    official_code: "INFS 120"
+    title_ar: "الحاسوب ونظم المعلومات"
+    title_en: "Computers & Info Sys"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-110
+    official_code: "MATH 110"
+    title_ar: "الجبر الجامعي"
+    title_en: "College Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-131
+    official_code: "MATH 131"
+    title_ar: "التفاضل والتكامل ١"
+    title_en: "Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmpe-201
+    official_code: "CMPE 201"
+    title_ar: "البرمجة الكائنية"
+    title_en: "Object-Oriented Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmpe-260
+    official_code: "CMPE 260"
+    title_ar: "هياكل البيانات"
+    title_en: "Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-201
+    official_code: "CMPS 201"
+    title_ar: "البرمجة الكائنية"
+    title_en: "Object-Oriented Prog"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: data-structures
+    title_ar: "هياكل البيانات"
+    title_en: "Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: discrete-structures
+    title_ar: "التراكيب المتقطعة"
+    title_en: "Discrete Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-220
+    official_code: "CMPS 220"
+    title_ar: "تقنيات الويب ١"
+    title_en: "Web Technologies I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-235
+    official_code: "CMPS 235"
+    title_ar: "مقدمة في أمن البيانات والأمن السيبراني"
+    title_en: "Introduction to Data and Cyber Security"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-132
+    official_code: "MATH 132"
+    title_ar: "التفاضل والتكامل ٢"
+    title_en: "Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-231
+    official_code: "MATH 231"
+    title_ar: "الجبر الخطي"
+    title_en: "Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmpe-250
+    official_code: "CMPE 250"
+    title_ar: "التراكيب المتقطعة"
+    title_en: "Discrete Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-260
+    official_code: "CMPS 260"
+    title_ar: "الشبكات ١"
+    title_en: "Networking I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-355
+    official_code: "CMPS 355"
+    title_ar: "تصميم وتحليل الخوارزميات"
+    title_en: "Design and Analysis of Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-360
+    official_code: "CMPS 360"
+    title_ar: "نظم قواعد البيانات"
+    title_en: "Database systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmpe-341
+    official_code: "CMPE 341"
+    title_ar: "أساسيات المنطق الرقمي مع المختبر"
+    title_en: "Fund. of Digital Logic + Lab"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-233
+    official_code: "MATH 233"
+    title_ar: "التفاضل والتكامل ٣"
+    title_en: "Calculus III"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-290
+    official_code: "MATH 290"
+    title_ar: "الإحصاء الهندسي"
+    title_en: "Engineering Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cmps-410
+    official_code: "CMPS 410"
+    title_ar: "علم البيانات والذكاء الاصطناعي"
+    title_en: "Data Science and AI"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-331
+    official_code: "MATH 331"
+    title_ar: "المعادلات التفاضلية العادية"
+    title_en: "Ordinary Differential Equations"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

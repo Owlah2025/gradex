@@ -1,0 +1,27 @@
+# Provenance for the American International University catalogue import.
+#
+# Read this before treating anything in manifest.yaml as an institutional fact.
+# Both sources below are Gradex's own, so this manifest asserts what Gradex
+# records about the institution, not what the institution publishes. Replacing
+# these citations with official registrar sources is a later curation pass and
+# is the only way these Subjects become officially sourced.
+
+sources:
+  - id: gradex-catalogue-ibntohamy
+    url: https://ibntohamy.pages.dev/dashboard
+    title: Gradex course catalogue (ibntohamy.pages.dev), Firestore collections universities and courses
+    type: gradex_operated_catalogue
+    retrieved_at: "2026-09-14"
+    supports:
+      - institution: aiu
+      - subject_codes: as_recorded_by_gradex
+      - subject_titles_en: as_recorded_by_gradex
+
+  - id: gradex-institution-naming
+    url: https://ibntohamy.pages.dev/dashboard
+    title: Gradex-supplied bilingual institution and Subject naming, curated 2026-09-14
+    type: gradex_curation
+    retrieved_at: "2026-09-14"
+    supports:
+      - institution_names: gradex_translation
+      - subject_titles_ar: gradex_translation

@@ -1,0 +1,149 @@
+# American International University — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: american-international-university-catalog-v1
+version: "1.0.0"
+description: >-
+  American International University Subjects transcribed from the Gradex course catalogue.
+  19 Subjects, no curriculum structure.
+
+institution:
+  key: aiu
+  slug: american-international-university
+  country_code: KW
+  name_ar: "الجامعة الأمريكية الدولية"
+  name_en: "American International University"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: csc-101
+    official_code: "CSC 101"
+    title_ar: "أساسيات الحاسوب (علوم الحاسوب)"
+    title_en: "Computer Essentials (CS)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-110
+    official_code: "CSC 110"
+    title_ar: "حل المسائل والبرمجة"
+    title_en: "Problem Solving & Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-121
+    official_code: "MAT 121"
+    title_ar: "التفاضل والتكامل ١"
+    title_en: "Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-122
+    official_code: "MAT 122"
+    title_ar: "التفاضل والتكامل ٢"
+    title_en: "Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-210
+    official_code: "CSC 210"
+    title_ar: "البرمجة الكائنية"
+    title_en: "Object-Oriented Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-220
+    official_code: "CSC 220"
+    title_ar: "هياكل البيانات والخوارزميات"
+    title_en: "Data Structures and Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: egr-150
+    official_code: "EGR 150"
+    title_ar: "الاحتمالات والإحصاء في الهندسة"
+    title_en: "Probability and Statistics in Engineering (MA)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-200
+    official_code: "MAT 200"
+    title_ar: "الرياضيات المتقطعة"
+    title_en: "Discrete Mathematics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-221
+    official_code: "MAT 221"
+    title_ar: "التفاضل والتكامل ٣"
+    title_en: "Calculus III"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-225
+    official_code: "MAT 225"
+    title_ar: "الجبر الخطي الأساسي"
+    title_en: "Elementary Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-230
+    official_code: "CSC 230"
+    title_ar: "البرمجة بلغة بايثون"
+    title_en: "Programming in Python"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-315
+    official_code: "CSC 315"
+    title_ar: "تصميم وتحليل الخوارزميات"
+    title_en: "Algorithm Design and Analysis"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-410
+    official_code: "CSC 410"
+    title_ar: "مقدمة في شبكات الحاسوب"
+    title_en: "Introduction to Computer Network"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-470
+    official_code: "CSC 470"
+    title_ar: "نظام إدارة قواعد البيانات"
+    title_en: "Database Management System"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-230
+    official_code: "MAT 230"
+    title_ar: "المعادلات التفاضلية وجبر المصفوفات"
+    title_en: "Differential Equations and Matrix Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: deep-learning
+    title_ar: "التعلّم العميق"
+    title_en: "Deep Learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: artificial-intelligence
+    title_ar: "الذكاء الاصطناعي"
+    title_en: "Artificial Intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: intro-to-machine-learning-applications
+    title_ar: "مقدمة في تعلّم الآلة وتطبيقاته"
+    title_en: "Intro to Machine Learning & Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: principles-of-data-science
+    title_ar: "مبادئ علم البيانات"
+    title_en: "Principles of Data Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

@@ -36,3 +36,6 @@ Thumbs.db
 # Playwright run artifacts (regenerated every run; never source)
 test-results/
 backend/test-results/
+
+# Local curation scratch: raw scrape, generated intermediates, throwaway test env.
+.scrape/

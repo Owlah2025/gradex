@@ -1,0 +1,195 @@
+# Abdullah Al Salem University — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: abdullah-al-salem-university-catalog-v1
+version: "1.0.0"
+description: >-
+  Abdullah Al Salem University Subjects transcribed from the Gradex course catalogue.
+  26 Subjects, no curriculum structure.
+
+institution:
+  key: aasu
+  slug: abdullah-al-salem-university
+  country_code: KW
+  name_ar: "جامعة عبدالله السالم"
+  name_en: "Abdullah Al Salem University"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: bus200
+    official_code: "BUS200"
+    title_ar: "إحصاء الأعمال"
+    title_en: "Business Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs-120
+    official_code: "CCS 120"
+    title_ar: "التفكير الحاسوبي والبرمجة"
+    title_en: "Computational Thinking & Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: dps095
+    official_code: "DPS095"
+    title_ar: "المهارات الرقمية والمهنية"
+    title_en: "Digital and Professional Skills"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: eng207
+    official_code: "ENG207"
+    title_ar: "البرمجة"
+    title_en: "Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: imp-098
+    official_code: "IMP 098"
+    title_ar: "الجبر المتوسط"
+    title_en: "Intermediate Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: imp-099b
+    official_code: "IMP 099B"
+    title_ar: "ما قبل التفاضل والتكامل (أعمال)"
+    title_en: "Precalculus (Business)"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: imp099
+    official_code: "IMP099"
+    title_ar: "ما قبل التفاضل والتكامل"
+    title_en: "Precalculus"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-101
+    official_code: "MAT 101"
+    title_ar: "التفاضل والتكامل ١"
+    title_en: "Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-102
+    official_code: "MAT 102"
+    title_ar: "التفاضل والتكامل ٢"
+    title_en: "Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-120
+    official_code: "MAT 120"
+    title_ar: "الرياضيات المتقطعة"
+    title_en: "Discrete Mathematics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-201
+    official_code: "MAT 201"
+    title_ar: "التفاضل والتكامل ٣"
+    title_en: "Calculus III"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-202
+    official_code: "MAT 202"
+    title_ar: "الجبر الخطي"
+    title_en: "Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs-200
+    official_code: "CCS 200"
+    title_ar: "المنطق الرقمي وتصميمه"
+    title_en: "Digital Logic and Design"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs-241
+    official_code: "CCS 241"
+    title_ar: "أساسيات شبكات الحاسوب"
+    title_en: "Fundamentals of Computer Networks"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs220
+    official_code: "CCS220"
+    title_ar: "التصميم والبرمجة الكائنية"
+    title_en: "Object-Oriented Design & programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs230
+    official_code: "CCS230"
+    title_ar: "أساسيات نظم قواعد البيانات"
+    title_en: "Fundamentals of Database Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: dai-250
+    official_code: "DAI 250"
+    title_ar: "أساسيات علم البيانات والذكاء الاصطناعي"
+    title_en: "Fundamentals of Data Science & AI"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: eng-304
+    official_code: "ENG 304"
+    title_ar: "الاحتمالات والإحصاء الهندسي"
+    title_en: "Engineering Probability & Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-221
+    official_code: "MAT 221"
+    title_ar: "نظرية الأعداد"
+    title_en: "Number Theory"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat-240
+    official_code: "MAT 240"
+    title_ar: "المعادلات التفاضلية"
+    title_en: "Differential Equations"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: mat210
+    official_code: "MAT210"
+    title_ar: "مقدمة في الاحتمالات والإحصاء"
+    title_en: "Intro. to Probability & Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs270
+    official_code: "CCS270"
+    title_ar: "هياكل البيانات والخوارزميات"
+    title_en: "Data Structures and Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ccs330
+    official_code: "CCS330"
+    title_ar: "هندسة الويب"
+    title_en: "Web Engineering"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: dai230
+    official_code: "DAI230"
+    title_ar: "الرياضيات لعلم البيانات والذكاء الاصطناعي"
+    title_en: "Mathematics for Data Science & AI"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: swe301
+    official_code: "SWE301"
+    title_ar: "عمليات ومنهجيات البرمجيات"
+    title_en: "Software Process and Methodologies"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: swe305
+    official_code: "SWE305"
+    title_ar: "هندسة متطلبات البرمجيات"
+    title_en: "Software Requirements Engineering"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

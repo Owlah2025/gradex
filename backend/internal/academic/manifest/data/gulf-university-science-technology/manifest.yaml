@@ -1,0 +1,189 @@
+# Gulf University for Science and Technology — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: gulf-university-science-technology-catalog-v1
+version: "1.0.0"
+description: >-
+  Gulf University for Science and Technology Subjects transcribed from the Gradex course catalogue.
+  25 Subjects, no curriculum structure.
+
+institution:
+  key: gust
+  slug: gulf-university-science-technology
+  country_code: KW
+  name_ar: "جامعة الخليج للعلوم والتكنولوجيا"
+  name_en: "Gulf University for Science and Technology"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: csc-101
+    official_code: "CSC 101"
+    title_ar: "مقدمة في علوم الحاسوب"
+    title_en: "Introduction to Computer Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-122
+    official_code: "CSC 122"
+    title_ar: "حل المسائل بالحوسبة"
+    title_en: "Computational Problem Solving"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-123
+    official_code: "CSC 123"
+    title_ar: "أساسيات تصميم الويب"
+    title_en: "Fundamentals of Web Design"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-125
+    official_code: "CSC 125"
+    title_ar: "البرمجة الكائنية ١"
+    title_en: "Object Oriented Programming I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-131
+    official_code: "MATH 131"
+    title_ar: "الهندسة التحليلية والتفاضل والتكامل ١"
+    title_en: "Analytic Geometry & Calculus I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-140
+    official_code: "MATH 140"
+    title_ar: "الجبر الخطي الأساسي"
+    title_en: "Elementary Linear Algebra"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-225
+    official_code: "CSC 225"
+    title_ar: "البرمجة وهياكل البيانات"
+    title_en: "Programming and Data Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-226
+    official_code: "CSC 226"
+    title_ar: "البرمجة الكائنية ٢"
+    title_en: "Object Oriented Programming II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-230
+    official_code: "CSC 230"
+    title_ar: "النظم الرقمية"
+    title_en: "Digital Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-300
+    official_code: "CSC 300"
+    title_ar: "التراكيب المتقطعة"
+    title_en: "Discrete Structures"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-313
+    official_code: "CSC 313"
+    title_ar: "تصميم وتحليل الخوارزميات"
+    title_en: "Design and Analysis of Algorithms"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-132
+    official_code: "MATH 132"
+    title_ar: "الهندسة التحليلية والتفاضل والتكامل ٢"
+    title_en: "Analytic Geometry & Calculus II"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: math-221
+    official_code: "MATH 221"
+    title_ar: "الإحصاء التطبيقي"
+    title_en: "Applied Statistics"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-235
+    official_code: "CSC 235"
+    title_ar: "تحديات البرمجة"
+    title_en: "Programming Challenges"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-271
+    official_code: "CSC 271"
+    title_ar: "نظم الحاسوب: البرمجة"
+    title_en: "Computer Systems: Programming"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-325
+    official_code: "CSC 325"
+    title_ar: "مفاهيم لغات البرمجة"
+    title_en: "Concepts of Programming Languages"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-326
+    official_code: "CSC 326"
+    title_ar: "أنماط التصميم الكائنية"
+    title_en: "Object Oriented Design Patterns"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-361
+    official_code: "CSC 361"
+    title_ar: "نظم إدارة قواعد البيانات"
+    title_en: "Database Management Systems"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-391
+    official_code: "CSC 391"
+    title_ar: "التمثيل المرئي للبيانات"
+    title_en: "Data Visualization"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-392
+    official_code: "CSC 392"
+    title_ar: "تعلّم الآلة"
+    title_en: "Machine Learning"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-430
+    official_code: "CSC 430"
+    title_ar: "الذكاء الاصطناعي"
+    title_en: "Artificial Intelligence"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-290
+    official_code: "CSC 290"
+    title_ar: "علم البيانات"
+    title_en: "Data Science"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-350
+    official_code: "CSC 350"
+    title_ar: "هندسة البرمجيات"
+    title_en: "Software Engineering"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-444
+    official_code: "CSC 444"
+    title_ar: "معالجة الصور الرقمية"
+    title_en: "Digital Image processing"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: csc-473
+    official_code: "CSC 473"
+    title_ar: "شبكات الحاسوب والاتصالات"
+    title_en: "Computer Networks & Communications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

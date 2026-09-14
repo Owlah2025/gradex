@@ -1,0 +1,57 @@
+# Kuwait Technical College — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: kuwait-technical-college-catalog-v1
+version: "1.0.0"
+description: >-
+  Kuwait Technical College Subjects transcribed from the Gradex course catalogue.
+  3 Subjects, no curriculum structure.
+
+institution:
+  key: ktech
+  slug: kuwait-technical-college
+  country_code: KW
+  name_ar: "الكلية التقنية الكويتية"
+  name_en: "Kuwait Technical College"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: csec-102
+    official_code: "CSEC 102"
+    title_ar: "مقدمة في الأمن السيبراني"
+    title_en: "Introduction to Cybersecurity"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ist-101
+    official_code: "IST 101"
+    title_ar: "برمجيات الحاسوب الشخصي"
+    title_en: "PC Software"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ist-103
+    official_code: "IST 103"
+    title_ar: "أساسيات الشبكات"
+    title_en: "Network Essentials"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]

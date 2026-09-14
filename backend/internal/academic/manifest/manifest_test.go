@@ -29,13 +29,95 @@ func TestKuwaitUniversityLaunchManifestValidates(t *testing.T) {
 	}
 }
 
-func TestOnlyKuwaitUniversityShipsAsLaunchData(t *testing.T) {
+// D-106 amends D-091 §11. Kuwait University is no longer the only shipped
+// Institution: the full Kuwaiti set is seeded ahead of inventory precisely so a
+// Student can find their Subject and register demand for it. "Exactly one
+// manifest" is therefore no longer the invariant, and the two guards below are
+// what replace it — nothing ships unvalidated, and no manifest may borrow the
+// authority of the officially sourced one.
+
+func TestEveryShippedManifestValidates(t *testing.T) {
 	ids, err := Available()
 	if err != nil {
 		t.Fatalf("listing manifests: %v", err)
 	}
-	if len(ids) != 1 || ids[0] != "kuwait-university-launch-v1" {
-		t.Fatalf("shipped manifests = %v; D-091 makes Kuwait University the only launch institution", ids)
+	if len(ids) < 2 {
+		t.Fatalf("shipped manifests = %v; D-106 seeds the Kuwaiti institution set, not one institution", ids)
+	}
+	seenSlug := map[string]string{}
+	seenID := map[string]bool{}
+	kuwaitUniversityShips := false
+	for _, id := range ids {
+		if seenID[id] {
+			t.Fatalf("manifest id %q ships twice; an identifier must address one package", id)
+		}
+		seenID[id] = true
+		pkg, err := Load(id)
+		if err != nil {
+			t.Fatalf("shipped manifest %s does not validate: %v", id, err)
+		}
+		institution := pkg.Manifest.Institution
+		if institution.CountryCode != "KW" {
+			t.Errorf("manifest %s seeds country %s; D-106 authorizes the Kuwaiti set only",
+				id, institution.CountryCode)
+		}
+		// Two manifests claiming one slug would race for the same Institution
+		// row and silently merge two universities into one.
+		if previous, clash := seenSlug[institution.Slug]; clash {
+			t.Fatalf("manifests %s and %s both claim institution slug %q", previous, id, institution.Slug)
+		}
+		seenSlug[institution.Slug] = id
+		if institution.Slug == "kuwait-university" {
+			kuwaitUniversityShips = true
+		}
+	}
+	if !kuwaitUniversityShips {
+		t.Fatal("the Kuwait University launch manifest must keep shipping; D-106 adds institutions, it removes none")
+	}
+}
+
+// The provenance split is the whole point of D-106. Kuwait University's catalog
+// is curated from official university sources and carries the academic
+// structure those sources publish. Every other institution is transcribed from
+// Gradex's own course catalogue, which states no college, degree plan, or
+// official Arabic wording — so those manifests must assert none of it. Without
+// this guard, scraped data that later grows a hand-written program tree would
+// be indistinguishable from sourced data after import.
+func TestOnlyKuwaitUniversityAssertsOfficialAcademicStructure(t *testing.T) {
+	ids, err := Available()
+	if err != nil {
+		t.Fatalf("listing manifests: %v", err)
+	}
+	for _, id := range ids {
+		pkg, err := Load(id)
+		if err != nil {
+			t.Fatalf("loading %s: %v", id, err)
+		}
+		if pkg.Manifest.Institution.Slug == "kuwait-university" {
+			continue
+		}
+		if n := len(pkg.Manifest.Units); n != 0 {
+			t.Errorf("%s declares %d academic units; no cited source gives it a hierarchy", id, n)
+		}
+		if n := len(pkg.Manifest.Programs); n != 0 {
+			t.Errorf("%s declares %d programs; no cited source gives it a degree structure", id, n)
+		}
+		if n := len(pkg.Manifest.Curricula); n != 0 {
+			t.Errorf("%s declares %d curricula; no cited source publishes a study plan for it", id, n)
+		}
+		if n := len(pkg.Manifest.Mappings); n != 0 {
+			t.Errorf("%s declares %d curriculum mappings without a curriculum to map into", id, n)
+		}
+		if pkg.Manifest.Institution.NameArSource != SourceGradexTranslation {
+			t.Errorf("%s marks its Arabic institution name %q; it is Gradex's own rendering",
+				id, pkg.Manifest.Institution.NameArSource)
+		}
+		for _, subject := range pkg.Manifest.Subjects {
+			if subject.TitleArSource != SourceGradexTranslation {
+				t.Errorf("%s subject %s marks its Arabic title %q; Gradex translated it",
+					id, subject.Key, subject.TitleArSource)
+			}
+		}
 	}
 }
 

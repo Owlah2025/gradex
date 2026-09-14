@@ -1,0 +1,93 @@
+# American College of the Middle East — Gradex catalogue import.
+#
+# PROVENANCE. Every Subject below is transcribed from the Gradex-operated
+# course catalogue at ibntohamy.pages.dev, which is first-party Gradex data
+# and not a publication of the institution. No official university calendar,
+# registrar page, or study plan was consulted for this manifest. Codes and
+# English titles are therefore reported as the Gradex catalogue records them,
+# and may differ from the institution's current official catalogue.
+#
+# Every Arabic title is a Gradex translation, tagged gradex_translation. None
+# of them is claimed to be the institution's official Arabic wording.
+#
+# No academic_units, programs, or curricula are declared. The source carries
+# no college, department, degree-plan, or placement data, and the schema's
+# optionality is the correct way to represent that absence — an invented
+# hierarchy would be indistinguishable from a sourced one after import.
+
+id: american-college-middle-east-catalog-v1
+version: "1.0.0"
+description: >-
+  American College of the Middle East Subjects transcribed from the Gradex course catalogue.
+  9 Subjects, no curriculum structure.
+
+institution:
+  key: acm
+  slug: american-college-middle-east
+  country_code: KW
+  name_ar: "كلية الشرق الأوسط الأمريكية"
+  name_en: "American College of the Middle East"
+  # Gradex's own rendering of the institution's name. No official Arabic
+  # publication was cited, so this may not match the institution's wording.
+  name_ar_source: gradex_translation
+  # The schema default. No cited source states this institution's level
+  # bounds or whether it runs a foundation stage, so neither is asserted.
+  max_academic_level: 4
+  has_foundation_stage: false
+  sources: [gradex-catalogue-ibntohamy, gradex-institution-naming]
+
+subjects:
+  - key: cns-156
+    official_code: "CNS 156"
+    title_ar: "مقدمة في مفاهيم تطوير البرمجيات"
+    title_en: "Introduction to Software Development Concepts"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cns-176
+    official_code: "CNS 176"
+    title_ar: "معمارية تقنية المعلومات"
+    title_en: "Information Technology Architecture"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cns-180
+    official_code: "CNS 180"
+    title_ar: "مقدمة في تطوير النظم"
+    title_en: "Introduction to Systems Development"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cns-240
+    official_code: "CNS 240"
+    title_ar: "اتصالات البيانات والشبكات"
+    title_en: "Data Communications & Networking"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ma-223
+    official_code: "MA 223"
+    title_ar: "مقدمة في التحليل ١"
+    title_en: "Introductory Analysis I"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: tech-120
+    official_code: "TECH 120"
+    title_ar: "التفكير التصميمي في التقنية"
+    title_en: "Design Thinking in Technology"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cns-255
+    official_code: "CNS 255"
+    title_ar: "مقدمة في البرمجة الكائنية"
+    title_en: "Object Oriented Programming Introduction"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: cns-272
+    official_code: "CNS 272"
+    title_ar: "أساسيات قواعد البيانات"
+    title_en: "Database Fundamentals"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
+  - key: ecet-264
+    official_code: "ECET 264"
+    title_ar: "تطبيقات لغة البرمجة C"
+    title_en: "C Programming Language Applications"
+    title_ar_source: gradex_translation
+    sources: [gradex-catalogue-ibntohamy]
