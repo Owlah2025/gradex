@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 40;
+export const ROTATING_TEST_SLOTS = 41;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 400;
+export const ROTATING_POOL_SIZE = 410;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -135,6 +135,8 @@ export const SUBJECT_DEMAND_ADMIN_FIRST_TEST_SLOT = 37;
 export const SUBJECT_DEMAND_ADMIN_SECOND_TEST_SLOT = 38;
 /** Signs in through the login form for the anonymous auth-return journey. */
 export const SUBJECT_DEMAND_AUTH_RETURN_TEST_SLOT = 39;
+/** Repeated-withdrawal convergence owns its initial demand state. */
+export const SUBJECT_DEMAND_WITHDRAW_TEST_SLOT = 40;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations
