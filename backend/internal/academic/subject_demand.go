@@ -84,10 +84,16 @@ type SubjectDemandSignal struct {
 type SubjectDemandCount struct {
 	SubjectID       string `json:"subject_id"`
 	InstitutionSlug string `json:"institution_slug"`
-	InstitutionName string `json:"institution_name_en"`
-	SubjectCode     string `json:"subject_code,omitempty"`
-	SubjectTitleAr  string `json:"subject_title_ar"`
-	SubjectTitleEn  string `json:"subject_title_en"`
+	// Both names are returned, never one resolved server-side by locale. Admin
+	// reads this aggregate in either language, and a single localized string
+	// would force the client either to re-request on a language switch or to
+	// keep its own institution-name table -- and a client-side name map drifts
+	// from the catalog the moment an Institution is renamed.
+	InstitutionNameAr string `json:"institution_name_ar"`
+	InstitutionNameEn string `json:"institution_name_en"`
+	SubjectCode       string `json:"subject_code,omitempty"`
+	SubjectTitleAr    string `json:"subject_title_ar"`
+	SubjectTitleEn    string `json:"subject_title_en"`
 	// Students is a count of distinct Students, which is what the live-unique
 	// index makes true. It is not a count of clicks.
 	Students int `json:"students"`
@@ -235,7 +241,7 @@ func (r *Repository) ListSubjectDemandCounts(
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT d.subject_id::text, i.slug, i.name_en,
+		SELECT d.subject_id::text, i.slug, i.name_ar, i.name_en,
 			COALESCE(s.official_code, ''), s.title_ar, s.title_en,
 			count(*)::int,
 			EXISTS (
@@ -247,7 +253,7 @@ func (r *Repository) ListSubjectDemandCounts(
 		JOIN subjects s ON s.id = d.subject_id
 		JOIN institutions i ON i.id = d.institution_id
 		WHERE d.withdrawn_at IS NULL`+filter+`
-		GROUP BY d.subject_id, i.slug, i.name_en, s.id, s.official_code, s.title_ar, s.title_en
+		GROUP BY d.subject_id, i.slug, i.name_ar, i.name_en, s.id, s.official_code, s.title_ar, s.title_en
 		ORDER BY count(*) DESC, s.title_en ASC
 		LIMIT $1`, arguments...)
 	if err != nil {
@@ -257,7 +263,8 @@ func (r *Repository) ListSubjectDemandCounts(
 	counts := []SubjectDemandCount{}
 	for rows.Next() {
 		var count SubjectDemandCount
-		if err := rows.Scan(&count.SubjectID, &count.InstitutionSlug, &count.InstitutionName,
+		if err := rows.Scan(&count.SubjectID, &count.InstitutionSlug,
+			&count.InstitutionNameAr, &count.InstitutionNameEn,
 			&count.SubjectCode, &count.SubjectTitleAr, &count.SubjectTitleEn,
 			&count.Students, &count.Served); err != nil {
 			return nil, fmt.Errorf("scanning subject demand count: %w", err)

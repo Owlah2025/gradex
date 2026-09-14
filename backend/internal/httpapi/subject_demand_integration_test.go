@@ -221,9 +221,11 @@ func TestUnservedSubjectIsDiscoverableAndCarriesDemand(t *testing.T) {
 		}
 		var body struct {
 			Items []struct {
-				SubjectID string `json:"subject_id"`
-				Students  int    `json:"students"`
-				Served    bool   `json:"served"`
+				SubjectID         string `json:"subject_id"`
+				InstitutionNameAr string `json:"institution_name_ar"`
+				InstitutionNameEn string `json:"institution_name_en"`
+				Students          int    `json:"students"`
+				Served            bool   `json:"served"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal(raw, &body); err != nil {
@@ -234,6 +236,16 @@ func TestUnservedSubjectIsDiscoverableAndCarriesDemand(t *testing.T) {
 		}
 		if body.Items[0].Students != 1 {
 			t.Errorf("students = %d, want 1", body.Items[0].Students)
+		}
+		// Both names ship so Admin can read the aggregate in either language
+		// without re-requesting or keeping a client-side institution-name map.
+		if body.Items[0].InstitutionNameAr != "جامعة الطلب" {
+			t.Errorf("institution_name_ar = %q, want the seeded Arabic name",
+				body.Items[0].InstitutionNameAr)
+		}
+		if body.Items[0].InstitutionNameEn != "Demand University" {
+			t.Errorf("institution_name_en = %q, want the seeded English name",
+				body.Items[0].InstitutionNameEn)
 		}
 		if body.Items[0].Served {
 			t.Error("the Subject has no published Course and must report served=false")

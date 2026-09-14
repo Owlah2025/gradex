@@ -257,7 +257,11 @@ export function SubjectDemandWorkspace() {
                 rows.map((row) => (
                   <TableRow key={row.subject_id} data-testid="demand-row">
                     <TableCell>
-                      <bdi>{row.institution_name_en}</bdi>
+                      <bdi>
+                        {locale === "ar"
+                          ? row.institution_name_ar
+                          : row.institution_name_en}
+                      </bdi>
                     </TableCell>
                     <TableCell>
                       <bdi>{row.subject_code ?? "—"}</bdi>

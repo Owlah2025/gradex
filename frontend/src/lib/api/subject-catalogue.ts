@@ -173,6 +173,12 @@ export function listOwnSubjectDemand(locale: "ar" | "en") {
 export type SubjectDemandCount = {
   subject_id: string;
   institution_slug: string;
+  /**
+   * Both names are supplied by the server. The client picks by locale rather
+   * than keeping its own institution-name table, which would drift from the
+   * catalog the moment an Institution is renamed.
+   */
+  institution_name_ar: string;
   institution_name_en: string;
   subject_code?: string;
   subject_title_ar: string;
