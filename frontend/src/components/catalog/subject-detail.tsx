@@ -3,19 +3,19 @@
 import * as React from "react";
 import Link from "next/link";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { useSessionResolution, useSessionView } from "@/lib/identity/use-session";
+import {
+  useSessionResolution,
+  useSessionView,
+} from "@/lib/identity/use-session";
 import { subjectDemandAudience } from "@/lib/identity/subject-demand-authority";
 import { Button } from "@/components/ui/button";
-import { Alert } from "@/components/ui/alert";
 import { DisplayHeading, Prose } from "@/components/ui/typography";
 import { Navbar } from "@/components/layout/navbar";
 import { Footer } from "@/components/layout/footer";
 import { Container } from "@/components/layout/container";
 import {
-  getSubject,
   institutionName,
   listOwnSubjectDemand,
-  subjectMissing,
   subjectTitle,
   type SubjectListing,
 } from "@/lib/api/subject-catalogue";
@@ -34,14 +34,13 @@ import { subjectCopy } from "./subject-copy";
  * Unserved, it explains the absence plainly and offers demand registration.
  * Neither state invents a product: no price, no placeholder Course, no
  * "coming soon" that implies a commitment nobody has made.
+ *
+ * The Subject arrives already resolved from the server route, which is what
+ * lets a missing one answer a real HTTP 404. This component therefore has no
+ * loading, missing, or failed state to render for it — only the interactive
+ * demand states below, which are why it stays a client component at all.
  */
-export function SubjectDetail({
-  institutionSlug,
-  value,
-}: {
-  institutionSlug: string;
-  value: string;
-}) {
+export function SubjectDetail({ subject }: { subject: SubjectListing }) {
   const { locale } = useLocale();
   const copy = subjectCopy[locale];
   const session = useSessionView();
@@ -49,34 +48,10 @@ export function SubjectDetail({
   const audience = subjectDemandAudience(session, resolution);
   const authenticated = audience === "ELIGIBLE_STUDENT";
 
-  const [subject, setSubject] = React.useState<SubjectListing | null>(null);
-  const [missing, setMissing] = React.useState(false);
-  const [failed, setFailed] = React.useState(false);
   const [requested, setRequested] = React.useState(false);
 
   React.useEffect(() => {
-    let live = true;
-    setSubject(null);
-    setMissing(false);
-    setFailed(false);
-    getSubject(institutionSlug, value, locale)
-      .then((found) => {
-        if (live) setSubject(found);
-      })
-      .catch((caught: unknown) => {
-        if (!live) return;
-        // A Subject that is gone is an ordinary empty state, not a failure: a
-        // shared link outliving a retired Subject is expected.
-        if (subjectMissing(caught)) setMissing(true);
-        else setFailed(true);
-      });
-    return () => {
-      live = false;
-    };
-  }, [institutionSlug, value, locale]);
-
-  React.useEffect(() => {
-    if (!authenticated || subject === null) {
+    if (!authenticated) {
       setRequested(false);
       return;
     }
@@ -92,7 +67,7 @@ export function SubjectDetail({
     return () => {
       live = false;
     };
-  }, [authenticated, locale, subject]);
+  }, [authenticated, locale, subject.subject_id]);
 
   const backHref = `/${locale}/subjects`;
 
@@ -108,90 +83,78 @@ export function SubjectDetail({
             {copy.detailBack}
           </Link>
 
-          {missing ? (
-            <div className="mt-6 max-w-lg">
-              <Alert tone="info" title={copy.detailNotFound} />
-            </div>
-          ) : failed ? (
-            <div className="mt-6 max-w-lg">
-              <Alert tone="error" title={copy.failed} />
-            </div>
-          ) : subject === null ? (
-            <p className="mt-6 text-sm text-muted-foreground">{copy.loading}</p>
-          ) : (
-            <article className="mt-6 max-w-2xl">
-              <p className="text-sm font-semibold text-muted-foreground">
-                <bdi>{institutionName(subject, locale)}</bdi>
+          <article className="mt-6 max-w-2xl">
+            <p className="text-sm font-semibold text-muted-foreground">
+              <bdi>{institutionName(subject, locale)}</bdi>
+            </p>
+
+            <DisplayHeading className="mt-2">
+              <bdi>{subjectTitle(subject, locale)}</bdi>
+            </DisplayHeading>
+
+            {subject.code ? (
+              <p className="mt-3 font-mono text-sm font-bold text-foreground">
+                <span className="font-sans font-semibold text-muted-foreground">
+                  {copy.code}:{" "}
+                </span>
+                <bdi>{subject.code}</bdi>
               </p>
+            ) : null}
 
-              <DisplayHeading className="mt-2">
-                <bdi>{subjectTitle(subject, locale)}</bdi>
-              </DisplayHeading>
+            <p
+              className={
+                subject.served
+                  ? "mt-4 inline-flex rounded-full bg-gx-success-soft px-3 py-1 text-xs font-bold text-gx-navy"
+                  : "mt-4 inline-flex rounded-full bg-muted px-3 py-1 text-xs font-bold text-muted-foreground"
+              }
+              data-testid="subject-availability"
+            >
+              {subject.served ? copy.served : copy.unserved}
+            </p>
 
-              {subject.code ? (
-                <p className="mt-3 font-mono text-sm font-bold text-foreground">
-                  <span className="font-sans font-semibold text-muted-foreground">
-                    {copy.code}:{" "}
-                  </span>
-                  <bdi>{subject.code}</bdi>
-                </p>
-              ) : null}
-
-              <p
-                className={
-                  subject.served
-                    ? "mt-4 inline-flex rounded-full bg-gx-success-soft px-3 py-1 text-xs font-bold text-gx-navy"
-                    : "mt-4 inline-flex rounded-full bg-muted px-3 py-1 text-xs font-bold text-muted-foreground"
-                }
-                data-testid="subject-availability"
-              >
-                {subject.served ? copy.served : copy.unserved}
-              </p>
-
-              {subject.served ? (
-                <section className="mt-8" data-testid="subject-courses">
-                  <h2 className="font-display text-lg font-bold text-foreground">
-                    {copy.coursesHeading}
-                  </h2>
-                  <ul className="mt-4 space-y-3">
-                    {subject.courses.map((course) => (
-                      <li
-                        key={course.slug}
-                        className="rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm"
+            {subject.served ? (
+              <section className="mt-8" data-testid="subject-courses">
+                <h2 className="font-display text-lg font-bold text-foreground">
+                  {copy.coursesHeading}
+                </h2>
+                <ul className="mt-4 space-y-3">
+                  {subject.courses.map((course) => (
+                    <li
+                      key={course.slug}
+                      className="rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm"
+                    >
+                      <p className="font-display text-base font-bold text-foreground">
+                        <bdi>{course.title}</bdi>
+                      </p>
+                      <Button
+                        asChild
+                        className="mt-3"
+                        data-testid="subject-open-course"
                       >
-                        <p className="font-display text-base font-bold text-foreground">
-                          <bdi>{course.title}</bdi>
-                        </p>
-                        <Button
-                          asChild
-                          className="mt-3"
-                          data-testid="subject-open-course"
+                        <Link
+                          href={`/${locale}/catalog/${encodeURIComponent(course.slug)}`}
                         >
-                          <Link
-                            href={`/${locale}/catalog/${encodeURIComponent(course.slug)}`}
-                          >
-                            {copy.openCourse}
-                          </Link>
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : (
-                <>
-                  <Prose className="mt-6">{copy.requestIntro}</Prose>
-                  <SubjectDemandAction
-                    subjectId={subject.subject_id}
-                    copy={copy}
-                    locale={locale}
-                    audience={audience}
-                    initiallyRequested={requested}
-                    onChange={(_, isRequested) => setRequested(isRequested)}
-                  />
-                </>
-              )}
-            </article>
-          )}
+                          {copy.openCourse}
+                        </Link>
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : (
+              <>
+                <Prose className="mt-6">{copy.requestIntro}</Prose>
+                <SubjectDemandAction
+                  subjectId={subject.subject_id}
+                  copy={copy}
+                  locale={locale}
+                  audience={audience}
+                  initiallyRequested={requested}
+                  onChange={(_, isRequested) => setRequested(isRequested)}
+                />
+              </>
+            )}
+          </article>
         </Container>
       </main>
       <Footer />

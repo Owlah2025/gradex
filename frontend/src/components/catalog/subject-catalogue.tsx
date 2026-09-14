@@ -44,6 +44,15 @@ import { subjectCopy } from "./subject-copy";
 
 const AVAILABILITY: SubjectAvailability[] = ["all", "served", "unserved"];
 
+/**
+ * How many Subjects one page carries.
+ *
+ * A page, not a ceiling. The catalogue previously asked for 60 against a corpus
+ * of 329, which silently hid most of it; raising that number would only move
+ * where the cliff falls. Every Subject is reachable by asking for the next page.
+ */
+const SUBJECTS_PER_PAGE = 24;
+
 function readAvailability(value: string | null): SubjectAvailability {
   return AVAILABILITY.includes(value as SubjectAvailability)
     ? (value as SubjectAvailability)
@@ -73,7 +82,14 @@ export function SubjectCatalogue() {
   const [institutions, setInstitutions] = React.useState<InstitutionOption[]>([]);
   const [subjects, setSubjects] = React.useState<SubjectListing[] | null>(null);
   const [total, setTotal] = React.useState(0);
+  const [loadedPages, setLoadedPages] = React.useState(0);
+  const [loadingMore, setLoadingMore] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
+  // Bumped to re-run the first-page effect after a failure. Without it, "Try
+  // again" only rewrote the URL, and when the URL was already correct -- which
+  // it is whenever the failure was the network rather than the filters -- React
+  // saw identical dependencies and never re-issued the request.
+  const [reloadToken, setReloadToken] = React.useState(0);
   const [searchDraft, setSearchDraft] = React.useState(search);
   // Which Subjects this Student has already asked for. Empty for anonymous
   // visitors, who have no signals and are never told about anyone else's.
@@ -97,20 +113,27 @@ export function SubjectCatalogue() {
     };
   }, [locale]);
 
+  // The first page, and every reset. Changing the locale, the institution, the
+  // availability, or the search discards what was loaded and starts again at
+  // page one -- appending page two of a *different* query would interleave two
+  // result sets into one list.
   React.useEffect(() => {
     let live = true;
     setSubjects(null);
+    setLoadedPages(0);
     setFailed(false);
     getSubjects(locale, {
       institution: institution || undefined,
       search: search || undefined,
       availability,
-      pageSize: 60,
+      pageSize: SUBJECTS_PER_PAGE,
+      page: 1,
     })
       .then((page) => {
         if (!live) return;
         setSubjects(page.items);
         setTotal(page.total);
+        setLoadedPages(1);
       })
       .catch(() => {
         if (live) setFailed(true);
@@ -118,7 +141,40 @@ export function SubjectCatalogue() {
     return () => {
       live = false;
     };
-  }, [locale, institution, search, availability]);
+  }, [locale, institution, search, availability, reloadToken]);
+
+  /**
+   * Appends the next page.
+   *
+   * Deduplicates by `subject_id` on append. The server orders by institution,
+   * then served-before-unserved, then code — a stable ordering, but a Course
+   * published between two requests moves a Subject across that boundary, and a
+   * Subject already on screen must not appear twice because of it.
+   */
+  const loadMore = React.useCallback(() => {
+    if (loadingMore || subjects === null) return;
+    const next = loadedPages + 1;
+    setLoadingMore(true);
+    setFailed(false);
+    getSubjects(locale, {
+      institution: institution || undefined,
+      search: search || undefined,
+      availability,
+      pageSize: SUBJECTS_PER_PAGE,
+      page: next,
+    })
+      .then((page) => {
+        setSubjects((current) => {
+          const base = current ?? [];
+          const seen = new Set(base.map((item) => item.subject_id));
+          return [...base, ...page.items.filter((item) => !seen.has(item.subject_id))];
+        });
+        setTotal(page.total);
+        setLoadedPages(next);
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setLoadingMore(false));
+  }, [availability, institution, loadedPages, loadingMore, locale, search, subjects]);
 
   React.useEffect(() => {
     if (!authenticated) {
@@ -264,13 +320,19 @@ export function SubjectCatalogue() {
           </form>
 
           <div className="mt-8">
-            {failed ? (
+            {failed && subjects === null ? (
               <div className="max-w-lg">
                 <Alert tone="error" title={copy.failed} />
                 <Button
                   type="button"
                   className="mt-4"
-                  onClick={() => applySelection({})}
+                  // Re-runs the request. The previous handler called
+                  // applySelection({}), which only rewrote the URL -- and when
+                  // the URL was already correct, which it is whenever the
+                  // failure was the network rather than the filters, nothing
+                  // re-fetched and the button did nothing at all.
+                  onClick={() => setReloadToken((token) => token + 1)}
+                  data-testid="subject-retry"
                 >
                   {copy.retry}
                 </Button>
@@ -297,6 +359,37 @@ export function SubjectCatalogue() {
                     />
                   ))}
                 </div>
+
+                {/* Progress is stated, not implied: "24 of 329" tells the
+                    Student the list is partial, which an unadorned Load More
+                    button does not. */}
+                <p
+                  className="mt-6 text-sm text-muted-foreground"
+                  data-testid="subject-shown-count"
+                >
+                  {copy.showing
+                    .replace("{shown}", String(subjects.length))
+                    .replace("{total}", String(total))}
+                </p>
+
+                {failed ? (
+                  <div className="mt-4 max-w-lg">
+                    <Alert tone="error" title={copy.failed} />
+                  </div>
+                ) : null}
+
+                {subjects.length < total ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-4"
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    data-testid="subject-load-more"
+                  >
+                    {loadingMore ? copy.loadingMore : copy.loadMore}
+                  </Button>
+                ) : null}
               </>
             )}
           </div>

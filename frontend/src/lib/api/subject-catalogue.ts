@@ -1,5 +1,6 @@
 import { authenticatedRequest } from "./http";
-import { isProblem, ProblemError } from "./problem";
+import { ProblemError } from "./problem";
+import { publicCatalogRequest as publicRequest } from "./public-request";
 
 /**
  * Public Subject discovery and Student demand (D-106).
@@ -64,22 +65,6 @@ export type SubjectQuery = {
   page?: number;
   pageSize?: number;
 };
-
-async function publicRequest<T>(path: string, locale: "ar" | "en"): Promise<T> {
-  const response = await fetch(`/api/v1/catalog${path}`, {
-    headers: {
-      Accept: "application/json, application/problem+json",
-      "Accept-Language": locale,
-    },
-    cache: "no-store",
-  });
-  const body: unknown = await response.json();
-  if (!response.ok)
-    throw isProblem(body)
-      ? new ProblemError(body)
-      : new Error("Subject catalogue request failed");
-  return body as T;
-}
 
 /**
  * Browses Subjects, including the ones no Course teaches.

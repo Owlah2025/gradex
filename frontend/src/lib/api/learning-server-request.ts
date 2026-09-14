@@ -21,7 +21,14 @@ function protectedCookies(cookieHeader: string | null): string | null {
   return cookies.length > 0 ? cookies.join("; ") : null;
 }
 
-function apiOrigin(): string {
+/**
+ * The backend origin for server-side rendering.
+ *
+ * Exported so other server-rendered surfaces resolve the API the same way
+ * rather than each re-deriving it — including the production guard, which must
+ * not be reimplemented per caller.
+ */
+export function apiOrigin(): string {
   const configuredOrigin = process.env.GRADEX_API_ORIGIN;
   if (!configuredOrigin && process.env.NODE_ENV === "production") {
     throw new Error("GRADEX_API_ORIGIN is required in production.");

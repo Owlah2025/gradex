@@ -1,4 +1,5 @@
 import { isProblem, ProblemError } from "./problem";
+import { publicCatalogRequest as publicRequest } from "./public-request";
 
 export type PublicTaxonomy = { label: string; code?: string };
 export type PublicPrice = {
@@ -102,22 +103,6 @@ export type PublicCourseList = {
   total: number;
 };
 export type PublicPreviewAuthorization = { url: string; expires_at: string };
-
-async function publicRequest<T>(path: string, locale: "ar" | "en"): Promise<T> {
-  const response = await fetch(`/api/v1/catalog${path}`, {
-    headers: {
-      Accept: "application/json, application/problem+json",
-      "Accept-Language": locale,
-    },
-    cache: "no-store",
-  });
-  const body: unknown = await response.json();
-  if (!response.ok)
-    throw isProblem(body)
-      ? new ProblemError(body)
-      : new Error("Public catalogue request failed");
-  return body as T;
-}
 
 export function getPublicCourses(
   locale: "ar" | "en",
