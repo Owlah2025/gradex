@@ -154,7 +154,16 @@ introduce short-lived or sliding media authorization is a separate decision for 
 ## Verification-fixture isolation
 
 Device-security browser journeys use a dedicated 50-Student pool. Its invitation timestamps are
-older than the Admin queue window, and the established rotating pool remains exactly 35 slots / 350
-Students. Device tests therefore cannot shift or crowd out the T8A entitlement fixtures. Generic
+older than the Admin queue window, and it is disjoint from the established rotating pool. Device
+tests therefore cannot shift or crowd out the T8A entitlement fixtures.
+
+The rotating pool's size is deliberately **not** restated here. It read "exactly 35 slots / 350
+Students" until D-106 added five Subject-demand slots, at which point this paragraph was describing
+a pool that no longer existed — a number duplicated into prose drifts the moment a slot is added,
+and a reader cannot tell a stale figure from a current one. The authority is
+`rotatingTestSlots` and `rotatingStudentPoolSize` in `backend/cmd/e2e-seed/rotating_students_test.go`,
+mirrored by `ROTATING_TEST_SLOTS` and `ROTATING_POOL_SIZE` in
+`frontend/src/lib/api/e2e-students.ts`; the unit suite asserts the pool covers slots times repeats.
+What matters for isolation is the disjointness above, which no slot count changes. Generic
 learning tests may establish a trusted Student device through the test-only seeder; the dedicated
 device-security journey still drives the real Mailpit-delivered OTP through the product UI.

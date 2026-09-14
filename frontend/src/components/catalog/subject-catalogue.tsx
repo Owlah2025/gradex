@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import {
   getSubjects,
   listOwnSubjectDemand,
+  requestAborted,
   type SubjectAvailability,
   type SubjectListing,
 } from "@/lib/api/subject-catalogue";
@@ -90,6 +91,42 @@ export function SubjectCatalogue() {
   // it is whenever the failure was the network rather than the filters -- React
   // saw identical dependencies and never re-issued the request.
   const [reloadToken, setReloadToken] = React.useState(0);
+
+  /**
+   * Which query the catalogue is currently showing.
+   *
+   * Every request captures this value and checks it again before touching
+   * state. An append issued against the previous query resolves after the reset
+   * that replaced it, and without this guard its results were spliced into the
+   * new list -- Subjects from a different institution, or filtered-out ones,
+   * appearing under filters that exclude them. The `live` flag on the reset
+   * effect never covered this: it protects the reset's own request, not an
+   * append already in flight when the reset began.
+   */
+  const queryGeneration = React.useRef(0);
+  /** Every in-flight catalogue request, so a reset can cancel all of them. */
+  const pending = React.useRef(new Set<AbortController>());
+
+  const beginRequest = React.useCallback((): {
+    controller: AbortController;
+    generation: number;
+    settle: () => void;
+  } => {
+    const controller = new AbortController();
+    pending.current.add(controller);
+    return {
+      controller,
+      generation: queryGeneration.current,
+      settle: () => pending.current.delete(controller),
+    };
+  }, []);
+
+  /** Invalidates every outstanding request and starts a new query generation. */
+  const invalidateOutstanding = React.useCallback(() => {
+    queryGeneration.current += 1;
+    for (const controller of pending.current) controller.abort();
+    pending.current.clear();
+  }, []);
   const [searchDraft, setSearchDraft] = React.useState(search);
   // Which Subjects this Student has already asked for. Empty for anonymous
   // visitors, who have no signals and are never told about anyone else's.
@@ -118,9 +155,14 @@ export function SubjectCatalogue() {
   // page one -- appending page two of a *different* query would interleave two
   // result sets into one list.
   React.useEffect(() => {
-    let live = true;
+    // Cancel anything still running for the previous query before starting
+    // this one, so a late append cannot land on the new result set.
+    invalidateOutstanding();
+    const { controller, generation, settle } = beginRequest();
+
     setSubjects(null);
     setLoadedPages(0);
+    setLoadingMore(false);
     setFailed(false);
     getSubjects(locale, {
       institution: institution || undefined,
@@ -128,20 +170,28 @@ export function SubjectCatalogue() {
       availability,
       pageSize: SUBJECTS_PER_PAGE,
       page: 1,
+      signal: controller.signal,
     })
       .then((page) => {
-        if (!live) return;
+        if (generation !== queryGeneration.current) return;
         setSubjects(page.items);
         setTotal(page.total);
         setLoadedPages(1);
       })
-      .catch(() => {
-        if (live) setFailed(true);
-      });
+      .catch((error: unknown) => {
+        // A cancelled request is not a failure to report: the query it
+        // belonged to is gone and something newer is already loading.
+        if (requestAborted(error)) return;
+        if (generation !== queryGeneration.current) return;
+        setFailed(true);
+      })
+      .finally(settle);
+
     return () => {
-      live = false;
+      controller.abort();
+      settle();
     };
-  }, [locale, institution, search, availability, reloadToken]);
+  }, [locale, institution, search, availability, reloadToken, beginRequest, invalidateOutstanding]);
 
   /**
    * Appends the next page.
@@ -154,6 +204,10 @@ export function SubjectCatalogue() {
   const loadMore = React.useCallback(() => {
     if (loadingMore || subjects === null) return;
     const next = loadedPages + 1;
+    // An append belongs to the query already on screen, so it joins the current
+    // generation rather than starting a new one.
+    const { controller, generation, settle } = beginRequest();
+
     setLoadingMore(true);
     setFailed(false);
     getSubjects(locale, {
@@ -162,8 +216,12 @@ export function SubjectCatalogue() {
       availability,
       pageSize: SUBJECTS_PER_PAGE,
       page: next,
+      signal: controller.signal,
     })
       .then((page) => {
+        // The filters may have changed while this was in flight. Appending now
+        // would splice one query's page two into another query's page one.
+        if (generation !== queryGeneration.current) return;
         setSubjects((current) => {
           const base = current ?? [];
           const seen = new Set(base.map((item) => item.subject_id));
@@ -172,9 +230,25 @@ export function SubjectCatalogue() {
         setTotal(page.total);
         setLoadedPages(next);
       })
-      .catch(() => setFailed(true))
-      .finally(() => setLoadingMore(false));
-  }, [availability, institution, loadedPages, loadingMore, locale, search, subjects]);
+      .catch((error: unknown) => {
+        if (requestAborted(error)) return;
+        if (generation !== queryGeneration.current) return;
+        setFailed(true);
+      })
+      .finally(() => {
+        settle();
+        if (generation === queryGeneration.current) setLoadingMore(false);
+      });
+  }, [
+    availability,
+    beginRequest,
+    institution,
+    loadedPages,
+    loadingMore,
+    locale,
+    search,
+    subjects,
+  ]);
 
   React.useEffect(() => {
     if (!authenticated) {

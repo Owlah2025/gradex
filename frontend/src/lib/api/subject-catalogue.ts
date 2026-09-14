@@ -64,7 +64,14 @@ export type SubjectQuery = {
   availability?: SubjectAvailability;
   page?: number;
   pageSize?: number;
+  /** Cancels the request when the caller's query has moved on. */
+  signal?: AbortSignal;
 };
+
+/** True when a rejection is this request being cancelled, not a failure. */
+export function requestAborted(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 /**
  * Browses Subjects, including the ones no Course teaches.
@@ -84,7 +91,7 @@ export function getSubjects(locale: "ar" | "en", query: SubjectQuery = {}) {
   if (query.page && query.page > 1) parameters.set("page", String(query.page));
   if (query.pageSize) parameters.set("page_size", String(query.pageSize));
   const suffix = parameters.size === 0 ? "" : `?${parameters}`;
-  return publicRequest<SubjectPage>(`/subjects${suffix}`, locale);
+  return publicRequest<SubjectPage>(`/subjects${suffix}`, locale, query.signal);
 }
 
 /**

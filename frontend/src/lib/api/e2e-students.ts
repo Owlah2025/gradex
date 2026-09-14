@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 37;
+export const ROTATING_TEST_SLOTS = 40;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 370;
+export const ROTATING_POOL_SIZE = 400;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -120,14 +120,21 @@ export const ENTITLEMENT_REVOKE_TEST_SLOT = 33;
 export const ADMIN_REPORTED_CONTENT_TEST_SLOT = 34;
 
 /**
- * D-106 Subject demand, one slot per locale.
+ * D-106 Subject demand. Every slot is dedicated, none is shared.
  *
- * Separate slots rather than one reused across the English and Arabic runs:
- * both mutate the same Student's demand signals, so sharing would make each
- * run's starting state depend on whether the other ran first.
+ * Each of these mutates demand signals that another test then reads — the
+ * Admin aggregate counts exactly the signals these Students leave behind. A
+ * slot reused across two tests would make each one's starting state depend on
+ * which ran first, which is the property that makes a suite pass in isolation
+ * and fail in a full run.
  */
 export const SUBJECT_DEMAND_EN_TEST_SLOT = 35;
 export const SUBJECT_DEMAND_AR_TEST_SLOT = 36;
+/** Two Students whose differing counts give the Admin sort something to order. */
+export const SUBJECT_DEMAND_ADMIN_FIRST_TEST_SLOT = 37;
+export const SUBJECT_DEMAND_ADMIN_SECOND_TEST_SLOT = 38;
+/** Signs in through the login form for the anonymous auth-return journey. */
+export const SUBJECT_DEMAND_AUTH_RETURN_TEST_SLOT = 39;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

@@ -15,6 +15,7 @@ import { isProblem, ProblemError } from "./problem";
 export async function publicCatalogRequest<T>(
   path: string,
   locale: "ar" | "en",
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`/api/v1/catalog${path}`, {
     headers: {
@@ -22,6 +23,10 @@ export async function publicCatalogRequest<T>(
       "Accept-Language": locale,
     },
     cache: "no-store",
+    // Lets a caller whose query has moved on stop waiting for an answer it can
+    // no longer use. An aborted fetch rejects with an AbortError, which callers
+    // must distinguish from a real failure.
+    signal,
   });
   const body: unknown = await response.json();
   if (!response.ok)
