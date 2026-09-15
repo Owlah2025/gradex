@@ -230,7 +230,7 @@ supervised emergency operation — not a routine migration path.
 **Rollback — in this exact order:**
 
 1. **Stop the D-103 application, API, and worker first.** No D-103 worker may remain running at any
-   later step, and no D-102 worker may start before step 5.
+   later step, and no D-102 worker may start before step 9.
 2. **Take and verify a backup immediately before the destructive step**, using the established
    pre-deployment backup above (`pg_dump --format=custom` plus its `sha256sum`), or
    `./deploy/scripts/database-recovery.sh backup` in the S12 topology. Do not proceed on an unverified
