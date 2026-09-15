@@ -270,31 +270,34 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 	`, work.id, operationID); err != nil {
 		return fmt.Errorf("recording interrupted processing attempt: %w", err)
 	}
-	// processing_attempt_count is reconciled against the durable attempt record
-	// in the same statement that fails the row (D-103 M1).
+	// processing_attempt_count is the CURRENT CYCLE's consumed-attempt count.
 	//
-	// INVARIANT: processing_attempt_count is the number of processing attempts
-	// already CONSUMED for this asset version, and is never less than the number
-	// of rows in processing_attempts for it.
+	// INVARIANT: a processing retry cycle receives exactly MaxWorkAttempts
+	// attempts. Historical rows in processing_attempts belonging to earlier
+	// cycles remain auditable but never consume the current cycle's budget.
 	//
-	// A row that entered PROCESSING before 0035 carries the schema default of 0
-	// while a real attempt was in flight, so reading the stored counter would
-	// hand that legacy attempt back for free and allow a fourth effective
-	// processing attempt. The terminal row inserted immediately above is the
-	// evidence that the attempt was consumed, so GREATEST against the attempt
-	// count makes the legacy attempt count exactly once. For a row claimed under
-	// 0035 the two numbers already agree, so this never double-counts. The
-	// reconciled value is returned and used for the budget decision below;
-	// the stale in-memory counter is deliberately not consulted again.
+	// An earlier revision reconciled this counter against
+	// `count(*) FROM processing_attempts`, which is append-only and therefore
+	// lifetime-global. Admin Retry deliberately resets the counter to zero to
+	// open a fresh cycle (see Service.applyRetry), so counting history made a
+	// freshly retried asset inherit every attempt of every previous cycle and be
+	// exhausted before its first new attempt ran.
+	//
+	// The only case the counter genuinely understates is a row that entered
+	// PROCESSING before 0035: the claim that put it there could not increment a
+	// column that did not exist yet, so its in-flight attempt is uncounted. That
+	// case is identified precisely — a PROCESSING row holding no claim token —
+	// and charged exactly one attempt. A row claimed under 0035 always carries
+	// its token and was already counted at claim time, so it is never
+	// double-charged, and no historical row is ever consulted.
 	var attemptsConsumed int
 	if err := tx.QueryRow(ctx, `
 		UPDATE media_asset_versions SET state='PROCESS_FAILED',
 		  processing_stage=NULL, processing_progress_percent=NULL, processing_updated_at=NULL, processing_attempt_token=NULL,
 		  work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
 		  last_failure_category='WORKER_INTERRUPTED',
-		  processing_attempt_count=GREATEST(processing_attempt_count, (
-		    SELECT count(*) FROM processing_attempts pa WHERE pa.asset_version_id=$1::uuid
-		  ))
+		  processing_attempt_count=processing_attempt_count
+		    + CASE WHEN work_claim_token IS NULL THEN 1 ELSE 0 END
 		WHERE id=$1::uuid AND state='PROCESSING'
 		RETURNING processing_attempt_count
 	`, work.id).Scan(&attemptsConsumed); err != nil {
