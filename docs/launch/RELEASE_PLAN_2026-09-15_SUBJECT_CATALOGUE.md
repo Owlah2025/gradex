@@ -297,11 +297,16 @@ export SHORT="${RELEASE_SHA:0:12}"
 printf 'release identity: %s (short %s)\n' "$RELEASE_SHA" "$SHORT"
 ```
 
-**2. Run the fail-closed gate.** It runs in a subshell so a refusal cannot be missed and cannot kill
-the operator's shell along with the exports above:
+**2. Run the fail-closed gate.**
+
+> **How to run every gate block in this document.** Save it and run it with `bash`, or paste it into
+> a non-interactive shell. Each gate ends in `exit 1` on refusal, so the block's own exit status is
+> the verdict — there is no trailing diagnostic to inspect, and nothing after a refusal executes.
+> The exports from step 1 are `export`ed, so a child `bash` inherits them. Pasting a gate directly
+> into an interactive shell also fails closed; it simply ends that shell.
 
 ```bash
-(
+if ! (
   set -euo pipefail
 
   # (a) A dirty worktree has no releasable identity. release.sh refuses one too; this
@@ -339,23 +344,28 @@ docs/launch/STATUS.md'
   git diff --stat 61142de "$RELEASE_SHA" -- deploy
 
   echo "PROCEED: $RELEASE_SHA carries the approved software content of $APPROVED_SOFTWARE_HEAD"
-)
-echo "CP-1 gate exit status: $?"
+); then
+  echo 'REFUSE: CP-1 preflight failed' >&2
+  exit 1
+fi
 ```
 
-Expected — note that no line names a literal release SHA, because the identity is whatever HEAD is
-at execution time:
+Expected on success — note that no line names a literal release SHA, because the identity is
+whatever HEAD is at execution time, and that the block exits `0`:
 ```
  deploy/env/production-like.env.example | 4 ++++
  1 file changed, 4 insertions(+)
 PROCEED: <RELEASE_SHA> carries the approved software content of e2223d7…
-CP-1 gate exit status: 0
 ```
 
-**STOP on any `REFUSE`, and on any non-zero gate exit status.** In particular, a non-empty
-`UNEXPECTED` or `ARTIFACT` list means the tree has moved beyond the independently approved software
-content: the approval no longer covers what would be built, and the release requires a new review
-rather than a new build.
+On refusal the block prints the specific `REFUSE:` line, then `REFUSE: CP-1 preflight failed`, and
+**exits non-zero**. There is deliberately no trailing `echo` of `$?`: a successful diagnostic
+command after a failed gate would reset the block's exit status to zero and turn a refusal into a
+silent pass.
+
+**STOP on any `REFUSE`.** In particular, a non-empty `UNEXPECTED` or `ARTIFACT` list means the tree
+has moved beyond the independently approved software content: the approval no longer covers what
+would be built, and the release requires a new review rather than a new build.
 
 The two allowlisted files are the release documentation itself. They are expected to differ, because
 committing this plan is what moves HEAD past the approved software head in the first place.
@@ -402,10 +412,24 @@ assuming it:
 
 ```bash
 cd /home/owlah/worktrees/gradex-catalog-seed
-./deploy/hostinger/release.sh build 2>&1 | tee /tmp/gradex-release-build.log
-grep -qF "built release $RELEASE_SHA" /tmp/gradex-release-build.log ||
-  echo "REFUSE: release.sh built a revision other than $RELEASE_SHA"
-./deploy/hostinger/release.sh export "$RELEASE_SHA"
+
+# No pipe: `release.sh build | tee` would report tee's exit status, so a failed build would
+# read as success. Redirect, then show the log.
+./deploy/hostinger/release.sh build >/tmp/gradex-release-build.log 2>&1 || {
+  echo "REFUSE: release.sh build failed; see /tmp/gradex-release-build.log" >&2
+  exit 1
+}
+cat /tmp/gradex-release-build.log
+
+grep -qF "built release $RELEASE_SHA" /tmp/gradex-release-build.log || {
+  echo "REFUSE: release.sh built a revision other than $RELEASE_SHA" >&2
+  exit 1
+}
+
+./deploy/hostinger/release.sh export "$RELEASE_SHA" || {
+  echo "REFUSE: release.sh export failed for $RELEASE_SHA" >&2
+  exit 1
+}
 ```
 
 Expected, with `$RELEASE_SHA` standing for the identity CP-1 captured — the tooling prints the real
@@ -416,8 +440,10 @@ s12-hostinger-release: built release $RELEASE_SHA
 s12-hostinger-release: exported release $RELEASE_SHA with checksum into ignored state
 ```
 
-**STOP** if the `grep` prints `REFUSE`: the build did not stamp the identity CP-1 audited, so
-nothing downstream — tags, labels, `release.env`, `apply-release` — is trustworthy.
+The identity assertion is **fatal, not advisory**: on a mismatch the block exits non-zero and the
+`export` step is never reached, so no artifact bearing the wrong revision can be produced or
+transferred. That matters because everything downstream — tags, labels, `release.env`,
+`apply-release` — trusts this one stamp.
 
 The exported artifacts land in `deploy/.state/hostinger/releases/$RELEASE_SHA/`.
 
@@ -590,7 +616,14 @@ Run the migration as a one-off release job against the **new** backend image:
 set -a; . /home/deploy/gradex-production/runtime.env; set +a
 export GRADEX_BACKEND_IMAGE=gradex-backend:hostinger-$SHORT
 gxcompose up --detach migrate
-gxcompose wait migrate || docker logs "$(gxcompose ps --all --quiet migrate)"
+
+# The logs are shown either way, but a failed migration is fatal here: CP-6 starts the new
+# backend, and it must never run against a half-applied or dirty schema.
+if ! gxcompose wait migrate; then
+  docker logs "$(gxcompose ps --all --quiet migrate)"
+  echo 'REFUSE: migrate did not complete successfully; do not proceed to CP-6' >&2
+  exit 1
+fi
 docker logs "$(gxcompose ps --all --quiet migrate)"
 ```
 
@@ -633,7 +666,16 @@ unrecoverable one. Go to the CP-5 rollback row in §Rollback matrix.
 
 ## CP-6 — Start the new backend
 
+The manifest identity is verified **before** `apply-release` runs, in the same block, so a mismatch
+terminates non-zero and the mutation never executes:
+
 ```bash
+ssh deploy@186.241.16.111 \
+  "grep -qxF 'GRADEX_RELEASE_SHA=$RELEASE_SHA' /home/deploy/gradex-production/incoming/$RELEASE_SHA/release.env" || {
+  echo "REFUSE: release.env does not declare $RELEASE_SHA; apply-release NOT run" >&2
+  exit 1
+}
+
 ./deploy/hostinger/host.sh apply-release /home/deploy/gradex-production/incoming/$RELEASE_SHA/release.env
 ```
 
@@ -642,15 +684,8 @@ asserts the schema is clean and not newer than the image ceiling (38 ≤ 38), ca
 provenance count, recreates `api`, `worker` and `frontend`, waits for health, re-asserts provenance
 is unchanged, and persists the selection into `runtime.env`.
 
-Before running it, confirm the drop on the host carries the same identity, so `apply-release` is
-verified against the value CP-1 captured rather than against whatever happens to be in the
-directory:
-
-```bash
-ssh deploy@186.241.16.111 \
-  "grep -qxF 'GRADEX_RELEASE_SHA=$RELEASE_SHA' /home/deploy/gradex-production/incoming/$RELEASE_SHA/release.env" ||
-  echo "REFUSE: release.env does not declare $RELEASE_SHA"
-```
+The manifest check above pins `apply-release` to the value CP-1 captured rather than to whatever
+happens to be in the drop directory.
 
 Expected:
 ```
@@ -1205,7 +1240,7 @@ edge-served assets are unaffected.
 
 | Gate | Position | Decision required |
 |---|---|---|
-| **G0a** | after CP-2, before G0b | **Independent technical approval** of the combined 34 → 38 payload. D-103 is APPROVED (`7d3ae73..e2223d7`); the combined candidate is **NOT YET SATISFIED**, pending independent verification of the corrected release pinning. Not a Product Owner decision and not waivable by one |
+| **G0a** | after CP-2, before G0b | **Independent technical approval** of the combined 34 → 38 payload. D-103 is APPROVED (`7d3ae73..e2223d7`) with H1/H2/M1 closed; the combined candidate is **NOT YET SATISFIED**, pending independent approval of this document's release-integrity corrections. Not a Product Owner decision and not waivable by one |
 | **G0b** | after G0a, before CP-3 | Product Owner approves the **34 → 38** payload (D-103 + D-104 + D-105 + D-106), the mandatory outage, the HTTP import path, and shipping the 2 Low D-106 findings unremediated |
 | **G1** | after CP-3, before CP-4 | **THE POINT OF NO EASY RETURN.** Approve beginning the outage and the irreversible migration, on a recorded and `verify-restore`-proven backup snapshot |
 | **G2** | after CP-7, before CP-8 | Approve the irreversible catalogue data mutation: 14 institutions, 245 Subjects, no un-import |
@@ -1215,9 +1250,16 @@ edge-served assets are unaffected.
 through CP-3 are read-only or reversible; CP-5 is the first irreversible step.
 
 **G0a is currently unsatisfied, so no gate after it may be granted.** Product Owner approval at G0b,
-G1, G2, or G3 has no effect while the independent technical verdict on D-103 stands at REJECTED.
-Product Owner authority covers release and business decisions; it does not override a failed
-engineering review.
+G1, G2, or G3 has no effect until G0a is recorded.
+
+What G0a is still waiting on is narrow: independent approval of this document's release-integrity
+corrections. **D-103 / migration `0035` is independently APPROVED and H1, H2 and M1 are
+independently closed** — there is no failed D-103 engineering review outstanding, and D-103 is not
+waiting on Product Owner remediation.
+
+The governance rule stands unchanged as a general matter: Product Owner authority covers release and
+business decisions and does not override a failed engineering review. It simply has nothing to
+override here.
 
 ---
 
