@@ -35,6 +35,23 @@ func processingFailureCategory(err error) failureCategory {
 	}
 }
 
+// databaseNow reads the transaction's clock.
+//
+// Retry schedules are derived from it rather than from w.now() because
+// outbox_events enforces `available_at >= occurred_at`, and occurred_at is
+// written by the database. A worker whose clock runs behind would compute an
+// available_at in the database's past and fail that constraint, aborting the
+// whole recovery transaction — so a clock-skewed worker would not merely
+// schedule badly, it would stop recovering work at all. One clock for the whole
+// decision removes that failure mode.
+func databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	var at time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&at); err != nil {
+		return time.Time{}, fmt.Errorf("reading database time: %w", err)
+	}
+	return at, nil
+}
+
 func retryBackoff(attempt int) time.Duration {
 	switch {
 	case attempt <= 1:
@@ -70,7 +87,11 @@ func (w *Worker) scheduleScanRetry(ctx context.Context, assetVersionID string) e
 	`, assetVersionID); err != nil {
 		return fmt.Errorf("resetting transient scan failure: %w", err)
 	}
-	availableAt := w.now().UTC().Add(retryBackoff(attempts))
+	base, err := databaseNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	availableAt := base.Add(retryBackoff(attempts))
 	if err := appendScanWorkAt(ctx, tx, w.outbox, workSchedule{
 		assetVersionID: assetVersionID, kind: kind, correlation: "automatic-scan-retry", availableAt: &availableAt,
 	}); err != nil {
@@ -100,14 +121,18 @@ func (w *Worker) RecoverStale(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		return 0, errors.New("media recovery limit must be positive")
 	}
+	// Staleness is judged by the database clock, never by w.now(). A worker whose
+	// clock runs fast would otherwise select and recover leases the database
+	// still considers live, tearing down healthy work; one running slow would
+	// leave genuinely expired leases unrecovered.
 	rows, err := w.db.Query(ctx, `
 		SELECT id::text
 		FROM media_asset_versions
 		WHERE state IN ('SCANNING', 'PROCESSING')
-		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= $1)
+		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
 		ORDER BY COALESCE(work_lease_expires_at, created_at), id
-		LIMIT $2
-	`, w.now().UTC(), limit)
+		LIMIT $1
+	`, limit)
 	if err != nil {
 		return 0, fmt.Errorf("loading stale media work: %w", err)
 	}
@@ -143,13 +168,18 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 	}
 	defer tx.Rollback(ctx)
 	var work staleWork
-	var leaseExpiresAt *time.Time
+	// leaseStillLive is computed by PostgreSQL inside this transaction, against
+	// the row this statement has just locked. Reading the timestamp out and
+	// comparing it in Go would reintroduce the worker clock as the authority for
+	// a decision that tears down another worker's claim.
+	var leaseStillLive bool
 	err = tx.QueryRow(ctx, `
-		SELECT id::text, kind, state, work_claim_token, work_lease_expires_at,
+		SELECT id::text, kind, state, work_claim_token,
+		       COALESCE(work_lease_expires_at > now(), false),
 		       scan_attempt_count, processing_attempt_count,
 		       successful_validation_attempt_id IS NOT NULL
 		FROM media_asset_versions WHERE id=$1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &leaseExpiresAt,
+	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &leaseStillLive,
 		&work.scanAttempts, &work.processingAttempts, &work.hasValidationEvidence)
 	if err != nil {
 		return false, fmt.Errorf("locking stale media work: %w", err)
@@ -157,7 +187,7 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 	if work.state != StateScanning && work.state != StateProcessing {
 		return false, nil
 	}
-	if leaseExpiresAt != nil && leaseExpiresAt.After(w.now().UTC()) {
+	if leaseStillLive {
 		return false, nil
 	}
 	if work.state == StateScanning {
@@ -218,7 +248,11 @@ func (w *Worker) recoverStaleScan(ctx context.Context, tx pgx.Tx, work staleWork
 	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state='QUARANTINED' WHERE id=$1::uuid AND state='SCAN_ERROR'`, work.id); err != nil {
 		return fmt.Errorf("resetting interrupted scan: %w", err)
 	}
-	availableAt := w.now().UTC().Add(retryBackoff(attempt))
+	base, err := databaseNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	availableAt := base.Add(retryBackoff(attempt))
 	return appendScanWorkAt(ctx, tx, w.outbox, workSchedule{
 		assetVersionID: work.id, kind: work.kind, correlation: "stale-scan-recovery", availableAt: &availableAt,
 	})
@@ -272,7 +306,11 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state='QUARANTINED' WHERE id=$1::uuid AND state='PROCESS_FAILED'`, work.id); err != nil {
 		return fmt.Errorf("resetting interrupted processing: %w", err)
 	}
-	availableAt := w.now().UTC().Add(retryBackoff(attemptsConsumed))
+	base, err := databaseNow(ctx, tx)
+	if err != nil {
+		return err
+	}
+	availableAt := base.Add(retryBackoff(attemptsConsumed))
 	if work.hasValidationEvidence {
 		if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state='VALIDATED' WHERE id=$1::uuid AND state='QUARANTINED'`, work.id); err != nil {
 			return fmt.Errorf("restoring immutable validation provenance: %w", err)

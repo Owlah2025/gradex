@@ -131,7 +131,7 @@ func (w *progressWriter) Progress(ctx context.Context, stage ProcessingStage, pe
 	if !w.shouldWrite(stage, percent, at) {
 		return
 	}
-	if err := writeProcessingProgress(ctx, w.db, w.assetVersionID, w.attemptToken, stage, percent, at); err != nil {
+	if err := writeProcessingProgress(ctx, w.db, w.assetVersionID, w.attemptToken, stage, percent); err != nil {
 		// Advisory: a lost observation costs the Instructor one refresh, while
 		// failing here would discard real transcoding work.
 		return
@@ -154,32 +154,41 @@ func clampPercent(percent int) int {
 
 // writeProcessingProgress is the only statement that advances an observation.
 //
-// It writes only while the version is still PROCESSING under the same attempt
-// token, and only forwards. A write from an abandoned attempt, or one that
+// It writes only while the version is still PROCESSING, under the same attempt
+// token, under a lease that is still valid by DATABASE time, and only forwards.
+// A write from an abandoned attempt, one whose lease has lapsed, or one that
 // lands after the version reached READY or PROCESS_FAILED, affects no rows.
+//
+// The expiry predicate matters independently of the token: recovery is a
+// periodic pass, so between a lease expiring and recovery reclaiming the row the
+// token is still the expired worker's own. Without `work_lease_expires_at >
+// now()` that worker could keep reporting progress for work no longer authorized
+// — showing an Instructor a live percentage for an attempt that is about to be
+// torn down. The timestamp is written by the database clock for the same reason.
 func writeProcessingProgress(
 	ctx context.Context,
 	db *pgxpool.Pool,
 	assetVersionID, attemptToken string,
 	stage ProcessingStage,
 	percent int,
-	at time.Time,
 ) error {
 	_, err := db.Exec(ctx, `
 		UPDATE media_asset_versions
 		SET processing_stage = $2,
 		    processing_progress_percent = $3,
-		    processing_updated_at = $4,
-		    processing_attempt_token = $5
+		    processing_updated_at = now(),
+		    processing_attempt_token = $4
 		WHERE id = $1::uuid
 		  AND state = 'PROCESSING'
-		  AND processing_attempt_token = $5
+		  AND processing_attempt_token = $4
+		  AND work_claim_token = $4
+		  AND work_lease_expires_at > now()
 		  AND (
 		        processing_stage IS DISTINCT FROM $2
 		        OR processing_progress_percent IS NULL
 		        OR processing_progress_percent <= $3
 		  )
-	`, assetVersionID, string(stage), int16(percent), at, attemptToken)
+	`, assetVersionID, string(stage), int16(percent), attemptToken)
 	if err != nil {
 		return fmt.Errorf("recording media processing progress: %w", err)
 	}
