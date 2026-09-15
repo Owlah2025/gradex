@@ -1,5 +1,31 @@
 # Gradex Launch Status
 
+> **2026-09-15 — D-103 AND COMBINED 34→38 REVIEW BLOCKERS REMEDIATED; STILL REJECTED PENDING
+> RE-REVIEW.** Independent review returned **REJECTED** for D-103 / migration `0035` and for the
+> combined schema 34 → 38 payload: 0 Critical, 4 High, 3 Medium, 1 Low. All eight findings are
+> remediated on `catalog-seed-ibntohamy-20260914`.
+>
+> **Exact re-review range: `c908168ac1a0acc2071279cdb37bad916241e47e..9d59e3989cdf088829adff2f49cdb10308485c4a`** (4 commits).
+>
+> - `ca1d26c` — H1 stale-operation fencing at the claim boundary; H2 database-time lease fencing on
+>   every lease-protected transition.
+> - `1589300` — M1 legacy processing-attempt accounting; M2 real post-rollback recovery path.
+> - `752aedd` — H3 API schema floor raised to 38; Low 34 → 38 migration-chain rehearsal and table
+>   inventory.
+> - `9d59e39` — M2/M3/H4 documentation: RUNBOOK recovery procedure, per-migration 38 → 34 rollback
+>   matrix, and the G0 authority boundary.
+>
+> **This remediation is builder work and is not self-approval.** It does not clear the REJECTED
+> verdict and does not unblock G0. The candidate remains **unauthorized for production** until an
+> independent reviewer records an approval verdict against the exact range above. G0 is now
+> explicitly two gates — G0a independent technical approval, then G0b Product Owner release
+> decision — and Product Owner approval cannot waive G0a. Production has not been touched.
+>
+> Release procedure and gates are in
+> [`RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md`](RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md).
+>
+> ---
+
 > **2026-09-11 — COMBINED BUNDLES/OFFERS + D-105 RELEASE CANDIDATE PREPARATION.** The candidate is
 > based on independently approved Bundles/Offers head `8ee8d42215fd1f5671499a2e370e909ca9a4aea2`
 > and integrates the independently reviewed D-105 head
