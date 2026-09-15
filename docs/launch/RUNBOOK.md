@@ -235,7 +235,73 @@ supervised emergency operation — not a routine migration path.
    pre-deployment backup above (`pg_dump --format=custom` plus its `sha256sum`), or
    `./deploy/scripts/database-recovery.sh backup` in the S12 topology. Do not proceed on an unverified
    backup.
-3. **Apply the supervised schema rollback in one transaction.** Apply *only*
+3. **Detect in-flight media.** Nothing is settled or dropped until you know what is in flight.
+
+   ```bash
+   psql --username gradex --host <HOST> --dbname gradex --no-psqlrc \
+     --command "SELECT state, count(*) FROM media_asset_versions
+                 WHERE state IN ('SCANNING', 'PROCESSING') GROUP BY state;" \
+     --command "SELECT count(*) AS trusted_in_flight FROM media_asset_versions
+                 WHERE state IN ('SCANNING', 'PROCESSING')
+                   AND successful_validation_attempt_id IS NOT NULL;"
+   ```
+
+   A zero first result means steps 4 and 5 have nothing to do; run them anyway, since they are
+   no-ops on an empty set and skipping them is how the next rollback forgets them. A non-zero
+   `trusted_in_flight` is the limit described after this procedure: those Asset Versions will not be
+   retryable in a scanner-mode deployment once they are settled.
+
+4. **Settle in-flight media and clear its lease fields, in one supervised transaction.** Every row
+   still `SCANNING` or `PROCESSING` moves to the terminal state its own path would have reached, and
+   its lease columns are cleared in the same statement.
+
+   ```bash
+   psql --username gradex --host <HOST> --dbname gradex \
+     --set ON_ERROR_STOP=1 --single-transaction \
+     --command "UPDATE media_asset_versions
+                   SET state = CASE state
+                           WHEN 'SCANNING' THEN 'SCAN_ERROR'
+                           WHEN 'PROCESSING' THEN 'PROCESS_FAILED'
+                       END::media_asset_version_state,
+                       processing_stage = NULL,
+                       processing_progress_percent = NULL,
+                       processing_updated_at = NULL,
+                       processing_attempt_token = NULL,
+                       work_claim_token = NULL,
+                       work_claimed_at = NULL,
+                       work_lease_expires_at = NULL,
+                       last_failure_category = 'WORKER_INTERRUPTED'
+                 WHERE state IN ('SCANNING', 'PROCESSING');"
+   ```
+
+   Three details are load-bearing, and all three are why this step precedes the down migration
+   rather than following it:
+
+   - **It must run while `0035` is still applied.** After the down migration those lease columns do
+     not exist, so this statement could not be written at all.
+   - **It must clear the lease columns in the same statement.** Leaving them populated on a row that
+     is no longer `SCANNING` or `PROCESSING` violates
+     `media_asset_versions_work_claim_coherent`, which is still in force at this point.
+   - **It takes only edges the state machine already permits** — `SCANNING -> SCAN_ERROR` and
+     `PROCESSING -> PROCESS_FAILED`. This is not a bypass of the transition trigger, and Admin
+     Retry's own state validation is unchanged.
+
+5. **Verify no incompatible rows remain.** This is a gate, not a formality: if it does not come back
+   clean, **do not run step 6.**
+
+   ```bash
+   psql --username gradex --host <HOST> --dbname gradex --no-psqlrc --tuples-only --no-align \
+     --command "SELECT count(*) FROM media_asset_versions WHERE state IN ('SCANNING', 'PROCESSING');" \
+     --command "SELECT count(*) FROM media_asset_versions
+                 WHERE work_claim_token IS NOT NULL
+                    OR work_claimed_at IS NOT NULL
+                    OR work_lease_expires_at IS NOT NULL;"
+   ```
+
+   Required: `0` and `0`. A non-zero first count means work was claimed after step 4 — the D-103
+   worker is still running, and step 1 was not actually completed.
+
+6. **Apply the supervised schema rollback in one transaction.** Only now. Apply *only*
    `0035_media_work_leases.down.sql` — never a generic sequence of older down migrations. The file
    contains no transaction wrapper of its own, and PostgreSQL DDL is transactional, so the schema
    change and the bookkeeping correction commit or abort together:
@@ -252,10 +318,12 @@ supervised emergency operation — not a routine migration path.
    reads that marker, so D-102 would keep refusing to serve. The table holds exactly one row
    (`version bigint`, `dirty boolean`), so the bookkeeping correction is an `UPDATE`, not an insert.
 
-4. **If the transaction fails, it has already rolled back — both the DDL and the bookkeeping.** Do not
+7. **If the transaction fails, it has already rolled back — both the DDL and the bookkeeping.** Do not
    retry blindly and do not continue the deployment. **D-102 stays stopped.** Diagnose, or restore the
-   backup from step 2 into a fresh database per the restore procedure above.
-5. **Prove both facts before starting any D-102 binary.** Bookkeeping and physical shape must *both*
+   backup from step 2 into a fresh database per the restore procedure above. The settle from step 4
+   is already committed and is safe to leave in place: `SCAN_ERROR` and `PROCESS_FAILED` are ordinary
+   states under both `0034` and `0035`.
+8. **Prove both facts before starting any D-102 binary.** Bookkeeping and physical shape must *both*
    be at `0034`:
 
    ```bash
@@ -269,8 +337,9 @@ supervised emergency operation — not a routine migration path.
    ```
 
    Required: `34 | f` and a column count of `0`. If either cannot be proven, **D-102 remains stopped.**
-6. Deploy the D-102 backend and frontend artifacts, then start the D-102 API and worker.
-7. **Verify after start:** `gradex-migrate version` reports `34`; `/healthz` returns `200 OK`;
+9. Deploy the D-102 backend and frontend artifacts, then start the D-102 API and worker. Each Asset
+   Version settled in step 4 is now Retry-eligible; an Admin retries them from the Admin surface.
+10. **Verify after start:** `gradex-migrate version` reports `34`; `/healthz` returns `200 OK`;
    `/readyz` returns `200 OK`; the API and worker are running the exact intended D-102 rollback SHA;
    the frontend rollback artifact is serving if one was part of the release; and no D-103 worker
    remains running anywhere.
@@ -290,40 +359,15 @@ operation". That was wrong, and acting on it would have stranded assets:
 - Rolling back `0035` also removes the lease columns, so the D-103 recovery pass that would
   otherwise reclaim those rows cannot run either. Under D-102 binaries **nothing** reclaims them.
 
-The supported procedure is to settle in-flight work **as part of the supervised rollback
-transaction**, before the `0035` down SQL, so every stranded row lands in the terminal state its own
-path would have reached — which is exactly the set Admin Retry accepts:
-
-```sql
-UPDATE media_asset_versions
-SET state = CASE state
-        WHEN 'SCANNING' THEN 'SCAN_ERROR'
-        WHEN 'PROCESSING' THEN 'PROCESS_FAILED'
-    END::media_asset_version_state,
-    processing_stage = NULL,
-    processing_progress_percent = NULL,
-    processing_updated_at = NULL,
-    processing_attempt_token = NULL,
-    work_claim_token = NULL,
-    work_claimed_at = NULL,
-    work_lease_expires_at = NULL,
-    last_failure_category = 'WORKER_INTERRUPTED'
-WHERE state IN ('SCANNING', 'PROCESSING');
-```
-
-Three details are load-bearing:
-
-1. **It runs before the `0035` down SQL**, in the same transaction. After the drop it could not
-   reference the lease columns at all.
-2. **It clears the lease columns in the same statement.** Leaving them populated on a row that is no
-   longer `SCANNING` or `PROCESSING` violates `media_asset_versions_work_claim_coherent`, which is
-   still in force at that point in the transaction.
-3. **It takes only edges the state machine already permits** — `SCANNING -> SCAN_ERROR` and
-   `PROCESSING -> PROCESS_FAILED`. It is not a bypass of the transition trigger, and Retry's own
-   state validation is unchanged.
+The supported procedure is **steps 3, 4 and 5 of the numbered rollback above**: detect what is in
+flight, settle it into the terminal state its own path would have reached, clear its lease fields,
+and verify nothing incompatible remains — all of it *before* the `0035` down migration runs. The
+statement and the three reasons its position matters are given there and are not repeated here, so
+there is only one executable copy of it.
 
 After the rollback completes, an Admin retries each settled Asset Version. Retry resets the scan and
-processing attempt counters to zero, so a recovered asset starts from a clean budget.
+processing attempt counters to zero, so a recovered asset starts from a clean budget — a fresh cycle,
+with the earlier cycle's attempts preserved as audit history that does not consume the new budget.
 
 **One limit to plan around.** An Asset Version holding D-088 trusted-validation provenance is
 retryable only in a deployment where the trusted path still applies. In a scanner-mode deployment the

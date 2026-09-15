@@ -145,10 +145,42 @@ func seedRepresentativeSchema34Data(t *testing.T, pool *pgxpool.Pool) schema34Fi
 	}
 	fingerprint.assetState = "UPLOADED"
 
+	// A real ACTIVE Entitlement, so the survival assertion below compares a
+	// non-zero count. An earlier revision counted an empty table and proved
+	// 0 == 0, which no migration could have failed.
+	//
+	// It needs the approved invitation it was granted from: ent_manual_needs_invitation
+	// requires MANUAL_INVITATION entitlements to carry their provenance, which is
+	// exactly the invariant the backup/restore checks also assert on.
+	var invitationID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO course_access_invitations (
+			normalized_email, email, course_id, created_by_account_id,
+			decided_by_account_id, accepted_by_account_id, state, accepted_at, decided_at
+		) VALUES ('chain34-student@example.test', 'chain34-student@example.test', $1::uuid, $2::uuid,
+		          $2::uuid, $3::uuid, 'APPROVED', now(), now())
+		RETURNING id::text
+	`, fingerprint.courseID, fingerprint.instructorID, fingerprint.accountID).Scan(&invitationID); err != nil {
+		t.Fatalf("seeding course access invitation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO entitlements (
+			student_account_id, scope_kind, scope_id, course_id, grant_source,
+			source_invitation_id, original_access_ends_at, access_ends_at,
+			retirement_eligibility_at, state
+		) VALUES ($1::uuid, 'COURSE', $2::uuid, $2::uuid, 'MANUAL_INVITATION', $3::uuid,
+		          now() + interval '365 days', now() + interval '365 days',
+		          now() + interval '730 days', 'ACTIVE')
+	`, fingerprint.accountID, fingerprint.courseID, invitationID); err != nil {
+		t.Fatalf("seeding entitlement: %v", err)
+	}
 	if err := pool.QueryRow(ctx, `
 		SELECT count(*) FROM entitlements
 	`).Scan(&fingerprint.entitlements); err != nil {
 		t.Fatalf("counting entitlements: %v", err)
+	}
+	if fingerprint.entitlements == 0 {
+		t.Fatal("the entitlement seed produced no rows; the survival assertion would prove nothing")
 	}
 	return fingerprint
 }
@@ -199,12 +231,148 @@ func assertSchema34DataSurvived(t *testing.T, pool *pgxpool.Pool, want schema34F
 	}
 
 	var entitlements int
+	var entitlementState, grantSource string
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM entitlements`).Scan(&entitlements); err != nil {
 		t.Fatalf("counting entitlements after the chain: %v", err)
 	}
-	if entitlements != want.entitlements {
-		t.Fatalf("entitlement count = %d, want %d", entitlements, want.entitlements)
+	if entitlements != want.entitlements || entitlements == 0 {
+		t.Fatalf("entitlement count = %d, want %d and non-zero", entitlements, want.entitlements)
 	}
+	// Not just the count: the access grant itself must be intact, since a
+	// migration that preserved the row but cleared its state or provenance would
+	// still have destroyed the Student's access.
+	if err := pool.QueryRow(ctx, `
+		SELECT state, grant_source FROM entitlements WHERE student_account_id = $1::uuid
+	`, want.accountID).Scan(&entitlementState, &grantSource); err != nil {
+		t.Fatalf("seeded entitlement did not survive the chain: %v", err)
+	}
+	if entitlementState != "ACTIVE" || grantSource != "MANUAL_INVITATION" {
+		t.Fatalf("entitlement = %s/%s, want ACTIVE/MANUAL_INVITATION", entitlementState, grantSource)
+	}
+}
+
+// postMigrationFixture is representative data for structures that DO NOT EXIST
+// at schema 34 and therefore cannot be seeded before the chain runs. It is
+// created after the migration that introduces each one, so the reverse path has
+// real rows to destroy and the documented consequences can be verified instead
+// of assumed. No impossible schema-34 row is invented.
+type postMigrationFixture struct {
+	accountID       string
+	trustedDeviceID string
+	deviceOTPID     string
+	deviceEventID   string
+	subjectID       string
+}
+
+// seedTrustedDeviceRows exercises 0037: a trusted device, its replacement
+// cooldown state, a live device-trust OTP challenge, and a device security
+// event. All four are classes the 0037 down migration deletes.
+func seedTrustedDeviceRows(t *testing.T, pool *pgxpool.Pool, accountID string) postMigrationFixture {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	fixture := postMigrationFixture{accountID: accountID}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO identity_trusted_devices (
+			account_id, credential_digest, label, browser_family, platform_family, trusted_at
+		) VALUES ($1::uuid, repeat('a', 64), 'Chain Laptop', 'Firefox', 'Linux', now())
+		RETURNING id::text
+	`, accountID).Scan(&fixture.trustedDeviceID); err != nil {
+		t.Fatalf("seeding trusted device: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity_device_replacement_state (account_id, last_replacement_at)
+		VALUES ($1::uuid, now())
+	`, accountID); err != nil {
+		t.Fatalf("seeding replacement cooldown state: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO identity_action_secrets (
+			account_id, purpose, secret_digest, expires_at, trusted_device_id
+		) VALUES ($1::uuid, 'DEVICE_TRUST_OTP', decode(repeat('ab', 32), 'hex'), now() + interval '10 minutes', $2::uuid)
+		RETURNING id::text
+	`, accountID, fixture.trustedDeviceID).Scan(&fixture.deviceOTPID); err != nil {
+		t.Fatalf("seeding device trust OTP: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO identity_security_events (event_type, account_id, request_id)
+		VALUES ('DEVICE_TRUSTED', $1::uuid, 'chain-rehearsal')
+		RETURNING id::text
+	`, accountID).Scan(&fixture.deviceEventID); err != nil {
+		t.Fatalf("seeding device security event: %v", err)
+	}
+	return fixture
+}
+
+// seedTrustedDeviceRowsWithoutHistory seeds only the two classes whose presence
+// does NOT block the 0037 down migration: the trusted-device registration and
+// the replacement cooldown state, both of which are removed by DROP TABLE. It
+// models a deployment that migrated device trust in but never exercised it, and
+// that is the only shape in which the reverse chain can complete at all.
+func seedTrustedDeviceRowsWithoutHistory(t *testing.T, pool *pgxpool.Pool, accountID string) postMigrationFixture {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	fixture := postMigrationFixture{accountID: accountID}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO identity_trusted_devices (
+			account_id, credential_digest, label, browser_family, platform_family, trusted_at
+		) VALUES ($1::uuid, repeat('a', 64), 'Chain Laptop', 'Firefox', 'Linux', now())
+		RETURNING id::text
+	`, accountID).Scan(&fixture.trustedDeviceID); err != nil {
+		t.Fatalf("seeding trusted device: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity_device_replacement_state (account_id, last_replacement_at)
+		VALUES ($1::uuid, now())
+	`, accountID); err != nil {
+		t.Fatalf("seeding replacement cooldown state: %v", err)
+	}
+	return fixture
+}
+
+// seedSubjectDemandRow exercises 0038 with a real Student demand signal, which
+// requires the Institution and Subject it is pinned to.
+func seedSubjectDemandRow(t *testing.T, pool *pgxpool.Pool, accountID string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	var institutionID, subjectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO institutions (country_code, slug, name_ar, name_en)
+		VALUES ('KW', 'chain-rehearsal-university', 'جامعة السلسلة', 'Chain Rehearsal University')
+		RETURNING id::text
+	`).Scan(&institutionID); err != nil {
+		t.Fatalf("seeding institution: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO subjects (institution_id, official_code, title_ar, title_en)
+		VALUES ($1::uuid, 'CHN 101', 'مادة السلسلة', 'Chain Subject')
+		RETURNING id::text
+	`, institutionID).Scan(&subjectID); err != nil {
+		t.Fatalf("seeding subject: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO subject_demand_signals (account_id, subject_id, institution_id, note)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'I take this in the fall')
+	`, accountID, subjectID, institutionID); err != nil {
+		t.Fatalf("seeding subject demand signal: %v", err)
+	}
+	return subjectID
+}
+
+func rowCount(t *testing.T, pool *pgxpool.Pool, query string, args ...any) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	var count int
+	if err := pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		t.Fatalf("counting rows: %v", err)
+	}
+	return count
 }
 
 // TestSchema34To38ChainAppliesCleanlyOverRealData is the release rehearsal: a
@@ -387,6 +555,99 @@ func TestSchema38ReadinessFloorRefusesSchema37(t *testing.T) {
 	}
 }
 
+// TestSchema37RollbackIsRefusedByRealDeviceData records two independent refusal
+// conditions, both found by putting a representative row in front of the
+// migration instead of reversing an empty database.
+//
+//  1. identity_security_events carries an append-only BEFORE UPDATE OR DELETE
+//     trigger from 0005. 0037's down migration must DELETE the nine device event
+//     types, because the pre-0037 CHECK constraint it restores would otherwise be
+//     violated by history the feature produced. Those two requirements are
+//     irreconcilable: one device security event is enough to stop the rollback.
+//
+//  2. 0037's down migration deletes live DEVICE_TRUST_OTP rows and then ALTERs
+//     identity_action_secrets in the same transaction. PostgreSQL refuses to
+//     ALTER a table that has pending trigger events from earlier DML in that
+//     transaction, so one live device-trust challenge is also enough.
+//
+// Either condition arises the first time a Student uses device trust. The
+// practical consequence for a release is that schema 37 is a FLOOR in any
+// deployment where the feature has been exercised, exactly as schema 36 is a
+// floor once Bundle commerce data exists. Reversing past it is a
+// restore-from-backup operation, not a migration.
+func TestSchema37RollbackIsRefusedByRealDeviceData(t *testing.T) {
+	for _, testCase := range []struct {
+		name    string
+		seed    func(t *testing.T, pool *pgxpool.Pool, accountID, deviceID string)
+		wantErr string
+	}{
+		{
+			name: "a device security event",
+			seed: func(t *testing.T, pool *pgxpool.Pool, accountID, _ string) {
+				ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+				defer cancel()
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO identity_security_events (event_type, account_id, request_id)
+					VALUES ('DEVICE_TRUSTED', $1::uuid, 'chain-rehearsal')
+				`, accountID); err != nil {
+					t.Fatalf("seeding device security event: %v", err)
+				}
+			},
+			wantErr: "append-only",
+		},
+		{
+			name: "a live device-trust OTP challenge",
+			seed: func(t *testing.T, pool *pgxpool.Pool, accountID, deviceID string) {
+				ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+				defer cancel()
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO identity_action_secrets (
+						account_id, purpose, secret_digest, expires_at, trusted_device_id
+					) VALUES ($1::uuid, 'DEVICE_TRUST_OTP', decode(repeat('cd', 32), 'hex'),
+					          now() + interval '10 minutes', $2::uuid)
+				`, accountID, deviceID); err != nil {
+					t.Fatalf("seeding device trust OTP: %v", err)
+				}
+			},
+			wantErr: "pending trigger events",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			freshDatabase(t)
+			pool := openPool(t)
+			m := openMigrator(t)
+
+			if err := m.Up(); err != nil {
+				t.Fatalf("up: %v", err)
+			}
+			fingerprint := seedRepresentativeSchema34Data(t, pool)
+			devices := seedTrustedDeviceRowsWithoutHistory(t, pool, fingerprint.accountID)
+			testCase.seed(t, pool, fingerprint.accountID, devices.trustedDeviceID)
+
+			// 38 -> 37 is unaffected and still succeeds.
+			if err := m.Migrate(uint(StudentTrustedDeviceSchemaVersion)); err != nil {
+				t.Fatalf("reversing 0038: %v", err)
+			}
+
+			err := m.Migrate(uint(BundlesAndOffersSchemaVersion))
+			if err == nil {
+				t.Fatal("reversing 0037 succeeded against real device data")
+			}
+			if !strings.Contains(err.Error(), testCase.wantErr) {
+				t.Fatalf("reversing 0037 failed with %v, want a refusal mentioning %q", err, testCase.wantErr)
+			}
+
+			// A refused rollback destroyed nothing.
+			if !tableExists(t, pool, "identity_trusted_devices") {
+				t.Fatal("identity_trusted_devices was dropped by a refused rollback")
+			}
+			if got := rowCount(t, pool, `SELECT count(*) FROM identity_trusted_devices`); got != 1 {
+				t.Fatalf("trusted device rows = %d, want the row preserved by the refusal", got)
+			}
+		})
+	}
+}
+
 // TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps rehearses the
 // documented reverse path in disposable infrastructure, one migration at a time
 // and in reverse order, and pins the point at which a down migration
@@ -403,8 +664,29 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 		t.Fatalf("schema = %d dirty=%t, want %d clean", version, dirty, SubjectDemandSignalSchemaVersion)
 	}
 
+	// Representative rows for the structures that do not exist at schema 34, so
+	// the reverse path destroys real data and the documented consequences are
+	// verified rather than assumed.
+	//
+	// Device SECURITY EVENTS are deliberately not seeded here: they make the
+	// 0037 down migration impossible outright, which is its own test
+	// (TestSchema37RollbackIsRefusedOnceDeviceSecurityEventsExist). This case
+	// covers the only shape in which the reverse chain can complete — a
+	// deployment where device trust was migrated in but never exercised.
+	fingerprint := seedRepresentativeSchema34Data(t, pool)
+	seedTrustedDeviceRowsWithoutHistory(t, pool, fingerprint.accountID)
+	seedSubjectDemandRow(t, pool, fingerprint.accountID)
+
+	sessionsBefore := rowCount(t, pool, `SELECT count(*) FROM sessions`)
+	if got := rowCount(t, pool, `SELECT count(*) FROM subject_demand_signals`); got != 1 {
+		t.Fatalf("seeded demand signals = %d, want 1", got)
+	}
+	if got := rowCount(t, pool, `SELECT count(*) FROM identity_trusted_devices`); got != 1 {
+		t.Fatalf("seeded trusted devices = %d, want 1", got)
+	}
+
 	// 38 -> 37 discards Student demand. That is real product input, and the
-	// rehearsal records the loss rather than glossing it.
+	// rehearsal proves the loss rather than glossing it.
 	if err := m.Migrate(uint(StudentTrustedDeviceSchemaVersion)); err != nil {
 		t.Fatalf("reversing 0038: %v", err)
 	}
@@ -414,8 +696,15 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 	if version, dirty := schemaVersion(t, pool); version != StudentTrustedDeviceSchemaVersion || dirty {
 		t.Fatalf("after reversing 0038 schema = %d dirty=%t, want %d clean", version, dirty, StudentTrustedDeviceSchemaVersion)
 	}
+	// The Subject the demand pointed at is not collateral damage: 0038 owns only
+	// the signal table, never the catalogue it references.
+	if got := rowCount(t, pool, `SELECT count(*) FROM subjects`); got != 1 {
+		t.Fatalf("subjects after reversing 0038 = %d, want the catalogue row preserved", got)
+	}
 
-	// 37 -> 36 removes trusted-device registrations and their replacement state.
+	// 37 -> 36 deletes four separate classes of row, exactly as the release plan
+	// documents: device security history, live device-trust OTP challenges,
+	// trusted-device registrations, and replacement cooldown state.
 	if err := m.Migrate(uint(BundlesAndOffersSchemaVersion)); err != nil {
 		t.Fatalf("reversing 0037: %v", err)
 	}
@@ -423,6 +712,16 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 		if tableExists(t, pool, gone) {
 			t.Fatalf("%s survived its own down migration", gone)
 		}
+	}
+	for _, column := range []string{"trusted_device_id", "device_trust_state"} {
+		if columnExists(t, pool, "sessions", column) {
+			t.Fatalf("sessions.%s survived the 0037 down migration", column)
+		}
+	}
+	// And the documented non-consequence: no session is deleted, so no Student
+	// is logged out by the rollback.
+	if got := rowCount(t, pool, `SELECT count(*) FROM sessions`); got != sessionsBefore {
+		t.Fatalf("sessions = %d, want %d — the rollback deleted sessions", got, sessionsBefore)
 	}
 
 	// 36 -> 35 removes the Bundle tables. On an empty commerce set this is
@@ -452,6 +751,9 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 	if version, dirty := schemaVersion(t, pool); version != 34 || dirty {
 		t.Fatalf("after the full reverse chain schema = %d dirty=%t, want 34 clean", version, dirty)
 	}
+	// Everything that legitimately predates the chain is still intact: the
+	// reverse path destroys only what its own migrations introduced.
+	assertSchema34DataSurvived(t, pool, fingerprint)
 
 	// And forward again, so the reverse path leaves a database that can still be
 	// brought back up rather than a dead end.

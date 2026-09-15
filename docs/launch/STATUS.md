@@ -1,5 +1,34 @@
 # Gradex Launch Status
 
+> **2026-09-15 (second pass) — SECOND-ROUND D-103 / COMBINED-RELEASE BLOCKERS REMEDIATED; STILL
+> REJECTED PENDING INDEPENDENT RE-REVIEW.** Independent review rejected the first remediation:
+> the H1 fence was evaluated as a PostgreSQL InitPlan *before* the row lock, and H2 left lease
+> creation, stale recovery, and progress writes on the application clock. Both were release-blocking.
+> Remediated on `catalog-seed-ibntohamy-20260914`.
+>
+> - H1 — the spent decision is now made in its own statement *after* `SELECT ... FOR UPDATE`.
+>   A deterministic test forces the reviewed interleaving by waiting until PostgreSQL reports the
+>   stale backend blocked on the lock.
+> - H2 — lease creation, stale selection, the locked recheck, progress writes, finalization, failure,
+>   and retry scheduling all read the database clock. The worker clock no longer decides lease
+>   authority anywhere.
+> - M1 — Admin Retry is confirmed to open a FRESH cycle; recovery no longer reconciles the per-cycle
+>   counter against lifetime `processing_attempts` history.
+> - Documentation — the `0035` rollback procedure now settles in-flight media *before* the down
+>   migration in its numbered steps; `0037` losses are itemised; the stale "new API supports 37"
+>   statements are corrected to `old API: 34` / `new API: 38`, no rolling overlap.
+>
+> **New finding from the strengthened rehearsal:** the `0037` down migration cannot run at all once
+> device trust has been used — an append-only trigger blocks its required `DELETE` of device security
+> events, and a live `DEVICE_TRUST_OTP` row blocks its `ALTER TABLE`. **Schema 37 is a hard floor** in
+> any live deployment; reversing past it is restore-from-backup, not migration. Recorded in the
+> release plan.
+>
+> **This remains builder work and is not self-approval.** The REJECTED verdict stands and G0a is NOT
+> satisfied. Production has not been touched.
+>
+> ---
+
 > **2026-09-15 — D-103 AND COMBINED 34→38 REVIEW BLOCKERS REMEDIATED; STILL REJECTED PENDING
 > RE-REVIEW.** Independent review returned **REJECTED** for D-103 / migration `0035` and for the
 > combined schema 34 → 38 payload: 0 Critical, 4 High, 3 Medium, 1 Low. All eight findings are

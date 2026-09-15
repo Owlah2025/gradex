@@ -65,14 +65,23 @@ reviewer records an approval verdict against the exact re-review range.
 
 ### F-2 — There is no zero-downtime path. A hard outage window is mandatory.
 
-- `backend/cmd/api/main.go:291` — `requiredSchemaVersion()` returns `StudentTrustedDeviceSchemaVersion` = **37**.
-- `backend/internal/db/schema.go:60` — `MaxSchemaVersion` = **38**.
-- `backend/cmd/worker/main.go:64` — worker requires `MediaWorkLeaseSchemaVersion` = **35**.
+- `backend/cmd/api/main.go` — `requiredSchemaVersion()` returns `SubjectDemandSignalSchemaVersion` = **38**.
+  The D-106 routes are mounted in this candidate and query `subject_demand_signals`, which arrives in
+  38, so the floor is 38 and not 37.
+- `backend/internal/db/schema.go` — `MaxSchemaVersion` = **38**.
+- `backend/cmd/worker/main.go` — worker requires `MediaWorkLeaseSchemaVersion` = **35**.
 - The currently-deployed production binary (`b8dea96`) has `MaxSchemaVersion` = **34** and refuses
   readiness against anything higher (`schema.go` `CheckSchemaAtLeast`, fails closed).
 
-So: the old binaries serve **34 only**; the new binaries serve **37–38 only**. There is no schema
-value both sets can serve, therefore no rolling overlap. `host.sh apply-release` is the wrong tool
+So the compatibility truth for this candidate is:
+
+```
+old API (b8dea96): schema 34 only
+new API (this candidate): schema 38 only
+```
+
+The two ranges do not touch — the new API's floor and ceiling are both 38 — so there is **no
+rolling-overlap schema**, and no ordering of binary and migration steps produces one. `host.sh apply-release` is the wrong tool
 here — it uses `--no-deps` and never runs migrations, so it would recreate the new API against
 schema 34 and die at `wait_for_status api healthy`.
 
@@ -461,7 +470,9 @@ migrate up: version=38 dirty=false (supported; this build supports 2..38)
 ```
 
 Under Option B (production already at 37) the same line is expected; only the number of applied
-migrations differs.
+migrations differs. Note that schema 37 is a staging point for the *migration*, never a servable
+state for this candidate's API: its readiness floor is 38, so the new API refuses 37 and the old API
+refuses anything above 34.
 
 **Migration-version verification — both bookkeeping and physical shape:**
 
@@ -913,6 +924,12 @@ docker exec -i gradex-production-postgres-1 psql -U gradex -d gradex_production 
 Expected: `37 | f`. Applying the SQL alone is **not** sufficient — readiness reads the marker.
 `schema_migrations` holds exactly one row, so the correction is an `UPDATE`, never an `INSERT`.
 
+**Schema 37 is not a servable resting state for this release.** This candidate's API floor is 38 and
+the previously-deployed API's ceiling is 34, so at 37 neither binary set will pass readiness. A
+38 → 37 rollback is therefore only ever a *step* on the way to 34, never a destination: plan to
+continue through the remaining three steps below, or do not start. The application stays stopped for
+the whole sequence.
+
 ### There is no single 38 → 34 rollback
 
 Going back from 38 to 34 is **four separate supervised transactions**, in reverse order, each taken
@@ -924,15 +941,90 @@ data, and two of them can refuse outright.
 | Step | Migration | What the down migration destroys | Refusal / precondition |
 |---|---|---|---|
 | 38 → 37 | `0038_subject_demand_signals` | **Drops `subject_demand_signals` entirely.** Every Student demand signal, live and withdrawn, is lost — including the withdrawal history that makes a demand count a count of Students rather than a count of clicks. Nothing else references the table and no access decision reads it, so the drop is structurally safe; the loss is product-prioritisation input, and it is unrecoverable except from backup. | None. The step always succeeds, which is exactly why the backup is the only protection. Export the counts first if the demand data has any decision value: `SELECT subject_id, count(*) FROM subject_demand_signals WHERE withdrawn_at IS NULL GROUP BY 1;` |
-| 37 → 36 | `0037_student_trusted_devices` | Drops `identity_trusted_devices` and `identity_device_replacement_state`. Every Student's trusted-device registrations and their 24-hour replacement-cooldown state are deleted. Students lose device trust and must re-confirm by email OTP on next use; any in-flight replacement cooldown is erased, so a Student mid-cooldown is silently released from it. | None structurally, but confirm no OTP/replacement flow is mid-flight, since erasing cooldown state weakens a security control rather than merely losing data. |
+| 37 → 36 | `0037_student_trusted_devices` | **Four separate classes of row are deleted, not one.** See the itemised list below the table. | **Refuses outright once device trust has been used at all** — two independent conditions, either sufficient. See "Schema 37 is a floor" below. |
 | 36 → 35 | `0036_bundles_and_offers` | Drops `bundles`, `bundle_courses`, `bundle_price_changes`, `purchase_request_bundle_items`, and `bundle_purchase_grants`. | **Refuses once commerce data exists.** The Bundle purchase snapshot is immutable by database constraint and `bundle_purchase_grants` records real fulfilled grants; dropping them would destroy purchase provenance. Check before attempting: `SELECT (SELECT count(*) FROM bundle_purchase_grants), (SELECT count(*) FROM purchase_request_bundle_items);` If either is non-zero, **do not roll 36 back** — retain schema 36 and roll back the application only. |
 | 35 → 34 | `0035_media_work_leases` | Drops the six work-lease and attempt-accounting columns, their four constraints, and the expired-lease recovery index. Media state, provenance, trusted duration, and rendition data are untouched, so existing `READY` media stays deliverable. | **In-flight media work must be settled inside the same transaction, before the down SQL** — see `docs/launch/RUNBOOK.md`. Without it, every Asset Version in `SCANNING` or `PROCESSING` is stranded permanently: Admin Retry refuses those states and the D-103 recovery pass no longer exists. Assets carrying D-088 trusted-validation provenance are not retryable at all in a scanner-mode deployment. |
 
+### What rolling back `0037` actually deletes
+
+Summarising this as "device state" understates it. `0037_student_trusted_devices.down.sql` removes,
+in this order:
+
+1. **Device security event history.** `DELETE FROM identity_security_events` for all nine device
+   event types: `DEVICE_TRUST_CHALLENGED`, `DEVICE_TRUST_ATTEMPTS_EXHAUSTED`, `DEVICE_TRUSTED`,
+   `DEVICE_ADOPTED_LEGACY_SESSION`, `DEVICE_REVOKED`, `DEVICE_LIMIT_REACHED`,
+   `DEVICE_REPLACEMENT_BLOCKED`, `ADMIN_DEVICE_REVOKED`, `ADMIN_DEVICE_COOLDOWN_RESET`. This is the
+   audit trail of every device trust, revocation, lockout and Admin intervention. It is deleted
+   because the restored pre-0037 `identity_security_events_type` constraint would otherwise be
+   violated by history this feature produced — so the deletion is structurally required, not
+   optional, and it is irreversible outside the backup.
+2. **Live device-trust OTP challenges.** `DELETE FROM identity_action_secrets WHERE purpose =
+   'DEVICE_TRUST_OTP'`. Any Student part-way through confirming a device loses that challenge.
+3. **Trusted-device registrations.** `DROP TABLE identity_trusted_devices`, with its live-credential
+   unique index and both account indexes. Every Student's trusted devices are gone.
+4. **Replacement cooldown state.** `DROP TABLE identity_device_replacement_state`. The 24-hour
+   replacement cooldown is erased, so a Student part-way through one is silently released from it.
+
+#### Schema 37 is a floor once device trust has been used
+
+Rehearsal in disposable infrastructure found that the `0037` down migration
+**cannot run at all** against a database where the feature has been exercised. Two
+independent conditions, either one sufficient:
+
+1. **Any device security event row.** `identity_security_events` carries an
+   append-only `BEFORE UPDATE OR DELETE` trigger from `0005`. The `0037` down
+   migration *must* `DELETE` the nine device event types, because the pre-`0037`
+   `identity_security_events_type` CHECK constraint it restores would otherwise be
+   violated by history the feature produced. The two requirements are
+   irreconcilable, and the migration fails with
+   `identity_security_events is append-only (attempted DELETE)`.
+2. **Any live `DEVICE_TRUST_OTP` row.** The down migration deletes those rows and
+   then `ALTER`s `identity_action_secrets` in the same transaction. PostgreSQL
+   refuses to `ALTER` a table carrying pending trigger events from earlier DML in
+   that transaction, and the migration fails with
+   `cannot ALTER TABLE "identity_action_secrets" because it has pending trigger events`.
+
+Both arise the first time any Student trusts, challenges, or revokes a device.
+So in any deployment where device trust is live, **schema 37 is a hard floor**:
+reversing past it is a restore-from-backup operation, not a migration. Check
+before planning a rollback past 37:
+
+```sql
+SELECT (SELECT count(*) FROM identity_security_events
+         WHERE event_type LIKE 'DEVICE%' OR event_type LIKE 'ADMIN_DEVICE%') AS device_events,
+       (SELECT count(*) FROM identity_action_secrets
+         WHERE purpose = 'DEVICE_TRUST_OTP') AS live_device_otps;
+```
+
+Non-zero in either column means the `0037` down migration will fail. A failed
+migration leaves the marker dirty and destroys nothing, so the refusal is safe —
+but it is a dead end, not a retry.
+
+Both refusals are proven by
+`TestSchema37RollbackIsRefusedByRealDeviceData`, and the structural reverse walk
+covers the only shape that can complete: device trust migrated in but never used.
+
+It also drops `sessions.trusted_device_id` and `sessions.device_trust_state` (with the
+`sessions_device_trust_coherent` constraint and the trusted-device index),
+`identity_action_secrets.trusted_device_id`, and the `session_device_trust_state` and
+`trusted_device_revocation_reason` types.
+
+What it does **not** do: no session row is deleted and no Student is logged out. Session families
+survive with their credentials intact and simply stop carrying a device binding, which is the state
+they were in before `0037` was applied.
+
+Items 1 and 4 are the ones to weigh. Deleting the device audit trail destroys the evidence an Admin
+would need to investigate a device-related incident, and erasing cooldown state removes an active
+throttle rather than merely losing a record. Neither is recoverable except from the backup taken
+before the step.
+
 Two consequences worth stating plainly:
 
-- **The reverse path can stop partway.** If 36 → 35 refuses because Bundle commerce data exists,
-  the database stays at 36 and no binary set can serve it alongside a D-102 application. Plan the
-  rollback decision knowing 36 may be a floor.
+- **The reverse path can stop partway, and usually will.** If `0037` refuses because device trust has
+  been used, the database stays at 37. If 36 → 35 refuses because Bundle commerce data exists, it
+  stays at 36. Either way no binary set can serve that schema alongside a D-102 application. Plan the
+  rollback decision knowing **37 is the realistic floor** in a live deployment, and 36 the floor
+  after that.
 - **Application-only rollback is unavailable at every step of this range.** The old and new binaries
   have disjoint servable schema ranges (F-2), so the schema must move first in both directions.
 

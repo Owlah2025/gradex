@@ -103,12 +103,13 @@ func inFlightAsset(t *testing.T, state AssetVersionState) (*mediaFixture, *Worke
 // the terminal state its own path would have reached, which is precisely the set
 // Admin Retry accepts.
 //
-// It runs BEFORE the 0035 down SQL, inside the same supervised transaction, and
-// clears the lease columns in the same statement. Both details are load-bearing:
-// settling after the drop could not reference those columns at all, and leaving
-// them populated on a row that is no longer SCANNING or PROCESSING violates the
-// 0035 media_asset_versions_work_claim_coherent constraint, which is still in
-// force at that point in the transaction.
+// It runs BEFORE the 0035 down SQL, in its own supervised transaction (RUNBOOK
+// step 4, gated by the verification in step 5), and clears the lease columns in
+// the same statement. Both details are load-bearing: settling after the drop
+// could not reference those columns at all, and leaving them populated on a row
+// that is no longer SCANNING or PROCESSING violates the 0035
+// media_asset_versions_work_claim_coherent constraint, which is still in force
+// at that point.
 func settleInFlightWorkForRollback(t *testing.T, f *mediaFixture) int64 {
 	t.Helper()
 	commandTag, err := f.pool.Exec(f.ctx, `
