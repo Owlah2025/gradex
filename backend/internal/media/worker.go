@@ -519,6 +519,19 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID, operationID
 	if version.State != StateScanPassed && version.State != StateValidated {
 		return version, false, nil
 	}
+	// The row lock is held by the SELECT ... FOR UPDATE above, so this question
+	// is answered against a snapshot that includes everything the previous lock
+	// holder committed — including a recovery pass that has just superseded this
+	// operation and queued a replacement. Asking before the lock, or asking in
+	// the same statement that takes it, would let a stale answer through.
+	spent, err := processingOperationSpentLocked(ctx, tx, assetVersionID, operationID)
+	if err != nil {
+		return versionRecord{}, false, err
+	}
+	if spent {
+		// A harmless refusal: no state change, no lease, no attempt consumed.
+		return version, false, nil
+	}
 	// The claim also opens this attempt's progress observation. Resetting it to
 	// zero under a fresh operation identity is what makes a retry start from
 	// zero rather than inheriting a previous attempt's abandoned percentage.
@@ -766,6 +779,15 @@ func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID,
 	if !leaseValid {
 		return ErrLeaseExpired
 	}
+	// The row lock is held by the SELECT ... FOR UPDATE above. A spent identity
+	// cannot finalize even if it somehow still matched the token.
+	spent, err := processingOperationSpentLocked(ctx, tx, assetVersionID, operationID)
+	if err != nil {
+		return err
+	}
+	if spent {
+		return ErrConcurrentModification
+	}
 	return nil
 }
 
@@ -852,17 +874,61 @@ func (w *Worker) recordProcessingFailure(ctx context.Context, assetVersionID, op
 // never again acquire processing authority over that asset version. The version
 // row is locked first so the answer cannot change under a concurrent claim.
 func processingOperationSpent(ctx context.Context, tx pgx.Tx, assetVersionID, operationID string) (bool, error) {
+	if err := lockAssetVersion(ctx, tx, assetVersionID); err != nil {
+		return false, err
+	}
+	return processingOperationSpentLocked(ctx, tx, assetVersionID, operationID)
+}
+
+// lockAssetVersion takes the authoritative row lock and nothing else.
+//
+// It is a statement of its own on purpose. A previous revision of this fence
+// combined the lock and the spent check into one statement:
+//
+//	SELECT EXISTS (SELECT 1 FROM processing_attempts WHERE ...)
+//	FROM media_asset_versions WHERE id = $1 FOR UPDATE
+//
+// PostgreSQL is free to evaluate that uncorrelated EXISTS as an InitPlan
+// *before* the scan that takes FOR UPDATE, so the answer could be computed
+// against a snapshot older than the lock. That reopened exactly the race the
+// fence exists to close: operation A reads "not spent", blocks on the lock,
+// recovery takes the lock, records A terminal, creates replacement B, commits,
+// and A then proceeds on its stale pre-lock answer and mutates B's state.
+//
+// Splitting the statements removes the dependence on planner behaviour. After
+// this call returns, the row lock is held, so any query issued afterwards in
+// this transaction sees a snapshot that includes every committed change made by
+// whoever held the lock before us.
+func lockAssetVersion(ctx context.Context, tx pgx.Tx, assetVersionID string) error {
+	var locked string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
+	`, assetVersionID).Scan(&locked); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("locking media asset version: %w", err)
+	}
+	return nil
+}
+
+// processingOperationSpentLocked answers the spent question. The caller MUST
+// already hold the asset-version row lock; this runs as its own statement after
+// that lock so the result cannot predate it.
+//
+// INVARIANT: once (asset_version_id, operation_id) is recorded terminal, that
+// exact operation ID may never again acquire or mutate processing authority for
+// that asset version. The decision is made by the database, after the
+// authoritative lock, and never by queue deduplication, broker delivery
+// guarantees, or application-level synchronization.
+func processingOperationSpentLocked(ctx context.Context, tx pgx.Tx, assetVersionID, operationID string) (bool, error) {
 	var spent bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 		    SELECT 1 FROM processing_attempts
 		    WHERE asset_version_id = $1::uuid AND operation_id = $2
 		)
-		FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
 	`, assetVersionID, operationID).Scan(&spent); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, ErrNotFound
-		}
 		return false, fmt.Errorf("checking superseded processing operation: %w", err)
 	}
 	return spent, nil
