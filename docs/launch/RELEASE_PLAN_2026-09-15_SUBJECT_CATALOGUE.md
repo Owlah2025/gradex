@@ -1,12 +1,42 @@
 # Production Release Plan — Subject Catalogue / Demand (D-106)
 
-**Status:** PLANNING AND PREFLIGHT ONLY. Nothing in this document has been executed. No production
-system has been contacted. Every command below is written to be read, approved, and then run by a
-human operator.
+**Status:** RE-DERIVED FROM THE LIVE PRODUCTION BASELINE. AWAITING INDEPENDENT RELEASE-INTEGRITY
+REVIEW AND A FRESH G0b.
+
+One execution attempt has been made against the previous revision of this document. CP-1 passed its
+identity and docs-only gate and the offline manifest validation, then **stopped fail-closed** at the
+production baseline check: this plan assumed production schema 34, and live read-only evidence
+proves production is already at clean schema **37**. That stop is the gate working as designed, not
+a failed deployment. **No production mutation occurred** — CP-2 was never started, CP-3 was never
+taken, and the application was never stopped.
+
+Every command below is written to be read, approved, and then run by a human operator.
 
 **Approved software head:** `e2223d7f01197c79a38f3568dfd25495fc5af163`
 **Branch:** `catalog-seed-ibntohamy-20260914`
 **Worktree at planning time:** clean
+
+### Operative production baseline (live read-only evidence, 2026-09-15)
+
+This table, not `STATUS.md`'s prior narrative, is the baseline every expected value below is derived
+from. Where documentation and live production disagreed, **live production was treated as
+authoritative**.
+
+| Fact | Value |
+|---|---|
+| Production application revision | `4e7ddcdbadda86d535f7a3663d9405a628218e5f` |
+| Production schema | **37, clean** (`37 \| f`) |
+| Migrations already applied | `0035`, `0036`, `0037` |
+| Migration pending | `0038_subject_demand_signals` only |
+| `subject_demand_signals` | absent |
+| Institutions | 1 (`kuwait-university`) |
+| Kuwait University Subjects | 84 |
+| `identity_trusted_devices` rows | **8 — the schema-37 hard floor is already operationally active** |
+| `/healthz`, `/readyz` | `200`; postgres / redis / schema all `ok` |
+
+**This is a schema 37 → 38 release applying exactly one pending migration.** `0035`, `0036` and
+`0037` are already in production. They are neither pending nor newly applied by this release, and no
+command in this document applies any of them by hand.
 
 ### Release identity — two different things, deliberately
 
@@ -52,85 +82,112 @@ literal SHA.
 These were discovered during preflight tracing and must be resolved by the Product Owner before the
 release can proceed as written.
 
-### F-1 — This is not a 37 → 38 release. It is a 34 → 38 release.
+### F-1 — This is a 37 → 38 release. The earlier 34 → 38 framing is superseded by live evidence.
 
-`docs/launch/STATUS.md` records the production base as `b8dea967196de68914440b2092cd80daf85d9546`,
-schema **34**, application-only, no migration. Nothing after it has been deployed.
+The previous revision of this plan, and `STATUS.md` alongside it, recorded the production base as
+`b8dea967196de68914440b2092cd80daf85d9546` at schema **34**, application-only, no migration applied.
+**That record was stale.** CP-1's read-only baseline check found production at
+`4e7ddcdbadda86d535f7a3663d9405a628218e5f`, schema **37 clean**, healthy, and serving.
 
-`gradex-migrate up` applies **every** pending migration. From schema 34, it applies four:
+#### Reconciling the production history
 
-| Migration | Feature | Decision | Approval state recorded in STATUS.md |
-|---|---|---|---|
-| `0035_media_work_leases` | D-103 media work leases | D-103 | **APPROVED** (second remediation pass, range `7d3ae73..e2223d7`) |
-| `0036_bundles_and_offers` | Bundles V1 / Catalogue Offers V1 | D-104 | Head `8ee8d42` approved |
-| `0037_student_trusted_devices` | Student device trust | D-105 | Head `e4993d6` approved |
-| `0038_subject_demand_signals` | Subject demand (this tranche) | D-106 | **APPROVED WITH FINDINGS** |
+What `4e7ddcd` is, established from repository evidence alone:
 
-The `APPROVED WITH FINDINGS` verdict covers the Subject Catalogue / Demand tranche only; D-103 holds
-its own separate approval on `7d3ae73..e2223d7`. Neither verdict is an approval of the combined
-payload: STATUS.md records that the combined Bundles + D-105 candidate "requires fresh independent
-approval before push or production deployment", and that approval is what G0a still waits on.
+- It is the tip of the range `b8dea96..4e7ddcd` (18 commits) and an ancestor of the current
+  release-packaging HEAD.
+- Its own subject is `feat(landing): polish navbar and hero presentation`, but the range beneath it
+  carries three schema-bearing tranches: **D-103** media work leases (`0035`), **D-104** Bundles V1
+  and Catalogue Offers V1 (`0036`), and **D-105** Student device trust (`0037`).
+- At `4e7ddcd`, `backend/internal/db/schema.go` has
+  `MaxSchemaVersion = StudentTrustedDeviceSchemaVersion` = **37**, and the embedded migration set
+  ends at `0037`. `0038_subject_demand_signals` first enters history one commit series later, at
+  `c7ab787` on 2026-09-14.
 
-**Consequence:** this release ships D-103, D-104 and D-105 alongside D-106. Two options, and the
-choice is the Product Owner's:
+So schema 37 *was* the intended resulting schema of that payload, and the live production state is
+internally consistent with it in both bookkeeping and physical shape: the `0035` columns on
+`media_asset_versions`, the `0036` `bundles` table, and the `0037` `identity_trusted_devices` and
+`identity_device_replacement_state` tables are all present, while `subject_demand_signals` is
+absent. There is no evidence of a falsified or hand-edited `schema_migrations` marker.
 
-**This is not a Product Owner waiver.** Product Owner approval governs release and business
-decisions — timing, scope, risk acceptance, whether to ship at all — and has no authority over
-whether an engineering review passed. Both are required, and the technical one comes first.
+**Authorization cannot be established from repository evidence, and is not invented here.** No
+`STATUS.md` entry, no file under `docs/launch/evidence/`, no decision record in `docs/DECISIONS.md`
+and no commit in this repository records a production deployment of `4e7ddcd`, an approval verdict
+against it, or a migration run to 37. The opposite is recorded: the `2026-09-11` entry states that
+the combined Bundles/Offers + D-105 candidate "requires fresh independent approval before push or
+production deployment", and **every** `STATUS.md` entry from `2026-09-11` through the fourth pass of
+`2026-09-15` asserts "Production has not been touched."
 
-D-103 has since been independently **APPROVED** on range `7d3ae73..e2223d7`, with H1, H2 and M1
-confirmed closed. The combined 34 → 38 candidate was then rejected on one ground only: this
-document was still pinned to the superseded `c908168`, so the executable release instructions
-selected a commit the reviewer had not approved. That is the defect this revision corrects.
+That assertion was false from approximately 2026-09-13 onward. Host timestamps
+(`incoming/` and `runtime.env` last written 2026-09-13) and the container uptime observed at CP-1
+(~46 hours) place the deployment on 2026-09-13, which is also `4e7ddcd`'s commit date.
 
-The two paths forward:
+**Why `STATUS.md` still described production as `b8dea96` / schema 34:** it was simply never updated
+after that deployment, and each subsequent entry restated the stale "production has not been
+touched" line unchanged. This is documentation drift. Whether the deployment itself was authorized
+is a question this document **cannot** answer from repository evidence, and it is recorded here as
+open rather than assumed either way.
 
-- **Option A:** the corrected pinning is independently verified, after which the Product Owner may
-  decide whether to accept a combined 34 → 38 release. Both are required; neither is sufficient
-  alone.
-- **Option B:** first ship a separately and independently approved intermediate release that brings
-  production to schema 37, then run this plan as a true 37 → 38 step. This still needs the combined
-  candidate's own independent approval.
+**What this changes for the release, and what it does not.**
 
-Everything below is written for a 34 → 38 step. Under Option B, only `0038` is pending at CP-5 and
-the expected `migrate up` output changes accordingly; nothing else in the plan changes.
+- The migration path is now `37 → 0038 → 38`. One pending migration, not four.
+- `0035`, `0036` and `0037` must never be described as pending or newly applied by this release.
+- The D-106 software being shipped is unchanged, and so is its approval status.
+- The schema-37 rollback floor is no longer a limitation to be accepted for the future. With 8 rows
+  in `identity_trusted_devices`, **it is already active today** — see §Rollback matrix.
 
-**Remediation status.** D-103 is independently APPROVED and H1, H2 and M1 are confirmed closed.
-The outstanding item is this document's own release-integrity model, corrected in this revision:
-the release identity is now derived from `git rev-parse HEAD` exactly as `release.sh` derives it,
-and the fixed `e2223d7` survives only as the approved-software baseline for the CP-1 allowlist
-audit. Correcting it is builder work and is explicitly **not** self-approval: it does not by itself
-clear the combined candidate's rejection, and it does not unblock G0. The candidate remains
-unauthorized for production until an independent reviewer verifies this correction.
+**What this does not resolve.** The reconciliation above is release *planning*, not approval. The
+re-derived 37 → 38 procedure has not been independently reviewed, and the prior Product Owner G0b
+approved a 34 → 38 payload that does not exist. Both are re-established at §GATE G0.
 
-### F-2 — There is no zero-downtime path. A hard outage window is mandatory.
+### F-2 — There is still no zero-downtime path. A hard outage window remains mandatory.
+
+The compatibility analysis is re-derived against the **actually deployed** binary, not the one
+`STATUS.md` assumed. The conclusion does not change; only the numbers do.
 
 - `backend/cmd/api/main.go` — `requiredSchemaVersion()` returns `SubjectDemandSignalSchemaVersion` = **38**.
   The D-106 routes are mounted in this candidate and query `subject_demand_signals`, which arrives in
   38, so the floor is 38 and not 37.
-- `backend/internal/db/schema.go` — `MaxSchemaVersion` = **38**.
-- `backend/cmd/worker/main.go` — worker requires `MediaWorkLeaseSchemaVersion` = **35**.
-- The currently-deployed production binary (`b8dea96`) has `MaxSchemaVersion` = **34** and refuses
-  readiness against anything higher (`schema.go` `CheckSchemaAtLeast`, fails closed).
+- `backend/internal/db/schema.go` at the release candidate — `MaxSchemaVersion` = **38**.
+- `backend/cmd/worker/main.go` — worker requires `MediaWorkLeaseSchemaVersion` = **35**, already met.
+- The **currently deployed** production binary (`4e7ddcd`) has `MaxSchemaVersion` = **37** and
+  refuses readiness against anything higher (`schema.go` `CheckSchemaAtLeast`, fails closed).
 
-So the compatibility truth for this candidate is:
+So the compatibility truth for this release is:
 
 ```
-old API (b8dea96): schema 34 only
-new API (this candidate): schema 38 only
+old API (4e7ddcd, deployed): schema 35..37   — serves 37, refuses 38
+new API (this candidate):    schema 38 only  — floor 38, ceiling 38
 ```
 
-The two ranges do not touch — the new API's floor and ceiling are both 38 — so there is **no
-rolling-overlap schema**, and no ordering of binary and migration steps produces one. `host.sh apply-release` is the wrong tool
-here — it uses `--no-deps` and never runs migrations, so it would recreate the new API against
-schema 34 and die at `wait_for_status api healthy`.
+The two ranges are adjacent but **disjoint**. The new API's floor and ceiling are both 38, so no
+ordering of binary and migration steps produces a rolling overlap. Zero downtime is **not**
+available and is not claimed. `host.sh apply-release` remains the wrong tool to reach 38 — it uses
+`--no-deps` and never runs migrations, so it would recreate the new API against schema 37 and die at
+`wait_for_status api healthy`.
 
-`docs/launch/RUNBOOK.md` (D-103 section) already states the required ordering, and it also states
-that **the old worker and the new worker must never run concurrently**. That rule is binding here.
+`docs/launch/RUNBOOK.md` (D-103 section) states that **the old worker and the new worker must never
+run concurrently**. That rule is unchanged and remains binding: the old worker at `4e7ddcd` and the
+new worker share the `0035` media work-lease tables, so an overlap would put two worker generations
+on the same lease rows. The stricter rule stands.
 
-**Consequence:** the requested order `backup → migration → backend → …` becomes
-`backup → stop application → migration → backend → …`. The public edge stays up and answers 502/503
-for the duration; no maintenance page is configured.
+**The safe order, stated explicitly:**
+
+```
+verified backup (CP-3)
+  -> stop old worker, api, frontend (CP-4; outage begins)
+  -> apply 0038 (CP-5)
+  -> verify clean schema 38 (CP-5)
+  -> start new backend (CP-6)
+  -> health / readiness / Subject API (CP-7)
+```
+
+Infrastructure — `postgres`, `redis`, `edge` — stays up throughout. The public edge answers 502/503
+for application requests for the duration; no maintenance page is configured.
+
+**One genuine improvement over the 34 → 38 framing.** Clean schema 37 is now a *servable* state: the
+deployed `4e7ddcd` binaries serve it. If CP-5 fails with the marker still clean at 37, restarting the
+old application ends the outage with no data change and no schema rollback. Under the old 34 → 38
+plan the equivalent failure left the database at a version no deployed binary could serve.
 
 ### F-3 — `catalog-import` is not present in any production image.
 
@@ -167,7 +224,7 @@ audit record for an operator-driven import.
 
 | Image | Tag | Contents |
 |---|---|---|
-| `gradex-backend` | `hostinger-$SHORT` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038`, embedded manifests |
+| `gradex-backend` | `hostinger-$SHORT` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038` (of which only `0038` is pending in production), embedded manifests |
 | `gradex-frontend` | `hostinger-$SHORT` | Next.js build incl. the new Subject routes |
 | `gradex-backend-proof` | `hostinger-$SHORT` | proof/seed tooling; not started by this release |
 
@@ -190,7 +247,9 @@ than shipping a mislabelled image.
 - `backend/internal/academic/manifest/data/**` — 14 new `manifest.yaml` + `sources.yaml` pairs.
   `kuwait-university/` is **unchanged** across the whole deployed range
   (`git diff --stat 4e7ddcd.."$RELEASE_SHA" -- backend/internal/academic/manifest/data/kuwait-university`
-  reports no changes).
+  reports no changes). Note that `4e7ddcd` is not merely a review landmark here: it is the revision
+  actually running in production, so this diff is exactly "what changes for Kuwait University
+  between what is deployed and what would be deployed", and the answer is nothing.
 
 ### Frontend routes new in the tranche
 
@@ -222,6 +281,17 @@ runtime env     /home/deploy/gradex-production/runtime.env   (mode 0600)
 release drop    /home/deploy/gradex-production/incoming/<full-sha>/
 database        gradex_production        role gradex
 public origin   https://gradexcourses.com
+```
+
+Production state as verified read-only at CP-1, which every expected value below assumes:
+
+```
+deployed application   4e7ddcdbadda86d535f7a3663d9405a628218e5f   (MaxSchemaVersion 37)
+schema_migrations      37 | f
+pending migration      0038_subject_demand_signals   (the only one)
+institutions           1        (kuwait-university)
+Kuwait University      84 Subjects
+identity_trusted_devices   8 rows   -> schema-37 hard floor already active
 ```
 
 Every `host.sh` invocation must export all four of `GRADEX_HOST_STATE_DIR`, `GRADEX_HOST_ENV_FILE`,
@@ -258,14 +328,14 @@ gxcompose() {
 ## 3. Execution order
 
 ```
-CP-1  preflight + SHA verification            (local, read-only)
+CP-1  preflight + SHA verification + live baseline gate   (local + host, read-only)
 CP-2  build, export, transfer, load images    (local + host, no production mutation)
-GATE  G0a — independent technical approval of D-103 + the 34→38 payload
-GATE  G0b — Product Owner approves the release (only after G0a)
+GATE  G0a — independent release-integrity review of this re-derived 37→38 procedure
+GATE  G0b — Product Owner approves the re-derived release (only after G0a)
 CP-3  production backup + artifact proof      (first host write; reversible)
 GATE  G1 — Product Owner approves the irreversible sequence
 CP-4  stop old application                    (start of outage)
-CP-5  migration 34 → 38                       (IRREVERSIBLE)
+CP-5  migration 37 → 38, one migration        (IRREVERSIBLE)
 CP-6  start new backend (api + worker)
 CP-7  backend health / readiness / Subject API smoke
 GATE  G2 — data mutation approval
@@ -380,26 +450,73 @@ done
 
 Expected: 15 lines, each ending `is valid: …`. Counts must match §CP-8's table exactly.
 
-Read the live production schema and catalogue baseline (read-only over ssh):
+Read the live production schema and catalogue baseline, and **gate on it fail-closed**. The previous
+revision of this document only printed these values for a human to eyeball; that is how a stale
+baseline survived to execution time. It is now an assertion.
 
 ```bash
-ssh deploy@186.241.16.111 "docker exec gradex-production-postgres-1 psql -U gradex -d gradex_production \
-  --no-psqlrc --tuples-only --no-align \
-  -c 'SELECT version, dirty FROM schema_migrations;' \
-  -c 'SELECT count(*) FROM institutions;' \
-  -c 'SELECT i.slug, count(s.id) FROM institutions i LEFT JOIN subjects s ON s.institution_id = i.id GROUP BY i.slug ORDER BY i.slug;'"
+if ! (
+  set -euo pipefail
+
+  BASELINE="$(ssh deploy@186.241.16.111 \
+    'docker exec -i gradex-production-postgres-1 psql -U gradex -d gradex_production \
+       --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1' <<'SQL'
+SELECT version || '|' || dirty FROM schema_migrations;
+SELECT 'institutions|' || count(*) FROM institutions;
+SELECT 'catalogue|' || i.slug || '|' || count(s.id)
+  FROM institutions i LEFT JOIN subjects s ON s.institution_id = i.id
+ GROUP BY i.slug ORDER BY i.slug;
+SELECT 'demand_table|' || coalesce(to_regclass('public.subject_demand_signals')::text, 'absent');
+SQL
+  )"
+
+  EXPECTED='37|f
+institutions|1
+catalogue|kuwait-university|84
+demand_table|absent'
+
+  [ "$BASELINE" = "$EXPECTED" ] || {
+    printf 'REFUSE: production is not at the re-derived baseline.\n--- expected ---\n%s\n--- actual ---\n%s\n' \
+      "$EXPECTED" "$BASELINE"
+    exit 1
+  }
+
+  REV="$(ssh deploy@186.241.16.111 \
+    'docker inspect --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}" gradex-production-api-1')"
+  [ "$REV" = "4e7ddcdbadda86d535f7a3663d9405a628218e5f" ] || {
+    echo "REFUSE: deployed API revision is '$REV', not the recorded baseline 4e7ddcd…"
+    exit 1
+  }
+
+  echo 'PROCEED: production is at clean schema 37 with exactly one pending migration (0038)'
+); then
+  echo 'REFUSE: CP-1 production baseline check failed' >&2
+  exit 1
+fi
 ```
 
-Expected (confirming F-1) — record the actual values as the release baseline:
+Expected on success:
 ```
-34|f
-1
-kuwait-university|84
+PROCEED: production is at clean schema 37 with exactly one pending migration (0038)
 ```
 
-**STOP if:** `dirty` is `t`; the version is not what this plan assumes; `institutions` is not 1; or
-any institution other than `kuwait-university` already exists. Any of those invalidates every
-expected count downstream and the plan must be re-derived before proceeding.
+**STOP on any `REFUSE`, and re-derive the plan again rather than reinterpreting it.** Every expected
+count downstream — the migration count at CP-5, the `84` Subject baseline at CP-7, the `15`/`329`
+totals at CP-9 — is derived from exactly this baseline. In particular:
+
+- `dirty` is `t` → production is mid-migration. Stop; this is an incident, not a release.
+- version is **below** 37 → some part of `0035`–`0037` is missing; this plan does not cover applying
+  them and must be re-derived.
+- version is **38 or above** → `0038` is not pending; either this release already ran, or something
+  else did. Stop.
+- `subject_demand_signals` already exists at version 37 → bookkeeping and physical shape disagree.
+  Stop; do not migrate.
+- institutions is not 1, or any institution other than `kuwait-university` exists → the import
+  expectations at CP-8/CP-9 are invalid.
+- the deployed revision is not `4e7ddcd…` → production moved again since this plan was re-derived,
+  and the compatibility analysis in F-2 no longer describes the running binary.
+
+**No production mutation occurs at CP-1.** Every command in this checkpoint is read-only.
 
 ---
 
@@ -474,48 +591,75 @@ Nothing in production has been mutated at this point.
 
 ---
 
-## GATE G0 — independent technical approval, then Product Owner approval
+## GATE G0 — independent release-integrity review, then Product Owner approval
 
 G0 has two parts, in this order. Both are required before CP-3.
 
-### G0a — independent technical approval (BLOCKING, currently NOT SATISFIED)
+### G0a — independent review of the re-derived procedure (BLOCKING, NOT SATISFIED)
 
-**The engineering position, stated plainly.** D-103 / migration `0035` is independently
-**APPROVED**, and H1 (stale-operation lock ordering), H2 (database-time lease authority) and M1
-(per-cycle retry attempt accounting) are independently confirmed closed. The deployable software
-content at the approved software head is approved. **There is no failed D-103 engineering review
-outstanding, and nothing about D-103 for a Product Owner to override.**
+**The software position is unchanged and remains historically satisfied.** D-103 / migration `0035`
+is independently **APPROVED**, with H1 (stale-operation lock ordering), H2 (database-time lease
+authority) and M1 (per-cycle retry attempt accounting) confirmed closed. The D-106 Subject
+Catalogue / Demand tranche is independently **APPROVED WITH FINDINGS** (2 Low, non-blocking). The
+deployable software content at the approved software head `e2223d7` is approved, and everything
+between it and the release-packaging HEAD is documentation-only, proven by the CP-1 allowlist audit.
 
-What remains open is narrower and belongs entirely to this document: the release-integrity model.
-The previous two revisions each embedded a literal final release SHA, which went stale the moment
-the document was committed and HEAD moved past it. This revision removes the literal entirely — the
-identity is derived at CP-1 from `git rev-parse HEAD`, exactly as `release.sh build` derives it, and
-`e2223d7` survives only as the fixed baseline the CP-1 allowlist audit compares against.
+**Nothing in this re-derivation changes a line of application code, migration, deploy tooling,
+manifest, test, frontend or runtime configuration.** It is a documentation correction only.
 
-G0a is satisfied only by a recorded independent reviewer verdict of approval against one exact
-commit range, with every Critical and High finding resolved. A review that produces no retrievable
-verdict is `UNAVAILABLE`, not approval. The builder's own assessment of its own correction is not a
-verdict, and Product Owner authority cannot convert a failed engineering review into a passed one —
-though on the current facts there is no failed engineering review left to convert.
+**What is newly unreviewed is the procedure, not the product.** The previously reviewed release
+procedure described a 34 → 38 migration from a baseline that does not exist. The procedure in this
+revision is materially different in ways that bear directly on production safety:
 
-**Current state: NOT SATISFIED.** The corrected release-integrity model awaits independent
-verification. The builder does not grant G0a.
+1. The migration step applies one migration, not four.
+2. The CP-1 baseline check is now a fail-closed gate rather than a printed value.
+3. The failure semantics at CP-5 changed: clean 37 is a servable resting state, so a clean-marker
+   migration failure is now fully recoverable by restarting the deployed application.
+4. The rollback model changed: the schema-37 floor is active rather than prospective, and the
+   generic 38 → 34 chain is withdrawn as a release recovery path.
+
+G0a is satisfied only by a recorded independent reviewer verdict against one exact commit range,
+with every Critical and High finding resolved. A review that produces no retrievable verdict is
+`UNAVAILABLE`, not approval. **The builder does not grant G0a**, and the builder's own reconciliation
+of the production history is not a verdict.
+
+**Current state: NOT SATISFIED.**
 
 ### G0b — Product Owner release decision
 
-Reached only after G0a is satisfied. The Product Owner then confirms in writing:
+**The previous G0b is superseded and must not be reused.** It approved, in writing, "applying
+migrations `0035` `0036` `0037` `0038` sequentially" from schema 34. Three of those four were
+already applied in production before that approval was given. The approval's factual premise does
+not hold, so it is void as to this release — **not** because anything failed, but because the
+baseline it described was discovered to be stale before any mutation occurred. Recording it as
+superseded is bookkeeping, not blame: the fail-closed stop that discovered this is the control
+working correctly.
 
-1. This release carries **D-103, D-104, D-105 and D-106** (schema 34 → 38), not D-106 alone (F-1).
-   All four are independently approved as software; the decision here is whether to ship them
-   together in one outage, not whether their engineering review passed.
-2. A mandatory application outage is accepted (F-2).
-3. The catalogue import will run through the Admin HTTP route under an Admin audit actor, not the
-   CLI SYSTEM actor (F-3).
-4. The 2 Low D-106 findings ship unremediated.
+A **fresh** G0b is required. Reached only after G0a is satisfied, the Product Owner confirms in
+writing:
+
+1. The actual production baseline is **clean schema 37** at application revision `4e7ddcd…`, and the
+   prior 34 → 38 approval is superseded by that discovery.
+2. **Exactly one migration is pending: `0038_subject_demand_signals`.** This release ships D-106
+   only; D-103, D-104 and D-105 are already in production.
+3. A mandatory application outage is accepted for 37 → 38 (F-2). Zero downtime is not available.
+4. **The schema-37 hard floor is already operationally active**, with 8 rows in
+   `identity_trusted_devices`. Reversing below 37 is a restore-from-backup operation today, not a
+   future limitation (§Rollback matrix).
+5. The 14-manifest catalogue import runs through the Admin HTTP route under an Admin audit actor,
+   not the CLI SYSTEM actor (F-3): 14 institutions, 245 Subjects, `kuwait-university-launch-v1`
+   excluded.
+6. The reviewed non-blocking findings — the 2 Low D-106 findings and the classified test-harness
+   flakes — ship unremediated.
+
+Item 1 additionally requires a Product Owner decision this plan cannot make for them: **the
+authorization status of the `4e7ddcd` production deployment is unestablished in repository
+evidence** (F-1). That is an open governance question, and shipping on top of that baseline does not
+retroactively settle it.
 
 These are business and risk decisions, which is exactly the scope Product Owner approval covers.
 
-**Without both G0a and G0b, stop here.**
+**Without both G0a and a fresh G0b, stop here.**
 
 ---
 
@@ -556,11 +700,14 @@ PostgreSQL container and assert against the source's recorded state:
 Expected:
 ```
 s12-hostinger: restored encrypted offsite snapshot <SNAPSHOT_ID> into a fresh isolated PostgreSQL volume
-s12-hostinger: restored encrypted snapshot <SNAPSHOT_ID>, schema 34|false, identity, Course, invitation provenance, Entitlement, and Enrollment passed
+s12-hostinger: restored encrypted snapshot <SNAPSHOT_ID>, schema 37|false, identity, Course, invitation provenance, Entitlement, and Enrollment passed
 ```
 
-`verify_restore` fails closed if the restored schema state, or any of the five record counts, differs
-from what the source held at capture time. That is the non-empty/readable proof.
+The schema reported here is **37**, matching the live production baseline at capture time. It is
+read from the snapshot, not asserted by this document: `verify_restore` fails closed if the restored
+schema state, or any of the five record counts, differs from what the source held at capture time.
+That is the non-empty/readable proof. A restore reporting `34|false` would mean the snapshot is not
+of this production database — **STOP**.
 
 **Restore procedure (recovery, not drill).** `restore` targets the standalone
 `gradex-restore-verify` container and its own volume — never the live database. To recover
@@ -605,10 +752,17 @@ The edge stays up and returns 502 for application requests for the duration. Thi
 outage window.
 
 **Rollback at this point:** `gxcompose start worker api frontend` — full, instant, no data change.
+The schema is still clean 37, which the deployed `4e7ddcd` binaries serve, so this is a complete
+return to the pre-release state.
 
 ---
 
-## CP-5 — Migration 34 → 38 (IRREVERSIBLE)
+## CP-5 — Migration 37 → 38 (IRREVERSIBLE)
+
+**Exactly one migration is pending: `0038_subject_demand_signals`.** `0035`, `0036` and `0037` are
+already applied in production and are not re-applied here; `migrate up` skips them as already
+recorded. No command in this checkpoint names or applies an individual migration by hand — the
+normal `migrate up` mechanism is used unchanged, and its expected behaviour is one applied migration.
 
 Run the migration as a one-off release job against the **new** backend image:
 
@@ -627,17 +781,12 @@ fi
 docker logs "$(gxcompose ps --all --quiet migrate)"
 ```
 
-Expected (`migrate` exits 0):
+Expected (`migrate` exits 0), with exactly one migration applied:
 ```
 migrate up: version=38 dirty=false (supported; this build supports 2..38)
 ```
 
-Under Option B (production already at 37) the same line is expected; only the number of applied
-migrations differs. Note that schema 37 is a staging point for the *migration*, never a servable
-state for this candidate's API: its readiness floor is 38, so the new API refuses 37 and the old API
-refuses anything above 34.
-
-**Migration-version verification — both bookkeeping and physical shape:**
+**Migration verification — both bookkeeping and physical shape:**
 
 ```bash
 docker exec gradex-production-postgres-1 psql -U gradex -d gradex_production \
@@ -656,11 +805,22 @@ subject_demand_signals
 0
 ```
 
-(4 = the primary-key index plus the three indexes the migration declares.)
+(4 = the primary-key index plus the three indexes the migration declares. `0` rows is the correct
+initial state — no Student has raised demand yet.)
 
-**STOP if:** `dirty` is `t`. Do not run `migrate up` again on a dirty marker — `requireClean` will
-refuse, and stacking migrations onto a half-applied state is how a recoverable failure becomes an
-unrecoverable one. Go to the CP-5 rollback row in §Rollback matrix.
+**STOP if the schema is not exactly clean 38.** Do not start CP-6 on anything else.
+
+**STOP if `dirty` is `t`, and do not run `migrate up` again.** `requireClean` will refuse, and
+stacking migrations onto a half-applied state is how a recoverable failure becomes an unrecoverable
+one. **Do not automatically retry a failed migration** under any circumstances. Go to the CP-5 rows
+in §Rollback matrix.
+
+**A clean-marker failure is fully recoverable here.** If `migrate` exits non-zero but the marker is
+still `37 | f`, the database is exactly where it started and the deployed `4e7ddcd` application
+serves that schema. `gxcompose start worker api frontend` ends the outage with no data change and no
+schema rollback. Diagnose afterwards, out of the outage window. This is a real improvement over the
+superseded 34 → 38 framing, where the equivalent failure could strand the database at a version no
+deployed binary could serve.
 
 ---
 
@@ -1059,24 +1219,38 @@ Expected:
 
 ## Rollback matrix
 
+The baseline change reshapes this table. Read the two framing facts first.
+
+**Framing fact 1 — clean 37 is a servable resting state.** The deployed `4e7ddcd` binaries serve
+schema 37. Any failure that leaves the marker clean at 37 is recovered by restarting the existing
+application: no schema rollback, no data loss, no restore.
+
+**Framing fact 2 — the schema-37 floor is already active, not prospective.** Production carries 8
+rows in `identity_trusted_devices`, and device trust has been exercised. The `0037` down migration
+therefore **cannot run today** (see below). Schema 37 is the floor *now*. This release does not
+create that condition and cannot remove it.
+
 | Stage | Failure | Rollback | Data loss | Downtime |
 |---|---|---|---|---|
-| CP-1 | Preflight mismatch | Abandon; re-derive the plan | none | none |
+| CP-1 | Identity, docs-only, manifest or **live baseline** mismatch | Abandon; re-derive the plan against the actual baseline | none | none |
 | CP-2 | Build / label / checksum failure | Abandon; `docker image rm` the loaded tags | none | none |
 | CP-3 | Backup or `verify-restore` fails | **Abandon the release.** Do not proceed on an unverified backup | none | none |
-| CP-4 | Services will not stop | `gxcompose start worker api frontend` | none | seconds |
-| CP-5 | `migrate` exits non-zero, marker **clean** at 34 | `gxcompose start worker api frontend` (old images still selected in `runtime.env`) | none | outage continues until restart |
-| CP-5 | `migrate` exits non-zero, marker **dirty** | **Do not re-run `migrate up`.** Old binaries refuse a dirty marker and stay stopped. Diagnose, or restore the CP-3 snapshot into a fresh database and repoint | back to snapshot time | extended |
-| CP-5 | Schema reached 38, decision to revert | **Supervised, backup-first, one file, one transaction.** See "Schema rollback" below. Never `migrate down`, never a step count | `subject_demand_signals` rows are dropped by `0038` down | extended |
-| CP-6 | `apply-release` refuses or `api`/`worker` never healthy | Read `api` logs. If schema-related, the schema is ahead of the old binaries — application-only rollback is **not available**; schema rollback first | none yet | outage continues |
+| CP-4 | Services will not stop, or state ambiguous | `gxcompose start worker api frontend`; do not migrate | none | seconds |
+| CP-5 | `migrate` exits non-zero, marker **clean at 37** | `gxcompose start worker api frontend` — the deployed binaries serve 37. **Complete recovery.** Diagnose outside the window | none | outage ends at restart |
+| CP-5 | `migrate` exits non-zero, marker **dirty** | **Do not re-run `migrate up`; do not retry.** Restore the CP-3 snapshot into a fresh database, verify, and repoint | back to snapshot time | extended |
+| CP-5 | Schema reached 38, decision to revert | `38 → 37` only: supervised, backup-first, one file, one transaction. See "Schema rollback" below | `subject_demand_signals` rows are dropped | minutes; the deployed application then serves 37 again |
+| CP-6 | `apply-release` refuses, or `api`/`worker` never healthy | Read `api` logs. The schema is at 38 and the deployed binaries cap at 37, so application-only rollback to `4e7ddcd` requires the `38 → 37` schema step first | none yet | outage continues |
 | CP-7 | Readiness or Subject API fails | Same as CP-6 | none | outage continues |
 | CP-8 | An import fails mid-way | That institution's transaction rolled back whole; the others are unaffected. Fix and re-apply only the failed manifest — re-applying a succeeded one is a NOOP | none | none (API already up) |
 | CP-8/9 | Imported data is wrong | **There is no un-import.** The importer never retires or deletes by omission. Reversal = restore the CP-3 snapshot | back to snapshot time | extended |
 | CP-10 | Frontend unhealthy | `GRADEX_FRONTEND_IMAGE=<previous>` and recreate `frontend` alone. Backend and schema are unaffected | none | ~4s per swap |
-| CP-11–15 | A smoke test fails | Triage by severity. Frontend-only → frontend rollback. Backend behaviour → full rollback requires schema rollback first | depends | depends |
+| CP-11–15 | A smoke test fails | Triage by severity. Frontend-only → frontend rollback. Backend behaviour → `38 → 37` schema step first, then the deployed application | depends | depends |
 | CP-16 | Log anomalies | Investigate before declaring the release complete | none | none |
 
 ### Schema rollback (supervised emergency operation only)
+
+**For this release the schema rollback question is exactly one step: `38 → 37`.** It is the only
+step available by migration, and it is the only one this release makes necessary.
 
 **`migrate down N` takes a STEP COUNT, not a target version.** `down 37` means thirty-seven steps
 back — it lands on version 1 and destroys the schema. Never issue it. The command also refuses to
@@ -1099,70 +1273,60 @@ docker exec -i gradex-production-postgres-1 psql -U gradex -d gradex_production 
 Expected: `37 | f`. Applying the SQL alone is **not** sufficient — readiness reads the marker.
 `schema_migrations` holds exactly one row, so the correction is an `UPDATE`, never an `INSERT`.
 
-**Schema 37 is not a servable resting state for this release.** This candidate's API floor is 38 and
-the previously-deployed API's ceiling is 34, so at 37 neither binary set will pass readiness. A
-38 → 37 rollback is therefore only ever a *step* on the way to 34, never a destination: plan to
-continue through the remaining three steps below, or do not start. The application stays stopped for
-the whole sequence.
+**What `38 → 37` costs.** `0038_subject_demand_signals.down.sql` drops `subject_demand_signals`
+entirely. Every Student demand signal, live and withdrawn, is lost — including the withdrawal
+history that makes a demand count a count of Students rather than a count of clicks. Nothing else
+references the table and no access decision reads it, so the drop is structurally safe; the loss is
+product-prioritisation input, unrecoverable except from backup. The step always succeeds, which is
+exactly why the backup is the only protection. Export the counts first if the demand data has any
+decision value:
 
-### There is no single 38 → 34 rollback
+```sql
+SELECT subject_id, count(*) FROM subject_demand_signals WHERE withdrawn_at IS NULL GROUP BY 1;
+```
 
-Going back from 38 to 34 is **four separate supervised transactions**, in reverse order, each taken
-on its own decision, each preceded by its own fresh verified backup, and each verified for both
-bookkeeping and physical shape before the next is considered. Never chain them into one command, and
-never describe the reversal as one generic rollback: each step destroys a different class of real
-data, and two of them can refuse outright.
+**Unlike the superseded 34 → 38 plan, schema 37 is a servable destination.** The deployed `4e7ddcd`
+binaries have `MaxSchemaVersion` 37 and serve it. A `38 → 37` rollback followed by restarting the
+existing application is therefore a complete return to the pre-release production state. It is a
+destination, not a step on the way to somewhere else.
 
-| Step | Migration | What the down migration destroys | Refusal / precondition |
-|---|---|---|---|
-| 38 → 37 | `0038_subject_demand_signals` | **Drops `subject_demand_signals` entirely.** Every Student demand signal, live and withdrawn, is lost — including the withdrawal history that makes a demand count a count of Students rather than a count of clicks. Nothing else references the table and no access decision reads it, so the drop is structurally safe; the loss is product-prioritisation input, and it is unrecoverable except from backup. | None. The step always succeeds, which is exactly why the backup is the only protection. Export the counts first if the demand data has any decision value: `SELECT subject_id, count(*) FROM subject_demand_signals WHERE withdrawn_at IS NULL GROUP BY 1;` |
-| 37 → 36 | `0037_student_trusted_devices` | **Four separate classes of row are deleted, not one.** See the itemised list below the table. | **Refuses outright once device trust has been used at all** — two independent conditions, either sufficient. See "Schema 37 is a floor" below. |
-| 36 → 35 | `0036_bundles_and_offers` | Drops `bundles`, `bundle_courses`, `bundle_price_changes`, `purchase_request_bundle_items`, and `bundle_purchase_grants`. | **Refuses once commerce data exists.** The Bundle purchase snapshot is immutable by database constraint and `bundle_purchase_grants` records real fulfilled grants; dropping them would destroy purchase provenance. Check before attempting: `SELECT (SELECT count(*) FROM bundle_purchase_grants), (SELECT count(*) FROM purchase_request_bundle_items);` If either is non-zero, **do not roll 36 back** — retain schema 36 and roll back the application only. |
-| 35 → 34 | `0035_media_work_leases` | Drops the six work-lease and attempt-accounting columns, their four constraints, and the expired-lease recovery index. Media state, provenance, trusted duration, and rendition data are untouched, so existing `READY` media stays deliverable. | **In-flight media work must be settled inside the same transaction, before the down SQL** — see `docs/launch/RUNBOOK.md`. Without it, every Asset Version in `SCANNING` or `PROCESSING` is stranded permanently: Admin Retry refuses those states and the D-103 recovery pass no longer exists. Assets carrying D-088 trusted-validation provenance are not retryable at all in a scanner-mode deployment. |
+### Going below 37 is a restore operation, not a migration
 
-### What rolling back `0037` actually deletes
+**Do not plan a 38 → 34 chain as this release's recovery path.** It is withdrawn as a normal option.
+Production is already past 37 with live Device Trust data, so the migration path below 37 does not
+exist today.
 
-Summarising this as "device state" understates it. `0037_student_trusted_devices.down.sql` removes,
-in this order:
+The `0037` down migration **cannot run** against this database. Two independent conditions, either
+one sufficient, and production satisfies them:
 
-1. **Device security event history.** `DELETE FROM identity_security_events` for all nine device
-   event types: `DEVICE_TRUST_CHALLENGED`, `DEVICE_TRUST_ATTEMPTS_EXHAUSTED`, `DEVICE_TRUSTED`,
-   `DEVICE_ADOPTED_LEGACY_SESSION`, `DEVICE_REVOKED`, `DEVICE_LIMIT_REACHED`,
-   `DEVICE_REPLACEMENT_BLOCKED`, `ADMIN_DEVICE_REVOKED`, `ADMIN_DEVICE_COOLDOWN_RESET`. This is the
-   audit trail of every device trust, revocation, lockout and Admin intervention. It is deleted
-   because the restored pre-0037 `identity_security_events_type` constraint would otherwise be
-   violated by history this feature produced — so the deletion is structurally required, not
-   optional, and it is irreversible outside the backup.
-2. **Live device-trust OTP challenges.** `DELETE FROM identity_action_secrets WHERE purpose =
-   'DEVICE_TRUST_OTP'`. Any Student part-way through confirming a device loses that challenge.
-3. **Trusted-device registrations.** `DROP TABLE identity_trusted_devices`, with its live-credential
-   unique index and both account indexes. Every Student's trusted devices are gone.
-4. **Replacement cooldown state.** `DROP TABLE identity_device_replacement_state`. The 24-hour
-   replacement cooldown is erased, so a Student part-way through one is silently released from it.
-
-#### Schema 37 is a floor once device trust has been used
-
-Rehearsal in disposable infrastructure found that the `0037` down migration
-**cannot run at all** against a database where the feature has been exercised. Two
-independent conditions, either one sufficient:
-
-1. **Any device security event row.** `identity_security_events` carries an
-   append-only `BEFORE UPDATE OR DELETE` trigger from `0005`. The `0037` down
-   migration *must* `DELETE` the nine device event types, because the pre-`0037`
-   `identity_security_events_type` CHECK constraint it restores would otherwise be
-   violated by history the feature produced. The two requirements are
+1. **Any device security event row.** `identity_security_events` carries an append-only
+   `BEFORE UPDATE OR DELETE` trigger from `0005`. The `0037` down migration *must* `DELETE` the nine
+   device event types, because the pre-`0037` `identity_security_events_type` CHECK constraint it
+   restores would otherwise be violated by history the feature produced. The two requirements are
    irreconcilable, and the migration fails with
    `identity_security_events is append-only (attempted DELETE)`.
-2. **Any live `DEVICE_TRUST_OTP` row.** The down migration deletes those rows and
-   then `ALTER`s `identity_action_secrets` in the same transaction. PostgreSQL
-   refuses to `ALTER` a table carrying pending trigger events from earlier DML in
-   that transaction, and the migration fails with
+2. **Any live `DEVICE_TRUST_OTP` row.** The down migration deletes those rows and then `ALTER`s
+   `identity_action_secrets` in the same transaction. PostgreSQL refuses to `ALTER` a table carrying
+   pending trigger events from earlier DML in that transaction, and the migration fails with
    `cannot ALTER TABLE "identity_action_secrets" because it has pending trigger events`.
 
-Both arise the first time any Student trusts, challenges, or revokes a device.
-So in any deployment where device trust is live, **schema 37 is a hard floor**:
-reversing past it is a restore-from-backup operation, not a migration. Check
-before planning a rollback past 37:
+Both refusals are proven by `TestSchema37RollbackIsRefusedByRealDeviceData`. A failed migration
+leaves the marker dirty and destroys nothing, so the refusal is safe — but it is a dead end, not a
+retry. Production has 8 trusted-device rows, so this is the live condition, not a hypothetical.
+
+**The only route below 37 is the already-reviewed recovery strategy**, and it requires explicit
+Product Owner emergency approval:
+
+```
+verified backup snapshot
+  -> restore into a FRESH database (never over the live one)
+  -> verify-restore against the recorded source schema and counts
+  -> promote / repoint DATABASE_URL under supervision
+```
+
+Do not improvise destructive SQL, and never run a generic `migrate down` to get there.
+
+Diagnostic, if a below-37 question is ever raised — non-zero in either column confirms the floor:
 
 ```sql
 SELECT (SELECT count(*) FROM identity_security_events
@@ -1171,43 +1335,24 @@ SELECT (SELECT count(*) FROM identity_security_events
          WHERE purpose = 'DEVICE_TRUST_OTP') AS live_device_otps;
 ```
 
-Non-zero in either column means the `0037` down migration will fail. A failed
-migration leaves the marker dirty and destroys nothing, so the refusal is safe —
-but it is a dead end, not a retry.
+#### Historical reference — what the lower steps would have destroyed
 
-Both refusals are proven by
-`TestSchema37RollbackIsRefusedByRealDeviceData`, and the structural reverse walk
-covers the only shape that can complete: device trust migrated in but never used.
+Retained as reviewed evidence of *why* the floor exists. **These are not available steps for this
+release** and must not be read as a recovery path.
 
-It also drops `sessions.trusted_device_id` and `sessions.device_trust_state` (with the
-`sessions_device_trust_coherent` constraint and the trusted-device index),
-`identity_action_secrets.trusted_device_id`, and the `session_device_trust_state` and
-`trusted_device_revocation_reason` types.
+| Step | Migration | What the down migration destroys | Status |
+|---|---|---|---|
+| 37 → 36 | `0037_student_trusted_devices` | Device security event history (nine event types), live `DEVICE_TRUST_OTP` challenges, `identity_trusted_devices`, and `identity_device_replacement_state` — the device audit trail and the active 24-hour replacement cooldown. No session row is deleted and no Student is logged out. | **UNAVAILABLE.** Refuses outright; production has live device data |
+| 36 → 35 | `0036_bundles_and_offers` | Drops `bundles`, `bundle_courses`, `bundle_price_changes`, `purchase_request_bundle_items`, `bundle_purchase_grants`. | Refuses once commerce data exists; unreachable while 37 → 36 refuses |
+| 35 → 34 | `0035_media_work_leases` | Drops the six work-lease and attempt-accounting columns, their four constraints, and the expired-lease recovery index. Media state, provenance, trusted duration and rendition data are untouched. | Requires in-flight media settled in the same transaction; unreachable while 37 → 36 refuses |
 
-What it does **not** do: no session row is deleted and no Student is logged out. Session families
-survive with their credentials intact and simply stop carrying a device binding, which is the state
-they were in before `0037` was applied.
+The forward chain and this reverse path are rehearsed in disposable infrastructure by
+`backend/internal/db/schema_34_to_38_chain_integration_test.go`. That rehearsal covers the only
+shape that can complete the reverse walk — device trust migrated in but never used — which is
+**not** the production shape.
 
-Items 1 and 4 are the ones to weigh. Deleting the device audit trail destroys the evidence an Admin
-would need to investigate a device-related incident, and erasing cooldown state removes an active
-throttle rather than merely losing a record. Neither is recoverable except from the backup taken
-before the step.
-
-Two consequences worth stating plainly:
-
-- **The reverse path can stop partway, and usually will.** If `0037` refuses because device trust has
-  been used, the database stays at 37. If 36 → 35 refuses because Bundle commerce data exists, it
-  stays at 36. Either way no binary set can serve that schema alongside a D-102 application. Plan the
-  rollback decision knowing **37 is the realistic floor** in a live deployment, and 36 the floor
-  after that.
-- **Application-only rollback is unavailable at every step of this range.** The old and new binaries
-  have disjoint servable schema ranges (F-2), so the schema must move first in both directions.
-
-The forward chain and this reverse path, including which steps destroy what, are rehearsed in
-disposable infrastructure by
-`backend/internal/db/schema_34_to_38_chain_integration_test.go`.
-
-Prove both bookkeeping and physical shape before starting any older binary:
+Prove both bookkeeping and physical shape before starting the deployed application after any
+schema rollback:
 
 ```bash
 docker exec gradex-production-postgres-1 psql -U gradex -d gradex_production \
@@ -1224,7 +1369,7 @@ Required: `37|f` and an empty second result.
 | Window | Cause | Estimate |
 |---|---|---|
 | CP-4 → CP-6 | application stopped for the migration | 1–3 min |
-| CP-5 alone | four additive migrations on a pre-launch dataset | < 30 s |
+| CP-5 alone | **one** additive migration (`0038`) on a pre-launch dataset | < 10 s |
 | CP-6 | container recreate + health waits (`api` healthy, `worker` running, `frontend` healthy) | 30–90 s |
 | CP-6 → CP-10 | **only if the frontend is held back for the import** | + 5–15 min |
 | CP-10 | `--force-recreate` frontend swap | ~4 s 502 |
@@ -1240,8 +1385,8 @@ edge-served assets are unaffected.
 
 | Gate | Position | Decision required |
 |---|---|---|
-| **G0a** | after CP-2, before G0b | **Independent technical approval** of the combined 34 → 38 payload. D-103 is APPROVED (`7d3ae73..e2223d7`) with H1/H2/M1 closed; the combined candidate is **NOT YET SATISFIED**, pending independent approval of this document's release-integrity corrections. Not a Product Owner decision and not waivable by one |
-| **G0b** | after G0a, before CP-3 | Product Owner approves the **34 → 38** payload (D-103 + D-104 + D-105 + D-106), the mandatory outage, the HTTP import path, and shipping the 2 Low D-106 findings unremediated |
+| **G0a** | after CP-2, before G0b | **Independent release-integrity review of this re-derived 37 → 38 procedure.** The software itself remains historically approved (D-103 `7d3ae73..e2223d7`; D-106 APPROVED WITH FINDINGS), and this re-derivation changes no code. What is unreviewed is the changed procedure: one migration instead of four, a fail-closed baseline gate, changed CP-5 failure semantics, and a rewritten rollback model. **NOT SATISFIED.** Not a Product Owner decision and not waivable by one |
+| **G0b** | after G0a, before CP-3 | **Fresh** Product Owner approval. The prior 34 → 38 G0b is **superseded** — its premise (schema 34, four pending migrations) was disproved before any mutation. Approve: baseline clean 37 at `4e7ddcd…`; one pending migration `0038`; mandatory outage; the **already-active** schema-37 hard floor; the 14-manifest import; and shipping the reviewed non-blocking findings |
 | **G1** | after CP-3, before CP-4 | **THE POINT OF NO EASY RETURN.** Approve beginning the outage and the irreversible migration, on a recorded and `verify-restore`-proven backup snapshot |
 | **G2** | after CP-7, before CP-8 | Approve the irreversible catalogue data mutation: 14 institutions, 245 Subjects, no un-import |
 | **G3** | after CP-9, before CP-10 | Approve public exposure of the feature once the data is verified correct |
@@ -1249,17 +1394,24 @@ edge-served assets are unaffected.
 **G1 is the final explicit approval required before any irreversible production mutation.** CP-1
 through CP-3 are read-only or reversible; CP-5 is the first irreversible step.
 
-**G0a is currently unsatisfied, so no gate after it may be granted.** Product Owner approval at G0b,
-G1, G2, or G3 has no effect until G0a is recorded.
+**G0a is unsatisfied, so no gate after it may be granted.** Product Owner approval at G0b, G1, G2 or
+G3 has no effect until G0a is recorded.
 
-What G0a is still waiting on is narrow: independent approval of this document's release-integrity
-corrections. **D-103 / migration `0035` is independently APPROVED and H1, H2 and M1 are
-independently closed** — there is no failed D-103 engineering review outstanding, and D-103 is not
-waiting on Product Owner remediation.
+**On the superseded G0b, stated plainly.** It was not withdrawn for cause and nothing failed review.
+It approved a payload — four sequential migrations from schema 34 — that does not correspond to
+production reality. Execution stopped fail-closed at CP-1 *before* any mutation precisely so that
+this would be caught here rather than discovered mid-outage. Reusing it would mean executing an
+approval whose stated contents cannot happen.
 
-The governance rule stands unchanged as a general matter: Product Owner authority covers release and
-business decisions and does not override a failed engineering review. It simply has nothing to
-override here.
+**The governance rule stands unchanged.** Product Owner authority covers release and business
+decisions and does not override an engineering review. D-103 / migration `0035` is independently
+**APPROVED** with H1, H2 and M1 closed; there is no failed D-103 technical review outstanding and
+none for a Product Owner to remediate.
+
+**One open item neither gate closes.** Repository evidence does not establish that the `4e7ddcd`
+production deployment was authorized or reviewed (F-1). Proceeding on top of that baseline is a
+Product Owner decision; it does not retroactively authorize the earlier deployment, and this
+document does not treat it as authorized.
 
 ---
 
@@ -1268,6 +1420,10 @@ override here.
 - The 2 Low findings (not remediated, by instruction).
 - Adding `gradex-catalog-import` to the production image.
 - Re-importing or upgrading `kuwait-university-launch-v1`.
+- Applying, re-applying or rolling back `0035`, `0036` or `0037`. They are already in production and
+  this release does not touch them.
+- Establishing or ratifying the authorization status of the `4e7ddcd` production deployment. That is
+  an open governance question recorded in F-1, deliberately not answered here.
 - Any remediation of the D-103 review status — **none remains outstanding**. D-103 / migration
   `0035` is independently **APPROVED**, with H1, H2 and M1 closed. As a matter of governance Product
   Owner authority never remediates or overrides a failed technical review, and there is no failed

@@ -1,5 +1,104 @@
 # Gradex Launch Status
 
+> **2026-09-15 (fifth pass) — RELEASE EXECUTION STOPPED FAIL-CLOSED AT CP-1; THE PRODUCTION BASELINE
+> WAS STALE AND THE RELEASE IS RE-DERIVED AS 37 → 38.**
+>
+> **This entry corrects a factual error repeated in every entry below it.** Those entries state
+> "Production has not been touched." That was true when each was written and is **false as of
+> approximately 2026-09-13**. Production is not at `b8dea96` / schema 34. Earlier entries are
+> preserved unchanged as the historical record; this entry supersedes their production-state claims.
+>
+> **What was executed, under the previously approved plan and the prior Product Owner G0b:**
+>
+> - **CP-1 identity and docs-only gate: PASSED.** Worktree clean; `RELEASE_SHA` captured from
+>   `git rev-parse HEAD`; only the two allowlisted documentation files differ from the approved
+>   software head `e2223d7f01197c79a38f3568dfd25495fc5af163`; zero artifact-bearing paths moved.
+> - **Offline manifest validation: PASSED, 15/15.** Every Subject count matches the release plan's
+>   table; the 14 non-KU manifests sum to exactly 245; `kuwait-university-launch-v1` is 84.
+> - **CP-1 live production baseline check: STOPPED.** The plan assumed schema 34. Production is at
+>   clean schema 37.
+>
+> **The stop was correct.** A fail-closed preflight refused to proceed on a disproved premise before
+> any mutation. This is the control working, not a failed deployment.
+>
+> **Verified live production baseline (read-only, 2026-09-15):**
+>
+> | Fact | Value |
+> |---|---|
+> | Deployed application revision | `4e7ddcdbadda86d535f7a3663d9405a628218e5f` |
+> | Schema | **37, clean** (`37 \| f`) |
+> | Migrations already present | `0035`, `0036`, `0037` |
+> | Migration pending | `0038_subject_demand_signals` only — table absent |
+> | Institutions | 1 (`kuwait-university`) |
+> | Kuwait University Subjects | 84 |
+> | `identity_trusted_devices` | 8 rows |
+> | `/healthz`, `/readyz` | `200`; postgres / redis / schema all `ok` |
+>
+> Physical shape and bookkeeping agree. There is no evidence of a falsified `schema_migrations`
+> marker.
+>
+> **No production mutation occurred.** CP-2 was not started. CP-3 backup was not taken. The
+> application was never stopped. No migration ran. No catalogue data was imported.
+>
+> **Production history reconciliation.** `4e7ddcd` is an ancestor of the current release-packaging
+> HEAD and the tip of `b8dea96..4e7ddcd` (18 commits), which carries D-103 (`0035`), D-104 Bundles
+> and Offers (`0036`) and D-105 Student device trust (`0037`). At that commit
+> `MaxSchemaVersion` = 37 and the embedded migration set ends at `0037`, so schema 37 was the
+> intended resulting schema of that payload. **Authorization cannot be established from repository
+> evidence and is not assumed here:** no STATUS entry, no file under `docs/launch/evidence/`, no
+> decision record and no commit records that deployment, an approval verdict against it, or a
+> migration run to 37 — while the 2026-09-11 entry states the combined Bundles/Offers + D-105
+> candidate "requires fresh independent approval before push or production deployment". Host
+> timestamps and ~46 hours of container uptime place the deployment on 2026-09-13. `STATUS.md` was
+> simply never updated afterwards. **Why this went unnoticed: documentation drift, not falsification.**
+>
+> **Re-derived release, documentation-only.**
+> [`RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md`](RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md) is
+> rewritten from the live baseline. No application code, migration, deploy tooling, manifest, test,
+> frontend or runtime configuration is changed.
+>
+> - Migration path is now `37 → 0038_subject_demand_signals → 38`. **One** pending migration.
+>   `0035`–`0037` are never described as pending or newly applied.
+> - CP-1 gains a **fail-closed** live-baseline assertion (clean 37, one pending migration,
+>   1 institution, KU 84, deployed revision `4e7ddcd…`). Anything else stops and re-derives.
+> - Outage remains **mandatory**: deployed API serves 35..37, the candidate API's floor and ceiling
+>   are both 38. Disjoint, so no rolling overlap exists. Old and new workers still must never
+>   overlap. Zero downtime is not claimed.
+> - CP-5 verifies `0038` only, keeps every fail-closed dirty-schema behaviour, and forbids automatic
+>   retry. New: a clean-marker failure at 37 is **fully recoverable** by restarting the deployed
+>   application, because `4e7ddcd` serves 37.
+> - **The schema-37 hard floor is already operationally active**, not a future accepted limitation —
+>   `identity_trusted_devices` has live rows, so the `0037` down migration cannot run today. The
+>   generic 38 → 34 chain is **withdrawn** as a release recovery path; the lower steps are retained
+>   only as historical evidence of why the floor exists. For this release the rollback question is
+>   `38 → 37`, at the cost of the `subject_demand_signals` rows, and 37 is a servable destination.
+>   Going below 37 requires the reviewed verified-backup → fresh-database restore → verify → repoint
+>   strategy under explicit Product Owner emergency approval.
+> - The Subject catalogue data plan is **unchanged**: 14 reviewed non-KU manifests, dry-run then
+>   apply, 15 institutions / 329 Subjects final, KU stays at 84 and is never re-imported, second-pass
+>   NOOP idempotence and all KU-isolation proofs retained.
+>
+> **Gates.**
+>
+> - **Approved software baseline:** unchanged at `e2223d7f01197c79a38f3568dfd25495fc5af163`. The
+>   docs-only allowlist audit from that baseline still passes. Release identity remains derived at
+>   execution time from `git rev-parse HEAD`; no literal release SHA is pinned.
+> - **G0a:** the software remains historically approved, but the **re-derived 37 → 38 procedure has
+>   not been independently reviewed**. NOT SATISFIED. The builder does not grant G0a.
+> - **G0b:** the prior 34 → 38 Product Owner approval is **SUPERSEDED** — it approved applying
+>   `0035` `0036` `0037` `0038` sequentially from schema 34, and three of those four are already in
+>   production. Superseded by factual baseline discovery, **not** by any failure. A fresh G0b is
+>   required covering: baseline clean 37, one pending migration `0038`, mandatory outage, the
+>   already-active schema-37 floor, the 14-manifest import, and the reviewed non-blocking findings.
+> - **G1 / G2 / G3:** unchanged and still separate. None is granted.
+>
+> **Open governance item:** whether the `4e7ddcd` production deployment was authorized is
+> **unestablished** in repository evidence. Shipping on top of that baseline does not settle it.
+>
+> Production remains untouched by this release.
+>
+> ---
+
 > **2026-09-15 (fourth pass) — RELEASE IDENTITY MODEL CORRECTED; THE SELF-REFERENTIAL SHA PIN IS
 > ELIMINATED.**
 >
