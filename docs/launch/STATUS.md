@@ -61,19 +61,25 @@
 >   `0035`–`0037` are never described as pending or newly applied.
 > - CP-1 gains a **fail-closed** live-baseline assertion (clean 37, one pending migration,
 >   1 institution, KU 84, deployed revision `4e7ddcd…`). Anything else stops and re-derives.
-> - Outage remains **mandatory**: deployed API serves 35..37, the candidate API's floor and ceiling
->   are both 38. Disjoint, so no rolling overlap exists. Old and new workers still must never
+> - Outage remains **mandatory**: the deployed API serves **37 only** (floor and ceiling both 37 at
+>   `4e7ddcd`), and the candidate API's floor and ceiling are both 38. Disjoint, so no rolling
+>   overlap exists. The deployed *worker* tolerates 35..37, but worker compatibility is not API
+>   compatibility and does not widen the servable range. Old and new workers still must never
 >   overlap. Zero downtime is not claimed.
 > - CP-5 verifies `0038` only, keeps every fail-closed dirty-schema behaviour, and forbids automatic
 >   retry. New: a clean-marker failure at 37 is **fully recoverable** by restarting the deployed
 >   application, because `4e7ddcd` serves 37.
-> - **The schema-37 hard floor is already operationally active**, not a future accepted limitation —
->   `identity_trusted_devices` has live rows, so the `0037` down migration cannot run today. The
->   generic 38 → 34 chain is **withdrawn** as a release recovery path; the lower steps are retained
->   only as historical evidence of why the floor exists. For this release the rollback question is
->   `38 → 37`, at the cost of the `subject_demand_signals` rows, and 37 is a servable destination.
->   Going below 37 requires the reviewed verified-backup → fresh-database restore → verify → repoint
->   strategy under explicit Product Owner emergency approval.
+> - **Schema 37 is treated as the rollback floor, on a credible but unproven basis.** The mechanism
+>   is independently proven: `0037`-down refuses once device security-event history or a live
+>   `DEVICE_TRUST_OTP` row exists. The captured evidence shows only that Device Trust has been used
+>   (`identity_trusted_devices` has 8 rows), which does **not** prove either refusal condition is
+>   currently present — the preflight queried neither. Policy is unchanged regardless: **do not
+>   assume ordinary 37 → 36 rollback is available.** The generic 38 → 34 chain is **withdrawn** as a
+>   release recovery path; the lower steps are retained only as historical evidence of why the floor
+>   exists. For this release the rollback question is `38 → 37`, at the cost of the
+>   `subject_demand_signals` rows, and 37 is a servable destination. Going below 37 uses the reviewed
+>   verified-backup → fresh-database restore → verify → repoint strategy under explicit Product Owner
+>   emergency approval, unless the down preconditions are explicitly proven safe at emergency time.
 > - The Subject catalogue data plan is **unchanged**: 14 reviewed non-KU manifests, dry-run then
 >   apply, 15 institutions / 329 Subjects final, KU stays at 84 and is never re-imported, second-pass
 >   NOOP idempotence and all KU-isolation proofs retained.

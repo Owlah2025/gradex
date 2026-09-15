@@ -31,7 +31,7 @@ authoritative**.
 | `subject_demand_signals` | absent |
 | Institutions | 1 (`kuwait-university`) |
 | Kuwait University Subjects | 84 |
-| `identity_trusted_devices` rows | **8 — the schema-37 hard floor is already operationally active** |
+| `identity_trusted_devices` rows | 8 — Device Trust has been used; see §Rollback matrix for what this does and does not prove about the schema-37 floor |
 | `/healthz`, `/readyz` | `200`; postgres / redis / schema all `ok` |
 
 **This is a schema 37 → 38 release applying exactly one pending migration.** `0035`, `0036` and
@@ -132,8 +132,10 @@ open rather than assumed either way.
 - The migration path is now `37 → 0038 → 38`. One pending migration, not four.
 - `0035`, `0036` and `0037` must never be described as pending or newly applied by this release.
 - The D-106 software being shipped is unchanged, and so is its approval status.
-- The schema-37 rollback floor is no longer a limitation to be accepted for the future. With 8 rows
-  in `identity_trusted_devices`, **it is already active today** — see §Rollback matrix.
+- The schema-37 rollback floor moves from hypothetical to *credible*: Device Trust has been used in
+  production (`identity_trusted_devices` has rows). That is not the same as proving the floor is
+  currently in force — see §Rollback matrix for the mechanism, the evidence, and the gap between
+  them.
 
 **What this does not resolve.** The reconciliation above is release *planning*, not approval. The
 re-derived 37 → 38 procedure has not been independently reviewed, and the prior Product Owner G0b
@@ -155,9 +157,19 @@ The compatibility analysis is re-derived against the **actually deployed** binar
 So the compatibility truth for this release is:
 
 ```
-old API (4e7ddcd, deployed): schema 35..37   — serves 37, refuses 38
+old API (4e7ddcd, deployed): schema 37 only  — floor 37, ceiling 37
 new API (this candidate):    schema 38 only  — floor 38, ceiling 38
 ```
+
+At `4e7ddcd`, `cmd/api/main.go`'s `requiredSchemaVersion()` returns `StudentTrustedDeviceSchemaVersion`
+= 37 and `MaxSchemaVersion` is also 37, so the deployed API's floor and ceiling are both 37: it
+serves **37 only**.
+
+**Do not read the worker's range as the API's.** The deployed worker's floor is
+`MediaWorkLeaseSchemaVersion` = 35 (with a ceiling of 37), so the worker tolerates 35..37. That is
+worker compatibility, and it has no bearing on whether the API can serve a given schema. An earlier
+revision of this document conflated the two and stated the API range as `35..37`. Readiness is
+decided per binary; the API is the binding constraint here.
 
 The two ranges are adjacent but **disjoint**. The new API's floor and ceiling are both 38, so no
 ordering of binary and migration steps produces a rolling overlap. Zero downtime is **not**
@@ -291,7 +303,7 @@ schema_migrations      37 | f
 pending migration      0038_subject_demand_signals   (the only one)
 institutions           1        (kuwait-university)
 Kuwait University      84 Subjects
-identity_trusted_devices   8 rows   -> schema-37 hard floor already active
+identity_trusted_devices   8 rows   -> Device Trust in use (see Rollback matrix)
 ```
 
 Every `host.sh` invocation must export all four of `GRADEX_HOST_STATE_DIR`, `GRADEX_HOST_ENV_FILE`,
@@ -461,7 +473,7 @@ if ! (
   BASELINE="$(ssh deploy@186.241.16.111 \
     'docker exec -i gradex-production-postgres-1 psql -U gradex -d gradex_production \
        --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1' <<'SQL'
-SELECT version || '|' || dirty FROM schema_migrations;
+SELECT version || '|' || dirty FROM schema_migrations;   -- boolean::text => 'false'/'true'
 SELECT 'institutions|' || count(*) FROM institutions;
 SELECT 'catalogue|' || i.slug || '|' || count(s.id)
   FROM institutions i LEFT JOIN subjects s ON s.institution_id = i.id
@@ -470,7 +482,7 @@ SELECT 'demand_table|' || coalesce(to_regclass('public.subject_demand_signals'):
 SQL
   )"
 
-  EXPECTED='37|f
+  EXPECTED='37|false
 institutions|1
 catalogue|kuwait-university|84
 demand_table|absent'
@@ -499,6 +511,15 @@ Expected on success:
 ```
 PROCEED: production is at clean schema 37 with exactly one pending migration (0038)
 ```
+
+**On the `false` rather than `f`.** The expected marker here is `37|false`, not `37|f`. The two
+renderings are both correct and they are not interchangeable: psql's own column formatter prints a
+boolean as `f`/`t`, but `version || '|' || dirty` concatenates, which casts the boolean to `text`,
+and PostgreSQL's `boolean::text` is `false`/`true`. This gate concatenates, so it must expect
+`false`. The read-only baseline query further down uses separate columns and still shows `37 | f`.
+Comparing against the wrong rendering would make a correct production baseline refuse, which is a
+fail-closed failure but a false one. Do not "normalise" these two spellings into one; each matches
+the query that produces it.
 
 **STOP on any `REFUSE`, and re-derive the plan again rather than reinterpreting it.** Every expected
 count downstream — the migration count at CP-5, the `84` Subject baseline at CP-7, the `15`/`329`
@@ -643,9 +664,11 @@ writing:
 2. **Exactly one migration is pending: `0038_subject_demand_signals`.** This release ships D-106
    only; D-103, D-104 and D-105 are already in production.
 3. A mandatory application outage is accepted for 37 → 38 (F-2). Zero downtime is not available.
-4. **The schema-37 hard floor is already operationally active**, with 8 rows in
-   `identity_trusted_devices`. Reversing below 37 is a restore-from-backup operation today, not a
-   future limitation (§Rollback matrix).
+4. **Ordinary rollback below schema 37 must not be assumed available.** Device Trust has been used
+   in production (`identity_trusted_devices` has rows), which makes the documented `0037`-down
+   refusal conditions credible — though the captured preflight evidence did not prove either
+   specific condition is currently present. Below-37 recovery therefore plans on the reviewed
+   verified-backup → fresh-database restore → verify → repoint route (§Rollback matrix).
 5. The 14-manifest catalogue import runs through the Admin HTTP route under an Admin audit actor,
    not the CLI SYSTEM actor (F-3): 14 institutions, 245 Subjects, `kuwait-university-launch-v1`
    excluded.
@@ -1212,7 +1235,7 @@ Expected:
 - `/readyz` → all three checks `ok`;
 - `38|f`;
 - API logs: no panics, no `column does not exist`, no `schema version is not supported`;
-- worker logs: no repeated lease or claim errors from the newly-applied `0035`;
+- worker logs: no repeated media lease or claim errors;
 - edge logs: 502s confined to the CP-4 → CP-10 window and the ~4s frontend recreate.
 
 ---
@@ -1225,10 +1248,21 @@ The baseline change reshapes this table. Read the two framing facts first.
 schema 37. Any failure that leaves the marker clean at 37 is recovered by restarting the existing
 application: no schema rollback, no data loss, no restore.
 
-**Framing fact 2 — the schema-37 floor is already active, not prospective.** Production carries 8
-rows in `identity_trusted_devices`, and device trust has been exercised. The `0037` down migration
-therefore **cannot run today** (see below). Schema 37 is the floor *now*. This release does not
-create that condition and cannot remove it.
+**Framing fact 2 — treat schema 37 as the rollback floor, without overclaiming why.** Two things
+must be kept apart:
+
+- **Mechanism (independently proven).** Schema 37 *becomes* a hard rollback floor once either
+  `0037`-down refusal condition exists — device security-event history, or a live `DEVICE_TRUST_OTP`
+  row. Both are proven by `TestSchema37RollbackIsRefusedByRealDeviceData`.
+- **Current production evidence (what was actually captured).** Production is at schema 37 and
+  Device Trust has been used: `identity_trusted_devices` contains 8 rows. **That does not prove
+  either refusal condition is present right now.** A trusted-device row count is not a
+  security-event count and not a live-OTP count, and the preflight did not query those.
+
+So the honest statement is: the floor is **credible and unverified**, not demonstrated. The release
+policy is the same either way — **do not assume ordinary 37 → 36 rollback is available** — because
+planning a rollback on an unverified precondition is the failure mode this distinction exists to
+prevent. This release neither creates nor removes that condition.
 
 | Stage | Failure | Rollback | Data loss | Downtime |
 |---|---|---|---|---|
@@ -1293,11 +1327,12 @@ destination, not a step on the way to somewhere else.
 ### Going below 37 is a restore operation, not a migration
 
 **Do not plan a 38 → 34 chain as this release's recovery path.** It is withdrawn as a normal option.
-Production is already past 37 with live Device Trust data, so the migration path below 37 does not
-exist today.
+Production is already past 37 and Device Trust is in use, so the migration path below 37 cannot be
+assumed to exist.
 
-The `0037` down migration **cannot run** against this database. Two independent conditions, either
-one sufficient, and production satisfies them:
+The `0037` down migration **fails whenever either of the following holds**. Two independent
+conditions, either one sufficient — and whether production currently satisfies either was **not**
+established by the captured preflight evidence:
 
 1. **Any device security event row.** `identity_security_events` carries an append-only
    `BEFORE UPDATE OR DELETE` trigger from `0005`. The `0037` down migration *must* `DELETE` the nine
@@ -1312,7 +1347,14 @@ one sufficient, and production satisfies them:
 
 Both refusals are proven by `TestSchema37RollbackIsRefusedByRealDeviceData`. A failed migration
 leaves the marker dirty and destroys nothing, so the refusal is safe — but it is a dead end, not a
-retry. Production has 8 trusted-device rows, so this is the live condition, not a hypothetical.
+retry.
+
+**What production evidence actually supports.** `identity_trusted_devices` holds 8 rows, so Device
+Trust has been used and the refusal conditions are plausible. It is **not** proof of either one: the
+preflight did not count device security events or live `DEVICE_TRUST_OTP` rows. Treat the floor as
+**credible and unproven**. If a below-37 reversal is ever genuinely required, prove the
+preconditions at emergency time with the diagnostic below, under supervision — and if they are not
+explicitly proven safe, use the restore route instead.
 
 **The only route below 37 is the already-reviewed recovery strategy**, and it requires explicit
 Product Owner emergency approval:
@@ -1326,7 +1368,10 @@ verified backup snapshot
 
 Do not improvise destructive SQL, and never run a generic `migrate down` to get there.
 
-Diagnostic, if a below-37 question is ever raised — non-zero in either column confirms the floor:
+Diagnostic, to be run at emergency time if a below-37 question is ever raised. **This was not run
+during preflight**, so the floor's current status is unestablished. Non-zero in either column
+confirms the floor is in force; zero in both is the only evidence that would make an ordinary
+`0037` down even worth attempting:
 
 ```sql
 SELECT (SELECT count(*) FROM identity_security_events
@@ -1342,7 +1387,7 @@ release** and must not be read as a recovery path.
 
 | Step | Migration | What the down migration destroys | Status |
 |---|---|---|---|
-| 37 → 36 | `0037_student_trusted_devices` | Device security event history (nine event types), live `DEVICE_TRUST_OTP` challenges, `identity_trusted_devices`, and `identity_device_replacement_state` — the device audit trail and the active 24-hour replacement cooldown. No session row is deleted and no Student is logged out. | **UNAVAILABLE.** Refuses outright; production has live device data |
+| 37 → 36 | `0037_student_trusted_devices` | Device security event history (nine event types), live `DEVICE_TRUST_OTP` challenges, `identity_trusted_devices`, and `identity_device_replacement_state` — the device audit trail and the active 24-hour replacement cooldown. No session row is deleted and no Student is logged out. | **DO NOT ASSUME AVAILABLE.** Refuses once either condition above holds; Device Trust is in use in production, and neither condition was proven present or absent at preflight |
 | 36 → 35 | `0036_bundles_and_offers` | Drops `bundles`, `bundle_courses`, `bundle_price_changes`, `purchase_request_bundle_items`, `bundle_purchase_grants`. | Refuses once commerce data exists; unreachable while 37 → 36 refuses |
 | 35 → 34 | `0035_media_work_leases` | Drops the six work-lease and attempt-accounting columns, their four constraints, and the expired-lease recovery index. Media state, provenance, trusted duration and rendition data are untouched. | Requires in-flight media settled in the same transaction; unreachable while 37 → 36 refuses |
 
