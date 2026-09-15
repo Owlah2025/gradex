@@ -68,6 +68,14 @@ var (
 	ErrProcessTimeout         = errors.New("media processing timeout")
 	ErrTranscodeFailed        = errors.New("media transcode failed")
 	ErrRetryScheduled         = errors.New("media retry scheduled")
+
+	// ErrLeaseExpired is the refusal a worker receives when its work lease is no
+	// longer valid according to *database* time. It wraps ErrConcurrentModification
+	// because that is exactly what it is — the row now belongs to the recovery
+	// pass or to a replacement attempt — so every existing caller that classifies
+	// concurrent modification keeps behaving identically while the specific cause
+	// stays legible in logs and tests.
+	ErrLeaseExpired = fmt.Errorf("%w: media work lease expired", ErrConcurrentModification)
 )
 
 // ContentTypeMismatchError is returned only when the stored bytes are a

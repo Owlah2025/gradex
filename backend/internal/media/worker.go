@@ -287,7 +287,7 @@ func (w *Worker) finishScan(ctx context.Context, version versionRecord, attempt 
 	if err != nil {
 		return err
 	}
-	if err := w.applyScanState(ctx, tx, version, evidence); err != nil {
+	if err := w.applyScanState(ctx, tx, version, scanWorkID, evidence); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -354,7 +354,13 @@ func loadDuplicateScanEvidence(ctx context.Context, tx pgx.Tx, version versionRe
 	return evidence, nil
 }
 
-func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionRecord, evidence scanEvidence) error {
+// applyScanState commits the scan outcome. Every transition out of SCANNING is
+// fenced in the database by the claiming work identity AND by database-time
+// lease validity, so a worker whose lease has already expired cannot commit a
+// result even while the recovery pass has not yet reclaimed the row. The
+// application clock is never the authority here: `now()` is evaluated by
+// PostgreSQL inside this transaction.
+func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionRecord, scanWorkID string, evidence scanEvidence) error {
 	if evidence.next == StateScanPassed {
 		if version.Kind == KindVideo {
 			commandTag, err := tx.Exec(ctx, `
@@ -362,7 +368,9 @@ func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionR
 				SET state = 'SCAN_PASSED', successful_scan_attempt_id = $1::uuid,
 				    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL
 				WHERE id = $2::uuid AND state = 'SCANNING'
-			`, evidence.attemptID, version.ID)
+				  AND work_claim_token = $3
+				  AND work_lease_expires_at > now()
+			`, evidence.attemptID, version.ID, scanWorkID)
 			if err != nil {
 				return fmt.Errorf("recording successful video scan: %w", err)
 			}
@@ -379,7 +387,9 @@ func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionR
 			SET state = 'SCAN_PASSED', successful_scan_attempt_id = $1::uuid,
 			    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL
 			WHERE id = $2::uuid AND state = 'SCANNING'
-		`, evidence.attemptID, version.ID)
+			  AND work_claim_token = $3
+			  AND work_lease_expires_at > now()
+		`, evidence.attemptID, version.ID, scanWorkID)
 		if err != nil {
 			return fmt.Errorf("recording successful non-video scan: %w", err)
 		}
@@ -404,7 +414,9 @@ func (w *Worker) applyScanState(ctx context.Context, tx pgx.Tx, version versionR
 		    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL,
 		    last_failure_category = CASE WHEN $1::media_asset_version_state = 'SCAN_FAILED' THEN 'SCAN_REJECTED' ELSE 'SCAN_UNAVAILABLE' END
 		WHERE id = $2::uuid AND state = 'SCANNING'
-	`, evidence.next, version.ID)
+		  AND work_claim_token = $3
+		  AND work_lease_expires_at > now()
+	`, evidence.next, version.ID, scanWorkID)
 	if err != nil {
 		return fmt.Errorf("recording failed scan state: %w", err)
 	}
@@ -512,6 +524,17 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID, operationID
 	// zero rather than inheriting a previous attempt's abandoned percentage.
 	claimedAt := w.now().UTC()
 	leaseExpiresAt := claimedAt.Add(w.workLeaseDuration)
+	// The operation-identity fence (D-103 H1). State and safety evidence alone
+	// cannot tell a first delivery apart from a redelivery of an operation that
+	// recovery has already superseded: recovery returns the row to VALIDATED or
+	// QUARANTINED, which is exactly the shape the claim predicate accepts. A
+	// terminal `processing_attempts` row is the authoritative, already-durable
+	// record that an operation identity has been spent — recovery, failure, and
+	// completion all write one — so requiring its absence inside the claiming
+	// UPDATE makes reacquisition unrepresentable rather than merely unlikely.
+	// It is evaluated by PostgreSQL in the same statement that takes the row,
+	// under the FOR UPDATE lock above, so it cannot be raced; it deliberately
+	// does not depend on any queue or broker deduplication.
 	claimed, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions
 		SET state = 'PROCESSING',
@@ -526,6 +549,11 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID, operationID
 		    last_failure_category = NULL
 		WHERE id = $1::uuid AND state = $2::media_asset_version_state
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM processing_attempts pa
+		      WHERE pa.asset_version_id = media_asset_versions.id
+		        AND pa.operation_id = $3
+		  )
 	`, assetVersionID, version.State, operationID, claimedAt, leaseExpiresAt)
 	if err != nil {
 		return versionRecord{}, false, fmt.Errorf("claiming media version for transcode: %w", err)
@@ -687,6 +715,7 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 		    last_failure_category = NULL
 		WHERE id = $3::uuid AND state = 'PROCESSING'
 		  AND work_claim_token = $4
+		  AND work_lease_expires_at > now()
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
 	`, completion.result.TrustedDurationMS, attemptID, completion.assetVersionID, completion.operationID)
 	if err != nil {
@@ -709,10 +738,16 @@ func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID,
 	var state AssetVersionState
 	var scanEvidence, validationEvidence *string
 	var claimToken *string
+	var leaseValid bool
+	// The lease comparison is made by PostgreSQL against its own clock in this
+	// transaction. Reading the timestamp out and comparing it in Go would make
+	// the worker's own clock the authority, which is precisely the drift this
+	// fence exists to remove.
 	if err := tx.QueryRow(ctx, `
-		SELECT state, successful_scan_attempt_id::text, successful_validation_attempt_id::text, work_claim_token
+		SELECT state, successful_scan_attempt_id::text, successful_validation_attempt_id::text, work_claim_token,
+		       COALESCE(work_lease_expires_at > now(), false)
 		FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&state, &scanEvidence, &validationEvidence, &claimToken); err != nil {
+	`, assetVersionID).Scan(&state, &scanEvidence, &validationEvidence, &claimToken, &leaseValid); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -726,6 +761,10 @@ func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID,
 	}
 	if claimToken == nil || *claimToken != operationID {
 		return ErrConcurrentModification
+	}
+	// A stale token and an expired lease are independently sufficient to refuse.
+	if !leaseValid {
+		return ErrLeaseExpired
 	}
 	return nil
 }
@@ -762,6 +801,19 @@ func (w *Worker) recordProcessingFailure(ctx context.Context, assetVersionID, op
 		return fmt.Errorf("beginning processing failure: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	// The same operation-identity fence as the claim boundary, applied before
+	// this attempt writes its own terminal row. Without it a redelivered stale
+	// operation could fail a SCAN_PASSED or VALIDATED row that its replacement
+	// has not claimed yet, stranding the replacement; the claim predicate's
+	// NOT EXISTS cannot be reused here because this transaction is about to
+	// insert exactly the row it would test for.
+	fenced, err := processingOperationSpent(ctx, tx, failure.assetVersionID, failure.operationID)
+	if err != nil {
+		return err
+	}
+	if fenced {
+		return nil
+	}
 	if err := recordFailedProcessingAttempt(ctx, tx, failure); err != nil {
 		return err
 	}
@@ -792,6 +844,30 @@ func (w *Worker) recordProcessingFailure(ctx context.Context, assetVersionID, op
 	return cause
 }
 
+// processingOperationSpent reports whether this exact operation identity has
+// already been recorded terminal for this asset version.
+//
+// The invariant it enforces: once a processing operation ID has been recorded
+// terminal — superseded by recovery, failed, or completed — that exact ID may
+// never again acquire processing authority over that asset version. The version
+// row is locked first so the answer cannot change under a concurrent claim.
+func processingOperationSpent(ctx context.Context, tx pgx.Tx, assetVersionID, operationID string) (bool, error) {
+	var spent bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+		    SELECT 1 FROM processing_attempts
+		    WHERE asset_version_id = $1::uuid AND operation_id = $2
+		)
+		FROM media_asset_versions WHERE id = $1::uuid FOR UPDATE
+	`, assetVersionID, operationID).Scan(&spent); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, fmt.Errorf("checking superseded processing operation: %w", err)
+	}
+	return spent, nil
+}
+
 type processingFailure struct {
 	assetVersionID string
 	operationID    string
@@ -813,12 +889,18 @@ func recordFailedProcessingAttempt(ctx context.Context, tx pgx.Tx, failure proce
 }
 
 func markProcessingFailed(ctx context.Context, tx pgx.Tx, failure processingFailure) (bool, error) {
+	// A PROCESSING row may only be failed by the identity that currently holds a
+	// live lease on it. Once the lease has expired the row belongs to recovery,
+	// so an expired worker's failure is refused here rather than racing it.
 	commandTag, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions SET state = 'PROCESS_FAILED',
 		    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL,
 		    last_failure_category = $3
 		WHERE id = $1::uuid AND state IN ('PROCESSING', 'SCAN_PASSED', 'VALIDATED')
-		  AND (state <> 'PROCESSING' OR work_claim_token = $2)
+		  AND (
+		        (state = 'PROCESSING' AND work_claim_token = $2 AND work_lease_expires_at > now())
+		     OR state <> 'PROCESSING'
+		  )
 	`, failure.assetVersionID, failure.operationID, failure.category)
 	if err != nil {
 		return false, fmt.Errorf("marking processing failure: %w", err)
