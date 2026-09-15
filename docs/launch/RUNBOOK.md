@@ -280,10 +280,68 @@ metadata: the lease claim columns, the two attempt counters, the failure categor
 constraints and partial index. It does not touch media state, provenance, trusted duration, or
 rendition data, so existing `READY` media stays deliverable under D-102.
 
-**In-flight media work needs attention after rollback.** Any Asset Version still in `SCANNING` or
-`PROCESSING` loses its lease evidence and reverts to pre-D-103 behaviour: it will not self-recover,
-and it requires the existing Admin retry operation. Prefer draining or letting in-flight media work
-settle before rolling back.
+**In-flight media work needs attention after rollback, and Admin Retry alone will not do it.**
+
+An earlier version of this section said that in-flight work "requires the existing Admin retry
+operation". That was wrong, and acting on it would have stranded assets:
+
+- `Service.Retry` accepts only `SCAN_FAILED`, `SCAN_ERROR`, and `PROCESS_FAILED`. An Asset Version
+  still in `SCANNING` or `PROCESSING` is in none of them and is refused with a state conflict.
+- Rolling back `0035` also removes the lease columns, so the D-103 recovery pass that would
+  otherwise reclaim those rows cannot run either. Under D-102 binaries **nothing** reclaims them.
+
+The supported procedure is to settle in-flight work **as part of the supervised rollback
+transaction**, before the `0035` down SQL, so every stranded row lands in the terminal state its own
+path would have reached — which is exactly the set Admin Retry accepts:
+
+```sql
+UPDATE media_asset_versions
+SET state = CASE state
+        WHEN 'SCANNING' THEN 'SCAN_ERROR'
+        WHEN 'PROCESSING' THEN 'PROCESS_FAILED'
+    END::media_asset_version_state,
+    processing_stage = NULL,
+    processing_progress_percent = NULL,
+    processing_updated_at = NULL,
+    processing_attempt_token = NULL,
+    work_claim_token = NULL,
+    work_claimed_at = NULL,
+    work_lease_expires_at = NULL,
+    last_failure_category = 'WORKER_INTERRUPTED'
+WHERE state IN ('SCANNING', 'PROCESSING');
+```
+
+Three details are load-bearing:
+
+1. **It runs before the `0035` down SQL**, in the same transaction. After the drop it could not
+   reference the lease columns at all.
+2. **It clears the lease columns in the same statement.** Leaving them populated on a row that is no
+   longer `SCANNING` or `PROCESSING` violates `media_asset_versions_work_claim_coherent`, which is
+   still in force at that point in the transaction.
+3. **It takes only edges the state machine already permits** — `SCANNING -> SCAN_ERROR` and
+   `PROCESSING -> PROCESS_FAILED`. It is not a bypass of the transition trigger, and Retry's own
+   state validation is unchanged.
+
+After the rollback completes, an Admin retries each settled Asset Version. Retry resets the scan and
+processing attempt counters to zero, so a recovered asset starts from a clean budget.
+
+**One limit to plan around.** An Asset Version holding D-088 trusted-validation provenance is
+retryable only in a deployment where the trusted path still applies. In a scanner-mode deployment the
+retry is refused with a state conflict, and the asset is left exactly as the settle found it. Count
+those rows before rolling back:
+
+```sql
+SELECT count(*) FROM media_asset_versions
+ WHERE state IN ('SCANNING', 'PROCESSING') AND successful_validation_attempt_id IS NOT NULL;
+```
+
+Prefer draining or letting in-flight media work settle before rolling back; the procedure above is
+the fallback for work that is still in flight when the rollback has to proceed.
+
+This procedure is executed by
+`backend/internal/media/rollback_recovery_integration_test.go`, which runs the settle statement
+verbatim, proves Retry refuses in-flight and healthy states without it, proves a settled asset
+retries and reaches `READY` again, and pins the trusted-provenance limit.
 
 ---
 
