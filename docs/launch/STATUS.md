@@ -95,7 +95,7 @@
 >   `0035` `0036` `0037` `0038` sequentially from schema 34, and three of those four are already in
 >   production. Superseded by factual baseline discovery, **not** by any failure. A fresh G0b is
 >   required covering: baseline clean 37, one pending migration `0038`, mandatory outage, the
->   already-active schema-37 floor, the 14-manifest import, and the reviewed non-blocking findings.
+>   credible but currently unverified schema-37 rollback floor — do not assume 37 → 36 is available unless the down-migration preconditions are explicitly proven safe at emergency time — the 14-manifest import, and the reviewed non-blocking findings.
 > - **G1 / G2 / G3:** unchanged and still separate. None is granted.
 >
 > **Open governance item:** whether the `4e7ddcd` production deployment was authorized is
