@@ -236,22 +236,43 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 	`, work.id, operationID); err != nil {
 		return fmt.Errorf("recording interrupted processing attempt: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `
+	// processing_attempt_count is reconciled against the durable attempt record
+	// in the same statement that fails the row (D-103 M1).
+	//
+	// INVARIANT: processing_attempt_count is the number of processing attempts
+	// already CONSUMED for this asset version, and is never less than the number
+	// of rows in processing_attempts for it.
+	//
+	// A row that entered PROCESSING before 0035 carries the schema default of 0
+	// while a real attempt was in flight, so reading the stored counter would
+	// hand that legacy attempt back for free and allow a fourth effective
+	// processing attempt. The terminal row inserted immediately above is the
+	// evidence that the attempt was consumed, so GREATEST against the attempt
+	// count makes the legacy attempt count exactly once. For a row claimed under
+	// 0035 the two numbers already agree, so this never double-counts. The
+	// reconciled value is returned and used for the budget decision below;
+	// the stale in-memory counter is deliberately not consulted again.
+	var attemptsConsumed int
+	if err := tx.QueryRow(ctx, `
 		UPDATE media_asset_versions SET state='PROCESS_FAILED',
 		  processing_stage=NULL, processing_progress_percent=NULL, processing_updated_at=NULL, processing_attempt_token=NULL,
 		  work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
-		  last_failure_category='WORKER_INTERRUPTED'
+		  last_failure_category='WORKER_INTERRUPTED',
+		  processing_attempt_count=GREATEST(processing_attempt_count, (
+		    SELECT count(*) FROM processing_attempts pa WHERE pa.asset_version_id=$1::uuid
+		  ))
 		WHERE id=$1::uuid AND state='PROCESSING'
-	`, work.id); err != nil {
+		RETURNING processing_attempt_count
+	`, work.id).Scan(&attemptsConsumed); err != nil {
 		return fmt.Errorf("failing interrupted processing: %w", err)
 	}
-	if work.processingAttempts >= MaxWorkAttempts {
+	if attemptsConsumed >= MaxWorkAttempts {
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state='QUARANTINED' WHERE id=$1::uuid AND state='PROCESS_FAILED'`, work.id); err != nil {
 		return fmt.Errorf("resetting interrupted processing: %w", err)
 	}
-	availableAt := w.now().UTC().Add(retryBackoff(work.processingAttempts))
+	availableAt := w.now().UTC().Add(retryBackoff(attemptsConsumed))
 	if work.hasValidationEvidence {
 		if _, err := tx.Exec(ctx, `UPDATE media_asset_versions SET state='VALIDATED' WHERE id=$1::uuid AND state='QUARANTINED'`, work.id); err != nil {
 			return fmt.Errorf("restoring immutable validation provenance: %w", err)
