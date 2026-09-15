@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -230,9 +231,28 @@ func (r *Repository) SubjectDetail(
 		return nil, nil
 	}
 
+	// Whether this value is a Subject identifier is decided by parsing it as a
+	// UUID in Go, never by a shape test in SQL.
+	//
+	// The previous form matched `^[0-9a-fA-F-]{36}$` and then cast the raw value
+	// with ::uuid. A string of 36 hyphens satisfies that pattern and is not a
+	// UUID, so PostgreSQL raised invalid_text_representation and the repository
+	// error surfaced as a 500 — a malformed URL answered as a server fault. No
+	// regex fixes this, because the shape is not the question: only a parser
+	// knows what PostgreSQL will accept.
+	//
+	// The parsed canonical value is bound as its own parameter. A value that is
+	// not a UUID binds NULL, so the identifier branch cannot match and the
+	// lookup falls through to the ordinary code path; finding nothing there is
+	// an ordinary not-found, which the HTTP layer renders as 404.
+	var subjectID any
+	if parsed, err := uuid.Parse(value); err == nil {
+		subjectID = parsed.String()
+	}
+
 	// A code and an identifier are matched in one query rather than by guessing
-	// the shape of the value first: a Subject whose official code happens to
-	// parse as a UUID must still resolve by code.
+	// which one the caller meant: a Subject whose official code happens to parse
+	// as a UUID must still resolve by code.
 	query := `
 		SELECT s.id::text, COALESCE(s.official_code, ''), s.title_ar, s.title_en,
 			i.slug, i.name_ar, i.name_en,
@@ -243,13 +263,13 @@ func (r *Repository) SubjectDetail(
 			AND i.slug = $2
 			AND (
 				s.code_normalized = academic_normalize_code($3)
-				OR ($3 ~ '^[0-9a-fA-F-]{36}$' AND s.id = $3::uuid)
+				OR ($4::uuid IS NOT NULL AND s.id = $4::uuid)
 			)
 		LIMIT 1`
 
 	var identifier, code, coursesJSON string
 	var item SubjectListing
-	err := r.pool.QueryRow(ctx, query, arabic, institutionSlug, value).Scan(
+	err := r.pool.QueryRow(ctx, query, arabic, institutionSlug, value, subjectID).Scan(
 		&identifier, &code, &item.TitleAr, &item.TitleEn,
 		&item.InstitutionSlug, &item.InstitutionNameAr, &item.InstitutionNameEn, &coursesJSON)
 	if err != nil {

@@ -5,6 +5,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"testing"
 )
 
@@ -472,6 +473,125 @@ func TestSubjectServedStatusFollowsCoursePublication(t *testing.T) {
 		}
 		if !body.Items[0].Served {
 			t.Error("the Subject has a live published Course; Admin must see served=true")
+		}
+	})
+}
+
+// Public Subject detail must answer 404 for anything it cannot resolve, and
+// must never answer 500 because the value looked like a UUID and was not.
+//
+// The regression: the lookup classified identifiers with a SQL shape test,
+// `$3 ~ '^[0-9a-fA-F-]{36}$'`, and then cast the raw value with ::uuid. Thirty-six
+// hyphens satisfy that pattern and are not a UUID, so PostgreSQL raised
+// invalid_text_representation and a malformed URL was answered as a server
+// fault. The assertions below cross the HTTP boundary rather than inspecting a
+// repository error, because 404-not-500 is a contract of the public surface.
+func TestPublicSubjectDetailResolvesOrAnswersNotFound(t *testing.T) {
+	env := setupAcademicAPIServer(t)
+	ctx := t.Context()
+	const institutionSlug = "detail-university"
+
+	var institutionID string
+	if err := env.pool.QueryRow(ctx, `
+		INSERT INTO institutions (country_code, slug, name_ar, name_en)
+		VALUES ('KW', $1, 'جامعة التفاصيل', 'Detail University')
+		RETURNING id::text`, institutionSlug).Scan(&institutionID); err != nil {
+		t.Fatalf("seeding institution: %v", err)
+	}
+
+	var codedID string
+	if err := env.pool.QueryRow(ctx, `
+		INSERT INTO subjects (institution_id, official_code, title_ar, title_en)
+		VALUES ($1::uuid, 'DTL 101', 'مادة مرمّزة', 'Coded Subject')
+		RETURNING id::text`, institutionID).Scan(&codedID); err != nil {
+		t.Fatalf("seeding coded subject: %v", err)
+	}
+
+	// A code-less Subject's public value *is* its identifier, so the UUID branch
+	// is a supported public identity and has to keep working.
+	var codelessID string
+	if err := env.pool.QueryRow(ctx, `
+		INSERT INTO subjects (institution_id, official_code, title_ar, title_en)
+		VALUES ($1::uuid, NULL, 'مادة بلا رمز', 'Code-less Subject')
+		RETURNING id::text`, institutionID).Scan(&codelessID); err != nil {
+		t.Fatalf("seeding code-less subject: %v", err)
+	}
+
+	detail := func(t *testing.T, value string) (int, []byte) {
+		t.Helper()
+		return env.call(t, http.MethodGet,
+			"/api/v1/catalog/subjects/"+institutionSlug+"/"+url.PathEscape(value), "", nil)
+	}
+
+	t.Run("a coded Subject resolves by its official code", func(t *testing.T) {
+		status, raw := detail(t, "DTL 101")
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", status, raw)
+		}
+		var body subjectListingResponse
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if body.SubjectID != codedID || body.Code != "DTL 101" {
+			t.Fatalf("resolved %+v, want the seeded coded Subject", body)
+		}
+	})
+
+	t.Run("a code-less Subject resolves by its identifier", func(t *testing.T) {
+		status, raw := detail(t, codelessID)
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", status, raw)
+		}
+		var body subjectListingResponse
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if body.SubjectID != codelessID {
+			t.Fatalf("resolved %q, want the code-less Subject %q", body.SubjectID, codelessID)
+		}
+		// Its public value is the identifier, because it has no code to share.
+		if body.Value != codelessID {
+			t.Errorf("value = %q, want the identifier %q", body.Value, codelessID)
+		}
+	})
+
+	t.Run("an ordinary unknown value is not found", func(t *testing.T) {
+		for _, value := range []string{"NOSUCH 999", "unknown", "0"} {
+			if status, raw := detail(t, value); status != http.StatusNotFound {
+				t.Errorf("detail(%q) status = %d, want 404; body %s", value, status, raw)
+			}
+		}
+	})
+
+	// The heart of the regression. Every value here is UUID-shaped enough to
+	// have reached the old ::uuid cast, and none of them is a UUID.
+	t.Run("a malformed UUID-shaped value is not found, never a server error", func(t *testing.T) {
+		malformed := map[string]string{
+			"thirty-six hyphens":       "------------------------------------",
+			"valid shape, bad hex":     "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+			"one bad hex digit":        "123e4567-e89b-12d3-a456-42661417400g",
+			"wrong group lengths":      "123e456-7e89b-12d3-a456-4266141740000",
+			"too few groups":           "123e4567-e89b-12d3-426614174000-----",
+			"hyphens and hex, 36 long": "1-2-3-4-5-6-7-8-9-0-a-b-c-d-e-f-1-2-",
+			"all zeroes but truncated": "00000000-0000-0000-0000-00000000000",
+		}
+		for name, value := range malformed {
+			status, raw := detail(t, value)
+			if status == http.StatusInternalServerError {
+				t.Errorf("detail(%s = %q) answered 500; a malformed URL is not a server fault; body %s",
+					name, value, raw)
+				continue
+			}
+			if status != http.StatusNotFound {
+				t.Errorf("detail(%s = %q) status = %d, want 404; body %s", name, value, status, raw)
+			}
+		}
+	})
+
+	// A well-formed UUID that names nothing is still simply not found.
+	t.Run("an unused but valid UUID is not found", func(t *testing.T) {
+		if status, raw := detail(t, "123e4567-e89b-12d3-a456-426614174000"); status != http.StatusNotFound {
+			t.Errorf("status = %d, want 404; body %s", status, raw)
 		}
 	})
 }

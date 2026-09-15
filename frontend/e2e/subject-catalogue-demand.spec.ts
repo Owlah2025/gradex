@@ -461,6 +461,25 @@ test("An unknown Subject URL is a real HTTP 404 while a real one renders", async
   );
   expect(present?.status(), "a real Subject must answer 200").toBe(200);
   await expect(page.getByTestId("subject-availability")).toHaveText("Available now");
+
+  // UUID-shaped but not a UUID. The detail lookup used to classify these with a
+  // SQL shape test and then cast the raw value with ::uuid, so PostgreSQL
+  // rejected the cast and a mistyped URL was served as a 500. Browser-proven
+  // here because "404, never 500" is a contract of the public URL, not of the
+  // repository.
+  for (const malformed of [
+    "------------------------------------",
+    "zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz",
+    "123e456-7e89b-12d3-a456-4266141740000",
+  ]) {
+    const response = await page.goto(
+      `/en/subjects/${INSTITUTION_SLUG}/${encodeURIComponent(malformed)}`,
+    );
+    expect(
+      response?.status(),
+      `a malformed UUID-shaped value (${malformed}) must answer 404, never 500`,
+    ).toBe(404);
+  }
 });
 
 test("Arabic: a Student requests a Subject through the Arabic routes", async ({
