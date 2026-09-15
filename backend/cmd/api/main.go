@@ -288,8 +288,16 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // then fail every media status poll with "column does not exist". Readiness
 // must fail closed instead, which is what keeps a half-migrated deployment out
 // of the load balancer rather than into it.
+//
+// This build mounts the D-106 Subject discovery and demand routes, and they
+// query subject_demand_signals unconditionally — the anonymous catalogue browse
+// and detail reads join it to report demand, and the Student and Admin demand
+// routes read and write it directly. That table arrives in schema 38, so a
+// process serving schema 37 would report ready and then fail every one of those
+// routes on a missing relation. The floor is therefore the schema that
+// introduces the table, not the one before it.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.StudentTrustedDeviceSchemaVersion
+	return db.SubjectDemandSignalSchemaVersion
 }
 
 func buildLearningFoundation(

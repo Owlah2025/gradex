@@ -731,9 +731,28 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	}
 }
 
-func TestRequiredSchemaVersionIncludesStudentDeviceColumns(t *testing.T) {
-	if got := requiredSchemaVersion(nil); got != db.StudentTrustedDeviceSchemaVersion {
-		t.Fatalf("required schema = %d, want %d", got, db.StudentTrustedDeviceSchemaVersion)
+// TestRequiredSchemaVersionCoversMountedRoutes pins the readiness floor to the
+// newest schema any mounted route actually reads.
+//
+// This build mounts the D-106 Subject discovery and demand routes, which query
+// subject_demand_signals — a table that arrives in schema 38. A floor of 37
+// would let the process report ready against a database where that table does
+// not exist, and every one of those routes would then fail on a missing
+// relation instead of the deployment being held out of the load balancer.
+func TestRequiredSchemaVersionCoversMountedRoutes(t *testing.T) {
+	if got := requiredSchemaVersion(nil); got != db.SubjectDemandSignalSchemaVersion {
+		t.Fatalf("required schema = %d, want %d", got, db.SubjectDemandSignalSchemaVersion)
+	}
+	// The floor must never exceed what this build can serve, or readiness would
+	// be unsatisfiable at every version.
+	if got := requiredSchemaVersion(nil); got > db.MaxSchemaVersion {
+		t.Fatalf("required schema %d exceeds the build ceiling %d", got, db.MaxSchemaVersion)
+	}
+	// Schema 37 carries the trusted-device tables but not subject_demand_signals,
+	// so it must sit strictly below the floor rather than at it.
+	if db.StudentTrustedDeviceSchemaVersion >= requiredSchemaVersion(nil) {
+		t.Fatalf("schema %d must be below the readiness floor %d",
+			db.StudentTrustedDeviceSchemaVersion, requiredSchemaVersion(nil))
 	}
 }
 

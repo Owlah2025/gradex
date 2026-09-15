@@ -130,6 +130,8 @@ var (
 	transactionalEmailTables = []string{"transactional_email_deliveries", "transactional_email_attempts"}
 	purchaseRequestTables    = []string{"purchase_requests"}
 	bundleTables             = []string{"bundles", "bundle_courses", "bundle_price_changes", "purchase_request_bundle_items", "bundle_purchase_grants"}
+	trustedDeviceTables      = []string{"identity_trusted_devices", "identity_device_replacement_state"}
+	subjectDemandTables      = []string{"subject_demand_signals"}
 )
 
 func allTables() []string {
@@ -145,7 +147,9 @@ func allTables() []string {
 	all = append(all, courseAccessGrantTables...)
 	all = append(all, transactionalEmailTables...)
 	all = append(all, purchaseRequestTables...)
-	return append(all, bundleTables...)
+	all = append(all, bundleTables...)
+	all = append(all, trustedDeviceTables...)
+	return append(all, subjectDemandTables...)
 }
 
 // TestMigrateUpDownUp walks the full lifecycle the release process depends on,
