@@ -1,5 +1,51 @@
 # Gradex Launch Status
 
+> **2026-09-15 (fourth pass) — RELEASE IDENTITY MODEL CORRECTED; THE SELF-REFERENTIAL SHA PIN IS
+> ELIMINATED.**
+>
+> **Terminology, corrected.** The previous entry called `e2223d7` the "current frozen HEAD". That
+> wording is superseded and should not be used: repository HEAD is later than `e2223d7`, because
+> committing release documentation necessarily moves it. Two distinct identities, never conflated:
+>
+> | Identity | Value | Role |
+> |---|---|---|
+> | **Approved software head** | `e2223d7f01197c79a38f3568dfd25495fc5af163` (fixed) | The commit whose deployable content is independently approved. Baseline for the CP-1 docs-only allowlist audit. Never builds, tags, labels or selects an artifact. |
+> | **Release packaging / documentation head** | the clean checked-out Git HEAD at release execution time | Captured fail-closed at CP-1 as `RELEASE_SHA="$(git rev-parse HEAD)"`, with `SHORT="${RELEASE_SHA:0:12}"`. This is the immutable identity of the artifact actually built and deployed. |
+>
+> **Why no SHA is hardcoded here.** Writing the final release SHA into a document that is itself
+> committed creates a fixed-point problem: the commit moves HEAD, so the recorded SHA is stale on
+> arrival. The previous two revisions each hit this. The release plan now derives the identity from
+> the same source `release.sh build` uses, and this entry deliberately does **not** record the SHA of
+> the commit containing it.
+>
+> **How the final release SHA is established.** At CP-1, after independent approval, on a clean
+> worktree: `RELEASE_SHA` is captured from `git rev-parse HEAD`, validated as a resolvable 40-hex
+> commit, and `SHORT` derived from it. Every change between the approved software head and that SHA
+> must match the docs-only allowlist — exactly
+> `docs/launch/RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md` and `docs/launch/STATUS.md` — with a
+> second positive check that no path under `backend/`, `frontend/`, `deploy/`, `scripts/`, `tools/`
+> or `specs/` has moved. Anything else stops the release, because the approval would no longer cover
+> what is about to be built. Every build, image tag, OCI provenance label, export directory, host
+> drop path, `release.env` and `apply-release` check then resolves to that one captured value.
+>
+> **Verdicts unchanged from the previous entry, restated for clarity:**
+>
+> - **D-103 / migration `0035`:** **APPROVED**. H1, H2 and M1 independently confirmed closed. There
+>   is no failed D-103 engineering review outstanding, and nothing about D-103 for a Product Owner to
+>   override.
+> - **Deployable software content at the approved software head:** independently technically
+>   approved. Everything after it is documentation-only.
+> - **`0037` rollback hard floor:** documented operational limitation, not a forward-release blocker.
+> - **Canonical `t3-student-academic-profile`:** pre-existing / load-induced test-harness flake,
+>   non-blocking.
+> - **Technical G0a:** **NOT YET SATISFIED**, pending independent verification of this
+>   release-integrity correction. The builder does not grant G0a.
+> - **Product Owner G0b:** not approved, and not reachable until G0a is satisfied.
+>
+> Production has not been touched.
+>
+> ---
+
 > **2026-09-15 (third pass) — D-103 APPROVED; COMBINED 34→38 CANDIDATE REJECTED ONLY FOR RELEASE
 > DOCUMENTATION PINNING, NOW CORRECTED.**
 >

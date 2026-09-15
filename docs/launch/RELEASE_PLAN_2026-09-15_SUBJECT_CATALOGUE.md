@@ -4,12 +4,31 @@
 system has been contacted. Every command below is written to be read, approved, and then run by a
 human operator.
 
-**Release SHA:** `e2223d7f01197c79a38f3568dfd25495fc5af163`
+**Approved software head:** `e2223d7f01197c79a38f3568dfd25495fc5af163`
 **Branch:** `catalog-seed-ibntohamy-20260914`
 **Worktree at planning time:** clean
 
-This SHA is the single executable identity of the release. Every command, export, image tag,
-provenance check and artifact path below resolves to it.
+### Release identity — two different things, deliberately
+
+This document names **two** identities and never conflates them.
+
+| Identity | Value | What it is for |
+|---|---|---|
+| **Approved software head** | `e2223d7f01197c79a38f3568dfd25495fc5af163` (fixed) | The commit whose *deployable content* is independently approved. Used only as the baseline for the CP-1 docs-only allowlist audit. Never used to build, tag, label, or select an artifact. |
+| **`RELEASE_SHA`** | `$(git rev-parse HEAD)`, captured at CP-1 | The immutable identity of the artifact actually built and deployed. Every build, tag, provenance label, export path, host drop path, `release.env` and `apply-release` check resolves to this one value. |
+
+**Why this plan contains no literal release SHA.** `release.sh build` derives the release identity
+from the checked-out Git HEAD (`current_revision()` is `git rev-parse HEAD` behind a clean-worktree
+refusal). Any literal final SHA written into this document becomes stale the moment the document
+itself is committed — the commit changes HEAD, so the document would name a revision the tooling
+would not build. That is a self-referential trap with no fixed point, and the previous revision of
+this plan fell into it twice. The fix is structural: the document derives the identity from the same
+source the tooling does, and pins only the *approved software head*, which is fixed and never
+changes when documentation is committed.
+
+**What makes that safe.** Documentation commits move HEAD but must not move the artifact. CP-1
+proves that fail-closed with an explicit allowlist: everything between the approved software head
+and HEAD must be one of exactly two documentation files, or the release stops.
 
 **What it contains, and the verdict on each part:**
 
@@ -21,8 +40,10 @@ provenance check and artifact path below resolves to it.
 
 The 2 Low D-106 findings are **not** remediated in this release.
 
-`c908168` appears below only where an earlier commit is being discussed as history. It is **not**
-the candidate being deployed and must never be selected by a command in this document.
+Historical review SHAs (`c908168`, `7d3ae73`, `e2223d7`, `4e7ddcd`, `61142de`) appear below as
+evidence of what was reviewed. Only `e2223d7`, as the approved software head, carries any operative
+meaning — and only as the CP-1 audit baseline. No command in this document selects an artifact by a
+literal SHA.
 
 ---
 
@@ -50,8 +71,8 @@ its own separate approval on `7d3ae73..e2223d7`. Neither verdict is an approval 
 payload: STATUS.md records that the combined Bundles + D-105 candidate "requires fresh independent
 approval before push or production deployment", and that approval is what G0a still waits on.
 
-**Consequence:** deploying `e2223d7f01197c79a38f3568dfd25495fc5af163` to production ships D-103,
-D-104 and D-105 alongside D-106. Two options, and the choice is the Product Owner's:
+**Consequence:** this release ships D-103, D-104 and D-105 alongside D-106. Two options, and the
+choice is the Product Owner's:
 
 **This is not a Product Owner waiver.** Product Owner approval governs release and business
 decisions — timing, scope, risk acceptance, whether to ship at all — and has no authority over
@@ -75,11 +96,12 @@ Everything below is written for a 34 → 38 step. Under Option B, only `0038` is
 the expected `migrate up` output changes accordingly; nothing else in the plan changes.
 
 **Remediation status.** D-103 is independently APPROVED and H1, H2 and M1 are confirmed closed.
-The outstanding item is this document's own release-integrity pinning, corrected in this revision to
-`e2223d7f01197c79a38f3568dfd25495fc5af163` throughout. Correcting it is builder work and is explicitly **not**
-self-approval: it does not by itself clear the combined candidate's rejection, and it does not
-unblock G0. The candidate remains unauthorized for production until an independent reviewer verifies
-the corrected pinning against the exact re-review range recorded in `docs/launch/STATUS.md`.
+The outstanding item is this document's own release-integrity model, corrected in this revision:
+the release identity is now derived from `git rev-parse HEAD` exactly as `release.sh` derives it,
+and the fixed `e2223d7` survives only as the approved-software baseline for the CP-1 allowlist
+audit. Correcting it is builder work and is explicitly **not** self-approval: it does not by itself
+clear the combined candidate's rejection, and it does not unblock G0. The candidate remains
+unauthorized for production until an independent reviewer verifies this correction.
 
 ### F-2 — There is no zero-downtime path. A hard outage window is mandatory.
 
@@ -145,12 +167,14 @@ audit record for an operator-driven import.
 
 | Image | Tag | Contents |
 |---|---|---|
-| `gradex-backend` | `hostinger-e2223d7f0119` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038`, embedded manifests |
-| `gradex-frontend` | `hostinger-e2223d7f0119` | Next.js build incl. the new Subject routes |
-| `gradex-backend-proof` | `hostinger-e2223d7f0119` | proof/seed tooling; not started by this release |
+| `gradex-backend` | `hostinger-$SHORT` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038`, embedded manifests |
+| `gradex-frontend` | `hostinger-$SHORT` | Next.js build incl. the new Subject routes |
+| `gradex-backend-proof` | `hostinger-$SHORT` | proof/seed tooling; not started by this release |
 
-All three carry `org.opencontainers.image.revision=e2223d7f01197c79a38f3568dfd25495fc5af163`;
-`release.sh record` and `host.sh apply-release` both verify that label against the release SHA.
+All three are tagged `hostinger-$SHORT` and carry
+`org.opencontainers.image.revision=$RELEASE_SHA`. `release.sh record` and `host.sh apply-release`
+both verify that label against the release SHA they derive, so a mismatch fails the release rather
+than shipping a mislabelled image.
 
 ### Backend components new or changed in the tranche
 
@@ -165,7 +189,7 @@ All three carry `org.opencontainers.image.revision=e2223d7f01197c79a38f3568dfd25
   `GET|POST /api/v1/me/subject-demand`, `DELETE /api/v1/me/subject-demand/:subjectId` (Student).
 - `backend/internal/academic/manifest/data/**` — 14 new `manifest.yaml` + `sources.yaml` pairs.
   `kuwait-university/` is **unchanged** across the whole deployed range
-  (`git diff --stat 4e7ddcd..e2223d7f01197c79a38f3568dfd25495fc5af163 -- backend/internal/academic/manifest/data/kuwait-university`
+  (`git diff --stat 4e7ddcd.."$RELEASE_SHA" -- backend/internal/academic/manifest/data/kuwait-university`
   reports no changes).
 
 ### Frontend routes new in the tranche
@@ -179,7 +203,7 @@ is optional at the edge — `/subjects` and `/en/subjects` both serve.
 
 ### Deploy tooling
 
-`git diff --stat 61142de e2223d7f01197c79a38f3568dfd25495fc5af163 -- deploy` reports a single changed file,
+`git diff --stat 61142de "$RELEASE_SHA" -- deploy` reports a single changed file,
 `deploy/env/production-like.env.example` (+4 lines), which belongs to the S12 production-like
 topology and is not used by the Hostinger host. `deploy/hostinger/compose.yml` and
 `deploy/hostinger/host.sh` are **byte-identical** to the pinned project root, so the existing
@@ -211,8 +235,10 @@ export GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production
 export GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env
 export GRADEX_HOST_PROJECT=gradex-production
 export APP_ENV=production
-export RELEASE_SHA=e2223d7f01197c79a38f3568dfd25495fc5af163
-export SHORT=e2223d7f0119
+# The exact value CP-1 captured and CP-2 verified. Carried across, never re-derived here: the
+# host checkout is pinned at 61142de and its HEAD is NOT the release identity.
+export RELEASE_SHA=<value captured at CP-1>
+export SHORT="${RELEASE_SHA:0:12}"
 cd /home/deploy/gradex-release-61142dedf146
 ```
 
@@ -256,21 +282,83 @@ CP-16 final health/readiness + log inspection
 
 ---
 
-## CP-1 — Preflight and SHA verification (local, read-only)
+## CP-1 — Preflight, release identity capture, and docs-only audit (local, read-only)
+
+This is where the release gets its identity. Nothing downstream may name a SHA that did not come
+from here.
+
+**1. Capture the identity from the checked-out HEAD**, the same source `release.sh build` uses:
 
 ```bash
-git -C /home/owlah/worktrees/gradex-catalog-seed rev-parse HEAD
-git -C /home/owlah/worktrees/gradex-catalog-seed status --porcelain=v1
-git -C /home/owlah/worktrees/gradex-catalog-seed diff --stat 61142de e2223d7f01197c79a38f3568dfd25495fc5af163 -- deploy
+cd /home/owlah/worktrees/gradex-catalog-seed
+export APPROVED_SOFTWARE_HEAD=e2223d7f01197c79a38f3568dfd25495fc5af163
+export RELEASE_SHA="$(git rev-parse HEAD)"
+export SHORT="${RELEASE_SHA:0:12}"
+printf 'release identity: %s (short %s)\n' "$RELEASE_SHA" "$SHORT"
 ```
 
-Expected:
+**2. Run the fail-closed gate.** It runs in a subshell so a refusal cannot be missed and cannot kill
+the operator's shell along with the exports above:
+
+```bash
+(
+  set -euo pipefail
+
+  # (a) A dirty worktree has no releasable identity. release.sh refuses one too; this
+  #     refuses earlier, before anything has been built.
+  [ -z "$(git status --porcelain=v1)" ] || { echo 'REFUSE: worktree is not clean'; exit 1; }
+
+  # (b) The captured identity must be a full 40-hex commit that actually resolves.
+  [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'REFUSE: RELEASE_SHA is not a full SHA'; exit 1; }
+  [ "$(git rev-parse --verify "$RELEASE_SHA^{commit}")" = "$RELEASE_SHA" ] ||
+    { echo 'REFUSE: RELEASE_SHA does not resolve to a commit'; exit 1; }
+  [ "$SHORT" = "${RELEASE_SHA:0:12}" ] || { echo 'REFUSE: SHORT is not derived from RELEASE_SHA'; exit 1; }
+
+  # (c) The deployable content must be identical to the independently approved software head.
+  #     An explicit ALLOWLIST, not an exclusion list: anything not named here stops the release,
+  #     including a path nobody thought to exclude.
+  ALLOWED='docs/launch/RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md
+docs/launch/STATUS.md'
+  UNEXPECTED="$(git diff --name-only "$APPROVED_SOFTWARE_HEAD".."$RELEASE_SHA" |
+                  grep -vxF "$ALLOWED" || true)"
+  [ -z "$UNEXPECTED" ] || {
+    printf 'REFUSE: non-documentation change since the approved software head:\n%s\n' "$UNEXPECTED"
+    exit 1
+  }
+
+  # (d) Belt and braces on the artifact-bearing trees, stated positively so the intent is
+  #     readable even if the allowlist is ever edited carelessly.
+  ARTIFACT="$(git diff --name-only "$APPROVED_SOFTWARE_HEAD".."$RELEASE_SHA" |
+                grep -E '^(backend/|frontend/|deploy/|scripts/|tools/|specs/)' || true)"
+  [ -z "$ARTIFACT" ] || {
+    printf 'REFUSE: artifact-bearing path changed since the approved software head:\n%s\n' "$ARTIFACT"
+    exit 1
+  }
+
+  # (e) The one deploy-tooling fact the pinned compose root depends on.
+  git diff --stat 61142de "$RELEASE_SHA" -- deploy
+
+  echo "PROCEED: $RELEASE_SHA carries the approved software content of $APPROVED_SOFTWARE_HEAD"
+)
+echo "CP-1 gate exit status: $?"
 ```
-e2223d7f01197c79a38f3568dfd25495fc5af163
-(no output from status)
+
+Expected — note that no line names a literal release SHA, because the identity is whatever HEAD is
+at execution time:
+```
  deploy/env/production-like.env.example | 4 ++++
  1 file changed, 4 insertions(+)
+PROCEED: <RELEASE_SHA> carries the approved software content of e2223d7…
+CP-1 gate exit status: 0
 ```
+
+**STOP on any `REFUSE`, and on any non-zero gate exit status.** In particular, a non-empty
+`UNEXPECTED` or `ARTIFACT` list means the tree has moved beyond the independently approved software
+content: the approval no longer covers what would be built, and the release requires a new review
+rather than a new build.
+
+The two allowlisted files are the release documentation itself. They are expected to differ, because
+committing this plan is what moves HEAD past the approved software head in the first place.
 
 Validate every manifest offline (pure function of checked-in data, no database):
 
@@ -307,20 +395,31 @@ expected count downstream and the plan must be re-derived before proceeding.
 
 ## CP-2 — Build, export, transfer, load images
 
-Local build (refuses a dirty worktree, stamps and verifies the revision label):
+Local build (refuses a dirty worktree, stamps and verifies the revision label). `release.sh build`
+derives its own revision with `git rev-parse HEAD` behind the same clean-worktree refusal CP-1 used,
+so it and `$RELEASE_SHA` agree by construction — and the assertion below proves it rather than
+assuming it:
 
 ```bash
 cd /home/owlah/worktrees/gradex-catalog-seed
-./deploy/hostinger/release.sh build
+./deploy/hostinger/release.sh build 2>&1 | tee /tmp/gradex-release-build.log
+grep -qF "built release $RELEASE_SHA" /tmp/gradex-release-build.log ||
+  echo "REFUSE: release.sh built a revision other than $RELEASE_SHA"
 ./deploy/hostinger/release.sh export "$RELEASE_SHA"
 ```
 
-Expected:
+Expected, with `$RELEASE_SHA` standing for the identity CP-1 captured — the tooling prints the real
+value, and this document deliberately does not predict it:
 ```
-s12-hostinger-release: recorded checksum-addressed local images for release e2223d7f01197c79a38f3568dfd25495fc5af163
-s12-hostinger-release: built release e2223d7f01197c79a38f3568dfd25495fc5af163
-s12-hostinger-release: exported release e2223d7f01197c79a38f3568dfd25495fc5af163 with checksum into ignored state
+s12-hostinger-release: recorded checksum-addressed local images for release $RELEASE_SHA
+s12-hostinger-release: built release $RELEASE_SHA
+s12-hostinger-release: exported release $RELEASE_SHA with checksum into ignored state
 ```
+
+**STOP** if the `grep` prints `REFUSE`: the build did not stamp the identity CP-1 audited, so
+nothing downstream — tags, labels, `release.env`, `apply-release` — is trustworthy.
+
+The exported artifacts land in `deploy/.state/hostinger/releases/$RELEASE_SHA/`.
 
 Transfer and load. **`apply-release` does not load images** — loading is a separate, explicit step:
 
@@ -342,7 +441,8 @@ ssh deploy@186.241.16.111 "docker image inspect --format '{{index .Config.Labels
   docker run --rm --entrypoint gradex-migrate gradex-backend:hostinger-$SHORT max-version"
 ```
 
-Expected: the release SHA three times, then `38`.
+Expected: `$RELEASE_SHA` three times, then `38`. Any other value means the loaded images are not
+the ones CP-2 built and audited — **STOP**.
 
 Nothing in production has been mutated at this point.
 
@@ -354,28 +454,34 @@ G0 has two parts, in this order. Both are required before CP-3.
 
 ### G0a — independent technical approval (BLOCKING, currently NOT SATISFIED)
 
-D-103 / migration `0035` is independently **APPROVED** on range `7d3ae73..e2223d7`; H1, H2 and M1 are
-confirmed closed. The combined 34 → 38 candidate remains **REJECTED on one ground only**: this
-document's executable release instructions were pinned to the superseded `c908168`, so they selected
-a commit that was never approved as the deployable candidate.
+**The engineering position, stated plainly.** D-103 / migration `0035` is independently
+**APPROVED**, and H1 (stale-operation lock ordering), H2 (database-time lease authority) and M1
+(per-cycle retry attempt accounting) are independently confirmed closed. The deployable software
+content at the approved software head is approved. **There is no failed D-103 engineering review
+outstanding, and nothing about D-103 for a Product Owner to override.**
 
-This revision repins every command, export, image tag, provenance check and artifact path to
-`e2223d7f01197c79a38f3568dfd25495fc5af163`.
+What remains open is narrower and belongs entirely to this document: the release-integrity model.
+The previous two revisions each embedded a literal final release SHA, which went stale the moment
+the document was committed and HEAD moved past it. This revision removes the literal entirely — the
+identity is derived at CP-1 from `git rev-parse HEAD`, exactly as `release.sh build` derives it, and
+`e2223d7` survives only as the fixed baseline the CP-1 allowlist audit compares against.
 
 G0a is satisfied only by a recorded independent reviewer verdict of approval against one exact
 commit range, with every Critical and High finding resolved. A review that produces no retrievable
 verdict is `UNAVAILABLE`, not approval. The builder's own assessment of its own correction is not a
-verdict, and no amount of Product Owner authority converts a failed engineering review into a passed
-one.
+verdict, and Product Owner authority cannot convert a failed engineering review into a passed one —
+though on the current facts there is no failed engineering review left to convert.
 
-**Current state: NOT SATISFIED.** The corrected pinning awaits independent verification. The builder
-does not grant G0a.
+**Current state: NOT SATISFIED.** The corrected release-integrity model awaits independent
+verification. The builder does not grant G0a.
 
 ### G0b — Product Owner release decision
 
 Reached only after G0a is satisfied. The Product Owner then confirms in writing:
 
 1. This release carries **D-103, D-104, D-105 and D-106** (schema 34 → 38), not D-106 alone (F-1).
+   All four are independently approved as software; the decision here is whether to ship them
+   together in one outage, not whether their engineering review passed.
 2. A mandatory application outage is accepted (F-2).
 3. The catalogue import will run through the Admin HTTP route under an Admin audit actor, not the
    CLI SYSTEM actor (F-3).
@@ -536,9 +642,19 @@ asserts the schema is clean and not newer than the image ceiling (38 ≤ 38), ca
 provenance count, recreates `api`, `worker` and `frontend`, waits for health, re-asserts provenance
 is unchanged, and persists the selection into `runtime.env`.
 
+Before running it, confirm the drop on the host carries the same identity, so `apply-release` is
+verified against the value CP-1 captured rather than against whatever happens to be in the
+directory:
+
+```bash
+ssh deploy@186.241.16.111 \
+  "grep -qxF 'GRADEX_RELEASE_SHA=$RELEASE_SHA' /home/deploy/gradex-production/incoming/$RELEASE_SHA/release.env" ||
+  echo "REFUSE: release.env does not declare $RELEASE_SHA"
+```
+
 Expected:
 ```
-s12-hostinger: application release e2223d7f01197c79a38f3568dfd25495fc5af163 is healthy on unchanged schema 38 (target max 38) and provenance
+s12-hostinger: application release $RELEASE_SHA is healthy on unchanged schema 38 (target max 38) and provenance
 ```
 
 Note this single command also brings up the new frontend, which is CP-10. If the Product Owner
