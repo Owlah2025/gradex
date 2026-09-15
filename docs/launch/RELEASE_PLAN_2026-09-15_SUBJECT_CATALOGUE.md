@@ -1268,5 +1268,7 @@ override here.
 - The 2 Low findings (not remediated, by instruction).
 - Adding `gradex-catalog-import` to the production image.
 - Re-importing or upgrading `kuwait-university-launch-v1`.
-- Any remediation of the D-103 review status — that is a Product Owner decision at G0, not a change
-  this plan makes.
+- Any remediation of the D-103 review status — **none remains outstanding**. D-103 / migration
+  `0035` is independently **APPROVED**, with H1, H2 and M1 closed. As a matter of governance Product
+  Owner authority never remediates or overrides a failed technical review, and there is no failed
+  D-103 technical review left in this candidate; G0b is a release and business decision only.
