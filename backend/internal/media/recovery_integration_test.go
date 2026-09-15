@@ -60,6 +60,11 @@ func TestD103ExpiredScanClaimIsRecoveredAndRetried(t *testing.T) {
 		t.Fatalf("state after interrupted claim=%s, want SCANNING", got)
 	}
 
+	// The lease is expired in the DATABASE, because database time is the only
+	// lease authority (D-103 H2). Advancing the injected worker clock alone no
+	// longer makes a lease stale, and a test that relied on it would be
+	// asserting against a clock the implementation correctly ignores.
+	expireLease(t, f, request.AssetVersionID)
 	now = now.Add(3 * time.Second)
 	if recovered, err := worker.RecoverStale(f.ctx, 10); err != nil || recovered != 1 {
 		t.Fatalf("RecoverStale recovered=%d err=%v", recovered, err)
@@ -133,6 +138,11 @@ func TestD103ExpiredProcessingClaimCannotPublishAndRecoveryConverges(t *testing.
 	}
 	oldResult, _ := successfulAttemptProcessor(f.ctx, oldVersion.Object)
 
+	// The lease is expired in the DATABASE, because database time is the only
+	// lease authority (D-103 H2). Advancing the injected worker clock alone no
+	// longer makes a lease stale, and a test that relied on it would be
+	// asserting against a clock the implementation correctly ignores.
+	expireLease(t, f, request.AssetVersionID)
 	now = now.Add(3 * time.Second)
 	if recovered, err := worker.RecoverStale(f.ctx, 10); err != nil || recovered != 1 {
 		t.Fatalf("RecoverStale recovered=%d err=%v", recovered, err)
@@ -204,6 +214,11 @@ func TestD103ExpiredProcessingClaimStopsAtAttemptBudget(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `UPDATE media_asset_versions SET processing_attempt_count=$2 WHERE id=$1::uuid`, request.AssetVersionID, MaxWorkAttempts); err != nil {
 		t.Fatalf("setting exhausted attempt count: %v", err)
 	}
+	// The lease is expired in the DATABASE, because database time is the only
+	// lease authority (D-103 H2). Advancing the injected worker clock alone no
+	// longer makes a lease stale, and a test that relied on it would be
+	// asserting against a clock the implementation correctly ignores.
+	expireLease(t, f, request.AssetVersionID)
 	now = now.Add(3 * time.Second)
 	if recovered, err := worker.RecoverStale(f.ctx, 10); err != nil || recovered != 1 {
 		t.Fatalf("RecoverStale recovered=%d err=%v", recovered, err)
