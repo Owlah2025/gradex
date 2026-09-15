@@ -4,12 +4,25 @@
 system has been contacted. Every command below is written to be read, approved, and then run by a
 human operator.
 
-**Release SHA:** `c908168ac1a0acc2071279cdb37bad916241e47e`
+**Release SHA:** `e2223d7f01197c79a38f3568dfd25495fc5af163`
 **Branch:** `catalog-seed-ibntohamy-20260914`
 **Worktree at planning time:** clean
-**Tranche commit range:** `4e7ddcd6..c908168a` (15 commits, first `7f18674`)
-**Independent verdict:** APPROVED WITH FINDINGS — 0 Critical / 0 High / 0 Medium / 2 Low
-(non-blocking). The 2 Low findings are **not** remediated in this release.
+
+This SHA is the single executable identity of the release. Every command, export, image tag,
+provenance check and artifact path below resolves to it.
+
+**What it contains, and the verdict on each part:**
+
+| Part | Range | Independent verdict |
+|---|---|---|
+| D-106 Subject Catalogue / Demand tranche | `4e7ddcd6..c908168a` (15 commits, first `7f18674`) | APPROVED WITH FINDINGS — 0 Critical / 0 High / 0 Medium / 2 Low (non-blocking) |
+| D-103 remediation, first pass | `c908168..7d3ae73` | REJECTED (superseded) |
+| D-103 remediation, second pass | `7d3ae73..e2223d7` | **APPROVED** — H1, H2 and M1 confirmed closed |
+
+The 2 Low D-106 findings are **not** remediated in this release.
+
+`c908168` appears below only where an earlier commit is being discussed as history. It is **not**
+the candidate being deployed and must never be selected by a command in this document.
 
 ---
 
@@ -27,29 +40,33 @@ schema **34**, application-only, no migration. Nothing after it has been deploye
 
 | Migration | Feature | Decision | Approval state recorded in STATUS.md |
 |---|---|---|---|
-| `0035_media_work_leases` | D-103 media work leases | D-103 | IMPLEMENTED, **pending independent review** |
+| `0035_media_work_leases` | D-103 media work leases | D-103 | **APPROVED** (second remediation pass, range `7d3ae73..e2223d7`) |
 | `0036_bundles_and_offers` | Bundles V1 / Catalogue Offers V1 | D-104 | Head `8ee8d42` approved |
 | `0037_student_trusted_devices` | Student device trust | D-105 | Head `e4993d6` approved |
 | `0038_subject_demand_signals` | Subject demand (this tranche) | D-106 | **APPROVED WITH FINDINGS** |
 
-The `APPROVED WITH FINDINGS` verdict covers the Subject Catalogue / Demand tranche only. It does not
-approve D-103, and STATUS.md states that the combined Bundles + D-105 candidate "requires fresh
-independent approval before push or production deployment".
+The `APPROVED WITH FINDINGS` verdict covers the Subject Catalogue / Demand tranche only; D-103 holds
+its own separate approval on `7d3ae73..e2223d7`. Neither verdict is an approval of the combined
+payload: STATUS.md records that the combined Bundles + D-105 candidate "requires fresh independent
+approval before push or production deployment", and that approval is what G0a still waits on.
 
-**Consequence:** deploying `c908168` to production ships D-103, D-104 and D-105 alongside D-106.
-Two options, and the choice is the Product Owner's:
+**Consequence:** deploying `e2223d7f01197c79a38f3568dfd25495fc5af163` to production ships D-103,
+D-104 and D-105 alongside D-106. Two options, and the choice is the Product Owner's:
 
-**This is not a Product Owner waiver.** D-103 has since been independently reviewed and
-**REJECTED**, and the combined 34 → 38 payload was **REJECTED** with it. A Product Owner decision
-cannot substitute for a passing technical review: Product Owner approval governs release and
-business decisions — timing, scope, risk acceptance, whether to ship at all — and has no authority
-over whether an engineering review passed. Both are required, and the technical one comes first.
+**This is not a Product Owner waiver.** Product Owner approval governs release and business
+decisions — timing, scope, risk acceptance, whether to ship at all — and has no authority over
+whether an engineering review passed. Both are required, and the technical one comes first.
 
-The only two paths forward are therefore:
+D-103 has since been independently **APPROVED** on range `7d3ae73..e2223d7`, with H1, H2 and M1
+confirmed closed. The combined 34 → 38 candidate was then rejected on one ground only: this
+document was still pinned to the superseded `c908168`, so the executable release instructions
+selected a commit the reviewer had not approved. That is the defect this revision corrects.
 
-- **Option A:** D-103 obtains an independent technical **approval** on a re-reviewed range, after
-  which the Product Owner may decide whether to accept a combined 34 → 38 release. Both are
-  required; neither is sufficient alone.
+The two paths forward:
+
+- **Option A:** the corrected pinning is independently verified, after which the Product Owner may
+  decide whether to accept a combined 34 → 38 release. Both are required; neither is sufficient
+  alone.
 - **Option B:** first ship a separately and independently approved intermediate release that brings
   production to schema 37, then run this plan as a true 37 → 38 step. This still needs the combined
   candidate's own independent approval.
@@ -57,11 +74,12 @@ The only two paths forward are therefore:
 Everything below is written for a 34 → 38 step. Under Option B, only `0038` is pending at CP-5 and
 the expected `migrate up` output changes accordingly; nothing else in the plan changes.
 
-**Remediation status.** The D-103 and combined-candidate review findings have been remediated on
-this branch (see the re-review ranges recorded in `docs/launch/STATUS.md`). That remediation is
-builder work and is explicitly **not** self-approval: it does not clear the REJECTED verdict, and it
-does not unblock G0. The candidate remains unauthorized for production until an independent
-reviewer records an approval verdict against the exact re-review range.
+**Remediation status.** D-103 is independently APPROVED and H1, H2 and M1 are confirmed closed.
+The outstanding item is this document's own release-integrity pinning, corrected in this revision to
+`e2223d7f01197c79a38f3568dfd25495fc5af163` throughout. Correcting it is builder work and is explicitly **not**
+self-approval: it does not by itself clear the combined candidate's rejection, and it does not
+unblock G0. The candidate remains unauthorized for production until an independent reviewer verifies
+the corrected pinning against the exact re-review range recorded in `docs/launch/STATUS.md`.
 
 ### F-2 — There is no zero-downtime path. A hard outage window is mandatory.
 
@@ -127,11 +145,11 @@ audit record for an operator-driven import.
 
 | Image | Tag | Contents |
 |---|---|---|
-| `gradex-backend` | `hostinger-c908168ac1a0` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038`, embedded manifests |
-| `gradex-frontend` | `hostinger-c908168ac1a0` | Next.js build incl. the new Subject routes |
-| `gradex-backend-proof` | `hostinger-c908168ac1a0` | proof/seed tooling; not started by this release |
+| `gradex-backend` | `hostinger-e2223d7f0119` | `gradex-api`, `gradex-worker`, `gradex-migrate`, embedded migrations `0001`–`0038`, embedded manifests |
+| `gradex-frontend` | `hostinger-e2223d7f0119` | Next.js build incl. the new Subject routes |
+| `gradex-backend-proof` | `hostinger-e2223d7f0119` | proof/seed tooling; not started by this release |
 
-All three carry `org.opencontainers.image.revision=c908168ac1a0acc2071279cdb37bad916241e47e`;
+All three carry `org.opencontainers.image.revision=e2223d7f01197c79a38f3568dfd25495fc5af163`;
 `release.sh record` and `host.sh apply-release` both verify that label against the release SHA.
 
 ### Backend components new or changed in the tranche
@@ -146,8 +164,9 @@ All three carry `org.opencontainers.image.revision=c908168ac1a0acc2071279cdb37ba
   `GET /api/v1/admin/academic/subject-demand` (Admin counts),
   `GET|POST /api/v1/me/subject-demand`, `DELETE /api/v1/me/subject-demand/:subjectId` (Student).
 - `backend/internal/academic/manifest/data/**` — 14 new `manifest.yaml` + `sources.yaml` pairs.
-  `kuwait-university/` is **unchanged** by this tranche (`git diff --stat 4e7ddcd..c908168` lists no
-  `kuwait-university` path).
+  `kuwait-university/` is **unchanged** across the whole deployed range
+  (`git diff --stat 4e7ddcd..e2223d7f01197c79a38f3568dfd25495fc5af163 -- backend/internal/academic/manifest/data/kuwait-university`
+  reports no changes).
 
 ### Frontend routes new in the tranche
 
@@ -160,7 +179,7 @@ is optional at the edge — `/subjects` and `/en/subjects` both serve.
 
 ### Deploy tooling
 
-`git diff --stat 61142de c908168 -- deploy` reports a single changed file,
+`git diff --stat 61142de e2223d7f01197c79a38f3568dfd25495fc5af163 -- deploy` reports a single changed file,
 `deploy/env/production-like.env.example` (+4 lines), which belongs to the S12 production-like
 topology and is not used by the Hostinger host. `deploy/hostinger/compose.yml` and
 `deploy/hostinger/host.sh` are **byte-identical** to the pinned project root, so the existing
@@ -192,8 +211,8 @@ export GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production
 export GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env
 export GRADEX_HOST_PROJECT=gradex-production
 export APP_ENV=production
-export RELEASE_SHA=c908168ac1a0acc2071279cdb37bad916241e47e
-export SHORT=c908168ac1a0
+export RELEASE_SHA=e2223d7f01197c79a38f3568dfd25495fc5af163
+export SHORT=e2223d7f0119
 cd /home/deploy/gradex-release-61142dedf146
 ```
 
@@ -242,12 +261,12 @@ CP-16 final health/readiness + log inspection
 ```bash
 git -C /home/owlah/worktrees/gradex-catalog-seed rev-parse HEAD
 git -C /home/owlah/worktrees/gradex-catalog-seed status --porcelain=v1
-git -C /home/owlah/worktrees/gradex-catalog-seed diff --stat 61142de c908168 -- deploy
+git -C /home/owlah/worktrees/gradex-catalog-seed diff --stat 61142de e2223d7f01197c79a38f3568dfd25495fc5af163 -- deploy
 ```
 
 Expected:
 ```
-c908168ac1a0acc2071279cdb37bad916241e47e
+e2223d7f01197c79a38f3568dfd25495fc5af163
 (no output from status)
  deploy/env/production-like.env.example | 4 ++++
  1 file changed, 4 insertions(+)
@@ -298,9 +317,9 @@ cd /home/owlah/worktrees/gradex-catalog-seed
 
 Expected:
 ```
-s12-hostinger-release: recorded checksum-addressed local images for release c908168ac1a0acc2071279cdb37bad916241e47e
-s12-hostinger-release: built release c908168ac1a0acc2071279cdb37bad916241e47e
-s12-hostinger-release: exported release c908168ac1a0acc2071279cdb37bad916241e47e with checksum into ignored state
+s12-hostinger-release: recorded checksum-addressed local images for release e2223d7f01197c79a38f3568dfd25495fc5af163
+s12-hostinger-release: built release e2223d7f01197c79a38f3568dfd25495fc5af163
+s12-hostinger-release: exported release e2223d7f01197c79a38f3568dfd25495fc5af163 with checksum into ignored state
 ```
 
 Transfer and load. **`apply-release` does not load images** — loading is a separate, explicit step:
@@ -335,17 +354,22 @@ G0 has two parts, in this order. Both are required before CP-3.
 
 ### G0a — independent technical approval (BLOCKING, currently NOT SATISFIED)
 
-D-103 / migration `0035` and the combined 34 → 38 payload both hold a **REJECTED** independent
-review verdict. G0 **may not be granted** while that stands.
+D-103 / migration `0035` is independently **APPROVED** on range `7d3ae73..e2223d7`; H1, H2 and M1 are
+confirmed closed. The combined 34 → 38 candidate remains **REJECTED on one ground only**: this
+document's executable release instructions were pinned to the superseded `c908168`, so they selected
+a commit that was never approved as the deployable candidate.
+
+This revision repins every command, export, image tag, provenance check and artifact path to
+`e2223d7f01197c79a38f3568dfd25495fc5af163`.
 
 G0a is satisfied only by a recorded independent reviewer verdict of approval against one exact
 commit range, with every Critical and High finding resolved. A review that produces no retrievable
-verdict is `UNAVAILABLE`, not approval. The builder's own assessment of its remediation is not a
+verdict is `UNAVAILABLE`, not approval. The builder's own assessment of its own correction is not a
 verdict, and no amount of Product Owner authority converts a failed engineering review into a passed
 one.
 
-**Current state: NOT SATISFIED.** The findings have been remediated on this branch and the candidate
-is awaiting independent re-review.
+**Current state: NOT SATISFIED.** The corrected pinning awaits independent verification. The builder
+does not grant G0a.
 
 ### G0b — Product Owner release decision
 
@@ -514,7 +538,7 @@ is unchanged, and persists the selection into `runtime.env`.
 
 Expected:
 ```
-s12-hostinger: application release c908168ac1a0acc2071279cdb37bad916241e47e is healthy on unchanged schema 38 (target max 38) and provenance
+s12-hostinger: application release e2223d7f01197c79a38f3568dfd25495fc5af163 is healthy on unchanged schema 38 (target max 38) and provenance
 ```
 
 Note this single command also brings up the new frontend, which is CP-10. If the Product Owner
@@ -1065,7 +1089,7 @@ edge-served assets are unaffected.
 
 | Gate | Position | Decision required |
 |---|---|---|
-| **G0a** | after CP-2, before G0b | **Independent technical approval** of D-103 and the combined 34 → 38 payload. Currently **REJECTED / NOT SATISFIED**. Not a Product Owner decision and not waivable by one |
+| **G0a** | after CP-2, before G0b | **Independent technical approval** of the combined 34 → 38 payload. D-103 is APPROVED (`7d3ae73..e2223d7`); the combined candidate is **NOT YET SATISFIED**, pending independent verification of the corrected release pinning. Not a Product Owner decision and not waivable by one |
 | **G0b** | after G0a, before CP-3 | Product Owner approves the **34 → 38** payload (D-103 + D-104 + D-105 + D-106), the mandatory outage, the HTTP import path, and shipping the 2 Low D-106 findings unremediated |
 | **G1** | after CP-3, before CP-4 | **THE POINT OF NO EASY RETURN.** Approve beginning the outage and the irreversible migration, on a recorded and `verify-restore`-proven backup snapshot |
 | **G2** | after CP-7, before CP-8 | Approve the irreversible catalogue data mutation: 14 institutions, 245 Subjects, no un-import |

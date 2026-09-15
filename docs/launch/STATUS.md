@@ -1,5 +1,39 @@
 # Gradex Launch Status
 
+> **2026-09-15 (third pass) — D-103 APPROVED; COMBINED 34→38 CANDIDATE REJECTED ONLY FOR RELEASE
+> DOCUMENTATION PINNING, NOW CORRECTED.**
+>
+> - **Current frozen HEAD:** `e2223d7f01197c79a38f3568dfd25495fc5af163`
+> - **Latest remediation review range:** `7d3ae73c217e9fed11eba55a8e2905f44bc2ffe4..e2223d7f01197c79a38f3568dfd25495fc5af163`
+> - **D-103 / migration `0035`:** **APPROVED**. H1 (stale-operation lock ordering), H2 (database-time
+>   lease authority) and M1 (per-cycle retry attempt accounting) are independently confirmed closed.
+> - **Combined schema 34→38 candidate:** **REJECTED only for release-integrity documentation
+>   pinning.** No application code, migration, test, media logic, frontend or deployment-tooling
+>   defect remains open against it. The sole ground was that
+>   [`RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md`](RELEASE_PLAN_2026-09-15_SUBJECT_CATALOGUE.md)
+>   still pinned every executable command, export, image tag, provenance label and artifact path to
+>   the superseded `c908168`, so the instructions selected a commit that was never approved as the
+>   deployable candidate. That document is now repinned throughout to
+>   `e2223d7f01197c79a38f3568dfd25495fc5af163`; remaining `c908168` references there are historical
+>   prose only, explicitly labelled as such.
+> - **`0037` rollback hard floor:** documented **operational limitation, not a forward-release
+>   blocker.** Once device trust has been used, the `0037` down migration cannot run — the
+>   append-only trigger on `identity_security_events` blocks its required `DELETE`, and a live
+>   `DEVICE_TRUST_OTP` row blocks its `ALTER TABLE`. Reversing past schema 37 is a
+>   restore-from-backup operation. This constrains rollback planning; it does not block going
+>   forward.
+> - **Canonical Playwright `t3-student-academic-profile`:** **pre-existing / load-induced test-harness
+>   flake, non-blocking.** Not reproducible in isolation (14 consecutive passes), and in an untouched
+>   code path. The canonical development lane has failed one varying spec in each of two consecutive
+>   runs, which is lane-level flakiness rather than a regression.
+> - **Technical G0a:** **NOT YET SATISFIED**, pending independent verification of the corrected
+>   release pinning. The builder does not grant G0a.
+> - **Product Owner G0b:** not approved, and not reachable until G0a is satisfied.
+>
+> Production has not been touched.
+>
+> ---
+
 > **2026-09-15 (second pass) — SECOND-ROUND D-103 / COMBINED-RELEASE BLOCKERS REMEDIATED; STILL
 > REJECTED PENDING INDEPENDENT RE-REVIEW.** Independent review rejected the first remediation:
 > the H1 fence was evaluated as a PostgreSQL InitPlan *before* the row lock, and H2 left lease
