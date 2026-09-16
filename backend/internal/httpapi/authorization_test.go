@@ -437,6 +437,7 @@ var expectedRouteMatrix = map[string]RouteMatrixEntry{
 	"POST /api/v1/admin/bundles/:id/publish":                  {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/publish", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/bundles/:id/delist":                   {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/delist", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/bundles/:id/archive":                  {Method: http.MethodPost, Path: "/api/v1/admin/bundles/:id/archive", Class: ClassCapabilityProtected},
+	"DELETE /api/v1/admin/bundles/:id":                        {Method: http.MethodDelete, Path: "/api/v1/admin/bundles/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/taxonomy/terms":                       {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms", Class: ClassCapabilityProtected},
 	"PATCH /api/v1/admin/taxonomy/terms/:id":                  {Method: http.MethodPatch, Path: "/api/v1/admin/taxonomy/terms/:id", Class: ClassCapabilityProtected},
 	"POST /api/v1/admin/taxonomy/terms/:id/retire":            {Method: http.MethodPost, Path: "/api/v1/admin/taxonomy/terms/:id/retire", Class: ClassCapabilityProtected},

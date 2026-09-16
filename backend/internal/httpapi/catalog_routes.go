@@ -202,6 +202,7 @@ func mountCatalogRoutes(
 		adminBundleMutationGroup.POST("/:id/publish", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundlePublished))
 		adminBundleMutationGroup.POST("/:id/delist", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundleDelisted))
 		adminBundleMutationGroup.POST("/:id/archive", strictJSONMiddleware(func() any { return &bundleTransitionBody{} }, accessMutationBodyLimit), bundleH.transition(catalog.BundleArchived))
+		adminBundleMutationGroup.DELETE("/:id", strictJSONMiddleware(func() any { return &bundleDeleteBody{} }, accessMutationBodyLimit), bundleH.remove)
 	}
 
 	adminPricingGetGroup := v1.Group("/admin/courses/:id")

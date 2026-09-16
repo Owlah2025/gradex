@@ -395,6 +395,7 @@ func privilegedAuditScenarios() map[string]privilegedAuditScenario {
 		http.MethodPost + " /api/v1/admin/bundles/:id/publish":                                        bundleLifecycleAuditScenario(catalog.BundlePublished, "BUNDLE_PUBLISHED"),
 		http.MethodPost + " /api/v1/admin/bundles/:id/delist":                                         bundleLifecycleAuditScenario(catalog.BundleDelisted, "BUNDLE_DELISTED"),
 		http.MethodPost + " /api/v1/admin/bundles/:id/archive":                                        bundleLifecycleAuditScenario(catalog.BundleArchived, "BUNDLE_ARCHIVED"),
+		http.MethodDelete + " /api/v1/admin/bundles/:id":                                              deleteBundleAuditScenario,
 		http.MethodPut + " /api/v1/admin/courses/:id/taxonomy":                                        taxonomyAssignmentAuditScenario,
 		http.MethodPost + " /api/v1/admin/taxonomy/terms":                                             createTermAuditScenario,
 		http.MethodPatch + " /api/v1/admin/taxonomy/terms/:id":                                        renameTermAuditScenario,
@@ -912,6 +913,26 @@ func bundleLifecycleAuditScenario(target catalog.BundleLifecycle, action string)
 		body := fmt.Sprintf(`{"expected_revision":%d}`, revision)
 		return f.execute(t, route, body, privilegedAuditExpectation{status: http.StatusOK, action: action, targetType: "BUNDLE", targetID: f.bundleID})
 	}
+}
+
+// Deleting a Bundle removes the row the audit event points at, so the evidence
+// has to be written before the deletion and survive it. That is exactly what
+// this scenario checks: a 204, a BUNDLE_DELETED event still on the record, and
+// no Bundle left behind it.
+func deleteBundleAuditScenario(t *testing.T, f *privilegedAuditFixture, route gin.RouteInfo) privilegedAuditExpectation {
+	f.prepareBundle(t)
+	return f.execute(t, route, `{"expected_revision":1}`, privilegedAuditExpectation{
+		status: http.StatusNoContent, action: "BUNDLE_DELETED", targetType: "BUNDLE", targetID: f.bundleID,
+		committed: func(t *testing.T, f *privilegedAuditFixture) {
+			var remaining int
+			if err := f.pool.QueryRow(f.ctx, `SELECT count(*) FROM bundles WHERE id = $1::uuid`, f.bundleID).Scan(&remaining); err != nil {
+				t.Fatalf("counting deleted Bundle: %v", err)
+			}
+			if remaining != 0 {
+				t.Fatalf("Bundle rows after delete = %d", remaining)
+			}
+		},
+	})
 }
 
 func lifecycleAuditScenario(target catalog.CourseLifecycle, action string) privilegedAuditScenario {

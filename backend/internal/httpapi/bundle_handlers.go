@@ -30,6 +30,13 @@ type bundleTransitionBody struct {
 	ExpectedRevision int64 `json:"expected_revision"`
 }
 
+// Deletion carries the same optimistic-concurrency body every other Bundle
+// mutation carries, rather than a query parameter, so a stale tab cannot delete
+// a Bundle another tab has just changed.
+type bundleDeleteBody struct {
+	ExpectedRevision int64 `json:"expected_revision"`
+}
+
 func bundlePriceInput(body *bundleMutationBody) *catalog.BundlePriceInput {
 	if body.RegularPriceMinorUnits == nil {
 		return nil
@@ -123,10 +130,30 @@ func (h *adminBundleHandlers) transition(target catalog.BundleLifecycle) gin.Han
 	}
 }
 
+func (h *adminBundleHandlers) remove(c *gin.Context) {
+	body := c.MustGet(strictJSONBodyContextKey).(*bundleDeleteBody)
+	adminID := c.GetString(ctxUserIDKey)
+	if err := h.repo.DeleteBundle(c.Request.Context(), catalog.DeleteBundleRequest{
+		BundleID: c.Param("id"), ExpectedRevision: body.ExpectedRevision,
+		AdminAccountID: adminID, ActorDescriptor: adminID,
+	}); err != nil {
+		writeBundleProblem(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func writeBundleProblem(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, catalog.ErrBundleNotFound):
 		writeProblem(c, problem.NotFound())
+	case errors.Is(err, catalog.ErrBundleReferenced):
+		// Distinct from the generic state conflict on purpose: the Admin needs
+		// to be told that history exists and that Archive is the way out, not
+		// told to refresh and retry an operation that will never succeed.
+		writeProblem(c, problem.New(http.StatusConflict, "bundle-referenced",
+			"Bundle has purchase history",
+			"This Bundle has been requested or purchased, so it cannot be deleted. Archive it instead to keep the purchase record intact."))
 	case errors.Is(err, catalog.ErrBundleVersionConflict), errors.Is(err, catalog.ErrBundleLifecycle):
 		writeProblem(c, problem.New(http.StatusConflict, "bundle-state-conflict", "Bundle changed", "Refresh the Bundle and try again."))
 	case errors.Is(err, catalog.ErrBundleMemberCount), errors.Is(err, catalog.ErrBundleMemberInvalid),

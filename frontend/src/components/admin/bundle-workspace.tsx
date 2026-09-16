@@ -14,6 +14,7 @@ import { PriceDisplay } from "@/components/catalog/price-display";
 import { bundleCourseCount } from "@/components/catalog/bundle-presentation";
 import {
   createAdminBundle,
+  deleteAdminBundle,
   getAdminBundleCourses,
   getAdminBundle,
   listAdminBundles,
@@ -23,9 +24,87 @@ import {
   type AdminBundleCourseOption,
   type BundleMutation,
   type AdminBundle,
+  type AdminBundleMember,
 } from "@/lib/api/catalog";
+import { ProblemError } from "@/lib/api/problem";
+import { formatFils } from "@/lib/formatters/currency";
 import { currentCSRFToken } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
+
+type BundleCopy = ReturnType<typeof useLocale>["t"]["adminBundles"];
+
+/**
+ * Turns a failed call into something an Admin can act on.
+ *
+ * The workspace previously collapsed every failure into one "Bundles could not
+ * be loaded" line, which is why a missing pricing reason, a revision conflict
+ * and a capability refusal were indistinguishable from each other and from a
+ * server fault. The API already returns a typed problem for each; this reads it
+ * rather than discarding it.
+ */
+function problemMessage(cause: unknown, copy: BundleCopy): string {
+  if (!(cause instanceof ProblemError)) return copy.serverError;
+  switch (cause.problem.code) {
+    case "BUNDLE_REFERENCED":
+      return copy.deleteUnavailable;
+    case "BUNDLE_STATE_CONFLICT":
+      return copy.revisionConflict;
+    case "VALIDATION_FAILED":
+      return cause.problem.detail ?? copy.invalidOffer;
+    case "NOT_FOUND":
+      return copy.revisionConflict;
+    default:
+      break;
+  }
+  if (cause.problem.status === 401 || cause.problem.status === 403) return copy.forbidden;
+  if (cause.problem.status >= 400 && cause.problem.status < 500) {
+    return cause.problem.detail ?? copy.serverError;
+  }
+  return copy.serverError;
+}
+
+const LIFECYCLE_TONE: Record<AdminBundle["lifecycle"], "success" | "neutral" | "accent"> = {
+  DRAFT: "neutral",
+  PUBLISHED: "success",
+  DELISTED: "accent",
+  ARCHIVED: "neutral",
+};
+
+function lifecycleLabel(lifecycle: AdminBundle["lifecycle"], copy: BundleCopy): string {
+  return {
+    DRAFT: copy.lifecycleDraft,
+    PUBLISHED: copy.lifecyclePublished,
+    DELISTED: copy.lifecycleDelisted,
+    ARCHIVED: copy.lifecycleArchived,
+  }[lifecycle];
+}
+
+function lifecycleHelp(lifecycle: AdminBundle["lifecycle"], copy: BundleCopy): string {
+  return {
+    DRAFT: copy.lifecycleDraftHelp,
+    PUBLISHED: copy.lifecyclePublishedHelp,
+    DELISTED: copy.lifecycleDelistedHelp,
+    ARCHIVED: copy.lifecycleArchivedHelp,
+  }[lifecycle];
+}
+
+function memberName(member: AdminBundleMember, locale: "ar" | "en"): string {
+  return locale === "ar" ? member.title_ar : member.title_en;
+}
+
+/**
+ * The savings line, or nothing.
+ *
+ * It renders only when the server supplied a complete member total and that
+ * total genuinely exceeds the Bundle price. A Bundle priced at or above its
+ * members is not a saving, and claiming one would be a false commercial
+ * statement on an Admin screen that Admins price from.
+ */
+function savingsMinorUnits(bundle: AdminBundle): number | null {
+  if (bundle.member_total_minor_units == null || !bundle.price) return null;
+  const saving = bundle.member_total_minor_units - bundle.price.effective_minor_units;
+  return saving > 0 ? saving : null;
+}
 
 type CourseChoice = AdminBundleCourseOption & { titleAr: string; titleEn: string };
 type Draft = {
@@ -93,6 +172,10 @@ export function BundleWorkspace() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which Bundle a mutation is currently in flight for, so the pending state is
+  // shown on the row being changed rather than greying out the whole page.
+  const [pendingBundleID, setPendingBundleID] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<AdminBundle | null>(null);
   const [coursePriceID, setCoursePriceID] = useState(searchParams.get("course_price") ?? "");
   const [courseRegular, setCourseRegular] = useState("");
   const [courseOffer, setCourseOffer] = useState("");
@@ -103,16 +186,28 @@ export function BundleWorkspace() {
   const [courseLoading, setCourseLoading] = useState(true);
   const [courseError, setCourseError] = useState<string | null>(null);
   const courseLoadSequence = useRef(0);
+  const bundleLoadSequence = useRef(0);
 
+  /**
+   * Refetches the authoritative list.
+   *
+   * Sequenced, because every mutation triggers one: a slow refresh issued
+   * before a fast one must not land after it and repaint the list with the
+   * pre-mutation state. Whatever the newest request returns is what the screen
+   * shows.
+   */
   const loadBundles = useCallback(async () => {
-    setError(null);
+    const requestSequence = ++bundleLoadSequence.current;
     try {
       const bundleResult = await listAdminBundles(locale);
+      if (requestSequence !== bundleLoadSequence.current) return;
       setBundles(bundleResult?.items ?? []);
-    } catch {
-      setError(copy.failed);
+    } catch (cause: unknown) {
+      if (requestSequence !== bundleLoadSequence.current) return;
+      setBundles((current) => current ?? []);
+      setError(problemMessage(cause, copy));
     }
-  }, [copy.failed, locale]);
+  }, [copy, locale]);
 
   const loadCourses = useCallback(async () => {
     const requestSequence = ++courseLoadSequence.current;
@@ -175,9 +270,16 @@ export function BundleWorkspace() {
       setError(copy.invalidOffer);
       return;
     }
+    // The server requires a reason for every price change and answers a missing
+    // one with a generic validation problem. Saying so here names the field the
+    // Admin has to fill instead of making them guess which input was wrong.
+    if (body.regular_price_minor_units !== undefined && draft.reason.trim() === "") {
+      setError(copy.reasonRequired);
+      return;
+    }
     const csrf = currentCSRFToken();
     if (!csrf) {
-      setError(copy.failed);
+      setError(copy.forbidden);
       return;
     }
     setBusy(true);
@@ -186,41 +288,99 @@ export function BundleWorkspace() {
         ? await updateAdminBundle(draft.id, body, locale, csrf)
         : await createAdminBundle(body, locale, csrf);
       if (!saved) throw new Error("Bundle response was empty");
-      setDraft({ ...draft, id: saved.id, revision: saved.revision });
+      // The editor is repopulated from the server's reply, not from what was
+      // typed: the revision, the trimmed titles and the stored price are the
+      // authoritative values, and the next save has to carry them.
+      applyAuthoritativeBundle(saved);
       setNotice(copy.saved);
       await loadBundles();
-    } catch {
-      setError(copy.failed);
+    } catch (cause: unknown) {
+      setError(problemMessage(cause, copy));
+      // A conflict means the screen is behind the server; reload rather than
+      // leaving a stale revision in the editor for the Admin to retry with.
+      if (cause instanceof ProblemError && (cause.problem.status === 409 || cause.problem.status === 404)) {
+        await loadBundles();
+      }
     } finally {
       setBusy(false);
     }
   }
 
+  /** Replaces the editor draft with exactly what the server returned. */
+  function applyAuthoritativeBundle(bundle: AdminBundle) {
+    setDraft({
+      id: bundle.id,
+      revision: bundle.revision,
+      titleAr: bundle.title_ar,
+      titleEn: bundle.title_en,
+      descriptionAr: bundle.description_ar,
+      descriptionEn: bundle.description_en,
+      courseIDs: bundle.members.map((member) => member.course_id),
+      regular: bundle.price ? String(bundle.price.regular_minor_units) : "",
+      offer: bundle.price?.offer_minor_units == null ? "" : String(bundle.price.offer_minor_units),
+      reason: "",
+    });
+  }
+
   async function editBundle(id: string) {
-    setBusy(true); setError(null);
+    setBusy(true); setPendingBundleID(id); setError(null);
     try {
       const bundle = await getAdminBundle(id, locale);
       if (!bundle) throw new Error("Bundle response was empty");
-      setDraft({ id: bundle.id, revision: bundle.revision, titleAr: bundle.title_ar, titleEn: bundle.title_en,
-        descriptionAr: bundle.description_ar, descriptionEn: bundle.description_en,
-        courseIDs: bundle.members.map((member) => member.course_id),
-        regular: bundle.price ? String(bundle.price.regular_minor_units) : "",
-        offer: bundle.price?.offer_minor_units == null ? "" : String(bundle.price.offer_minor_units), reason: "" });
+      applyAuthoritativeBundle(bundle);
+      setCourses((current) => mergeCourseChoices(current, bundle.members.map((member) => ({
+        id: member.course_id,
+        title_ar: member.title_ar,
+        title_en: member.title_en,
+        instructor_display_name: member.instructor_display_name,
+      }))));
       document.querySelector('[data-testid="bundle-editor"]')?.scrollIntoView({ behavior: "smooth" });
-    } catch { setError(copy.failed); }
-    finally { setBusy(false); }
+    } catch (cause: unknown) { setError(problemMessage(cause, copy)); }
+    finally { setBusy(false); setPendingBundleID(null); }
   }
 
   async function changeLifecycle(bundle: AdminBundle, action: "publish" | "delist" | "archive") {
-    const csrf = currentCSRFToken(); if (!csrf) return;
-    setBusy(true); setError(null);
+    const csrf = currentCSRFToken();
+    if (!csrf) { setError(copy.forbidden); return; }
+    setBusy(true); setPendingBundleID(bundle.id); setError(null); setNotice(null);
     try {
-      await transitionAdminBundle(bundle.id, action, bundle.revision, locale, csrf);
-      await loadBundles();
-    } catch {
-      setError(copy.failed);
+      const updated = await transitionAdminBundle(bundle.id, action, bundle.revision, locale, csrf);
+      // Even on success the list is refetched rather than patched in place: the
+      // lifecycle move can change eligibility and public visibility of rows the
+      // response does not describe.
+      if (updated && draft.id === updated.id) applyAuthoritativeBundle(updated);
+      setNotice(copy.saved);
+    } catch (cause: unknown) {
+      setError(problemMessage(cause, copy));
     } finally {
-      setBusy(false);
+      await loadBundles();
+      setBusy(false); setPendingBundleID(null);
+    }
+  }
+
+  /**
+   * Hard-deletes one Bundle after an explicit, titled confirmation.
+   *
+   * The button is offered only for a Bundle the server reported as deletable,
+   * but the refusal path is still handled: `deletable` was computed when the
+   * list was fetched, and a purchase request can arrive in between. The server
+   * is the authority either way.
+   */
+  async function confirmDelete(bundle: AdminBundle) {
+    const csrf = currentCSRFToken();
+    if (!csrf) { setError(copy.forbidden); return; }
+    setBusy(true); setPendingBundleID(bundle.id); setError(null); setNotice(null);
+    try {
+      await deleteAdminBundle(bundle.id, bundle.revision, locale, csrf);
+      setDeleteCandidate(null);
+      if (draft.id === bundle.id) setDraft(emptyDraft());
+      setNotice(copy.deleted);
+    } catch (cause: unknown) {
+      setError(problemMessage(cause, copy));
+      setDeleteCandidate(null);
+    } finally {
+      await loadBundles();
+      setBusy(false); setPendingBundleID(null);
     }
   }
 
@@ -316,22 +476,138 @@ export function BundleWorkspace() {
       </WorkspaceSection>
 
       <WorkspaceSection title={copy.title} className="mt-8">
-        {bundles === null ? <p aria-live="polite">{copy.loading}</p> : null}
-        {bundles?.length === 0 ? <p className="text-muted-foreground">{copy.empty}</p> : null}
-        <ul className="space-y-3">
-          {bundles?.map((bundle) => <li key={bundle.id} className="rounded-lg border border-border p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4"><div>
-              <StatusBadge tone={bundle.lifecycle === "PUBLISHED" && bundle.eligible ? "success" : "neutral"} label={bundle.lifecycle} />
-              <h3 className="mt-2 font-display text-lg font-bold"><bdi>{locale === "ar" ? bundle.title_ar : bundle.title_en}</bdi></h3>
-              <p className="text-sm text-muted-foreground">{bundleCourseCount(bundle.course_count, t.bundles.courseCount)}</p>
-              {bundle.price ? <PriceDisplay price={{ minor_units: bundle.price.effective_minor_units, regular_minor_units: bundle.price.regular_minor_units, offer_minor_units: bundle.price.offer_minor_units, currency: "KWD" }} locale={locale} className="mt-2" compact /> : null}
-            </div><div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => void editBundle(bundle.id)}>{copy.edit}</Button>
-              {bundle.lifecycle === "DRAFT" || bundle.lifecycle === "DELISTED" ? <Button type="button" disabled={busy || !bundle.eligible || !bundle.price} onClick={() => void changeLifecycle(bundle, "publish")}>{copy.publish}</Button> : null}
-              {bundle.lifecycle === "PUBLISHED" ? <Button type="button" variant="outline" disabled={busy} onClick={() => void changeLifecycle(bundle, "delist")}>{copy.delist}</Button> : null}
-              {bundle.lifecycle !== "ARCHIVED" ? <Button type="button" variant="outline" disabled={busy} onClick={() => void changeLifecycle(bundle, "archive")}>{copy.archive}</Button> : null}
-            </div></div>
-          </li>)}
+        {bundles === null ? <p aria-live="polite" data-testid="bundle-list-loading">{copy.loading}</p> : null}
+        {bundles?.length === 0 ? <p className="text-muted-foreground" data-testid="bundle-list-empty">{copy.empty}</p> : null}
+        <ul className="space-y-3" data-testid="bundle-list">
+          {bundles?.map((bundle) => {
+            const saving = savingsMinorUnits(bundle);
+            const rowBusy = busy && pendingBundleID === bundle.id;
+            return (
+              <li
+                key={bundle.id}
+                className="rounded-lg border border-border p-4"
+                data-testid="bundle-row"
+                data-bundle-id={bundle.id}
+                data-lifecycle={bundle.lifecycle}
+                data-deletable={bundle.deletable ? "true" : "false"}
+                aria-busy={rowBusy}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    {/* The state, the word that explains it, and the reason the
+                        Bundle is not publishable — never colour alone, and never
+                        a state the reader has to infer from which buttons exist. */}
+                    <StatusBadge
+                      tone={LIFECYCLE_TONE[bundle.lifecycle]}
+                      label={lifecycleLabel(bundle.lifecycle, copy)}
+                      detail={lifecycleHelp(bundle.lifecycle, copy)}
+                      labelTestID="bundle-lifecycle"
+                    />
+                    <h3 className="mt-2 font-display text-lg font-bold"><bdi>{locale === "ar" ? bundle.title_ar : bundle.title_en}</bdi></h3>
+                    <p className="text-sm text-muted-foreground" data-testid="bundle-course-count">
+                      {bundleCourseCount(bundle.course_count, t.bundles.courseCount)}
+                    </p>
+
+                    {bundle.members.length > 0 ? (
+                      <ul className="mt-2 space-y-1 text-sm text-muted-foreground" data-testid="bundle-members">
+                        {bundle.members.map((member) => (
+                          <li key={member.course_id} className="truncate">
+                            <bdi>{memberName(member, locale)}</bdi>
+                            {member.effective_minor_units != null ? (
+                              <span className="ms-2 tabular-nums"><bdi>{formatFils(member.effective_minor_units, locale)}</bdi></span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-muted-foreground" data-testid="bundle-no-members">{copy.noMembers}</p>
+                    )}
+
+                    {bundle.price ? (
+                      <PriceDisplay
+                        price={{ minor_units: bundle.price.effective_minor_units, regular_minor_units: bundle.price.regular_minor_units, offer_minor_units: bundle.price.offer_minor_units, currency: "KWD" }}
+                        locale={locale}
+                        className="mt-2"
+                        compact
+                      />
+                    ) : null}
+                    {bundle.member_total_minor_units != null ? (
+                      <p className="mt-1 text-sm text-muted-foreground tabular-nums" data-testid="bundle-member-total">
+                        {copy.memberTotal}: <bdi>{formatFils(bundle.member_total_minor_units, locale)}</bdi>
+                      </p>
+                    ) : null}
+                    {saving !== null ? (
+                      <p className="mt-1">
+                        {/* The success token is only ever painted on the light
+                            ground it was contrast-proved against. */}
+                        <span className="inline-block rounded-md bg-gx-success-soft px-2 py-0.5 text-sm font-semibold text-gx-success-strong" data-testid="bundle-savings">
+                          {copy.savings.replace("{amount}", formatFils(saving, locale))}
+                        </span>
+                      </p>
+                    ) : null}
+                    {!bundle.eligible && bundle.lifecycle !== "ARCHIVED" ? (
+                      <p className="mt-2 text-sm text-muted-foreground" data-testid="bundle-not-eligible">{copy.notEligible}</p>
+                    ) : null}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      <span data-testid="bundle-created">{copy.createdAt.replace("{date}", new Date(bundle.created_at).toLocaleDateString(locale))}</span>
+                      {" · "}
+                      <span data-testid="bundle-updated">{copy.updatedAt.replace("{date}", new Date(bundle.updated_at).toLocaleDateString(locale))}</span>
+                    </p>
+                    {rowBusy ? <p className="mt-2 text-sm text-muted-foreground" aria-live="polite" data-testid="bundle-row-pending">{copy.pending}</p> : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" disabled={busy} onClick={() => void editBundle(bundle.id)}>{copy.edit}</Button>
+                    {/* Actions are derived from the authoritative lifecycle the
+                        server reported, not from local optimism. DRAFT and
+                        DELISTED are the two states the domain allows to publish
+                        from; ARCHIVED is terminal. */}
+                    {bundle.lifecycle === "DRAFT" || bundle.lifecycle === "DELISTED" ? (
+                      <Button type="button" data-testid="bundle-publish" disabled={busy || !bundle.eligible} onClick={() => void changeLifecycle(bundle, "publish")}>{copy.publish}</Button>
+                    ) : null}
+                    {bundle.lifecycle === "PUBLISHED" ? (
+                      <Button type="button" variant="outline" data-testid="bundle-delist" disabled={busy} onClick={() => void changeLifecycle(bundle, "delist")}>{copy.delist}</Button>
+                    ) : null}
+                    {bundle.lifecycle !== "ARCHIVED" ? (
+                      <Button type="button" variant="outline" data-testid="bundle-archive" disabled={busy} onClick={() => void changeLifecycle(bundle, "archive")}>{copy.archive}</Button>
+                    ) : null}
+                    {/* Hard delete is offered only where the server says it is
+                        available. Where it is not, the supported lifecycle
+                        action stays and the reason is stated — no button that
+                        exists only to fail. */}
+                    {bundle.deletable ? (
+                      <Button type="button" variant="outline" data-testid="bundle-delete" disabled={busy} onClick={() => { setError(null); setNotice(null); setDeleteCandidate(bundle); }}>{copy.delete}</Button>
+                    ) : (
+                      <p className="max-w-xs text-xs text-muted-foreground" data-testid="bundle-delete-unavailable">{copy.deleteUnavailable}</p>
+                    )}
+                  </div>
+                </div>
+
+                {deleteCandidate?.id === bundle.id ? (
+                  <div
+                    role="alertdialog"
+                    aria-modal="false"
+                    aria-labelledby={`bundle-delete-title-${bundle.id}`}
+                    aria-describedby={`bundle-delete-body-${bundle.id}`}
+                    className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 p-4"
+                    data-testid="bundle-delete-dialog"
+                  >
+                    {/* The Bundle's own title is in the confirmation, so the
+                        Admin confirms the Bundle they meant rather than the row
+                        they happened to click. */}
+                    <h4 id={`bundle-delete-title-${bundle.id}`} className="font-semibold">
+                      {copy.deleteConfirmTitle.replace("{title}", locale === "ar" ? bundle.title_ar : bundle.title_en)}
+                    </h4>
+                    <p id={`bundle-delete-body-${bundle.id}`} className="mt-1 text-sm text-muted-foreground">{copy.deleteConfirmBody}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" data-testid="bundle-delete-confirm" disabled={busy} onClick={() => void confirmDelete(bundle)}>{copy.deleteConfirm}</Button>
+                      <Button type="button" variant="outline" data-testid="bundle-delete-cancel" disabled={busy} onClick={() => setDeleteCandidate(null)}>{copy.deleteCancel}</Button>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       </WorkspaceSection>
 

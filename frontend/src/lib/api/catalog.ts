@@ -317,6 +317,8 @@ export type AdminBundleMember = {
   title_ar: string;
   title_en: string;
   instructor_display_name: string;
+  /** What this Course sells for on its own. Absent when it was never priced. */
+  effective_minor_units?: number | null;
 };
 
 export type AdminBundle = {
@@ -337,6 +339,14 @@ export type AdminBundle = {
     currency: "KWD";
   };
   members: AdminBundleMember[];
+  /**
+   * Summed standalone price of every member, present only when every member is
+   * priced. The savings line is rendered from this and is therefore either
+   * truthful or absent — never a partial sum presented as a total.
+   */
+  member_total_minor_units?: number | null;
+  /** Server's answer on whether hard deletion is available. Never inferred. */
+  deletable: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -405,6 +415,18 @@ export function updateAdminBundle(id: string, input: BundleMutation, locale: "ar
 
 export function transitionAdminBundle(id: string, action: "publish" | "delist" | "archive", revision: number, locale: "ar" | "en", csrf: string) {
   return authenticatedRequest<AdminBundle>(`/admin/bundles/${encodeURIComponent(id)}/${action}`, "POST", locale, csrf, { expected_revision: revision });
+}
+
+/**
+ * Deletes one Bundle at one revision.
+ *
+ * The revision travels in the body exactly as it does for every other Bundle
+ * mutation, so a stale tab cannot delete what another tab just changed. The
+ * server decides whether deletion is permitted at all; `AdminBundle.deletable`
+ * only decides whether the action is offered.
+ */
+export function deleteAdminBundle(id: string, revision: number, locale: "ar" | "en", csrf: string) {
+  return authenticatedRequest<null>(`/admin/bundles/${encodeURIComponent(id)}`, "DELETE", locale, csrf, { expected_revision: revision });
 }
 
 export async function setSectionPrice(

@@ -31,6 +31,11 @@ var (
 	ErrBundleLifecycle       = errors.New("invalid bundle lifecycle transition")
 	ErrBundlePriceRequired   = errors.New("bundle price is required")
 	ErrBundleDescription     = errors.New("Arabic and English bundle descriptions are required")
+	// ErrBundleReferenced reports a Bundle that commerce history already points
+	// at. Hard deletion would orphan a purchase snapshot a Student and an Admin
+	// both rely on, so the Bundle stays and the caller is told to use the
+	// lifecycle instead.
+	ErrBundleReferenced = errors.New("bundle is referenced by purchase history")
 )
 
 type BundleMember struct {
@@ -39,7 +44,38 @@ type BundleMember struct {
 	TitleAr               string `json:"title_ar"`
 	TitleEn               string `json:"title_en"`
 	InstructorDisplayName string `json:"instructor_display_name"`
+	// EffectiveMinorUnits is what this Course sells for on its own today, so
+	// the Admin can see what the Bundle is discounting against. Absent when
+	// the Course has never been priced.
+	EffectiveMinorUnits *int64 `json:"effective_minor_units,omitempty"`
 }
+
+// sumMemberPrices totals the standalone price of every member. It returns nil
+// unless every member is priced, because a sum missing a member is not a
+// smaller total -- it is a wrong one.
+func sumMemberPrices(members []BundleMember) *int64 {
+	if len(members) == 0 {
+		return nil
+	}
+	total := int64(0)
+	for _, member := range members {
+		if member.EffectiveMinorUnits == nil {
+			return nil
+		}
+		total += *member.EffectiveMinorUnits
+	}
+	return &total
+}
+
+// memberPriceSelect is the standalone effective price of one Course: the offer
+// when one is live, otherwise the regular price. Course-level only --
+// section_id IS NULL -- matching how the Course catalogue itself prices.
+const memberPriceSelect = `(
+	SELECT COALESCE(cpc.offer_price_minor_units, cpc.new_value_minor_units)
+	FROM course_price_changes cpc
+	WHERE cpc.course_id = %s AND cpc.section_id IS NULL
+	ORDER BY cpc.changed_at DESC, cpc.id DESC LIMIT 1
+)`
 
 type Bundle struct {
 	ID            string          `json:"id"`
@@ -53,9 +89,18 @@ type Bundle struct {
 	Price         *CatalogPrice   `json:"price,omitempty"`
 	Members       []BundleMember  `json:"members"`
 	CourseCount   int             `json:"course_count"`
-	Eligible      bool            `json:"eligible"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	// MemberTotalMinorUnits is the summed effective price of every member
+	// Course, and is present only when every member actually carries a price.
+	// A partial sum would understate the total and turn the Admin savings line
+	// into a false claim, so the field is omitted instead of guessed.
+	MemberTotalMinorUnits *int64 `json:"member_total_minor_units,omitempty"`
+	// Deletable reports whether hard deletion is available right now: no
+	// purchase request has ever referenced this Bundle. The frontend renders
+	// the action from this field; the backend enforces it regardless.
+	Deletable bool      `json:"deletable"`
+	Eligible  bool      `json:"eligible"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type BundlePriceInput struct {
@@ -183,12 +228,10 @@ func (r *Repository) CreateBundle(ctx context.Context, req CreateBundleRequest) 
 		}); err != nil {
 			return err
 		}
-		bundle.Members, err = loadBundleMembersTx(ctx, tx, bundle.ID)
-		if err != nil {
+		if err := hydrateBundleTx(ctx, tx, &bundle); err != nil {
 			return err
 		}
 		bundle.Eligible = bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), bundle.Price != nil)
-		bundle.CourseCount = len(bundle.Members)
 		result = &bundle
 		return nil
 	})
@@ -262,8 +305,7 @@ func (r *Repository) UpdateBundle(ctx context.Context, req UpdateBundleRequest) 
 		}
 		bundle.TitleAr, bundle.TitleEn = strings.TrimSpace(req.TitleAr), strings.TrimSpace(req.TitleEn)
 		bundle.DescriptionAr, bundle.DescriptionEn = req.DescriptionAr, req.DescriptionEn
-		bundle.Members, err = loadBundleMembersTx(ctx, tx, bundle.ID)
-		if err != nil {
+		if err := hydrateBundleTx(ctx, tx, bundle); err != nil {
 			return err
 		}
 		actor := req.AdminAccountID
@@ -276,7 +318,6 @@ func (r *Repository) UpdateBundle(ctx context.Context, req UpdateBundleRequest) 
 			return err
 		}
 		bundle.Eligible = bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), bundle.Price != nil)
-		bundle.CourseCount = len(bundle.Members)
 		result = bundle
 		return nil
 	})
@@ -326,6 +367,14 @@ func (r *Repository) TransitionBundle(ctx context.Context, req TransitionBundleR
 		}
 		bundle.Lifecycle = req.Target
 		bundle.Eligible = req.Target == BundlePublished
+		if bundle.Price == nil {
+			if bundle.Price, err = loadBundlePriceTx(ctx, tx, bundle.ID); err != nil {
+				return err
+			}
+		}
+		if err := hydrateBundleTx(ctx, tx, bundle); err != nil {
+			return err
+		}
 		actor := req.AdminAccountID
 		action := map[BundleLifecycle]string{
 			BundlePublished: "BUNDLE_PUBLISHED", BundleDelisted: "BUNDLE_DELISTED", BundleArchived: "BUNDLE_ARCHIVED",
@@ -485,7 +534,8 @@ func loadBundleCourseIDsTx(ctx context.Context, tx pgx.Tx, bundleID string) ([]s
 
 func loadBundleMembersTx(ctx context.Context, tx pgx.Tx, bundleID string) ([]BundleMember, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT bc.course_id::text, bc.position, cr.title_ar, cr.title_en, a.display_name
+		SELECT bc.course_id::text, bc.position, cr.title_ar, cr.title_en, a.display_name,
+		       `+fmt.Sprintf(memberPriceSelect, "c.id")+`
 		FROM bundle_courses bc
 		JOIN courses c ON c.id=bc.course_id
 		JOIN course_revisions cr ON cr.id=c.live_revision_id
@@ -499,12 +549,118 @@ func loadBundleMembersTx(ctx context.Context, tx pgx.Tx, bundleID string) ([]Bun
 	members := []BundleMember{}
 	for rows.Next() {
 		var member BundleMember
-		if err := rows.Scan(&member.CourseID, &member.Position, &member.TitleAr, &member.TitleEn, &member.InstructorDisplayName); err != nil {
+		if err := rows.Scan(&member.CourseID, &member.Position, &member.TitleAr, &member.TitleEn,
+			&member.InstructorDisplayName, &member.EffectiveMinorUnits); err != nil {
 			return nil, err
 		}
 		members = append(members, member)
 	}
 	return members, rows.Err()
+}
+
+// bundleReferencedTx reports whether commerce history points at this Bundle.
+// purchase_requests is the single entry point: bundle_purchase_grants and
+// purchase_request_bundle_items both hang off a purchase request, so a Bundle
+// with no purchase request has no historical record to preserve.
+func bundleReferencedTx(ctx context.Context, tx pgx.Tx, bundleID string) (bool, error) {
+	var referenced bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM purchase_requests WHERE bundle_id=$1::uuid)
+	`, bundleID).Scan(&referenced); err != nil {
+		return false, fmt.Errorf("checking bundle references: %w", err)
+	}
+	return referenced, nil
+}
+
+// hydrateBundleTx fills the presentation-only fields every Admin response
+// carries, so no mutation reply can come back with a truthful lifecycle and an
+// empty membership beside it.
+func hydrateBundleTx(ctx context.Context, tx pgx.Tx, bundle *Bundle) error {
+	members, err := loadBundleMembersTx(ctx, tx, bundle.ID)
+	if err != nil {
+		return err
+	}
+	bundle.Members = members
+	bundle.CourseCount = len(members)
+	bundle.MemberTotalMinorUnits = sumMemberPrices(members)
+	referenced, err := bundleReferencedTx(ctx, tx, bundle.ID)
+	if err != nil {
+		return err
+	}
+	bundle.Deletable = !referenced
+	return nil
+}
+
+// DeleteBundleRequest asks for irreversible removal of one Bundle at one
+// revision. The revision is required for the same reason every other Bundle
+// mutation requires it: an Admin must not delete the row a second tab just
+// changed underneath them.
+type DeleteBundleRequest struct {
+	BundleID         string
+	ExpectedRevision int64
+	AdminAccountID   string
+	ActorDescriptor  string
+}
+
+// DeleteBundle hard-deletes a Bundle that no purchase request has ever
+// referenced.
+//
+// Deletion is deliberately narrow. A Bundle that has been purchased -- or even
+// only requested -- carries a commercial snapshot that Students, Admins and
+// the audit record all read, so it is refused here rather than cascaded away;
+// ARCHIVED remains the supported end state for those. Everything the deleted
+// Bundle owned outright (its membership rows and its price history) goes with
+// it, and the audit event is written first so the deletion itself survives the
+// row it describes.
+func (r *Repository) DeleteBundle(ctx context.Context, req DeleteBundleRequest) error {
+	if _, err := uuid.Parse(req.BundleID); err != nil {
+		return ErrBundleNotFound
+	}
+	if _, err := uuid.Parse(req.AdminAccountID); err != nil {
+		return errors.New("admin account ID is required")
+	}
+	return r.ExecTx(ctx, func(tx pgx.Tx) error {
+		bundle, err := lockBundle(ctx, tx, req.BundleID)
+		if err != nil {
+			return err
+		}
+		if req.ExpectedRevision < 1 || bundle.Revision != req.ExpectedRevision {
+			return ErrBundleVersionConflict
+		}
+		referenced, err := bundleReferencedTx(ctx, tx, bundle.ID)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return ErrBundleReferenced
+		}
+		actor := req.AdminAccountID
+		if err := WriteAuditEvent(ctx, tx, AuditEvent{
+			ActorAccountID: &actor, ActorRole: "ADMIN", ActorDescriptor: req.ActorDescriptor,
+			Action: "BUNDLE_DELETED", TargetType: "BUNDLE", TargetID: bundle.ID,
+			Reason: "Unreferenced Bundle deleted by Admin",
+			Metadata: map[string]any{
+				"lifecycle": bundle.Lifecycle, "revision": bundle.Revision,
+				"title_en": bundle.TitleEn, "title_ar": bundle.TitleAr, "slug": bundle.Slug,
+			},
+		}); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bundle_price_changes WHERE bundle_id=$1::uuid`, bundle.ID); err != nil {
+			return fmt.Errorf("deleting bundle price history: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM bundle_courses WHERE bundle_id=$1::uuid`, bundle.ID); err != nil {
+			return fmt.Errorf("deleting bundle members: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM bundles WHERE id=$1::uuid`, bundle.ID)
+		if err != nil {
+			return fmt.Errorf("deleting bundle: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrBundleNotFound
+		}
+		return nil
+	})
 }
 
 func (r *Repository) GetBundle(ctx context.Context, bundleID string) (*Bundle, error) {
@@ -521,8 +677,7 @@ func (r *Repository) GetBundle(ctx context.Context, bundleID string) (*Bundle, e
 	if err != nil {
 		return nil, err
 	}
-	bundle.Members, err = loadBundleMembersTx(ctx, tx, bundle.ID)
-	if err != nil {
+	if err := hydrateBundleTx(ctx, tx, bundle); err != nil {
 		return nil, err
 	}
 	var memberEligible bool
@@ -539,7 +694,6 @@ func (r *Repository) GetBundle(ctx context.Context, bundleID string) (*Bundle, e
 		return nil, fmt.Errorf("checking Bundle eligibility: %w", err)
 	}
 	bundle.Eligible = bundle.Price != nil && memberEligible && bundlePublicationReady(bundle.DescriptionAr, bundle.DescriptionEn, len(bundle.Members), true)
-	bundle.CourseCount = len(bundle.Members)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -558,7 +712,8 @@ func (r *Repository) ListBundles(ctx context.Context) ([]Bundle, error) {
 			AND count(bc.course_id) >= 2 AND bool_and(
 		           c.lifecycle='PUBLISHED' AND c.access_suspended_at IS NULL
 		           AND c.retired_at IS NULL AND c.live_revision_id=cr.id
-		       ) AS eligible
+		       ) AS eligible,
+		       NOT EXISTS (SELECT 1 FROM purchase_requests pr WHERE pr.bundle_id=b.id) AS deletable
 		FROM bundles b
 		LEFT JOIN bundle_courses bc ON bc.bundle_id=b.id
 		LEFT JOIN courses c ON c.id=bc.course_id
@@ -581,7 +736,7 @@ func (r *Repository) ListBundles(ctx context.Context) ([]Bundle, error) {
 		var count int
 		if err := rows.Scan(&item.ID, &item.Slug, &item.Lifecycle, &item.TitleAr, &item.TitleEn,
 			&item.DescriptionAr, &item.DescriptionEn, &item.Revision, &item.CreatedAt, &item.UpdatedAt,
-			&regular, &offer, &count, &item.Eligible); err != nil {
+			&regular, &offer, &count, &item.Eligible, &item.Deletable); err != nil {
 			return nil, err
 		}
 		if regular != nil {
@@ -595,5 +750,60 @@ func (r *Repository) ListBundles(ctx context.Context) ([]Bundle, error) {
 		item.CourseCount = count
 		items = append(items, item)
 	}
-	return items, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Membership is loaded for the list, not only for the detail read. The
+	// Admin list is where a Bundle is recognised, and "3 Courses" with no names
+	// beside it is not enough to tell two draft Bundles apart -- which is
+	// exactly the state that makes a delete feel unsafe. One extra query keyed
+	// by the ids already selected, rather than N detail reads.
+	if err := r.attachBundleMembers(ctx, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *Repository) attachBundleMembers(ctx context.Context, items []Bundle) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	index := make(map[string]int, len(items))
+	for position, item := range items {
+		ids = append(ids, item.ID)
+		index[item.ID] = position
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT bc.bundle_id::text, bc.course_id::text, bc.position, cr.title_ar, cr.title_en,
+		       a.display_name, `+fmt.Sprintf(memberPriceSelect, "c.id")+`
+		FROM bundle_courses bc
+		JOIN courses c ON c.id=bc.course_id
+		JOIN course_revisions cr ON cr.id=c.live_revision_id
+		JOIN accounts a ON a.id=c.owner_account_id
+		WHERE bc.bundle_id = ANY($1::uuid[])
+		ORDER BY bc.bundle_id, bc.position, bc.course_id
+	`, ids)
+	if err != nil {
+		return fmt.Errorf("listing bundle members: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bundleID string
+		var member BundleMember
+		if err := rows.Scan(&bundleID, &member.CourseID, &member.Position, &member.TitleAr,
+			&member.TitleEn, &member.InstructorDisplayName, &member.EffectiveMinorUnits); err != nil {
+			return err
+		}
+		if position, ok := index[bundleID]; ok {
+			items[position].Members = append(items[position].Members, member)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for position := range items {
+		items[position].MemberTotalMinorUnits = sumMemberPrices(items[position].Members)
+	}
+	return nil
 }
