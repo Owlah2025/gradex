@@ -1184,6 +1184,9 @@ func seedFixtures(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := seedSubjectCatalogueFixtures(ctx, tx, instructorID); err != nil {
 		return err
 	}
+	if err := seedLandingStudyPlanFixtures(ctx, tx, instructorID, adminAccountID); err != nil {
+		return err
+	}
 
 	return tx.Commit(ctx)
 }
@@ -1242,6 +1245,22 @@ func seedSubjectCatalogueFixtures(ctx context.Context, tx pgx.Tx, instructorID s
 		}
 	}
 
+	// The existing Subject fixture also has one real Program so landing filter
+	// switching can prove results never leak between Institutions.
+	var programID, curriculumID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO programs (institution_id, slug, name_ar, name_en, degree_kind)
+		VALUES ($1::uuid, 'e2e-computer-science', 'علوم الحاسوب للاختبار', 'E2E Computer Science', 'BSC')
+		RETURNING id::text`, institutionID).Scan(&programID); err != nil {
+		return fmt.Errorf("seed subject-catalogue Program: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO curricula (program_id, institution_id, version_label, status)
+		VALUES ($1::uuid, $2::uuid, '2026', 'ACTIVE') RETURNING id::text`,
+		programID, institutionID).Scan(&curriculumID); err != nil {
+		return fmt.Errorf("seed subject-catalogue Curriculum: %w", err)
+	}
+
 	// The one served Subject, with a real published Course behind it.
 	var servedSubjectID string
 	if err := tx.QueryRow(ctx, `
@@ -1280,6 +1299,118 @@ func seedSubjectCatalogueFixtures(ctx context.Context, tx pgx.Tx, instructorID s
 		UPDATE courses SET lifecycle='PUBLISHED', live_revision_id=$2::uuid WHERE id=$1::uuid`,
 		courseID, revisionID); err != nil {
 		return fmt.Errorf("publish served subject course: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO curriculum_subjects (curriculum_id, subject_id, institution_id, requirement_kind)
+		SELECT $1::uuid, s.id, $2::uuid, 'MAJOR_CORE'
+		FROM subjects s WHERE s.institution_id = $2::uuid`, curriculumID, institutionID); err != nil {
+		return fmt.Errorf("map subject-catalogue Subjects: %w", err)
+	}
+	return nil
+}
+
+// A small production-shaped Kuwait University study plan for landing E2E.
+// It uses the canonical public slugs and the real C & UNIX code/title, but it is
+// created only inside the disposable per-run database.
+func seedLandingStudyPlanFixtures(
+	ctx context.Context, tx pgx.Tx, instructorID, adminID string,
+) error {
+	const (
+		institutionID = "91000000-0000-0000-0000-000000000001"
+		programID     = "91000000-0000-0000-0000-000000000002"
+		curriculumID  = "91000000-0000-0000-0000-000000000003"
+		courseID      = "c0000000-0000-0000-0000-000000000004"
+		revisionID    = "f0000000-0000-0000-0000-000000000004"
+	)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO institutions (id, country_code, slug, name_ar, name_en, max_academic_level)
+		VALUES ($1::uuid, 'KW', 'kuwait-university', 'جامعة الكويت', 'Kuwait University', 5)`,
+		institutionID); err != nil {
+		return fmt.Errorf("seed landing Kuwait University: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO programs (id, institution_id, slug, name_ar, name_en, degree_kind)
+		VALUES ($1::uuid, $2::uuid, 'computer-science', 'علوم الحاسوب', 'Computer Science', 'BSC')`,
+		programID, institutionID); err != nil {
+		return fmt.Errorf("seed landing Computer Science Program: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO curricula (id, program_id, institution_id, version_label, status)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, '2024', 'ACTIVE')`,
+		curriculumID, programID, institutionID); err != nil {
+		return fmt.Errorf("seed landing Computer Science Curriculum: %w", err)
+	}
+
+	type subjectFixture struct{ code, titleAr, titleEn string }
+	subjects := []subjectFixture{
+		{"0418-101", "مقدمة في علوم الحاسوب", "Introduction to Computer Science"},
+		{"0418-120", "أساسيات البرمجة", "Fundamentals of Computer Programming"},
+		{"0418-201", "هياكل البيانات والخوارزميات", "Data Structures & Algorithms"},
+		{"0418-220", "البرمجة بلغة C ونظام يونكس", "Programming in C & UNIX"},
+		{"0418-221", "تنظيم الحاسوب", "Computer Organization"},
+		{"0418-310", "نظرية الحوسبة", "Theory of Computation"},
+		{"0418-320", "نظم التشغيل", "Operating Systems"},
+		{"0418-330", "قواعد البيانات", "Database Systems"},
+		{"0418-340", "شبكات الحاسوب", "Computer Networks"},
+		{"0418-350", "هندسة البرمجيات", "Software Engineering"},
+		{"0418-410", "الذكاء الاصطناعي", "Artificial Intelligence"},
+		{"0418-420", "أمن الحاسوب", "Computer Security"},
+	}
+	var servedSubjectID string
+	for index, subject := range subjects {
+		subjectID := fmt.Sprintf("92000000-0000-0000-0000-%012d", index+1)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO subjects (id, institution_id, official_code, title_ar, title_en)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5)`,
+			subjectID, institutionID, subject.code, subject.titleAr, subject.titleEn); err != nil {
+			return fmt.Errorf("seed landing Subject %s: %w", subject.code, err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO curriculum_subjects (curriculum_id, subject_id, institution_id, requirement_kind)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, 'MAJOR_CORE')`,
+			curriculumID, subjectID, institutionID); err != nil {
+			return fmt.Errorf("map landing Subject %s: %w", subject.code, err)
+		}
+		if subject.code == "0418-220" {
+			servedSubjectID = subjectID
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle, classification_model, institution_id, subject_id)
+		VALUES ($1::uuid, $2::uuid, 'DRAFT', 'ACADEMIC_CATALOG', $3::uuid, $4::uuid)`,
+		courseID, instructorID, institutionID, servedSubjectID); err != nil {
+		return fmt.Errorf("seed landing C & UNIX Course: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO course_revisions (id, course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1::uuid, $2::uuid, 'APPROVED', 1,
+			'البرمجة بلغة C ونظام يونكس', 'Programming in C & UNIX', 'وصف الكورس', 'Course description')`,
+		revisionID, courseID); err != nil {
+		return fmt.Errorf("seed landing C & UNIX revision: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $2::uuid WHERE id = $1::uuid`,
+		courseID, revisionID); err != nil {
+		return fmt.Errorf("publish landing C & UNIX Course: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO course_price_changes (course_id, new_value_minor_units, changed_by_account_id, reason)
+		VALUES ($1::uuid, 32000, $2::uuid, 'Landing study-plan E2E price')`, courseID, adminID); err != nil {
+		return fmt.Errorf("price landing C & UNIX Course: %w", err)
+	}
+
+	// Slot 42 owns profile initialization. Seed every repeat identity in that
+	// slot so --repeat-each remains isolated and deterministic.
+	for repeat := 0; repeat < rotatingMaxRepeats; repeat++ {
+		accountID := rotatingStudentID(42*rotatingMaxRepeats + repeat)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO student_academic_profiles
+				(account_id, setup_state, enrollment_status, institution_id, program_id, curriculum_id, current_level)
+			VALUES ($1::uuid, 'COMPLETED', 'ENROLLED', $2::uuid, $3::uuid, $4::uuid, 2)`,
+			accountID, institutionID, programID, curriculumID); err != nil {
+			return fmt.Errorf("seed landing profile repeat %d: %w", repeat, err)
+		}
 	}
 	return nil
 }

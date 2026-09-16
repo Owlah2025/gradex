@@ -22,6 +22,8 @@ export type AcademicProfile = {
   enrollment_status?: EnrollmentStatus;
   institution_id?: string;
   institution_name?: string;
+  /** Public discovery identifier; additive and never an authority input. */
+  institution_slug?: string;
   /** The institution's own level bound. Never assume a number here. */
   max_academic_level?: number;
   has_foundation_stage?: boolean;

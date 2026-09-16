@@ -35,7 +35,7 @@ export function FeaturedBundles() {
   }, [locale]);
 
   return (
-    <Section aria-labelledby="bundles-title" tone="muted">
+    <Section aria-labelledby="bundles-title" tone="muted" className="pt-10 md:pt-12 lg:pt-14">
       <div className="max-w-2xl">
         <SectionHeading id="bundles-title">{t.bundles.title}</SectionHeading>
         <p className="mt-2 text-pretty text-muted-foreground">{t.bundles.subtitle}</p>
@@ -65,4 +65,3 @@ export function FeaturedBundles() {
     </Section>
   );
 }
-

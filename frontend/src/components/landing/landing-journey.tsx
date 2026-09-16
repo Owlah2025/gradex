@@ -76,7 +76,7 @@ export function LandingJourneyProvider({
    * Deliberately synchronous, and deliberately not deferred to an animation frame.
    *
    * Both hand-offs have to happen *after* React has committed the state change that caused them —
-   * the courses section is being retitled and refiltered by the same update that triggers the
+   * the study-plan section is being initialized and refiltered by the same update that triggers the
    * scroll — so the timing belongs to an effect at the call site, which is exactly what an effect
    * guarantees. `requestAnimationFrame` looks like the same thing and is not: it does not run in a
    * hidden or non-compositing tab, so the reader could complete the questions and simply never

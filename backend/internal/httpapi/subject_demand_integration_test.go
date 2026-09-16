@@ -35,6 +35,11 @@ type subjectListingResponse struct {
 		Slug  string `json:"slug"`
 		Title string `json:"title"`
 	} `json:"courses"`
+	PrimaryCourse *struct {
+		Slug                  string `json:"slug"`
+		Title                 string `json:"title"`
+		InstructorDisplayName string `json:"instructor_display_name"`
+	} `json:"primary_course"`
 }
 
 type subjectPageResponse struct {
@@ -382,6 +387,11 @@ func TestSubjectServedStatusFollowsCoursePublication(t *testing.T) {
 		if item.Courses[0].Title != "كورس مخدوم" {
 			t.Errorf("course title = %q, want the revision's Arabic title", item.Courses[0].Title)
 		}
+		if item.PrimaryCourse == nil || item.PrimaryCourse.Slug != courseSlug ||
+			item.PrimaryCourse.Title != "كورس مخدوم" ||
+			item.PrimaryCourse.InstructorDisplayName != "Served Instructor" {
+			t.Fatalf("primary Course projection = %+v; want the real published Course card", item.PrimaryCourse)
+		}
 	})
 
 	t.Run("served Subjects sort before unserved ones", func(t *testing.T) {
@@ -421,6 +431,9 @@ func TestSubjectServedStatusFollowsCoursePublication(t *testing.T) {
 		}
 		if len(item.Courses) != 0 {
 			t.Errorf("a suspended Course was still linked: %+v", item.Courses)
+		}
+		if item.PrimaryCourse != nil {
+			t.Errorf("a suspended Course was still projected: %+v", item.PrimaryCourse)
 		}
 	})
 
@@ -475,6 +488,108 @@ func TestSubjectServedStatusFollowsCoursePublication(t *testing.T) {
 			t.Error("the Subject has a live published Course; Admin must see served=true")
 		}
 	})
+}
+
+func TestSubjectProgramFilterRunsBeforeCountingAndPagination(t *testing.T) {
+	env := setupAcademicAPIServer(t)
+	institutionSlug := seedDemandInstitution(t, env, "CS 101", "EE 201")
+	ctx := t.Context()
+
+	var institutionID, csSubjectID, eeSubjectID string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT id::text FROM institutions WHERE slug = $1`, institutionSlug).Scan(&institutionID); err != nil {
+		t.Fatalf("reading institution: %v", err)
+	}
+	if err := env.pool.QueryRow(ctx,
+		`SELECT id::text FROM subjects WHERE institution_id = $1::uuid AND official_code = 'CS 101'`,
+		institutionID).Scan(&csSubjectID); err != nil {
+		t.Fatalf("reading CS Subject: %v", err)
+	}
+	if err := env.pool.QueryRow(ctx,
+		`SELECT id::text FROM subjects WHERE institution_id = $1::uuid AND official_code = 'EE 201'`,
+		institutionID).Scan(&eeSubjectID); err != nil {
+		t.Fatalf("reading EE Subject: %v", err)
+	}
+
+	seedProgram := func(slug string, subjectID string) {
+		t.Helper()
+		var programID, curriculumID string
+		if err := env.pool.QueryRow(ctx, `
+			INSERT INTO programs (institution_id, slug, name_ar, name_en, degree_kind)
+			VALUES ($1::uuid, $2, 'تخصص ' || $2, 'Program ' || $2, 'BSC')
+			RETURNING id::text`, institutionID, slug).Scan(&programID); err != nil {
+			t.Fatalf("seeding Program %s: %v", slug, err)
+		}
+		if err := env.pool.QueryRow(ctx, `
+			INSERT INTO curricula (program_id, institution_id, version_label, status)
+			VALUES ($1::uuid, $2::uuid, '2026', 'ACTIVE') RETURNING id::text`,
+			programID, institutionID).Scan(&curriculumID); err != nil {
+			t.Fatalf("seeding Curriculum %s: %v", slug, err)
+		}
+		if _, err := env.pool.Exec(ctx, `
+			INSERT INTO curriculum_subjects (curriculum_id, subject_id, institution_id, requirement_kind)
+			VALUES ($1::uuid, $2::uuid, $3::uuid, 'MAJOR_CORE')`,
+			curriculumID, subjectID, institutionID); err != nil {
+			t.Fatalf("mapping Subject into %s: %v", slug, err)
+		}
+	}
+	seedProgram("computer-science", csSubjectID)
+	seedProgram("electrical-engineering", eeSubjectID)
+
+	page := browseSubjects(t, env,
+		"institution="+institutionSlug+"&program=computer-science&page_size=1")
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Code != "CS 101" {
+		t.Fatalf("program-filtered page = %+v total=%d; want only CS 101", page.Items, page.Total)
+	}
+	if missing := browseSubjects(t, env,
+		"institution="+institutionSlug+"&program=no-such-program&page_size=1"); missing.Total != 0 || len(missing.Items) != 0 {
+		t.Fatalf("unknown Program returned %+v total=%d; want an empty page", missing.Items, missing.Total)
+	}
+}
+
+func TestSubjectPrimaryCourseUsesStableExistingSlugOrder(t *testing.T) {
+	env := setupAcademicAPIServer(t)
+	institutionSlug := seedDemandInstitution(t, env, "DET 100")
+	item := browseSubjects(t, env, "institution="+institutionSlug).Items[0]
+	publishCourseForSubject(t, env, item.SubjectID)
+	ctx := t.Context()
+
+	var ownerID, institutionID, courseID string
+	if err := env.pool.QueryRow(ctx, `
+		SELECT owner_account_id::text, institution_id::text
+		FROM courses WHERE subject_id = $1::uuid LIMIT 1`, item.SubjectID).Scan(&ownerID, &institutionID); err != nil {
+		t.Fatalf("reading first Course ownership: %v", err)
+	}
+	if err := env.pool.QueryRow(ctx, `
+		INSERT INTO courses (id, owner_account_id, lifecycle, classification_model, institution_id, subject_id)
+		VALUES ('00000000-0000-0000-0000-000000000001', $1::uuid, 'DRAFT', 'ACADEMIC_CATALOG', $2::uuid, $3::uuid)
+		RETURNING id::text`, ownerID, institutionID, item.SubjectID).Scan(&courseID); err != nil {
+		t.Fatalf("seeding deterministic primary Course: %v", err)
+	}
+	var revisionID string
+	if err := env.pool.QueryRow(ctx, `
+		INSERT INTO course_revisions (course_id, state, revision_number, title_ar, title_en, description_ar, description_en)
+		VALUES ($1::uuid, 'APPROVED', 1, 'الكورس الأساسي', 'Primary Course', 'وصف', 'Description')
+		RETURNING id::text`, courseID).Scan(&revisionID); err != nil {
+		t.Fatalf("seeding primary revision: %v", err)
+	}
+	if _, err := env.pool.Exec(ctx, `
+		UPDATE courses SET lifecycle = 'PUBLISHED', live_revision_id = $2::uuid WHERE id = $1::uuid`,
+		courseID, revisionID); err != nil {
+		t.Fatalf("publishing primary Course: %v", err)
+	}
+
+	projected := browseSubjects(t, env, "institution="+institutionSlug).Items[0]
+	if !projected.Served || len(projected.Courses) != 2 {
+		t.Fatalf("Subject service projection = %+v; want two published Courses", projected)
+	}
+	const primarySlug = "course-00000000000000000000000000000001"
+	if projected.Courses[0].Slug != primarySlug || projected.PrimaryCourse == nil ||
+		projected.PrimaryCourse.Slug != primarySlug ||
+		projected.PrimaryCourse.Title != "الكورس الأساسي" {
+		t.Fatalf("primary projection = %+v refs=%+v; want explicit slug-first Course",
+			projected.PrimaryCourse, projected.Courses)
+	}
 }
 
 // Public Subject detail must answer 404 for anything it cannot resolve, and

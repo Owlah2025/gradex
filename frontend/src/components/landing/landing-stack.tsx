@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { SectionStack, StackLayer } from "./section-stack";
-import { useLandingJourney } from "./landing-journey";
 import { COURSES_ANCHOR } from "./anchors";
 import { HeroCourseDivider } from "./hero-course-divider";
 
@@ -10,12 +9,8 @@ import { HeroCourseDivider } from "./hero-course-divider";
  * Hero → Courses, as one continuous surface.
  *
  * The two sections are passed in rather than imported so this stays a layout: it decides the
- * stacking order, carries the anchor id, and hands the journey the element it needs to scroll to.
- * It knows nothing about academic contexts, catalogue filters or copy.
- *
- * The registration is why this is a client component at all. The journey scrolls to a real layer of
- * the stack — the box that carries `scroll-margin-top` — instead of looking it up by selector,
- * which would tie the hand-off to an id spelled somewhere else.
+ * stacking order and carries the anchor id. The study-plan section inside this stack registers the
+ * precise post-selection scroll target with the landing journey.
  */
 export function LandingStack({
   hero,
@@ -24,8 +19,6 @@ export function LandingStack({
   hero: React.ReactNode;
   courses: React.ReactNode;
 }) {
-  const journey = useLandingJourney();
-
   return (
     <SectionStack>
       <StackLayer layer={1}>{hero}</StackLayer>
@@ -35,7 +28,6 @@ export function LandingStack({
         layer={2}
         tail
         id={COURSES_ANCHOR}
-        ref={journey?.registerCourses}
         className="bg-background"
       >
         <HeroCourseDivider />

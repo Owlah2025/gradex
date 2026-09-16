@@ -22,7 +22,9 @@ import {
 } from "@/lib/api/subject-catalogue";
 import {
   getPublicInstitutions,
+  getPublicPrograms,
   type InstitutionOption,
+  type ProgramOption,
 } from "@/lib/api/public-catalog";
 import { SubjectCard } from "./subject-card";
 import { subjectCopy } from "./subject-copy";
@@ -77,10 +79,14 @@ export function SubjectCatalogue() {
   const authenticated = audience === "ELIGIBLE_STUDENT";
 
   const institution = searchParams.get("institution") ?? "";
+  const program = institution ? (searchParams.get("program") ?? "") : "";
   const availability = readAvailability(searchParams.get("availability"));
   const search = searchParams.get("q") ?? "";
 
   const [institutions, setInstitutions] = React.useState<InstitutionOption[]>([]);
+  const [programs, setPrograms] = React.useState<ProgramOption[]>([]);
+  const [programsLoading, setProgramsLoading] = React.useState(false);
+  const [programsFailed, setProgramsFailed] = React.useState(false);
   const [subjects, setSubjects] = React.useState<SubjectListing[] | null>(null);
   const [total, setTotal] = React.useState(0);
   const [loadedPages, setLoadedPages] = React.useState(0);
@@ -150,6 +156,32 @@ export function SubjectCatalogue() {
     };
   }, [locale]);
 
+  React.useEffect(() => {
+    if (!institution) {
+      setPrograms([]);
+      setProgramsLoading(false);
+      setProgramsFailed(false);
+      return;
+    }
+    let live = true;
+    setPrograms([]);
+    setProgramsLoading(true);
+    setProgramsFailed(false);
+    getPublicPrograms(institution, locale)
+      .then((items) => {
+        if (live) setPrograms(items);
+      })
+      .catch(() => {
+        if (live) setProgramsFailed(true);
+      })
+      .finally(() => {
+        if (live) setProgramsLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [institution, locale]);
+
   // The first page, and every reset. Changing the locale, the institution, the
   // availability, or the search discards what was loaded and starts again at
   // page one -- appending page two of a *different* query would interleave two
@@ -166,6 +198,7 @@ export function SubjectCatalogue() {
     setFailed(false);
     getSubjects(locale, {
       institution: institution || undefined,
+      program: program || undefined,
       search: search || undefined,
       availability,
       pageSize: SUBJECTS_PER_PAGE,
@@ -191,7 +224,7 @@ export function SubjectCatalogue() {
       controller.abort();
       settle();
     };
-  }, [locale, institution, search, availability, reloadToken, beginRequest, invalidateOutstanding]);
+  }, [locale, institution, program, search, availability, reloadToken, beginRequest, invalidateOutstanding]);
 
   /**
    * Appends the next page.
@@ -212,6 +245,7 @@ export function SubjectCatalogue() {
     setFailed(false);
     getSubjects(locale, {
       institution: institution || undefined,
+      program: program || undefined,
       search: search || undefined,
       availability,
       pageSize: SUBJECTS_PER_PAGE,
@@ -243,6 +277,7 @@ export function SubjectCatalogue() {
     availability,
     beginRequest,
     institution,
+    program,
     loadedPages,
     loadingMore,
     locale,
@@ -270,7 +305,12 @@ export function SubjectCatalogue() {
   }, [authenticated, locale]);
 
   const applySelection = React.useCallback(
-    (next: { institution?: string; availability?: SubjectAvailability; q?: string }) => {
+    (next: {
+      institution?: string;
+      program?: string;
+      availability?: SubjectAvailability;
+      q?: string;
+    }) => {
       const params = new URLSearchParams(searchParams.toString());
       const set = (key: string, value: string | undefined) => {
         // An empty value is removed rather than written empty, so a shared URL
@@ -278,7 +318,11 @@ export function SubjectCatalogue() {
         if (value === undefined || value === "") params.delete(key);
         else params.set(key, value);
       };
-      if ("institution" in next) set("institution", next.institution);
+      if ("institution" in next) {
+        set("institution", next.institution);
+        set("program", "");
+      }
+      if ("program" in next) set("program", next.program);
       if ("availability" in next)
         set("availability", next.availability === "all" ? "" : next.availability);
       if ("q" in next) set("q", next.q);
@@ -350,6 +394,38 @@ export function SubjectCatalogue() {
               >
                 <option value="">{copy.allInstitutions}</option>
                 {institutions.map((option) => (
+                  <option key={option.slug} value={option.slug}>
+                    {locale === "ar" ? option.name_ar : option.name_en}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="subject-program"
+                className="block text-sm font-semibold text-foreground"
+              >
+                {copy.programLabel}
+              </label>
+              <select
+                id="subject-program"
+                className="mt-2 min-h-11 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                value={program}
+                onChange={(event) => applySelection({ program: event.target.value })}
+                disabled={!institution || programsLoading || programsFailed || programs.length === 0}
+                data-testid="subject-program-filter"
+              >
+                <option value="">
+                  {programsLoading
+                    ? copy.programsLoading
+                    : programsFailed
+                      ? copy.programsFailed
+                      : programs.length === 0 && institution
+                        ? copy.noPrograms
+                        : copy.allPrograms}
+                </option>
+                {programs.map((option) => (
                   <option key={option.slug} value={option.slug}>
                     {locale === "ar" ? option.name_ar : option.name_en}
                   </option>

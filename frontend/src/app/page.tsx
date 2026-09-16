@@ -3,6 +3,7 @@ import { Footer } from "@/components/layout/footer";
 import { Hero } from "@/components/sections/hero";
 import { FeaturedCourses } from "@/components/sections/featured-courses";
 import { FeaturedBundles } from "@/components/sections/featured-bundles";
+import { StudyPlanSubjects } from "@/components/sections/study-plan-subjects";
 import { WhyGradex } from "@/components/sections/why-gradex";
 import { LearningExperience } from "@/components/sections/learning-experience";
 import { Faq } from "@/components/sections/faq";
@@ -33,7 +34,13 @@ export default function LandingPage() {
         <LandingJourneyProvider>
           <LandingStack
             hero={<Hero />}
-            courses={<><FeaturedCourses /><FeaturedBundles /></>}
+            courses={
+              <>
+                <FeaturedCourses />
+                <StudyPlanSubjects />
+                <FeaturedBundles />
+              </>
+            }
           />
         </LandingJourneyProvider>
         <WhyGradex />

@@ -62,6 +62,7 @@ func (h *publicCatalogHandlers) browseSubjects(c *gin.Context) {
 	search, _ := publicCatalogSearchQuery(c)
 	query := catalogpublic.SubjectQuery{
 		InstitutionSlug: publicCatalogFilterValue(c, "institution"),
+		ProgramSlug:     publicCatalogFilterValue(c, "program"),
 		Search:          search,
 		Page:            page,
 		PageSize:        pageSize,

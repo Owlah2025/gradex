@@ -164,6 +164,9 @@ func TestStudentAcademicProfileAPI(t *testing.T) {
 		if profile["curriculum_version_label"] != "2024" {
 			t.Fatalf("curriculum = %v, want the server-resolved 2024 plan", profile["curriculum_version_label"])
 		}
+		if profile["institution_slug"] != "kuwait-university" {
+			t.Fatalf("institution_slug = %v, want the additive public discovery slug", profile["institution_slug"])
+		}
 		// The College is derived from the Program, never stored twice.
 		if profile["college_name"] != "College of Science" {
 			t.Fatalf("derived college = %v", profile["college_name"])

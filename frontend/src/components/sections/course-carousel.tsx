@@ -172,17 +172,26 @@ export function CourseCard({
   href,
   locale,
   labels,
+  statusLabel,
+  actionLabel,
+  testID,
 }: {
   course: PublicCourse;
   href: string;
   locale: "ar" | "en";
   labels: CourseCardLabels;
+  /** Optional product state used when a real Course is presented inside Subject discovery. */
+  statusLabel?: string;
+  /** Optional visible CTA; the entire card remains one accessible link. */
+  actionLabel?: string;
+  testID?: string;
 }) {
     const level = course.study_year?.label;
 
   return (
     <Link
       href={href}
+      data-testid={testID}
       className={cn(
         // `w-full` is load-bearing: the card is a flex child of its <li>, and without it the card
         // shrinks to its content width and sits left-aligned, turning the leftover item width into
@@ -210,6 +219,12 @@ export function CourseCard({
           </p>
         ) : null}
 
+        {statusLabel ? (
+          <p className="mt-2 text-[13px] font-bold text-gx-navy" data-testid="subject-availability">
+            {statusLabel}
+          </p>
+        ) : null}
+
         <div className="mt-auto flex items-end justify-between gap-2 pt-3">
           {level ? (
             <span className="text-[13px] font-medium text-muted-foreground">
@@ -220,6 +235,11 @@ export function CourseCard({
           )}
           {course.price ? <PriceDisplay price={course.price} locale={locale} compact /> : null}
         </div>
+        {actionLabel ? (
+          <span className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-bold text-primary-foreground">
+            {actionLabel}
+          </span>
+        ) : null}
       </div>
     </Link>
   );

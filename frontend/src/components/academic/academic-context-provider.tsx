@@ -83,6 +83,8 @@ export type AcademicContextValue = {
    * waiting in those cases meant a request that could only be refused, on the busiest public page.
    */
   status: "loading" | "ready";
+  /** Whether an authenticated principal's profile read has settled. */
+  profileStatus: "loading" | "ready";
   /** The preference this browser is holding, or `null`. Never an account fact. */
   anonymous: AnonymousAcademicContext | null;
   /** The signed-in Student's own profile, or `null` for everyone else. Authoritative when complete. */
@@ -214,6 +216,11 @@ export function AcademicContextProvider({
     profileRead;
   const status: "loading" | "ready" =
     storageRead && precedenceSettled ? "ready" : "loading";
+  const profileStatus: "loading" | "ready" =
+    sessionResolution === "UNRESOLVED" ||
+    (sessionResolution === "AUTHENTICATED" && !profileRead)
+      ? "loading"
+      : "ready";
 
   /**
    * See `adoptProfile` on the value type. `profileRead` is set alongside it because a write that
@@ -340,6 +347,7 @@ export function AcademicContextProvider({
   const value = React.useMemo<AcademicContextValue>(
     () => ({
       status,
+      profileStatus,
       anonymous,
       profile,
       adoptProfile,
@@ -354,6 +362,7 @@ export function AcademicContextProvider({
     }),
     [
       status,
+      profileStatus,
       anonymous,
       profile,
       adoptProfile,

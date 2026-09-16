@@ -1,6 +1,7 @@
 import { authenticatedRequest } from "./http";
 import { ProblemError } from "./problem";
 import { publicCatalogRequest as publicRequest } from "./public-request";
+import type { PublicCourse } from "./public-catalog";
 
 /**
  * Public Subject discovery and Student demand (D-106).
@@ -47,6 +48,8 @@ export type SubjectListing = {
   served: boolean;
   /** Non-empty exactly when `served` is true. */
   courses: SubjectCourseRef[];
+  /** Complete real Course-card data for the deterministic primary published Course. */
+  primary_course?: PublicCourse;
 };
 
 export type SubjectPage = {
@@ -60,6 +63,7 @@ export type SubjectAvailability = "all" | "served" | "unserved";
 
 export type SubjectQuery = {
   institution?: string;
+  program?: string;
   search?: string;
   availability?: SubjectAvailability;
   page?: number;
@@ -84,6 +88,7 @@ export function getSubjects(locale: "ar" | "en", query: SubjectQuery = {}) {
   // An empty filter is omitted rather than sent empty, so "no filter" and "a
   // filter matching nothing" stay different requests.
   if (query.institution) parameters.set("institution", query.institution);
+  if (query.program) parameters.set("program", query.program);
   if (query.search) parameters.set("q", query.search);
   // "all" is the absence of a filter, not a value the server knows.
   if (query.availability && query.availability !== "all")

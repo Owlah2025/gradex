@@ -21,9 +21,9 @@
 /** Mirrors `rotatingMaxRepeats` in backend/cmd/e2e-seed/rotating_students_test.go. */
 export const ROTATING_MAX_REPEATS = 10;
 /** Mirrors `rotatingTestSlots`. */
-export const ROTATING_TEST_SLOTS = 42;
+export const ROTATING_TEST_SLOTS = 45;
 /** Mirrors `rotatingStudentPoolSize`. */
-export const ROTATING_POOL_SIZE = 420;
+export const ROTATING_POOL_SIZE = 450;
 /** Mirrors `rotatingExpiredSlots`. */
 export const ROTATING_EXPIRED_SLOTS = 8;
 /** Mirrors `rotatingExpiredPoolSize`. */
@@ -41,6 +41,9 @@ export const ROTATING_EXPIRED_POOL_SIZE = 100;
 //   22-23  Dashboard resume (F15)   English and Arabic, one Student each
 //   24-29  Student academic profile 6 T3 journeys, one Student each
 //   30-33  Entitlement lifecycle    4 T8A BR-026 operations, one Student each
+//   34     reported-content journey 1
+//   35-41 Subject demand            7 isolated Students
+//   42-44 Landing study-plan        profile, request, and filter journeys
 //
 // Growing the map never reassigns an existing execution: allocation is
 // slot * repeats + repeat, so slots 0-23 keep indices 0-239 and slots 0-29 keep
@@ -139,6 +142,10 @@ export const SUBJECT_DEMAND_AUTH_RETURN_TEST_SLOT = 39;
 export const SUBJECT_DEMAND_WITHDRAW_TEST_SLOT = 40;
 /** Signs in from a new browser and completes device trust before returning. */
 export const SUBJECT_DEMAND_UNTRUSTED_AUTH_RETURN_TEST_SLOT = 41;
+/** Landing study-plan discovery owns three isolated Student identities. */
+export const LANDING_STUDY_PLAN_PROFILE_TEST_SLOT = 42;
+export const LANDING_STUDY_PLAN_REQUEST_TEST_SLOT = 43;
+export const LANDING_STUDY_PLAN_FILTER_TEST_SLOT = 44;
 /**
  * The per-viewport rendered-evidence executions occupy active slots 18-21. Each walks every S5
  * screen in both locales, so it authenticates once and issues at most two playback authorizations

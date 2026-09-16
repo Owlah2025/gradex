@@ -15,21 +15,11 @@ import {
 } from "@/components/sections/course-carousel";
 import { getPublicCourses, type PublicCourse } from "@/lib/api/public-catalog";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { cn } from "@/lib/utils";
 import { routes } from "@/components/layout/nav-items";
-import { useAcademicContext } from "@/components/academic/academic-context-provider";
-import {
-  catalogueHrefForContext,
-  selectionForContext,
-} from "@/components/academic/catalogue-context";
-import { requestFilters } from "@/components/catalog/academic-filter-state";
-import { academicContextNames } from "@/lib/academic/anonymous-context";
-import { AcademicContextChips } from "@/components/academic/selected-academic-context";
-import { useLandingJourney } from "@/components/landing/landing-journey";
 
 type FeaturedState =
   | { kind: "loading" }
-  | { kind: "ready"; courses: PublicCourse[]; total: number }
+  | { kind: "ready"; courses: PublicCourse[] }
   | { kind: "failed" };
 
 function courseHref(locale: "ar" | "en", course: PublicCourse): string {
@@ -64,39 +54,22 @@ export function FeaturedCourses() {
   const { locale, dir, t } = useLocale();
   const [state, setState] = useState<FeaturedState>({ kind: "loading" });
   const [hovered, setHovered] = useState<number | null>(null);
-  const { status, anonymous, source } = useAcademicContext();
-  // Present on the landing page, absent anywhere else this strip is mounted. See `useLandingJourney`.
-  const journey = useLandingJourney();
   const carousel = useCarousel(
     dir,
     state.kind === "ready" ? state.courses.length : 0,
   );
 
-  // Narrowed by the visitor's own academic context, through the same anonymous catalogue API the
-  // catalogue itself uses. A profile-backed Student is left alone here: their profile orders the
-  // catalogue rather than narrowing it.
-  const filters =
-    source === "anonymous" && anonymous
-      ? requestFilters(selectionForContext(anonymous))
-      : {};
-  const filterKey = JSON.stringify(filters);
-
   useEffect(() => {
-    // Waiting for the stored context avoids fetching the unfiltered list first and then visibly
-    // replacing it a moment later with the personalised one.
-    if (status !== "ready") return;
     let active = true;
     setState({ kind: "loading" });
-    getPublicCourses(locale, "", JSON.parse(filterKey))
+    getPublicCourses(locale)
       .then((result) => {
         // A browsable row rather than a fixed three-up: a bounded slice of the real, ordered
-        // response, enough to swipe through while "View all" carries the rest. `total` is the real
-        // count behind that link.
+        // response, enough to swipe through while "View all" carries the rest.
         if (active)
           setState({
             kind: "ready",
             courses: result.items.slice(0, 9),
-            total: result.total,
           });
       })
       .catch(() => {
@@ -105,28 +78,11 @@ export function FeaturedCourses() {
     return () => {
       active = false;
     };
-  }, [locale, status, filterKey]);
-
-  // Carries the context into the catalogue, so "View all" continues the list the reader is looking
-  // at instead of resetting it.
-  const browseAllHref =
-    source === "anonymous" && anonymous
-      ? catalogueHrefForContext(locale, anonymous)
-      : routes.catalogue(locale);
-
-  // The strip retitles itself once it is showing a narrowed list. "Start where your semester is" is
-  // an invitation and belongs above the general catalogue; above courses chosen by the reader's own
-  // university and program it would be describing something else.
-  const personalized = source === "anonymous" && anonymous !== null;
-  const names = personalized && anonymous ? academicContextNames(anonymous, locale) : null;
+  }, [locale]);
 
   const ready = state.kind === "ready" && state.courses.length > 0;
-  const total = state.kind === "ready" ? state.total : null;
   const ViewAllArrow = dir === "rtl" ? ArrowLeft : ArrowRight;
-  const viewAllLabel =
-    total != null && total > 0
-      ? t.courses.viewAllCount.replace("{count}", String(total))
-      : t.courses.viewAll;
+  const viewAllLabel = t.courses.viewAll;
   const cardLabels: CourseCardLabels = {
     instructor: t.courses.instructor,
     preview: t.courses.previewShort,
@@ -138,20 +94,14 @@ export function FeaturedCourses() {
       <div className="mb-4 flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <SectionHeading id="courses-title">
-            {personalized ? t.courses.personalizedTitle : t.courses.title}
+            {t.courses.title}
           </SectionHeading>
 
-          {/* The one secondary action and the rail controls, together at the head of the section.
-              View-all is offered once there are courses — and also whenever the reader has named a
-              university and program, even if nothing is published for them yet: that reader is
-              exactly the one who needs the addressed catalogue, and hiding its only link behind a
-              non-empty result leaves the empty state with no way onward. The arrows appear only when
-              there is somewhere to scroll, and stay out of the small-screen layout where swiping is
-              the real control. */}
-          {ready || personalized ? (
+          {/* The secondary catalogue link and rail controls share one compact action group. */}
+          {ready ? (
             <div className="flex items-center gap-3 sm:gap-4">
               <Link
-                href={browseAllHref}
+                href={routes.catalogue(locale)}
                 data-testid="featured-courses-view-all"
                 className="group/all inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm font-display text-[14px] font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
@@ -178,19 +128,7 @@ export function FeaturedCourses() {
             </div>
           ) : null}
         </div>
-
-        {/* The context that produced this list, and the one control that reopens it. Changing it
-            returns the reader to the question they answered rather than restarting the flow. */}
-        {personalized && names && journey ? (
-          <AcademicContextChips
-            testID="featured-courses-context"
-            institution={names.institution || anonymous!.institutionSlug}
-            program={names.program}
-            onChange={journey.requestEdit}
-            changeLabel={t.academicContext.change}
-            changeAria={t.academicContext.changeAria}
-          />
-        ) : null}
+        <p className="max-w-2xl text-pretty text-muted-foreground">{t.courses.subtitle}</p>
       </div>
 
       {state.kind === "loading" && (
@@ -210,7 +148,35 @@ export function FeaturedCourses() {
           description={t.courses.emptyBody}
         />
       )}
-      {ready && (
+      {ready && state.courses.length === 1 ? (
+        <div className="grid gap-8 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-center lg:gap-16">
+          <ul data-testid="featured-courses-list" aria-label={t.courses.carouselLabel} className="max-w-[340px]">
+            <li className="flex">
+              <CourseCard
+                course={state.courses[0]}
+                href={courseHref(locale, state.courses[0])}
+                locale={locale}
+                labels={cardLabels}
+              />
+            </li>
+          </ul>
+          <div className="max-w-xl lg:py-8" data-testid="single-course-companion">
+            <h3 className="text-balance font-display text-2xl font-bold leading-tight text-foreground md:text-3xl">
+              {t.courses.singleTitle}
+            </h3>
+            <p className="mt-3 max-w-prose text-pretty leading-7 text-muted-foreground">
+              {t.courses.singleBody}
+            </p>
+            <Link
+              href="#study-plan"
+              className="mt-5 inline-flex min-h-11 items-center gap-2 font-display text-sm font-bold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {t.courses.exploreSubjects}
+              <ViewAllArrow aria-hidden className="size-4" />
+            </Link>
+          </div>
+        </div>
+      ) : ready && (
         <ul
           ref={carousel.scrollerRef}
           data-testid="featured-courses-list"

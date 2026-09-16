@@ -70,6 +70,10 @@ type SubjectListing struct {
 	Served bool `json:"served"`
 	// Courses is non-empty exactly when Served is true.
 	Courses []SubjectCourseRef `json:"courses"`
+	// PrimaryCourse is the first eligible published Course under the Subject
+	// catalogue's existing stable slug order. It is the complete public card
+	// projection, resolved in one batch for the page rather than per Subject.
+	PrimaryCourse *Course `json:"primary_course,omitempty"`
 }
 
 // SubjectPage is one page of Subject listings.
@@ -84,6 +88,10 @@ type SubjectPage struct {
 // value browses every Subject of every active Institution.
 type SubjectQuery struct {
 	InstitutionSlug string
+	// ProgramSlug narrows Subjects through active canonical curricula before
+	// counting and pagination. It is the same public slug vocabulary used by the
+	// academic option and Course catalogue endpoints.
+	ProgramSlug string
 	// Search matches the Subject's code or either title. Free text.
 	Search string
 	// ServedOnly and UnservedOnly are mutually exclusive; setting both returns
@@ -135,6 +143,19 @@ func (r *Repository) BrowseSubjects(
 		return result, nil
 	}
 
+	// Counting, listing, and the batched Course-card projection must describe
+	// one database snapshot. Without this read-only repeatable-read transaction,
+	// a publication change between the Subject and Course reads could report a
+	// served Subject without the real Course data that made it served.
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return SubjectPage{}, fmt.Errorf("starting public subject browse: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	arguments := []any{arabic}
 	add := func(value any) string {
 		arguments = append(arguments, value)
@@ -144,6 +165,17 @@ func (r *Repository) BrowseSubjects(
 	clauses := []string{"i.retired_at IS NULL", "s.retired_at IS NULL"}
 	if slug := strings.TrimSpace(query.InstitutionSlug); slug != "" {
 		clauses = append(clauses, "i.slug = "+add(slug))
+	}
+	if slug := strings.TrimSpace(query.ProgramSlug); slug != "" {
+		program := add(slug)
+		clauses = append(clauses, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM curriculum_subjects cs
+			JOIN curricula cu ON cu.id = cs.curriculum_id
+				AND cu.retired_at IS NULL AND cu.status = 'ACTIVE'
+			JOIN programs p ON p.id = cu.program_id AND p.retired_at IS NULL
+			WHERE cs.subject_id = s.id AND p.institution_id = i.id AND p.slug = %s
+		)`, program))
 	}
 	if search := strings.TrimSpace(query.Search); search != "" {
 		// ILIKE over the stored forms plus the normalized code, so "cs101",
@@ -167,11 +199,14 @@ func (r *Repository) BrowseSubjects(
 		JOIN institutions i ON i.id = s.institution_id` + subjectServedCourses("$1") + `
 		` + where
 
-	if err := r.pool.QueryRow(ctx, "SELECT count(*) "+from, arguments...).
+	if err := tx.QueryRow(ctx, "SELECT count(*) "+from, arguments...).
 		Scan(&result.Total); err != nil {
 		return SubjectPage{}, fmt.Errorf("counting public subjects: %w", err)
 	}
 	if result.Total == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return SubjectPage{}, fmt.Errorf("committing empty public subject browse: %w", err)
+		}
 		return result, nil
 	}
 
@@ -188,7 +223,7 @@ func (r *Repository) BrowseSubjects(
 			COALESCE(s.official_code, s.title_en) ASC
 		LIMIT ` + limit + ` OFFSET ` + offset
 
-	rows, err := r.pool.Query(ctx, listing, arguments...)
+	rows, err := tx.Query(ctx, listing, arguments...)
 	if err != nil {
 		return SubjectPage{}, fmt.Errorf("listing public subjects: %w", err)
 	}
@@ -214,7 +249,69 @@ func (r *Repository) BrowseSubjects(
 		item.Served = len(item.Courses) > 0
 		result.Items = append(result.Items, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return SubjectPage{}, err
+	}
+	rows.Close()
+
+	items := make([]*SubjectListing, len(result.Items))
+	for index := range result.Items {
+		items[index] = &result.Items[index]
+	}
+	if err := r.attachPrimarySubjectCourses(ctx, tx, items, arabic); err != nil {
+		return SubjectPage{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return SubjectPage{}, fmt.Errorf("committing public subject browse: %w", err)
+	}
+	return result, nil
+}
+
+// attachPrimarySubjectCourses resolves the complete public Course projection
+// for every served Subject in one query. The first Course is not arbitrary:
+// subjectServedCourses orders the refs by slug, which is the existing explicit
+// Subject catalogue order, and this method projects exactly that first slug.
+func (r *Repository) attachPrimarySubjectCourses(
+	ctx context.Context, tx pgx.Tx, items []*SubjectListing, arabic bool,
+) error {
+	slugs := make([]string, 0, len(items))
+	for _, item := range items {
+		if len(item.Courses) > 0 {
+			slugs = append(slugs, item.Courses[0].Slug)
+		}
+	}
+	if len(slugs) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, r.projectionQuery(
+		r.visibility("c", "cr"),
+		"AND c.slug = ANY($2::text[])",
+		"ORDER BY c.slug",
+	), arabic, slugs)
+	if err != nil {
+		return fmt.Errorf("projecting primary public subject courses: %w", err)
+	}
+	defer rows.Close()
+	courses, err := scanCourses(rows, arabic)
+	if err != nil {
+		return err
+	}
+	bySlug := make(map[string]*Course, len(courses))
+	for index := range courses {
+		bySlug[courses[index].Slug] = &courses[index]
+	}
+	for _, item := range items {
+		if len(item.Courses) == 0 {
+			continue
+		}
+		course := bySlug[item.Courses[0].Slug]
+		if course == nil {
+			return fmt.Errorf("published primary Course %q was not projected", item.Courses[0].Slug)
+		}
+		item.PrimaryCourse = course
+	}
+	return nil
 }
 
 // SubjectDetail resolves one Subject within one Institution by its public value,
@@ -230,6 +327,14 @@ func (r *Repository) SubjectDetail(
 	if institutionSlug == "" || value == "" {
 		return nil, nil
 	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("starting public subject detail: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Whether this value is a Subject identifier is decided by parsing it as a
 	// UUID in Go, never by a shape test in SQL.
@@ -269,7 +374,7 @@ func (r *Repository) SubjectDetail(
 
 	var identifier, code, coursesJSON string
 	var item SubjectListing
-	err := r.pool.QueryRow(ctx, query, arabic, institutionSlug, value, subjectID).Scan(
+	err = tx.QueryRow(ctx, query, arabic, institutionSlug, value, subjectID).Scan(
 		&identifier, &code, &item.TitleAr, &item.TitleEn,
 		&item.InstitutionSlug, &item.InstitutionNameAr, &item.InstitutionNameEn, &coursesJSON)
 	if err != nil {
@@ -289,6 +394,12 @@ func (r *Repository) SubjectDetail(
 		return nil, fmt.Errorf("decoding subject courses: %w", err)
 	}
 	item.Served = len(item.Courses) > 0
+	if err := r.attachPrimarySubjectCourses(ctx, tx, []*SubjectListing{&item}, arabic); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing public subject detail: %w", err)
+	}
 	return &item, nil
 }
 

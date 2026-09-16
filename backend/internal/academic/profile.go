@@ -68,6 +68,9 @@ type StudentAcademicProfile struct {
 
 	InstitutionID   *string `json:"institution_id,omitempty"`
 	InstitutionName *string `json:"institution_name,omitempty"`
+	// InstitutionSlug is the public discovery identifier. It is additive to the
+	// existing internal identifier and display name and carries no authority.
+	InstitutionSlug *string `json:"institution_slug,omitempty"`
 	// MaxAcademicLevel lets a surface render the level choices without a second
 	// call and without hardcoding any institution's bounds.
 	MaxAcademicLevel   *int  `json:"max_academic_level,omitempty"`
@@ -144,7 +147,7 @@ func (r *Repository) loadProfile(ctx context.Context, q rowQuerier, accountID st
 	var setup string
 	err := q.QueryRow(ctx, `
 		SELECT sp.setup_state::text, sp.enrollment_status::text,
-			sp.institution_id::text, i.name_en, i.max_academic_level, i.has_foundation_stage,
+			sp.institution_id::text, i.name_en, i.slug, i.max_academic_level, i.has_foundation_stage,
 			sp.academic_unit_id::text, unit.name_en,
 			sp.program_id::text, prog.name_en, prog.slug,
 			department.name_en, college.name_en,
@@ -159,7 +162,7 @@ func (r *Repository) loadProfile(ctx context.Context, q rowQuerier, accountID st
 		LEFT JOIN curricula cur ON cur.id = sp.curriculum_id
 		WHERE sp.account_id = $1::uuid
 	`, accountID).Scan(&setup, &status,
-		&p.InstitutionID, &p.InstitutionName, &p.MaxAcademicLevel, &p.HasFoundationStage,
+		&p.InstitutionID, &p.InstitutionName, &p.InstitutionSlug, &p.MaxAcademicLevel, &p.HasFoundationStage,
 		&p.AcademicUnitID, &p.AcademicUnitName,
 		&p.ProgramID, &p.ProgramName, &p.ProgramSlug,
 		&p.DepartmentName, &p.CollegeName,

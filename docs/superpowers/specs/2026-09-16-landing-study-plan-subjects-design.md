@@ -28,7 +28,9 @@ The page order is:
 
 `FeaturedCourses` remains the presentation of the public Course catalogue. It always reads the
 published-Course endpoint and renders only real Course data. It no longer changes its product
-meaning based on the anonymous academic selection.
+meaning based on the anonymous academic selection. When only one Course is published, its bounded
+card sits beside a short editorial link to the study-plan section instead of leaving an apparently
+broken full-width rail.
 
 The new `StudyPlanSubjects` section owns landing-only Subject discovery state. The hero's existing
 academic selection continues to write through `AcademicContextProvider`; after that selection
