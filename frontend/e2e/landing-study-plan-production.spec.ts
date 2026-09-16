@@ -6,7 +6,8 @@ const PRODUCTION_ORIGIN = "https://gradexcourses.com";
 test.describe("production landing study-plan smoke", () => {
   test.skip(!isExternal, "This suite is read-only and runs only with GRADEX_E2E_EXTERNAL_ORIGIN.");
 
-  test("English landing discovers Kuwait University Subjects and preserves filters", async ({ page }) => {
+  test("English landing discovers Kuwait University Subjects and preserves filters", async ({ context, page }) => {
+    await context.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Available now" })).toBeVisible();
     await expect(page.getByText("Programming in C & UNIX", { exact: true }).first()).toBeVisible();
@@ -24,7 +25,8 @@ test.describe("production landing study-plan smoke", () => {
     );
   });
 
-  test("Arabic landing stays RTL and the existing public catalogue counts remain unchanged", async ({ page }) => {
+  test("Arabic landing stays RTL and the existing public catalogue counts remain unchanged", async ({ context, page }) => {
+    await context.addInitScript(() => window.localStorage.setItem("gradex.locale", "en"));
     await page.goto("/", { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "Switch to Arabic" }).click();
     await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
@@ -32,7 +34,8 @@ test.describe("production landing study-plan smoke", () => {
     await expect(page.getByRole("heading", { name: "مواد خطتك الدراسية" })).toBeVisible();
     await page.getByTestId("study-plan-institution").selectOption("kuwait-university");
     await page.getByTestId("study-plan-program").selectOption("computer-science");
-    await expect(page.locator('[data-subject-code="0418-220"]').getByText("البرمجة بلغة C ونظام يونكس", { exact: true })).toBeVisible();
+    await expect(page.locator('[data-subject-code="0418-220"]')).toHaveAttribute("data-served", "true");
+    await expect(page.getByTestId("study-plan-served-course").getByText("اعرض الكورس", { exact: true })).toBeVisible();
     await expect(page.locator('[data-testid="study-plan-subject-card"][data-served="false"]').first().getByText("اطلب هذا الكورس", { exact: true })).toBeVisible();
 
     const institutions = await page.request.get(`${PRODUCTION_ORIGIN}/api/v1/catalog/academic-options/institutions`);
