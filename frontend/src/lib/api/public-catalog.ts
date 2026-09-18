@@ -131,11 +131,47 @@ export function getPublicCourses(
  * one, and the Admin lists carry retired rows and audit metadata that must not
  * reach a visitor.
  */
+/**
+ * The University this product launched for.
+ *
+ * Matched on the slug rather than on either display name, so the rule holds in
+ * both languages without comparing Arabic strings, and does not break the first
+ * time someone edits the name.
+ */
+const HOME_INSTITUTION_SLUG = "kuwait-university";
+
+/**
+ * Kuwait University first, everything else exactly as the server ordered it.
+ *
+ * The API returns institutions `ORDER BY name_en ASC`, which is deterministic
+ * and stays that way — so several institutions sort ahead of Kuwait University
+ * on the alphabet alone, and the University most visitors are actually looking
+ * for was not the one they saw first.
+ *
+ * Presentation only. Nothing here changes the request, the server's ordering,
+ * or an institution's identity; the sort is stable, so the remaining rows keep
+ * the relative order they arrived in rather than acquiring a second, competing
+ * one. Applied at the shared client rather than in one component because every
+ * Student-facing list of Universities reads this function — the landing rail,
+ * the academic picker, the catalogue filter, and subject discovery. Two of them
+ * appear on the same page, and disagreeing about the order reads as a bug.
+ */
+function homeInstitutionFirst(items: InstitutionOption[]): InstitutionOption[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const aHome = a.item.slug === HOME_INSTITUTION_SLUG ? 0 : 1;
+      const bHome = b.item.slug === HOME_INSTITUTION_SLUG ? 0 : 1;
+      return aHome - bHome || a.index - b.index;
+    })
+    .map(({ item }) => item);
+}
+
 export function getPublicInstitutions(locale: "ar" | "en") {
   return publicRequest<{ items: InstitutionOption[] }>(
     `/academic-options/institutions`,
     locale,
-  ).then((body) => body.items);
+  ).then((body) => homeInstitutionFirst(body.items));
 }
 
 export function getPublicPrograms(

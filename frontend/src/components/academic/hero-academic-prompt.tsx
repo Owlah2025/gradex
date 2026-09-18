@@ -404,6 +404,8 @@ export function HeroAcademicPrompt({ onResolved }: { onResolved?: () => void }) 
                 loadFailed: copy.loadFailed,
                 retry: copy.retry,
                 noInstitutions: copy.noInstitutions,
+                railPrevious: copy.railPrevious,
+                railNext: copy.railNext,
               }}
               onSelect={(slug) => openCard(slug)}
               onRetry={retryInstitutions}

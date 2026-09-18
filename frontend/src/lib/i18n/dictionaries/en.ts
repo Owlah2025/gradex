@@ -2354,6 +2354,12 @@ export const en = {
     programsFailed: "Programs for this university could not be loaded.",
     retry: "Try again",
     noInstitutions: "No universities are listed yet.",
+    // The University rail's controls. Named for what they reveal rather than for
+    // where they sit: the control on the reader's left uncovers the universities
+    // before the ones on screen in both scripts, even though "left" is the start
+    // of the row in one and the end of it in the other.
+    railPrevious: "Show previous universities",
+    railNext: "Show more universities",
     noPrograms: "No programs are listed for this university yet. You can still browse its courses.",
     summaryTitle: "Your academic context",
     showingFor: "Showing courses for",

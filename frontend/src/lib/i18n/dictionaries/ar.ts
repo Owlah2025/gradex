@@ -2154,6 +2154,8 @@ export const ar: Dictionary = {
     programsFailed: "تعذّر تحميل تخصصات هذه الجامعة.",
     retry: "أعد المحاولة",
     noInstitutions: "لا توجد جامعات مسجّلة بعد.",
+    railPrevious: "اعرض الجامعات السابقة",
+    railNext: "اعرض المزيد من الجامعات",
     noPrograms: "لا توجد تخصصات مسجّلة لهذه الجامعة بعد. تقدر تتصفح مقرراتها.",
     summaryTitle: "سياقك الدراسي",
     showingFor: "المقررات المعروضة لـ",
