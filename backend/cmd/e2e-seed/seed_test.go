@@ -70,6 +70,7 @@ func TestMain(m *testing.M) {
 	var queryInvitationToken bool
 	var queryEmailVerificationToken bool
 	var queryCredentialState bool
+	var previewInstitutionsFlag bool
 	var invitationIDParam string
 	flag.StringVar(&dbName, "dbname", "", "Target database name")
 	flag.BoolVar(&dropOnly, "drop", false, "Drop target database and exit")
@@ -92,6 +93,7 @@ func TestMain(m *testing.M) {
 	flag.BoolVar(&useRegistrationPassword, "use-registration-password", false, "Authenticate session issuance with the run-scoped registration password")
 	flag.StringVar(&emailParam, "email", "", "Student email for session issuance")
 	flag.StringVar(&accessMutationParam, "access-mutation", "", "Allowlisted mid-session authority mutation: expire-entitlement, revoke-entitlement, suspend-account, emergency-suspend-course")
+	flag.BoolVar(&previewInstitutionsFlag, "preview-institutions", false, "Add the local Student preview stack's demonstration Universities. Not part of the E2E fixture: no spec sees these rows unless this verb is passed")
 	flag.Parse()
 	if loadtestFixtures && issueLoadtestSessionsFlag || betaLoadtestFixtures && issueBetaLoadtestSessionsFlag {
 		log.Fatalf("fixture creation and session issuance are separate operations")
@@ -224,6 +226,20 @@ func TestMain(m *testing.M) {
 			log.Fatalf("encoding credential state: %v", err)
 		}
 		fmt.Printf("%s", encoded)
+		os.Exit(0)
+	}
+
+	if previewInstitutionsFlag {
+		pool, err := pgxpool.New(ctx, targetDSN)
+		if err != nil {
+			log.Fatalf("connecting to target db for preview institutions: %v", err)
+		}
+		defer pool.Close()
+		added, err := seedPreviewInstitutions(ctx, pool)
+		if err != nil {
+			log.Fatalf("seeding preview institutions: %v", err)
+		}
+		log.Printf("seeded %d preview institutions", added)
 		os.Exit(0)
 	}
 

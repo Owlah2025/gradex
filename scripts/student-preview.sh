@@ -183,9 +183,13 @@ cmd_infra() {
   echo "  postgres 127.0.0.1:${PG_PORT}  redis 127.0.0.1:${REDIS_PORT}  minio 127.0.0.1:${MINIO_PORT}"
 }
 
-cmd_seed() {
-  [ -x "${SEED_BIN}" ] || cmd_build
-  echo "Seeding ${DB_NAME}..."
+# Runs the seeder binary with the full fail-closed environment it requires.
+#
+# One definition rather than one per verb: the API's configuration loader refuses
+# to start without every one of these, so a copy that drifts does not fail
+# quietly — it fails at the first invocation that uses it, which is exactly the
+# kind of breakage a duplicated block invites.
+seed_tool() {
   (cd "${BACKEND_DIR}" && env \
     GRADEX_E2E_ADMIN_DB_URL="${ADMIN_DSN}" \
     GRADEX_E2E_TARGET_DB_NAME="${DB_NAME}" \
@@ -214,8 +218,19 @@ cmd_seed() {
     PUBLIC_ORIGIN="${PUBLIC_ORIGIN}" \
     CORS_ALLOWED_ORIGINS="${PUBLIC_ORIGIN}" \
     CORS_ALLOW_CREDENTIALS=true \
-    "${SEED_BIN}")
+    "${SEED_BIN}" "$@")
+}
+
+cmd_seed() {
+  [ -x "${SEED_BIN}" ] || cmd_build
+  echo "Seeding ${DB_NAME}..."
+  seed_tool
   echo "  seeded"
+  # Demonstration Universities, so the landing page's University rail has enough
+  # institutions to overflow and show its controls. A separate verb rather than
+  # part of the seed: no E2E spec sees these rows.
+  seed_tool -preview-institutions
+  echo "  preview institutions added"
 }
 
 # Mints a real session for a seeded Student and prints its cookie.
@@ -227,38 +242,10 @@ cmd_seed() {
 #
 # Usage: scripts/student-preview.sh session [email] [device-slot]
 cmd_session() {
-  local email="${1:-student1@example.test}"
+  local email="${1:-student-rotating-000@example.test}"
   local slot="${2:-0}"
   [ -x "${SEED_BIN}" ] || cmd_build
-  (cd "${BACKEND_DIR}" && env \
-    GRADEX_E2E_ADMIN_DB_URL="${ADMIN_DSN}" \
-    GRADEX_E2E_TARGET_DB_NAME="${DB_NAME}" \
-    GRADEX_E2E_TARGET_DB_URL="${TARGET_DSN}" \
-    GRADEX_E2E_ALLOW_DATABASE_RESET=1 \
-    DATABASE_URL="${APP_DSN}" \
-    APP_ENV=development \
-    SERVICE_ROLE=api \
-    REDIS_ADDR="127.0.0.1:${REDIS_PORT}" \
-    S3_ENDPOINT="http://127.0.0.1:${MINIO_PORT}" \
-    S3_BUCKET=gradex-test \
-    S3_ACCESS_KEY=gradexminio \
-    S3_SECRET_KEY=gradexminio \
-    AUTH_FAKE_MODE=false \
-    STUDENT_REGISTRATION_ENABLED=true \
-    REGISTRATION_POLICY_SET_ID=student-preview-v1 \
-    PASSWORD_SCREEN_MODE=deterministic \
-    SESSION_CSRF_KEY=0123456789abcdef0123456789abcdef \
-    ANONYMOUS_COOKIE_SIGNING_KEY=1123456789abcdef0123456789abcdef \
-    ANONYMOUS_CSRF_KEY=2123456789abcdef0123456789abcdef \
-    IDENTITY_OTP_PEPPER=3123456789abcdef0123456789abcdef \
-    ADMISSION_LIMITER_HMAC_KEY=4123456789abcdef0123456789abcdef \
-    PLAYBACK_TOKEN_SECRET=5123456789abcdef0123456789abcdef \
-    OUTBOX_PROTECTED_PAYLOAD_KEY=6123456789abcdef0123456789abcdef \
-    OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION=student-preview-v1 \
-    PUBLIC_ORIGIN="${PUBLIC_ORIGIN}" \
-    CORS_ALLOWED_ORIGINS="${PUBLIC_ORIGIN}" \
-    CORS_ALLOW_CREDENTIALS=true \
-    "${SEED_BIN}" -issue-session -email "${email}" -device-slot "${slot}")
+  seed_tool -issue-session -email "${email}" -device-slot "${slot}"
 }
 
 cmd_backend() {
