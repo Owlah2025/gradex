@@ -1,10 +1,8 @@
 package email
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/mail"
 	"net/url"
 	"strings"
@@ -76,6 +74,7 @@ type RendererOptions struct {
 
 type Renderer struct {
 	publicOrigin string
+	logoURL      string
 	from         string
 	replyTo      string
 }
@@ -97,7 +96,12 @@ func NewRenderer(options RendererOptions) (*Renderer, error) {
 			return nil, errors.New("transactional email reply-to is invalid")
 		}
 	}
-	return &Renderer{publicOrigin: options.PublicOrigin, from: from, replyTo: replyTo}, nil
+	return &Renderer{
+		publicOrigin: options.PublicOrigin,
+		logoURL:      options.PublicOrigin + "/media/gradex-logo-email.png",
+		from:         from,
+		replyTo:      replyTo,
+	}, nil
 }
 
 type localizedTemplate struct {
@@ -200,7 +204,7 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 	if request.Template == TemplateVerifyEmailOTP || request.Template == TemplateDeviceTrustOTP {
 		code = request.Payload.VerificationToken
 	}
-	htmlBody, err := renderHTML(request.Locale, copy, actionURL, expiry, code)
+	htmlBody, err := renderHTML(request.Locale, request.Template, copy, actionURL, expiry, code, r.logoURL)
 	if err != nil {
 		return Message{}, errors.New("transactional email HTML rendering failed")
 	}
@@ -333,32 +337,4 @@ func (r *Renderer) actionURL(request RenderRequest) (string, bool, error) {
 	default:
 		return "", false, errors.New("transactional email template is unsupported")
 	}
-}
-
-var htmlMessageTemplate = template.Must(template.New("email").Parse(`<!doctype html>
-<html lang="{{.Locale}}" dir="{{.Direction}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;background:#f6f5f1;color:#17211b;font-family:Arial,sans-serif;direction:{{.Direction}};text-align:{{.Align}}">
-<main style="max-width:600px;margin:0 auto;padding:24px"><div style="background:#ffffff;border:1px solid #dedbd2;border-radius:12px;padding:28px">
-<h1 style="font-size:24px;line-height:1.3;margin:0 0 16px">{{.Title}}</h1><p style="font-size:16px;line-height:1.7">{{.Body}}</p>
-{{if .Code}}<p style="margin:24px 0"><span style="display:inline-block;background:#f2f4f3;border:1px solid #dedbd2;border-radius:8px;padding:14px 22px;font-family:'Courier New',monospace;font-size:32px;font-weight:bold;letter-spacing:8px;direction:ltr;unicode-bidi:isolate">{{.Code}}</span></p>{{end}}
-{{if .Expiry}}<p style="font-size:14px;line-height:1.6"><strong>{{.ExpiryLabel}}</strong> {{.Expiry}}</p>{{end}}
-{{if .ActionURL}}<p style="margin:24px 0"><a href="{{.ActionURL}}" style="display:inline-block;background:#175c3a;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px">{{.Action}}</a></p>{{end}}
-<p style="font-size:14px;line-height:1.6;color:#4f5b54">{{.Footer}}</p></div></main></body></html>`))
-
-func renderHTML(locale string, copy localizedTemplate, actionURL, expiry, code string) (string, error) {
-	direction, align := "ltr", "left"
-	if locale == "ar" {
-		direction, align = "rtl", "right"
-	}
-	expiryLabel := expiryLabelFor(locale, code != "")
-	data := struct {
-		Locale, Direction, Align, Title, Body, Action, ActionURL, Footer, Expiry, ExpiryLabel, Code string
-	}{
-		locale, direction, align, copy.Title, copy.Body, copy.Action, actionURL, copy.Footer, expiry, expiryLabel, code,
-	}
-	var buffer bytes.Buffer
-	if err := htmlMessageTemplate.Execute(&buffer, data); err != nil {
-		return "", err
-	}
-	return buffer.String(), nil
 }

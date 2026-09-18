@@ -183,7 +183,7 @@ func TestVerificationCodeMessageCarriesTheCodeAndNoLink(t *testing.T) {
 		if !strings.Contains(message.HTML, "482913") || !strings.Contains(message.Text, "482913") {
 			t.Errorf("%s: the code is not readable in the message", locale)
 		}
-		if strings.Contains(message.HTML, "<a href") || strings.Contains(message.HTML, "gradex.example/") {
+		if strings.Contains(message.HTML, "<a ") || strings.Contains(message.HTML, "#token=") {
 			t.Errorf("%s: an OTP message must carry no action link", locale)
 		}
 		if strings.Contains(message.Text, "https://") {
