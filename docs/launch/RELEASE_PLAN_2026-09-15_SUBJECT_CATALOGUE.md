@@ -1,5 +1,11 @@
 # Production Release Plan — Subject Catalogue / Demand (D-106)
 
+> **SUPERSEDED for current release execution.** Live production is already at revision
+> `776f02543b105fe428e80627ed52342304dc01f2`, clean schema 38, with 15 institutions. Do not run
+> the schema-37 → 38 procedure in this document. Use
+> [`RELEASE_PLAN_2026-09-18_STUDENT_UI_EMAIL.md`](RELEASE_PLAN_2026-09-18_STUDENT_UI_EMAIL.md) for
+> the current Student UI/Auth/Email release framing and the same existing Hostinger tooling.
+
 **Status:** RE-DERIVED FROM THE LIVE PRODUCTION BASELINE. AWAITING INDEPENDENT RELEASE-INTEGRITY
 REVIEW AND A FRESH G0b.
 

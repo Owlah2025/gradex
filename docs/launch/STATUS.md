@@ -1,5 +1,12 @@
 # Gradex Launch Status
 
+> **Current release reconciliation — 2026-09-18:** live read-only Hostinger inspection supersedes
+> the stale schema-37/`4e7ddc` narrative below. Production is running revision
+> `776f02543b105fe428e80627ed52342304dc01f2`, clean schema 38, 15 institutions, and healthy
+> `/healthz`/`/readyz` checks. The current Student UI/Auth/Email release plan is
+> [`RELEASE_PLAN_2026-09-18_STUDENT_UI_EMAIL.md`](RELEASE_PLAN_2026-09-18_STUDENT_UI_EMAIL.md).
+> No production mutation has occurred in this release preparation.
+
 > **2026-09-15 (fifth pass) — RELEASE EXECUTION STOPPED FAIL-CLOSED AT CP-1; THE PRODUCTION BASELINE
 > WAS STALE AND THE RELEASE IS RE-DERIVED AS 37 → 38.**
 >
