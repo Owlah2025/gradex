@@ -215,7 +215,13 @@ export function CourseCard({
         {course.instructor_display_name ? (
           <p className="mt-1 truncate text-[13px] text-muted-foreground">
             <span className="sr-only">{labels.instructor}: </span>
-            {course.instructor_display_name}
+            {/* Isolated, as it already is on Course Details and the Bundle page.
+                An Instructor's name is authored in whatever script they use, and
+                this card may be read in the other one. Left unisolated in an
+                Arabic paragraph, a Latin name's trailing full stop resolves
+                against the paragraph rather than against the name, so
+                "Dr. Instructor" renders as ".Dr Instructor". */}
+            <bdi>{course.instructor_display_name}</bdi>
           </p>
         ) : null}
 

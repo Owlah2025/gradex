@@ -5,9 +5,10 @@ import Link from "next/link";
 import { Container } from "./container";
 import { BirdMark } from "@/components/brand/bird-mark";
 import { Wordmark } from "@/components/brand/wordmark";
+import { StudentLogo } from "@/components/brand/logo";
 import { usePathname } from "next/navigation";
 import { useLocale } from "@/lib/i18n/locale-provider";
-import { exploreNavigation } from "./nav-items";
+import { exploreNavigation, isWorkspacePath } from "./nav-items";
 
 export function Footer() {
   const { locale, t } = useLocale();
@@ -28,10 +29,32 @@ export function Footer() {
         <div className="grid gap-10 md:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr]">
           {/* Brand */}
           <div>
-            <div className="flex items-center gap-2.5">
-              <BirdMark className="size-7" />
-              <Wordmark className="text-white" />
-            </div>
+            {/* The same real lockup the rest of the Student surfaces carry.
+                Reconstructing it here was visibly a different mark from the one
+                in the header directly above it — and in Arabic the bird mirrored
+                to the far side of the wordmark, which the real lockup, being one
+                image, cannot do.
+
+                Always the dark-background asset: this footer paints its own navy
+                and stays navy in light mode, so following the theme would put the
+                light-ground logo on a dark ground half the time.
+
+                Gated on the surface for the same reason the header is — the
+                workspaces keep the branding they had. */}
+            {isWorkspacePath(pathname ?? "/") ? (
+              <div className="flex items-center gap-2.5">
+                <BirdMark className="size-7" />
+                <Wordmark className="text-white" />
+              </div>
+            ) : (
+              <StudentLogo
+                surface="dark"
+                ariaLabel={t.meta.logoHomeAria}
+                // Larger than the header's, and without the optical nudge that
+                // aligns it to a 64px bar it is not in.
+                imageClassName="w-[124px] translate-x-0 translate-y-0 sm:w-[132px] rtl:translate-x-0"
+              />
+            )}
             <p className="mt-3.5 max-w-sm leading-relaxed text-white/60">
               {t.footer.tagline}
             </p>
@@ -55,8 +78,15 @@ export function Footer() {
         </div>
 
         <div className="mt-11 flex flex-wrap justify-between gap-4 border-t border-white/10 pt-6 text-[13.5px] text-white/50">
-          <span>{t.footer.copyright}</span>
-          <span>{t.footer.pricingNote}</span>
+          {/* Both lines mix scripts — the Arabic copyright carries "© 2026
+              Gradex" and the pricing note names KWD — and an unisolated Latin
+              run inside an Arabic line has its trailing punctuation resolved
+              against the line rather than against the run. That is what rendered
+              the copyright as ".Gradex 2026 ©". Isolating each line lets the
+              embedded run keep its own punctuation without altering a word of
+              either translation. */}
+          <bdi>{t.footer.copyright}</bdi>
+          <bdi>{t.footer.pricingNote}</bdi>
         </div>
       </Container>
     </footer>

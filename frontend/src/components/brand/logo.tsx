@@ -16,11 +16,25 @@ export function Logo({
   href = "/",
   ariaLabel = `${siteConfig.name} home`,
   imageSrc,
+  surface = "theme",
+  imageClassName,
 }: {
   className?: string;
   href?: string;
   ariaLabel?: string;
   imageSrc?: string;
+  /**
+   * Which ground the logo is sitting on.
+   *
+   * `"theme"` follows the page: the light asset in light mode, the dark one in
+   * dark mode. `"dark"` is for a surface that is dark in *both* modes — the
+   * footer's navy is painted by the footer, not by the theme, so a logo that
+   * swapped with the theme there would put the light-background asset on navy
+   * half the time.
+   */
+  surface?: "theme" | "dark";
+  /** Size override for the asset. Merged last, so widths here win. */
+  imageClassName?: string;
 }) {
   return (
     <Link
@@ -32,10 +46,22 @@ export function Logo({
       )}
     >
       {imageSrc ? (
-        <>
-          <LogoImage src={imageSrc} className="block dark:hidden" />
-          <LogoImage src={DARK_LOGO_SRC} className="hidden dark:block" />
-        </>
+        surface === "dark" ? (
+          <LogoImage src={DARK_LOGO_SRC} className="block" imageClassName={imageClassName} />
+        ) : (
+          <>
+            <LogoImage
+              src={imageSrc}
+              className="block dark:hidden"
+              imageClassName={imageClassName}
+            />
+            <LogoImage
+              src={DARK_LOGO_SRC}
+              className="hidden dark:block"
+              imageClassName={imageClassName}
+            />
+          </>
+        )
       ) : (
         <>
           <BirdMark className="size-[30px]" />
@@ -63,19 +89,36 @@ export function Logo({
 export function StudentLogo({
   className,
   ariaLabel,
+  surface,
+  imageClassName,
 }: {
   className?: string;
   ariaLabel?: string;
+  /** See `Logo`. Pass `"dark"` on a surface that stays dark in both themes. */
+  surface?: "theme" | "dark";
+  /** Size override, for a surface where the header's size is wrong. */
+  imageClassName?: string;
 }) {
-  return <Logo href="/" ariaLabel={ariaLabel} className={className} imageSrc={LIGHT_LOGO_SRC} />;
+  return (
+    <Logo
+      href="/"
+      ariaLabel={ariaLabel}
+      className={className}
+      imageSrc={LIGHT_LOGO_SRC}
+      surface={surface}
+      imageClassName={imageClassName}
+    />
+  );
 }
 
 function LogoImage({
   src,
   className,
+  imageClassName,
 }: {
   src: string;
   className: string;
+  imageClassName?: string;
 }) {
   // The logo is above the fold on the landing page, so request it with the initial render.
   return (
@@ -85,7 +128,7 @@ function LogoImage({
       alt="GradeX"
       loading="eager"
       fetchPriority="high"
-      className={cn(LOGO_IMAGE_CLASS, className)}
+      className={cn(LOGO_IMAGE_CLASS, className, imageClassName)}
     />
   );
 }

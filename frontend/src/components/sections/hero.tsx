@@ -101,14 +101,24 @@ export function Hero() {
         {/* A wider measure on large screens: the headline sets to longer lines, which in Arabic
             carries it further into the band rather than stacking it against its own edge. */}
         <div className="relative max-w-[34rem] lg:max-w-[45rem]">
+          {/**
+           * The two floating marks sit on opposite sides of the copy: the play
+           * mark on the side the headline ends on, the book on the side it
+           * starts from, which is also the side the lockup occupies.
+           *
+           * `start-*` and `end-*` already mirror by themselves, so the direction
+           * these were wrapped in flipped them a second time and pinned both to
+           * the same physical side in either script. In Arabic that put the play
+           * mark on top of the GradeX lockup at phone widths. The sides are
+           * logical now and the condition is gone.
+           *
+           * The translations still need saying twice, because `translate-x` is
+           * physical and has no logical form — so each has an `rtl:` counterpart
+           * rather than being left to drift the wrong way.
+           */}
           <div
             aria-hidden
-            className={cn(
-              "pointer-events-none absolute -translate-x-5 -translate-y-2.5 top-0 z-0 flex size-10 sm:-translate-x-[170px] sm:-translate-y-[75px] sm:top-24 sm:size-14",
-              dir === "rtl"
-                ? "start-1 sm:-start-16 lg:-start-20"
-                : "end-1 sm:-end-16 lg:-end-20",
-            )}
+            className="pointer-events-none absolute end-1 top-0 z-0 flex size-10 -translate-x-5 -translate-y-2.5 rtl:translate-x-5 sm:-end-16 sm:top-24 sm:size-14 sm:-translate-x-[170px] sm:-translate-y-[75px] sm:rtl:translate-x-[170px] lg:-end-20"
           >
             <div
               className="flex size-10 items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] text-gx-blue-200 shadow-[0_10px_24px_rgba(13,27,42,0.25)] backdrop-blur-sm motion-safe:animate-hero-float motion-reduce:animate-none sm:size-14"
@@ -117,14 +127,27 @@ export function Hero() {
             </div>
           </div>
 
+          {/**
+           * The book previously hung outside the copy column — far enough out
+           * that on a wide screen it cleared the column's own edge and came to
+           * rest against the viewport, reading as something that had escaped the
+           * composition rather than as part of it. It now sits just inside the
+           * column's leading edge, below the calls to action, where it belongs to
+           * the block it decorates.
+           *
+           * It is not shown at phone widths, because there it has nowhere to be.
+           * The only free ground is the band between the calls to action and the
+           * university strip, and that band is a function of how the headline
+           * wraps: 54px in Arabic, 25px in English, against a 40px mark. Keeping
+           * it would mean showing it in one language and not the other, or
+           * landing it on the strip — which is what it used to do, having been
+           * pushed 154px below the column and straight into it. Absent in both
+           * languages is the consistency; present wherever there is room for it
+           * is the rule.
+           */}
           <div
             aria-hidden
-            className={cn(
-              "pointer-events-none absolute -bottom-16 -translate-x-2.5 translate-y-[90px] z-0 flex size-10 sm:-translate-x-[30px] sm:translate-y-[130px] sm:bottom-8 sm:size-14",
-              dir === "rtl"
-                ? "end-1 sm:-end-16 lg:-end-20"
-                : "start-1 sm:-start-16 lg:-start-20",
-            )}
+            className="pointer-events-none absolute bottom-8 start-1 z-0 hidden size-10 -translate-x-2.5 rtl:translate-x-2.5 sm:flex sm:start-2 sm:size-14 sm:-translate-x-[30px] sm:translate-y-[104px] sm:rtl:translate-x-[30px] lg:start-4"
           >
             <div
               className="flex size-10 items-center justify-center rounded-xl border border-white/15 bg-white/[0.08] text-gx-orange-200 shadow-[0_10px_24px_rgba(13,27,42,0.25)] backdrop-blur-sm motion-safe:animate-hero-float motion-reduce:animate-none sm:size-14"
