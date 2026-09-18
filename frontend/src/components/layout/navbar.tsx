@@ -2,13 +2,13 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Logo } from "@/components/brand/logo";
+import { Logo, StudentLogo } from "@/components/brand/logo";
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { LanguageToggle } from "@/components/common/language-toggle";
 import { usePathname } from "next/navigation";
 import { AuthActions } from "./auth-actions";
 import { MobileNav } from "./mobile-nav";
-import { primaryNavigation, routes } from "./nav-items";
+import { isWorkspacePath, primaryNavigation, routes } from "./nav-items";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { useSessionView } from "@/lib/identity/use-session";
 
@@ -33,10 +33,20 @@ export function Navbar() {
       <div className="mx-auto flex h-full max-w-container items-center gap-5 px-5 sm:px-6">
         {/* The logo and the "Home" entry beside it must name one destination.
             Two controls that look like the way back and disagree about where
-            that is are worse than one. */}
-        <Logo href={routes.home(locale)} ariaLabel={t.meta.logoHomeAria}
-          imageSrc={pathname === routes.home(locale) ? "/media/gradex-logo-web.webp" : undefined}
-        />
+            that is are worse than one.
+
+            This header is shared with the Admin and Instructor workspaces, so
+            the brand asset is decided by which surface it is over rather than
+            applied to all of them. A Student — on the landing page, the public
+            catalogue, or Course Details — gets the real lockup; the workspaces
+            keep exactly the presentation they had, because their branding is
+            not in scope here. The landing page previously singled itself out
+            for the real asset this way; every public surface now qualifies. */}
+        {isWorkspacePath(pathname ?? "/") ? (
+          <Logo href={routes.home(locale)} ariaLabel={t.meta.logoHomeAria} />
+        ) : (
+          <StudentLogo ariaLabel={t.meta.logoHomeAria} />
+        )}
 
         <nav
           aria-label={t.nav.primaryNavigation}

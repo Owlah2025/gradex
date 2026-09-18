@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { LockKeyhole } from "lucide-react";
-import { Logo } from "@/components/brand/logo";
+import { Logo, StudentLogo } from "@/components/brand/logo";
 import { LanguageToggle } from "@/components/common/language-toggle";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { AuthShellNavigation } from "./auth-shell-navigation";
@@ -47,7 +47,16 @@ export function AuthShell({
     <main id="main" className="min-h-dvh bg-background lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.72fr)]">
       <section className="flex min-h-dvh flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8 xl:px-20">
         <header className="flex items-center justify-between gap-4">
-          <Logo ariaLabel={t.meta.logoHomeAria} />
+          {/* Gated on the audience rather than applied to the whole shell.
+              This frame is also the staff invitation screen, which is not a
+              Student surface and whose branding is not in scope here, so it
+              keeps the presentation it had. The geometry is identical either
+              way — only the mark changes. */}
+          {audience === "staff" ? (
+            <Logo ariaLabel={t.meta.logoHomeAria} />
+          ) : (
+            <StudentLogo ariaLabel={t.meta.logoHomeAria} />
+          )}
           <LanguageToggle />
         </header>
 

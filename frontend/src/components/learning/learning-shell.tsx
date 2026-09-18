@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { Menu } from "lucide-react";
-import { Logo } from "@/components/brand/logo";
+import { StudentLogo } from "@/components/brand/logo";
 import { LanguageToggle } from "@/components/common/language-toggle";
 import { ThemeToggle } from "@/components/common/theme-toggle";
 import { SignOutButton } from "@/components/layout/sign-out-button";
@@ -72,7 +72,13 @@ export function LearningShell({
     <div dir={dir} className="flex min-h-screen flex-col bg-background">
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
         <div className="mx-auto flex h-16 max-w-container items-center gap-3 px-5 sm:px-6">
-          <Logo href={dashboardHref} className="shrink-0" />
+          {/* The logo points at the public home page, not at the dashboard.
+              Every other Student surface means the same thing by it, and a mark
+              that goes somewhere different depending on which screen you are on
+              is not a way back — it is a control you have to learn twice. My
+              Learning is still one press away: it is the first entry in the row
+              beside this, and on the Lesson screen the breadcrumb names it too. */}
+          <StudentLogo className="shrink-0" />
 
           {/* The Course used to be named here as a link back to it. The Lesson
               screen now carries a breadcrumb that names the Course, the Lesson,
