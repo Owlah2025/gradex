@@ -478,6 +478,16 @@ test("every screen that asks for a password states the rule before enforcing it"
     en.auth.common.passwordRule,
     "the Arabic password rule is the English one",
   );
+  assert.match(
+    en.auth.common.passwordRule,
+    /No numbers or symbols are required/,
+    "the English password hint still implies a composition rule",
+  );
+  assert.match(
+    ar.auth.common.passwordRule,
+    /لا يُشترط إضافة أرقام أو رموز/,
+    "the Arabic password hint still implies a composition rule",
+  );
 });
 
 test("a password field can be read back on every screen that asks for one", () => {

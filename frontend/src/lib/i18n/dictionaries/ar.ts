@@ -1184,7 +1184,7 @@ export const ar: Dictionary = {
       homeLink: "الصفحة الرئيسية",
       backToCourse: "العودة إلى الكورس",
       opensInNewTab: "يفتح في تبويب جديد",
-      passwordRule: "من 8 إلى 128 حرفاً. المسافات مسموحة، ولا توجد قواعد للرموز.",
+      passwordRule: "استخدم من 8 إلى 128 حرفاً. لا يُشترط إضافة أرقام أو رموز.",
       currentStep: "أنت هنا",
       showPassword: "إظهار كلمة المرور",
       hidePassword: "إخفاء كلمة المرور",
@@ -1192,7 +1192,7 @@ export const ar: Dictionary = {
   },
   hero: {
     launchBadge: "الآن في الكويت",
-    title: "ادرس مع GradeX.\nوتخرّج بتميّز.",
+    title: "ادرس مع Gradex.\nوتخرّج بتميّز.",
     subtitle: "مقررات جامعية مصممة وفق خطتك الدراسية.",
     primaryCta: "اعرض مقرراتي",
     secondaryCta: "انضم إلى GradeX",

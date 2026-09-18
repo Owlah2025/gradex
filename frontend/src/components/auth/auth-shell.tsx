@@ -4,7 +4,9 @@ import * as React from "react";
 import { LockKeyhole } from "lucide-react";
 import { Logo, StudentLogo } from "@/components/brand/logo";
 import { LanguageToggle } from "@/components/common/language-toggle";
+import { ThemeToggle } from "@/components/common/theme-toggle";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { cn } from "@/lib/utils";
 import { AuthShellNavigation } from "./auth-shell-navigation";
 
 /**
@@ -43,6 +45,7 @@ export function AuthShell({
 }) {
   const { locale, t } = useLocale();
   const panel = t.auth.shell[audience];
+  const studentSurface = audience !== "staff";
   return (
     <main id="main" className="min-h-dvh bg-background lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.72fr)]">
       <section className="flex min-h-dvh flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8 xl:px-20">
@@ -57,7 +60,14 @@ export function AuthShell({
           ) : (
             <StudentLogo ariaLabel={t.meta.logoHomeAria} />
           )}
-          <LanguageToggle />
+          {studentSurface ? (
+            <div className="ms-auto flex items-center gap-2">
+              <LanguageToggle />
+              <ThemeToggle />
+            </div>
+          ) : (
+            <LanguageToggle />
+          )}
         </header>
 
         <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-center py-12 sm:py-16">
@@ -86,7 +96,14 @@ export function AuthShell({
         </footer>
       </section>
 
-      <aside className="relative hidden overflow-hidden bg-gx-navy text-white lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
+      <aside
+        className={cn(
+          "relative hidden bg-gx-navy text-white lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16",
+          studentSurface
+            ? "overflow-x-hidden dark:bg-gx-ink-800 lg:sticky lg:top-0 lg:h-dvh lg:self-start lg:overflow-y-auto"
+            : "overflow-hidden",
+        )}
+      >
         <div
           className="absolute inset-0 opacity-[0.08]"
           aria-hidden
@@ -107,8 +124,18 @@ export function AuthShell({
           </p>
         </div>
 
+        {studentSurface ? (
+          <div className="relative flex min-h-[136px] flex-1 items-center justify-center py-8">
+            <StudentLogo
+              ariaLabel={t.meta.logoHomeAria}
+              surface="dark"
+              imageClassName="w-[200px] translate-x-0 translate-y-0 rtl:translate-x-0 sm:w-[200px] xl:w-[232px]"
+            />
+          </div>
+        ) : null}
+
         {panel.steps.length > 0 ? (
-          <ol className="relative mt-12 space-y-0">
+          <ol className={cn("relative space-y-0", !studentSurface && "mt-12")}>
             {panel.steps.map((step, index) => {
               const current = index === activeStep;
               return (

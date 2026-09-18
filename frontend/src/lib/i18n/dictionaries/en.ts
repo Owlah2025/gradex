@@ -1251,8 +1251,7 @@ export const en = {
       homeLink: "Gradex home",
       backToCourse: "Back to the course",
       opensInNewTab: "opens in a new tab",
-      passwordRule:
-        "8–128 characters. Spaces are welcome; there are no symbol rules.",
+      passwordRule: "Use 8–128 characters. No numbers or symbols are required.",
       currentStep: "you are here",
       showPassword: "Show password",
       hidePassword: "Hide password",
@@ -1260,7 +1259,7 @@ export const en = {
   },
   hero: {
     launchBadge: "Now in Kuwait",
-    title: "Study with GradeX.\nGraduate with excellence.",
+    title: "Study with Gradex.\nGraduate with excellence.",
     subtitle: "University courses built around your actual study plan.",
     primaryCta: "Find my courses",
     secondaryCta: "Join GradeX",
