@@ -57,7 +57,8 @@ const (
 	BundlesAndOffersSchemaVersion        = MediaWorkLeaseSchemaVersion + 1
 	StudentTrustedDeviceSchemaVersion    = BundlesAndOffersSchemaVersion + 1
 	SubjectDemandSignalSchemaVersion     = StudentTrustedDeviceSchemaVersion + 1
-	MaxSchemaVersion                     = SubjectDemandSignalSchemaVersion
+	MediaPlayableEnumSchemaVersion       = SubjectDemandSignalSchemaVersion + 1
+	MaxSchemaVersion                     = MediaPlayableEnumSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

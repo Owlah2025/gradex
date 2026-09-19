@@ -7,13 +7,17 @@ import "fmt"
 type AssetVersionState string
 
 const (
-	StateUploaded      AssetVersionState = "UPLOADED"
-	StateQuarantined   AssetVersionState = "QUARANTINED"
-	StateScanning      AssetVersionState = "SCANNING"
-	StateScanPassed    AssetVersionState = "SCAN_PASSED"
-	StateScanFailed    AssetVersionState = "SCAN_FAILED"
-	StateScanError     AssetVersionState = "SCAN_ERROR"
-	StateProcessing    AssetVersionState = "PROCESSING"
+	StateUploaded    AssetVersionState = "UPLOADED"
+	StateQuarantined AssetVersionState = "QUARANTINED"
+	StateScanning    AssetVersionState = "SCANNING"
+	StateScanPassed  AssetVersionState = "SCAN_PASSED"
+	StateScanFailed  AssetVersionState = "SCAN_FAILED"
+	StateScanError   AssetVersionState = "SCAN_ERROR"
+	StateProcessing  AssetVersionState = "PROCESSING"
+	// StatePlayable is introduced in Phase 3B1 as part of the schema compatibility
+	// bridge for progressive video readiness. In Phase 3B1, it is inert: not
+	// deliverable and not reachable by any transition.
+	StatePlayable      AssetVersionState = "PLAYABLE"
 	StateReady         AssetVersionState = "READY"
 	StateProcessFailed AssetVersionState = "PROCESS_FAILED"
 
@@ -31,7 +35,7 @@ func (s AssetVersionState) Valid() bool {
 	switch s {
 	case StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
 		StateScanFailed, StateScanError, StateValidated, StateProcessing,
-		StateReady, StateProcessFailed:
+		StatePlayable, StateReady, StateProcessFailed:
 		return true
 	default:
 		return false

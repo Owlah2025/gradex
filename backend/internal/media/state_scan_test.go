@@ -39,7 +39,7 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 	every := []AssetVersionState{
 		StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
 		StateScanFailed, StateScanError, StateValidated, StateProcessing,
-		StateReady, StateProcessFailed,
+		StatePlayable, StateReady, StateProcessFailed,
 	}
 	for _, from := range every {
 		for _, to := range every {
@@ -60,7 +60,8 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 		t.Fatal("unknown source state was accepted")
 	}
 	if StateScanError.Deliverable() || StateProcessFailed.Deliverable() ||
-		StateProcessing.Deliverable() || StateValidated.Deliverable() {
+		StateProcessing.Deliverable() || StateValidated.Deliverable() ||
+		StatePlayable.Deliverable() {
 		t.Fatal("a non-READY state is deliverable")
 	}
 	// Trusted validation is an honest, distinct state. Nothing in the machine
@@ -79,6 +80,34 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 	}
 	if !StateReady.Deliverable() {
 		t.Fatal("READY is not deliverable")
+	}
+}
+
+func TestPlayableStateInvariantsInPhase3B1(t *testing.T) {
+	if !StatePlayable.Valid() {
+		t.Fatal("PLAYABLE must be a valid AssetVersionState")
+	}
+	if StatePlayable.Deliverable() {
+		t.Fatal("PLAYABLE must not be deliverable in Phase 3B1")
+	}
+	// In Phase 3B1, PLAYABLE cannot be transitioned to or from.
+	transitionsToTest := []struct {
+		from AssetVersionState
+		to   AssetVersionState
+	}{
+		{StateProcessing, StatePlayable},
+		{StateScanPassed, StatePlayable},
+		{StateValidated, StatePlayable},
+		{StateUploaded, StatePlayable},
+		{StatePlayable, StateReady},
+		{StatePlayable, StateProcessFailed},
+		{StatePlayable, StateQuarantined},
+		{StatePlayable, StateProcessing},
+	}
+	for _, tc := range transitionsToTest {
+		if err := Transition(tc.from, tc.to); err == nil {
+			t.Errorf("Transition(%q, %q) succeeded, want error", tc.from, tc.to)
+		}
 	}
 }
 

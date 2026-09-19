@@ -617,8 +617,8 @@ func TestSchema37RollbackIsRefusedByRealDeviceData(t *testing.T) {
 			pool := openPool(t)
 			m := openMigrator(t)
 
-			if err := m.Up(); err != nil {
-				t.Fatalf("up: %v", err)
+			if err := m.Migrate(uint(SubjectDemandSignalSchemaVersion)); err != nil {
+				t.Fatalf("up to schema 38: %v", err)
 			}
 			fingerprint := seedRepresentativeSchema34Data(t, pool)
 			devices := seedTrustedDeviceRowsWithoutHistory(t, pool, fingerprint.accountID)
@@ -657,8 +657,8 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 	pool := openPool(t)
 	m := openMigrator(t)
 
-	if err := m.Up(); err != nil {
-		t.Fatalf("up: %v", err)
+	if err := m.Migrate(uint(SubjectDemandSignalSchemaVersion)); err != nil {
+		t.Fatalf("migrating to schema 38: %v", err)
 	}
 	if version, dirty := schemaVersion(t, pool); version != SubjectDemandSignalSchemaVersion || dirty {
 		t.Fatalf("schema = %d dirty=%t, want %d clean", version, dirty, SubjectDemandSignalSchemaVersion)
@@ -757,7 +757,7 @@ func TestSchema38ReverseChainIsSupervisedAndRefusesDestructiveSteps(t *testing.T
 
 	// And forward again, so the reverse path leaves a database that can still be
 	// brought back up rather than a dead end.
-	if err := m.Up(); err != nil {
+	if err := m.Migrate(uint(SubjectDemandSignalSchemaVersion)); err != nil {
 		t.Fatalf("re-applying the chain after the reverse path: %v", err)
 	}
 	if version, dirty := schemaVersion(t, pool); version != SubjectDemandSignalSchemaVersion || dirty {
