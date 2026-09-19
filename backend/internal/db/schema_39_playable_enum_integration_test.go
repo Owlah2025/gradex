@@ -114,24 +114,45 @@ func TestSchema39PlayableEnumCompatibilityBridge(t *testing.T) {
 		t.Fatalf("dirty schema accepted: %v, want ErrSchemaDirty", err)
 	}
 
-	// Restore clean 39 marker for rollback test.
+	// Restore clean 39 marker for down-marker test.
 	if _, err := pool.Exec(ctx,
 		"UPDATE "+schemaMigrationsTable+" SET version = $1, dirty = false", MediaPlayableEnumSchemaVersion); err != nil {
 		t.Fatalf("restoring clean schema marker: %v", err)
 	}
 
-	// 6. Rollback: 0039 down returns cleanly to schema 38.
+	// 6. No-op down marker: 0039 down is intentionally `SELECT 1;`.
+	// It adjusts the migration version marker back to schema 38 without dirtying
+	// the database, but it is NOT a true schema rollback: PostgreSQL cannot
+	// drop enum values, so the 'PLAYABLE' label physically persists in
+	// media_asset_version_state.
 	if err := m.Steps(-1); err != nil {
-		t.Fatalf("rolling back 0039: %v", err)
+		t.Fatalf("applying 0039 no-op down marker: %v", err)
 	}
 	state, err = ReadSchemaState(ctx, pool)
 	if err != nil {
-		t.Fatalf("reading schema state after 0039 rollback: %v", err)
+		t.Fatalf("reading schema state after 0039 down marker: %v", err)
 	}
 	if state.Version != SubjectDemandSignalSchemaVersion || state.Dirty {
-		t.Fatalf("schema after 0039 down = %+v, want clean version %d", state, SubjectDemandSignalSchemaVersion)
+		t.Fatalf("schema after 0039 down marker = %+v, want clean version %d", state, SubjectDemandSignalSchemaVersion)
 	}
 	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); err != nil {
-		t.Fatalf("bridge rejected schema 38 after rollback: %v", err)
+		t.Fatalf("bridge rejected schema 38 after 0039 down marker: %v", err)
+	}
+
+	// Explicitly assert that 'PLAYABLE' STILL EXISTS in media_asset_version_state,
+	// proving that 0039 DOWN changes migration bookkeeping only and does not remove
+	// the PostgreSQL enum label.
+	var playableStillExists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_enum e
+			JOIN pg_type t ON t.oid = e.enumtypid
+			WHERE t.typname = 'media_asset_version_state' AND e.enumlabel = 'PLAYABLE'
+		)
+	`).Scan(&playableStillExists); err != nil {
+		t.Fatalf("checking for PLAYABLE enum after 0039 down marker: %v", err)
+	}
+	if !playableStillExists {
+		t.Fatal("PLAYABLE enum value was removed by 0039 down marker; expected it to persist")
 	}
 }
