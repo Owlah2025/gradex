@@ -285,7 +285,7 @@ func (p *FFmpegProcessor) transcodeRung(ctx context.Context, input, outDir strin
 		"-progress", "pipe:1", "-nostats",
 		"-y", "-i", input,
 		"-vf", fmt.Sprintf("scale=w=%d:h=%d:force_original_aspect_ratio=decrease:force_divisible_by=2", rung.Width, rung.Height),
-		"-c:v", "libx264", "-profile:v", "main", "-crf", "20", "-sc_threshold", "0",
+		"-c:v", "libx264", "-profile:v", "main", "-preset", "veryfast", "-crf", "20", "-sc_threshold", "0",
 		"-g", "48", "-keyint_min", "48", "-b:v", videoKbps,
 		"-maxrate", fmt.Sprintf("%dk", rung.VideoKbps*107/100), "-bufsize", fmt.Sprintf("%dk", rung.VideoKbps*150/100),
 		"-c:a", "aac", "-ar", "48000", "-b:a", fmt.Sprintf("%dk", rung.AudioKbps),
