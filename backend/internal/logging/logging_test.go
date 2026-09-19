@@ -234,6 +234,42 @@ func TestWorkerEventsAreStructuredCorrelatableAndExcludeRawErrors(t *testing.T) 
 	}
 }
 
+func TestWorkerTranscodeTelemetryIsBoundedAndCorrelatable(t *testing.T) {
+	var buf bytes.Buffer
+	logger := New(&buf, "gradex-worker", "production", slog.LevelInfo)
+	logger.WorkerConfiguration(WorkerConfigurationEvent{MediaTranscodeConcurrency: 1})
+	logger.WorkerTranscode(WorkerTranscodeEvent{
+		Phase: "STARTED", OperationID: "operation-id", Active: 1, Limit: 1,
+	})
+	logger.WorkerTranscode(WorkerTranscodeEvent{
+		Phase: "FINISHED", OperationID: "operation-id", Active: 0, Limit: 1, Outcome: "FAILED",
+	})
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("worker telemetry lines=%d, want 3", len(lines))
+	}
+	configuration := decode(t, lines[0])
+	if configuration["msg"] != "worker_configuration" || configuration["media_transcode_concurrency"] != float64(1) {
+		t.Fatalf("configuration record=%v", configuration)
+	}
+	started := decode(t, lines[1])
+	if started["msg"] != "media_transcode" || started["phase"] != "STARTED" || started["operation_id"] != "operation-id" || started["active_transcodes"] != float64(1) {
+		t.Fatalf("started record=%v", started)
+	}
+	finished := decode(t, lines[2])
+	if finished["msg"] != "media_transcode" || finished["phase"] != "FINISHED" || finished["outcome"] != "FAILED" || finished["active_transcodes"] != float64(0) {
+		t.Fatalf("finished record=%v", finished)
+	}
+	for _, record := range []map[string]any{configuration, started, finished} {
+		for _, forbidden := range []string{"error", "payload", "asset_version_id", "storage_object_key", "signed_url", "password"} {
+			if _, present := record[forbidden]; present {
+				t.Errorf("worker telemetry emitted forbidden field %q", forbidden)
+			}
+		}
+	}
+}
+
 // The panic value is excluded on purpose: it routinely holds whatever the
 // handler was working with.
 func TestPanicRecoveredExcludesPanicValue(t *testing.T) {

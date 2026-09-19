@@ -67,6 +67,7 @@ export GRADEX_FRONTEND_IMAGE=gradex-frontend:s12-local
 export GRADEX_EDGE_IMAGE=gradex-edge:s12-local
 export GRADEX_PROOF_IMAGE=gradex-backend-proof:s12-local
 export GRADEX_RELEASE_SHA=0123456789abcdef0123456789abcdef01234567
+export MEDIA_TRANSCODE_CONCURRENCY=1
 export STAGING_HOSTNAME=staging.gradex.test
 export ACME_EMAIL=ops@gradex.test
 export POSTGRES_DB=gradex

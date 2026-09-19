@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,7 +30,30 @@ type Worker struct {
 	workLeaseDuration time.Duration
 	now               func() time.Time
 	transcodeGate     *concurrencyGate
+	observeTranscode  TranscodeObserver
 }
+
+// TranscodePhase identifies the bounded lifecycle observations emitted around
+// the existing transcode gate.
+type TranscodePhase string
+
+const (
+	TranscodeStarted  TranscodePhase = "STARTED"
+	TranscodeFinished TranscodePhase = "FINISHED"
+)
+
+// TranscodeObservation is safe operational telemetry for one gated operation.
+// It contains no media object identity or storage capability.
+type TranscodeObservation struct {
+	Phase       TranscodePhase
+	OperationID string
+	Active      int
+	Limit       int
+	Outcome     string
+}
+
+// TranscodeObserver receives advisory transcode lifecycle telemetry.
+type TranscodeObserver func(TranscodeObservation)
 
 type WorkerOptions struct {
 	DB                   *pgxpool.Pool
@@ -39,6 +63,7 @@ type WorkerOptions struct {
 	ProcessingTimeout    time.Duration
 	WorkLeaseDuration    time.Duration
 	TranscodeConcurrency int
+	ObserveTranscode     TranscodeObserver
 	Now                  func() time.Time
 }
 
@@ -83,25 +108,43 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 	return &Worker{
 		db: options.DB, scanner: options.Scanner, process: options.Process, outbox: options.Outbox,
 		processingTimeout: timeout, workLeaseDuration: lease, now: now,
-		transcodeGate: newConcurrencyGate(concurrency),
+		transcodeGate: newConcurrencyGate(concurrency), observeTranscode: options.ObserveTranscode,
 	}, nil
 }
 
-type concurrencyGate struct{ slots chan struct{} }
+type concurrencyGate struct {
+	slots    chan struct{}
+	active   atomic.Int32
+	inFlight atomic.Int32
+}
 
 func newConcurrencyGate(limit int) *concurrencyGate {
 	return &concurrencyGate{slots: make(chan struct{}, limit)}
 }
 
 func (g *concurrencyGate) run(ctx context.Context, work func() error) error {
+	g.inFlight.Add(1)
+	defer g.inFlight.Add(-1)
 	select {
 	case g.slots <- struct{}{}:
-		defer func() { <-g.slots }()
+		g.active.Add(1)
+		defer func() {
+			g.active.Add(-1)
+			<-g.slots
+		}()
 		return work()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
+
+func (g *concurrencyGate) Active() int { return int(g.active.Load()) }
+
+func (g *concurrencyGate) Limit() int { return cap(g.slots) }
+
+// InFlight reports callers that are either waiting for or holding a gate slot.
+// It is intended for deterministic tests and diagnostics, not scheduling.
+func (g *concurrencyGate) InFlight() int { return int(g.inFlight.Load()) }
 
 func (w *Worker) Register(mux *asynq.ServeMux) error {
 	if mux == nil {
@@ -446,9 +489,39 @@ func (w *Worker) Transcode(ctx context.Context, assetVersionID, operationID stri
 	if strings.TrimSpace(operationID) == "" {
 		return fmt.Errorf("%w: transcode operation ID is required", ErrValidation)
 	}
-	return w.transcodeGate.run(ctx, func() error {
+	started := false
+	err := w.transcodeGate.run(ctx, func() error {
+		started = true
+		w.notifyTranscode(TranscodeObservation{
+			Phase: TranscodeStarted, OperationID: operationID,
+			Active: w.transcodeGate.Active(), Limit: w.transcodeGate.Limit(),
+		})
 		return w.transcode(ctx, assetVersionID, operationID)
 	})
+	if started {
+		w.notifyTranscode(TranscodeObservation{
+			Phase: TranscodeFinished, OperationID: operationID,
+			Active: w.transcodeGate.Active(), Limit: w.transcodeGate.Limit(),
+			Outcome: transcodeOutcome(err),
+		})
+	}
+	return err
+}
+
+func (w *Worker) notifyTranscode(observation TranscodeObservation) {
+	if w.observeTranscode != nil {
+		w.observeTranscode(observation)
+	}
+}
+
+func transcodeOutcome(err error) string {
+	if err == nil {
+		return "SUCCEEDED"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "CANCELLED"
+	}
+	return "FAILED"
 }
 
 func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID string) error {

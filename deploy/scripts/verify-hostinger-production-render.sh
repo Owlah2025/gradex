@@ -89,6 +89,7 @@ export GRADEX_BACKEND_IMAGE=gradex-backend:render-check
 export GRADEX_FRONTEND_IMAGE=gradex-frontend:render-check
 export GRADEX_PROOF_IMAGE=gradex-backend-proof:render-check
 export GRADEX_RELEASE_SHA=0123456789abcdef0123456789abcdef01234567
+export MEDIA_TRANSCODE_CONCURRENCY=1
 
 render() {
   docker compose --file "$COMPOSE_FILE" --project-name hostinger-mode-render-check config
@@ -118,7 +119,8 @@ for expectation in \
   'STUDENT_REGISTRATION_ENABLED: "false"' \
   'AUTH_FAKE_MODE: "false"' \
   'EMAIL_ENABLED: "true"' \
-  'EMAIL_PROVIDER: resend'; do
+  'EMAIL_PROVIDER: resend' \
+  'MEDIA_TRANSCODE_CONCURRENCY: "1"'; do
   printf '%s' "$production_api" | grep --quiet --fixed-strings "$expectation" ||
     die "the production API environment is missing: $expectation"
 done
@@ -186,7 +188,8 @@ for expectation in \
   'EMAIL_ENABLED: "true"' \
   'EMAIL_PROVIDER: resend' \
   'STUDENT_REGISTRATION_ENABLED: "false"' \
-  'AUTH_FAKE_MODE: "false"'; do
+  'AUTH_FAKE_MODE: "false"' \
+  'MEDIA_TRANSCODE_CONCURRENCY: "1"'; do
   printf '%s' "$staging_api" | grep --quiet --fixed-strings "$expectation" ||
     die "the staging API environment is missing: $expectation"
 done
@@ -254,6 +257,13 @@ compose_case production adapter true ||
   die "the approved production composition was rejected"
 compose_case staging adapter false ||
   die "the approved staging composition was rejected"
+
+(MEDIA_TRANSCODE_CONCURRENCY=2 compose_case production adapter true >/dev/null 2>&1) &&
+  die "production accepted MEDIA_TRANSCODE_CONCURRENCY above the single-encoder guardrail"
+(
+  unset MEDIA_TRANSCODE_CONCURRENCY
+  compose_case production adapter true >/dev/null 2>&1
+) && die "production accepted a missing MEDIA_TRANSCODE_CONCURRENCY"
 
 # `die` exits, so every negative runs in a subshell.
 
@@ -389,6 +399,8 @@ for key in APP_ENV PASSWORD_SCREEN_MODE COMPROMISED_PASSWORD_ADAPTER_APPROVED; d
   grep --quiet --extended-regexp "^$key=" "$RUNTIME_EXAMPLE" ||
     die "the runtime example does not carry $key"
 done
+grep --quiet --extended-regexp '^MEDIA_TRANSCODE_CONCURRENCY=1$' "$RUNTIME_EXAMPLE" ||
+  die "the Hostinger runtime example must explicitly set MEDIA_TRANSCODE_CONCURRENCY=1"
 
 grep --quiet --fixed-strings 'die "backend image revision label does not match GRADEX_RELEASE_SHA"' "$HOST_SCRIPT" ||
   die "the backend image revision check was lost"

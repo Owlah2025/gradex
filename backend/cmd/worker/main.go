@@ -125,11 +125,24 @@ func main() {
 		exitWorker(logger, "media_processor_build", logging.ErrorClassOf(err))
 		return
 	}
-	worker, err := media.NewWorker(media.WorkerOptions{DB: pool, Scanner: scanner, Process: processor, Outbox: writer, ProcessingTimeout: cfg.MediaProcessingTimeout()})
+	worker, err := media.NewWorker(media.WorkerOptions{
+		DB: pool, Scanner: scanner, Process: processor, Outbox: writer,
+		ProcessingTimeout:    cfg.MediaProcessingTimeout(),
+		TranscodeConcurrency: cfg.MediaTranscodeConcurrency(),
+		ObserveTranscode: func(observation media.TranscodeObservation) {
+			logger.WorkerTranscode(logging.WorkerTranscodeEvent{
+				Phase: string(observation.Phase), OperationID: observation.OperationID,
+				Active: observation.Active, Limit: observation.Limit, Outcome: observation.Outcome,
+			})
+		},
+	})
 	if err != nil {
 		exitWorker(logger, "media_worker_build", logging.ErrorClassOf(err))
 		return
 	}
+	logger.WorkerConfiguration(logging.WorkerConfigurationEvent{
+		MediaTranscodeConcurrency: cfg.MediaTranscodeConcurrency(),
+	})
 	dispatcher, err := media.NewDispatcher(pool, queueClient, cfg.MediaProcessingTimeout())
 	if err != nil {
 		exitWorker(logger, "media_dispatcher_build", logging.ErrorClassOf(err))

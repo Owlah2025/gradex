@@ -80,6 +80,10 @@ browser-equivalent LG-019 scenario and capture API, PostgreSQL, Redis, CPU, RAM,
 Caddy has no shorter response timeout configured, while unrelated API requests retain the ordinary
 30-second server write timeout.
 
+`MEDIA_TRANSCODE_CONCURRENCY=1` is required for the shared two-vCPU production host. It limits only
+CPU-heavy FFmpeg processing; browser uploads and direct R2 PUTs remain concurrent. Host preflight
+refuses a production runtime that omits this value or sets it above one.
+
 `prepare` validates the release labels and configuration, creates a private 90-day Redis CA/server
 certificate with the `redis` DNS identity, and renders the narrow R2 CORS policy. Apply that policy
 through the R2 dashboard or API without changing public bucket access.

@@ -174,6 +174,8 @@ validate_application_composition() {
     # consulted: config.go gates LG-021 on environment.IsProduction().
     [ "$COMPROMISED_PASSWORD_ADAPTER_APPROVED" = true ] ||
       die "production PASSWORD_SCREEN_MODE=adapter requires COMPROMISED_PASSWORD_ADAPTER_APPROVED=true (LG-021)"
+    [ "$MEDIA_TRANSCODE_CONCURRENCY" = 1 ] ||
+      die "production MEDIA_TRANSCODE_CONCURRENCY must be explicitly 1 on the shared 2-vCPU host"
   fi
 
   note "$APP_ENV composition accepted: real sessions, adapter screening, Resend transactional email, no fake authentication, registration policy validated"
@@ -207,7 +209,7 @@ validate_environment() {
     IDENTITY_OTP_PEPPER \
     OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION OUTBOX_PROTECTED_PAYLOAD_KEY \
     APP_ENV PASSWORD_SCREEN_MODE COMPROMISED_PASSWORD_ADAPTER_APPROVED \
-    EMAIL_ENABLED EMAIL_PROVIDER; do
+    EMAIL_ENABLED EMAIL_PROVIDER MEDIA_TRANSCODE_CONCURRENCY; do
     require_value "$name"
   done
   validate_application_composition

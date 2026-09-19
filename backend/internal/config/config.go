@@ -474,11 +474,12 @@ type Config struct {
 	maxUploadSizeBytes  int64
 	playbackTokenSecret Secret
 
-	ffmpegBinaryPath       string
-	ffprobeBinaryPath      string
-	mediaProcessingTimeout time.Duration
-	mediaOperatingMode     MediaOperatingMode
-	mediaScannerMode       MediaScannerMode
+	ffmpegBinaryPath          string
+	ffprobeBinaryPath         string
+	mediaProcessingTimeout    time.Duration
+	mediaTranscodeConcurrency int
+	mediaOperatingMode        MediaOperatingMode
+	mediaScannerMode          MediaScannerMode
 
 	authFakeMode        bool
 	salesWhatsAppNumber string
@@ -564,6 +565,7 @@ func (c *Config) PlaybackTokenSecret() Secret      { return c.playbackTokenSecre
 func (c *Config) FFmpegBinaryPath() string               { return c.ffmpegBinaryPath }
 func (c *Config) FFprobeBinaryPath() string              { return c.ffprobeBinaryPath }
 func (c *Config) MediaProcessingTimeout() time.Duration  { return c.mediaProcessingTimeout }
+func (c *Config) MediaTranscodeConcurrency() int         { return c.mediaTranscodeConcurrency }
 func (c *Config) MediaOperatingMode() MediaOperatingMode { return c.mediaOperatingMode }
 func (c *Config) MediaScannerMode() MediaScannerMode     { return c.mediaScannerMode }
 
@@ -686,11 +688,12 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		playbackURLExpiry:  p.duration("PLAYBACK_URL_EXPIRY", 5*time.Minute),
 		maxUploadSizeBytes: p.integer("MAX_UPLOAD_SIZE_BYTES", 5*1024*1024*1024),
 
-		ffmpegBinaryPath:       p.str("FFMPEG_BINARY_PATH", "ffmpeg"),
-		ffprobeBinaryPath:      p.str("FFPROBE_BINARY_PATH", "ffprobe"),
-		mediaProcessingTimeout: p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
-		mediaOperatingMode:     MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
-		mediaScannerMode:       MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
+		ffmpegBinaryPath:          p.str("FFMPEG_BINARY_PATH", "ffmpeg"),
+		ffprobeBinaryPath:         p.str("FFPROBE_BINARY_PATH", "ffprobe"),
+		mediaProcessingTimeout:    p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
+		mediaTranscodeConcurrency: int(p.integer("MEDIA_TRANSCODE_CONCURRENCY", 2)),
+		mediaOperatingMode:        MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
+		mediaScannerMode:          MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
 
 		authFakeMode:        p.boolean("AUTH_FAKE_MODE", false),
 		salesWhatsAppNumber: p.str("SALES_WHATSAPP_NUMBER", ""),
@@ -1222,6 +1225,9 @@ func (c *Config) validate(p *parser) {
 
 	if c.maxUploadSizeBytes <= 0 {
 		p.errf("MAX_UPLOAD_SIZE_BYTES must be positive, got %d", c.maxUploadSizeBytes)
+	}
+	if c.mediaTranscodeConcurrency <= 0 {
+		p.errf("MEDIA_TRANSCODE_CONCURRENCY must be positive, got %d", c.mediaTranscodeConcurrency)
 	}
 	if !c.mediaOperatingMode.Valid() {
 		p.errf("MEDIA_OPERATING_MODE must be SCANNER, ADMIN_CATALOGUE or TRUSTED_INSTRUCTOR, got %q", c.mediaOperatingMode)

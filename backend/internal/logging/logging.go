@@ -350,6 +350,39 @@ func (l *Logger) WorkerLifecycle(phase WorkerPhase) {
 	l.slog.Info("worker_lifecycle", slog.String("phase", Sanitize(string(phase))))
 }
 
+// WorkerConfigurationEvent records safe worker startup configuration.
+type WorkerConfigurationEvent struct {
+	MediaTranscodeConcurrency int
+}
+
+func (l *Logger) WorkerConfiguration(ev WorkerConfigurationEvent) {
+	l.slog.Info("worker_configuration",
+		slog.Int("media_transcode_concurrency", ev.MediaTranscodeConcurrency),
+	)
+}
+
+// WorkerTranscodeEvent records safe lifecycle telemetry for one gated operation.
+type WorkerTranscodeEvent struct {
+	Phase       string
+	OperationID string
+	Active      int
+	Limit       int
+	Outcome     string
+}
+
+func (l *Logger) WorkerTranscode(ev WorkerTranscodeEvent) {
+	attrs := []any{
+		slog.String("phase", Sanitize(ev.Phase)),
+		slog.String("operation_id", Sanitize(ev.OperationID)),
+		slog.Int("active_transcodes", ev.Active),
+		slog.Int("transcode_concurrency", ev.Limit),
+	}
+	if ev.Outcome != "" {
+		attrs = append(attrs, slog.String("outcome", Sanitize(ev.Outcome)))
+	}
+	l.slog.Info("media_transcode", attrs...)
+}
+
 // WorkerFailureEvent identifies a failed worker operation. ErrorClass is a
 // type or a closed classification, never raw error text; task IDs remain
 // stable across Asynq retries and provide correlation without exposing job

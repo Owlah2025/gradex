@@ -308,6 +308,33 @@ func TestMediaOperatingModeIsExplicitAndValidated(t *testing.T) {
 	}
 }
 
+func TestMediaTranscodeConcurrencyIsPositiveAndConfigurable(t *testing.T) {
+	if cfg := mustLoad(t, nil); cfg.MediaTranscodeConcurrency() != 2 {
+		t.Fatalf("default transcode concurrency = %d, want 2", cfg.MediaTranscodeConcurrency())
+	}
+	configured := mustLoad(t, func(settings map[string]string, _ MapSecretResolver) {
+		settings["MEDIA_TRANSCODE_CONCURRENCY"] = "1"
+	})
+	if configured.MediaTranscodeConcurrency() != 1 {
+		t.Fatalf("configured transcode concurrency = %d, want 1", configured.MediaTranscodeConcurrency())
+	}
+
+	for _, invalid := range []struct {
+		value string
+		want  string
+	}{
+		{value: "0", want: "MEDIA_TRANSCODE_CONCURRENCY must be positive"},
+		{value: "-1", want: "MEDIA_TRANSCODE_CONCURRENCY must be positive"},
+		{value: "not-an-integer", want: "MEDIA_TRANSCODE_CONCURRENCY must be an integer"},
+	} {
+		t.Run(invalid.value, func(t *testing.T) {
+			wantErrContaining(t, func(settings map[string]string, _ MapSecretResolver) {
+				settings["MEDIA_TRANSCODE_CONCURRENCY"] = invalid.value
+			}, invalid.want)
+		})
+	}
+}
+
 // The no-op scanner inspects nothing, so the only environment allowed to build
 // it is development. Staging and production must refuse it outright rather than
 // start with an unscanned media pipeline.
