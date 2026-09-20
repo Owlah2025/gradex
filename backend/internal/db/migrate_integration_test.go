@@ -685,9 +685,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("media playable enum schema = %d, want one past subject demand signal %d",
 			MediaPlayableEnumSchemaVersion, SubjectDemandSignalSchemaVersion)
 	}
-	if MaxSchemaVersion != MediaPlayableEnumSchemaVersion {
+	if MediaPlayableFoundationSchemaVersion != MediaPlayableEnumSchemaVersion+1 {
+		t.Fatalf("media playable foundation schema = %d, want one past media playable enum %d",
+			MediaPlayableFoundationSchemaVersion, MediaPlayableEnumSchemaVersion)
+	}
+	if MaxSchemaVersion != MediaPlayableFoundationSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, MediaPlayableEnumSchemaVersion)
+			MaxSchemaVersion, MediaPlayableFoundationSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
