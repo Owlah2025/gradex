@@ -3,9 +3,13 @@ package media
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func writeOutputFixture(t *testing.T, root, relative, contents string) {
@@ -135,5 +139,588 @@ func TestProcessingOutputPrefixIsAttemptScopedAndInjectionSafe(t *testing.T) {
 	}
 	if err := validateTranscodeCompletion("version-1", "operation-1", result); !errors.Is(err, ErrValidation) {
 		t.Fatalf("cross-prefix rendition error=%v, want ErrValidation", err)
+	}
+}
+
+func TestValidateLocalRungRejectsPartialOrUnsafeRungs(t *testing.T) {
+	cases := []struct {
+		name    string
+		rung    hlsRung
+		files   map[string]string
+		wantErr bool
+	}{
+		{
+			name: "valid rung",
+			rung: hlsRung{Name: "720p"},
+			files: map[string]string{
+				"720p/playlist.m3u8": "#EXTM3U\nsegment000.ts\nsegment001.ts\n",
+				"720p/segment000.ts": "seg0",
+				"720p/segment001.ts": "seg1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing segment",
+			rung: hlsRung{Name: "720p"},
+			files: map[string]string{
+				"720p/playlist.m3u8": "#EXTM3U\nsegment000.ts\nsegment001.ts\n",
+				"720p/segment000.ts": "seg0",
+			},
+			wantErr: true,
+		},
+		{
+			name: "unsafe URL segment",
+			rung: hlsRung{Name: "720p"},
+			files: map[string]string{
+				"720p/playlist.m3u8": "#EXTM3U\nhttps://evil.test/segment000.ts\n",
+			},
+			wantErr: true,
+		},
+		{
+			name: "path traversal segment",
+			rung: hlsRung{Name: "720p"},
+			files: map[string]string{
+				"720p/playlist.m3u8": "#EXTM3U\n../secret.ts\n",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty playlist without segments",
+			rung: hlsRung{Name: "720p"},
+			files: map[string]string{
+				"720p/playlist.m3u8": "#EXTM3U\n#EXT-X-VERSION:3\n",
+			},
+			wantErr: true,
+		},
+		{
+			name: "escaping rung name",
+			rung: hlsRung{Name: "../escaping"},
+			files: map[string]string{
+				"escaping/playlist.m3u8": "#EXTM3U\nsegment000.ts\n",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			for rel, body := range tc.files {
+				writeOutputFixture(t, root, rel, body)
+			}
+			segments, err := validateLocalRung(root, tc.rung)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("validateLocalRung unexpectedly succeeded for %s", tc.name)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("validateLocalRung failed: %v", err)
+				}
+				if len(segments) != 2 || segments[0] != "segment000.ts" || segments[1] != "segment001.ts" {
+					t.Fatalf("validateLocalRung returned unexpected segments: %v", segments)
+				}
+			}
+		})
+	}
+}
+
+type pipelineEventStore struct {
+	mu           sync.Mutex
+	logPath      string
+	objects      map[string][]byte
+	failPutKey   string
+	failHeadKey  string
+	sourceFile   string
+	afterPutHook func(key string)
+}
+
+func (s *pipelineEventStore) appendLog(event string) {
+	if s.logPath == "" {
+		return
+	}
+	f, err := os.OpenFile(s.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintln(f, event)
+}
+
+func (s *pipelineEventStore) DownloadToFileVersion(_ context.Context, _, _ string) (string, func(), error) {
+	s.appendLog("download:source")
+	return s.sourceFile, func() {}, nil
+}
+
+func (s *pipelineEventStore) PutObject(_ context.Context, key string, body []byte, _ string) error {
+	s.appendLog("put:" + key)
+	if s.failPutKey != "" && strings.Contains(key, s.failPutKey) {
+		return fmt.Errorf("%w: injected PUT failure for %s", ErrStorageUnavailable, key)
+	}
+	s.mu.Lock()
+	if s.objects == nil {
+		s.objects = make(map[string][]byte)
+	}
+	s.objects[key] = append([]byte(nil), body...)
+	s.mu.Unlock()
+	if s.afterPutHook != nil {
+		s.afterPutHook(key)
+	}
+	return nil
+}
+
+func (s *pipelineEventStore) HeadObject(_ context.Context, key string) (int64, bool, error) {
+	s.appendLog("head:" + key)
+	if s.failHeadKey != "" && strings.Contains(key, s.failHeadKey) {
+		return 0, false, fmt.Errorf("%w: injected HEAD failure for %s", ErrStorageUnavailable, key)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	body, ok := s.objects[key]
+	return int64(len(body)), ok, nil
+}
+
+func (s *pipelineEventStore) DeletePrefix(_ context.Context, prefix string) error {
+	s.appendLog("delete:" + prefix)
+	return nil
+}
+
+type recordingPipelineSink struct {
+	logPath    string
+	mu         sync.Mutex
+	onProgress func(stage ProcessingStage, percent int)
+}
+
+func (s *recordingPipelineSink) Progress(ctx context.Context, stage ProcessingStage, percent int) {
+	if s.logPath != "" {
+		f, err := os.OpenFile(s.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, "sink:%s:%d\n", stage, percent)
+			_ = f.Close()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.onProgress != nil {
+		s.onProgress(stage, percent)
+	}
+}
+
+func createFakePipelineHarness(t *testing.T, failRung string, height int) (probePath, ffmpegPath, sourcePath, logPath string) {
+	t.Helper()
+	dir := t.TempDir()
+
+	sourcePath = filepath.Join(dir, "source.mp4")
+	if err := os.WriteFile(sourcePath, []byte("fake-mp4-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	logPath = filepath.Join(dir, "events.log")
+
+	probePath = filepath.Join(dir, "ffprobe.sh")
+	probeContent := fmt.Sprintf(`#!/bin/sh
+cat << 'EOF'
+{
+  "streams": [{"codec_type": "video", "width": %d, "height": %d}],
+  "format": {"duration": "10.0"}
+}
+EOF
+`, height*16/9, height)
+	if err := os.WriteFile(probePath, []byte(probeContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ffmpegPath = filepath.Join(dir, "ffmpeg.sh")
+	ffmpegContent := fmt.Sprintf(`#!/bin/sh
+for arg do last="$arg"; done
+dir=$(dirname "$last")
+rung=$(basename "$dir")
+echo "encode:$rung" >> "%s"
+if [ "$rung" = "%s" ]; then
+  echo "injected failure for $rung" >&2
+  exit 1
+fi
+mkdir -p "$dir"
+printf "fake-segment" > "$dir/segment000.ts"
+printf "#EXTM3U\nsegment000.ts\n" > "$last"
+printf "out_time_ms=5000000\nprogress=continue\n"
+`, logPath, failRung)
+	if err := os.WriteFile(ffmpegPath, []byte(ffmpegContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	return probePath, ffmpegPath, sourcePath, logPath
+}
+
+func readLogEvents(t *testing.T, logPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func TestPerRungPipelineOrderAndVerification(t *testing.T) {
+	probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, "", 720)
+	store := &pipelineEventStore{logPath: logPath, sourceFile: sourcePath}
+	proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var progressReports []int
+	sink := &recordingPipelineSink{
+		logPath: logPath,
+		onProgress: func(stage ProcessingStage, percent int) {
+			progressReports = append(progressReports, percent)
+		},
+	}
+
+	obj := ObjectVersion{
+		AssetVersionID:        "version-1",
+		StorageObjectKey:      "quarantine/version-1",
+		StorageObjectVersion:  "v1",
+		ProcessingOperationID: "op-1",
+	}
+
+	res, err := proc.TranscodeWithProgress(context.Background(), obj, sink)
+	if err != nil {
+		t.Fatalf("TranscodeWithProgress failed: %v", err)
+	}
+
+	expectedPrefix := processingOutputPrefix("version-1", "op-1")
+	if res.OutputPrefix != expectedPrefix {
+		t.Fatalf("OutputPrefix=%s, want %s", res.OutputPrefix, expectedPrefix)
+	}
+	if len(res.Renditions) != 3 {
+		t.Fatalf("len(res.Renditions)=%d, want 3", len(res.Renditions))
+	}
+
+	events := readLogEvents(t, logPath)
+	indexOf := func(target string) int {
+		for i, ev := range events {
+			if strings.Contains(ev, target) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	// 1. Operation order: 720p encode -> 720p upload/verify -> 480p encode -> 480p upload/verify -> 240p encode -> 240p upload/verify
+	enc720 := indexOf("encode:720p")
+	putSeg720 := indexOf("put:" + expectedPrefix + "/720p/segment000.ts")
+	headSeg720 := indexOf("head:" + expectedPrefix + "/720p/segment000.ts")
+	putPl720 := indexOf("put:" + expectedPrefix + "/720p/playlist.m3u8")
+	headPl720 := indexOf("head:" + expectedPrefix + "/720p/playlist.m3u8")
+	prog720 := indexOf("sink:TRANSCODING:33")
+
+	enc480 := indexOf("encode:480p")
+	putSeg480 := indexOf("put:" + expectedPrefix + "/480p/segment000.ts")
+	headSeg480 := indexOf("head:" + expectedPrefix + "/480p/segment000.ts")
+	putPl480 := indexOf("put:" + expectedPrefix + "/480p/playlist.m3u8")
+	headPl480 := indexOf("head:" + expectedPrefix + "/480p/playlist.m3u8")
+	prog480 := indexOf("sink:TRANSCODING:66")
+
+	enc240 := indexOf("encode:240p")
+	putSeg240 := indexOf("put:" + expectedPrefix + "/240p/segment000.ts")
+	headSeg240 := indexOf("head:" + expectedPrefix + "/240p/segment000.ts")
+	putPl240 := indexOf("put:" + expectedPrefix + "/240p/playlist.m3u8")
+	headPl240 := indexOf("head:" + expectedPrefix + "/240p/playlist.m3u8")
+	prog240 := indexOf("sink:TRANSCODING:99")
+
+	putMaster := indexOf("put:" + expectedPrefix + "/master.m3u8")
+	headMaster := indexOf("head:" + expectedPrefix + "/master.m3u8")
+
+	order := []struct {
+		name  string
+		index int
+	}{
+		{"enc720", enc720},
+		{"putSeg720", putSeg720},
+		{"headSeg720", headSeg720},
+		{"putPl720", putPl720},
+		{"headPl720", headPl720},
+		{"prog720", prog720},
+		{"enc480", enc480},
+		{"putSeg480", putSeg480},
+		{"headSeg480", headSeg480},
+		{"putPl480", putPl480},
+		{"headPl480", headPl480},
+		{"prog480", prog480},
+		{"enc240", enc240},
+		{"putSeg240", putSeg240},
+		{"headSeg240", headSeg240},
+		{"putPl240", putPl240},
+		{"headPl240", headPl240},
+		{"prog240", prog240},
+		{"putMaster", putMaster},
+		{"headMaster", headMaster},
+	}
+
+	for i := 0; i < len(order)-1; i++ {
+		if order[i].index == -1 {
+			t.Fatalf("missing event %s in events: %v", order[i].name, events)
+		}
+		if order[i+1].index == -1 {
+			t.Fatalf("missing event %s in events: %v", order[i+1].name, events)
+		}
+		if order[i].index >= order[i+1].index {
+			t.Fatalf("ordering violation: %s (idx %d) must precede %s (idx %d). Full events: %v",
+				order[i].name, order[i].index, order[i+1].name, order[i+1].index, events)
+		}
+	}
+
+	// Requirement 5: Master PUT is the last PUT in the entire sequence.
+	var lastPut string
+	for _, ev := range events {
+		if strings.HasPrefix(ev, "put:") {
+			lastPut = ev
+		}
+	}
+	if lastPut != "put:"+expectedPrefix+"/master.m3u8" {
+		t.Fatalf("last put object=%s, want master.m3u8", lastPut)
+	}
+
+	// Requirement 18: Progress is monotonic and remains < 100 before READY.
+	lastProgress := -1
+	for _, p := range progressReports {
+		if p < lastProgress {
+			t.Fatalf("progress regression: %d -> %d", lastProgress, p)
+		}
+		if p >= 100 {
+			t.Fatalf("progress reached %d before CompleteTranscode / READY", p)
+		}
+		lastProgress = p
+	}
+}
+
+func TestPerRungPipelineFailures(t *testing.T) {
+	cases := []struct {
+		name        string
+		failRung    string
+		failPutKey  string
+		failHeadKey string
+		assertLog   func(t *testing.T, events []string)
+	}{
+		{
+			name:       "first_rung_segment_put_failure",
+			failPutKey: "720p/segment000.ts",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if ev == "encode:480p" {
+						t.Fatal("480p was encoded after 720p segment PUT failure")
+					}
+					if strings.Contains(ev, "master.m3u8") {
+						t.Fatal("master was referenced after 720p segment PUT failure")
+					}
+				}
+			},
+		},
+		{
+			name:        "first_rung_segment_head_failure",
+			failHeadKey: "720p/segment000.ts",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if ev == "encode:480p" {
+						t.Fatal("480p was encoded after 720p segment HEAD failure")
+					}
+					if strings.Contains(ev, "720p/playlist.m3u8") {
+						t.Fatal("playlist was published after segment HEAD failure")
+					}
+				}
+			},
+		},
+		{
+			name:       "first_rung_playlist_put_failure",
+			failPutKey: "720p/playlist.m3u8",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if ev == "encode:480p" {
+						t.Fatal("480p was encoded after 720p playlist PUT failure")
+					}
+				}
+			},
+		},
+		{
+			name:        "first_rung_playlist_head_failure",
+			failHeadKey: "720p/playlist.m3u8",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if ev == "encode:480p" {
+						t.Fatal("480p was encoded after 720p playlist HEAD failure")
+					}
+				}
+			},
+		},
+		{
+			name:     "later_rung_transcode_failure",
+			failRung: "480p",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if ev == "encode:240p" {
+						t.Fatal("240p was encoded after 480p transcode failure")
+					}
+					if strings.Contains(ev, "master.m3u8") {
+						t.Fatal("master was referenced after 480p failure")
+					}
+				}
+			},
+		},
+		{
+			name:       "master_put_failure",
+			failPutKey: "master.m3u8",
+			assertLog: func(t *testing.T, events []string) {
+				for _, ev := range events {
+					if strings.HasPrefix(ev, "head:") && strings.Contains(ev, "master.m3u8") {
+						t.Fatal("master HEAD executed after master PUT failure")
+					}
+				}
+			},
+		},
+		{
+			name:        "master_head_failure",
+			failHeadKey: "master.m3u8",
+			assertLog: func(t *testing.T, events []string) {
+				putSeen := false
+				for _, ev := range events {
+					if strings.HasPrefix(ev, "put:") && strings.Contains(ev, "master.m3u8") {
+						putSeen = true
+					}
+				}
+				if !putSeen {
+					t.Fatal("master PUT was expected before master HEAD failure")
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, tc.failRung, 720)
+			store := &pipelineEventStore{
+				logPath:     logPath,
+				sourceFile:  sourcePath,
+				failPutKey:  tc.failPutKey,
+				failHeadKey: tc.failHeadKey,
+			}
+			proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			obj := ObjectVersion{
+				AssetVersionID:        "version-1",
+				StorageObjectKey:      "quarantine/version-1",
+				StorageObjectVersion:  "v1",
+				ProcessingOperationID: "op-fail",
+			}
+			_, err = proc.TranscodeWithProgress(context.Background(), obj, nil)
+			if err == nil {
+				t.Fatal("expected error from failed pipeline, got nil")
+			}
+			events := readLogEvents(t, logPath)
+			tc.assertLog(t, events)
+		})
+	}
+}
+
+func TestPerRungCancellationBoundary(t *testing.T) {
+	probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, "", 720)
+	store := &pipelineEventStore{logPath: logPath, sourceFile: sourcePath}
+	proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var cancelOnce sync.Once
+	sink := &recordingPipelineSink{
+		logPath: logPath,
+		onProgress: func(stage ProcessingStage, percent int) {
+			// Cancel when 720p completes (percent = 33)
+			if stage == StageTranscoding && percent == 33 {
+				cancelOnce.Do(func() {
+					cancel()
+				})
+			}
+		},
+	}
+
+	obj := ObjectVersion{
+		AssetVersionID:        "version-1",
+		StorageObjectKey:      "quarantine/version-1",
+		StorageObjectVersion:  "v1",
+		ProcessingOperationID: "op-cancel",
+	}
+
+	_, err = proc.TranscodeWithProgress(ctx, obj, sink)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got: %v", err)
+	}
+
+	events := readLogEvents(t, logPath)
+	for _, ev := range events {
+		if ev == "encode:480p" {
+			t.Fatal("encode:480p started after cancellation")
+		}
+		if ev == "encode:240p" {
+			t.Fatal("encode:240p started after cancellation")
+		}
+		if strings.Contains(ev, "master.m3u8") {
+			t.Fatal("master.m3u8 was uploaded after cancellation")
+		}
+	}
+}
+
+func TestFinalFullTreeValidationExecutesBeforeMasterPublication(t *testing.T) {
+	probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, "", 720)
+	store := &pipelineEventStore{
+		logPath:    logPath,
+		sourceFile: sourcePath,
+		afterPutHook: func(key string) {
+			// When the last rung's playlist is put, delete its segment from disk
+			// to trigger a full-tree validation failure before master publication.
+			if strings.HasSuffix(key, "240p/playlist.m3u8") {
+				matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "gradex-media-hls-*", "240p", "segment000.ts"))
+				for _, m := range matches {
+					_ = os.Remove(m)
+				}
+			}
+		},
+	}
+	proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	obj := ObjectVersion{
+		AssetVersionID:        "version-1",
+		StorageObjectKey:      "quarantine/version-1",
+		StorageObjectVersion:  "v1",
+		ProcessingOperationID: "op-tree-val",
+	}
+
+	_, err = proc.TranscodeWithProgress(context.Background(), obj, nil)
+	if !errors.Is(err, ErrTranscodeFailed) {
+		t.Fatalf("expected ErrTranscodeFailed from full-tree validation failure, got: %v", err)
+	}
+
+	events := readLogEvents(t, logPath)
+	for _, ev := range events {
+		if strings.Contains(ev, "master.m3u8") {
+			t.Fatal("master.m3u8 was uploaded even though full-tree validation failed")
+		}
 	}
 }

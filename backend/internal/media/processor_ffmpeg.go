@@ -126,17 +126,79 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 		return TranscodeResult{}, fmt.Errorf("creating HLS scratch directory: %w", err)
 	}
 	defer os.RemoveAll(outDir)
-	if err := p.renderHLS(processingCtx, localPath, outDir, metadata, sink); err != nil {
+
+	duration := time.Duration(metadata.durationMS) * time.Millisecond
+	count := len(metadata.rungs)
+	reportProgress(processingCtx, sink, StageTranscoding, 0)
+	verifiedRenditions := make([]Rendition, 0, count)
+
+	for index, rung := range metadata.rungs {
+		if err := processingCtx.Err(); err != nil {
+			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+		}
+		if err := p.transcodeRung(processingCtx, localPath, outDir, rung, func(processed time.Duration) {
+			reportProgress(processingCtx, sink, StageTranscoding, rungProgressPercent(index, count, processed, duration))
+		}); err != nil {
+			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+		}
+		segments, err := validateLocalRung(outDir, rung)
+		if err != nil {
+			return TranscodeResult{}, err
+		}
+		if err := p.uploadVerifiedRung(processingCtx, outDir, prefix, rung, segments); err != nil {
+			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+		}
+		verifiedRenditions = append(verifiedRenditions, Rendition{
+			Name:             rung.Name,
+			StorageObjectKey: prefix + "/" + rung.Name + "/playlist.m3u8",
+			Width:            rung.Width,
+			Height:           rung.Height,
+			BitrateKbps:      rung.VideoKbps,
+			DurationMS:       metadata.durationMS,
+		})
+		// Progress for this rung is emitted only after its storage upload and
+		// HEAD verification are complete.
+		reportProgress(processingCtx, sink, StageTranscoding, rungProgressPercent(index+1, count, 0, duration))
+	}
+
+	if err := processingCtx.Err(); err != nil {
 		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
-	// Uploading the finished ladder is its own phase. It has no continuous
-	// measure worth trusting, so it reports the stage at the point transcoding
-	// reached rather than inventing a second fraction.
+	masterPath := filepath.Join(outDir, "master.m3u8")
+	if err := writeMediaMaster(masterPath, metadata.rungs); err != nil {
+		return TranscodeResult{}, err
+	}
+	files, err := walkMediaFiles(outDir)
+	if err != nil {
+		return TranscodeResult{}, fmt.Errorf("walking HLS output: %w", err)
+	}
+	if len(files) == 0 {
+		return TranscodeResult{}, fmt.Errorf("HLS processing produced no output files")
+	}
+	// Full-tree validation remains authoritative and executes before master publication.
+	if err := validateLocalHLSOutput(outDir, files); err != nil {
+		return TranscodeResult{}, err
+	}
 	reportProgress(processingCtx, sink, StagePackaging, 99)
-	if err := p.uploadHLS(processingCtx, outDir, prefix); err != nil {
+	if err := p.uploadVerifiedHLSObject(processingCtx, outDir, prefix, "master.m3u8"); err != nil {
 		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
-	return transcodeResult(prefix, metadata), nil
+	return TranscodeResult{
+		OutputPrefix:      prefix,
+		TrustedDurationMS: metadata.durationMS,
+		Renditions:        verifiedRenditions,
+	}, nil
+}
+
+func (p *FFmpegProcessor) uploadVerifiedRung(ctx context.Context, outDir, prefix string, rung hlsRung, segments []string) error {
+	for _, seg := range segments {
+		relative := rung.Name + "/" + seg
+		if err := p.uploadVerifiedHLSObject(ctx, outDir, prefix, relative); err != nil {
+			return err
+		}
+	}
+	playlistRelative := rung.Name + "/playlist.m3u8"
+	return p.uploadVerifiedHLSObject(ctx, outDir, prefix, playlistRelative)
 }
 
 type processingMetadata struct {
@@ -155,21 +217,6 @@ func trustedMediaMetadata(probe processorProbe) (processingMetadata, error) {
 		}
 	}
 	return processingMetadata{}, fmt.Errorf("%w: ffprobe did not return a video height", ErrInvalidMedia)
-}
-
-func (p *FFmpegProcessor) renderHLS(ctx context.Context, input, outDir string, metadata processingMetadata, sink ProgressSink) error {
-	duration := time.Duration(metadata.durationMS) * time.Millisecond
-	count := len(metadata.rungs)
-	reportProgress(ctx, sink, StageTranscoding, 0)
-	for index, rung := range metadata.rungs {
-		if err := p.transcodeRung(ctx, input, outDir, rung, func(processed time.Duration) {
-			reportProgress(ctx, sink, StageTranscoding, rungProgressPercent(index, count, processed, duration))
-		}); err != nil {
-			return err
-		}
-		reportProgress(ctx, sink, StageTranscoding, rungProgressPercent(index+1, count, 0, duration))
-	}
-	return writeMediaMaster(filepath.Join(outDir, "master.m3u8"), metadata.rungs)
 }
 
 func reportProgress(ctx context.Context, sink ProgressSink, stage ProcessingStage, percent int) {
@@ -412,14 +459,59 @@ func validateLocalRendition(root, relative string, present map[string]struct{}) 
 	return nil
 }
 
-func validateLocalSegmentReference(directory, reference string, present map[string]struct{}) error {
+func validateSegmentReferenceFormat(reference string) error {
 	if strings.Contains(reference, "://") || strings.ContainsAny(reference, "?\\/") || reference == "." || reference == ".." {
 		return fmt.Errorf("%w: HLS rendition contains an unsafe segment reference", ErrTranscodeFailed)
+	}
+	return nil
+}
+
+func validateLocalSegmentReference(directory, reference string, present map[string]struct{}) error {
+	if err := validateSegmentReferenceFormat(reference); err != nil {
+		return err
 	}
 	if _, ok := present[directory+"/"+reference]; !ok {
 		return fmt.Errorf("%w: HLS rendition references missing segment %s", ErrTranscodeFailed, reference)
 	}
 	return nil
+}
+
+func validateLocalRung(root string, rung hlsRung) ([]string, error) {
+	relative := rung.Name + "/playlist.m3u8"
+	clean, err := safeHLSRelativePath(relative)
+	if err != nil {
+		return nil, fmt.Errorf("%w: HLS output path escapes the attempt", ErrTranscodeFailed)
+	}
+	body, err := os.ReadFile(filepath.Join(root, clean))
+	if err != nil {
+		return nil, fmt.Errorf("reading HLS rendition manifest %s: %w", clean, err)
+	}
+	directory := filepath.ToSlash(filepath.Dir(clean))
+	var segments []string
+	for _, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if err := validateSegmentReferenceFormat(line); err != nil {
+			return nil, err
+		}
+		segRelative := directory + "/" + line
+		cleanSeg, err := safeHLSRelativePath(segRelative)
+		if err != nil {
+			return nil, fmt.Errorf("%w: HLS output path escapes the attempt", ErrTranscodeFailed)
+		}
+		segPath := filepath.Join(root, cleanSeg)
+		info, err := os.Stat(segPath)
+		if err != nil || info.IsDir() {
+			return nil, fmt.Errorf("%w: HLS rendition references missing segment %s", ErrTranscodeFailed, line)
+		}
+		segments = append(segments, line)
+	}
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("%w: HLS rendition has no segments", ErrTranscodeFailed)
+	}
+	return segments, nil
 }
 
 func hlsRungsForHeight(height int) []hlsRung {
