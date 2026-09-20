@@ -37,9 +37,10 @@ type ProcessingStore interface {
 	DeletePrefix(context.Context, string) error
 }
 
-// CleanupAttempt removes only one immutable attempt prefix. It is used after
-// durable stale-claim recovery; cleanup failure never rolls back recovery or
-// affects a newer attempt's objects.
+// CleanupAttempt removes only one immutable attempt prefix. It is the storage
+// deletion primitive for an attempt prefix; callers in the DB-aware worker/recovery
+// layer must verify that no durable video_renditions reference this prefix
+// before invoking this method.
 func (p *FFmpegProcessor) CleanupAttempt(ctx context.Context, assetVersionID, operationID string) error {
 	return p.store.DeletePrefix(ctx, processingOutputPrefix(assetVersionID, operationID))
 }
@@ -105,20 +106,6 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 	processingCtx, cancel := context.WithTimeout(ctx, p.processingTimeout)
 	defer cancel()
 	prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
-	completed := false
-	defer func() {
-		if completed {
-			return
-		}
-		// Cleanup cannot rely on the processing context: a timeout or caller
-		// cancellation is precisely when a partial rendition prefix must still
-		// be removed from private storage.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		if cleanupErr := p.store.DeletePrefix(cleanupCtx, prefix); cleanupErr != nil && err == nil {
-			err = fmt.Errorf("removing partial HLS output: %w", cleanupErr)
-		}
-	}()
 
 	localPath, cleanup, err := p.store.DownloadToFileVersion(processingCtx, object.StorageObjectKey, object.StorageObjectVersion)
 	if err != nil {
@@ -149,7 +136,6 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 	if err := p.uploadHLS(processingCtx, outDir, prefix); err != nil {
 		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
-	completed = true
 	return transcodeResult(prefix, metadata), nil
 }
 

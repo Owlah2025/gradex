@@ -91,9 +91,17 @@ func TestFFmpegProcessorBoundsCommandContextAndCleansTimedOutOutput(t *testing.T
 			if elapsed := time.Since(started); elapsed > time.Second {
 				t.Fatalf("CommandContext was not bounded; processing took %s", elapsed)
 			}
+			// Processor-level failure must NOT independently blind-delete the attempt prefix (Phase 3B2A).
+			if got := store.deletedPrefixes(); len(got) != 0 {
+				t.Fatalf("processor unexpectedly blind-deleted output on failure: %v", got)
+			}
+			// Low-level CleanupAttempt deletes only when explicitly invoked by an authorized DB-aware layer.
 			wantPrefix := processingOutputPrefix("version-1", operationID)
+			if err := processor.CleanupAttempt(context.Background(), "version-1", operationID); err != nil {
+				t.Fatalf("CleanupAttempt: %v", err)
+			}
 			if got := store.deletedPrefixes(); len(got) != 1 || got[0] != wantPrefix {
-				t.Fatalf("partial output cleanup = %v, want [%s]", got, wantPrefix)
+				t.Fatalf("CleanupAttempt = %v, want [%s]", got, wantPrefix)
 			}
 		})
 	}

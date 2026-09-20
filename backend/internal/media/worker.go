@@ -936,12 +936,14 @@ func (w *Worker) recordProcessingFailure(ctx context.Context, assetVersionID, op
 			if err := tx.Commit(ctx); err != nil {
 				return fmt.Errorf("committing processing retry: %w", err)
 			}
+			_, _ = w.CleanupAttemptSafe(ctx, failure.assetVersionID, failure.operationID)
 			return fmt.Errorf("%w: %v", ErrRetryScheduled, cause)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing processing failure: %w", err)
 	}
+	_, _ = w.CleanupAttemptSafe(ctx, failure.assetVersionID, failure.operationID)
 	return cause
 }
 

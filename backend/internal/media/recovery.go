@@ -201,16 +201,11 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 		return false, fmt.Errorf("committing stale media recovery: %w", err)
 	}
 	if work.state == StateProcessing && work.token != nil {
-		if cleaner, ok := w.process.(interface {
-			CleanupAttempt(context.Context, string, string) error
-		}); ok {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-			defer cancel()
-			// Data correctness no longer depends on this prefix: the recovered
-			// attempt has a new identity. Prefer a bounded leak over undoing the
-			// committed recovery when object deletion is unavailable.
-			_ = cleaner.CleanupAttempt(cleanupCtx, work.id, *work.token)
-		}
+		// Data correctness no longer depends on this prefix: the recovered
+		// attempt has a new identity. Prefer a bounded leak over undoing the
+		// committed recovery when object deletion is unavailable. Only delete
+		// if PostgreSQL proves zero durable video_renditions reference the prefix.
+		_, _ = w.CleanupAttemptSafe(ctx, work.id, *work.token)
 	}
 	return true, nil
 }
