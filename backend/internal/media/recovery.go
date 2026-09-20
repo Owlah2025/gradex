@@ -128,7 +128,7 @@ func (w *Worker) RecoverStale(ctx context.Context, limit int) (int, error) {
 	rows, err := w.db.Query(ctx, `
 		SELECT id::text
 		FROM media_asset_versions
-		WHERE state IN ('SCANNING', 'PROCESSING')
+		WHERE state IN ('SCANNING', 'PROCESSING', 'PLAYABLE')
 		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
 		ORDER BY COALESCE(work_lease_expires_at, created_at), id
 		LIMIT $1
@@ -184,7 +184,7 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 	if err != nil {
 		return false, fmt.Errorf("locking stale media work: %w", err)
 	}
-	if work.state != StateScanning && work.state != StateProcessing {
+	if work.state != StateScanning && work.state != StateProcessing && work.state != StatePlayable {
 		return false, nil
 	}
 	if leaseStillLive {
@@ -194,13 +194,19 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 		if err := w.recoverStaleScan(ctx, tx, work); err != nil {
 			return false, err
 		}
-	} else if err := w.recoverStaleProcessing(ctx, tx, work); err != nil {
-		return false, err
+	} else if work.state == StateProcessing {
+		if err := w.recoverStaleProcessing(ctx, tx, work); err != nil {
+			return false, err
+		}
+	} else if work.state == StatePlayable {
+		if err := w.recoverStalePlayable(ctx, tx, work); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("committing stale media recovery: %w", err)
 	}
-	if work.state == StateProcessing && work.token != nil {
+	if (work.state == StateProcessing || work.state == StatePlayable) && work.token != nil {
 		// Data correctness no longer depends on this prefix: the recovered
 		// attempt has a new identity. Prefer a bounded leak over undoing the
 		// committed recovery when object deletion is unavailable. Only delete
@@ -320,4 +326,28 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 	return appendScanWorkAt(ctx, tx, w.outbox, workSchedule{
 		assetVersionID: work.id, kind: work.kind, correlation: "stale-processing-rescan", availableAt: &availableAt,
 	})
+}
+
+func (w *Worker) recoverStalePlayable(ctx context.Context, tx pgx.Tx, work staleWork) error {
+	operationID := "recovery:" + uuid.NewString()
+	if work.token != nil {
+		operationID = *work.token
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, rendition_count, error_reason)
+		VALUES ($1::uuid,$2,'FAILED',0,'worker lease expired before processing completion')
+		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
+	`, work.id, operationID); err != nil {
+		return fmt.Errorf("recording interrupted processing attempt: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions SET
+		  work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
+		  last_failure_category='WORKER_INTERRUPTED'
+		WHERE id=$1::uuid AND state='PLAYABLE'
+	`, work.id); err != nil {
+		return fmt.Errorf("clearing claim for interrupted playable: %w", err)
+	}
+	return nil
 }

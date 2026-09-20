@@ -1040,13 +1040,14 @@ func markProcessingFailed(ctx context.Context, tx pgx.Tx, failure processingFail
 	// live lease on it. Once the lease has expired the row belongs to recovery,
 	// so an expired worker's failure is refused here rather than racing it.
 	commandTag, err := tx.Exec(ctx, `
-		UPDATE media_asset_versions SET state = 'PROCESS_FAILED',
+		UPDATE media_asset_versions SET
+		    state = CASE WHEN state = 'PLAYABLE' THEN 'PLAYABLE'::media_asset_version_state ELSE 'PROCESS_FAILED'::media_asset_version_state END,
 		    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL,
 		    last_failure_category = $3
-		WHERE id = $1::uuid AND state IN ('PROCESSING', 'SCAN_PASSED', 'VALIDATED')
+		WHERE id = $1::uuid AND state IN ('PROCESSING', 'PLAYABLE', 'SCAN_PASSED', 'VALIDATED')
 		  AND (
-		        (state = 'PROCESSING' AND work_claim_token = $2 AND work_lease_expires_at > now())
-		     OR state <> 'PROCESSING'
+		        (state IN ('PROCESSING', 'PLAYABLE') AND work_claim_token = $2 AND work_lease_expires_at > now())
+		     OR state NOT IN ('PROCESSING', 'PLAYABLE')
 		  )
 	`, failure.assetVersionID, failure.operationID, failure.category)
 	if err != nil {
@@ -1072,12 +1073,16 @@ func (w *Worker) scheduleProcessingRetry(ctx context.Context, tx pgx.Tx, failure
 	if target.attempts >= MaxWorkAttempts {
 		return false, nil
 	}
-	if _, err := tx.Exec(ctx, `
+	commandTag, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions SET state='QUARANTINED',
 		  processing_stage=NULL,processing_progress_percent=NULL,processing_updated_at=NULL,processing_attempt_token=NULL
 		WHERE id=$1::uuid AND state='PROCESS_FAILED'
-	`, failure.assetVersionID); err != nil {
+	`, failure.assetVersionID)
+	if err != nil {
 		return false, fmt.Errorf("resetting transient processing failure: %w", err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return false, nil
 	}
 	base, err := databaseNow(ctx, tx)
 	if err != nil {
