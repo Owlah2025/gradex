@@ -343,6 +343,7 @@ mkdir -p "$dir"
 printf "fake-segment" > "$dir/segment000.ts"
 printf "#EXTM3U\nsegment000.ts\n" > "$last"
 printf "out_time_ms=5000000\nprogress=continue\n"
+printf "out_time_ms=10000000\nprogress=end\n"
 `, logPath, failRung)
 	if err := os.WriteFile(ffmpegPath, []byte(ffmpegContent), 0o755); err != nil {
 		t.Fatal(err)
@@ -722,5 +723,182 @@ func TestFinalFullTreeValidationExecutesBeforeMasterPublication(t *testing.T) {
 		if strings.Contains(ev, "master.m3u8") {
 			t.Fatal("master.m3u8 was uploaded even though full-tree validation failed")
 		}
+	}
+}
+
+func TestPerRungTerminalLiveProgressDoesNotPrematurelyEmitBoundary(t *testing.T) {
+	probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, "", 720)
+	store := &pipelineEventStore{logPath: logPath, sourceFile: sourcePath}
+	proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rawReports []struct {
+		stage   ProcessingStage
+		percent int
+	}
+	var mu sync.Mutex
+	sink := &recordingPipelineSink{
+		logPath: logPath,
+		onProgress: func(stage ProcessingStage, percent int) {
+			mu.Lock()
+			defer mu.Unlock()
+			rawReports = append(rawReports, struct {
+				stage   ProcessingStage
+				percent int
+			}{stage, percent})
+		},
+	}
+
+	obj := ObjectVersion{
+		AssetVersionID:        "version-1",
+		StorageObjectKey:      "quarantine/version-1",
+		StorageObjectVersion:  "v1",
+		ProcessingOperationID: "op-term-progress",
+	}
+
+	res, err := proc.TranscodeWithProgress(context.Background(), obj, sink)
+	if err != nil {
+		t.Fatalf("TranscodeWithProgress failed: %v", err)
+	}
+
+	count := len(res.Renditions)
+	if count != 3 {
+		t.Fatalf("len(res.Renditions)=%d, want 3", count)
+	}
+	duration := 10 * time.Second
+	expectedPrefix := processingOutputPrefix("version-1", "op-term-progress")
+
+	// Calculate authoritative boundaries for the 3 rungs.
+	b0 := rungProgressPercent(1, count, 0, duration) // Rung 0 completion (e.g. 33)
+	b1 := rungProgressPercent(2, count, 0, duration) // Rung 1 completion (e.g. 66)
+	b2 := rungProgressPercent(3, count, 0, duration) // Rung 2 completion (e.g. 99)
+
+	events := readLogEvents(t, logPath)
+
+	indexOf := func(target string) int {
+		for i, ev := range events {
+			if strings.Contains(ev, target) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	// Boundary 0 (720p) assertions
+	enc720 := indexOf("encode:720p")
+	headPl720 := indexOf("head:" + expectedPrefix + "/720p/playlist.m3u8")
+	if enc720 == -1 || headPl720 == -1 {
+		t.Fatalf("missing 720p encode or head events: %v", events)
+	}
+	// Verify all progress events during 720p FFmpeg live encode are strictly below b0
+	for i := enc720; i < headPl720; i++ {
+		ev := events[i]
+		if strings.HasPrefix(ev, "sink:TRANSCODING:") {
+			var p int
+			fmt.Sscanf(ev, "sink:TRANSCODING:%d", &p)
+			if p >= b0 {
+				t.Fatalf("terminal FFmpeg progress for rung 0 emitted %d >= boundary %d before storage verification! Events: %v", p, b0, events)
+			}
+		}
+	}
+	// Boundary b0 must appear after headPl720
+	boundaryEvent0 := fmt.Sprintf("sink:TRANSCODING:%d", b0)
+	countB0 := 0
+	firstB0Index := -1
+	for i, ev := range events {
+		if ev == boundaryEvent0 {
+			countB0++
+			if firstB0Index == -1 {
+				firstB0Index = i
+			}
+		}
+	}
+	if countB0 != 1 {
+		t.Fatalf("expected boundary %s to be emitted exactly once, got %d times in events: %v", boundaryEvent0, countB0, events)
+	}
+	if firstB0Index <= headPl720 {
+		t.Fatalf("boundary %s index %d must be after headPl720 %d", boundaryEvent0, firstB0Index, headPl720)
+	}
+
+	// Boundary 1 (480p) assertions
+	enc480 := indexOf("encode:480p")
+	headPl480 := indexOf("head:" + expectedPrefix + "/480p/playlist.m3u8")
+	if enc480 == -1 || headPl480 == -1 {
+		t.Fatalf("missing 480p encode or head events: %v", events)
+	}
+	for i := enc480; i < headPl480; i++ {
+		ev := events[i]
+		if strings.HasPrefix(ev, "sink:TRANSCODING:") {
+			var p int
+			fmt.Sscanf(ev, "sink:TRANSCODING:%d", &p)
+			if p >= b1 {
+				t.Fatalf("terminal FFmpeg progress for rung 1 emitted %d >= boundary %d before storage verification! Events: %v", p, b1, events)
+			}
+		}
+	}
+	boundaryEvent1 := fmt.Sprintf("sink:TRANSCODING:%d", b1)
+	countB1 := 0
+	firstB1Index := -1
+	for i, ev := range events {
+		if ev == boundaryEvent1 {
+			countB1++
+			if firstB1Index == -1 {
+				firstB1Index = i
+			}
+		}
+	}
+	if countB1 != 1 {
+		t.Fatalf("expected boundary %s to be emitted exactly once, got %d times in events: %v", boundaryEvent1, countB1, events)
+	}
+	if firstB1Index <= headPl480 {
+		t.Fatalf("boundary %s index %d must be after headPl480 %d", boundaryEvent1, firstB1Index, headPl480)
+	}
+
+	// Boundary 2 (240p) assertions
+	enc240 := indexOf("encode:240p")
+	headPl240 := indexOf("head:" + expectedPrefix + "/240p/playlist.m3u8")
+	if enc240 == -1 || headPl240 == -1 {
+		t.Fatalf("missing 240p encode or head events: %v", events)
+	}
+	for i := enc240; i < headPl240; i++ {
+		ev := events[i]
+		if strings.HasPrefix(ev, "sink:TRANSCODING:") {
+			var p int
+			fmt.Sscanf(ev, "sink:TRANSCODING:%d", &p)
+			if p >= b2 {
+				t.Fatalf("terminal FFmpeg progress for rung 2 emitted %d >= boundary %d before storage verification! Events: %v", p, b2, events)
+			}
+		}
+	}
+	boundaryEvent2 := fmt.Sprintf("sink:TRANSCODING:%d", b2)
+	countB2 := 0
+	firstB2Index := -1
+	for i, ev := range events {
+		if ev == boundaryEvent2 {
+			countB2++
+			if firstB2Index == -1 {
+				firstB2Index = i
+			}
+		}
+	}
+	if countB2 != 1 {
+		t.Fatalf("expected boundary %s to be emitted exactly once, got %d times in events: %v", boundaryEvent2, countB2, events)
+	}
+	if firstB2Index <= headPl240 {
+		t.Fatalf("boundary %s index %d must be after headPl240 %d", boundaryEvent2, firstB2Index, headPl240)
+	}
+
+	// Monotonicity and bounded below 100
+	lastP := -1
+	for _, r := range rawReports {
+		if r.percent < lastP {
+			t.Fatalf("progress regression: %d -> %d", lastP, r.percent)
+		}
+		if r.percent >= 100 {
+			t.Fatalf("progress reached %d >= 100 before READY", r.percent)
+		}
+		lastP = r.percent
 	}
 }

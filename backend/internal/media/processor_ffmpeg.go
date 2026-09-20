@@ -137,7 +137,7 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 		}
 		if err := p.transcodeRung(processingCtx, localPath, outDir, rung, func(processed time.Duration) {
-			reportProgress(processingCtx, sink, StageTranscoding, rungProgressPercent(index, count, processed, duration))
+			reportProgress(processingCtx, sink, StageTranscoding, rungLiveProgressPercent(index, count, processed, duration))
 		}); err != nil {
 			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 		}
@@ -199,6 +199,18 @@ func (p *FFmpegProcessor) uploadVerifiedRung(ctx context.Context, outDir, prefix
 	}
 	playlistRelative := rung.Name + "/playlist.m3u8"
 	return p.uploadVerifiedHLSObject(ctx, outDir, prefix, playlistRelative)
+}
+
+// rungLiveProgressPercent calculates progress during FFmpeg execution, ensuring
+// that live progress remains strictly below the post-verification completion
+// boundary for this rung.
+func rungLiveProgressPercent(rungIndex, rungCount int, processed, duration time.Duration) int {
+	percent := rungProgressPercent(rungIndex, rungCount, processed, duration)
+	boundary := rungProgressPercent(rungIndex+1, rungCount, 0, duration)
+	if boundary > 0 && percent >= boundary {
+		return boundary - 1
+	}
+	return percent
 }
 
 type processingMetadata struct {
