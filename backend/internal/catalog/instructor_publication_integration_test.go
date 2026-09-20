@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/catalogpublic"
@@ -564,5 +565,65 @@ func TestPreviouslyPublishedCourseIsRecognisedWithoutReapproval(t *testing.T) {
 	}
 	if live := f.liveRevisionID(t); live != candidate.ID {
 		t.Fatalf("live_revision_id = %q, want %q", live, candidate.ID)
+	}
+}
+
+func TestSection28_SubmitCourseRefusesPlayableLessonVideo(t *testing.T) {
+	f := newPublicationFixture(t)
+	// Create a PLAYABLE video in media_asset_versions
+	assetID, versionID := uuid.NewString(), uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_assets (id, kind, owner_account_id, course_id, lesson_id, visibility)
+		VALUES ($1::uuid, 'VIDEO', $2::uuid, $3::uuid, $4::uuid, 'PROTECTED')
+	`, assetID, f.ownerID, f.courseID, f.lessonID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO media_asset_versions (id, logical_asset_id, kind, state, storage_object_key, storage_object_version, content_type, size_bytes)
+		VALUES ($1::uuid, $2::uuid, 'VIDEO', 'QUARANTINED', 'quarantine/key', 'v1', 'video/mp4', 100)
+	`, versionID, assetID); err != nil {
+		t.Fatal(err)
+	}
+	scanID := uuid.NewString()
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO scan_attempts (id, asset_version_id, attempt_number, work_id, storage_object_version, outcome, scanner_identity)
+		VALUES ($1::uuid, $2::uuid, 1, 'scan-1', 'v1', 'PASSED', 'scanner')
+	`, scanID, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'SCANNING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET successful_scan_attempt_id = $1::uuid, state = 'SCAN_PASSED' WHERE id = $2::uuid`, scanID, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PROCESSING' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `
+		INSERT INTO video_renditions (asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms)
+		VALUES ($1::uuid, '720p', 'media/hls/720p/playlist.m3u8', 1280, 720, 2800, 60000)
+	`, versionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.p.Exec(f.ctx, `UPDATE media_asset_versions SET state = 'PLAYABLE' WHERE id = $1::uuid`, versionID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Directly assign the PLAYABLE video to the draft lesson
+	if _, err := f.p.Exec(f.ctx, `
+		UPDATE course_lessons SET video_asset_version_id = $1::uuid WHERE lesson_identity_id = $2::uuid
+	`, versionID, f.lessonID); err != nil {
+		t.Fatal(err)
+	}
+
+	// SubmitCourse must refuse the PLAYABLE video with submission validation failure
+	err := f.submit(t, f.firstRevisionID)
+	if err == nil {
+		t.Fatal("SubmitCourse succeeded with PLAYABLE video, want validation refusal")
+	}
+	var subErr *SubmissionValidationError
+	if !errors.As(err, &subErr) {
+		t.Fatalf("SubmitCourse error = %v, want SubmissionValidationError", err)
 	}
 }

@@ -787,10 +787,10 @@ func TestSection26_LowResolutionLadders(t *testing.T) {
 }
 
 // ============================================================================
-// SECTION 27: PLAYABLE DELIVERY NEGATIVE TEST
+// SECTION 27: PLAYABLE DELIVERY (PHASE 3B3C)
 // ============================================================================
 
-func TestSection27_PlayableDeliveryNegative(t *testing.T) {
+func TestSection27_PlayableDelivery(t *testing.T) {
 	f := newDeliveryFixture(t)
 
 	// Create a new video using validated upload, then begin transcode and persist 1 rendition to reach PLAYABLE
@@ -817,15 +817,18 @@ func TestSection27_PlayableDeliveryNegative(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify that IssuePlayback refuses the PLAYABLE version with ErrProtectedUnavailable
+	// Verify that IssuePlayback succeeds for PLAYABLE version in Phase 3B3C
 	playbackReq := PlaybackRequest{
 		StudentID:      f.student,
 		DeviceID:       testDeviceID(f.student),
 		LessonID:       f.lesson,
 		AssetVersionID: request.AssetVersionID,
 	}
-	_, err := f.delivery.IssuePlayback(f.ctx, playbackReq)
-	if !errors.Is(err, ErrProtectedUnavailable) {
-		t.Fatalf("IssuePlayback on PLAYABLE video error = %v, want %v", err, ErrProtectedUnavailable)
+	auth, err := f.delivery.IssuePlayback(f.ctx, playbackReq)
+	if err != nil {
+		t.Fatalf("IssuePlayback on PLAYABLE video error = %v, want nil", err)
+	}
+	if auth.PlaybackSession == "" || auth.ManifestURL == "" {
+		t.Fatalf("unexpected playback auth: %+v", auth)
 	}
 }

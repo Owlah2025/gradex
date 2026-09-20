@@ -329,12 +329,18 @@ func (target deliveryTarget) readyVideo() bool {
 	return target.kind == KindVideo && target.state == StateReady && target.hasRenditions
 }
 
+func (target deliveryTarget) streamableVideo() bool {
+	return target.kind == KindVideo &&
+		(target.state == StatePlayable || target.state == StateReady) &&
+		target.hasRenditions
+}
+
 // TrustedVideoDuration returns S4-owned READY exact-version metadata for an
 // already-authorized S5 progress write. It does not evaluate access or sign a
 // URL; callers must use the Entitlement evaluator first.
 func (s *DeliveryService) TrustedVideoDuration(ctx context.Context, lessonID, assetVersionID string) (time.Duration, error) {
 	target, err := s.loadApprovedTarget(ctx, lessonID, assetVersionID, KindVideo)
-	if err != nil || target.durationMS <= 0 {
+	if err != nil || !target.streamableVideo() || target.durationMS <= 0 {
 		return 0, ErrProtectedUnavailable
 	}
 	return time.Duration(target.durationMS) * time.Millisecond, nil
@@ -348,7 +354,7 @@ func (s *DeliveryService) IssuePlayback(ctx context.Context, request PlaybackReq
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	target, err := s.loadApprovedTarget(ctx, request.LessonID, request.AssetVersionID, KindVideo)
-	if err != nil || !target.readyVideo() {
+	if err != nil || !target.streamableVideo() {
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	decision := s.evaluator.EvaluateTarget(ctx, request.StudentID, request.LessonID, target.retiredAt, s.now().UTC())
@@ -514,7 +520,7 @@ func (s *DeliveryService) authorizeStudentPlaybackSession(ctx context.Context, r
 		return playbackSessionClaims{}, ErrPlaybackLeaseLost
 	}
 	target, err := s.loadApprovedTarget(ctx, claims.LessonID, claims.AssetVersionID, KindVideo)
-	if err != nil || !target.readyVideo() {
+	if err != nil || !target.streamableVideo() {
 		return playbackSessionClaims{}, ErrProtectedUnavailable
 	}
 	decision := s.evaluator.EvaluateTarget(ctx, request.StudentID, claims.LessonID, target.retiredAt, now)
@@ -853,7 +859,9 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	var assetRetiredAt *time.Time
 	err := s.db.QueryRow(ctx, `
 		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state,
-		       mav.storage_object_key, COALESCE(mav.trusted_duration_ms, 0), ma.retired_at,
+		       mav.storage_object_key,
+		       COALESCE(mav.trusted_duration_ms, (SELECT vr.duration_ms FROM video_renditions vr WHERE vr.asset_version_id = mav.id ORDER BY vr.created_at ASC LIMIT 1), 0),
+		       ma.retired_at,
 		       EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
 		FROM course_lessons cl
 		JOIN course_sections cs ON cs.id = cl.section_id AND cs.course_id = cl.course_id
@@ -864,12 +872,13 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	`+ExactVersionProvenanceJoin+`
 		WHERE cl.lesson_identity_id = $1::uuid
 		  AND mav.kind = $3::media_asset_kind
-		  AND mav.state = 'READY'
-		  AND (mav.kind <> 'VIDEO' OR (
-			mav.successful_processing_attempt_id IS NOT NULL
-			AND mav.trusted_duration_ms IS NOT NULL
-			AND EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
-		  ))
+		  AND (
+			(mav.kind = 'VIDEO'
+			 AND mav.state IN ('PLAYABLE', 'READY')
+			 AND (mav.state = 'PLAYABLE' OR (mav.successful_processing_attempt_id IS NOT NULL AND mav.trusted_duration_ms IS NOT NULL))
+			 AND EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id))
+			OR (mav.kind <> 'VIDEO' AND mav.state = 'READY')
+		  )
 		  AND (
 				(cl.video_asset_version_id = mav.id AND c.live_revision_id = cr.id AND cr.state = 'APPROVED')
 				OR (cl.video_asset_version_id = mav.id AND cr.state = 'SUPERSEDED')
