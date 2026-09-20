@@ -440,6 +440,7 @@ func TestCleanupSafety_CurrentSuccessPathContract(t *testing.T) {
 				DurationMS:       60000,
 			},
 		},
+		ExpectedRenditions: []string{"720p"},
 	}
 	if err := validateTranscodeCompletion(assetVersionID, operationID, result); err != nil {
 		t.Fatalf("validateTranscodeCompletion: %v", err)

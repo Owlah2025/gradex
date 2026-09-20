@@ -401,9 +401,10 @@ func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
 	processor := integrationProcessorFunc(func(_ context.Context, object ObjectVersion) (TranscodeResult, error) {
 		prefix := processingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
 		return TranscodeResult{
-			TrustedDurationMS: 123456,
-			OutputPrefix:      prefix,
-			Renditions:        []Rendition{{Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+			TrustedDurationMS:  123456,
+			OutputPrefix:       prefix,
+			Renditions:         []Rendition{{Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+			ExpectedRenditions: []string{"720p"},
 		}, nil
 	})
 	scanner, err := NewScannerAdapter(integrationScannerFunc(func(_ context.Context, object ObjectVersion) (ScanObservation, error) {
@@ -427,9 +428,10 @@ func TestD7PipelineReachesReadyWithTrustedVersionEvidence(t *testing.T) {
 		t.Fatalf("reading transcode operation ID: %v", err)
 	}
 	duplicateResult := TranscodeResult{
-		TrustedDurationMS: 123456,
-		OutputPrefix:      processingOutputPrefix(request.AssetVersionID, operationID),
-		Renditions:        []Rendition{{Name: "720p", StorageObjectKey: processingOutputPrefix(request.AssetVersionID, operationID) + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+		TrustedDurationMS:  123456,
+		OutputPrefix:       processingOutputPrefix(request.AssetVersionID, operationID),
+		Renditions:         []Rendition{{Name: "720p", StorageObjectKey: processingOutputPrefix(request.AssetVersionID, operationID) + "/720p/playlist.m3u8", Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456}},
+		ExpectedRenditions: []string{"720p"},
 	}
 	if err := worker.CompleteTranscode(f.ctx, request.AssetVersionID, operationID, duplicateResult); err == nil {
 		t.Fatal("out-of-order transcode callback succeeded before PROCESSING")

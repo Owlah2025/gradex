@@ -307,6 +307,7 @@ func TestD088TrustedVideoValidatesThenProcessesToReady(t *testing.T) {
 				Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 				Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 90000,
 			}},
+			ExpectedRenditions: []string{"720p"},
 		}, nil
 	})
 	if err := worker.Transcode(f.ctx, request.AssetVersionID, operationID); err != nil {
@@ -876,6 +877,7 @@ func TestD096TrustedPublicPreviewValidatesThenProcessesToReady(t *testing.T) {
 				Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 				Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 45000,
 			}},
+			ExpectedRenditions: []string{"720p"},
 		}, nil
 	})
 	if err := worker.Transcode(f.ctx, request.AssetVersionID, operationID); err != nil {

@@ -41,6 +41,7 @@ func successfulAttemptProcessor(_ context.Context, object ObjectVersion) (Transc
 			Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 			Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 90_000,
 		}},
+		ExpectedRenditions: []string{"720p"},
 	}, nil
 }
 

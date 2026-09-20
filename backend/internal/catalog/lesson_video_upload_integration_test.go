@@ -39,6 +39,7 @@ func (p lessonVideoProcessor) Transcode(_ context.Context, object media.ObjectVe
 			Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 			Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 60000,
 		}},
+		ExpectedRenditions: []string{"720p"},
 	}, nil
 }
 
@@ -276,4 +277,91 @@ func TestNonReadySelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
 	if got := selectedLessonVideo(t, f, f.liveID); got != f.videoOld {
 		t.Fatalf("live video = %s, want unchanged %s", got, f.videoOld)
 	}
+}
+
+type playableOnlyProcessor struct{}
+
+func (p playableOnlyProcessor) Transcode(_ context.Context, _ media.ObjectVersion) (media.TranscodeResult, error) {
+	return media.TranscodeResult{}, errors.New("not implemented")
+}
+
+func (p playableOnlyProcessor) TranscodeProgressive(ctx context.Context, object media.ObjectVersion, progress media.ProgressSink, renditions media.VerifiedRenditionSink) (media.TranscodeResult, error) {
+	prefix := media.ProcessingOutputPrefix(object.AssetVersionID, object.ProcessingOperationID)
+	r1 := media.Rendition{
+		Name:             "720p",
+		StorageObjectKey: prefix + "/720p/playlist.m3u8",
+		Width:            1280,
+		Height:           720,
+		BitrateKbps:      2800,
+		DurationMS:       60000,
+	}
+	if renditions != nil {
+		if err := renditions.PersistVerifiedRendition(ctx, r1); err != nil {
+			return media.TranscodeResult{}, err
+		}
+	}
+	return media.TranscodeResult{}, errors.New("halted after first rendition")
+}
+
+func TestPlayableSelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
+	f := newD5Fixture(t)
+	candidate := f.candidate(t)
+	versionID := seedLessonVideoUpload(t, f, time.Date(2026, 9, 2, 13, 0, 0, 0, time.UTC), true)
+	claimLessonVideo(t, f, candidate.ID, versionID)
+
+	scanner, err := media.NewScannerAdapter(lessonVideoScanner{})
+	if err != nil {
+		t.Fatalf("NewScannerAdapter: %v", err)
+	}
+	worker, err := media.NewWorker(media.WorkerOptions{
+		DB: f.p, Scanner: scanner, Process: playableOnlyProcessor{}, Outbox: testOutboxWriter(t),
+	})
+	if err != nil {
+		t.Fatalf("NewWorker: %v", err)
+	}
+	if err := worker.Scan(f.ctx, versionID); err != nil {
+		t.Fatalf("Worker.Scan: %v", err)
+	}
+	var operationID string
+	if err := f.p.QueryRow(f.ctx, `
+		SELECT safe_payload->>'operation_id'
+		FROM outbox_events
+		WHERE event_type = 'media.transcode_requested' AND aggregate_id = $1::uuid
+		ORDER BY occurred_at DESC, id DESC LIMIT 1
+	`, versionID).Scan(&operationID); err != nil {
+		t.Fatalf("loading transcode operation: %v", err)
+	}
+	_ = worker.Transcode(f.ctx, versionID, operationID)
+
+	// Verify the video transitioned to PLAYABLE and has 1 canonical rendition
+	var state string
+	var renditionCount int
+	if err := f.p.QueryRow(f.ctx, `
+		SELECT state::text, (SELECT count(*) FROM video_renditions WHERE asset_version_id = $1::uuid)
+		FROM media_asset_versions WHERE id = $1::uuid
+	`, versionID).Scan(&state, &renditionCount); err != nil {
+		t.Fatalf("querying asset version: %v", err)
+	}
+	if state != "PLAYABLE" || renditionCount != 1 {
+		t.Fatalf("expected state=PLAYABLE (count=1), got state=%s (count=%d)", state, renditionCount)
+	}
+
+	// Asset version validator directly rejects PLAYABLE video
+	if err := f.validator.ValidateAssetVersion(f.ctx, versionID); !errors.Is(err, ErrAssetVersionNotReady) {
+		t.Fatalf("ValidateAssetVersion on PLAYABLE video = %v, want %v", err, ErrAssetVersionNotReady)
+	}
+
+	// Instructor publication must refuse PLAYABLE video: Deliverable/readiness stays READY-only
+	err = f.publish(f.ctx, candidate.ID)
+	assertSubmissionFailure(t, err)
+
+	// Admin approval path also refuses PLAYABLE video
+	if _, err := f.p.Exec(f.ctx, `UPDATE course_revisions SET state = 'PENDING_REVIEW' WHERE id = $1::uuid`, candidate.ID); err != nil {
+		t.Fatalf("placing candidate under review: %v", err)
+	}
+	_, approveErr := f.repo.ApproveCourse(f.ctx, f.validator, ApproveCourseRequest{
+		CourseID: f.courseID, RevisionID: candidate.ID,
+		AdminAccountID: f.adminID, ActorDescriptor: f.adminID,
+	})
+	assertSubmissionFailure(t, approveErr)
 }

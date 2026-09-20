@@ -48,6 +48,7 @@ func (p progressReportingProcessor) TranscodeWithProgress(
 			Name: "720p", StorageObjectKey: prefix + "/720p/playlist.m3u8",
 			Width: 1280, Height: 720, BitrateKbps: 2800, DurationMS: 123456,
 		}},
+		ExpectedRenditions: []string{"720p"},
 	}, nil
 }
 

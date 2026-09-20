@@ -524,6 +524,16 @@ func transcodeOutcome(err error) string {
 	return "FAILED"
 }
 
+type workerRenditionSink struct {
+	worker         *Worker
+	assetVersionID string
+	operationID    string
+}
+
+func (s *workerRenditionSink) PersistVerifiedRendition(ctx context.Context, rendition Rendition) error {
+	return s.worker.PersistVerifiedRendition(ctx, s.assetVersionID, s.operationID, rendition)
+}
+
 func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID string) error {
 	version, applied, err := w.beginTranscode(ctx, assetVersionID, operationID)
 	if err != nil || !applied {
@@ -537,7 +547,14 @@ func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID stri
 	// progress simply does not, and the attempt is unaffected.
 	var result TranscodeResult
 	var processErr error
-	if reporting, ok := w.process.(ProgressProcessor); ok {
+	sink := &workerRenditionSink{worker: w, assetVersionID: version.ID, operationID: operationID}
+	if progressive, ok := w.process.(ProgressiveProcessor); ok {
+		result, processErr = progressive.TranscodeProgressive(
+			processingCtx, version.Object,
+			newProgressWriter(w.db, version.ID, operationID),
+			sink,
+		)
+	} else if reporting, ok := w.process.(ProgressProcessor); ok {
 		result, processErr = reporting.TranscodeWithProgress(
 			processingCtx, version.Object, newProgressWriter(w.db, version.ID, operationID),
 		)
@@ -549,6 +566,15 @@ func (w *Worker) transcode(ctx context.Context, assetVersionID, operationID stri
 	}
 	if result.OperationID != "" && result.OperationID != operationID {
 		return w.failTranscode(ctx, version.ID, operationID, errors.New("processor operation identity mismatch"))
+	}
+	// For non-progressive test doubles that did not invoke the sink during transcoding,
+	// persist the verified renditions progressively now.
+	if _, ok := w.process.(ProgressiveProcessor); !ok {
+		for _, rendition := range result.Renditions {
+			if err := w.PersistVerifiedRendition(processingCtx, version.ID, operationID, rendition); err != nil {
+				return w.failTranscode(ctx, version.ID, operationID, err)
+			}
+		}
 	}
 	if err := validateTranscodeCompletion(assetVersionID, operationID, result); err != nil {
 		return w.failTranscode(ctx, version.ID, operationID, err)
@@ -720,11 +746,20 @@ func validateTranscodeCompletion(assetVersionID, operationID string, result Tran
 	if result.TrustedDurationMS <= 0 || len(result.Renditions) == 0 || strings.TrimSpace(result.OutputPrefix) == "" {
 		return fmt.Errorf("%w: transcode output is not successful", ErrValidation)
 	}
+	if len(result.ExpectedRenditions) == 0 {
+		return fmt.Errorf("%w: transcode expected rendition plan is required", ErrValidation)
+	}
+	if len(result.Renditions) != len(result.ExpectedRenditions) {
+		return fmt.Errorf("%w: transcode rendition count (%d) does not match expected ladder count (%d)", ErrValidation, len(result.Renditions), len(result.ExpectedRenditions))
+	}
 	expectedPrefix := processingOutputPrefix(assetVersionID, operationID)
 	if result.OutputPrefix != expectedPrefix {
 		return fmt.Errorf("%w: transcode output prefix is not scoped to this attempt (got %q, want %q)", ErrValidation, result.OutputPrefix, expectedPrefix)
 	}
-	for _, rendition := range result.Renditions {
+	for i, rendition := range result.Renditions {
+		if rendition.Name != result.ExpectedRenditions[i] {
+			return fmt.Errorf("%w: rendition at index %d (%q) does not match expected ladder (%q)", ErrValidation, i, rendition.Name, result.ExpectedRenditions[i])
+		}
 		if strings.TrimSpace(rendition.Name) == "" || strings.TrimSpace(rendition.StorageObjectKey) == "" {
 			return fmt.Errorf("%w: rendition identity is incomplete", ErrValidation)
 		}
@@ -734,6 +769,186 @@ func validateTranscodeCompletion(assetVersionID, operationID string, result Tran
 		if _, err := parseRenditionID(rendition.Name); err != nil {
 			return fmt.Errorf("%w: rendition identity is invalid", ErrValidation)
 		}
+		if rendition.Width <= 0 || rendition.Height <= 0 || rendition.BitrateKbps <= 0 || rendition.DurationMS <= 0 {
+			return fmt.Errorf("%w: rendition metadata must be positive", ErrValidation)
+		}
+	}
+	return nil
+}
+
+// PersistVerifiedRendition durably persists one verified progressive rendition in
+// PostgreSQL. For the first rendition on a PROCESSING asset, it atomically
+// inserts the canonical video_renditions row and transitions the asset to PLAYABLE
+// while retaining the existing work claim and lease. For subsequent renditions, it
+// verifies the asset remains PLAYABLE under the same valid claim and inserts the row
+// exact-idempotently.
+func (w *Worker) PersistVerifiedRendition(ctx context.Context, assetVersionID, operationID string, rendition Rendition) error {
+	if strings.TrimSpace(assetVersionID) == "" {
+		return fmt.Errorf("%w: asset version ID is required", ErrValidation)
+	}
+	if _, err := uuid.Parse(assetVersionID); err != nil {
+		return fmt.Errorf("%w: invalid asset version UUID %q", ErrValidation, assetVersionID)
+	}
+	if strings.TrimSpace(operationID) == "" {
+		return fmt.Errorf("%w: operation ID is required", ErrValidation)
+	}
+	if strings.TrimSpace(rendition.Name) == "" {
+		return fmt.Errorf("%w: rendition name is required", ErrValidation)
+	}
+	if _, err := parseRenditionID(rendition.Name); err != nil {
+		return fmt.Errorf("%w: invalid rendition name %q", ErrValidation, rendition.Name)
+	}
+	if rendition.Width <= 0 || rendition.Height <= 0 || rendition.BitrateKbps <= 0 || rendition.DurationMS <= 0 {
+		return fmt.Errorf("%w: rendition metadata must be positive (width=%d, height=%d, bitrate=%d, duration=%d)",
+			ErrValidation, rendition.Width, rendition.Height, rendition.BitrateKbps, rendition.DurationMS)
+	}
+	expectedPrefix := processingOutputPrefix(assetVersionID, operationID)
+	expectedKey := expectedPrefix + "/" + rendition.Name + "/playlist.m3u8"
+	if rendition.StorageObjectKey != expectedKey {
+		return fmt.Errorf("%w: rendition storage key %q does not match canonical key %q", ErrValidation, rendition.StorageObjectKey, expectedKey)
+	}
+
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning verified rendition transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var state AssetVersionState
+	var claimToken *string
+	var claimedAt, expiresAt *time.Time
+	var scanEvidence, validationEvidence *string
+	var leaseValid bool
+
+	err = tx.QueryRow(ctx, `
+		SELECT state, work_claim_token, work_claimed_at, work_lease_expires_at,
+		       successful_scan_attempt_id::text, successful_validation_attempt_id::text,
+		       COALESCE(work_lease_expires_at > now(), false)
+		FROM media_asset_versions
+		WHERE id = $1::uuid
+		FOR UPDATE
+	`, assetVersionID).Scan(&state, &claimToken, &claimedAt, &expiresAt, &scanEvidence, &validationEvidence, &leaseValid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("locking asset version for rendition persistence: %w", err)
+	}
+
+	// 1. Claim token check
+	if claimToken == nil || *claimToken != operationID {
+		return ErrConcurrentModification
+	}
+	// 2. Lease check
+	if !leaseValid {
+		return ErrLeaseExpired
+	}
+	// 3. Claim coherence check
+	if claimedAt == nil || expiresAt == nil || !expiresAt.After(*claimedAt) {
+		return ErrConcurrentModification
+	}
+	// 4. Provenance check
+	if scanEvidence == nil && validationEvidence == nil {
+		return fmt.Errorf("%w: transcode target lacks successful scan or validation evidence", ErrConflict)
+	}
+	// 5. Operation spent check
+	spent, err := processingOperationSpentLocked(ctx, tx, assetVersionID, operationID)
+	if err != nil {
+		return err
+	}
+	if spent {
+		return ErrConcurrentModification
+	}
+
+	// 6. State check: must be PROCESSING or PLAYABLE
+	if state != StateProcessing && state != StatePlayable {
+		return fmt.Errorf("%w: cannot persist rendition in state %s", ErrConflict, state)
+	}
+
+	// 7. Check if row already exists in video_renditions
+	var existingKey string
+	var existingWidth, existingHeight, existingBitrate int
+	var existingDuration int64
+	err = tx.QueryRow(ctx, `
+		SELECT storage_object_key, COALESCE(width, 0), COALESCE(height, 0),
+		       COALESCE(bitrate_kbps, 0), duration_ms
+		FROM video_renditions
+		WHERE asset_version_id = $1::uuid AND name = $2
+	`, assetVersionID, rendition.Name).Scan(&existingKey, &existingWidth, &existingHeight, &existingBitrate, &existingDuration)
+
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("checking existing rendition: %w", err)
+	}
+
+	rowExists := (err == nil)
+	if rowExists {
+		// Idempotency / conflict check
+		exactMatch := existingKey == rendition.StorageObjectKey &&
+			existingWidth == rendition.Width &&
+			existingHeight == rendition.Height &&
+			existingBitrate == rendition.BitrateKbps &&
+			existingDuration == rendition.DurationMS &&
+			strings.HasPrefix(existingKey, expectedPrefix+"/")
+
+		if !exactMatch {
+			return fmt.Errorf("%w: conflicting video_renditions row already exists for %s", ErrConflict, rendition.Name)
+		}
+
+		// Row already exists with exact match. If state is PROCESSING, promote to PLAYABLE atomically.
+		if state == StateProcessing {
+			cmd, err := tx.Exec(ctx, `
+				UPDATE media_asset_versions
+				SET state = 'PLAYABLE',
+				    processing_updated_at = now()
+				WHERE id = $1::uuid
+				  AND state = 'PROCESSING'
+				  AND work_claim_token = $2
+				  AND work_lease_expires_at > now()
+			`, assetVersionID, operationID)
+			if err != nil {
+				return fmt.Errorf("promoting asset to PLAYABLE on idempotent replay: %w", err)
+			}
+			if cmd.RowsAffected() != 1 {
+				return ErrConcurrentModification
+			}
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("committing idempotent rendition callback: %w", err)
+		}
+		return nil
+	}
+
+	// Row does not exist. Insert it.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO video_renditions (
+			asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+	`, assetVersionID, rendition.Name, rendition.StorageObjectKey, rendition.Width, rendition.Height, rendition.BitrateKbps, rendition.DurationMS); err != nil {
+		return fmt.Errorf("inserting video rendition: %w", err)
+	}
+
+	// If state == PROCESSING, promote to PLAYABLE atomically in this same transaction.
+	if state == StateProcessing {
+		cmd, err := tx.Exec(ctx, `
+			UPDATE media_asset_versions
+			SET state = 'PLAYABLE',
+			    processing_updated_at = now()
+			WHERE id = $1::uuid
+			  AND state = 'PROCESSING'
+			  AND work_claim_token = $2
+			  AND work_lease_expires_at > now()
+		`, assetVersionID, operationID)
+		if err != nil {
+			return fmt.Errorf("promoting asset to PLAYABLE: %w", err)
+		}
+		if cmd.RowsAffected() != 1 {
+			return ErrConcurrentModification
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing rendition persistence: %w", err)
 	}
 	return nil
 }
@@ -772,6 +987,9 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 	if err := requireProcessingProvenance(ctx, tx, completion.assetVersionID, completion.operationID); err != nil {
 		return err
 	}
+	if err := verifyStrictRenditionsLocked(ctx, tx, completion); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO processing_attempts (
 			asset_version_id, operation_id, state, output_prefix,
@@ -788,9 +1006,6 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 	`, completion.assetVersionID, completion.operationID).Scan(&attemptID); err != nil {
 		return fmt.Errorf("loading successful processing attempt: %w", err)
 	}
-	if err := recordRenditions(ctx, tx, completion); err != nil {
-		return err
-	}
 	// READY closes the observation at 100 in the same statement that makes the
 	// version deliverable, so no reader ever sees a READY asset still reporting
 	// a partial percentage — and the row is immutable from here on.
@@ -805,7 +1020,7 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 		    work_claimed_at = NULL,
 		    work_lease_expires_at = NULL,
 		    last_failure_category = NULL
-		WHERE id = $3::uuid AND state = 'PROCESSING'
+		WHERE id = $3::uuid AND state = 'PLAYABLE'
 		  AND work_claim_token = $4
 		  AND work_lease_expires_at > now()
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
@@ -814,7 +1029,7 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 		return fmt.Errorf("marking media asset ready: %w", err)
 	}
 	// A stale worker must fail the whole transaction, including its callback
-	// receipt, attempt, and rendition rows.  Otherwise a later legitimate retry
+	// receipt, attempt, and rendition rows. Otherwise a later legitimate retry
 	// could be mistaken for an already-applied completion.
 	if commandTag.RowsAffected() != 1 {
 		return ErrConcurrentModification
@@ -823,7 +1038,7 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 }
 
 // requireProcessingProvenance refuses to record a successful processing result
-// for a version that is not in PROCESSING or that holds neither legitimate
+// for a version that is not in PLAYABLE or that holds neither legitimate
 // safety evidence. It accepts either provenance without confusing them: the two
 // columns stay distinct, and nothing here writes or reads one as the other.
 func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID, operationID string) error {
@@ -845,8 +1060,8 @@ func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID,
 		}
 		return fmt.Errorf("loading transcode target: %w", err)
 	}
-	if state != StateProcessing {
-		return fmt.Errorf("%w: transcode target is not PROCESSING", ErrConflict)
+	if state != StatePlayable {
+		return fmt.Errorf("%w: transcode target is not PLAYABLE (state=%s)", ErrConflict, state)
 	}
 	if scanEvidence == nil && validationEvidence == nil {
 		return fmt.Errorf("%w: transcode target lacks successful scan or validation evidence", ErrConflict)
@@ -870,20 +1085,92 @@ func requireProcessingProvenance(ctx context.Context, tx pgx.Tx, assetVersionID,
 	return nil
 }
 
-func recordRenditions(ctx context.Context, tx pgx.Tx, completion transcodeCompletion) error {
-	for _, rendition := range completion.result.Renditions {
-		if strings.TrimSpace(rendition.Name) == "" || strings.TrimSpace(rendition.StorageObjectKey) == "" {
-			return fmt.Errorf("%w: rendition identity is incomplete", ErrValidation)
+type persistedRendition struct {
+	storageObjectKey string
+	width            int
+	height           int
+	bitrateKbps      int
+	durationMS       int64
+}
+
+func verifyStrictRenditionsLocked(ctx context.Context, tx pgx.Tx, completion transcodeCompletion) error {
+	rows, err := tx.Query(ctx, `
+		SELECT name, storage_object_key, COALESCE(width, 0), COALESCE(height, 0),
+		       COALESCE(bitrate_kbps, 0), duration_ms
+		FROM video_renditions
+		WHERE asset_version_id = $1::uuid
+	`, completion.assetVersionID)
+	if err != nil {
+		return fmt.Errorf("querying persisted video renditions: %w", err)
+	}
+	defer rows.Close()
+
+	persisted := make(map[string]persistedRendition)
+	for rows.Next() {
+		var name string
+		var r persistedRendition
+		if err := rows.Scan(&name, &r.storageObjectKey, &r.width, &r.height, &r.bitrateKbps, &r.durationMS); err != nil {
+			return fmt.Errorf("scanning video rendition: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO video_renditions (
-				asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms
-			) VALUES ($1::uuid, $2, $3, NULLIF($4, 0), NULLIF($5, 0), NULLIF($6, 0), $7)
-			ON CONFLICT (asset_version_id, name) DO NOTHING
-		`, completion.assetVersionID, rendition.Name, rendition.StorageObjectKey, rendition.Width, rendition.Height, rendition.BitrateKbps, rendition.DurationMS); err != nil {
-			return fmt.Errorf("recording video rendition: %w", err)
+		persisted[name] = r
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating video renditions: %w", err)
+	}
+
+	// Check E: The expected rendition-name set is EXACT (count matches)
+	if len(persisted) != len(completion.result.ExpectedRenditions) {
+		return fmt.Errorf("%w: persisted rendition count %d does not match expected ladder count %d",
+			ErrConflict, len(persisted), len(completion.result.ExpectedRenditions))
+	}
+
+	expectedMap := make(map[string]bool, len(completion.result.ExpectedRenditions))
+	for _, name := range completion.result.ExpectedRenditions {
+		expectedMap[name] = true
+		// Check F: Every expected video_renditions row exists
+		if _, ok := persisted[name]; !ok {
+			return fmt.Errorf("%w: missing expected rendition %q in database", ErrConflict, name)
 		}
 	}
+
+	// Check G: No unexpected/rogue rendition names exist
+	for name := range persisted {
+		if !expectedMap[name] {
+			return fmt.Errorf("%w: unexpected rogue rendition %q in database", ErrConflict, name)
+		}
+	}
+
+	expectedPrefix := processingOutputPrefix(completion.assetVersionID, completion.operationID)
+
+	// Check H & I: Every storage key belongs to current operation prefix and DB row metadata matches verified final processor result
+	for _, resultRendition := range completion.result.Renditions {
+		dbRow, ok := persisted[resultRendition.Name]
+		if !ok {
+			return fmt.Errorf("%w: missing DB row for rendition %q", ErrConflict, resultRendition.Name)
+		}
+		canonicalKey := expectedPrefix + "/" + resultRendition.Name + "/playlist.m3u8"
+		if dbRow.storageObjectKey != canonicalKey {
+			return fmt.Errorf("%w: DB rendition %q storage key %q does not match canonical operation prefix %q",
+				ErrConflict, resultRendition.Name, dbRow.storageObjectKey, canonicalKey)
+		}
+		if resultRendition.StorageObjectKey != canonicalKey {
+			return fmt.Errorf("%w: result rendition %q storage key %q does not match canonical operation prefix %q",
+				ErrConflict, resultRendition.Name, resultRendition.StorageObjectKey, canonicalKey)
+		}
+		if dbRow.width != resultRendition.Width {
+			return fmt.Errorf("%w: rendition %q width mismatch (db=%d, result=%d)", ErrConflict, resultRendition.Name, dbRow.width, resultRendition.Width)
+		}
+		if dbRow.height != resultRendition.Height {
+			return fmt.Errorf("%w: rendition %q height mismatch (db=%d, result=%d)", ErrConflict, resultRendition.Name, dbRow.height, resultRendition.Height)
+		}
+		if dbRow.bitrateKbps != resultRendition.BitrateKbps {
+			return fmt.Errorf("%w: rendition %q bitrate mismatch (db=%d, result=%d)", ErrConflict, resultRendition.Name, dbRow.bitrateKbps, resultRendition.BitrateKbps)
+		}
+		if dbRow.durationMS != resultRendition.DurationMS {
+			return fmt.Errorf("%w: rendition %q duration mismatch (db=%d, result=%d)", ErrConflict, resultRendition.Name, dbRow.durationMS, resultRendition.DurationMS)
+		}
+	}
+
 	return nil
 }
 

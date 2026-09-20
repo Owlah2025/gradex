@@ -288,6 +288,7 @@ type recordingPipelineSink struct {
 	logPath    string
 	mu         sync.Mutex
 	onProgress func(stage ProcessingStage, percent int)
+	onPersist  func(rendition Rendition) error
 }
 
 func (s *recordingPipelineSink) Progress(ctx context.Context, stage ProcessingStage, percent int) {
@@ -303,6 +304,22 @@ func (s *recordingPipelineSink) Progress(ctx context.Context, stage ProcessingSt
 	if s.onProgress != nil {
 		s.onProgress(stage, percent)
 	}
+}
+
+func (s *recordingPipelineSink) PersistVerifiedRendition(ctx context.Context, rendition Rendition) error {
+	if s.logPath != "" {
+		f, err := os.OpenFile(s.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err == nil {
+			_, _ = fmt.Fprintf(f, "persist:%s\n", rendition.Name)
+			_ = f.Close()
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.onPersist != nil {
+		return s.onPersist(rendition)
+	}
+	return nil
 }
 
 func createFakePipelineHarness(t *testing.T, failRung string, height int) (probePath, ffmpegPath, sourcePath, logPath string) {
@@ -408,6 +425,10 @@ func TestPerRungPipelineOrderAndVerification(t *testing.T) {
 		t.Fatalf("len(res.Renditions)=%d, want 3", len(res.Renditions))
 	}
 
+	if len(res.ExpectedRenditions) != 3 || res.ExpectedRenditions[0] != "720p" || res.ExpectedRenditions[1] != "480p" || res.ExpectedRenditions[2] != "240p" {
+		t.Fatalf("res.ExpectedRenditions=%v, want [720p 480p 240p]", res.ExpectedRenditions)
+	}
+
 	events := readLogEvents(t, logPath)
 	indexOf := func(target string) int {
 		for i, ev := range events {
@@ -418,12 +439,13 @@ func TestPerRungPipelineOrderAndVerification(t *testing.T) {
 		return -1
 	}
 
-	// 1. Operation order: 720p encode -> 720p upload/verify -> 480p encode -> 480p upload/verify -> 240p encode -> 240p upload/verify
+	// 1. Operation order: 720p encode -> 720p upload/verify -> 720p persist callback -> 720p progress -> 480p encode -> ...
 	enc720 := indexOf("encode:720p")
 	putSeg720 := indexOf("put:" + expectedPrefix + "/720p/segment000.ts")
 	headSeg720 := indexOf("head:" + expectedPrefix + "/720p/segment000.ts")
 	putPl720 := indexOf("put:" + expectedPrefix + "/720p/playlist.m3u8")
 	headPl720 := indexOf("head:" + expectedPrefix + "/720p/playlist.m3u8")
+	persist720 := indexOf("persist:720p")
 	prog720 := indexOf("sink:TRANSCODING:33")
 
 	enc480 := indexOf("encode:480p")
@@ -431,6 +453,7 @@ func TestPerRungPipelineOrderAndVerification(t *testing.T) {
 	headSeg480 := indexOf("head:" + expectedPrefix + "/480p/segment000.ts")
 	putPl480 := indexOf("put:" + expectedPrefix + "/480p/playlist.m3u8")
 	headPl480 := indexOf("head:" + expectedPrefix + "/480p/playlist.m3u8")
+	persist480 := indexOf("persist:480p")
 	prog480 := indexOf("sink:TRANSCODING:66")
 
 	enc240 := indexOf("encode:240p")
@@ -438,6 +461,7 @@ func TestPerRungPipelineOrderAndVerification(t *testing.T) {
 	headSeg240 := indexOf("head:" + expectedPrefix + "/240p/segment000.ts")
 	putPl240 := indexOf("put:" + expectedPrefix + "/240p/playlist.m3u8")
 	headPl240 := indexOf("head:" + expectedPrefix + "/240p/playlist.m3u8")
+	persist240 := indexOf("persist:240p")
 	prog240 := indexOf("sink:TRANSCODING:99")
 
 	putMaster := indexOf("put:" + expectedPrefix + "/master.m3u8")
@@ -452,18 +476,21 @@ func TestPerRungPipelineOrderAndVerification(t *testing.T) {
 		{"headSeg720", headSeg720},
 		{"putPl720", putPl720},
 		{"headPl720", headPl720},
+		{"persist720", persist720},
 		{"prog720", prog720},
 		{"enc480", enc480},
 		{"putSeg480", putSeg480},
 		{"headSeg480", headSeg480},
 		{"putPl480", putPl480},
 		{"headPl480", headPl480},
+		{"persist480", persist480},
 		{"prog480", prog480},
 		{"enc240", enc240},
 		{"putSeg240", putSeg240},
 		{"headSeg240", headSeg240},
 		{"putPl240", putPl240},
 		{"headPl240", headPl240},
+		{"persist240", persist240},
 		{"prog240", prog240},
 		{"putMaster", putMaster},
 		{"headMaster", headMaster},
@@ -631,6 +658,103 @@ func TestPerRungPipelineFailures(t *testing.T) {
 			}
 			events := readLogEvents(t, logPath)
 			tc.assertLog(t, events)
+		})
+	}
+}
+
+func TestProgressiveProcessorCallbackFailures(t *testing.T) {
+	cases := []struct {
+		name         string
+		failRung     string
+		assertEvents func(t *testing.T, events []string)
+	}{
+		{
+			name:     "first_rung_persistence_failure_aborts_pipeline",
+			failRung: "720p",
+			assertEvents: func(t *testing.T, events []string) {
+				hasEvent := func(prefix string) bool {
+					for _, ev := range events {
+						if strings.HasPrefix(ev, prefix) {
+							return true
+						}
+					}
+					return false
+				}
+				if !hasEvent("persist:720p") {
+					t.Fatal("expected persist:720p to be attempted")
+				}
+				if hasEvent("sink:TRANSCODING:33") {
+					t.Fatal("boundary progress 33% was emitted despite persistence failure")
+				}
+				if hasEvent("encode:480p") {
+					t.Fatal("subsequent rung 480p was encoded despite 720p persistence failure")
+				}
+				if hasEvent("put:") && strings.Contains(events[len(events)-1], "master.m3u8") {
+					t.Fatal("master manifest was uploaded despite persistence failure")
+				}
+			},
+		},
+		{
+			name:     "second_rung_persistence_failure_aborts_pipeline",
+			failRung: "480p",
+			assertEvents: func(t *testing.T, events []string) {
+				hasEvent := func(prefix string) bool {
+					for _, ev := range events {
+						if strings.HasPrefix(ev, prefix) {
+							return true
+						}
+					}
+					return false
+				}
+				if !hasEvent("persist:720p") || !hasEvent("sink:TRANSCODING:33") {
+					t.Fatal("first rung should have succeeded before second rung failure")
+				}
+				if !hasEvent("persist:480p") {
+					t.Fatal("expected persist:480p to be attempted")
+				}
+				if hasEvent("sink:TRANSCODING:66") {
+					t.Fatal("boundary progress 66% was emitted despite 480p persistence failure")
+				}
+				if hasEvent("encode:240p") {
+					t.Fatal("subsequent rung 240p was encoded despite 480p persistence failure")
+				}
+				if hasEvent("put:") && strings.Contains(events[len(events)-1], "master.m3u8") {
+					t.Fatal("master manifest was uploaded despite persistence failure")
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			probePath, ffmpegPath, sourcePath, logPath := createFakePipelineHarness(t, "", 720)
+			store := &pipelineEventStore{logPath: logPath, sourceFile: sourcePath}
+			proc, err := NewFFmpegProcessor(store, ffmpegPath, probePath, 5*time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			injectedErr := errors.New("injected DB persistence error")
+			sink := &recordingPipelineSink{
+				logPath: logPath,
+				onPersist: func(rendition Rendition) error {
+					if rendition.Name == tc.failRung {
+						return injectedErr
+					}
+					return nil
+				},
+			}
+			obj := ObjectVersion{
+				AssetVersionID:        "version-1",
+				StorageObjectKey:      "quarantine/version-1",
+				StorageObjectVersion:  "v1",
+				ProcessingOperationID: "op-cb-fail",
+			}
+			_, err = proc.TranscodeWithProgress(context.Background(), obj, sink)
+			if !errors.Is(err, injectedErr) {
+				t.Fatalf("expected injectedErr, got: %v", err)
+			}
+			events := readLogEvents(t, logPath)
+			tc.assertEvents(t, events)
 		})
 	}
 }

@@ -87,19 +87,29 @@ var hlsLadder = []hlsRung{
 	{Name: "240p", Width: 426, Height: 240, VideoKbps: 400, AudioKbps: 96},
 }
 
-// Transcode runs the pipeline without reporting progress. It exists for
-// callers that have nowhere to put an observation; the worker uses
-// TranscodeWithProgress.
+// Transcode runs the pipeline without reporting progress or progressive renditions.
+// It exists for callers that have nowhere to put an observation; the worker uses
+// TranscodeProgressive.
 func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (TranscodeResult, error) {
-	return p.TranscodeWithProgress(ctx, object, nil)
+	return p.TranscodeProgressive(ctx, object, nil, nil)
 }
 
 // TranscodeWithProgress is the same pipeline, reporting real measured progress
-// into sink as it goes. Progress is derived from FFmpeg's own structured
-// `-progress` stream against the ffprobe duration of the exact source object —
-// never from elapsed time — so a stalled encode stops advancing rather than
-// creeping toward a number nobody measured.
-func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object ObjectVersion, sink ProgressSink) (result TranscodeResult, err error) {
+// into sink as it goes.
+func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object ObjectVersion, sink ProgressSink) (TranscodeResult, error) {
+	var renditionSink VerifiedRenditionSink
+	if rs, ok := sink.(VerifiedRenditionSink); ok {
+		renditionSink = rs
+	}
+	return p.TranscodeProgressive(ctx, object, sink, renditionSink)
+}
+
+// TranscodeProgressive executes the HLS pipeline with synchronous per-rendition
+// persistence callback. Live FFmpeg progress is reported below each rung's completion
+// boundary, durable persistence executes synchronously after local and storage
+// verification, and the exact rung progress boundary is emitted only after DB
+// commit. Master publication is uploaded last following full-tree validation.
+func (p *FFmpegProcessor) TranscodeProgressive(ctx context.Context, object ObjectVersion, sink ProgressSink, renditionSink VerifiedRenditionSink) (result TranscodeResult, err error) {
 	if !object.valid() || strings.TrimSpace(object.ProcessingOperationID) == "" {
 		return TranscodeResult{}, ErrStaleScanEvidence
 	}
@@ -131,6 +141,10 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 	count := len(metadata.rungs)
 	reportProgress(processingCtx, sink, StageTranscoding, 0)
 	verifiedRenditions := make([]Rendition, 0, count)
+	expectedRenditions := make([]string, count)
+	for i, r := range metadata.rungs {
+		expectedRenditions[i] = r.Name
+	}
 
 	for index, rung := range metadata.rungs {
 		if err := processingCtx.Err(); err != nil {
@@ -148,16 +162,22 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 		if err := p.uploadVerifiedRung(processingCtx, outDir, prefix, rung, segments); err != nil {
 			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 		}
-		verifiedRenditions = append(verifiedRenditions, Rendition{
+		rendition := Rendition{
 			Name:             rung.Name,
 			StorageObjectKey: prefix + "/" + rung.Name + "/playlist.m3u8",
 			Width:            rung.Width,
 			Height:           rung.Height,
 			BitrateKbps:      rung.VideoKbps,
 			DurationMS:       metadata.durationMS,
-		})
-		// Progress for this rung is emitted only after its storage upload and
-		// HEAD verification are complete.
+		}
+		if renditionSink != nil {
+			if err := renditionSink.PersistVerifiedRendition(processingCtx, rendition); err != nil {
+				return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+			}
+		}
+		verifiedRenditions = append(verifiedRenditions, rendition)
+		// Progress for this rung is emitted only after its storage upload,
+		// HEAD verification, and durable DB persistence commit are complete.
 		reportProgress(processingCtx, sink, StageTranscoding, rungProgressPercent(index+1, count, 0, duration))
 	}
 
@@ -184,9 +204,10 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
 	return TranscodeResult{
-		OutputPrefix:      prefix,
-		TrustedDurationMS: metadata.durationMS,
-		Renditions:        verifiedRenditions,
+		OutputPrefix:       prefix,
+		TrustedDurationMS:  metadata.durationMS,
+		Renditions:         verifiedRenditions,
+		ExpectedRenditions: expectedRenditions,
 	}, nil
 }
 
@@ -288,8 +309,15 @@ func (p *FFmpegProcessor) uploadVerifiedHLSObject(ctx context.Context, outDir, p
 }
 
 func transcodeResult(prefix string, metadata processingMetadata) TranscodeResult {
-	result := TranscodeResult{OutputPrefix: prefix, TrustedDurationMS: metadata.durationMS, Renditions: make([]Rendition, 0, len(metadata.rungs))}
-	for _, rung := range metadata.rungs {
+	expectedRenditions := make([]string, len(metadata.rungs))
+	result := TranscodeResult{
+		OutputPrefix:       prefix,
+		TrustedDurationMS:  metadata.durationMS,
+		Renditions:         make([]Rendition, 0, len(metadata.rungs)),
+		ExpectedRenditions: expectedRenditions,
+	}
+	for i, rung := range metadata.rungs {
+		expectedRenditions[i] = rung.Name
 		result.Renditions = append(result.Renditions, Rendition{
 			Name: rung.Name, StorageObjectKey: prefix + "/" + rung.Name + "/playlist.m3u8",
 			Width: rung.Width, Height: rung.Height, BitrateKbps: rung.VideoKbps,

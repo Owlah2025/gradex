@@ -208,10 +208,26 @@ type Rendition struct {
 }
 
 type TranscodeResult struct {
-	OperationID       string
-	OutputPrefix      string
-	TrustedDurationMS int64
-	Renditions        []Rendition
+	OperationID        string
+	OutputPrefix       string
+	TrustedDurationMS  int64
+	Renditions         []Rendition
+	ExpectedRenditions []string
+}
+
+// VerifiedRenditionSink receives fully verified progressive renditions as they
+// complete storage upload and HEAD verification during transcoding. Calls are
+// synchronous and block the next rendition encode until durable persistence is
+// committed. Any error aborts the transcode pipeline.
+type VerifiedRenditionSink interface {
+	PersistVerifiedRendition(ctx context.Context, rendition Rendition) error
+}
+
+// ProgressiveProcessor is the processor capability that supports synchronous
+// progressive rendition persistence as each rung finishes verification.
+type ProgressiveProcessor interface {
+	Processor
+	TranscodeProgressive(ctx context.Context, object ObjectVersion, progress ProgressSink, renditions VerifiedRenditionSink) (TranscodeResult, error)
 }
 
 // Processor is the durable worker boundary for HLS processing. It returns

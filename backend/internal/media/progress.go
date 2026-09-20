@@ -179,7 +179,7 @@ func writeProcessingProgress(
 		    processing_updated_at = now(),
 		    processing_attempt_token = $4
 		WHERE id = $1::uuid
-		  AND state = 'PROCESSING'
+		  AND state IN ('PROCESSING', 'PLAYABLE')
 		  AND processing_attempt_token = $4
 		  AND work_claim_token = $4
 		  AND work_lease_expires_at > now()

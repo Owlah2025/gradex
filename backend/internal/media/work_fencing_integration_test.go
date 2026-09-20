@@ -351,6 +351,11 @@ func TestD103CompletionImmediatelyBeforeExpirySucceeds(t *testing.T) {
 	`, versionID); err != nil {
 		t.Fatalf("shortening work lease: %v", err)
 	}
+	for _, r := range result.Renditions {
+		if err := worker.PersistVerifiedRendition(f.ctx, versionID, operation, r); err != nil {
+			t.Fatalf("persisting verified rendition: %v", err)
+		}
+	}
 	if err := worker.CompleteTranscode(f.ctx, versionID, operation, result); err != nil {
 		t.Fatalf("completion inside a valid lease was refused: %v", err)
 	}
