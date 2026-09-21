@@ -59,7 +59,11 @@ const (
 	SubjectDemandSignalSchemaVersion     = StudentTrustedDeviceSchemaVersion + 1
 	MediaPlayableEnumSchemaVersion       = SubjectDemandSignalSchemaVersion + 1
 	MediaPlayableFoundationSchemaVersion = MediaPlayableEnumSchemaVersion + 1
-	MaxSchemaVersion                     = MediaPlayableFoundationSchemaVersion
+	// Phase 3C-A: explicit processing-attempt kind and rendition provenance.
+	// Representation only — no enhancement recovery producer exists at this
+	// version.
+	EnhancementRecoveryFoundationSchemaVersion = MediaPlayableFoundationSchemaVersion + 1
+	MaxSchemaVersion                           = EnhancementRecoveryFoundationSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
