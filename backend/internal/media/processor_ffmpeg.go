@@ -80,6 +80,27 @@ type hlsRung struct {
 	AudioKbps int
 }
 
+// hlsLadder is a PRODUCTION DATA CONTRACT, not a tuning knob.
+//
+// `persistedVideoRendition` validates every persisted `video_renditions` row
+// against this table by name, and rejects the row when the stored width,
+// height, or video bitrate disagrees with the compiled rung. A rejected row
+// fails `validateVideoRenditions`, which makes the whole master manifest
+// unavailable — so editing a rung's name, width, height, or video bitrate does
+// not change future encodes, it makes every EXISTING READY asset encoded under
+// the old values undeliverable, with no error at build or deploy time.
+//
+// Changing any of those four fields, or removing or reordering a rung, is
+// therefore a breaking media migration. It requires an explicit compatibility
+// plan — persisting the ladder values alongside each rendition, or a supervised
+// re-encode of affected assets — recorded as a decision before the edit lands.
+// Adding a genuinely new rung name is the only safe-by-construction change, and
+// it still alters the expected ladder that strict READY verification demands.
+//
+// `hlsLadderContract` in processor_ffmpeg_test.go pins these exact values so an
+// accidental edit fails the build rather than silently shipping. AudioKbps is
+// deliberately outside the persisted-validation set: it is an encoder input
+// only and no stored row is checked against it.
 var hlsLadder = []hlsRung{
 	{Name: "1080p", Width: 1920, Height: 1080, VideoKbps: 5000, AudioKbps: 192},
 	{Name: "720p", Width: 1280, Height: 720, VideoKbps: 2800, AudioKbps: 128},

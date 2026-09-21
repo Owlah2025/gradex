@@ -4217,3 +4217,62 @@ inventory exists (the condition D-091 §11 set, which forecloses the measurement
 Gradex where to build inventory).
 
 **Source:** Product Owner instruction of 2026-09-14.
+
+## D-107 — The HLS ladder is a frozen data contract and Phase 3C-A adds attempt-kind and rendition provenance
+
+**Date:** 2026-09-21
+**Status:** Implemented on schema 41 as representation only; no enhancement recovery producer
+exists. Pending independent review.
+
+**Decision:** Two related invariants are recorded.
+
+1. **`media.hlsLadder` is a production data contract, not a tuning knob.** `persistedVideoRendition`
+   validates every persisted `video_renditions` row against the compiled ladder by name and rejects
+   the row when its stored width, height, or video bitrate disagrees. A rejected row fails
+   `validateVideoRenditions`, which makes the entire master manifest unavailable. Editing a rung's
+   name, width, height, or video bitrate therefore does not change future encodes — it makes every
+   existing READY asset encoded under the old values undeliverable, at runtime, with no build or
+   deploy failure. Any such change is a breaking media migration requiring an explicit compatibility
+   plan (persisting ladder values per rendition, or a supervised re-encode of affected assets)
+   recorded as its own decision before the edit lands. `TestHLSLadderIsAFrozenContract` pins the four
+   rungs so an accidental edit fails the build. `AudioKbps` is outside the validated set: it is an
+   encoder input and no stored row is checked against it.
+
+2. **Schema 41 makes a zero-output successful attempt representable.** A worker can commit the last
+   missing rendition and die before the READY transaction, leaving a PLAYABLE asset that already
+   holds its complete canonical ladder. Finalizing it later must not re-encode anything, and schema
+   40 cannot record that honestly: `processing_attempt_result_coherent` requires
+   `rendition_count > 0` for every SUCCEEDED attempt, `processing_attempts` is append-only so the
+   earlier FAILED row can never become SUCCEEDED, and `successful_processing_attempt_id` must
+   reference a SUCCEEDED attempt. Migration 0041 adds a separate
+   `media_processing_attempt_kind` enum (`FULL`, `ENHANCEMENT`, `FINALIZATION`), defaulting every
+   existing row to `FULL`, and discriminates the coherence rule by it: FULL and ENHANCEMENT keep the
+   unchanged schema-40 success rule, while FINALIZATION must have produced nothing —
+   `rendition_count = 0` and `output_prefix IS NULL` — so it can never impersonate an attempt that
+   wrote objects. `media_processing_state` keeps exactly `SUCCEEDED` and `FAILED`.
+
+   0041 also adds nullable `video_renditions.processing_operation_id`, written for every new
+   canonical row and never backfilled, because the table is append-only and its existing rows are
+   live delivery evidence. It is deliberately not a foreign key: the rendition commits while its
+   attempt is still running, so the terminal attempt row does not yet exist.
+
+**Reason:** Both invariants were discovered by the Phase 3C architecture audit as pre-existing facts
+about the running system, not as new design. Recording the ladder contract converts an invisible
+runtime cliff into a build failure. Adding the schema foundation separately from any recovery
+producer keeps the migration reviewable on its own and preserves a clean rollback floor.
+
+**Rollback floor:** While no finalization producer exists, schema 41 reverses to 40 — every attempt
+is FULL. Once a SUCCEEDED FINALIZATION attempt is recorded, that row has no schema-40 representation
+and `0041_enhancement_recovery_foundation.down.sql` refuses rather than falsifying it; from that
+point the rollback floor is a schema-41-compatible application revision.
+
+**Alternatives rejected:** A third `media_processing_state` value (conflates outcome with intent and
+makes every existing coherence rule ambiguous); loosening the constraint globally to
+`SUCCEEDED => rendition_count >= 0` (lets an ordinary whole-ladder attempt claim success while
+producing nothing); recording `rendition_count = <ladder size>` on a finalization attempt (false
+audit evidence about storage output); backfilling `processing_operation_id` (requires rewriting
+append-only canonical delivery evidence); a foreign key to `processing_attempts` (inverts the real
+commit order and would make progressive persistence impossible).
+
+**Source:** Phase 3C architecture audit, G0 verdict `ARCHITECTURE APPROVE — MIGRATION REQUIRED`;
+Product Owner instruction of 2026-09-21.

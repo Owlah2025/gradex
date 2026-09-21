@@ -869,12 +869,17 @@ func (w *Worker) PersistVerifiedRendition(ctx context.Context, assetVersionID, o
 	var existingKey string
 	var existingWidth, existingHeight, existingBitrate int
 	var existingDuration int64
+	// Schema 41 provenance. NULL means the row predates the column, which is
+	// true of every rendition written before 0041 and of nothing written after
+	// it; a legacy row is therefore compared on its bytes alone, exactly as it
+	// was before this column existed.
+	var existingOperationID *string
 	err = tx.QueryRow(ctx, `
 		SELECT storage_object_key, COALESCE(width, 0), COALESCE(height, 0),
-		       COALESCE(bitrate_kbps, 0), duration_ms
+		       COALESCE(bitrate_kbps, 0), duration_ms, processing_operation_id
 		FROM video_renditions
 		WHERE asset_version_id = $1::uuid AND name = $2
-	`, assetVersionID, rendition.Name).Scan(&existingKey, &existingWidth, &existingHeight, &existingBitrate, &existingDuration)
+	`, assetVersionID, rendition.Name).Scan(&existingKey, &existingWidth, &existingHeight, &existingBitrate, &existingDuration, &existingOperationID)
 
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("checking existing rendition: %w", err)
@@ -888,7 +893,12 @@ func (w *Worker) PersistVerifiedRendition(ctx context.Context, assetVersionID, o
 			existingHeight == rendition.Height &&
 			existingBitrate == rendition.BitrateKbps &&
 			existingDuration == rendition.DurationMS &&
-			strings.HasPrefix(existingKey, expectedPrefix+"/")
+			strings.HasPrefix(existingKey, expectedPrefix+"/") &&
+			// Recorded provenance must agree when it exists. The storage key
+			// already pins the operation through its hashed prefix, so this can
+			// only disagree if the two records of the same fact contradict each
+			// other, which is a conflict rather than a replay.
+			(existingOperationID == nil || *existingOperationID == operationID)
 
 		if !exactMatch {
 			return fmt.Errorf("%w: conflicting video_renditions row already exists for %s", ErrConflict, rendition.Name)
@@ -919,12 +929,18 @@ func (w *Worker) PersistVerifiedRendition(ctx context.Context, assetVersionID, o
 		return nil
 	}
 
-	// Row does not exist. Insert it.
+	// Row does not exist. Insert it, recording the operation that is committing
+	// it. The column is write-only at this version: nothing reads it to make a
+	// delivery, readiness, or publication decision, and no recovery producer
+	// exists yet. It is written now so that when one does exist, the canonical
+	// rows it must reason about already carry their own provenance instead of
+	// being inferred from a hashed storage prefix.
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO video_renditions (
-			asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms
-		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
-	`, assetVersionID, rendition.Name, rendition.StorageObjectKey, rendition.Width, rendition.Height, rendition.BitrateKbps, rendition.DurationMS); err != nil {
+			asset_version_id, name, storage_object_key, width, height, bitrate_kbps, duration_ms,
+			processing_operation_id
+		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)
+	`, assetVersionID, rendition.Name, rendition.StorageObjectKey, rendition.Width, rendition.Height, rendition.BitrateKbps, rendition.DurationMS, operationID); err != nil {
 		return fmt.Errorf("inserting video rendition: %w", err)
 	}
 

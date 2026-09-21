@@ -155,3 +155,34 @@ func TestFFmpegRungArgsUseVeryfastAndPreserveCurrentLadder(t *testing.T) {
 		t.Fatalf("FFmpeg args = %#v, want %#v", got, want)
 	}
 }
+
+// hlsLadderContract pins the production HLS ladder. It is a data contract, not
+// a preference: `persistedVideoRendition` rejects any stored rendition row
+// whose width, height, or video bitrate disagrees with the compiled rung of the
+// same name, and a rejected row makes the entire master manifest unavailable.
+// Editing a value here therefore breaks delivery for every existing READY asset
+// encoded under the old value, silently and at runtime.
+//
+// If a change is genuinely intended, updating this table is the deliberate
+// second step — after a recorded decision and a compatibility plan for assets
+// already encoded under the current values.
+var hlsLadderContract = []hlsRung{
+	{Name: "1080p", Width: 1920, Height: 1080, VideoKbps: 5000, AudioKbps: 192},
+	{Name: "720p", Width: 1280, Height: 720, VideoKbps: 2800, AudioKbps: 128},
+	{Name: "480p", Width: 854, Height: 480, VideoKbps: 1400, AudioKbps: 128},
+	{Name: "240p", Width: 426, Height: 240, VideoKbps: 400, AudioKbps: 96},
+}
+
+func TestHLSLadderIsAFrozenContract(t *testing.T) {
+	if len(hlsLadder) != len(hlsLadderContract) {
+		t.Fatalf("hlsLadder has %d rungs, contract pins %d; adding or removing a rung changes the expected ladder strict READY verification demands",
+			len(hlsLadder), len(hlsLadderContract))
+	}
+	for index, want := range hlsLadderContract {
+		got := hlsLadder[index]
+		if got != want {
+			t.Fatalf("hlsLadder[%d] = %+v, contract pins %+v; name, width, height and video bitrate are validated against every persisted rendition row, so changing one makes existing READY assets undeliverable. Record the decision and the compatibility plan before updating this contract",
+				index, got, want)
+		}
+	}
+}
