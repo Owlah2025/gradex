@@ -4311,7 +4311,9 @@ producers, verify no active media work, run the 41 → 40 preflight (which requi
 verify schema 40 clean, then start `78ee4227`.
 
 That floor is open throughout 3C-A only because this release ships no producer for ENHANCEMENT or
-FINALIZATION: both Go writers of `processing_attempts` omit `attempt_kind` and take the FULL default.
+FINALIZATION: all current production insertion paths for `processing_attempts` rely on FULL
+semantics — the two writers in `internal/media/worker.go` and the two in `internal/media/recovery.go`
+all omit `attempt_kind` and take the column default.
 The accepted trade is that the down migration drops `processing_operation_id` from renditions written
 on schema 41 — the rows, their storage keys and their metadata all survive, and the key still embeds
 a one-way hash of the writing operation.
@@ -4321,6 +4323,29 @@ schema 41 → 40 becomes unavailable by design and `78ee4227` leaves the normal 
 permanently. The deployed 3C-A revision then becomes the schema-41-compatible application rollback
 floor, and no 3C-B release may deploy unless its plan records that exact revision as the staged
 rollback target and its image, tree and manifest remain available.
+
+**Supervised production rollback.** Generic `gradex-migrate down` remains prohibited when
+`APP_ENV=production`, and no flag was added to change that. What exists instead is one narrow
+command, `gradex-migrate rollback-schema-41`, which reverts exactly schema 41 to schema 40 and can
+mean nothing else: it accepts no step count and no target version, and refuses a positional argument
+outright. In production it requires `-confirm-production=schema-41-to-40` — an acknowledgement that
+names the transition rather than authorizing "a downgrade", following the shape
+`cmd/bootstrap-admin` established, so it cannot be reused for any other schema movement and is
+itself refused outside production.
+
+Before golang-migrate is asked to do anything, the command requires the marker to read exactly 41
+and not dirty, every `processing_attempts` row to be FULL, and no Asset Version to hold a live
+`work_claim_token`. Every refusal therefore leaves the marker exactly as it found it. The
+active-claim check is a gate against an incomplete quiesce, not synchronization: the operational
+contract still requires the API and worker to be stopped first, because a running producer could
+claim work in the instant after the query returns. After the step the command verifies the marker
+landed on a clean 40 and fails loudly otherwise, attempting no automatic repair and rewriting no
+evidence. `host.sh rollback-schema-41-foundation` runs it as a one-off job on the currently selected
+backend image, requiring Postgres healthy and both `api` and `worker` stopped.
+
+The candidate image is required for the rollback, because the baseline contains no
+`0041_…down.sql`. The baseline release selection is therefore restored only **after** the
+rollback has succeeded, never before it.
 
 **Preflight-to-down race, for 3C-B.** The `cmd/migrate` preflight necessarily runs before
 golang-migrate executes the down step, so under a future system with a non-FULL producer the

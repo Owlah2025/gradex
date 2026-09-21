@@ -43,10 +43,9 @@ A short media/backend maintenance window is preferred over every alternative: pe
 provenance on post-0041 rows, dual-schema SQL branches, a throwaway compatibility image, or weakened
 provenance guarantees. Do not design around continuous worker availability for this release.
 
-Expected user-visible impact: the API and the worker are down for the length of the window — the
-migration itself is three `ALTER`s and a `CREATE TYPE` against a table with 32 rows, so the window is
-dominated by container recreation, not by SQL. The public edge can stay up, serving errors for API
-routes, or be taken down with the rest of the stack; see §4.
+Expected user-visible impact: the API and the worker are unavailable for the length of the window.
+Its duration is not predicted here — measure it, do not assume it. The public edge can stay up,
+serving errors for API routes, or be taken down with the rest of the stack; see §4.
 
 ---
 
@@ -97,10 +96,26 @@ Reasoning per service:
 - **edge — may stay up.** Leaving it up avoids re-binding the public ports and keeps the
   `assert_edge_ports_available` check out of the critical path.
 
-`host.sh` exposes only whole-stack `stop` (`compose down`). If the deploying agent wants the smaller
-boundary, it must stop the two services within the same Compose project and environment rather than
-invoking `host.sh stop`. Either route is acceptable; the required **state transition** is what
-matters, not which command produces it:
+### How to stop exactly those services
+
+`host.sh stop` is **not** the right command here. It runs `compose down`, which takes the whole
+stack — Postgres included — and the migration needs Postgres. There is no `host.sh` wrapper for a
+selective stop, so use Docker Compose directly against the same project and environment `host.sh`
+itself uses:
+
+```bash
+docker compose --file deploy/hostinger/compose.yml --project-directory deploy/hostinger --project-name gradex-production --env-file /home/deploy/gradex-production/runtime.env stop api worker
+```
+
+Run it from the candidate release tree, so the compose file matches the release being deployed.
+`stop` leaves the containers present but not running, which is what the later `up-core` step
+replaces. Confirm afterwards that neither container reports `running`; the supervised rollback
+command performs the same check itself and refuses if it finds one.
+
+`frontend` may also be stopped for a cleaner maintenance window — it serves a page that cannot reach
+a stopped API either way. Never stop `postgres`. Redis may stay up.
+
+The required **state transition** is what matters, not which command produces it:
 
 > No process built from `78ee4227` may be running media work at any moment when the database is at
 > schema 41.
@@ -166,25 +181,60 @@ tooling, not only by documentation: `apply-release` computes `image_max_schema_v
 target backend and dies with `schema 41 is newer than target release maximum 40`. The wrong rollback
 is refused before it recreates anything.
 
+The generic `gradex-migrate down` cannot perform it. It is refused outright when `APP_ENV=production`
+and that prohibition is deliberate and unchanged — see the D-103 procedure in
+[RUNBOOK.md](RUNBOOK.md). What exists instead is one narrow supervised command that reverts exactly
+this migration and nothing else:
+
+```
+gradex-migrate rollback-schema-41 -confirm-production=schema-41-to-40
+```
+
+It refuses unless every one of these holds, and every refusal happens **before** golang-migrate is
+asked to do anything, so a refused rollback leaves the marker exactly as it found it — `41`, not
+dirty:
+
+- the acknowledgement is exactly `schema-41-to-40` (required in production, refused outside it);
+- no positional argument is given — there is no step count and no target version to supply;
+- the schema marker reads exactly `41` and is not dirty;
+- every `processing_attempts` row is `attempt_kind = FULL`;
+- no Asset Version holds a live `work_claim_token`.
+
+After the step it verifies the marker landed on a clean `40` and fails loudly if it did not.
+
+The host wrapper runs it as a one-off job on the **currently selected** backend image, requiring
+Postgres healthy and both `api` and `worker` stopped:
+
+```bash
+GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production \
+GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env \
+GRADEX_HOST_PROJECT=gradex-production APP_ENV=production \
+./deploy/hostinger/host.sh rollback-schema-41-foundation
+```
+
 The correct coordinated sequence is:
 
-1. Quiesce and stop the candidate media producers (`worker`, and `api`).
+1. Quiesce and stop the candidate media producers — `api` and `worker`, per §4. Postgres stays up.
 2. Verify no active media work, using the same guard as §3.
-3. Run the schema 41 → 40 rollback preflight — it is automatic in the candidate `migrate` binary's
-   `down` path, and it refuses **before** golang-migrate touches the schema marker.
-4. The preflight requires every `processing_attempts` row to be `attempt_kind = FULL`.
-5. Run the down step across 41 → 40 with the **candidate** migrate binary, since only it contains
-   `0041_…down.sql`.
-6. Verify `schema_migrations` reads `40 | f`.
-7. Restore the `78ee4227` release selection and start it.
+3. **Keep the candidate backend selected.** Do not restore the baseline release selection yet: the
+   baseline image contains no `0041_…down.sql` and cannot perform this rollback.
+4. Run `host.sh rollback-schema-41-foundation` from the candidate tree.
+5. Verify `schema_migrations` reads `40 | f`. If it does not, stop — do not start a schema-40
+   application against a marker that is not a clean 40.
+6. **Only now** switch the four release keys in `runtime.env` back to `78ee4227`.
+7. Start the baseline application and run the usual health verification.
 
-Note step 5's binary: the baseline image cannot perform its own rollback.
+The ordering of steps 3 and 6 is load-bearing: selecting the baseline image before the rollback
+would leave no binary on the host capable of reverting the migration.
 
 ### Schema rollback during 3C-A — open, with one accepted trade
 
 The floor is open throughout 3C-A because **3C-A ships no producer for `ENHANCEMENT` or
-`FINALIZATION`**. Both Go writers of `processing_attempts` omit `attempt_kind` entirely and take the
-column default, so every row written by this release is `FULL`.
+`FINALIZATION`**. All current production insertion paths for `processing_attempts` rely on FULL
+semantics: the two writers in `internal/media/worker.go` (successful completion and recorded
+failure) and the two in `internal/media/recovery.go` (interrupted processing and interrupted
+playable) all omit `attempt_kind` and take the column default, so every row written by this release
+is `FULL`.
 
 The accepted trade: renditions written on schema 41 carry `processing_operation_id`, and the down
 migration drops that column. The rendition rows themselves, their storage keys, and their metadata
@@ -236,21 +286,53 @@ relied on as such.
 
 ---
 
-## 9. Verification after cutover
+## 9. Failure matrix
+
+| Situation | Action |
+| --- | --- |
+| **A.** Schema is 41 clean and the candidate fails to start or fails health checks | The supervised 41 → 40 rollback is available throughout 3C-A, because every attempt is still FULL. Follow §6 in full: quiesce, roll the schema back with the candidate image still selected, verify a clean 40, then select and start `78ee4227`. |
+| **B.** Candidate starts healthy, a regression is found later | Same coordinated path as A. Nothing about a later discovery changes the procedure; it only means media may have been processed in between, so re-run the active-media guard rather than assuming it is still clean. |
+| **C.** The supervised rollback **refuses** | **Do not start `78ee4227` while the schema remains 41** — it would fail its startup schema check and leave you with a stopped application and no clearer position. Read the refusal: an active claim means a producer was not stopped (stop it and retry); a non-FULL attempt means the floor has closed and rollback is no longer the answer. Either keep the application stopped while the cause is resolved, or fix forward with a schema-41-compatible build. |
+| **D.** The rollback fails *after* the migration began | The command reports the real marker state. Do not force a version, do not rewrite evidence, do not delete rows. Treat it as a dirty-schema incident: resolve the marker manually against the reported state before any application is started. |
+| **E.** `up-core` runs but the marker is still 40 | The migration did not apply — almost certainly the release keys were not switched to the candidate before step 6. The candidate worker will have refused to start, which is the intended signal. Fix the selection and re-run; do not restart the worker against schema 40. |
+
+---
+
+## 10. Verification after cutover
+
+Schema and release:
 
 - Schema `41`, `dirty = false`.
-- All three services on `a272011…`, restart counts 0, worker `READY` in its logs.
-- `/healthz` 200; `/readyz` ok with postgres, redis and schema ok; public edge verification passes.
-- Media state counts and `processing_attempts` count unchanged from the pre-migration baseline —
-  this release processes nothing by itself.
+- All three services report revision `a272011…`; restart counts 0; worker logs show
+  `worker_lifecycle READY`, not a `media_schema_check` exit.
+
+Worker configuration — verify explicitly, they are the media pipeline's safety envelope:
+
+- exactly **one** worker container running;
+- `MEDIA_TRANSCODE_CONCURRENCY=1`;
+- `MEDIA_PROCESSING_TIMEOUT=6h`.
+
+Health:
+
+- `/healthz` 200; `/readyz` 200 with postgres, redis and schema all ok;
+- public edge verification passes.
+
+Data:
+
 - `SELECT count(*) FROM processing_attempts WHERE attempt_kind <> 'FULL'` returns **0**, confirming
   the schema-40 rollback floor is still open.
-- Every existing `video_renditions` row still reads `processing_operation_id IS NULL`; the column is
+- No unexpected active media claim appears immediately after the release — release machinery itself
+  starts no media work.
+- **Record** the media state counts and the `processing_attempts` count rather than requiring them to
+  match the pre-migration baseline. Once the worker is running, legitimate production activity can
+  change them at any time; a changed count is a thing to explain, not a failure. Investigate only
+  transitions that no legitimate activity accounts for.
+- Existing `video_renditions` rows still read `processing_operation_id IS NULL`. The column is
   written only for rows created after the cutover, and nothing is backfilled.
 
 ---
 
-## 10. Related
+## 11. Related
 
 - [D-107](../DECISIONS.md#d-107--the-hls-ladder-is-a-frozen-data-contract-and-phase-3c-a-adds-attempt-kind-and-rendition-provenance) — the decision this release implements, including the rollback-floor rule.
 - [RUNBOOK.md](RUNBOOK.md) — standing operational procedures.

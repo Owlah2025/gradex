@@ -215,8 +215,11 @@ it one. Three separate guards stand in the way, all of them deliberate:
 - Even outside production, the down path runs `CheckManualPurchaseRollbackSafety` for any rollback
   from schema `21` or above. It raises if a single `purchase_requests` row or `PURCHASE_REQUEST`
   entitlement exists, so on a live database the `35 -> 34` step is refused before any DDL runs.
-- The production backend image exposes only `gradex-migrate up`, `version`, and `max-version`. A down
-  command is not part of the documented production surface at all.
+- The production backend image's documented surface is `gradex-migrate up`, `version`, and
+  `max-version`. A generic down command is not part of it. (Schema 41 later added exactly one
+  supervised production-capable downgrade, `rollback-schema-41`, which reverts only migration 0041
+  and accepts no step count or target version — see D-107. It does not exist at schema 0035 and
+  changes nothing about this D-103 procedure.)
 
 `deploy/scripts/application-rollback.sh` also fails closed here by design, and correctly so: it reads
 `max-version` from the target image and dies with `schema 35 is newer than target release maximum 34`.
