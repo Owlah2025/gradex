@@ -125,11 +125,38 @@ func (w *Worker) RecoverStale(ctx context.Context, limit int) (int, error) {
 	// clock runs fast would otherwise select and recover leases the database
 	// still considers live, tearing down healthy work; one running slow would
 	// leave genuinely expired leases unrecovered.
+	//
+	// SCANNING and PROCESSING keep the unleased arm of the predicate. For them a
+	// NULL lease is genuinely recoverable work: a row that entered either state
+	// before 0035 introduced the lease columns is in flight with nothing left to
+	// expire, and leaving it unrecovered would strand it forever.
+	//
+	// PLAYABLE is the opposite case, because it is the one in-flight state that
+	// an asset stays in after its work ends. A PLAYABLE row holding no claim is
+	// not abandoned work: it is the terminal, already-recorded shape of a failed
+	// enhancement — its attempt was made terminal and its claim cleared by
+	// `markProcessingFailed` or by `recoverStalePlayable` itself. Recovering it
+	// again has nothing to terminalize, so it would mint a fresh
+	// `recovery:<uuid>` operation identity, slip past the
+	// `ON CONFLICT DO NOTHING` that only deduplicates a repeated identity, and
+	// append another FAILED `processing_attempts` row on every tick, without
+	// bound. PLAYABLE therefore requires positive evidence of a claimed
+	// operation that has since expired. Scheduling enhancement retry for those
+	// terminal rows is deliberately not done here; it is Phase 3C's separate
+	// concern.
 	rows, err := w.db.Query(ctx, `
 		SELECT id::text
 		FROM media_asset_versions
-		WHERE state IN ('SCANNING', 'PROCESSING', 'PLAYABLE')
-		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
+		WHERE (
+		        state IN ('SCANNING', 'PROCESSING')
+		        AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
+		      )
+		   OR (
+		        state = 'PLAYABLE'
+		        AND work_claim_token IS NOT NULL
+		        AND work_lease_expires_at IS NOT NULL
+		        AND work_lease_expires_at <= now()
+		      )
 		ORDER BY COALESCE(work_lease_expires_at, created_at), id
 		LIMIT $1
 	`, limit)
@@ -188,6 +215,16 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 		return false, nil
 	}
 	if leaseStillLive {
+		return false, nil
+	}
+	// The same rule the selection applies, re-asserted under the row lock. The
+	// selection ran in an earlier snapshot, so a PLAYABLE row that held a claim
+	// when it was chosen may have had that claim cleared — and its attempt made
+	// terminal — by its own worker's failure path between the two. Without this
+	// the recovered-again row would be given a fresh recovery operation identity
+	// and append a second, invented FAILED attempt for work that already
+	// recorded its own outcome.
+	if work.state == StatePlayable && work.token == nil {
 		return false, nil
 	}
 	if work.state == StateScanning {
