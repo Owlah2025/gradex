@@ -4287,6 +4287,53 @@ stalling every upload on a missing column. The API's floor is unchanged, because
 reads the new column. `cmd/migrate` has no floor of its own and can still perform 40 → 41, so no
 bootstrap deadlock exists.
 
+**Cutover is quiescent stop → migrate → start, and is deliberately not zero-downtime.** The baseline
+revision `78ee4227` compiles `MaxSchemaVersion = 40`, so it cannot restart against schema 41 at all;
+and an already-running `78ee4227` worker must not survive the 40 → 41 boundary either, because it
+would keep inserting `video_renditions` rows through SQL that does not name
+`processing_operation_id`, persisting post-0041 canonical rows with NULL provenance that an
+append-only table can never repair. There is intentionally no supported period in which a
+`78ee4227` process handles media on schema 41.
+
+The release therefore stops the old media producer, applies 0041 with the candidate migrate binary,
+confirms schema 41 clean, and only then starts the candidate revision. A short media and backend
+maintenance window is accepted in preference to permanent NULL provenance, dual-schema SQL branches,
+a temporary compatibility binary, or any weakening of the provenance guarantee. No code exists to
+keep the worker continuously available across this one-time foundation migration, and none should be
+written for it.
+
+**Application rollback and schema rollback are not independent during 3C-A.** There is no
+application-only path from the 3C-A revision back to `78ee4227` while the database remains at schema
+41; `apply-release` already refuses it, dying with `schema 41 is newer than target release maximum
+40`. Returning to the baseline is a coordinated operation: quiesce and stop the candidate media
+producers, verify no active media work, run the 41 → 40 preflight (which requires every
+`processing_attempts` row to be `attempt_kind = FULL`), run the down step with the candidate binary,
+verify schema 40 clean, then start `78ee4227`.
+
+That floor is open throughout 3C-A only because this release ships no producer for ENHANCEMENT or
+FINALIZATION: both Go writers of `processing_attempts` omit `attempt_kind` and take the FULL default.
+The accepted trade is that the down migration drops `processing_operation_id` from renditions written
+on schema 41 — the rows, their storage keys and their metadata all survive, and the key still embeds
+a one-way hash of the writing operation.
+
+The instant 3C-B persists its first ENHANCEMENT or FINALIZATION attempt row, FAILED or SUCCEEDED,
+schema 41 → 40 becomes unavailable by design and `78ee4227` leaves the normal rollback chain
+permanently. The deployed 3C-A revision then becomes the schema-41-compatible application rollback
+floor, and no 3C-B release may deploy unless its plan records that exact revision as the staged
+rollback target and its image, tree and manifest remain available.
+
+**Preflight-to-down race, for 3C-B.** The `cmd/migrate` preflight necessarily runs before
+golang-migrate executes the down step, so under a future system with a non-FULL producer the
+preflight could observe all-FULL, a concurrent insert could add an ENHANCEMENT or FINALIZATION row,
+and the SQL defence would then refuse mid-step — keeping the evidence safe but potentially leaving
+the marker dirty. The race cannot occur during 3C-A, which has no such producer. Before 3C-B, any
+schema-down procedure must quiesce every non-FULL producer before the preflight and keep it quiesced
+through completion. The SQL refusal is defence in depth against a direct runner, never concurrency
+synchronisation.
+
+The operational sequence is recorded in
+[`docs/launch/RELEASE_PLAN_2026-09-21_SCHEMA_41_FOUNDATION.md`](launch/RELEASE_PLAN_2026-09-21_SCHEMA_41_FOUNDATION.md).
+
 **Alternatives rejected:** A third `media_processing_state` value (conflates outcome with intent and
 makes every existing coherence rule ambiguous); loosening the constraint globally to
 `SUCCEEDED => rendition_count >= 0` (lets an ordinary whole-ladder attempt claim success while
