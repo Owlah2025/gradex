@@ -14,9 +14,12 @@ const (
 	StateScanFailed  AssetVersionState = "SCAN_FAILED"
 	StateScanError   AssetVersionState = "SCAN_ERROR"
 	StateProcessing  AssetVersionState = "PROCESSING"
-	// StatePlayable is introduced in Phase 3B1 as part of the schema compatibility
-	// bridge for progressive video readiness. In Phase 3B1, it is inert: not
-	// deliverable and not reachable by any transition.
+	// StatePlayable means one canonical rendition has been verified and
+	// persisted for this exact version: the video can be streamed, while the
+	// rest of the expected ladder is still being produced. It is reached only
+	// from PROCESSING, in the same transaction that inserts the rendition row,
+	// and it leaves only for READY. It is deliberately not deliverable: generic
+	// deliverability still means the whole ladder finished.
 	StatePlayable      AssetVersionState = "PLAYABLE"
 	StateReady         AssetVersionState = "READY"
 	StateProcessFailed AssetVersionState = "PROCESS_FAILED"
@@ -52,6 +55,15 @@ func (s AssetVersionState) Deliverable() bool { return s == StateReady }
 // scanner-gated asset leaves it through SCANNING, and a D-088 trusted asset
 // leaves it through VALIDATED. No retry path can skip the safety evidence its
 // asset requires, and neither path can enter the other's states.
+//
+// This table mirrors the authoritative schema-40 database trigger
+// `media_asset_versions_enforce_immutability`, which is what actually refuses
+// an illegitimate state change. The kind-conditioned edges the trigger owns —
+// the THUMBNAIL and non-video shortcuts to READY — are expressed there and not
+// here, because this table is kind-agnostic by construction. Where an edge is
+// unconditional in the trigger, it must appear here too: a Go representation
+// that silently disagrees with the database is worse than no representation,
+// because callers reason about it.
 var transitionTable = map[AssetVersionState]map[AssetVersionState]struct{}{
 	StateUploaded: {
 		StateQuarantined: {},
@@ -89,8 +101,20 @@ var transitionTable = map[AssetVersionState]map[AssetVersionState]struct{}{
 		StateProcessFailed: {},
 	},
 	StateProcessing: {
+		// PLAYABLE is entered progressively, once the first canonical rendition
+		// is verified and persisted. READY remains the direct edge taken when
+		// the whole ladder is verified without an intermediate publication of
+		// partial evidence.
+		StatePlayable:      {},
 		StateReady:         {},
 		StateProcessFailed: {},
+	},
+	// A PLAYABLE version only ever improves. It has already published verified
+	// bytes, so it may not regress to a failure or retry state: a later
+	// enhancement failure leaves it PLAYABLE with its surviving renditions,
+	// and only completion of the expected ladder moves it on to READY.
+	StatePlayable: {
+		StateReady: {},
 	},
 	StateProcessFailed: {
 		StateQuarantined: {},

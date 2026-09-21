@@ -18,8 +18,10 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 		{StateScanning, StateScanError},
 		{StateScanPassed, StateProcessing},
 		{StateScanPassed, StateReady},
+		{StateProcessing, StatePlayable},
 		{StateProcessing, StateReady},
 		{StateProcessing, StateProcessFailed},
+		{StatePlayable, StateReady},
 		{StateScanFailed, StateQuarantined},
 		{StateScanError, StateQuarantined},
 		{StateProcessFailed, StateQuarantined},
@@ -83,30 +85,68 @@ func TestAssetVersionStateMachineAcceptsOnlyApprovedTransitions(t *testing.T) {
 	}
 }
 
-func TestPlayableStateInvariantsInPhase3B1(t *testing.T) {
+// TestPlayableStateMirrorsSchema40Trigger pins the Go transition table to the
+// authoritative schema-40 database trigger for every PLAYABLE edge. The trigger
+// admits exactly two: PROCESSING -> PLAYABLE and PLAYABLE -> READY. Everything
+// else touching PLAYABLE is refused by the database, so it must be refused here
+// too — a Go table that is more permissive than the trigger would let a caller
+// reason its way into a state change PostgreSQL will reject at commit.
+func TestPlayableStateMirrorsSchema40Trigger(t *testing.T) {
 	if !StatePlayable.Valid() {
 		t.Fatal("PLAYABLE must be a valid AssetVersionState")
 	}
+	// PLAYABLE is stream-ready, not ladder-complete. Generic deliverability
+	// still means READY, and nothing about the mirror fix changes that.
 	if StatePlayable.Deliverable() {
-		t.Fatal("PLAYABLE must not be deliverable in Phase 3B1")
+		t.Fatal("PLAYABLE must not be deliverable")
 	}
-	// In Phase 3B1, PLAYABLE cannot be transitioned to or from.
-	transitionsToTest := []struct {
+
+	for _, tc := range []struct {
 		from AssetVersionState
 		to   AssetVersionState
 	}{
 		{StateProcessing, StatePlayable},
+		{StatePlayable, StateReady},
+	} {
+		if err := Transition(tc.from, tc.to); err != nil {
+			t.Errorf("schema-40 permits %q -> %q, Go refused it: %v", tc.from, tc.to, err)
+		}
+	}
+
+	// Refused by the trigger, and therefore refused here. PLAYABLE never
+	// regresses: a failed enhancement leaves the version PLAYABLE with its
+	// already-verified renditions, and there is no edge out to a failure or
+	// retry state for the worker or an operator to take.
+	for _, tc := range []struct {
+		from AssetVersionState
+		to   AssetVersionState
+	}{
 		{StateScanPassed, StatePlayable},
 		{StateValidated, StatePlayable},
 		{StateUploaded, StatePlayable},
-		{StatePlayable, StateReady},
+		{StateQuarantined, StatePlayable},
+		{StateReady, StatePlayable},
+		{StateProcessFailed, StatePlayable},
 		{StatePlayable, StateProcessFailed},
 		{StatePlayable, StateQuarantined},
 		{StatePlayable, StateProcessing},
-	}
-	for _, tc := range transitionsToTest {
+		{StatePlayable, StateScanning},
+		{StatePlayable, StateValidated},
+		{StatePlayable, StatePlayable},
+	} {
 		if err := Transition(tc.from, tc.to); err == nil {
 			t.Errorf("Transition(%q, %q) succeeded, want error", tc.from, tc.to)
+		}
+	}
+
+	// READY stays terminal in both representations.
+	for _, to := range []AssetVersionState{
+		StateUploaded, StateQuarantined, StateScanning, StateScanPassed,
+		StateScanFailed, StateScanError, StateValidated, StateProcessing,
+		StatePlayable, StateReady, StateProcessFailed,
+	} {
+		if err := Transition(StateReady, to); err == nil {
+			t.Errorf("Transition(READY, %q) succeeded, want error", to)
 		}
 	}
 }
