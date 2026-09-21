@@ -505,3 +505,7 @@ func TestT4ADualValidationSeparatesTheTwoModels(t *testing.T) {
 type noopAssetValidator struct{}
 
 func (n *noopAssetValidator) ValidateAssetVersion(context.Context, string) error { return nil }
+
+func (n *noopAssetValidator) ValidateLessonVideoForPublication(context.Context, string) error {
+	return nil
+}

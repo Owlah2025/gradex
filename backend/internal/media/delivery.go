@@ -325,6 +325,10 @@ type deliveryTarget struct {
 	hasRenditions  bool
 }
 
+// readyVideo is ladder-complete video: the whole expected rendition set passed
+// strict terminal verification. It is deliberately kept alongside
+// streamableVideo rather than folded into it, so that any surface which really
+// does mean "finished", rather than "watchable now", keeps a name for it.
 func (target deliveryTarget) readyVideo() bool {
 	return target.kind == KindVideo && target.state == StateReady && target.hasRenditions
 }
@@ -475,7 +479,7 @@ func (s *DeliveryService) IssueAdminReviewPlayback(ctx context.Context, request 
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	target, err := s.loadAdminReviewTarget(ctx, request)
-	if err != nil || !target.readyVideo() {
+	if err != nil || !target.streamableVideo() {
 		return PlaybackAuthorization{}, ErrProtectedUnavailable
 	}
 	now := s.now().UTC()
@@ -605,7 +609,7 @@ func (s *DeliveryService) authorizeAdminReviewPlaybackSession(ctx context.Contex
 		AdminAccountID: adminAccountID, CourseID: claims.CourseID, RevisionID: claims.RevisionID,
 		LessonID: claims.LessonID, AssetVersionID: claims.AssetVersionID,
 	})
-	if err != nil || !target.readyVideo() {
+	if err != nil || !target.streamableVideo() {
 		return adminReviewPlaybackClaims{}, ErrProtectedUnavailable
 	}
 	return claims, nil
@@ -898,11 +902,33 @@ func (s *DeliveryService) loadApprovedTarget(ctx context.Context, lessonID, asse
 	return target, nil
 }
 
+// loadAdminReviewTarget resolves the exact submitted Lesson video an Admin
+// reviewer asked for. Under D-105 / Option 3A a revision may be submitted with
+// an actively PLAYABLE video, so a reviewer must be able to watch one: a review
+// gate that cannot render what it is approving is not a gate. The state test is
+// therefore the same streamable pair protected Student playback already uses,
+// and `streamableVideo` at the call sites still requires persisted rendition
+// evidence for either state.
+//
+// Nothing else here is relaxed. The revision must be the exact one named and in
+// PENDING_REVIEW, the version must be the one that revision points at, the
+// logical Asset must belong to this Course and not be retired, and the bytes
+// must carry exact-version safety provenance.
+//
+// A PLAYABLE version has no `trusted_duration_ms` yet — that is written when
+// the ladder completes — so the duration falls back to the first canonical
+// persisted rendition, ordered deterministically. Without it `playbackLifetime`
+// would collapse to the bare configured grace and truncate a long lecture
+// mid-review. READY keeps reading its own trusted duration exactly as before.
 func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request AdminReviewPlaybackRequest) (deliveryTarget, error) {
 	var target deliveryTarget
 	err := s.db.QueryRow(ctx, `
 		SELECT cl.lesson_identity_id::text, mav.id::text, mav.kind, mav.state, mav.storage_object_key,
-		       COALESCE(mav.trusted_duration_ms, 0),
+		       COALESCE(mav.trusted_duration_ms, (
+			SELECT vr.duration_ms FROM video_renditions vr
+			WHERE vr.asset_version_id = mav.id
+			ORDER BY vr.created_at ASC, vr.name ASC LIMIT 1
+		       ), 0),
 		       EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
 		FROM courses c
 		JOIN course_revisions cr ON cr.id = $2::uuid AND cr.course_id = c.id AND cr.state = 'PENDING_REVIEW'
@@ -912,8 +938,13 @@ func (s *DeliveryService) loadAdminReviewTarget(ctx context.Context, request Adm
 		JOIN media_assets ma ON ma.id = mav.logical_asset_id AND ma.course_id = c.id AND ma.retired_at IS NULL
 	`+ExactVersionProvenanceJoin+`
 		WHERE c.id = $1::uuid AND cl.lesson_identity_id = $3::uuid
-		  AND mav.kind = 'VIDEO' AND mav.state = 'READY'
-		  AND mav.successful_processing_attempt_id IS NOT NULL AND mav.trusted_duration_ms IS NOT NULL
+		  AND mav.kind = 'VIDEO'
+		  AND (
+			(mav.state = 'READY'
+			 AND mav.successful_processing_attempt_id IS NOT NULL
+			 AND mav.trusted_duration_ms IS NOT NULL)
+			OR mav.state = 'PLAYABLE'
+		  )
 	`, request.CourseID, request.RevisionID, request.LessonID, request.AssetVersionID).Scan(
 		&target.lessonID, &target.assetVersionID, &target.kind, &target.state, &target.storageKey, &target.durationMS, &target.hasRenditions,
 	)

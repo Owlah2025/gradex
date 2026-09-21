@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Owlah2025/gradex/backend/internal/media"
 	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
@@ -18,6 +19,16 @@ type DBAssetVersionValidator struct {
 	queryer interface {
 		QueryRow(context.Context, string, ...any) pgx.Row
 	}
+	// lockRows makes the Lesson-video publication check take a row-level share
+	// lock on the `media_asset_versions` row it reads, held until the
+	// surrounding transaction commits. It is set only for the final publication
+	// transaction (D-105 / Option 3A): a READY version is immutable, so nothing
+	// needed serializing before, but an actively PLAYABLE version is a live row
+	// the media worker is still writing to. Instructor submission deliberately
+	// leaves it off and validates against its snapshot, because submission is
+	// not the transaction that puts a revision live and must not hold a lock
+	// against the worker while an author fills in a form.
+	lockRows bool
 }
 
 func NewDBAssetVersionValidator(pool *pgxpool.Pool) *DBAssetVersionValidator {
@@ -26,6 +37,13 @@ func NewDBAssetVersionValidator(pool *pgxpool.Pool) *DBAssetVersionValidator {
 
 func newTxAssetVersionValidator(tx pgx.Tx) *DBAssetVersionValidator {
 	return &DBAssetVersionValidator{queryer: tx}
+}
+
+// newTxPublicationAssetVersionValidator is the validator used by the
+// transaction that actually promotes a revision to live. It is the only one
+// that locks the media rows it validates.
+func newTxPublicationAssetVersionValidator(tx pgx.Tx) *DBAssetVersionValidator {
+	return &DBAssetVersionValidator{queryer: tx, lockRows: true}
 }
 
 type candidateMutationHold struct {
@@ -106,6 +124,120 @@ func (v *DBAssetVersionValidator) ValidateAssetVersion(ctx context.Context, asse
 
 	if status != "READY" && status != "PUBLISHED" {
 		return ErrAssetVersionNotReady
+	}
+	return nil
+}
+
+// ValidateLessonVideoForPublication is the D-105 / Option 3A readiness rule for
+// one Lesson video, and it applies to nothing else. A Lesson video may carry a
+// revision to live in one of two shapes:
+//
+//   - READY — the full expected rendition ladder completed strict terminal
+//     verification. This is exactly the rule that has always applied, evaluated
+//     by exactly the same code, so no Asset Version that could publish before
+//     this change can fail to publish after it.
+//
+//   - actively PLAYABLE — at least one canonical rendition has been verified
+//     and persisted for these exact bytes, and a live worker claim says the
+//     remaining ladder is still being produced. The video is streamable now,
+//     which is all publication needs; the rest arrives behind the Student.
+//
+// The two are evaluated in that order and the PLAYABLE branch is reached only
+// after the READY branch has declined, so this method is strictly additive over
+// the existing gate. Everything that is neither — PROCESSING, UPLOADED, the
+// scan and validation waypoints, PROCESS_FAILED, and a PLAYABLE version whose
+// enhancement work has stopped — is refused exactly as before.
+//
+// This is deliberately not `ValidateAssetVersion` with a kind branch inside it.
+// Lesson video is the only kind for which partial processing is a publishable
+// product state: a Lesson Resource, a Lab Material, a public Preview, and a
+// thumbnail all stay READY-only, and they stay that way because they never
+// reach this method at all.
+func (v *DBAssetVersionValidator) ValidateLessonVideoForPublication(ctx context.Context, assetVersionID string) error {
+	if assetVersionID == "" {
+		return ErrAssetVersionInvalid
+	}
+	if v == nil || v.queryer == nil {
+		return errors.New("asset version validator database queryer is required")
+	}
+	// Taken before anything is read, so the decision below and the commit that
+	// depends on it see the same row. Without it the media worker could take
+	// this version from PLAYABLE to READY, or clear its claim on an enhancement
+	// failure, between this check and the pointer swap.
+	if err := v.lockLessonVideoRow(ctx, assetVersionID); err != nil {
+		return err
+	}
+
+	err := v.ValidateAssetVersion(ctx, assetVersionID)
+	if err == nil || !errors.Is(err, ErrAssetVersionNotReady) {
+		return err
+	}
+	return v.validateActivePlayableLessonVideo(ctx, assetVersionID)
+}
+
+// lockLessonVideoRow takes the share lock described on DBAssetVersionValidator.
+// A missing row is not an error here: the identifier may belong to a pre-S4
+// `videos` row, and refusing it would change the legacy acceptance the READY
+// branch still owns. Validation below decides; this only fixes what it reads.
+func (v *DBAssetVersionValidator) lockLessonVideoRow(ctx context.Context, assetVersionID string) error {
+	if !v.lockRows {
+		return nil
+	}
+	var locked int
+	err := v.queryer.QueryRow(ctx,
+		`SELECT 1 FROM media_asset_versions WHERE id = $1::uuid FOR SHARE`,
+		assetVersionID,
+	).Scan(&locked)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("locking lesson video asset version: %w", err)
+	}
+	return nil
+}
+
+// validateActivePlayableLessonVideo admits the second publishable shape. Every
+// condition is proved in the database rather than inferred from the state name:
+//
+//   - the reference is a VIDEO Asset Version of a VIDEO logical Asset, and that
+//     Asset has not been retired;
+//   - the exact stored bytes carry one of the two legitimate safety
+//     provenances, through the same join protected delivery uses;
+//   - at least one canonical rendition row exists. Progressive persistence
+//     already guarantees this in the same transaction that sets PLAYABLE, so
+//     this is a fail-safe: a malformed or hand-written row that claims PLAYABLE
+//     with nothing to serve must never reach a live revision;
+//   - a live work claim exists. This is what separates an active PLAYABLE, whose
+//     ladder is still being produced, from a failed PLAYABLE, whose enhancement
+//     work has stopped and for which no recovery path exists before Phase 3C.
+//     A failed PLAYABLE that is already live stays live and stays streamable —
+//     it is only refused as the basis for a *new* publication.
+//
+// The lease comparison is made by PostgreSQL against its own clock in this
+// transaction, for the same reason the media worker's fences are: reading the
+// timestamp out and comparing it in Go would make the API process's clock the
+// authority for a publication decision.
+func (v *DBAssetVersionValidator) validateActivePlayableLessonVideo(ctx context.Context, assetVersionID string) error {
+	var admitted int
+	err := v.queryer.QueryRow(ctx, `
+		SELECT 1
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+	`+media.ExactVersionProvenanceJoin+`
+		WHERE mav.id = $1::uuid
+		  AND mav.kind = 'VIDEO'
+		  AND ma.kind = 'VIDEO'
+		  AND ma.retired_at IS NULL
+		  AND mav.state = 'PLAYABLE'
+		  AND mav.work_claim_token IS NOT NULL
+		  AND mav.work_lease_expires_at > now()
+		  AND EXISTS (
+			SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id
+		  )
+	`, assetVersionID).Scan(&admitted)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrAssetVersionNotReady
+	}
+	if err != nil {
+		return fmt.Errorf("checking lesson video publication readiness: %w", err)
 	}
 	return nil
 }

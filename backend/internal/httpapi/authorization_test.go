@@ -478,6 +478,10 @@ func (fakeAssetValidator) ValidateAssetVersion(context.Context, string) error {
 	return nil
 }
 
+func (fakeAssetValidator) ValidateLessonVideoForPublication(context.Context, string) error {
+	return nil
+}
+
 func derivedProtectedRoutes(r *gin.Engine) []struct{ method, path string } {
 	routes := r.Routes()
 	var result []struct{ method, path string }

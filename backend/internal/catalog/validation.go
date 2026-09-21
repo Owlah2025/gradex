@@ -118,7 +118,7 @@ func validateCourseForSubmission(
 							Target: "lesson:" + les.LessonIdentityID,
 						})
 					} else {
-						if err := req.validator.ValidateAssetVersion(ctx, *les.VideoAssetVersionID); err != nil {
+						if err := req.validator.ValidateLessonVideoForPublication(ctx, *les.VideoAssetVersionID); err != nil {
 							violations = append(violations, SubmissionViolation{
 								Code:   "LESSON_VIDEO_MISSING",
 								Target: "lesson:" + les.LessonIdentityID,

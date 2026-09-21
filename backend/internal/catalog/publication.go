@@ -278,8 +278,15 @@ func (r *Repository) revalidatePublication(
 	// The same completeness and media-readiness gate the Instructor faced at
 	// submission, re-run against committed state. A Lesson video that is still
 	// processing fails here whichever actor is publishing.
+	//
+	// This is the transaction that actually puts the revision live, so it uses
+	// the locking validator: every Lesson video row it accepts is held under a
+	// share lock until commit. Submission validates the same rule against its
+	// snapshot; only this path has a pointer swap to protect, and only this
+	// path can be raced by the media worker finishing or failing an
+	// enhancement between the check and the commit.
 	validation, err := validateCourseForSubmission(ctx, submissionValidationRequest{
-		tx: tx, validator: newTxAssetVersionValidator(tx),
+		tx: tx, validator: newTxPublicationAssetVersionValidator(tx),
 		courseID: pub.courseID, revision: graph, course: pub.course,
 	})
 	if err != nil {

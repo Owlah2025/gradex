@@ -303,6 +303,17 @@ func (p playableOnlyProcessor) TranscodeProgressive(ctx context.Context, object 
 	return media.TranscodeResult{}, errors.New("halted after first rendition")
 }
 
+// TestPlayableSelectedLessonVideoCannotPassLifecycleGates is about a *failed*
+// PLAYABLE: playableOnlyProcessor persists one rendition and then abandons the
+// attempt, so the version is left PLAYABLE with its work claim cleared and a
+// terminal FAILED processing attempt behind it.
+//
+// D-105 / Option 3A made an *actively* PLAYABLE video publishable; it
+// deliberately did not make this one publishable, because no enhancement
+// recovery exists for it before Phase 3C. The assertions below therefore still
+// hold, and they are now the negative half of that policy rather than a blanket
+// READY-only rule. The positive half lives in the stream-ready publication
+// suite.
 func TestPlayableSelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
 	f := newD5Fixture(t)
 	candidate := f.candidate(t)
@@ -346,12 +357,17 @@ func TestPlayableSelectedLessonVideoCannotPassLifecycleGates(t *testing.T) {
 		t.Fatalf("expected state=PLAYABLE (count=1), got state=%s (count=%d)", state, renditionCount)
 	}
 
-	// Asset version validator directly rejects PLAYABLE video
+	// The generic, kind-agnostic readiness gate still means READY for every
+	// kind, PLAYABLE video included. Only the dedicated Lesson-video
+	// publication rule knows about PLAYABLE, and it refuses this one too.
 	if err := f.validator.ValidateAssetVersion(f.ctx, versionID); !errors.Is(err, ErrAssetVersionNotReady) {
 		t.Fatalf("ValidateAssetVersion on PLAYABLE video = %v, want %v", err, ErrAssetVersionNotReady)
 	}
+	if err := f.validator.ValidateLessonVideoForPublication(f.ctx, versionID); !errors.Is(err, ErrAssetVersionNotReady) {
+		t.Fatalf("ValidateLessonVideoForPublication on failed PLAYABLE video = %v, want %v", err, ErrAssetVersionNotReady)
+	}
 
-	// Instructor publication must refuse PLAYABLE video: Deliverable/readiness stays READY-only
+	// Instructor publication must refuse a failed PLAYABLE video.
 	err = f.publish(f.ctx, candidate.ID)
 	assertSubmissionFailure(t, err)
 

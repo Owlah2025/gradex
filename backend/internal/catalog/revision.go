@@ -76,8 +76,20 @@ var (
 // AssetVersionValidator validates Asset Version references (T014, SLICES §3.2).
 // Absent or unprocessed versions are refused.
 // No upload, scan, or transcode path is included.
+//
+// The two methods are separate because they answer different questions, and
+// collapsing them would let one kind's rule leak into another's:
+//
+//   - ValidateAssetVersion asks whether the media pipeline finished for this
+//     reference. It is READY-only and kind-agnostic, and it is what attaching
+//     any asset and validating every non-video dependency continues to use.
+//   - ValidateLessonVideoForPublication asks whether one Lesson video may carry
+//     a revision to live. Under D-105 / Option 3A that admits an actively
+//     PLAYABLE video as well as a READY one, and it admits nothing else and no
+//     other kind.
 type AssetVersionValidator interface {
 	ValidateAssetVersion(ctx context.Context, assetVersionID string) error
+	ValidateLessonVideoForPublication(ctx context.Context, assetVersionID string) error
 }
 
 type TaxonomyTerm struct {
