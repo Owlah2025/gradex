@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -48,4 +49,62 @@ func CheckEnhancementRecoveryRollbackSafety(ctx context.Context, pool *pgxpool.P
 		return errors.New("enhancement or finalization processing attempts exist; schema 40 has no attempt kind and would record them as whole-ladder attempts. Retain schema 41 and use an application build compatible with that schema")
 	}
 	return nil
+}
+
+// ActiveMediaClaim is one Asset Version holding a live work claim at the moment
+// the query ran.
+type ActiveMediaClaim struct {
+	AssetVersionID string
+	State          string
+}
+
+// CheckNoActiveMediaClaims refuses a supervised schema rollback while any media
+// work is claimed.
+//
+// It is a safety gate against operator error, NOT distributed synchronization.
+// A producer that is still running can acquire a claim in the instant after this
+// query returns, so the operational contract remains what it has always been:
+// stop the API and worker before invoking a supervised rollback. This check
+// catches the case where that step was skipped or only partly completed — which
+// is the realistic failure, and the one that would otherwise let a live worker
+// mutate processing evidence while the schema changes underneath it.
+//
+// PostgreSQL is the authority. The migration binary deliberately does not
+// inspect processes: it cannot see a worker on another host, and a container
+// that is up but idle is not the question being asked.
+func CheckNoActiveMediaClaims(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("database pool is required")
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT id::text, state::text
+		FROM media_asset_versions
+		WHERE work_claim_token IS NOT NULL
+		ORDER BY state, id
+		LIMIT 20
+	`)
+	if err != nil {
+		return fmt.Errorf("checking active media claims: %w", err)
+	}
+	defer rows.Close()
+	var claims []ActiveMediaClaim
+	for rows.Next() {
+		var claim ActiveMediaClaim
+		if err := rows.Scan(&claim.AssetVersionID, &claim.State); err != nil {
+			return fmt.Errorf("reading active media claims: %w", err)
+		}
+		claims = append(claims, claim)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating active media claims: %w", err)
+	}
+	if len(claims) == 0 {
+		return nil
+	}
+	described := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		described = append(described, claim.State+" "+claim.AssetVersionID)
+	}
+	return fmt.Errorf("active media work is claimed (%s); stop the API and worker, let in-flight media settle, and retry",
+		strings.Join(described, ", "))
 }

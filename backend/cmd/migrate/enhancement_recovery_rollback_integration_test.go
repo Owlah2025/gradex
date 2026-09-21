@@ -63,18 +63,52 @@ func migrateCommandHarness(t *testing.T, ctx context.Context) (*migrate.Migrate,
 	}
 	t.Cleanup(pool.Close)
 
-	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
-		"APP_ENV": "development", "PUBLIC_ORIGIN": "https://gradex.example",
+	cfg := migrateCommandConfig(t, "development")
+	return m, cfg, pool
+}
+
+// migrateCommandConfig builds the typed configuration the subcommands receive,
+// for a declared APP_ENV. Production is a real value here rather than a test
+// shim, because the acknowledgement rule this exercises only exists in
+// production.
+func migrateCommandConfig(t *testing.T, appEnv string) *config.Config {
+	t.Helper()
+	settings := map[string]string{
+		"APP_ENV": appEnv, "PUBLIC_ORIGIN": "https://gradex.example",
 		"REDIS_ADDR": "localhost:6379", "S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
 		"PASSWORD_SCREEN_MODE": "deterministic", "OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION": "key-v1",
-	}), config.MapSecretResolver{
+	}
+	secrets := config.MapSecretResolver{
 		"DATABASE_URL": rollbackCommandDSN, "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "b",
 		"PLAYBACK_TOKEN_SECRET": "c", "OUTBOX_PROTECTED_PAYLOAD_KEY": strings.Repeat("a", 32),
-	})
-	if err != nil {
-		t.Fatalf("loading disposable rollback configuration: %v", err)
 	}
-	return m, cfg, pool
+	if appEnv != "development" {
+		// Production configuration is validated in full, so a production-mode
+		// test must satisfy the real contract rather than a relaxed one. These
+		// are the settings the validator requires outside development; none of
+		// them affect the migration path under test.
+		settings["PASSWORD_SCREEN_MODE"] = "unavailable"
+		settings["SALES_WHATSAPP_NUMBER"] = "96500000000"
+		settings["S3_ENDPOINT"] = "https://s3.gradex.example"
+		settings["S3_PRESIGN_ENDPOINT"] = "https://s3.gradex.example"
+		settings["REDIS_TLS_ENABLED"] = "true"
+		settings["LEGAL_OPERATOR_NAME"] = "Gradex"
+		settings["LEGAL_REGISTRATION_NUMBER"] = "CR-000000"
+		settings["LEGAL_REGISTERED_ADDRESS"] = "Kuwait City"
+		settings["PRIVACY_EMAIL"] = "privacy@gradex.example"
+		settings["SUPPORT_EMAIL"] = "support@gradex.example"
+		settings["SECURITY_EMAIL"] = "security@gradex.example"
+		secrets["REDIS_PASSWORD"] = "redis-password"
+		secrets["SESSION_CSRF_KEY"] = strings.Repeat("b", 32)
+		secrets["ANONYMOUS_COOKIE_SIGNING_KEY"] = strings.Repeat("c", 32)
+		secrets["ANONYMOUS_CSRF_KEY"] = strings.Repeat("d", 32)
+		secrets["ADMISSION_LIMITER_HMAC_KEY"] = strings.Repeat("e", 32)
+	}
+	cfg, err := config.LoadFrom(config.MapLookup(settings), secrets)
+	if err != nil {
+		t.Fatalf("loading disposable rollback configuration for APP_ENV=%s: %v", appEnv, err)
+	}
+	return cfg
 }
 
 // seedMediaVersion creates the minimum Asset Version a processing attempt can

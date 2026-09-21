@@ -1317,8 +1317,57 @@ apply_release() {
   note "application release $release is healthy on unchanged schema $schema_version (target max $target_max_schema) and provenance"
 }
 
+
+# require_stopped is the inverse of require_status: it proves a service is not
+# running. A supervised schema rollback must not proceed while an application
+# producer could still claim media work, and an operator who skipped the quiesce
+# step should be told so before the schema moves, not after.
+require_stopped() {
+  local service="$1" container status
+  for container in $(service_id "$service"); do
+    [ -n "$container" ] || continue
+    status="$(docker inspect --format '{{.State.Status}}' "$container")"
+    [ "$status" != running ] ||
+      die "$service is $status; stop the application tier before a supervised schema rollback so no producer can claim media work while the schema changes"
+  done
+}
+
+# The supervised emergency rollback of the 3C-A foundation migration, and
+# nothing else. There is deliberately no generic `migrate-down <steps>` command
+# here, for the same reason `gradex-migrate down` stays prohibited in
+# production: an arbitrary production downgrade is not an operation this
+# repository offers. This one reverts exactly schema 41 to schema 40.
+#
+# It runs the migration as a one-off job on the CURRENTLY SELECTED backend
+# image, which must still be the schema-41 candidate — the baseline image
+# contains no 0041 down migration and could not perform this rollback. Restore
+# the baseline release selection only after this command has succeeded.
+#
+# Postgres stays up because the migration needs it. Redis may stay up. No API or
+# worker is started as a side effect: `run --no-deps` starts the one container
+# and removes it.
+rollback_schema_41_foundation() {
+  require_tools
+  load_environment
+  require_status postgres healthy
+  require_stopped api
+  require_stopped worker
+
+  # cmd/migrate requires the transition-naming acknowledgement when
+  # APP_ENV=production and refuses it otherwise, so the flag follows the
+  # declared environment exactly, as the Administrator bootstrap does.
+  local confirmation=()
+  [ "$APP_ENV" = production ] && confirmation=(-confirm-production=schema-41-to-40)
+
+  note "reverting schema 41 to 40 in project $S12_PROJECT ($APP_ENV) using backend image $GRADEX_BACKEND_IMAGE"
+  compose run --rm --no-deps migrate \
+    gradex-migrate rollback-schema-41 "${confirmation[@]}" ||
+    die "the supervised schema 41 to 40 rollback did not complete; read the command output for the real schema marker state and do not start a schema-40 application until the marker reads a clean 40"
+  note "supervised schema rollback completed; verify the marker reads version=40 dirty=false before selecting the baseline release"
+}
+
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1340,6 +1389,7 @@ case "${1:-}" in
   restore) [ "$#" -le 2 ] || usage; shift; restore_backup "$@" ;;
   verify-restore) [ "$#" = 1 ] || usage; verify_restore ;;
   apply-release) shift; apply_release "$@" ;;
+  rollback-schema-41-foundation) [ "$#" = 1 ] || usage; rollback_schema_41_foundation ;;
   status) load_environment; compose --profile restore ps ;;
   logs) load_environment; if [ -n "${2:-}" ]; then compose logs --no-color "$2"; else compose logs --no-color; fi ;;
   stop) load_environment; compose down ;;
