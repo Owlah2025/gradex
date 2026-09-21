@@ -87,7 +87,9 @@ func TestSchema39PlayableEnumCompatibilityBridge(t *testing.T) {
 	}
 
 	// 5. Version bounds enforcement.
-	// Version 40 (above MaxSchemaVersion) must be rejected.
+	// Any version above MaxSchemaVersion must be rejected. The bound is read
+	// from the constant rather than written as a literal, so this assertion
+	// cannot drift out of step with the build the way a hardcoded 40 did.
 	if _, err := pool.Exec(ctx,
 		"UPDATE "+schemaMigrationsTable+" SET version = $1", MaxSchemaVersion+1); err != nil {
 		t.Fatalf("setting version above ceiling: %v", err)

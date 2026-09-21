@@ -4261,10 +4261,31 @@ about the running system, not as new design. Recording the ladder contract conve
 runtime cliff into a build failure. Adding the schema foundation separately from any recovery
 producer keeps the migration reviewable on its own and preserves a clean rollback floor.
 
-**Rollback floor:** While no finalization producer exists, schema 41 reverses to 40 — every attempt
-is FULL. Once a SUCCEEDED FINALIZATION attempt is recorded, that row has no schema-40 representation
-and `0041_enhancement_recovery_foundation.down.sql` refuses rather than falsifying it; from that
-point the rollback floor is a schema-41-compatible application revision.
+**Rollback floor:** Schema 41 can be downgraded to schema 40 only while all `processing_attempts`
+remain `attempt_kind = FULL`. Once any ENHANCEMENT or FINALIZATION attempt row is persisted,
+regardless of outcome, the schema-40 rollback floor is closed and the floor becomes a
+schema-41-compatible application revision.
+
+The boundary is the first non-FULL row, not the first successful one. A FAILED ENHANCEMENT is
+refused too, even though schema 40's restored `processing_attempt_result_coherent` would accept its
+remaining columns: schema 40 has no `attempt_kind`, so dropping the column would leave the row in
+place while silently reinterpreting it as a legacy whole-ladder attempt. The refusal is therefore
+deliberately broader than the coherence constraint requires.
+
+That refusal lives in two places on purpose.
+`0041_enhancement_recovery_foundation.down.sql` protects correctness against any runner that executes
+the migration directly. `db.CheckEnhancementRecoveryRollbackSafety`, invoked by `cmd/migrate` only
+when a rollback would actually cross 41 → 40, protects operational cleanliness: golang-migrate marks
+the target version dirty *before* executing the migration body, so a refusal raised from inside the
+SQL would preserve the evidence and still leave the schema marker dirty, blocking every later
+migration command until an operator cleared it by hand.
+
+**Binary compatibility:** the worker is the only binary that requires schema 41 — progressive
+persistence reads and writes `video_renditions.processing_operation_id`, so its startup floor is
+`EnhancementRecoveryFoundationSchemaVersion` and it refuses readiness against schema 40 rather than
+stalling every upload on a missing column. The API's floor is unchanged, because no shipped route
+reads the new column. `cmd/migrate` has no floor of its own and can still perform 40 → 41, so no
+bootstrap deadlock exists.
 
 **Alternatives rejected:** A third `media_processing_state` value (conflates outcome with intent and
 makes every existing coherence rule ambiguous); loosening the constraint globally to

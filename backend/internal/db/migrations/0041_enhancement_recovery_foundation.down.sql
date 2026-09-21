@@ -2,13 +2,19 @@
 --
 -- ROLLBACK FLOOR
 --
--- While no finalization producer exists, this reversal is safe: every attempt
--- row is FULL, so schema 40 can represent all of it. Once a later phase records
--- a SUCCEEDED FINALIZATION attempt, that row has no schema-40 representation —
--- it is a successful attempt with zero renditions and no output prefix — and
--- this migration refuses rather than destroying or falsifying it. From that
--- point the rollback floor is a schema-41-compatible application revision, not
--- schema 40.
+-- Schema 41 can be downgraded to schema 40 only while all processing_attempts
+-- remain attempt_kind = FULL. Once any ENHANCEMENT or FINALIZATION attempt row
+-- is persisted, regardless of outcome, the schema-40 rollback floor is closed
+-- and the floor becomes a schema-41-compatible application revision instead.
+--
+-- The boundary is the FIRST non-FULL row, not the first successful one. A
+-- FAILED ENHANCEMENT is refused too, even though schema 40's restored
+-- `processing_attempt_result_coherent` would accept its remaining columns:
+-- schema 40 has no attempt_kind at all, so dropping the column would leave the
+-- row in place while silently reinterpreting it as a legacy whole-ladder
+-- attempt. Losing what the worker was asked to do is not a lesser failure than
+-- losing the row, so the refusal below is deliberately broader than the
+-- coherence constraint requires.
 
 -- Refuse before any destructive DDL, in the style of 0021. Nothing below runs
 -- if the data cannot be honestly represented by the restored schema.

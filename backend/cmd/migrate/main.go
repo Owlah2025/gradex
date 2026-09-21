@@ -190,6 +190,15 @@ func down(m *migrate.Migrate, cfg *config.Config, args []string) error {
 				return err
 			}
 		}
+		// Only when this rollback would actually cross 41 -> 40. A down that
+		// stays at or above 41 leaves attempt_kind in place and has nothing to
+		// misrepresent, and an up or version command never reaches here at all.
+		if version >= db.EnhancementRecoveryFoundationSchemaVersion &&
+			int64(version)-int64(steps) < db.EnhancementRecoveryFoundationSchemaVersion {
+			if err := db.CheckEnhancementRecoveryRollbackSafety(ctx, pool); err != nil {
+				return err
+			}
+		}
 		if err := db.CheckManualPurchaseRollbackSafety(ctx, pool); err != nil {
 			return err
 		}

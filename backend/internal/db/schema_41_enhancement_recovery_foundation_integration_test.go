@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -151,6 +152,32 @@ func TestSchema41EnhancementRecoveryFoundation(t *testing.T) {
 		t.Fatalf("SUCCEEDED FINALIZATION with zero renditions rejected: %v", err)
 	}
 
+	// 6b. A genuine SUCCEEDED ENHANCEMENT keeps the whole schema-40 success
+	//     rule: it really produced rungs, so it must prove them. This is what
+	//     separates ENHANCEMENT from FINALIZATION — the two are constrained in
+	//     opposite directions and neither can stand in for the other.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, trusted_duration_ms, output_prefix, error_reason)
+		VALUES ($1::uuid, 'enh-ok', 'SUCCEEDED', 'ENHANCEMENT', 3, 1000, 'media/x/hls/stu', NULL)
+	`, fixture.versionID); err != nil {
+		t.Fatalf("a successful ENHANCEMENT producing real rungs was rejected: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, trusted_duration_ms, output_prefix)
+		VALUES ($1::uuid, 'enh-noprefix', 'SUCCEEDED', 'ENHANCEMENT', 3, 1000, NULL)
+	`, fixture.versionID); err == nil {
+		t.Fatal("expected a successful ENHANCEMENT with NULL output_prefix to be refused; only FINALIZATION may omit it")
+	}
+
+	// 6c. A FAILED ENHANCEMENT is schema-valid: the FAILED arm is unchanged and
+	//     kind-independent. It is still enough to close the rollback floor.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason)
+		VALUES ($1::uuid, 'enh-failed', 'FAILED', 'ENHANCEMENT', 0, 'enhancement encoder died')
+	`, fixture.versionID); err != nil {
+		t.Fatalf("a FAILED ENHANCEMENT attempt was rejected: %v", err)
+	}
+
 	// 7. SUCCEEDED FULL with rendition_count = 0 is still rejected.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, trusted_duration_ms, output_prefix)
@@ -234,9 +261,77 @@ func TestSchema41EnhancementRecoveryFoundation(t *testing.T) {
 	}
 }
 
-// TestSchema41DownMigration proves the rollback floor in both directions: it
-// reverses cleanly while every attempt is FULL, and refuses without mutating
-// anything once finalization evidence exists.
+// TestSchema41StartupCompatibilityFloors proves which binaries may serve which
+// schema, through the same CheckSchemaAtLeast seam the processes call at
+// startup. The worker reads and writes video_renditions.processing_operation_id
+// in progressive persistence, so it must refuse schema 40 rather than stall
+// every upload on a missing column inside the transaction that would have made
+// the asset PLAYABLE. Nothing else may be tightened with it: the API reads no
+// new column, and raising its floor would withhold traffic from routes that
+// work perfectly against schema 40.
+func TestSchema41StartupCompatibilityFloors(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+
+	if err := m.Migrate(uint(MediaPlayableFoundationSchemaVersion)); err != nil {
+		t.Fatalf("migrating to schema 40: %v", err)
+	}
+
+	// New worker against schema 40: refused, so no media work is consumed.
+	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+		t.Fatalf("worker floor at schema 40 = %v, want %v", err, ErrSchemaIncompatible)
+	}
+	// The API is deliberately not tightened with it.
+	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); err != nil {
+		t.Fatalf("API floor at schema 40 = %v, want the API to remain servable", err)
+	}
+
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("applying migration 0041: %v", err)
+	}
+
+	// New worker against schema 41: accepted.
+	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); err != nil {
+		t.Fatalf("worker floor at schema 41 = %v, want acceptance", err)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); err != nil {
+		t.Fatalf("API floor at schema 41 = %v, want acceptance", err)
+	}
+
+	// Forward incompatibility is unchanged: a schema above this build's ceiling
+	// is refused for both floors.
+	if _, err := pool.Exec(ctx,
+		"UPDATE "+schemaMigrationsTable+" SET version = $1", MaxSchemaVersion+1); err != nil {
+		t.Fatalf("setting version above ceiling: %v", err)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+		t.Fatalf("worker floor above ceiling = %v, want %v", err, ErrSchemaIncompatible)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+		t.Fatalf("API floor above ceiling = %v, want %v", err, ErrSchemaIncompatible)
+	}
+	// A dirty marker still fails closed for the worker floor too.
+	if _, err := pool.Exec(ctx,
+		"UPDATE "+schemaMigrationsTable+" SET version = $1, dirty = true", EnhancementRecoveryFoundationSchemaVersion); err != nil {
+		t.Fatalf("setting dirty marker: %v", err)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaDirty) {
+		t.Fatalf("worker floor on a dirty schema = %v, want %v", err, ErrSchemaDirty)
+	}
+}
+
+// TestSchema41DownMigration proves the rollback floor in both directions at the
+// migration-SQL level: it reverses cleanly while every attempt is FULL, and
+// refuses without mutating anything once any non-FULL attempt exists.
+//
+// The boundary is the first non-FULL row regardless of outcome, which is why
+// the refusal case here uses a FAILED ENHANCEMENT — a row schema 40's restored
+// coherence constraint would otherwise accept. Operational cleanliness of the
+// refusal, meaning the schema marker is not left dirty, is proven separately by
+// the cmd/migrate preflight test.
 func TestSchema41DownMigration(t *testing.T) {
 	t.Run("reverses when no schema-41-only evidence exists", func(t *testing.T) {
 		freshDatabase(t)
@@ -294,7 +389,7 @@ func TestSchema41DownMigration(t *testing.T) {
 		}
 	})
 
-	t.Run("refuses without mutation when finalization evidence exists", func(t *testing.T) {
+	t.Run("refuses without mutation when any non-FULL evidence exists", func(t *testing.T) {
 		freshDatabase(t)
 		m := openMigrator(t)
 		pool := openPool(t)
@@ -305,29 +400,32 @@ func TestSchema41DownMigration(t *testing.T) {
 			t.Fatalf("migrating to schema 41: %v", err)
 		}
 		fixture := seedSchema40MediaEvidence(t, ctx, pool, "down-blocked")
+		// Deliberately the weakest non-FULL row: a FAILED ENHANCEMENT whose
+		// remaining columns schema 40's restored coherence constraint would
+		// accept. If the refusal were scoped to unrepresentable success only,
+		// this row would pass and its kind would be silently relabelled FULL.
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, trusted_duration_ms, output_prefix)
-			VALUES ($1::uuid, 'finalize-op', 'SUCCEEDED', 'FINALIZATION', 0, 1000, NULL)
+			INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason)
+			VALUES ($1::uuid, 'enhance-failed', 'FAILED', 'ENHANCEMENT', 0, 'enhancement encoder died')
 		`, fixture.versionID); err != nil {
-			t.Fatalf("inserting finalization evidence: %v", err)
+			t.Fatalf("inserting failed enhancement evidence: %v", err)
 		}
 
 		if err := m.Steps(-1); err == nil {
-			t.Fatal("expected rollback to refuse while unrepresentable finalization evidence exists")
+			t.Fatal("expected rollback to refuse while any non-FULL attempt evidence exists")
 		}
 
 		// Nothing may have been destroyed or rewritten by the refused attempt.
-		var kind string
+		var kind, state, reason string
 		var renditionCount int
-		var prefix *string
 		if err := pool.QueryRow(ctx, `
-			SELECT attempt_kind::text, rendition_count, output_prefix FROM processing_attempts
-			WHERE asset_version_id = $1::uuid AND operation_id = 'finalize-op'
-		`, fixture.versionID).Scan(&kind, &renditionCount, &prefix); err != nil {
-			t.Fatalf("finalization evidence did not survive the refused rollback: %v", err)
+			SELECT attempt_kind::text, state::text, rendition_count, error_reason FROM processing_attempts
+			WHERE asset_version_id = $1::uuid AND operation_id = 'enhance-failed'
+		`, fixture.versionID).Scan(&kind, &state, &renditionCount, &reason); err != nil {
+			t.Fatalf("enhancement evidence did not survive the refused rollback: %v", err)
 		}
-		if kind != "FINALIZATION" || renditionCount != 0 || prefix != nil {
-			t.Fatalf("finalization evidence was rewritten: kind=%s rendition_count=%d output_prefix=%v", kind, renditionCount, prefix)
+		if kind != "ENHANCEMENT" || state != "FAILED" || renditionCount != 0 || reason != "enhancement encoder died" {
+			t.Fatalf("enhancement evidence was rewritten: kind=%s state=%s rendition_count=%d error_reason=%q", kind, state, renditionCount, reason)
 		}
 		var renditions int
 		if err := pool.QueryRow(ctx,
