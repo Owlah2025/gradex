@@ -221,6 +221,14 @@ it one. Three separate guards stand in the way, all of them deliberate:
   and accepts no step count or target version — see D-107. It does not exist at schema 0035 and
   changes nothing about this D-103 procedure.)
 
+For schema 41, follow the [artifact release plan](RELEASE_PLAN_2026-09-21_SCHEMA_41_FOUNDATION.md).
+Forward cutover and supervised rollback execute `host.sh` from the same verified per-release tooling
+bundle under `/home/deploy/gradex-production/releases/$RELEASE_SHA/tooling/`. No per-release production
+Git checkout is required. Builder-side Git freezes the reviewed identity; the host checks bundle
+checksums/content and manifest/runtime/image bindings. Keep the existing pinned backup/monitor
+operational root and systemd units unchanged. Retain the complete deployed 3C-A artifact set as the
+schema-41 application rollback floor before 3C-B; the first non-FULL attempt closes schema-40 rollback.
+
 `deploy/scripts/application-rollback.sh` also fails closed here by design, and correctly so: it reads
 `max-version` from the target image and dies with `schema 35 is newer than target release maximum 34`.
 Its own usage text states that schema downgrade and database rollback are intentionally unsupported.

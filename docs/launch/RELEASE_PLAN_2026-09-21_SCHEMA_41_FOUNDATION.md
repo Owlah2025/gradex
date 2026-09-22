@@ -14,23 +14,68 @@ running anything. The sequence is **stop → migrate → start**, and it is not 
 
 After final independent G0 approval, from a clean worktree capture `RELEASE_SHA=$(git rev-parse HEAD)`.
 No commit may follow that approval: any code or documentation commit changes HEAD, invalidates the
-reviewed artifact, and requires a new G0 review and freeze. Verify the frozen tree contains
-`49146e37f9b3a41380ada9aa31f63c929636539b` (the supervised rollback implementation), the
-`rollback-schema-41` command, the Hostinger `rollback-schema-41-foundation` command, and migration
-0041. Commit ancestry is an implementation floor, while the executable image and OCI-label checks
-below prove which artifact was actually built.
+reviewed artifact, and requires a new G0 review and freeze. The historical `49146e3` introduced
+supervised rollback; it is not the deployable identity. Builder Git exports both image build contexts
+and tooling from the frozen commit. Build, record and export require the exact clean builder HEAD.
 
-Build and export with `release.sh` from that exact clean HEAD. Its release manifest supplies the
-existing four keys: `GRADEX_RELEASE_SHA`, `GRADEX_BACKEND_IMAGE`, `GRADEX_FRONTEND_IMAGE`, and
-`GRADEX_PROOF_IMAGE`. Require every backend, frontend, and proof OCI revision label to equal
-`RELEASE_SHA`; retain the manifest and all three images. The Hostinger source checkout must also be
-the Git tree at `RELEASE_SHA`, with no local changes. If HEAD, a manifest key, an image label, or
-the selected runtime keys disagree, abort before migration or rollback.
+**No per-release production Git checkout is required.** The host needs neither Git, history nor
+repository credentials. `release.env` remains authoritative for `GRADEX_RELEASE_SHA` and the three
+image selections/IDs. Its `GRADEX_DEPLOY_BUNDLE_SHA256` binds the tooling archive. The bundle's
+`release-tooling.env` carries the same `RELEASE_SHA`, `DEPLOY_BUNDLE_FORMAT=1` and
+`SCHEMA41_CAPABILITY=supervised-41-to-40-v1`. All three OCI revision labels must match that SHA.
 
-There is no existing read-only CLI discovery command for `rollback-schema-41`. The Hostinger gate
-therefore checks the reviewed implementation ancestor and command definitions in the clean source
-tree, schema ceiling 41 from the selected binary, and OCI labels tying that binary to the same
-`RELEASE_SHA`. It never probes capability by invoking the destructive rollback.
+Each schema-41 invocation rechecks the retained archive checksum, inventory, extracted file hashes,
+metadata, runtime image selections and image IDs/labels. The backend must report schema ceiling 41;
+its no-argument usage must advertise `rollback-schema-41` (no database configuration is loaded),
+and its 0041 UP/DOWN hashes must match the bundled files. Capability is never probed by executing
+the destructive rollback command.
+
+### Stable operational root and immutable release tooling
+
+The **stable operational root** stays at its existing pinned path. Installed `gradex-backup` and
+`gradex-monitor` units keep their existing working directory/executable. Do not relocate, reinstall
+or repoint them for this release.
+
+The **immutable release tooling bundle** lives at
+`/home/deploy/gradex-production/releases/$RELEASE_SHA/tooling/`. Import refuses overwrite and removes
+write permissions. Retain the original archives, checksums and manifest beside `tooling/`; wrappers
+revalidate them each time. This is process immutability, not protection against a privileged host
+administrator. Checksums detect corruption/mixing; the trusted builder and authenticated SSH transfer
+supply provenance, not a signature against a hostile publisher.
+
+Runtime dependency closure traced from `host.sh` and Compose:
+
+- `deploy/hostinger/{host.sh,release-artifact.sh,backup-restic.sh,compose.yml,Caddyfile}`;
+- `deploy/hostinger/r2-cors.json.template` and `deploy/compose/redis-server.ext` for prepare;
+- `deploy/monitoring/monitor-once.sh`, invoked by the monitoring entry point;
+- `deploy/scripts/verify-schema-41-rollback.sh`, the offline wrapper guard;
+- `backend/internal/db/migrations/0041_enhancement_recovery_foundation.{up,down}.sql` for image hash comparison;
+- generated `release-tooling.env` and `tooling.sha256`.
+
+There are no secrets, `.git`, systemd units or installer in the bundle. Restic/password and Redis
+certificates stay at their configured external paths. The explicit `gradex-production` Compose name
+preserves named volumes/networks. The only relative bind, `./Caddyfile`, resolves inside the bundle.
+
+### Build, transfer and import
+
+On the trusted builder, at the final G0-approved clean HEAD:
+
+```bash
+RELEASE_SHA=$(git rev-parse HEAD)
+./deploy/hostinger/release.sh build
+./deploy/hostinger/release.sh export "$RELEASE_SHA"
+ssh deploy@186.241.16.111 "mkdir -p /home/deploy/gradex-production/incoming/$RELEASE_SHA"
+scp deploy/.state/hostinger/releases/"$RELEASE_SHA"/{release.env,images.tar.gz,images.tar.gz.sha256,deploy-bundle.tar.gz,deploy-bundle.tar.gz.sha256} \
+  deploy@186.241.16.111:/home/deploy/gradex-production/incoming/"$RELEASE_SHA"/
+ssh deploy@186.241.16.111 "bash -s -- $RELEASE_SHA" < deploy/hostinger/import-release.sh
+```
+
+The trusted importer is sent over SSH stdin from that same frozen builder tree; it does not update
+the pinned root. It copies the five incoming artifacts to protected staging, checks both SHA-256
+files before extraction/load, validates bundle/manifest and image bindings, then installs the release
+read-only. Failed import publishes no release directory. If OCI validation fails after `docker load`,
+images may already be loaded but runtime selection is unchanged. Do not bypass refusals by manually
+extracting tooling or editing metadata. Host tools add `tar`, `gzip`, `cmp` and `find`; not Git.
 
 ---
 
@@ -132,14 +177,19 @@ docker compose --file deploy/hostinger/compose.yml --project-directory deploy/ho
 docker compose --file deploy/hostinger/compose.yml --project-directory deploy/hostinger --project-name gradex-production --env-file /home/deploy/gradex-production/runtime.env rm --force api worker
 ```
 
-Run it from the candidate release tree, so the compose file matches the release being deployed.
+Run these selective stop/remove commands from the existing stable operational root before importing
+the candidate. The explicit project and protected runtime select the existing production containers.
 The second command removes only the stopped application containers. Confirm that neither `api` nor
 `worker` has a container in the production Compose project; stopped, restarting and paused containers
 are not quiescence proof. The rollback wrapper refuses any container in either service, whatever its
-state. The production worker in this Compose project is the sole legitimate media producer connected
-to this production database; Founder Beta and LG019 use separate stacks and databases. Verify at
-release time that no additional producer points at the production database. Do not stop unrelated
-stacks. Postgres and Redis remain running throughout.
+state. Both schema-41 commands inspect all local Docker containers, in every state/project, for
+worker role, worker Compose service, `gradex-worker` command/entrypoint or an unrecognized GradeX
+backend command. They refuse producers targeting `gradex_production` through any hostname, ambiguous
+database configuration and inspection failures. Known API and `gradex-migrate up` commands are not
+worker producers. Distinct database names establish local isolation for Founder Beta/LG019, whose
+containers are not stopped. Same-name databases on different servers are conservatively refused.
+This does not inspect native processes or remote machines: the operator must confirm none was
+introduced and prevent new producer starts during maintenance. Postgres/Redis remain running.
 
 `frontend` may also be stopped for a cleaner maintenance window — it serves a page that cannot reach
 a stopped API either way. Never stop `postgres`. Redis may stay up.
@@ -166,34 +216,37 @@ dies *before* `persist_release_selection` — leaving containers moved and `runt
 
 Required state transitions, in order:
 
-1. **Transfer and load** the candidate release archive, verify its SHA-256 on the host before
-   `docker load`, and re-verify the three image revision labels afterwards. Sync the candidate
-   source checkout to the exact frozen `RELEASE_SHA`, including its Git history, so `host.sh` can
-   verify the tree before it runs. Do not use an older pinned checkout.
-2. **Record the pre-migration baseline**: schema version/dirty, media state counts, active claim
+1. **Record the pre-migration baseline**: schema version/dirty, media state counts, active claim
    count, `processing_attempts` count.
-3. **Run the active-media guard.** Abort if anything is processing.
-4. **Stop and remove the `78ee4227` media producer** (`worker`, and `api` per §4). Confirm both
+2. **Run the active-media guard.** Abort if anything is processing.
+3. **Stop and remove the `78ee4227` media producer** (`worker`, and `api` per §4). Confirm both
    containers are absent, not merely unhealthy or exited.
+4. **Build, export, transfer and import** the frozen release using the commands above. No host
+   checkout changes or systemd reinstall are required. Abort on checksum/identity failure.
 5. **Select the candidate release** by setting the four release keys — `GRADEX_RELEASE_SHA`,
    `GRADEX_BACKEND_IMAGE`, `GRADEX_FRONTEND_IMAGE`, `GRADEX_PROOF_IMAGE` — in
    `/home/deploy/gradex-production/runtime.env` to the values in the frozen release's `release.env`.
    These are the same four keys `persist_release_selection` maintains, so the file shape is
    unchanged.
-6. **Apply the migration** from the frozen `RELEASE_SHA` tree:
+6. **Apply the migration** from imported tooling. Set `RELEASE_SHA` in the host shell to the frozen
+   identity; the wrapper independently binds it to protected runtime selection:
 
    ```bash
    GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production \
    GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env \
    GRADEX_HOST_PROJECT=gradex-production APP_ENV=production \
-   ./deploy/hostinger/host.sh up-core-schema-41-foundation
+   /home/deploy/gradex-production/releases/"$RELEASE_SHA"/tooling/deploy/hostinger/host.sh up-core-schema-41-foundation
    ```
 
    The command validates the production project, runtime selection, database URL target, OCI labels
-   and source-tree revision before touching the database. It brings `postgres` and `redis` to healthy, runs the
+   and tooling checksums/content before prepare mutations or migration. It requires absent API/worker
+   containers and local producer isolation. It brings `postgres` and `redis` to healthy, runs the
    candidate `migrate` service to completion, and then starts `api`, `worker` and `frontend` on the
    candidate images. Compose additionally enforces the ordering: `api` and `worker` declare
    `depends_on: migrate: service_completed_successfully`.
+   After startup, the local inventory must contain exactly the selected production worker and no
+   additional local worker targeting this database. Unrecognized URI query options fail closed
+   because they could override the database target; only `sslmode` is accepted by this inventory check.
 7. **Verify schema 41 is clean before trusting anything else**: `SELECT version, dirty FROM
    schema_migrations` must read `41 | f`.
 8. **Verify the application tier**: all three services report revision `RELEASE_SHA`, `/healthz` 200,
@@ -243,15 +296,15 @@ After the step it verifies the marker landed on a clean `40` and fails loudly if
 
 The host wrapper runs it as a one-off job on the **currently selected** backend image. Before it
 launches the job, it validates the production project, runtime environment and database URL target,
-release tree, all OCI
-revision labels, the schema-41 implementation ancestor, and the image's schema ceiling. It requires
+bundle checksums/content, manifest/image IDs, all OCI
+revision labels, rollback capability, migration file hashes and the image's schema ceiling. It requires
 Postgres healthy and both `api` and `worker` containers absent:
 
 ```bash
 GRADEX_HOST_STATE_DIR=/home/deploy/gradex-production \
 GRADEX_HOST_ENV_FILE=/home/deploy/gradex-production/runtime.env \
 GRADEX_HOST_PROJECT=gradex-production APP_ENV=production \
-./deploy/hostinger/host.sh rollback-schema-41-foundation
+/home/deploy/gradex-production/releases/"$RELEASE_SHA"/tooling/deploy/hostinger/host.sh rollback-schema-41-foundation
 ```
 
 The correct coordinated sequence is:
@@ -260,7 +313,7 @@ The correct coordinated sequence is:
 2. Verify no active media work, using the same guard as §3.
 3. **Keep the frozen `RELEASE_SHA` backend selected.** Do not restore the baseline release selection yet: the
    baseline image contains no `0041_…down.sql` and cannot perform this rollback.
-4. Run `host.sh rollback-schema-41-foundation` from the clean `RELEASE_SHA` tree, with the production
+4. Run `host.sh rollback-schema-41-foundation` from the **same imported `RELEASE_SHA` bundle**, with the production
    project and runtime path explicitly declared as shown above.
 5. Verify `schema_migrations` reads `40 | f`. If it does not, stop — do not start a schema-40
    application against a marker that is not a clean 40.
@@ -305,8 +358,9 @@ revision becomes the schema-41-compatible application rollback floor.
 ### Prerequisite on the 3C-B release plan
 
 Before 3C-B may deploy, its release plan must record the exact deployed 3C-A revision as the staged
-schema-41-compatible rollback target, and that image, tree and release manifest must still be
-available on the host. **Do not deploy 3C-B without it.** There is no other rollback target once the
+schema-41-compatible rollback target. Its backend/frontend/proof images, release manifest, tooling
+bundle, extracted tooling and both archives/checksums must remain staged. Do not garbage-collect
+this floor. **Do not deploy 3C-B without it.** There is no other rollback target once the
 schema-40 floor closes.
 
 ---

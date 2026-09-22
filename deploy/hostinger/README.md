@@ -51,14 +51,19 @@ Build on a clean trusted machine at the exact revision to deploy:
 ./deploy/hostinger/release.sh export
 ```
 
-Transfer the repository checkout, ignored `release.env`, image archive, and checksum over SSH. Verify
-the checksum on the VPS before `docker load`. The image tags, image IDs, and OCI revision labels in
-the ignored manifest bind the release to one full Git SHA. Do not use `latest`.
+Transfer `release.env`, `images.tar.gz`, `images.tar.gz.sha256`, `deploy-bundle.tar.gz` and
+`deploy-bundle.tar.gz.sha256` into `incoming/<full-sha>/` under host state. Send `import-release.sh`
+over trusted SSH stdin from the same frozen builder tree, with the full SHA argument and intended
+`GRADEX_HOST_STATE_DIR`. It verifies checksums before extraction/load, then bundle/manifest and image
+identities, and installs read-only `releases/<full-sha>/tooling/`. No per-release production Git
+checkout is required. See the [schema-41 release plan](../../docs/launch/RELEASE_PLAN_2026-09-21_SCHEMA_41_FOUNDATION.md)
+for executable transfer/import commands. Do not use `latest`. Existing backup/monitor systemd units
+keep their stable pinned root; do not reinstall or repoint them to a release bundle.
 
 Create two releases at two T046-compatible commits before the provider rollback drill. A pre-T046
 backend is not an acceptable rollback target once Redis is TLS/auth-only. If a compatible release was
-built before a later tooling commit, run `release.sh record <full-sha>` and
-`release.sh export <full-sha>` while its three labeled images remain local.
+built before a later tooling commit, retain its existing exported artifacts. `record` and `export`
+now require the exact clean builder HEAD and cannot attach newer tooling to an older image SHA.
 
 ## 3. Protected runtime configuration
 

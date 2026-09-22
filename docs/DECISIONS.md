@@ -4306,10 +4306,14 @@ written for it.
 
 **Release identity is frozen only after final independent G0 approval.** From a clean tree capture
 `RELEASE_SHA=$(git rev-parse HEAD)` and make no further commit; another code or documentation commit
-requires a new review and freeze. The release manifest, runtime selection, source tree and backend,
+requires a new review and freeze. The release manifest, runtime selection, deploy tooling bundle and backend,
 frontend and proof OCI revision labels must all identify that same SHA. The release must contain the
 supervised rollback implementation introduced by `49146e3`, but that ancestor is not itself the
-deployable revision.
+deployable revision. Production identity is artifact-based: no per-release host Git checkout or
+history is required. Builder Git exports images/tooling from the reviewed SHA. The manifest binds
+the bundle checksum; each schema-41 invocation verifies extracted content, metadata, image IDs/labels,
+rollback capability and migration hashes. The stable systemd operational root stays pinned while
+release tooling is imported separately under protected host state.
 
 **Application rollback and schema rollback are not independent during 3C-A.** There is no
 application-only path from the 3C-A revision back to `78ee4227` while the database remains at schema
@@ -4331,7 +4335,7 @@ The instant 3C-B persists its first ENHANCEMENT or FINALIZATION attempt row, FAI
 schema 41 → 40 becomes unavailable by design and `78ee4227` leaves the normal rollback chain
 permanently. The deployed 3C-A revision then becomes the schema-41-compatible application rollback
 floor, and no 3C-B release may deploy unless its plan records that exact revision as the staged
-rollback target and its image, tree and manifest remain available.
+rollback target and its backend/frontend/proof images, tooling bundle, manifest and checksums remain available.
 
 **Supervised production rollback.** Generic `gradex-migrate down` remains prohibited when
 `APP_ENV=production`, and no flag was added to change that. What exists instead is one narrow
@@ -4350,14 +4354,16 @@ contract still requires the API and worker containers to be removed first, becau
 producer could claim work in the instant after the query returns. After the step the command verifies
 the marker landed on a clean 40 and fails loudly otherwise, attempting no automatic repair and
 rewriting no evidence. `host.sh rollback-schema-41-foundation` validates the production project,
-protected runtime and database URL target, frozen tree and selected image labels, requires Postgres
+protected runtime and database URL target, immutable bundle and selected image identities, requires Postgres
 healthy and both `api` and `worker` containers absent, then runs the one-off job on the frozen
 release backend image.
 
 The exact final G0-approved candidate image is required for rollback, because the baseline lacks
 the dedicated command and `0041_…down.sql`. The production worker in the `gradex-production`
 Compose project is the sole legitimate producer for this database; Founder Beta and LG019 use
-separate stacks and databases. Verify no additional production-DB producer exists at release time.
+separate stacks and databases. Both schema-41 wrappers inspect all local Docker containers for
+additional production-DB producers and refuse ambiguous configuration or failed inspection. The
+operator must confirm no native/remote producer was introduced and prevent new starts during maintenance.
 The rollback order is: active-media guard → remove `api` and `worker` while keeping Postgres up →
 confirm project and release identity → supervised 41→40 rollback → verify clean 40 → restore the
 baseline selection → start and health-check `78ee4227`. Never restore baseline selection before DOWN.
