@@ -4,6 +4,7 @@ set -euo pipefail
 
 S12_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 S12_RELEASE_DIR="$S12_ROOT/deploy/.state/hostinger/releases"
+. "$S12_ROOT/deploy/hostinger/release-artifact.sh"
 
 note() { printf 's12-hostinger-release: %s\n' "$*" >&2; }
 die() { note "$*"; exit 1; }
@@ -21,6 +22,7 @@ record_release() {
   [ "$#" = 1 ] || die "record requires one full release SHA"
   local revision="$1" short backend frontend proof manifest
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "release SHA must be 40 lowercase hexadecimal characters"
+  [ "$(current_revision)" = "$revision" ] || die "record requires the exact clean builder HEAD"
   short="${revision:0:12}"
   backend="gradex-backend:hostinger-$short"
   frontend="gradex-frontend:hostinger-$short"
@@ -44,7 +46,29 @@ record_release() {
     printf 'GRADEX_FRONTEND_IMAGE_ID=%s\n' "$(docker image inspect --format '{{.Id}}' "$frontend")"
     printf 'GRADEX_PROOF_IMAGE_ID=%s\n' "$(docker image inspect --format '{{.Id}}' "$proof")"
   } >"$manifest"
+  package_tooling "$revision"
   note "recorded checksum-addressed local images for release $revision"
+}
+
+package_tooling() {
+  local revision="$1" release="$S12_RELEASE_DIR/$1" staging
+  staging="$(mktemp -d)"
+  # Explicit runtime closure: host.sh sources backup/artifact helpers, invokes the
+  # monitor, prepares TLS/CORS, and resolves Compose's Caddy bind beside itself.
+  git -C "$S12_ROOT" archive "$revision" \
+    deploy/hostinger/host.sh deploy/hostinger/compose.yml deploy/hostinger/Caddyfile \
+    deploy/hostinger/backup-restic.sh deploy/hostinger/release-artifact.sh \
+    deploy/hostinger/r2-cors.json.template deploy/compose/redis-server.ext \
+    deploy/monitoring/monitor-once.sh deploy/scripts/verify-schema-41-rollback.sh \
+    backend/internal/db/migrations/0041_enhancement_recovery_foundation.up.sql \
+    backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql |
+    tar -xf - -C "$staging"
+  printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA41_CAPABILITY=supervised-41-to-40-v1\n' "$revision" >"$staging/release-tooling.env"
+  (cd "$staging" && find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256)
+  tar -czf "$release/deploy-bundle.tar.gz" -C "$staging" --transform='s,^./,,' .
+  (cd "$release" && sha256sum deploy-bundle.tar.gz >deploy-bundle.tar.gz.sha256)
+  printf 'GRADEX_DEPLOY_BUNDLE_SHA256=%s\n' "$(sha256sum "$release/deploy-bundle.tar.gz" | awk '{print $1}')" >>"$release/release.env"
+  rm -rf -- "$staging"
 }
 
 build_release() {
@@ -57,17 +81,15 @@ build_release() {
   frontend="gradex-frontend:hostinger-$short"
   proof="gradex-backend-proof:hostinger-$short"
 
-  tar --exclude=.git --exclude=.env --exclude='.env.*' --exclude='*.out' --exclude=coverage \
-    -C "$S12_ROOT/backend" -cf - . |
+  git -C "$S12_ROOT" archive "$revision:backend" |
     docker build --build-arg "GRADEX_REVISION=$revision" --tag "$backend" -
-  tar --exclude=.git --exclude=.env --exclude='.env.*' --exclude='*.out' --exclude=coverage \
-    -C "$S12_ROOT/backend" -cf - . |
+  git -C "$S12_ROOT" archive "$revision:backend" |
     docker build --target proof --build-arg "GRADEX_REVISION=$revision" --tag "$proof" -
-  tar --exclude=node_modules --exclude=.next --exclude=coverage \
-    -C "$S12_ROOT/frontend" -cf - . |
+  git -C "$S12_ROOT" archive "$revision:frontend" |
     docker build --build-arg "GRADEX_REVISION=$revision" --tag "$frontend" -
 
   record_release "$revision"
+  [ "$(current_revision)" = "$revision" ] || die "builder tree changed during build"
   note "built release $revision"
 }
 
@@ -83,19 +105,22 @@ export_release() {
   else
     die "export accepts at most one full release SHA"
   fi
+  [ "$(current_revision)" = "$revision" ] || die "export requires the exact clean builder HEAD"
   manifest="$S12_RELEASE_DIR/$revision/release.env"
   [ -f "$manifest" ] || die "build release $revision first"
   set -a
   # shellcheck disable=SC1090
   . "$manifest"
   set +a
+  [ "$GRADEX_RELEASE_SHA" = "$revision" ] || die "manifest release mismatch"
+  verify_release_images "$manifest" "$revision"
   backend="$GRADEX_BACKEND_IMAGE"
   frontend="$GRADEX_FRONTEND_IMAGE"
   proof="$GRADEX_PROOF_IMAGE"
   archive="$S12_RELEASE_DIR/$revision/images.tar.gz"
   docker save "$backend" "$frontend" "$proof" | gzip --best >"$archive.partial"
   mv "$archive.partial" "$archive"
-  sha256sum "$archive" >"$archive.sha256"
+  (cd "$S12_RELEASE_DIR/$revision" && sha256sum images.tar.gz >images.tar.gz.sha256)
   chmod 600 "$archive" "$archive.sha256"
   note "exported release $revision with checksum into ignored state"
 }

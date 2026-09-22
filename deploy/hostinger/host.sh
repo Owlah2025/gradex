@@ -51,10 +51,11 @@ trap cleanup_backup_staging_notice EXIT
 
 # shellcheck source=backup-restic.sh
 . "$S12_HOST_DIR/backup-restic.sh"
+. "$S12_HOST_DIR/release-artifact.sh"
 
 require_tools() {
   local tool
-  for tool in awk curl date docker flock grep jq mktemp openssl readlink sed sha256sum stat timeout; do
+  for tool in awk cmp curl date docker find flock grep gzip jq mktemp openssl readlink sed sha256sum stat tar timeout; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
   done
   docker info >/dev/null 2>&1 || die "Docker is not reachable"
@@ -362,10 +363,16 @@ wait_for_completion() {
 # edge through the dependency graph; migrate has already run as a one-shot, so
 # the api dependency it satisfies is met.
 start_core() {
-  prepare
   if [ "${1:-}" = schema-41-foundation ]; then
+    require_tools
+    load_environment
+    validate_environment
     require_schema41_release_identity
+    require_absent api
+    require_absent worker
+    require_no_local_production_workers
   fi
+  prepare
   compose up --detach postgres redis
   wait_for_status postgres healthy
   wait_for_status redis healthy
@@ -375,6 +382,12 @@ start_core() {
   wait_for_status api healthy
   wait_for_status worker running
   wait_for_status frontend healthy
+  if [ "${1:-}" = schema-41-foundation ]; then
+    local expected_worker
+    expected_worker="$(service_id worker)" || die "could not inspect production worker topology"
+    [ -n "$expected_worker" ] || die "production worker is absent after startup"
+    require_no_local_production_workers "$expected_worker"
+  fi
   note "application tier is running privately; the public edge has not been started"
 }
 
@@ -1353,28 +1366,14 @@ require_schema41_production_target() {
   [ "$db_url_name" = "$POSTGRES_DB" ] || die "production DATABASE_URL names a different database"
 }
 
-# The reviewed release identity comes from runtime.env, and validate_environment
-# has already matched all three OCI revision labels to it. The host source tree
-# must be the same immutable revision and include the rollback implementation.
+# runtime.env selects the release; the imported manifest binds the images and
+# checksummed tooling. No production Git metadata or history is needed.
 require_schema41_release_identity() {
-  local tree_revision tree_status
   require_schema41_production_target
-  command -v git >/dev/null 2>&1 || die "git is required to verify the release tree"
-  tree_revision="$(git -C "$S12_ROOT" rev-parse HEAD)" || die "cannot identify the release tree"
-  [ "$tree_revision" = "$GRADEX_RELEASE_SHA" ] ||
-    die "release tree HEAD does not match GRADEX_RELEASE_SHA"
-  tree_status="$(git -C "$S12_ROOT" status --porcelain=v1)" || die "cannot inspect the release tree"
-  [ -z "$tree_status" ] || die "release tree is not clean"
-  git -C "$S12_ROOT" merge-base --is-ancestor 49146e37f9b3a41380ada9aa31f63c929636539b "$tree_revision" ||
-    die "selected release predates the supervised schema 41 rollback"
-  grep --quiet --fixed-strings 'case rollbackSchema41Command:' "$S12_ROOT/backend/cmd/migrate/main.go" ||
-    die "selected release lacks the dedicated rollback command"
-  grep --quiet --fixed-strings 'rollback-schema-41-foundation) ' "$S12_ROOT/deploy/hostinger/host.sh" ||
-    die "selected release lacks the Hostinger rollback command"
-  [ -f "$S12_ROOT/backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql" ] ||
-    die "selected release lacks migration 0041 DOWN"
+  require_release_artifact
   [ "$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")" = 41 ] ||
     die "selected backend image must target schema 41"
+  require_schema41_image_capability
 }
 
 # The supervised emergency rollback of the 3C-A foundation migration, and
@@ -1399,6 +1398,7 @@ rollback_schema_41_foundation() {
   require_status postgres healthy
   require_absent api
   require_absent worker
+  require_no_local_production_workers
 
   # cmd/migrate requires the transition-naming acknowledgement when
   # APP_ENV=production and refuses it otherwise, so the flag follows the

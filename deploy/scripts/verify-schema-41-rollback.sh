@@ -40,6 +40,11 @@ validate_environment() {
 }
 require_status() { [ "$1" = postgres ] && [ "$2" = healthy ] || die "unexpected status probe"; }
 image_max_schema_version() { printf '%s\n' "$MOCK_MAX_SCHEMA"; }
+# Artifact identity and executable no-Git paths are exercised end-to-end by
+# verify-deploy-bundle.py; this guard retains the scope/quiescence regression set.
+require_release_artifact() { [ "$MOCK_ARTIFACT_VALID" = true ] || die "invalid release artifact"; }
+require_schema41_image_capability() { :; }
+require_no_local_production_workers() { :; }
 service_id() {
   [ "${MOCK_PS_FAILURE:-}" != "$1" ] || return 1
   case "$1" in
@@ -48,15 +53,11 @@ service_id() {
     *) return 1 ;;
   esac
 }
-git() {
-  case "$3" in
-    rev-parse) printf '%s\n' "$MOCK_TREE_SHA" ;;
-    status) [ "$MOCK_TREE_CLEAN" = true ] || printf ' M changed\n' ;;
-    merge-base) [ "$MOCK_ANCESTOR" = true ] ;;
-    *) return 1 ;;
-  esac
+compose() {
+  COMPOSE_CALL="$*"
+  [ "$*" != 'up --detach --no-deps api worker frontend' ] || MOCK_WORKER_ID=worker
+  printf 'COMPOSE %s\n' "$*"
 }
-compose() { COMPOSE_CALL="$*"; printf 'COMPOSE %s\n' "$*"; }
 
 fixture() {
   S12_ROOT="$ROOT"
@@ -72,9 +73,7 @@ fixture() {
   GRADEX_RELEASE_SHA=1111111111111111111111111111111111111111
   GRADEX_BACKEND_IMAGE=gradex-backend:hostinger-reviewed
   MOCK_IMAGE_SHA="$GRADEX_RELEASE_SHA"
-  MOCK_TREE_SHA="$GRADEX_RELEASE_SHA"
-  MOCK_TREE_CLEAN=true
-  MOCK_ANCESTOR=true
+  MOCK_ARTIFACT_VALID=true
   MOCK_MAX_SCHEMA=41
   MOCK_API_ID=
   MOCK_WORKER_ID=
@@ -104,15 +103,11 @@ set_wrong_database() { POSTGRES_DB=gradex_other; }
 set_wrong_database_url() { DATABASE_URL='postgres://gradex:placeholder@postgres:5432/gradex_other?sslmode=disable'; }
 set_wrong_database_host() { DATABASE_URL='postgres://gradex:placeholder@other-postgres:5432/gradex_production?sslmode=disable'; }
 set_image_mismatch() { MOCK_IMAGE_SHA=2222222222222222222222222222222222222222; }
-set_tree_mismatch() { MOCK_TREE_SHA=2222222222222222222222222222222222222222; }
-set_wrong_tree_directory() { S12_ROOT="$ROOT/deploy/hostinger"; }
 set_old_release() {
   GRADEX_RELEASE_SHA=a272011620296569f180a02c11c33fbbc8d97c73
   MOCK_IMAGE_SHA="$GRADEX_RELEASE_SHA"
-  MOCK_TREE_SHA="$GRADEX_RELEASE_SHA"
-  MOCK_ANCESTOR=false
+  MOCK_ARTIFACT_VALID=false
 }
-set_dirty_tree() { MOCK_TREE_CLEAN=false; }
 set_wrong_schema_ceiling() { MOCK_MAX_SCHEMA=40; }
 set_staging_env() { APP_ENV=staging; }
 
@@ -132,10 +127,7 @@ expect_refusal "wrong database URL" "production DATABASE_URL names a different d
 expect_refusal "wrong database host" "production DATABASE_URL must use this project's postgres service" set_wrong_database_host
 expect_refusal "staging environment" "production-only" set_staging_env
 expect_refusal "backend revision mismatch" "image revision mismatch" set_image_mismatch
-expect_refusal "release tree mismatch" "release tree HEAD does not match" set_tree_mismatch
-expect_refusal "wrong project source tree" "selected release lacks the dedicated rollback command" set_wrong_tree_directory
-expect_refusal "older artifact without rollback" "predates the supervised schema 41 rollback" set_old_release
-expect_refusal "dirty release tree" "release tree is not clean" set_dirty_tree
+expect_refusal "older artifact without rollback" "invalid release artifact" set_old_release
 expect_refusal "wrong image schema ceiling" "selected backend image must target schema 41" set_wrong_schema_ceiling
 
 (
