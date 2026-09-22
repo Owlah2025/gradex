@@ -17,6 +17,11 @@ const (
 	TypeMediaEnhancement = "media:enhancement"
 )
 
+// DefaultQueueName is the one asynq queue this deployment enqueues to and
+// serves. Release tooling that has to prove a queue is drained needs the name
+// from the same authority the server uses, not a second literal that can drift.
+const DefaultQueueName = "default"
+
 type ServerOptions struct {
 	ErrorHandler    asynq.ErrorHandler
 	HealthCheckFunc func(error)
@@ -32,7 +37,7 @@ func (c *Connection) NewServer(options ServerOptions) *asynq.Server {
 			HealthCheckFunc: options.HealthCheckFunc,
 			Logger:          options.Logger,
 			Queues: map[string]int{
-				"default": 1,
+				DefaultQueueName: 1,
 			},
 		},
 	)

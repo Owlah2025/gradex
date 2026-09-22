@@ -44,6 +44,12 @@ ALLOWLIST=(
   # directly into db.Connect/pgx. Connection errors are discarded and the
   # sanitized artifact never receives configuration secrets. D-087.
   "cmd/e2e-media-diagnostic/main.go"
+  # Read-only 42 -> 41 rollback drain proof: DATABASE_URL crosses exactly once
+  # into db.Connect/pgx. The Redis credentials are NOT exposed here — they are
+  # handed to queue.NewConnection as Secret values, which has its own pinned
+  # boundary. Output is counts and event/task identifiers only, and every
+  # message leaves through a scrubber that removes the DSN and Redis password.
+  "cmd/enhancement-drain/main.go"
   # DSN only, for pgx.Connect, which cannot accept the wrapper. The bootstrap
   # password is NOT exposed here: it is resolved, checked with IsEmpty(), and
   # passed to Identity as a Secret. Adding a password Expose() to this file

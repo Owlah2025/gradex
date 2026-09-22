@@ -51,6 +51,102 @@ func CheckEnhancementRecoveryRollbackSafety(ctx context.Context, pool *pgxpool.P
 	return nil
 }
 
+// PendingEnhancementIntent is one durable manual-enhancement request that the
+// media dispatcher has not yet turned into a queue task.
+type PendingEnhancementIntent struct {
+	EventID        string
+	AssetVersionID string
+}
+
+// pendingEnhancementIntentSample bounds what a refusal prints. The count it
+// reports alongside is exact; the identifiers are a sample, because an operator
+// needs enough to begin resolving the work, not an entire backlog in a shell.
+const pendingEnhancementIntentSample = 20
+
+// PendingEnhancementIntents reports every committed media.enhancement_requested
+// outbox event with no dispatch receipt, as an exact count plus a bounded
+// sample. It is read-only and mutates no processing evidence.
+//
+// It deliberately ignores available_at. A future-dated intent is still durable:
+// it survives a downgrade and becomes dispatchable later, which is exactly the
+// case a rollback gate must catch rather than defer.
+func PendingEnhancementIntents(ctx context.Context, pool *pgxpool.Pool) (int, []PendingEnhancementIntent, error) {
+	if pool == nil {
+		return 0, nil, errors.New("database pool is required")
+	}
+	var total int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM outbox_events e
+		LEFT JOIN media_outbox_dispatches md ON md.event_id = e.id
+		WHERE e.source_module = 'MEDIA_AND_ASSETS'
+		  AND e.event_type = 'media.enhancement_requested'
+		  AND md.event_id IS NULL
+	`).Scan(&total); err != nil {
+		return 0, nil, fmt.Errorf("counting pending enhancement intents: %w", err)
+	}
+	if total == 0 {
+		return 0, nil, nil
+	}
+	rows, err := pool.Query(ctx, `
+		SELECT e.id::text, e.aggregate_id::text
+		FROM outbox_events e
+		LEFT JOIN media_outbox_dispatches md ON md.event_id = e.id
+		WHERE e.source_module = 'MEDIA_AND_ASSETS'
+		  AND e.event_type = 'media.enhancement_requested'
+		  AND md.event_id IS NULL
+		ORDER BY e.occurred_at, e.id
+		LIMIT $1
+	`, pendingEnhancementIntentSample)
+	if err != nil {
+		return 0, nil, fmt.Errorf("listing pending enhancement intents: %w", err)
+	}
+	defer rows.Close()
+	var pending []PendingEnhancementIntent
+	for rows.Next() {
+		var intent PendingEnhancementIntent
+		if err := rows.Scan(&intent.EventID, &intent.AssetVersionID); err != nil {
+			return 0, nil, fmt.Errorf("reading pending enhancement intents: %w", err)
+		}
+		pending = append(pending, intent)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, fmt.Errorf("iterating pending enhancement intents: %w", err)
+	}
+	return total, pending, nil
+}
+
+// CheckNoPendingEnhancementIntents is the hard 42 -> 41 gate for undispatched
+// manual enhancement work, and it is not advisory.
+//
+// The deployed 3C-A media dispatcher has no case for
+// media.enhancement_requested. It does not skip that row: dispatchEvent returns
+// "unsupported media outbox event", DispatchPending returns the error, and the
+// batch stops. The query that feeds it is ordered by occurred_at and selects
+// only rows without a dispatch receipt, so the surviving intent is the first row
+// of every subsequent batch too. One such row therefore does not merely fail to
+// run — it permanently blocks scan and transcode dispatch for the whole module
+// until an operator removes it.
+//
+// Proving zero before the downgrade is the only safe ordering. This command does
+// not delete or reschedule intents: rollback must not quietly discard work an
+// Administrator asked for.
+func CheckNoPendingEnhancementIntents(ctx context.Context, pool *pgxpool.Pool) error {
+	total, pending, err := PendingEnhancementIntents(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return nil
+	}
+	described := make([]string, 0, len(pending))
+	for _, intent := range pending {
+		described = append(described, intent.EventID+" (asset version "+intent.AssetVersionID+")")
+	}
+	return fmt.Errorf("%d undispatched media.enhancement_requested outbox event(s) remain (%s); the schema-41 dispatcher aborts its batch on that event type and would block all later media outbox dispatch. Resolve them before rolling back; this command will not delete them",
+		total, strings.Join(described, ", "))
+}
+
 // CheckActiveProcessingKindRollbackSafety keeps a refused 42 -> 41 downgrade
 // from dirtying golang-migrate's marker. Terminal progress tokens are allowed:
 // only an in-flight processing operation needs the schema-42 kind column.

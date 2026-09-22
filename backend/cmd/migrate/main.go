@@ -114,8 +114,64 @@ const rollbackSchema41Command = "rollback-schema-41"
 // runbook, or made to authorize any other schema movement.
 const rollbackSchema41Confirmation = "schema-41-to-40"
 
+// rollbackSchema42Command is the supervised production downgrade for the 3C-B
+// manual enhancement recovery release, and — like its schema-41 predecessor — it
+// exists for exactly one migration.
+//
+// It means one thing and can mean nothing else: the database is clean at 42,
+// exactly 0042 is reverted, and the result is a clean 41. It takes no target
+// version and no step count, it cannot reach 40, and it ends at 41. Continuing
+// on to 41 -> 40 is not a rollback this command performs or offers; that is a
+// separate supervised command with its own, stricter, evidence rule.
+//
+// Adding it does not widen the generic `down` path, which stays prohibited in
+// production with no flag to change that.
+const rollbackSchema42Command = "rollback-schema-42"
+
+// rollbackSchema42Confirmation names its exact transition, so it cannot be
+// copied from a schema-41 runbook and cannot authorize any other movement.
+const rollbackSchema42Confirmation = "schema-42-to-41"
+
 func usage() error {
-	return errors.New("usage: migrate <up|down|version|max-version|" + rollbackSchema41Command + "> [steps]")
+	return errors.New("usage: migrate <up|down|version|max-version|" +
+		rollbackSchema41Command + "|" + rollbackSchema42Command + "> [steps]")
+}
+
+// requireProductionAcknowledgement applies the acknowledgement rule shared by
+// every supervised downgrade: required, and exact, in production; refused
+// outside it, so the flag can never become a habit that is passed everywhere and
+// therefore means nothing.
+func requireProductionAcknowledgement(cfg *config.Config, command, want, got string) error {
+	if cfg.Environment().IsProduction() {
+		if got != want {
+			return fmt.Errorf("APP_ENV=production requires -confirm-production=%s for %s", want, command)
+		}
+		return nil
+	}
+	if got != "" {
+		return fmt.Errorf("-confirm-production was passed but APP_ENV=%s", cfg.Environment())
+	}
+	return nil
+}
+
+// requireCleanSchemaAt answers "dirty?" before "which version?", because a dirty
+// marker means the recorded version may not describe the database at all. It
+// runs before golang-migrate is asked to do anything, so a refusal leaves the
+// marker exactly as it was found.
+func requireCleanSchemaAt(m *migrate.Migrate, command string, want, resulting int) error {
+	current, dirty, err := m.Version()
+	if err != nil {
+		return fmt.Errorf("reading current schema version: %w", err)
+	}
+	if dirty {
+		return fmt.Errorf("schema is dirty at version %d; %s will not act on a half-applied schema, resolve it manually first",
+			current, command)
+	}
+	if current != uint(want) {
+		return fmt.Errorf("schema is at version %d; %s reverts only %d to %d and is not authorized to cross any other version",
+			current, command, want, resulting)
+	}
+	return nil
 }
 
 func run() error {
@@ -159,6 +215,8 @@ func run() error {
 		return down(m, cfg, args[1:])
 	case rollbackSchema41Command:
 		return rollbackSchema41(m, cfg, args[1:])
+	case rollbackSchema42Command:
+		return rollbackSchema42(m, cfg, args[1:])
 	case "version":
 		return version(m)
 	default:
@@ -263,33 +321,15 @@ func rollbackSchema41(m *migrate.Migrate, cfg *config.Config, args []string) err
 	}
 
 	// The acknowledgement follows the declared environment exactly, in the shape
-	// cmd/bootstrap-admin established: required in production, refused outside
-	// it, so the flag can never become a habit that is passed everywhere and
-	// therefore means nothing.
-	if cfg.Environment().IsProduction() {
-		if *confirm != rollbackSchema41Confirmation {
-			return fmt.Errorf("APP_ENV=production requires -confirm-production=%s for the supervised schema %d to %d rollback",
-				rollbackSchema41Confirmation,
-				db.EnhancementRecoveryFoundationSchemaVersion, db.MediaPlayableFoundationSchemaVersion)
-		}
-	} else if *confirm != "" {
-		return fmt.Errorf("-confirm-production was passed but APP_ENV=%s", cfg.Environment())
+	// cmd/bootstrap-admin established.
+	if err := requireProductionAcknowledgement(cfg, fmt.Sprintf("the supervised schema %d to %d rollback",
+		db.EnhancementRecoveryFoundationSchemaVersion, db.MediaPlayableFoundationSchemaVersion),
+		rollbackSchema41Confirmation, *confirm); err != nil {
+		return err
 	}
-
-	current, dirty, err := m.Version()
-	if err != nil {
-		return fmt.Errorf("reading current schema version: %w", err)
-	}
-	// Dirty is answered before the version, because a dirty marker means the
-	// recorded version may not describe the database at all.
-	if dirty {
-		return fmt.Errorf("schema is dirty at version %d; %s will not act on a half-applied schema, resolve it manually first",
-			current, rollbackSchema41Command)
-	}
-	if current != uint(db.EnhancementRecoveryFoundationSchemaVersion) {
-		return fmt.Errorf("schema is at version %d; %s reverts only %d to %d and is not authorized to cross any other version",
-			current, rollbackSchema41Command,
-			db.EnhancementRecoveryFoundationSchemaVersion, db.MediaPlayableFoundationSchemaVersion)
+	if err := requireCleanSchemaAt(m, rollbackSchema41Command,
+		db.EnhancementRecoveryFoundationSchemaVersion, db.MediaPlayableFoundationSchemaVersion); err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
@@ -310,11 +350,20 @@ func rollbackSchema41(m *migrate.Migrate, cfg *config.Config, args []string) err
 		return err
 	}
 
+	return stepDownOnce(m, rollbackSchema41Command, db.MediaPlayableFoundationSchemaVersion)
+}
+
+// stepDownOnce executes the single reversal a supervised rollback authorizes and
+// then proves where it landed.
+//
+// It never forces a version, clears a dirty marker, retries, or continues to a
+// further down migration. If the step fails the marker state is genuinely
+// unknown to this process — the down SQL may have refused before touching
+// anything, or golang-migrate may have marked the version dirty first — so it
+// reports what the database actually says instead of claiming it is clean, and
+// leaves repair to an operator.
+func stepDownOnce(m *migrate.Migrate, command string, resulting int) error {
 	if err := m.Steps(-1); err != nil {
-		// The marker state is now genuinely unknown to this process: the down
-		// SQL may have refused before touching anything, or golang-migrate may
-		// have marked the version dirty first. Report what the database
-		// actually says rather than claiming it is clean.
 		after, afterDirty, versionErr := m.Version()
 		if versionErr != nil {
 			return fmt.Errorf("supervised schema rollback failed: %w (the resulting schema state could not be read: %v)", err, versionErr)
@@ -322,16 +371,90 @@ func rollbackSchema41(m *migrate.Migrate, cfg *config.Config, args []string) err
 		return fmt.Errorf("supervised schema rollback failed: %w (schema is now version=%d dirty=%t; no automatic repair was attempted)",
 			err, after, afterDirty)
 	}
-
 	after, afterDirty, err := m.Version()
 	if err != nil {
 		return fmt.Errorf("reading resulting schema version: %w", err)
 	}
-	if after != uint(db.MediaPlayableFoundationSchemaVersion) || afterDirty {
+	if after != uint(resulting) || afterDirty {
 		return fmt.Errorf("supervised schema rollback did not land on a clean version %d: version=%d dirty=%t; do not start the baseline application",
-			db.MediaPlayableFoundationSchemaVersion, after, afterDirty)
+			resulting, after, afterDirty)
 	}
-	return report(m, rollbackSchema41Command)
+	return report(m, command)
+}
+
+// rollbackSchema42 performs the supervised 42 -> 41 rollback of the 3C-B manual
+// enhancement recovery release.
+//
+// Every refusal happens BEFORE golang-migrate is asked to do anything, so a
+// refused rollback leaves the marker exactly as it found it: version 42, not
+// dirty. The SQL guard inside 0042_active_processing_attempt_kind.down.sql is
+// retained as defence in depth against a runner that bypasses this command.
+//
+// Three preconditions are asked of the database, in this order, and each is a
+// hard gate rather than a warning:
+//
+//  1. no active processing operation, because an in-flight claim is what needs
+//     the schema-42 kind column;
+//  2. no claimed media work at all, which catches an incomplete quiesce;
+//  3. no undispatched media.enhancement_requested outbox event, because the
+//     schema-41 dispatcher aborts its batch on that event type and would then
+//     block every later media outbox event permanently.
+//
+// The third gate covers only PostgreSQL. A dispatched intent whose asynq task is
+// still pending, scheduled, retrying or archived is invisible here by design —
+// this binary holds no Redis client — so the operational contract requires
+// cmd/enhancement-drain to have proven the queue side first. The Hostinger
+// wrapper runs it; see docs/launch/RUNBOOK.md.
+//
+// This command ends at a clean 41. It does not continue to 40, and starting the
+// schema-41 application is a separate, deliberate act afterwards.
+func rollbackSchema42(m *migrate.Migrate, cfg *config.Config, args []string) error {
+	fs := flag.NewFlagSet(rollbackSchema42Command, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	confirm := fs.String("confirm-production", "",
+		"required acknowledgement when APP_ENV=production; must be exactly "+rollbackSchema42Confirmation)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("%s takes no positional arguments; it reverts exactly schema %d to %d",
+			rollbackSchema42Command, db.ActiveProcessingKindSchemaVersion, db.EnhancementRecoveryFoundationSchemaVersion)
+	}
+
+	if err := requireProductionAcknowledgement(cfg, fmt.Sprintf("the supervised schema %d to %d rollback",
+		db.ActiveProcessingKindSchemaVersion, db.EnhancementRecoveryFoundationSchemaVersion),
+		rollbackSchema42Confirmation, *confirm); err != nil {
+		return err
+	}
+	if err := requireCleanSchemaAt(m, rollbackSchema42Command,
+		db.ActiveProcessingKindSchemaVersion, db.EnhancementRecoveryFoundationSchemaVersion); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), lockTimeout)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL().Expose())
+	if err != nil {
+		return fmt.Errorf("opening supervised rollback preflight connection: %w", err)
+	}
+	defer pool.Close()
+	// The same helper the generic down path uses when it crosses 42 -> 41, so the
+	// supervised command cannot drift into a weaker one.
+	if err := db.CheckActiveProcessingKindRollbackSafety(ctx, pool); err != nil {
+		return err
+	}
+	if err := db.CheckNoActiveMediaClaims(ctx, pool); err != nil {
+		return err
+	}
+	if err := db.CheckNoPendingEnhancementIntents(ctx, pool); err != nil {
+		return err
+	}
+
+	// Deliberately NOT CheckEnhancementRecoveryRollbackSafety: historical
+	// ENHANCEMENT and FINALIZATION attempts stay fully representable on schema
+	// 41 and must not be deleted to satisfy a rollback. They close 41 -> 40,
+	// which this command never performs.
+	return stepDownOnce(m, rollbackSchema42Command, db.EnhancementRecoveryFoundationSchemaVersion)
 }
 
 func version(m *migrate.Migrate) error {
