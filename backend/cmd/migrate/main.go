@@ -210,6 +210,11 @@ func down(m *migrate.Migrate, cfg *config.Config, args []string) error {
 			return fmt.Errorf("opening rollback preflight connection: %w", err)
 		}
 		defer pool.Close()
+		if version >= db.ActiveProcessingKindSchemaVersion && int64(version)-int64(steps) < db.ActiveProcessingKindSchemaVersion {
+			if err := db.CheckActiveProcessingKindRollbackSafety(ctx, pool); err != nil {
+				return err
+			}
+		}
 		if version >= db.CourseThumbnailSchemaVersion && int64(version)-int64(steps) < db.CourseThumbnailSchemaVersion {
 			if err := db.CheckThumbnailRollbackSafety(ctx, pool); err != nil {
 				return err

@@ -63,7 +63,8 @@ const (
 	// Representation only — no enhancement recovery producer exists at this
 	// version.
 	EnhancementRecoveryFoundationSchemaVersion = MediaPlayableFoundationSchemaVersion + 1
-	MaxSchemaVersion                           = EnhancementRecoveryFoundationSchemaVersion
+	ActiveProcessingKindSchemaVersion          = EnhancementRecoveryFoundationSchemaVersion + 1
+	MaxSchemaVersion                           = ActiveProcessingKindSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

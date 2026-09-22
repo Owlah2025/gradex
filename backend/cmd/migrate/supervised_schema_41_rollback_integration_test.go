@@ -20,6 +20,7 @@ import (
 func productionRollbackHarness(t *testing.T, ctx context.Context) (*migrate.Migrate, *config.Config, *pgxpool.Pool) {
 	t.Helper()
 	m, _, pool := migrateCommandHarness(t, ctx)
+	stageSchema41(t, m)
 	return m, migrateCommandConfig(t, "production"), pool
 }
 
@@ -92,7 +93,7 @@ func TestGenericDownRemainsProhibitedInProduction(t *testing.T) {
 			t.Fatalf("down %v error = %v, want the production prohibition", steps, err)
 		}
 	}
-	assertSchema(t, m, db.MaxSchemaVersion, false, "after refused generic down")
+	assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused generic down")
 }
 
 // TestSupervisedRollbackRequiresExactAcknowledgement pins the fail-closed
@@ -115,7 +116,7 @@ func TestSupervisedRollbackRequiresExactAcknowledgement(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "requires -confirm-production=schema-41-to-40") {
 			t.Fatalf("rollback with %v error = %v, want the acknowledgement refusal", args, err)
 		}
-		assertSchema(t, m, db.MaxSchemaVersion, false, "after refused acknowledgement")
+		assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused acknowledgement")
 	}
 
 	// Outside production the flag must not be passed at all, so it cannot become
@@ -125,7 +126,7 @@ func TestSupervisedRollbackRequiresExactAcknowledgement(t *testing.T) {
 		!strings.Contains(err.Error(), "-confirm-production was passed but APP_ENV=") {
 		t.Fatalf("development rollback with acknowledgement error = %v, want the misuse refusal", err)
 	}
-	assertSchema(t, m, db.MaxSchemaVersion, false, "after refused development acknowledgement")
+	assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused development acknowledgement")
 }
 
 // TestSupervisedRollbackRefusesPositionalArguments proves the command cannot be
@@ -143,7 +144,7 @@ func TestSupervisedRollbackRefusesPositionalArguments(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "takes no positional arguments") {
 			t.Fatalf("rollback with %v error = %v, want the positional-argument refusal", args, err)
 		}
-		assertSchema(t, m, db.MaxSchemaVersion, false, "after refused positional arguments")
+		assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused positional arguments")
 	}
 }
 
@@ -209,7 +210,7 @@ func TestSupervisedRollbackRefusesNonFullEvidence(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "enhancement or finalization processing attempts exist") {
 		t.Fatalf("supervised rollback error = %v, want the non-FULL evidence refusal", err)
 	}
-	assertSchema(t, m, db.MaxSchemaVersion, false, "after refused non-FULL rollback")
+	assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused non-FULL rollback")
 
 	var kind, state, reason string
 	if err := pool.QueryRow(ctx, `
@@ -252,7 +253,7 @@ func TestSupervisedRollbackRefusesActiveMediaClaim(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "active media work is claimed") {
 		t.Fatalf("supervised rollback error = %v, want the active-claim refusal", err)
 	}
-	assertSchema(t, m, db.MaxSchemaVersion, false, "after refused active-claim rollback")
+	assertSchema(t, m, db.EnhancementRecoveryFoundationSchemaVersion, false, "after refused active-claim rollback")
 
 	var token *string
 	if err := pool.QueryRow(ctx,

@@ -60,6 +60,9 @@ func forcePlayable(t *testing.T, f *mediaFixture, objectVersion string, claim pl
 		UPDATE media_asset_versions
 		SET state = 'PLAYABLE',
 		    work_claim_token = $2,
+		    processing_stage = 'TRANSCODING', processing_progress_percent = 0,
+		    processing_updated_at = now(), processing_attempt_token = $2,
+		    active_processing_attempt_kind = 'FULL',
 		    work_claimed_at = now() - `+claim.claimedAt+`,
 		    work_lease_expires_at = now() `+claim.expiresAt+`
 		WHERE id = $1::uuid

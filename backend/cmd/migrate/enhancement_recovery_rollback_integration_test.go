@@ -67,6 +67,13 @@ func migrateCommandHarness(t *testing.T, ctx context.Context) (*migrate.Migrate,
 	return m, cfg, pool
 }
 
+func stageSchema41(t *testing.T, m *migrate.Migrate) {
+	t.Helper()
+	if err := m.Steps(-1); err != nil {
+		t.Fatalf("staging schema 41 rollback test: %v", err)
+	}
+}
+
 // migrateCommandConfig builds the typed configuration the subcommands receive,
 // for a declared APP_ENV. Production is a real value here rather than a test
 // shim, because the acknowledgement rule this exercises only exists in
@@ -158,6 +165,7 @@ func TestDownRefusesNonFullAttemptBeforeMigrationStateChanges(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	m, cfg, pool := migrateCommandHarness(t, ctx)
+	stageSchema41(t, m)
 
 	versionID := seedMediaVersion(t, ctx, pool)
 	if _, err := pool.Exec(ctx, `
@@ -174,9 +182,9 @@ func TestDownRefusesNonFullAttemptBeforeMigrationStateChanges(t *testing.T) {
 
 	// The whole point: the marker is clean, so the next migration command works.
 	version, dirty, versionErr := m.Version()
-	if versionErr != nil || version != uint(db.MaxSchemaVersion) || dirty {
+	if versionErr != nil || version != uint(db.EnhancementRecoveryFoundationSchemaVersion) || dirty {
 		t.Fatalf("schema after refused command down = version=%d dirty=%t err=%v, want clean %d",
-			version, dirty, versionErr, db.MaxSchemaVersion)
+			version, dirty, versionErr, db.EnhancementRecoveryFoundationSchemaVersion)
 	}
 
 	// The evidence is untouched.
@@ -221,6 +229,7 @@ func TestDownCrossesSchema41WhenEveryAttemptIsFull(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	m, cfg, pool := migrateCommandHarness(t, ctx)
+	stageSchema41(t, m)
 
 	versionID := seedMediaVersion(t, ctx, pool)
 	if _, err := pool.Exec(ctx, `

@@ -379,7 +379,7 @@ func TestD103StaleTokenAndExpiredLeaseFenceIndependently(t *testing.T) {
 		// A different identity now owns the row; the lease itself is healthy.
 		replacement := uuid.NewString()
 		if _, err := f.pool.Exec(f.ctx, `
-			UPDATE media_asset_versions SET work_claim_token = $2 WHERE id = $1::uuid
+			UPDATE media_asset_versions SET work_claim_token = $2, processing_attempt_token = $2 WHERE id = $1::uuid
 		`, versionID, replacement); err != nil {
 			t.Fatalf("installing replacement token: %v", err)
 		}

@@ -39,6 +39,9 @@ func TestPlayableRecovery(t *testing.T) {
 	if _, err := f.pool.Exec(f.ctx, `
 		UPDATE media_asset_versions 
 		SET state = 'PLAYABLE', 
+		    processing_stage = 'TRANSCODING', processing_progress_percent = 0,
+		    processing_updated_at = now(), processing_attempt_token = 'op-1',
+		    active_processing_attempt_kind = 'FULL',
 		    work_claim_token = 'op-1', work_claimed_at = now() - interval '2 hours', work_lease_expires_at = now() - interval '1 hour'
 		WHERE id = $1::uuid
 	`, versionID); err != nil {

@@ -281,7 +281,7 @@ func TestSchema41StartupCompatibilityFloors(t *testing.T) {
 	}
 
 	// New worker against schema 40: refused, so no media work is consumed.
-	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+	if err := CheckSchemaAtLeast(ctx, pool, ActiveProcessingKindSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
 		t.Fatalf("worker floor at schema 40 = %v, want %v", err, ErrSchemaIncompatible)
 	}
 	// The API is deliberately not tightened with it.
@@ -293,12 +293,18 @@ func TestSchema41StartupCompatibilityFloors(t *testing.T) {
 		t.Fatalf("applying migration 0041: %v", err)
 	}
 
-	// New worker against schema 41: accepted.
-	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); err != nil {
-		t.Fatalf("worker floor at schema 41 = %v, want acceptance", err)
+	// A 3C-B worker must refuse schema 41; its enhancement claim needs 0042.
+	if err := CheckSchemaAtLeast(ctx, pool, ActiveProcessingKindSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+		t.Fatalf("worker floor at schema 41 = %v, want refusal", err)
 	}
 	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); err != nil {
 		t.Fatalf("API floor at schema 41 = %v, want acceptance", err)
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("applying migration 0042: %v", err)
+	}
+	if err := CheckSchemaAtLeast(ctx, pool, ActiveProcessingKindSchemaVersion); err != nil {
+		t.Fatalf("worker floor at schema 42 = %v, want acceptance", err)
 	}
 
 	// Forward incompatibility is unchanged: a schema above this build's ceiling
@@ -307,7 +313,7 @@ func TestSchema41StartupCompatibilityFloors(t *testing.T) {
 		"UPDATE "+schemaMigrationsTable+" SET version = $1", MaxSchemaVersion+1); err != nil {
 		t.Fatalf("setting version above ceiling: %v", err)
 	}
-	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
+	if err := CheckSchemaAtLeast(ctx, pool, ActiveProcessingKindSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
 		t.Fatalf("worker floor above ceiling = %v, want %v", err, ErrSchemaIncompatible)
 	}
 	if err := CheckSchemaAtLeast(ctx, pool, SubjectDemandSignalSchemaVersion); !errors.Is(err, ErrSchemaIncompatible) {
@@ -318,7 +324,7 @@ func TestSchema41StartupCompatibilityFloors(t *testing.T) {
 		"UPDATE "+schemaMigrationsTable+" SET version = $1, dirty = true", EnhancementRecoveryFoundationSchemaVersion); err != nil {
 		t.Fatalf("setting dirty marker: %v", err)
 	}
-	if err := CheckSchemaAtLeast(ctx, pool, EnhancementRecoveryFoundationSchemaVersion); !errors.Is(err, ErrSchemaDirty) {
+	if err := CheckSchemaAtLeast(ctx, pool, ActiveProcessingKindSchemaVersion); !errors.Is(err, ErrSchemaDirty) {
 		t.Fatalf("worker floor on a dirty schema = %v, want %v", err, ErrSchemaDirty)
 	}
 }

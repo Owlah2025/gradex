@@ -122,6 +122,7 @@ func settleInFlightWorkForRollback(t *testing.T, f *mediaFixture) int64 {
 		    processing_progress_percent = NULL,
 		    processing_updated_at = NULL,
 		    processing_attempt_token = NULL,
+		    active_processing_attempt_kind = NULL,
 		    work_claim_token = NULL,
 		    work_claimed_at = NULL,
 		    work_lease_expires_at = NULL,

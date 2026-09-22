@@ -20,8 +20,11 @@ func TestSchemaConstants(t *testing.T) {
 	if EnhancementRecoveryFoundationSchemaVersion != 41 {
 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want 41", EnhancementRecoveryFoundationSchemaVersion)
 	}
-	if MaxSchemaVersion != EnhancementRecoveryFoundationSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want %d", MaxSchemaVersion, EnhancementRecoveryFoundationSchemaVersion)
+	if ActiveProcessingKindSchemaVersion != EnhancementRecoveryFoundationSchemaVersion+1 {
+		t.Fatalf("ActiveProcessingKindSchemaVersion = %d, want 42", ActiveProcessingKindSchemaVersion)
+	}
+	if MaxSchemaVersion != ActiveProcessingKindSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want %d", MaxSchemaVersion, ActiveProcessingKindSchemaVersion)
 	}
 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",

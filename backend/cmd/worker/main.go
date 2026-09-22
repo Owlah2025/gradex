@@ -60,22 +60,18 @@ func main() {
 	// state to show its Instructor. The worker refuses to start instead — an
 	// unstarted worker is visible; a silently non-processing one is not.
 	//
-	// The floor is schema 41 rather than the work-lease schema that first made
-	// this check necessary, because progressive persistence now reads and writes
-	// `video_renditions.processing_operation_id`, which 0041 adds. Against
-	// schema 40 that statement fails on a missing column, and it fails inside
-	// the transaction that persists the first verified rendition — so the
-	// asset would never reach PLAYABLE and every upload would stall exactly
-	// where the old floor was meant to prevent.
+	// Phase 3C-B requires 0042: an enhancement claim must persist its kind in
+	// the same update as its operation token, so stale recovery can record the
+	// right failed attempt even if the worker dies before encoding any rung.
 	//
-	// Only this binary needs 41. The API's `requiredSchemaVersion` is unchanged:
+	// Only this binary needs 42. The API's `requiredSchemaVersion` is unchanged:
 	// no shipped route reads the new column, and raising it would keep the API
 	// out of the load balancer for a capability it does not use. The migrate
-	// command has no floor of its own, so it can still perform 40 -> 41 and no
+	// command has no floor of its own, so it can still perform 41 -> 42 and no
 	// bootstrap deadlock is created.
 	{
 		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
-		err := db.CheckSchemaAtLeast(startupCtx, pool, db.EnhancementRecoveryFoundationSchemaVersion)
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.ActiveProcessingKindSchemaVersion)
 		cancel()
 		if err != nil {
 			exitWorker(logger, "media_schema_check", logging.ErrorClassOf(err))

@@ -62,12 +62,12 @@ func lockedStaleWork(t *testing.T, f *mediaFixture, tx pgx.Tx, assetVersionID st
 	var work staleWork
 	var leaseStillLive bool
 	if err := tx.QueryRow(f.ctx, `
-		SELECT id::text, kind, state, work_claim_token,
+		SELECT id::text, kind, state, work_claim_token, active_processing_attempt_kind::text,
 		       COALESCE(work_lease_expires_at > now(), false),
 		       scan_attempt_count, processing_attempt_count,
 		       successful_validation_attempt_id IS NOT NULL
 		FROM media_asset_versions WHERE id=$1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &leaseStillLive,
+	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &work.processingKind, &leaseStillLive,
 		&work.scanAttempts, &work.processingAttempts, &work.hasValidationEvidence); err != nil {
 		t.Fatalf("locking stale work: %v", err)
 	}

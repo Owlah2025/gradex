@@ -569,6 +569,9 @@ func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operatio
 		return w.failEnhancement(ctx, assetVersionID, operationID, err)
 	}
 	if len(missing) == 0 {
+		if err := w.beginFinalization(ctx, assetVersionID, operationID); err != nil {
+			return w.failEnhancement(ctx, assetVersionID, operationID, err)
+		}
 		if err := w.completeFinalization(ctx, assetVersionID, operationID, probe.TrustedDurationMS, probe.ExpectedRenditions); err != nil {
 			return w.failFinalization(ctx, assetVersionID, operationID, err)
 		}
@@ -635,6 +638,7 @@ func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operation
 		UPDATE media_asset_versions
 		SET processing_stage = 'TRANSCODING', processing_progress_percent = 0,
 		    processing_updated_at = now(), processing_attempt_token = $2,
+		    active_processing_attempt_kind = 'ENHANCEMENT',
 		    work_claim_token = $2, work_claimed_at = now(),
 		    work_lease_expires_at = now() + make_interval(secs => $3),
 		    processing_attempt_count = processing_attempt_count + 1,
@@ -653,6 +657,22 @@ func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operation
 		return enhancementTarget{}, false, fmt.Errorf("committing enhancement claim: %w", err)
 	}
 	return target, true, nil
+}
+
+func (w *Worker) beginFinalization(ctx context.Context, assetVersionID, operationID string) error {
+	updated, err := w.db.Exec(ctx, `
+		UPDATE media_asset_versions SET active_processing_attempt_kind='FINALIZATION'
+		WHERE id=$1::uuid AND state='PLAYABLE' AND work_claim_token=$2
+		  AND work_lease_expires_at > now()
+		  AND active_processing_attempt_kind='ENHANCEMENT'
+	`, assetVersionID, operationID)
+	if err != nil {
+		return fmt.Errorf("classifying finalization claim: %w", err)
+	}
+	if updated.RowsAffected() != 1 {
+		return ErrConcurrentModification
+	}
+	return nil
 }
 
 func (w *Worker) missingEnhancementRenditions(ctx context.Context, assetVersionID string, expected []string) ([]string, error) {
@@ -719,11 +739,13 @@ func (w *Worker) completeRecoveryAttempt(ctx context.Context, assetVersionID, op
 		SET state='READY', trusted_duration_ms=$1, successful_processing_attempt_id=$2::uuid,
 		    processing_stage='PACKAGING', processing_progress_percent=100,
 		    processing_updated_at=now(), processing_attempt_token=$4,
+		    active_processing_attempt_kind=NULL,
 		    work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
 		    last_failure_category=NULL
 		WHERE id=$3::uuid AND state='PLAYABLE' AND work_claim_token=$4
+		  AND active_processing_attempt_kind=$5::media_processing_attempt_kind
 		  AND work_lease_expires_at > now()
-	`, result.TrustedDurationMS, attemptID, assetVersionID, operationID)
+	`, result.TrustedDurationMS, attemptID, assetVersionID, operationID, attemptKind)
 	if err != nil {
 		return fmt.Errorf("marking recovered media ready: %w", err)
 	}
@@ -801,10 +823,12 @@ func (w *Worker) failRecovery(ctx context.Context, assetVersionID, operationID s
 		return err
 	}
 	updated, err := tx.Exec(ctx, `
-		UPDATE media_asset_versions SET state='PLAYABLE', work_claim_token=NULL, work_claimed_at=NULL,
+		UPDATE media_asset_versions SET state='PLAYABLE', active_processing_attempt_kind=NULL,
+		  work_claim_token=NULL, work_claimed_at=NULL,
 		  work_lease_expires_at=NULL, last_failure_category=$3
 		WHERE id=$1::uuid AND state='PLAYABLE' AND work_claim_token=$2 AND work_lease_expires_at > now()
-	`, assetVersionID, operationID, processingFailureCategory(cause))
+		  AND active_processing_attempt_kind=$4::media_processing_attempt_kind
+	`, assetVersionID, operationID, processingFailureCategory(cause), attemptKind)
 	if err != nil {
 		return fmt.Errorf("clearing enhancement claim after failure: %w", err)
 	}
@@ -970,6 +994,7 @@ func (w *Worker) beginTranscode(ctx context.Context, assetVersionID, operationID
 		    processing_progress_percent = 0,
 		    processing_updated_at = now(),
 		    processing_attempt_token = $3,
+		    active_processing_attempt_kind = 'FULL',
 		    work_claim_token = $3,
 		    work_claimed_at = now(),
 		    work_lease_expires_at = now() + make_interval(secs => $4),
@@ -1342,12 +1367,14 @@ func (w *Worker) recordSuccessfulProcessing(ctx context.Context, tx pgx.Tx, comp
 		    processing_progress_percent = 100,
 		    processing_updated_at = now(),
 		    processing_attempt_token = $4,
+		    active_processing_attempt_kind = NULL,
 		    work_claim_token = NULL,
 		    work_claimed_at = NULL,
 		    work_lease_expires_at = NULL,
 		    last_failure_category = NULL
 		WHERE id = $3::uuid AND state = 'PLAYABLE'
 		  AND work_claim_token = $4
+		  AND active_processing_attempt_kind = 'FULL'
 		  AND work_lease_expires_at > now()
 		  AND (successful_scan_attempt_id IS NOT NULL OR successful_validation_attempt_id IS NOT NULL)
 	`, completion.result.TrustedDurationMS, attemptID, completion.assetVersionID, completion.operationID)
@@ -1661,6 +1688,7 @@ func markProcessingFailed(ctx context.Context, tx pgx.Tx, failure processingFail
 		UPDATE media_asset_versions SET
 		    state = CASE WHEN state = 'PLAYABLE' THEN 'PLAYABLE'::media_asset_version_state ELSE 'PROCESS_FAILED'::media_asset_version_state END,
 		    work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL,
+		    active_processing_attempt_kind = NULL,
 		    last_failure_category = $3
 		WHERE id = $1::uuid AND state IN ('PROCESSING', 'PLAYABLE', 'SCAN_PASSED', 'VALIDATED')
 		  AND (

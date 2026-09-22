@@ -51,6 +51,28 @@ func CheckEnhancementRecoveryRollbackSafety(ctx context.Context, pool *pgxpool.P
 	return nil
 }
 
+// CheckActiveProcessingKindRollbackSafety keeps a refused 42 -> 41 downgrade
+// from dirtying golang-migrate's marker. Terminal progress tokens are allowed:
+// only an in-flight processing operation needs the schema-42 kind column.
+func CheckActiveProcessingKindRollbackSafety(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("database pool is required")
+	}
+	var active bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_asset_versions
+			WHERE state='PROCESSING' OR (state='PLAYABLE' AND work_claim_token IS NOT NULL)
+		)
+	`).Scan(&active); err != nil {
+		return fmt.Errorf("checking active processing rollback safety: %w", err)
+	}
+	if active {
+		return errors.New("active processing operation requires schema 42; settle media work before rolling back to 41")
+	}
+	return nil
+}
+
 // ActiveMediaClaim is one Asset Version holding a live work claim at the moment
 // the query ran.
 type ActiveMediaClaim struct {

@@ -374,7 +374,8 @@ func TestLessonVideoPublicationReadinessRejectsEveryUnsafePlayableShape(t *testi
 			degrade: func(t *testing.T, f *d5Fixture, versionID string) {
 				if _, err := f.p.Exec(f.ctx, `
 					UPDATE media_asset_versions
-					SET work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL
+					SET work_claim_token = NULL, work_claimed_at = NULL, work_lease_expires_at = NULL,
+					    active_processing_attempt_kind = NULL
 					WHERE id = $1::uuid
 				`, versionID); err != nil {
 					t.Fatalf("clearing work claim: %v", err)
@@ -455,6 +456,9 @@ func TestPlayableLessonVideoWithNoCanonicalRenditionIsRefused(t *testing.T) {
 	if _, err := f.p.Exec(f.ctx, `
 		UPDATE media_asset_versions
 		SET state = 'PROCESSING', work_claim_token = 'fixture-claim',
+		    processing_stage = 'TRANSCODING', processing_progress_percent = 0,
+		    processing_updated_at = now(), processing_attempt_token = 'fixture-claim',
+		    active_processing_attempt_kind = 'FULL',
 		    work_claimed_at = now(), work_lease_expires_at = now() + interval '1 hour'
 		WHERE id = $1::uuid
 	`, versionID); err != nil {

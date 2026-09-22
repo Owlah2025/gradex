@@ -108,6 +108,7 @@ type staleWork struct {
 	kind                  AssetKind
 	state                 AssetVersionState
 	token                 *string
+	processingKind        *string
 	scanAttempts          int
 	processingAttempts    int
 	hasValidationEvidence bool
@@ -201,12 +202,12 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 	// a decision that tears down another worker's claim.
 	var leaseStillLive bool
 	err = tx.QueryRow(ctx, `
-		SELECT id::text, kind, state, work_claim_token,
+		SELECT id::text, kind, state, work_claim_token, active_processing_attempt_kind::text,
 		       COALESCE(work_lease_expires_at > now(), false),
 		       scan_attempt_count, processing_attempt_count,
 		       successful_validation_attempt_id IS NOT NULL
 		FROM media_asset_versions WHERE id=$1::uuid FOR UPDATE
-	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &leaseStillLive,
+	`, assetVersionID).Scan(&work.id, &work.kind, &work.state, &work.token, &work.processingKind, &leaseStillLive,
 		&work.scanAttempts, &work.processingAttempts, &work.hasValidationEvidence)
 	if err != nil {
 		return false, fmt.Errorf("locking stale media work: %w", err)
@@ -297,6 +298,9 @@ func (w *Worker) recoverStaleScan(ctx context.Context, tx pgx.Tx, work staleWork
 }
 
 func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work staleWork) error {
+	if work.token != nil && (work.processingKind == nil || *work.processingKind != "FULL") {
+		return errors.New("claimed PROCESSING operation lacks a FULL kind")
+	}
 	operationID := "recovery:" + uuid.NewString()
 	if work.token != nil {
 		operationID = *work.token
@@ -333,6 +337,7 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 		UPDATE media_asset_versions SET state='PROCESS_FAILED',
 		  processing_stage=NULL, processing_progress_percent=NULL, processing_updated_at=NULL, processing_attempt_token=NULL,
 		  work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
+		  active_processing_attempt_kind=NULL,
 		  last_failure_category='WORKER_INTERRUPTED',
 		  processing_attempt_count=processing_attempt_count
 		    + CASE WHEN work_claim_token IS NULL THEN 1 ELSE 0 END
@@ -366,21 +371,22 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 }
 
 func (w *Worker) recoverStalePlayable(ctx context.Context, tx pgx.Tx, work staleWork) error {
-	operationID := "recovery:" + uuid.NewString()
-	if work.token != nil {
-		operationID = *work.token
+	if work.token == nil || work.processingKind == nil {
+		return errors.New("claimed PLAYABLE operation lacks durable processing kind")
 	}
+	operationID := *work.token
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO processing_attempts (asset_version_id, operation_id, state, rendition_count, error_reason)
-		VALUES ($1::uuid,$2,'FAILED',0,'worker lease expired before processing completion')
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason)
+		VALUES ($1::uuid,$2,'FAILED',$3::media_processing_attempt_kind,0,'worker lease expired before processing completion')
 		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
-	`, work.id, operationID); err != nil {
+	`, work.id, operationID, *work.processingKind); err != nil {
 		return fmt.Errorf("recording interrupted processing attempt: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_asset_versions SET
 		  work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
+		  active_processing_attempt_kind=NULL,
 		  last_failure_category='WORKER_INTERRUPTED'
 		WHERE id=$1::uuid AND state='PLAYABLE'
 	`, work.id); err != nil {
