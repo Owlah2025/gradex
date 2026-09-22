@@ -4295,17 +4295,26 @@ would keep inserting `video_renditions` rows through SQL that does not name
 append-only table can never repair. There is intentionally no supported period in which a
 `78ee4227` process handles media on schema 41.
 
-The release therefore stops the old media producer, applies 0041 with the candidate migrate binary,
-confirms schema 41 clean, and only then starts the candidate revision. A short media and backend
-maintenance window is accepted in preference to permanent NULL provenance, dual-schema SQL branches,
-a temporary compatibility binary, or any weakening of the provenance guarantee. No code exists to
+The release therefore removes the old media producer, uses the guarded
+`host.sh up-core-schema-41-foundation` entry to verify the frozen release identity and apply 0041
+with its candidate migrate binary before starting the candidate revision, then verifies clean schema
+41. A short media and backend maintenance window is accepted in preference to permanent NULL
+provenance, dual-schema SQL branches, a temporary compatibility binary, or any weakening of the
+provenance guarantee. No code exists to
 keep the worker continuously available across this one-time foundation migration, and none should be
 written for it.
+
+**Release identity is frozen only after final independent G0 approval.** From a clean tree capture
+`RELEASE_SHA=$(git rev-parse HEAD)` and make no further commit; another code or documentation commit
+requires a new review and freeze. The release manifest, runtime selection, source tree and backend,
+frontend and proof OCI revision labels must all identify that same SHA. The release must contain the
+supervised rollback implementation introduced by `49146e3`, but that ancestor is not itself the
+deployable revision.
 
 **Application rollback and schema rollback are not independent during 3C-A.** There is no
 application-only path from the 3C-A revision back to `78ee4227` while the database remains at schema
 41; `apply-release` already refuses it, dying with `schema 41 is newer than target release maximum
-40`. Returning to the baseline is a coordinated operation: quiesce and stop the candidate media
+40`. Returning to the baseline is a coordinated operation: quiesce and remove the candidate media
 producers, verify no active media work, run the 41 → 40 preflight (which requires every
 `processing_attempts` row to be `attempt_kind = FULL`), run the down step with the candidate binary,
 verify schema 40 clean, then start `78ee4227`.
@@ -4337,15 +4346,21 @@ Before golang-migrate is asked to do anything, the command requires the marker t
 and not dirty, every `processing_attempts` row to be FULL, and no Asset Version to hold a live
 `work_claim_token`. Every refusal therefore leaves the marker exactly as it found it. The
 active-claim check is a gate against an incomplete quiesce, not synchronization: the operational
-contract still requires the API and worker to be stopped first, because a running producer could
-claim work in the instant after the query returns. After the step the command verifies the marker
-landed on a clean 40 and fails loudly otherwise, attempting no automatic repair and rewriting no
-evidence. `host.sh rollback-schema-41-foundation` runs it as a one-off job on the currently selected
-backend image, requiring Postgres healthy and both `api` and `worker` stopped.
+contract still requires the API and worker containers to be removed first, because a running
+producer could claim work in the instant after the query returns. After the step the command verifies
+the marker landed on a clean 40 and fails loudly otherwise, attempting no automatic repair and
+rewriting no evidence. `host.sh rollback-schema-41-foundation` validates the production project,
+protected runtime and database URL target, frozen tree and selected image labels, requires Postgres
+healthy and both `api` and `worker` containers absent, then runs the one-off job on the frozen
+release backend image.
 
-The candidate image is required for the rollback, because the baseline contains no
-`0041_…down.sql`. The baseline release selection is therefore restored only **after** the
-rollback has succeeded, never before it.
+The exact final G0-approved candidate image is required for rollback, because the baseline lacks
+the dedicated command and `0041_…down.sql`. The production worker in the `gradex-production`
+Compose project is the sole legitimate producer for this database; Founder Beta and LG019 use
+separate stacks and databases. Verify no additional production-DB producer exists at release time.
+The rollback order is: active-media guard → remove `api` and `worker` while keeping Postgres up →
+confirm project and release identity → supervised 41→40 rollback → verify clean 40 → restore the
+baseline selection → start and health-check `78ee4227`. Never restore baseline selection before DOWN.
 
 **Preflight-to-down race, for 3C-B.** The `cmd/migrate` preflight necessarily runs before
 golang-migrate executes the down step, so under a future system with a non-FULL producer the

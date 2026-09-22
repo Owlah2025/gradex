@@ -233,6 +233,7 @@ export APP_ENV=staging PASSWORD_SCREEN_MODE=adapter \
   S3_ACCESS_KEY=placeholder S3_SECRET_KEY=placeholder PLAYBACK_TOKEN_SECRET=placeholder \
   SALES_WHATSAPP_NUMBER=96500000000 SESSION_CSRF_KEY=placeholder \
   ANONYMOUS_COOKIE_SIGNING_KEY=placeholder ANONYMOUS_CSRF_KEY=placeholder \
+  IDENTITY_OTP_PEPPER=placeholder MEDIA_TRANSCODE_CONCURRENCY=1 \
   ADMISSION_LIMITER_HMAC_KEY=placeholder OUTBOX_PROTECTED_PAYLOAD_KEY_VERSION=v1 \
   OUTBOX_PROTECTED_PAYLOAD_KEY=placeholder LEGAL_OPERATOR_NAME=Gradex \
   LEGAL_REGISTRATION_NUMBER=RENDER-ONLY LEGAL_REGISTERED_ADDRESS=Address \
@@ -350,5 +351,7 @@ published="$(
 [ "$published" = edge ] ||
   die "services other than the edge publish host ports: $published"
 note "the edge remains the only service in the topology that publishes host ports"
+
+bash "$ROOT/deploy/scripts/verify-schema-41-rollback.sh"
 
 printf 'hostinger-first-cutover: private tier bring-up, private verification, isolated edge handover, project scoping, and shared-host port safety verified\n' >&2

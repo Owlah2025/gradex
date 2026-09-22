@@ -363,6 +363,9 @@ wait_for_completion() {
 # the api dependency it satisfies is met.
 start_core() {
   prepare
+  if [ "${1:-}" = schema-41-foundation ]; then
+    require_schema41_release_identity
+  fi
   compose up --detach postgres redis
   wait_for_status postgres healthy
   wait_for_status redis healthy
@@ -1318,18 +1321,60 @@ apply_release() {
 }
 
 
-# require_stopped is the inverse of require_status: it proves a service is not
-# running. A supervised schema rollback must not proceed while an application
-# producer could still claim media work, and an operator who skipped the quiesce
-# step should be told so before the schema moves, not after.
-require_stopped() {
-  local service="$1" container status
-  for container in $(service_id "$service"); do
-    [ -n "$container" ] || continue
-    status="$(docker inspect --format '{{.State.Status}}' "$container")"
-    [ "$status" != running ] ||
-      die "$service is $status; stop the application tier before a supervised schema rollback so no producer can claim media work while the schema changes"
-  done
+# A container in any state can be started or resume. Schema rollback requires
+# the known application producers to be removed from this exact Compose project.
+require_absent() {
+  local service="$1" containers
+  containers="$(service_id "$service")" ||
+    die "could not inspect $service containers in project $S12_PROJECT"
+  [ -z "$containers" ] ||
+    die "$service container still exists in project $S12_PROJECT; stop and remove it before schema rollback"
+}
+
+# This one-off production rollback targets the canonical production project,
+# database, and protected runtime file. validate_environment supplies the
+# shared project declaration and image-label checks before this narrower gate.
+require_schema41_production_target() {
+  local db_url_target db_url_host db_url_name
+  [ "$APP_ENV" = production ] || die "schema 41 foundation rollback is production-only"
+  [ "$S12_PROJECT" = gradex-production ] || die "schema 41 rollback requires project gradex-production"
+  [ "$S12_HOST_STATE_DIR" = /home/deploy/gradex-production ] ||
+    die "schema 41 rollback requires the production host state directory"
+  [ "$S12_ENV_FILE" = "$S12_HOST_STATE_DIR/runtime.env" ] ||
+    die "schema 41 rollback requires the production runtime.env"
+  [ "$POSTGRES_DB" = gradex_production ] || die "schema 41 rollback requires the production database"
+  db_url_target="${DATABASE_URL#*://}"
+  [ "$db_url_target" != "$DATABASE_URL" ] || die "production DATABASE_URL is malformed"
+  db_url_host="${db_url_target%%/*}"
+  db_url_host="${db_url_host##*@}"
+  case "$db_url_host" in postgres|postgres:5432) ;; *) die "production DATABASE_URL must use this project's postgres service" ;; esac
+  db_url_name="${db_url_target#*/}"
+  db_url_name="${db_url_name%%\?*}"
+  [ "$db_url_name" = "$POSTGRES_DB" ] || die "production DATABASE_URL names a different database"
+}
+
+# The reviewed release identity comes from runtime.env, and validate_environment
+# has already matched all three OCI revision labels to it. The host source tree
+# must be the same immutable revision and include the rollback implementation.
+require_schema41_release_identity() {
+  local tree_revision tree_status
+  require_schema41_production_target
+  command -v git >/dev/null 2>&1 || die "git is required to verify the release tree"
+  tree_revision="$(git -C "$S12_ROOT" rev-parse HEAD)" || die "cannot identify the release tree"
+  [ "$tree_revision" = "$GRADEX_RELEASE_SHA" ] ||
+    die "release tree HEAD does not match GRADEX_RELEASE_SHA"
+  tree_status="$(git -C "$S12_ROOT" status --porcelain=v1)" || die "cannot inspect the release tree"
+  [ -z "$tree_status" ] || die "release tree is not clean"
+  git -C "$S12_ROOT" merge-base --is-ancestor 49146e37f9b3a41380ada9aa31f63c929636539b "$tree_revision" ||
+    die "selected release predates the supervised schema 41 rollback"
+  grep --quiet --fixed-strings 'case rollbackSchema41Command:' "$S12_ROOT/backend/cmd/migrate/main.go" ||
+    die "selected release lacks the dedicated rollback command"
+  grep --quiet --fixed-strings 'rollback-schema-41-foundation) ' "$S12_ROOT/deploy/hostinger/host.sh" ||
+    die "selected release lacks the Hostinger rollback command"
+  [ -f "$S12_ROOT/backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql" ] ||
+    die "selected release lacks migration 0041 DOWN"
+  [ "$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")" = 41 ] ||
+    die "selected backend image must target schema 41"
 }
 
 # The supervised emergency rollback of the 3C-A foundation migration, and
@@ -1349,25 +1394,24 @@ require_stopped() {
 rollback_schema_41_foundation() {
   require_tools
   load_environment
+  validate_environment
+  require_schema41_release_identity
   require_status postgres healthy
-  require_stopped api
-  require_stopped worker
+  require_absent api
+  require_absent worker
 
   # cmd/migrate requires the transition-naming acknowledgement when
   # APP_ENV=production and refuses it otherwise, so the flag follows the
   # declared environment exactly, as the Administrator bootstrap does.
-  local confirmation=()
-  [ "$APP_ENV" = production ] && confirmation=(-confirm-production=schema-41-to-40)
-
   note "reverting schema 41 to 40 in project $S12_PROJECT ($APP_ENV) using backend image $GRADEX_BACKEND_IMAGE"
   compose run --rm --no-deps migrate \
-    gradex-migrate rollback-schema-41 "${confirmation[@]}" ||
+    gradex-migrate rollback-schema-41 -confirm-production=schema-41-to-40 ||
     die "the supervised schema 41 to 40 rollback did not complete; read the command output for the real schema marker state and do not start a schema-40 application until the marker reads a clean 40"
   note "supervised schema rollback completed; verify the marker reads version=40 dirty=false before selecting the baseline release"
 }
 
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1375,6 +1419,7 @@ case "${1:-}" in
   prepare) [ "$#" = 1 ] || usage; prepare ;;
   up) [ "$#" = 1 ] || usage; start_environment ;;
   up-core) [ "$#" = 1 ] || usage; start_core ;;
+  up-core-schema-41-foundation) [ "$#" = 1 ] || usage; start_core schema-41-foundation ;;
   up-edge) [ "$#" = 1 ] || usage; start_edge ;;
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
   verify-core) [ "$#" = 1 ] || usage; verify_core ;;
