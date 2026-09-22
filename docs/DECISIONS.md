@@ -4425,5 +4425,33 @@ events or queued enhancement tasks, a safe 42→41 downgrade, and clean schema 4
 The first non-FULL attempt still forbids 41→40. Generic production DOWN remains
 prohibited; supervised production 42→41 tooling requires separate review.
 
+**Release-hardening closure (2026-09-22):** The supervised production downgrade for this boundary is
+`gradex-migrate rollback-schema-42 -confirm-production=schema-42-to-41`. It reverts exactly 0042, takes
+no target version and no step count, requires a clean schema 42, ends at a clean schema 41, and never
+continues to 40. Generic production DOWN stays prohibited and no `ALLOW_DOWN`-style flag exists.
+
+Before that downgrade runs, zero incompatible enhancement work must be proven in **every** durable
+location: undispatched `media.enhancement_requested` outbox events, and `media:enhancement` asynq
+tasks in the **pending**, **active**, **scheduled**, **retry**, **archived** (dead-letter) and
+**aggregating** states. Completed asynq tasks and historical terminal ENHANCEMENT/FINALIZATION
+attempts do not block: they need no schema-42 producer and stay representable on schema 41. A
+dispatched intent is not finished work — its outbox row carries a receipt while its queue task waits —
+so the database gate and the queue gate are both required.
+
+A surviving undispatched `media.enhancement_requested` event is **not** merely rejected or skipped by
+the deployed 3C-A application. Its dispatcher returns `unsupported media outbox event`, the batch
+aborts, the event stays undispatched, and because the feeding query is ordered and receipt-filtered it
+is the first row of every later batch — so it blocks **all** subsequent media outbox dispatch,
+including scans and transcodes. `outbox_events` is append-only, so that row cannot be deleted or
+edited; clearing it afterwards requires an explicit operator decision to record a dispatch receipt on
+a live production database during an outage of all media processing. Zero such rows is therefore a
+hard rollback gate, not advisory.
+
+If incompatible work exists the rollback refuses and reports counts and identifiers. It deletes
+nothing and rewrites no processing evidence. The complete deployed 3C-A artifact set
+`98e88fcc1105e8c638bb638d3f1c46630bcc51b2` must still be staged and still validate before 3C-B is
+deployed *and* before the downgrade runs; that application must never start against schema 42.
+
 **Source:** Phase 3C-B manual enhancement recovery specification and schema-41 foundation contract;
-implementation review pending.
+implementation review pending. Release hardening in
+[RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md](launch/RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md).

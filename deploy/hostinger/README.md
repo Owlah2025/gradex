@@ -60,6 +60,20 @@ checkout is required. See the [schema-41 release plan](../../docs/launch/RELEASE
 for executable transfer/import commands. Do not use `latest`. Existing backup/monitor systemd units
 keep their stable pinned root; do not reinstall or repoint them to a release bundle.
 
+Each schema cutover is a one-release boundary with its own commands and its own bundle capability
+marker, and the commands refuse each other's bundles and images by design:
+
+| Boundary | Marker | Forward | Supervised downgrade |
+| --- | --- | --- | --- |
+| schema 41 (3C-A) | `SCHEMA41_CAPABILITY=supervised-41-to-40-v1` | `up-core-schema-41-foundation` | `rollback-schema-41-foundation` (41 → 40) |
+| schema 42 (3C-B) | `SCHEMA42_CAPABILITY=manual-enhancement-v1` | `up-core-schema-42-enhancement-recovery` | `rollback-schema-42-enhancement-recovery` (42 → 41) |
+
+The schema-42 boundary additionally verifies that the complete deployed 3C-A artifact floor is still
+staged, proves media quiescence, and proves that no `media.enhancement_requested` outbox event or
+`media:enhancement` queue task survives before it downgrades. `enhancement-drain` runs that proof on
+its own, read-only. Procedure, gate list and failure matrix:
+[schema-42 release plan](../../docs/launch/RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md).
+
 Create two releases at two T046-compatible commits before the provider rollback drill. A pre-T046
 backend is not an acceptable rollback target once Redis is TLS/auth-only. If a compatible release was
 built before a later tooling commit, retain its existing exported artifacts. `record` and `export`

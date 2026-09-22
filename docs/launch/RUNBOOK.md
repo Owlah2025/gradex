@@ -408,8 +408,10 @@ for an ACL account. `REDIS_ADDR` must contain only `host:port`, never a credenti
 
 ## Phase 3C-B — manual enhancement recovery
 
-Phase 3C-B is manual-only and schema-41 compatible. Production must retain the complete deployed
-3C-A artifact floor `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` before this phase is released. An
+Phase 3C-B is manual-only and **requires schema 42**; its worker refuses to start on schema 41.
+Production must retain the complete deployed 3C-A artifact floor
+`98e88fcc1105e8c638bb638d3f1c46630bcc51b2` before this phase is released, and both the cutover and the
+supervised downgrade refuse if any part of that artifact set is missing or fails its checksums. An
 authenticated Admin may request enhancement recovery for a current, unclaimed PLAYABLE video Asset
 Version through `POST /api/v1/media/assets/:id/retry-enhancements`. The request records audit evidence
 and a durable outbox intent but does not claim the asset, probe it, change its state, or predict its
@@ -424,8 +426,52 @@ continues to render its dynamic master from their persisted keys.
 
 The first ENHANCEMENT or FINALIZATION attempt, failed or successful, closes schema-40 rollback. After
 that evidence exists, normal application rollback targets the retained 3C-A artifact on schema 41;
-the supervised 41→40 command must refuse. No automatic retry scheduler, periodic scan, backoff,
-schema 42, or 3C-C behavior is permitted.
+the supervised 41→40 command must refuse. No automatic retry scheduler, periodic scan, backoff, or
+3C-C behavior is permitted.
+
+### Cutover and supervised 42→41 rollback
+
+Forward and back both execute `host.sh` from the verified schema-42 tooling bundle. Full procedure,
+gate list and failure matrix:
+[schema-42 release plan](RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md).
+
+- Forward: `host.sh up-core-schema-42-enhancement-recovery`. It verifies release identity and the
+  schema-42 capability, verifies the 3C-A artifact floor, requires the api and worker containers
+  absent, proves zero active media claims and a clean schema 41, migrates, verifies a clean schema 42,
+  and only then starts the api, worker and frontend. **Do not start the 3C-B API before schema 42 is
+  verified clean** — request-time semantics are harmless on 41, but an enhancement intent written
+  before the schema-42 worker exists has nothing able to execute it.
+- Back: `host.sh rollback-schema-42-enhancement-recovery`. It forwards exactly
+  `gradex-migrate rollback-schema-42 -confirm-production=schema-42-to-41` — no target version, no step
+  count, no 42→40 — and ends at a clean 41. The 3C-B candidate image stays selected throughout,
+  because the 3C-A image contains neither migration 0042 nor the command that reverts it. Switch the
+  runtime selection to `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` only after the marker reads a clean
+  41. Generic production `down` stays prohibited and no flag is added to change that.
+
+**The enhancement drain is a blocking prerequisite, not a warning.** Before the schema moves, prove
+zero incompatible work in every durable location: undispatched `media.enhancement_requested` outbox
+events, and `media:enhancement` asynq tasks in the **pending**, **active**, **scheduled**, **retry**,
+**archived** (dead-letter) and **aggregating** states. `host.sh enhancement-drain` reads all of them
+read-only and reports the counts. Completed asynq tasks and historical terminal
+ENHANCEMENT/FINALIZATION attempts do not block — they need no schema-42 producer and stay
+representable on schema 41. A dispatched intent is not finished work: its outbox row carries a
+receipt while its queue task still waits, so both the database and the queue must be proven.
+
+**Why one surviving outbox event is a hard gate.** A surviving undispatched
+`media.enhancement_requested` event is not merely rejected or skipped by the deployed 3C-A
+application. Its media dispatcher returns `unsupported media outbox event`, the batch aborts, the
+event remains undispatched, and because the feeding query is ordered by `occurred_at` and selects only
+rows without a dispatch receipt, that same event heads every later batch. One such row therefore
+**blocks all later media outbox dispatch**, scans and transcodes included. `outbox_events` is
+append-only, so the row cannot be deleted or edited: clearing it afterwards requires an explicit
+operator decision to record a dispatch receipt in `media_outbox_dispatches`, on a live production
+database, during an outage of all media processing. Zero such rows is required before the downgrade,
+every time.
+
+If incompatible work exists, the rollback refuses and reports counts and identifiers. It deletes
+nothing: discarding requested work is an operator decision with its own evidence, never a side effect
+of a downgrade. Never mutate processing evidence to make a gate pass, and never force or
+automatically repair a schema marker after a failed step.
 
 ## 7. Health Checks & Verification Sequence
 
