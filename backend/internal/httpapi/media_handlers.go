@@ -52,6 +52,7 @@ func mountMediaRoutes(v1 *gin.RouterGroup, foundation *MediaFoundation, authenti
 	mountMediaUploadRoutes(content, h, authenticator, principals, logger)
 	mountMediaStatusRoute(content, h, authenticator, principals, logger)
 	mountMediaRetryRoute(content, h, authenticator, principals, logger)
+	mountMediaEnhancementRetryRoute(content, h, authenticator, principals, logger)
 	mountMediaCatalogueRoutes(content, h, authenticator, principals, logger)
 	if foundation.delivery != nil {
 		mountMediaDeliveryRoutes(content, foundation, authenticator, principals, logger)
@@ -104,6 +105,16 @@ func mountMediaRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authentica
 		requireRole(identity.RoleAdmin),
 	)
 	retry.POST("", h.retry)
+}
+
+func mountMediaEnhancementRetryRoute(content *gin.RouterGroup, h *mediaHandlers, authenticator auth.Authenticator, principals identity.PrincipalResolver, logger *logging.Logger) {
+	retry := content.Group("/assets/:id/retry-enhancements")
+	retry.Use(
+		requireAuth(authenticator),
+		requireCapability(principals, logger, identity.CapAdminOperations),
+		requireRole(identity.RoleAdmin),
+	)
+	retry.POST("", h.retryEnhancements)
 }
 
 func (h *mediaHandlers) beginUpload(c *gin.Context) {
@@ -222,6 +233,16 @@ func (h *mediaHandlers) retry(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"asset_version_id": c.Param("id"), "state": media.StateQuarantined})
 }
 
+func (h *mediaHandlers) retryEnhancements(c *gin.Context) {
+	if err := h.service.RetryEnhancements(c.Request.Context(), media.RetryRequest{
+		AssetVersionID: c.Param("id"), AdminAccountID: c.GetString(ctxUserIDKey), ActorDescriptor: c.GetString(ctxUserIDKey),
+	}); err != nil {
+		writeMediaProblem(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"asset_version_id": c.Param("id"), "state": media.StatePlayable, "queued": true})
+}
+
 func requireRole(role identity.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		principal, ok := principalFrom(c)
@@ -246,6 +267,8 @@ func writeMediaProblem(c *gin.Context, err error) {
 	case errors.Is(err, media.ErrNotAuthorized):
 		writeProblem(c, problem.NotAuthorized())
 	case errors.Is(err, media.ErrConflict):
+		writeProblem(c, problem.UnsupportedStateTransition())
+	case errors.Is(err, media.ErrEnhancementNotEligible), errors.Is(err, media.ErrEnhancementActive):
 		writeProblem(c, problem.UnsupportedStateTransition())
 	default:
 		writeProblem(c, problem.Internal(""))

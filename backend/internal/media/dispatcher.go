@@ -110,6 +110,8 @@ func queueTypeForEvent(eventType string) (string, bool) {
 		return queue.TypeMediaScan, true
 	case "media.transcode_requested":
 		return queue.TypeMediaTranscode, true
+	case "media.enhancement_requested":
+		return queue.TypeMediaEnhancement, true
 	default:
 		return "", false
 	}

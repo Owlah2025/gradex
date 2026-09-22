@@ -1053,6 +1053,57 @@ func (s *Service) Retry(ctx context.Context, request RetryRequest) error {
 	return nil
 }
 
+// RetryEnhancements queues a manual recovery intent without changing media
+// state or acquiring a work claim. The worker owns all execution-time truth.
+func (s *Service) RetryEnhancements(ctx context.Context, request RetryRequest) error {
+	if err := validateRetryRequest(request); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: beginning enhancement retry transaction: %v", ErrUnavailable, err)
+	}
+	defer tx.Rollback(ctx)
+	if err := s.requireActiveAdmin(ctx, tx, request.AdminAccountID); err != nil {
+		return err
+	}
+	var state AssetVersionState
+	var kind AssetKind
+	var retiredAt *time.Time
+	var claimToken *string
+	var leaseValid bool
+	err = tx.QueryRow(ctx, `
+		SELECT mav.state, mav.kind, ma.retired_at, mav.work_claim_token,
+		       COALESCE(mav.work_lease_expires_at > now(), false)
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE mav.id = $1::uuid
+		FOR UPDATE OF mav
+	`, request.AssetVersionID).Scan(&state, &kind, &retiredAt, &claimToken, &leaseValid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("loading enhancement retry target: %w", err)
+	}
+	if kind != KindVideo || retiredAt != nil || state != StatePlayable {
+		return ErrEnhancementNotEligible
+	}
+	if claimToken != nil || leaseValid {
+		return ErrEnhancementActive
+	}
+	if err := appendEnhancementWork(ctx, tx, s.outbox, request.AssetVersionID); err != nil {
+		return err
+	}
+	if err := appendMediaAudit(ctx, tx, request.AdminAccountID, "ADMIN", "MEDIA_ENHANCEMENT_RETRY_REQUESTED", request.AssetVersionID, "Admin queued manual enhancement recovery", map[string]any{"state": string(state), "manual": true}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing enhancement retry request: %w", err)
+	}
+	return nil
+}
+
 func validateRetryRequest(request RetryRequest) error {
 	if request.AdminAccountID == "" || request.ActorDescriptor == "" {
 		return ErrNotAuthorized

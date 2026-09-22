@@ -115,6 +115,50 @@ func (p *FFmpegProcessor) Transcode(ctx context.Context, object ObjectVersion) (
 	return p.TranscodeProgressive(ctx, object, nil, nil)
 }
 
+// ProbeExpected downloads and re-probes the exact source version without
+// writing storage output. Manual enhancement recovery uses this to derive the
+// current ladder before deciding between ENHANCEMENT and FINALIZATION.
+func (p *FFmpegProcessor) ProbeExpected(ctx context.Context, object ObjectVersion) (EnhancementProbe, error) {
+	if !object.valid() {
+		return EnhancementProbe{}, ErrStaleScanEvidence
+	}
+	if err := p.verifyExpectedObject(ctx, object); err != nil {
+		return EnhancementProbe{}, err
+	}
+	processingCtx, cancel := context.WithTimeout(ctx, p.processingTimeout)
+	defer cancel()
+	localPath, cleanup, err := p.store.DownloadToFileVersion(processingCtx, object.StorageObjectKey, object.StorageObjectVersion)
+	if err != nil {
+		return EnhancementProbe{}, fmt.Errorf("%w: downloading exact media object: %v", ErrStorageUnavailable, err)
+	}
+	defer cleanup()
+	probe, err := p.probe(processingCtx, localPath)
+	if err != nil {
+		return EnhancementProbe{}, classifyProcessorContext(processingCtx, err)
+	}
+	metadata, err := trustedMediaMetadata(probe)
+	if err != nil {
+		return EnhancementProbe{}, err
+	}
+	names := make([]string, 0, len(metadata.rungs))
+	for _, rung := range metadata.rungs {
+		names = append(names, rung.Name)
+	}
+	return EnhancementProbe{ExpectedRenditions: names, TrustedDurationMS: metadata.durationMS}, nil
+}
+
+// TranscodeMissing preserves the normal FFmpeg construction and validation but
+// limits storage writes to the explicitly derived missing rung set. It does
+// not upload a single-attempt master playlist because delivery renders that
+// master from canonical rows, which may span several operation prefixes.
+func (p *FFmpegProcessor) TranscodeMissing(ctx context.Context, object ObjectVersion, missing []string, sink ProgressSink, renditionSink VerifiedRenditionSink) (TranscodeResult, error) {
+	selected := make(map[string]struct{}, len(missing))
+	for _, name := range missing {
+		selected[name] = struct{}{}
+	}
+	return p.transcodeProgressive(ctx, object, sink, renditionSink, selected, false)
+}
+
 // TranscodeWithProgress is the same pipeline, reporting real measured progress
 // into sink as it goes.
 func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object ObjectVersion, sink ProgressSink) (TranscodeResult, error) {
@@ -131,8 +175,15 @@ func (p *FFmpegProcessor) TranscodeWithProgress(ctx context.Context, object Obje
 // verification, and the exact rung progress boundary is emitted only after DB
 // commit. Master publication is uploaded last following full-tree validation.
 func (p *FFmpegProcessor) TranscodeProgressive(ctx context.Context, object ObjectVersion, sink ProgressSink, renditionSink VerifiedRenditionSink) (result TranscodeResult, err error) {
+	return p.transcodeProgressive(ctx, object, sink, renditionSink, nil, true)
+}
+
+func (p *FFmpegProcessor) transcodeProgressive(ctx context.Context, object ObjectVersion, sink ProgressSink, renditionSink VerifiedRenditionSink, selected map[string]struct{}, uploadMaster bool) (result TranscodeResult, err error) {
 	if !object.valid() || strings.TrimSpace(object.ProcessingOperationID) == "" {
 		return TranscodeResult{}, ErrStaleScanEvidence
+	}
+	if err := p.verifyExpectedObject(ctx, object); err != nil {
+		return TranscodeResult{}, err
 	}
 	processingCtx, cancel := context.WithTimeout(ctx, p.processingTimeout)
 	defer cancel()
@@ -159,15 +210,27 @@ func (p *FFmpegProcessor) TranscodeProgressive(ctx context.Context, object Objec
 	defer os.RemoveAll(outDir)
 
 	duration := time.Duration(metadata.durationMS) * time.Millisecond
-	count := len(metadata.rungs)
+	rungs := metadata.rungs
+	if selected != nil {
+		rungs = make([]hlsRung, 0, len(selected))
+		for _, rung := range metadata.rungs {
+			if _, ok := selected[rung.Name]; ok {
+				rungs = append(rungs, rung)
+			}
+		}
+		if len(rungs) != len(selected) {
+			return TranscodeResult{}, fmt.Errorf("%w: requested enhancement rung is not in the compiled ladder", ErrValidation)
+		}
+	}
+	count := len(rungs)
 	reportProgress(processingCtx, sink, StageTranscoding, 0)
 	verifiedRenditions := make([]Rendition, 0, count)
-	expectedRenditions := make([]string, count)
+	expectedRenditions := make([]string, len(metadata.rungs))
 	for i, r := range metadata.rungs {
 		expectedRenditions[i] = r.Name
 	}
 
-	for index, rung := range metadata.rungs {
+	for index, rung := range rungs {
 		if err := processingCtx.Err(); err != nil {
 			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 		}
@@ -205,24 +268,26 @@ func (p *FFmpegProcessor) TranscodeProgressive(ctx context.Context, object Objec
 	if err := processingCtx.Err(); err != nil {
 		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
 	}
-	masterPath := filepath.Join(outDir, "master.m3u8")
-	if err := writeMediaMaster(masterPath, metadata.rungs); err != nil {
-		return TranscodeResult{}, err
-	}
-	files, err := walkMediaFiles(outDir)
-	if err != nil {
-		return TranscodeResult{}, fmt.Errorf("walking HLS output: %w", err)
-	}
-	if len(files) == 0 {
-		return TranscodeResult{}, fmt.Errorf("HLS processing produced no output files")
-	}
-	// Full-tree validation remains authoritative and executes before master publication.
-	if err := validateLocalHLSOutput(outDir, files); err != nil {
-		return TranscodeResult{}, err
-	}
-	reportProgress(processingCtx, sink, StagePackaging, 99)
-	if err := p.uploadVerifiedHLSObject(processingCtx, outDir, prefix, "master.m3u8"); err != nil {
-		return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+	if uploadMaster {
+		masterPath := filepath.Join(outDir, "master.m3u8")
+		if err := writeMediaMaster(masterPath, metadata.rungs); err != nil {
+			return TranscodeResult{}, err
+		}
+		files, err := walkMediaFiles(outDir)
+		if err != nil {
+			return TranscodeResult{}, fmt.Errorf("walking HLS output: %w", err)
+		}
+		if len(files) == 0 {
+			return TranscodeResult{}, fmt.Errorf("HLS processing produced no output files")
+		}
+		// Full-tree validation remains authoritative and executes before master publication.
+		if err := validateLocalHLSOutput(outDir, files); err != nil {
+			return TranscodeResult{}, err
+		}
+		reportProgress(processingCtx, sink, StagePackaging, 99)
+		if err := p.uploadVerifiedHLSObject(processingCtx, outDir, prefix, "master.m3u8"); err != nil {
+			return TranscodeResult{}, classifyProcessorContext(processingCtx, err)
+		}
 	}
 	return TranscodeResult{
 		OutputPrefix:       prefix,
@@ -230,6 +295,26 @@ func (p *FFmpegProcessor) TranscodeProgressive(ctx context.Context, object Objec
 		Renditions:         verifiedRenditions,
 		ExpectedRenditions: expectedRenditions,
 	}, nil
+}
+
+func (p *FFmpegProcessor) verifyExpectedObject(ctx context.Context, object ObjectVersion) error {
+	if strings.TrimSpace(object.ExpectedSHA256Hex) == "" {
+		return nil
+	}
+	verifier, ok := p.store.(interface {
+		HashObjectVersion(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return fmt.Errorf("%w: exact source hash verification is unavailable", ErrStorageUnavailable)
+	}
+	actual, err := verifier.HashObjectVersion(ctx, object.StorageObjectKey, object.StorageObjectVersion)
+	if err != nil {
+		return fmt.Errorf("%w: hashing exact media object: %v", ErrStorageUnavailable, err)
+	}
+	if !strings.EqualFold(actual, object.ExpectedSHA256Hex) {
+		return fmt.Errorf("%w: exact source checksum changed", ErrStaleScanEvidence)
+	}
+	return nil
 }
 
 func (p *FFmpegProcessor) uploadVerifiedRung(ctx context.Context, outDir, prefix string, rung hlsRung, segments []string) error {

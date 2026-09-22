@@ -210,6 +210,7 @@ func TestD7ProductionMediaRoutesRequireCapabilitiesBeforeHandlers(t *testing.T) 
 		"POST /api/v1/media/uploads/:id/completions",
 		"GET /api/v1/media/assets/:id",
 		"POST /api/v1/media/assets/:id/retries",
+		"POST /api/v1/media/assets/:id/retry-enhancements",
 	} {
 		if !mounted[route] {
 			t.Fatalf("production router is missing D7 media route %q", route)

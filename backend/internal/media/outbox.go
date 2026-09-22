@@ -39,6 +39,21 @@ func appendTranscodeWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer
 	return nil
 }
 
+func appendEnhancementWork(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, assetVersionID string) error {
+	eventID := uuid.NewString()
+	work := EnhancementWork{AssetVersionID: assetVersionID}
+	_, err := writer.Append(ctx, tx, outbox.Event{
+		ID: eventID, Type: "media.enhancement_requested", SchemaVersion: 1,
+		SourceModule: mediaSourceModule, AggregateType: "MEDIA_ASSET_VERSION",
+		AggregateID: assetVersionID, AggregateRevision: 1, CorrelationID: eventID,
+		SafePayload: map[string]any{"asset_version_id": assetVersionID},
+	}, work)
+	if err != nil {
+		return fmt.Errorf("writing media enhancement outbox intent: %w", err)
+	}
+	return nil
+}
+
 func appendScanWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, schedule workSchedule) error {
 	eventID := uuid.NewString()
 	_, err := writer.Append(ctx, tx, outbox.Event{

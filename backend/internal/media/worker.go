@@ -152,6 +152,7 @@ func (w *Worker) Register(mux *asynq.ServeMux) error {
 	}
 	mux.HandleFunc(queue.TypeMediaScan, w.handleScanTask)
 	mux.HandleFunc(queue.TypeMediaTranscode, w.handleTranscodeTask)
+	mux.HandleFunc(queue.TypeMediaEnhancement, w.handleEnhancementTask)
 	return nil
 }
 
@@ -181,6 +182,23 @@ func (w *Worker) handleTranscodeTask(ctx context.Context, task *asynq.Task) erro
 	defer cancel()
 	err := w.Transcode(processingCtx, work.AssetVersionID, work.OperationID)
 	if errors.Is(err, ErrRetryScheduled) {
+		return nil
+	}
+	return err
+}
+
+func (w *Worker) handleEnhancementTask(ctx context.Context, task *asynq.Task) error {
+	var work EnhancementWork
+	if err := json.Unmarshal(task.Payload(), &work); err != nil {
+		return fmt.Errorf("decoding media enhancement work: %w", err)
+	}
+	if strings.TrimSpace(work.AssetVersionID) == "" {
+		return fmt.Errorf("%w: media enhancement asset version is required", ErrValidation)
+	}
+	processingCtx, cancel := context.WithTimeout(ctx, w.processingTimeout)
+	defer cancel()
+	err := w.RetryEnhancements(processingCtx, work.AssetVersionID)
+	if errors.Is(err, ErrEnhancementNotEligible) || errors.Is(err, ErrEnhancementActive) {
 		return nil
 	}
 	return err
@@ -506,6 +524,298 @@ func (w *Worker) Transcode(ctx context.Context, assetVersionID, operationID stri
 		})
 	}
 	return err
+}
+
+// RetryEnhancements executes one explicit manual recovery intent. The queue
+// carries only the Asset Version; claim, source proof, ladder planning and
+// operation identity are all decided against current database/storage truth.
+func (w *Worker) RetryEnhancements(ctx context.Context, assetVersionID string) error {
+	operationID := ""
+	started := false
+	err := w.transcodeGate.run(ctx, func() error {
+		started = true
+		operationID = uuid.NewString()
+		w.notifyTranscode(TranscodeObservation{
+			Phase: TranscodeStarted, OperationID: operationID,
+			Active: w.transcodeGate.Active(), Limit: w.transcodeGate.Limit(),
+		})
+		return w.retryEnhancements(ctx, assetVersionID, operationID)
+	})
+	if started {
+		w.notifyTranscode(TranscodeObservation{
+			Phase: TranscodeFinished, OperationID: operationID,
+			Active: w.transcodeGate.Active(), Limit: w.transcodeGate.Limit(),
+			Outcome: transcodeOutcome(err),
+		})
+	}
+	return err
+}
+
+func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operationID string) error {
+	processor, ok := w.process.(EnhancementProcessor)
+	if !ok {
+		return fmt.Errorf("%w: enhancement processor capability is unavailable", ErrUnavailable)
+	}
+	target, claimed, err := w.beginEnhancement(ctx, assetVersionID, operationID)
+	if err != nil || !claimed {
+		return err
+	}
+	probe, err := processor.ProbeExpected(ctx, target.object)
+	if err != nil {
+		return w.failEnhancement(ctx, assetVersionID, operationID, err)
+	}
+	missing, err := w.missingEnhancementRenditions(ctx, assetVersionID, probe.ExpectedRenditions)
+	if err != nil {
+		return w.failEnhancement(ctx, assetVersionID, operationID, err)
+	}
+	if len(missing) == 0 {
+		if err := w.completeFinalization(ctx, assetVersionID, operationID, probe.TrustedDurationMS, probe.ExpectedRenditions); err != nil {
+			return w.failFinalization(ctx, assetVersionID, operationID, err)
+		}
+		return nil
+	}
+	target.object.ProcessingOperationID = operationID
+	result, err := processor.TranscodeMissing(ctx, target.object, missing, nil, &workerRenditionSink{
+		worker: w, assetVersionID: assetVersionID, operationID: operationID,
+	})
+	if err != nil {
+		return w.failEnhancement(ctx, assetVersionID, operationID, err)
+	}
+	result.ExpectedRenditions = append([]string(nil), probe.ExpectedRenditions...)
+	result.TrustedDurationMS = probe.TrustedDurationMS
+	result.OutputPrefix = processingOutputPrefix(assetVersionID, operationID)
+	if err := w.completeEnhancement(ctx, assetVersionID, operationID, result); err != nil {
+		return w.failEnhancement(ctx, assetVersionID, operationID, err)
+	}
+	return nil
+}
+
+type enhancementTarget struct{ object ObjectVersion }
+
+func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operationID string) (enhancementTarget, bool, error) {
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return enhancementTarget{}, false, fmt.Errorf("beginning enhancement claim: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var target enhancementTarget
+	var kind AssetKind
+	var state AssetVersionState
+	var retiredAt *time.Time
+	var claimToken *string
+	var leaseValid bool
+	var checksum string
+	var scanEvidence, validationEvidence *string
+	err = tx.QueryRow(ctx, `
+		SELECT mav.kind, mav.state, mav.storage_object_key, mav.storage_object_version,
+		       COALESCE(mav.sha256_hex, ''), ma.retired_at, mav.work_claim_token,
+		       mav.successful_scan_attempt_id::text, mav.successful_validation_attempt_id::text,
+		       COALESCE(mav.work_lease_expires_at > now(), false)
+		FROM media_asset_versions mav
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE mav.id = $1::uuid
+		FOR UPDATE OF mav
+	`, assetVersionID).Scan(&kind, &state, &target.object.StorageObjectKey, &target.object.StorageObjectVersion,
+		&checksum, &retiredAt, &claimToken, &scanEvidence, &validationEvidence, &leaseValid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return enhancementTarget{}, false, ErrNotFound
+	}
+	if err != nil {
+		return enhancementTarget{}, false, fmt.Errorf("loading enhancement target: %w", err)
+	}
+	if kind != KindVideo || retiredAt != nil || state != StatePlayable || (scanEvidence == nil && validationEvidence == nil) || strings.TrimSpace(checksum) == "" {
+		return target, false, ErrEnhancementNotEligible
+	}
+	if claimToken != nil || leaseValid {
+		return target, false, ErrEnhancementActive
+	}
+	target.object.AssetVersionID = assetVersionID
+	target.object.ExpectedSHA256Hex = checksum
+	claimed, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET processing_stage = 'TRANSCODING', processing_progress_percent = 0,
+		    processing_updated_at = now(), processing_attempt_token = $2,
+		    work_claim_token = $2, work_claimed_at = now(),
+		    work_lease_expires_at = now() + make_interval(secs => $3),
+		    processing_attempt_count = processing_attempt_count + 1,
+		    last_failure_category = NULL
+		WHERE id = $1::uuid AND state = 'PLAYABLE'
+		  AND work_claim_token IS NULL
+		  AND (work_lease_expires_at IS NULL OR work_lease_expires_at <= now())
+	`, assetVersionID, operationID, w.workLeaseDuration.Seconds())
+	if err != nil {
+		return enhancementTarget{}, false, fmt.Errorf("claiming enhancement target: %w", err)
+	}
+	if claimed.RowsAffected() != 1 {
+		return target, false, nil
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return enhancementTarget{}, false, fmt.Errorf("committing enhancement claim: %w", err)
+	}
+	return target, true, nil
+}
+
+func (w *Worker) missingEnhancementRenditions(ctx context.Context, assetVersionID string, expected []string) ([]string, error) {
+	rows, err := w.db.Query(ctx, `SELECT name FROM video_renditions WHERE asset_version_id = $1::uuid`, assetVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("loading canonical enhancement renditions: %w", err)
+	}
+	defer rows.Close()
+	existing := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scanning canonical enhancement rendition: %w", err)
+		}
+		existing[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating canonical enhancement renditions: %w", err)
+	}
+	return missingRenditionNames(expected, existing), nil
+}
+
+func missingRenditionNames(expected []string, existing map[string]struct{}) []string {
+	missing := make([]string, 0, len(expected))
+	for _, name := range expected {
+		if _, ok := existing[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
+func (w *Worker) completeEnhancement(ctx context.Context, assetVersionID, operationID string, result TranscodeResult) error {
+	return w.completeRecoveryAttempt(ctx, assetVersionID, operationID, result, "ENHANCEMENT", result.OutputPrefix, len(result.Renditions))
+}
+
+func (w *Worker) completeFinalization(ctx context.Context, assetVersionID, operationID string, durationMS int64, expected []string) error {
+	result := TranscodeResult{ExpectedRenditions: expected, TrustedDurationMS: durationMS}
+	return w.completeRecoveryAttempt(ctx, assetVersionID, operationID, result, "FINALIZATION", "", 0)
+}
+
+func (w *Worker) completeRecoveryAttempt(ctx context.Context, assetVersionID, operationID string, result TranscodeResult, attemptKind, outputPrefix string, renditionCount int) error {
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning recovery completion: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := verifyCanonicalRecoveryLadder(ctx, tx, assetVersionID, result.ExpectedRenditions, result.TrustedDurationMS); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, output_prefix, rendition_count, trusted_duration_ms)
+		VALUES ($1::uuid, $2, 'SUCCEEDED', $3::media_processing_attempt_kind, NULLIF($4, ''), $5, $6)
+		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
+	`, assetVersionID, operationID, attemptKind, outputPrefix, renditionCount, result.TrustedDurationMS); err != nil {
+		return fmt.Errorf("recording successful recovery attempt: %w", err)
+	}
+	var attemptID string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM processing_attempts WHERE asset_version_id=$1::uuid AND operation_id=$2 AND state='SUCCEEDED'`, assetVersionID, operationID).Scan(&attemptID); err != nil {
+		return fmt.Errorf("loading successful recovery attempt: %w", err)
+	}
+	updated, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions
+		SET state='READY', trusted_duration_ms=$1, successful_processing_attempt_id=$2::uuid,
+		    processing_stage='PACKAGING', processing_progress_percent=100,
+		    processing_updated_at=now(), processing_attempt_token=$4,
+		    work_claim_token=NULL, work_claimed_at=NULL, work_lease_expires_at=NULL,
+		    last_failure_category=NULL
+		WHERE id=$3::uuid AND state='PLAYABLE' AND work_claim_token=$4
+		  AND work_lease_expires_at > now()
+	`, result.TrustedDurationMS, attemptID, assetVersionID, operationID)
+	if err != nil {
+		return fmt.Errorf("marking recovered media ready: %w", err)
+	}
+	if updated.RowsAffected() != 1 {
+		return ErrConcurrentModification
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing recovered media ready state: %w", err)
+	}
+	return nil
+}
+
+func verifyCanonicalRecoveryLadder(ctx context.Context, tx pgx.Tx, assetVersionID string, expected []string, durationMS int64) error {
+	rows, err := tx.Query(ctx, `SELECT name, storage_object_key, COALESCE(width,0), COALESCE(height,0), COALESCE(bitrate_kbps,0), duration_ms FROM video_renditions WHERE asset_version_id=$1::uuid`, assetVersionID)
+	if err != nil {
+		return fmt.Errorf("loading canonical recovery ladder: %w", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	for rows.Next() {
+		var name, key string
+		var width, height, bitrate int
+		var rowDuration int64
+		if err := rows.Scan(&name, &key, &width, &height, &bitrate, &rowDuration); err != nil {
+			return fmt.Errorf("scanning canonical recovery ladder: %w", err)
+		}
+		rung, ok := hlsRungByName(name)
+		if !ok || key == "" || width != rung.Width || height != rung.Height || bitrate != rung.VideoKbps || rowDuration != durationMS {
+			return fmt.Errorf("%w: canonical recovery rendition %q is inconsistent", ErrConflict, name)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("%w: duplicate canonical recovery rendition %q", ErrConflict, name)
+		}
+		seen[name] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating canonical recovery ladder: %w", err)
+	}
+	if len(seen) != len(expected) {
+		return fmt.Errorf("%w: canonical recovery ladder has %d rows, expected %d", ErrConflict, len(seen), len(expected))
+	}
+	for _, name := range expected {
+		if _, ok := seen[name]; !ok {
+			return fmt.Errorf("%w: canonical recovery ladder is missing %q", ErrConflict, name)
+		}
+	}
+	return nil
+}
+
+func (w *Worker) failEnhancement(ctx context.Context, assetVersionID, operationID string, cause error) error {
+	return w.failRecovery(ctx, assetVersionID, operationID, cause, "ENHANCEMENT")
+}
+
+func (w *Worker) failFinalization(ctx context.Context, assetVersionID, operationID string, cause error) error {
+	return w.failRecovery(ctx, assetVersionID, operationID, cause, "FINALIZATION")
+}
+
+func (w *Worker) failRecovery(ctx context.Context, assetVersionID, operationID string, cause error, attemptKind string) error {
+	if errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning enhancement failure: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	spent, err := processingOperationSpent(ctx, tx, assetVersionID, operationID)
+	if err != nil {
+		return err
+	}
+	if spent {
+		return nil
+	}
+	if err := recordFailedProcessingAttempt(ctx, tx, processingFailure{assetVersionID: assetVersionID, operationID: operationID, cause: cause, category: processingFailureCategory(cause), attemptKind: attemptKind}); err != nil {
+		return err
+	}
+	updated, err := tx.Exec(ctx, `
+		UPDATE media_asset_versions SET state='PLAYABLE', work_claim_token=NULL, work_claimed_at=NULL,
+		  work_lease_expires_at=NULL, last_failure_category=$3
+		WHERE id=$1::uuid AND state='PLAYABLE' AND work_claim_token=$2 AND work_lease_expires_at > now()
+	`, assetVersionID, operationID, processingFailureCategory(cause))
+	if err != nil {
+		return fmt.Errorf("clearing enhancement claim after failure: %w", err)
+	}
+	if updated.RowsAffected() != 1 {
+		return ErrConcurrentModification
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing enhancement failure: %w", err)
+	}
+	_, _ = w.CleanupAttemptSafe(ctx, assetVersionID, operationID)
+	return cause
 }
 
 func (w *Worker) notifyTranscode(observation TranscodeObservation) {
@@ -1323,16 +1633,21 @@ type processingFailure struct {
 	operationID    string
 	cause          error
 	category       failureCategory
+	attemptKind    string
 }
 
 func recordFailedProcessingAttempt(ctx context.Context, tx pgx.Tx, failure processingFailure) error {
 	reason := truncateMediaOutput(failure.cause.Error(), 2000)
+	attemptKind := failure.attemptKind
+	if attemptKind == "" {
+		attemptKind = "FULL"
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO processing_attempts (
-			asset_version_id, operation_id, state, rendition_count, error_reason
-		) VALUES ($1::uuid, $2, 'FAILED', 0, $3)
+			asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason
+		) VALUES ($1::uuid, $2, 'FAILED', $3::media_processing_attempt_kind, 0, $4)
 		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
-	`, failure.assetVersionID, failure.operationID, reason); err != nil {
+	`, failure.assetVersionID, failure.operationID, attemptKind, reason); err != nil {
 		return fmt.Errorf("recording processing failure: %w", err)
 	}
 	return nil

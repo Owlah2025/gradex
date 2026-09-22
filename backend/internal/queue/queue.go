@@ -12,8 +12,9 @@ import (
 // Job type names, colon-namespaced per asynq convention so future job types
 // (thumbnail:generate, subtitle:generate, watermark:apply, virus:scan) don't collide.
 const (
-	TypeMediaScan      = "media:scan"
-	TypeMediaTranscode = "media:transcode"
+	TypeMediaScan        = "media:scan"
+	TypeMediaTranscode   = "media:transcode"
+	TypeMediaEnhancement = "media:enhancement"
 )
 
 type ServerOptions struct {

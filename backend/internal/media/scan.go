@@ -33,6 +33,10 @@ type ObjectVersion struct {
 	AssetVersionID       string
 	StorageObjectKey     string
 	StorageObjectVersion string
+	// ExpectedSHA256Hex is populated by enhancement recovery when the
+	// immutable upload evidence is available. Full processing keeps it empty
+	// for backwards-compatible callers.
+	ExpectedSHA256Hex string
 	// ProcessingOperationID is set only at the Processor boundary. It scopes
 	// output to one attempt so a worker that outlives its lease cannot overwrite
 	// a newer attempt's canonical object set.

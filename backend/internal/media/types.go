@@ -68,6 +68,8 @@ var (
 	ErrProcessTimeout         = errors.New("media processing timeout")
 	ErrTranscodeFailed        = errors.New("media transcode failed")
 	ErrRetryScheduled         = errors.New("media retry scheduled")
+	ErrEnhancementNotEligible = errors.New("media enhancement retry is not eligible")
+	ErrEnhancementActive      = errors.New("media enhancement retry is already active")
 
 	// ErrLeaseExpired is the refusal a worker receives when its work lease is no
 	// longer valid according to *database* time. It wraps ErrConcurrentModification
@@ -193,6 +195,13 @@ type ScanWork struct {
 	ScanWorkID     string `json:"scan_work_id"`
 }
 
+// EnhancementWork is intentionally only the immutable Asset Version identity.
+// Claim, source validation, ladder derivation, and operation identity belong to
+// worker execution rather than queue creation.
+type EnhancementWork struct {
+	AssetVersionID string `json:"asset_version_id"`
+}
+
 type TranscodeWork struct {
 	AssetVersionID string `json:"asset_version_id"`
 	OperationID    string `json:"operation_id"`
@@ -213,6 +222,21 @@ type TranscodeResult struct {
 	TrustedDurationMS  int64
 	Renditions         []Rendition
 	ExpectedRenditions []string
+}
+
+// EnhancementProbe is the execution-time source truth used to plan recovery.
+type EnhancementProbe struct {
+	ExpectedRenditions []string
+	TrustedDurationMS  int64
+}
+
+// EnhancementProcessor is an optional extension of the normal processor. The
+// full-processing interface remains unchanged; only a processor that can
+// re-probe an exact source and encode a selected rung set may execute manual
+// enhancement recovery.
+type EnhancementProcessor interface {
+	ProbeExpected(context.Context, ObjectVersion) (EnhancementProbe, error)
+	TranscodeMissing(context.Context, ObjectVersion, []string, ProgressSink, VerifiedRenditionSink) (TranscodeResult, error)
 }
 
 // VerifiedRenditionSink receives fully verified progressive renditions as they
