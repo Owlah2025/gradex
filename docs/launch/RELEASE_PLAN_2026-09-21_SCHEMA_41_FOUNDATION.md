@@ -353,7 +353,7 @@ revision becomes the schema-41-compatible application rollback floor.
 | Phase | Deployed | Rolls back to |
 | --- | --- | --- |
 | 3C-A | frozen `RELEASE_SHA` + schema 41 | remove producers → down 41 → 40 → `78ee4227` + schema 40 |
-| 3C-B (after first non-FULL row) | new app + schema 41 | the exact deployed 3C-A `RELEASE_SHA` + **schema 41** — not to schema 40 |
+| 3C-B (after first non-FULL row) | new app + schema 42 | quiesce, downgrade 42→41, then the exact deployed 3C-A `RELEASE_SHA` + **schema 41** — not to schema 40 |
 
 ### Prerequisite on the 3C-B release plan
 

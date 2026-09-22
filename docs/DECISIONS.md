@@ -4391,7 +4391,7 @@ commit order and would make progressive persistence impossible).
 **Source:** Phase 3C architecture audit, G0 verdict `ARCHITECTURE APPROVE — MIGRATION REQUIRED`;
 Product Owner instruction of 2026-09-21.
 
-## D-108 — Phase 3C-B is manual enhancement recovery on schema 41
+## D-108 — Phase 3C-B is manual enhancement recovery
 
 **Decision:** Phase 3C-B adds one authenticated Admin-only manual enhancement retry action for an
 eligible PLAYABLE video Asset Version. The action writes audit evidence and a durable generic outbox
@@ -4411,8 +4411,19 @@ ladder rather than an attempt that necessarily encoded every row.
 The first persisted ENHANCEMENT or FINALIZATION attempt, regardless of outcome, closes the schema-40
 rollback floor. The deployed 3C-A `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` artifact becomes the
 schema-41 application rollback floor. No automatic scheduler, periodic scan, backoff, 3C-C bounded
-growth, schema 42, ladder change, publication redesign, public delivery widening or provenance
+growth, ladder change, publication redesign, public delivery widening or provenance
 backfill is part of this decision.
+
+**Schema-42 G1 closure (2026-09-22):** The 3C-B worker requires schema 42. Its active processing
+claim carries an explicit kind beside the operation token. A zero-missing-rung
+claim changes from ENHANCEMENT to FINALIZATION under its lease before completion;
+stale recovery records the durable kind. Manual queueing alone does not create
+publication eligibility; a live worker claim on PLAYABLE engages the existing
+active-PLAYABLE path, while failed/unclaimed PLAYABLE does not. Rollback to the
+deployed 3C-A app requires quiesced processing, no pending enhancement outbox
+events or queued enhancement tasks, a safe 42→41 downgrade, and clean schema 41.
+The first non-FULL attempt still forbids 41→40. Generic production DOWN remains
+prohibited; supervised production 42→41 tooling requires separate review.
 
 **Source:** Phase 3C-B manual enhancement recovery specification and schema-41 foundation contract;
 implementation review pending.
