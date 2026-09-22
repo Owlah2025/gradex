@@ -406,6 +406,27 @@ for an ACL account. `REDIS_ADDR` must contain only `host:port`, never a credenti
 
 ---
 
+## Phase 3C-B — manual enhancement recovery
+
+Phase 3C-B is manual-only and schema-41 compatible. Production must retain the complete deployed
+3C-A artifact floor `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` before this phase is released. An
+authenticated Admin may request enhancement recovery for a current, unclaimed PLAYABLE video Asset
+Version through `POST /api/v1/media/assets/:id/retry-enhancements`. The request records audit evidence
+and a durable outbox intent but does not claim the asset, probe it, change its state, or predict its
+missing rungs.
+
+The worker claims at execution, revalidates the exact object version and checksum, re-probes the
+source, derives the frozen ladder, and compares it with canonical `video_renditions`. It encodes only
+missing rungs and preserves every already committed row. A failed enhancement remains PLAYABLE with
+its committed rows intact. A complete canonical ladder uses a zero-output FINALIZATION attempt and
+atomically proves READY. Canonical rows may span multiple operation prefixes; protected delivery
+continues to render its dynamic master from their persisted keys.
+
+The first ENHANCEMENT or FINALIZATION attempt, failed or successful, closes schema-40 rollback. After
+that evidence exists, normal application rollback targets the retained 3C-A artifact on schema 41;
+the supervised 41→40 command must refuse. No automatic retry scheduler, periodic scan, backoff,
+schema 42, or 3C-C behavior is permitted.
+
 ## 7. Health Checks & Verification Sequence
 
 - **Readiness Check**: `GET /readyz` -> returns `200 OK`

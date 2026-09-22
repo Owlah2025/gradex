@@ -4390,3 +4390,29 @@ commit order and would make progressive persistence impossible).
 
 **Source:** Phase 3C architecture audit, G0 verdict `ARCHITECTURE APPROVE — MIGRATION REQUIRED`;
 Product Owner instruction of 2026-09-21.
+
+## D-108 — Phase 3C-B is manual enhancement recovery on schema 41
+
+**Decision:** Phase 3C-B adds one authenticated Admin-only manual enhancement retry action for an
+eligible PLAYABLE video Asset Version. The action writes audit evidence and a durable generic outbox
+intent containing only the Asset Version identity. It never claims the asset or changes media state
+at request time. The worker claims at execution using the existing database-time lease/fencing
+mechanism, revalidates the exact immutable source version and checksum, re-probes it, derives the
+frozen compiled ladder, and computes the missing canonical rung set at that moment.
+
+An ENHANCEMENT attempt encodes only missing rungs and persists each verified new row append-only with
+its operation provenance. Existing canonical rows, including legacy NULL provenance, remain valid.
+A partial failure keeps committed rows, records a truthful FAILED ENHANCEMENT, clears the claim and
+leaves the asset PLAYABLE. When no rung is missing, the worker performs no encoding and records a
+zero-output SUCCEEDED FINALIZATION. READY proof spans all canonical rows across operations and
+`successful_processing_attempt_id` identifies the terminal attempt that proved/finalized the complete
+ladder rather than an attempt that necessarily encoded every row.
+
+The first persisted ENHANCEMENT or FINALIZATION attempt, regardless of outcome, closes the schema-40
+rollback floor. The deployed 3C-A `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` artifact becomes the
+schema-41 application rollback floor. No automatic scheduler, periodic scan, backoff, 3C-C bounded
+growth, schema 42, ladder change, publication redesign, public delivery widening or provenance
+backfill is part of this decision.
+
+**Source:** Phase 3C-B manual enhancement recovery specification and schema-41 foundation contract;
+implementation review pending.
