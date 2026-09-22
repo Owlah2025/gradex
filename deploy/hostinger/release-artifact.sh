@@ -9,13 +9,33 @@ artifact_value() {
   printf '%s' "$value"
 }
 
+# A release bundle declares exactly one boundary capability marker, drawn from a
+# closed set. Each schema cutover is a one-release boundary with its own
+# supervised rollback, so the marker says which boundary this bundle is FOR, and
+# the per-boundary command asserts the value it requires. A bundle declaring
+# none, more than one, or an unrecognized value is not a release this tooling can
+# reason about — that is a mixed or stale bundle, and it refuses here.
+SCHEMA41_BUNDLE_CAPABILITY=SCHEMA41_CAPABILITY=supervised-41-to-40-v1
+SCHEMA42_BUNDLE_CAPABILITY=SCHEMA42_CAPABILITY=manual-enhancement-v1
+
+bundle_capability() {
+  local declared
+  declared="$(awk -F= '$1 ~ /^SCHEMA4[0-9]_CAPABILITY$/ { count++; line=$0 } END { if (count != 1) exit 1; print line }' \
+    "$1/release-tooling.env")" || die "bundle must declare exactly one release capability marker"
+  case "$declared" in
+    "$SCHEMA41_BUNDLE_CAPABILITY"|"$SCHEMA42_BUNDLE_CAPABILITY") ;;
+    *) die "unrecognized bundle capability marker" ;;
+  esac
+  printf '%s' "$declared"
+}
+
 verify_release_bundle() {
   local release_dir="$1" tooling="$1/tooling" manifest="$1/release.env" revision="$2" digest
   [ -f "$tooling/release-tooling.env" ] || die "missing bundle metadata"
   [ "$(artifact_value "$manifest" GRADEX_RELEASE_SHA)" = "$revision" ] || die "manifest release mismatch"
   [ "$(artifact_value "$tooling/release-tooling.env" RELEASE_SHA)" = "$revision" ] || die "bundle release mismatch"
   [ "$(artifact_value "$tooling/release-tooling.env" DEPLOY_BUNDLE_FORMAT)" = 1 ] || die "unsupported bundle format"
-  [ "$(artifact_value "$tooling/release-tooling.env" SCHEMA41_CAPABILITY)" = supervised-41-to-40-v1 ] || die "bundle lacks supervised rollback capability"
+  bundle_capability "$tooling" >/dev/null
   digest="$(artifact_value "$manifest" GRADEX_DEPLOY_BUNDLE_SHA256)"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "invalid bundle digest"
   [ "$(cat "$release_dir/deploy-bundle.tar.gz.sha256")" = "$digest  deploy-bundle.tar.gz" ] || die "bundle checksum disagrees with manifest"
@@ -37,26 +57,81 @@ verify_release_images() {
   done
 }
 
+# The caller names the boundary it is executing, so a schema-41 command can never
+# accept a schema-42 bundle and the reverse is equally impossible.
 require_release_artifact() {
-  local release_dir="$S12_HOST_STATE_DIR/releases/$GRADEX_RELEASE_SHA" key
+  local expected_capability="$1" release_dir="$S12_HOST_STATE_DIR/releases/$GRADEX_RELEASE_SHA" key
+  [ -n "$expected_capability" ] || die "the release boundary capability must be named"
   [ "$S12_ROOT" = "$release_dir/tooling" ] || die "execute host.sh from the selected imported release tooling"
   verify_release_bundle "$release_dir" "$GRADEX_RELEASE_SHA"
+  [ "$(bundle_capability "$release_dir/tooling")" = "$expected_capability" ] ||
+    die "bundle capability is not $expected_capability"
   for key in GRADEX_BACKEND_IMAGE GRADEX_FRONTEND_IMAGE GRADEX_PROOF_IMAGE; do
     [ "${!key}" = "$(artifact_value "$release_dir/release.env" "$key")" ] || die "runtime image selection disagrees with manifest"
   done
   verify_release_images "$release_dir/release.env" "$GRADEX_RELEASE_SHA"
 }
 
+require_migration_hash_binding() {
+  local prefix="$1" migration expected actual
+  for migration in "$prefix".{up,down}.sql; do
+    expected="$(sha256sum "$S12_ROOT/backend/internal/db/migrations/$migration")"
+    actual="$(docker run --rm --network none --entrypoint sha256sum "$GRADEX_BACKEND_IMAGE" "internal/db/migrations/$migration")" ||
+      die "backend lacks migration $prefix"
+    [ "${actual%% *}" = "${expected%% *}" ] || die "backend migration $prefix differs from tooling bundle"
+  done
+}
+
+# The schema-42 candidate's own capability proof, deliberately separate from the
+# schema-41 one. The usage text is the exact compiled command surface, so an
+# image that predates the supervised 42 -> 41 command, or one that has drifted
+# past this boundary, is refused rather than trusted because its version label
+# looks right.
+require_schema42_image_capability() {
+  local usage status=0
+  usage="$(docker run --rm --network none --entrypoint gradex-migrate "$GRADEX_BACKEND_IMAGE" 2>&1)" || status=$?
+  [ "$status" = 1 ] &&
+    [ "$usage" = 'migrate: usage: migrate <up|down|version|max-version|rollback-schema-41|rollback-schema-42> [steps]' ] ||
+    die "backend lacks the supervised schema 42 rollback command"
+  # The rollback's queue-side drain proof has to exist in the same image that
+  # performs the downgrade; the schema-41 baseline image does not carry it.
+  docker run --rm --network none --entrypoint test "$GRADEX_BACKEND_IMAGE" -x /usr/local/bin/gradex-enhancement-drain ||
+    die "backend lacks the enhancement drain proof"
+  require_migration_hash_binding 0042_active_processing_attempt_kind
+}
+
+# The exact deployed 3C-A artifact set, which is the application rollback target
+# for the whole 3C-B release. It cannot be rebuilt on the host — there is no
+# production Git checkout — so if any part of it is missing or no longer
+# validates, 3C-B has no way back and must not go forward.
+SCHEMA41_APPLICATION_FLOOR=98e88fcc1105e8c638bb638d3f1c46630bcc51b2
+
+require_schema41_application_floor() {
+  local floor="$S12_HOST_STATE_DIR/releases/$SCHEMA41_APPLICATION_FLOOR" file
+  [ -d "$floor" ] ||
+    die "the schema-41 application rollback floor $SCHEMA41_APPLICATION_FLOOR is not staged; refusing to deploy schema 42 without a way back"
+  for file in release.env images.tar.gz images.tar.gz.sha256 deploy-bundle.tar.gz deploy-bundle.tar.gz.sha256 \
+    tooling/release-tooling.env tooling/deploy/hostinger/host.sh tooling/tooling.sha256; do
+    [ -f "$floor/$file" ] && [ ! -L "$floor/$file" ] ||
+      die "the schema-41 application rollback floor is missing regular artifact $file"
+  done
+  (cd "$floor" && sha256sum --check --status images.tar.gz.sha256) ||
+    die "the schema-41 application rollback floor image archive checksum failed"
+  verify_release_bundle "$floor" "$SCHEMA41_APPLICATION_FLOOR"
+  [ "$(bundle_capability "$floor/tooling")" = "$SCHEMA41_BUNDLE_CAPABILITY" ] ||
+    die "the schema-41 application rollback floor does not declare the supervised 41 to 40 capability"
+  verify_release_images "$floor/release.env" "$SCHEMA41_APPLICATION_FLOOR"
+  [ "$(image_max_schema_version "$(artifact_value "$floor/release.env" GRADEX_BACKEND_IMAGE)")" = 41 ] ||
+    die "the schema-41 application rollback floor backend image does not target schema 41"
+  note "schema-41 application rollback floor $SCHEMA41_APPLICATION_FLOOR is complete and validates"
+}
+
 require_schema41_image_capability() {
-  local usage status=0 migration expected actual
+  local usage status=0
   usage="$(docker run --rm --network none --entrypoint gradex-migrate "$GRADEX_BACKEND_IMAGE" 2>&1)" || status=$?
   [ "$status" = 1 ] && [ "$usage" = 'migrate: usage: migrate <up|down|version|max-version|rollback-schema-41> [steps]' ] ||
     die "backend lacks supervised rollback capability"
-  for migration in 0041_enhancement_recovery_foundation.{up,down}.sql; do
-    expected="$(sha256sum "$S12_ROOT/backend/internal/db/migrations/$migration")"
-    actual="$(docker run --rm --network none --entrypoint sha256sum "$GRADEX_BACKEND_IMAGE" "internal/db/migrations/$migration")" || die "backend lacks migration 0041"
-    [ "${actual%% *}" = "${expected%% *}" ] || die "backend migration 0041 differs from tooling bundle"
-  done
+  require_migration_hash_binding 0041_enhancement_recovery_foundation
 }
 
 # Inspect all local containers, including stopped/restarting ones. DB names

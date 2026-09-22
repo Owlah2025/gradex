@@ -60,10 +60,17 @@ package_tooling() {
     deploy/hostinger/backup-restic.sh deploy/hostinger/release-artifact.sh \
     deploy/hostinger/r2-cors.json.template deploy/compose/redis-server.ext \
     deploy/monitoring/monitor-once.sh deploy/scripts/verify-schema-41-rollback.sh \
+    deploy/scripts/verify-schema-42-rollback.sh \
     backend/internal/db/migrations/0041_enhancement_recovery_foundation.up.sql \
-    backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql |
+    backend/internal/db/migrations/0041_enhancement_recovery_foundation.down.sql \
+    backend/internal/db/migrations/0042_active_processing_attempt_kind.up.sql \
+    backend/internal/db/migrations/0042_active_processing_attempt_kind.down.sql |
     tar -xf - -C "$staging"
-  printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA41_CAPABILITY=supervised-41-to-40-v1\n' "$revision" >"$staging/release-tooling.env"
+  # One boundary capability marker per release, naming which cutover this bundle
+  # is for. The host's schema-42 commands require exactly this value and the
+  # schema-41 commands require their own, so a stale or mixed bundle refuses
+  # instead of being accepted by whichever command happens to run.
+  printf 'RELEASE_SHA=%s\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA42_CAPABILITY=manual-enhancement-v1\n' "$revision" >"$staging/release-tooling.env"
   (cd "$staging" && find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256)
   tar -czf "$release/deploy-bundle.tar.gz" -C "$staging" --transform='s,^./,,' .
   (cd "$release" && sha256sum deploy-bundle.tar.gz >deploy-bundle.tar.gz.sha256)

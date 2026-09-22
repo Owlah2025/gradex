@@ -24,21 +24,39 @@ fixture = Path(os.environ["FIXTURE"])
 c = json.loads((fixture / "docker.json").read_text())
 worker_id = "a" * 64
 with (fixture / "docker.log").open("a") as f: f.write(json.dumps(a) + "\n")
+state_file = fixture / "schema-state"
+def schema_state(): return state_file.read_text().strip() if state_file.exists() else c.get("schema_state", "41|false")
 if a[0] in ("build", "save", "load"):
     if a[0] != "save": sys.stdin.buffer.read()
     if a[0] == "save": print("mock image archive")
 elif a[:2] == ["image", "inspect"]:
     if "--format" in a:
         fmt = a[a.index("--format")+1]
-        print(c.get("bad_revision", {}).get(a[-1], c["sha"]) if "revision" in fmt else c.get("image_id", "sha256:"+hashlib.sha256(a[-1].encode()).hexdigest()))
+        if "revision" in fmt:
+            print(c.get("bad_revision", {}).get(a[-1], c.get("revisions", {}).get(a[-1], c["sha"])))
+        else:
+            print(c.get("image_id", "sha256:"+hashlib.sha256(a[-1].encode()).hexdigest()))
 elif a[0] == "run":
     entry = a[a.index("--entrypoint")+1]
+    image = a[a.index("--entrypoint")+2]
     if entry == "sha256sum":
         print(c.get("migration_hash", hashlib.sha256((fixture / "source/backend" / a[-1]).read_bytes()).hexdigest())+"  "+a[-1])
-    elif a[-1] == "max-version": print(c.get("ceiling", "41"))
+    elif entry == "test":
+        # The read-only enhancement drain proof must exist in the same image.
+        sys.exit(1 if c.get("no_drain") else 0)
+    elif a[-1] == "max-version": print(c.get("ceilings", {}).get(image, c.get("ceiling", "42")))
     else:
-        print("migrate: usage: migrate <up|down|version|max-version"+("" if c.get("old") else "|rollback-schema-41")+"> [steps]", file=sys.stderr)
+        commands = ["up", "down", "version", "max-version"]
+        if not c.get("old"): commands.append("rollback-schema-41")
+        if not c.get("old") and not c.get("no_schema42_command"): commands.append("rollback-schema-42")
+        print("migrate: usage: migrate <"+"|".join(commands)+"> [steps]", file=sys.stderr)
         sys.exit(1)
+elif a[0] == "exec":
+    command = a[-1]
+    if "schema_migrations" in command: print(schema_state())
+    elif "work_claim_token" in command: print(c.get("active_claims", "0"))
+    elif "source_invitation_id" in command: print("0")
+    else: raise RuntimeError(a)
 elif a[0] == "ps":
     assert "--no-trunc" in a
     if c.get("ps_failure"): sys.exit(1)
@@ -57,10 +75,21 @@ elif a[0] == "compose":
     assert a[a.index("--project-name")+1] == "gradex-production", a
     if "ps" in a:
         service = a[-1]
-        if service == "postgres" or (fixture / ("started-"+service)).exists() or service in c.get("present", []): print(worker_id if service == "worker" else service)
+        if service in ("postgres", "redis") or (fixture / ("started-"+service)).exists() or service in c.get("present", []): print(worker_id if service == "worker" else service)
     elif "up" in a:
         for service in a[a.index("up")+1:]:
             if not service.startswith("-"): (fixture / ("started-"+service)).touch()
+        if "migrate" in a: state_file.write_text(c.get("schema_state_after_up", "42|false"))
+    elif "run" in a:
+        if "gradex-enhancement-drain" in a:
+            if c.get("pending_enhancement"): sys.exit(1)
+        elif "rollback-schema-42" in a:
+            assert "-confirm-production=schema-42-to-41" in a, a
+            if c.get("down_failure"): sys.exit(1)
+            state_file.write_text(c.get("schema_state_after_down", "41|false"))
+        elif "rollback-schema-41" in a:
+            assert "-confirm-production=schema-41-to-40" in a, a
+            state_file.write_text("40|false")
 elif a[0] != "info": raise RuntimeError(a)
 '''
 
@@ -74,6 +103,57 @@ def run(args, *, env=None, cwd=None, ok=True, input_text=None):
 
 def manifest(path):
     return dict(line.split("=", 1) for line in path.read_text().splitlines())
+
+
+# The deployed 3C-A revision, which is the schema-42 release's only application
+# rollback target. It is a reviewed constant in release-artifact.sh, so the test
+# reads it from there rather than restating it.
+FLOOR_SHA = next(line.split("=", 1)[1].strip()
+                 for line in (ROOT / "deploy/hostinger/release-artifact.sh").read_text().splitlines()
+                 if line.startswith("SCHEMA41_APPLICATION_FLOOR="))
+
+
+def stage_application_floor(state, tooling, fixture):
+    """Stage the 3C-A artifact set exactly as import-release.sh leaves it.
+
+    The floor is a real release that cannot be rebuilt here, so it is
+    reconstructed from the candidate's own tooling with the schema-41 boundary
+    marker and its own revision. It has to satisfy every check the host applies:
+    bundle inventory, extracted-tooling checksums, manifest bindings, image
+    identity and the schema-41 version ceiling.
+    """
+    assert len(FLOOR_SHA) == 40 and all(character in "0123456789abcdef" for character in FLOOR_SHA), FLOOR_SHA
+    staging = fixture / "floor-staging"
+    shutil.copytree(tooling, staging)
+    run(["chmod", "-R", "u+w", str(staging)])
+    (staging / "release-tooling.env").write_text(
+        f"RELEASE_SHA={FLOOR_SHA}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA41_CAPABILITY=supervised-41-to-40-v1\n")
+    (staging / "tooling.sha256").unlink()
+    run(["bash", "-c", "find . -type f ! -name tooling.sha256 -print0 | sort -z | xargs -0 sha256sum >tooling.sha256"], cwd=staging)
+
+    destination = state / "releases" / FLOOR_SHA
+    destination.mkdir(parents=True)
+    run(["tar", "-czf", str(destination / "deploy-bundle.tar.gz"), "-C", str(staging), "--transform", "s,^./,,", "."])
+    digest = hashlib.sha256((destination / "deploy-bundle.tar.gz").read_bytes()).hexdigest()
+    (destination / "deploy-bundle.tar.gz.sha256").write_text(f"{digest}  deploy-bundle.tar.gz\n")
+    (destination / "images.tar.gz").write_bytes(b"mock image archive\n")
+    (destination / "images.tar.gz.sha256").write_text(
+        f"{hashlib.sha256((destination / 'images.tar.gz').read_bytes()).hexdigest()}  images.tar.gz\n")
+    (destination / "tooling").mkdir()
+    run(["tar", "-xzf", str(destination / "deploy-bundle.tar.gz"), "-C", str(destination / "tooling")])
+
+    images = {role: f"gradex-{'backend-proof' if role == 'PROOF' else role.lower()}:hostinger-{FLOOR_SHA[:12]}"
+              for role in ("BACKEND", "FRONTEND", "PROOF")}
+    lines = [f"GRADEX_RELEASE_SHA={FLOOR_SHA}"]
+    for role, image in images.items():
+        lines.append(f"GRADEX_{role}_IMAGE={image}")
+    for role, image in images.items():
+        lines.append(f"GRADEX_{role}_IMAGE_ID=sha256:{hashlib.sha256(image.encode()).hexdigest()}")
+    lines.append(f"GRADEX_DEPLOY_BUNDLE_SHA256={digest}")
+    (destination / "release.env").write_text("\n".join(lines) + "\n")
+    run(["chmod", "-R", "a-w", str(destination)])
+    return {"revisions": {image: FLOOR_SHA for image in images.values()},
+            "ceilings": {images["BACKEND"]: "41"}}
 
 
 def main():
@@ -178,9 +258,17 @@ def main():
         assert caddy["source"] == str(tooling / "deploy/hostinger/Caddyfile")
         assert Path(caddy["source"]).is_file()
 
+        # The deployed 3C-A artifact set, staged exactly as import-release.sh
+        # leaves it. Without it the schema-42 cutover has no application to roll
+        # back to and must refuse, so the forward path cannot be exercised at all
+        # until the floor is present.
+        floor = stage_application_floor(state, tooling, fixture)
+        config = {**config, "revisions": floor["revisions"], "ceilings": floor["ceilings"]}
+
         def host(command, overrides=None, configuration=None):
             for started in fixture.glob("started-*"):
                 started.unlink()
+            (fixture / "schema-state").unlink(missing_ok=True)
             (fixture / "docker.log").write_text("")
             (fixture / "docker.json").write_text(json.dumps(configuration or config))
             runtime = dict(values, **(overrides or {}))
@@ -195,27 +283,94 @@ def main():
             calls = [json.loads(line) for line in (fixture / "docker.log").read_text().splitlines()]
             return result, calls
 
-        for command in ("up-core-schema-41-foundation", "rollback-schema-41-foundation"):
-            result, calls = host(command)
+        forward_command = "up-core-schema-42-enhancement-recovery"
+        rollback_command = "rollback-schema-42-enhancement-recovery"
+        starting = {forward_command: "41|false", rollback_command: "42|false"}
+
+        def migration_ran(calls):
+            return any(a[0] == "compose" and (("up" in a and "migrate" in a) or "rollback-schema-42" in a) for a in calls)
+
+        for command in (forward_command, rollback_command):
+            base = {**config, "schema_state": starting[command]}
+            result, calls = host(command, configuration=base)
             assert result.returncode == 0, result.stderr
-            assert any(a[0] == "compose" and ("up" in a if command.startswith("up") else "rollback-schema-41" in a) for a in calls)
+            assert migration_ran(calls), calls
+            if command == rollback_command:
+                # Exactly the dedicated command with its transition-specific
+                # acknowledgement, and nothing that could continue to schema 40.
+                runs = [a for a in calls if a[0] == "compose" and "run" in a]
+                assert [a[-1] for a in runs] == ["gradex-enhancement-drain", "-confirm-production=schema-42-to-41"], runs
+                assert not any("rollback-schema-41" in a or "down" in a for a in runs), runs
+
+            # Identity: a mismatched image, a mixed runtime selection, a missing
+            # capability, a wrong ceiling or a drifted migration refuses before
+            # anything is started.
             for role in ("BACKEND", "FRONTEND", "PROOF"):
-                result, calls = host(command, configuration={**config, "bad_revision": {fields[f"GRADEX_{role}_IMAGE"]: "2" * 40}})
+                result, calls = host(command, configuration={**base, "bad_revision": {fields[f"GRADEX_{role}_IMAGE"]: "2" * 40}})
                 assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
             for overrides in ({"GRADEX_RELEASE_SHA": "2" * 40}, {"GRADEX_BACKEND_IMAGE": "gradex-backend:mixed"}):
-                result, calls = host(command, overrides=overrides)
+                result, calls = host(command, overrides=overrides, configuration=base)
                 assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
-            for mutation in ({"old": True}, {"ceiling": "40"}, {"image_id": "sha256:wrong"}, {"migration_hash": "0"*64}):
-                result, calls = host(command, configuration={**config, **mutation})
-                assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
+            for mutation in ({"old": True}, {"no_schema42_command": True}, {"no_drain": True},
+                             {"ceiling": "41"}, {"ceiling": "43"}, {"image_id": "sha256:wrong"}, {"migration_hash": "0"*64}):
+                result, calls = host(command, configuration={**base, **mutation})
+                assert result.returncode and not any(a[0] == "compose" for a in calls), (mutation, result.stderr)
             for service in ("api", "worker"):
-                result, calls = host(command, configuration={**config, "present": [service]})
-                assert result.returncode and not any(a[0] == "compose" and ("up" in a or "run" in a) for a in calls)
+                result, calls = host(command, configuration={**base, "present": [service]})
+                assert result.returncode and not migration_ran(calls), result.stderr
+
+            # Quiescence and schema preconditions sit after PostgreSQL is up, so
+            # what they must prevent is the migration, not every Compose call.
+            for mutation in ({"active_claims": "2"}, {"schema_state": "40|false"},
+                             {"schema_state": starting[command].replace("false", "true")}):
+                result, calls = host(command, configuration={**base, **mutation})
+                assert result.returncode and not migration_ran(calls), (mutation, result.stderr)
+
+        # The enhancement drain is a hard gate: pending work refuses, and the
+        # refusal lands before the schema moves.
+        result, calls = host(rollback_command, configuration={**config, "schema_state": "42|false", "pending_enhancement": True})
+        assert result.returncode and not any("rollback-schema-42" in a for a in calls), result.stderr
+
+        # A DOWN that fails, or lands anywhere but a clean 41, is not a completed
+        # rollback and must not be reported as one.
+        for mutation in ({"down_failure": True}, {"schema_state_after_down": "40|false"}, {"schema_state_after_down": "41|true"}):
+            result, _ = host(rollback_command, configuration={**config, "schema_state": "42|false", **mutation})
+            assert result.returncode, mutation
+
+        # A migration that does not land on a clean 42 must not start the 3C-B
+        # application tier: its worker requires 42.
+        result, calls = host(forward_command, configuration={**config, "schema_state": "41|false", "schema_state_after_up": "41|false"})
+        assert result.returncode and not any(a[0] == "compose" and "up" in a and "api" in a for a in calls), result.stderr
+
+        # No way back means no way forward.
+        floor_dir = state / "releases" / FLOOR_SHA
+        hidden = state / "releases" / (FLOOR_SHA + ".moved")
+        floor_dir.rename(hidden)
+        for command in (forward_command, rollback_command):
+            result, calls = host(command, configuration={**config, "schema_state": starting[command]})
+            assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
+        hidden.rename(floor_dir)
+
+        # The schema-41 one-release commands stay narrow: this is a schema-42
+        # bundle carrying a schema-42 image, and they must refuse both.
+        for command in ("up-core-schema-41-foundation", "rollback-schema-41-foundation"):
+            result, calls = host(command, configuration={**config, "schema_state": "41|false"})
+            assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
 
         # Drift/missing metadata must refuse before even Compose configuration.
+        # The capability marker is part of that: a bundle declaring the previous
+        # release's boundary, both boundaries, or an unknown one is a mixed or
+        # stale bundle and this command must not act on it.
         for path, replacement in ((tooling / "release-tooling.env", None),
                                   (tooling / "release-tooling.env", b"RELEASE_SHA=" + b"2"*40 + b"\n"),
                                   (tooling / "release-tooling.env", f"RELEASE_SHA={sha}\nDEPLOY_BUNDLE_FORMAT=0\n".encode()),
+                                  (tooling / "release-tooling.env",
+                                   f"RELEASE_SHA={sha}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA41_CAPABILITY=supervised-41-to-40-v1\n".encode()),
+                                  (tooling / "release-tooling.env",
+                                   f"RELEASE_SHA={sha}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA41_CAPABILITY=supervised-41-to-40-v1\n"
+                                   f"SCHEMA42_CAPABILITY=manual-enhancement-v1\n".encode()),
+                                  (tooling / "release-tooling.env",
+                                   f"RELEASE_SHA={sha}\nDEPLOY_BUNDLE_FORMAT=1\nSCHEMA42_CAPABILITY=unreviewed\n".encode()),
                                   (tooling / "deploy/hostinger/Caddyfile", b"drift"),
                                   (state / "releases" / sha / "deploy-bundle.tar.gz", b"corrupt")):
             old = path.read_bytes()
@@ -223,7 +378,7 @@ def main():
             path.chmod(0o600)
             if replacement is None: path.unlink()
             else: path.write_bytes(replacement)
-            result, calls = host("rollback-schema-41-foundation")
+            result, calls = host(rollback_command, configuration={**config, "schema_state": "42|false"})
             assert result.returncode and not any(a[0] == "compose" for a in calls), result.stderr
             path.write_bytes(old)
             path.chmod(0o400)
@@ -232,19 +387,20 @@ def main():
             container = {"Config": {"Image": "gradex-backend:other", "Cmd": ["gradex-worker"],
                                     "Env": [f"DATABASE_URL=postgres://user:fixture@other-postgres/{db_name}"],
                                     "Labels": {"com.docker.compose.project": "other", "com.docker.compose.service": "worker"}}}
-            result, calls = host("rollback-schema-41-foundation", configuration={**config, "containers": {"other-worker": container}})
+            result, calls = host(rollback_command, configuration={**config, "schema_state": "42|false", "containers": {"other-worker": container}})
             assert (result.returncode == 0) == accepted, result.stderr
-        result, _ = host("rollback-schema-41-foundation", configuration={**config, "ps_failure": True})
+        producer_base = {**config, "schema_state": "42|false"}
+        result, _ = host(rollback_command, configuration={**producer_base, "ps_failure": True})
         assert result.returncode
-        result, _ = host("rollback-schema-41-foundation", configuration={**config, "containers": {"uninspectable": {}}, "inspect_failure": True})
+        result, _ = host(rollback_command, configuration={**producer_base, "containers": {"uninspectable": {}}, "inspect_failure": True})
         assert result.returncode
         for malformed in ({"Config": {"Cmd": ["gradex-worker"], "Env": []}},
                           {"Config": {"Cmd": ["gradex-worker"], "Env": ["DATABASE_URL=not-a-url"]}},
                           {"Config": {"Cmd": ["gradex-worker"], "Env": ["DATABASE_URL=postgres://fixture@postgres/other?dbname=gradex_production"]}}):
-            result, _ = host("rollback-schema-41-foundation", configuration={**config, "containers": {"ambiguous-worker": malformed}})
+            result, _ = host(rollback_command, configuration={**producer_base, "containers": {"ambiguous-worker": malformed}})
             assert result.returncode
         old_sha = "a272011620296569f180a02c11c33fbbc8d97c73"
-        result, calls = host("up-core-schema-41-foundation", overrides={"GRADEX_RELEASE_SHA": old_sha}, configuration={"sha": old_sha})
+        result, calls = host(forward_command, overrides={"GRADEX_RELEASE_SHA": old_sha}, configuration={"sha": old_sha})
         assert result.returncode and not any(a[0] == "compose" for a in calls)
         # Read-only imported trees need write permission solely for test cleanup.
         for directory, _, files in os.walk(fixture):

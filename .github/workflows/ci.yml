@@ -304,6 +304,19 @@ jobs:
       - name: Secret exposure guard
         run: ./scripts/expose-guard.sh
 
+      # The supervised schema-rollback wrappers are release tooling: a reviewer
+      # cannot run a production cutover to check them, so their gates are checked
+      # here instead. Both guards extract the real host.sh functions and exercise
+      # them against value fixtures — no container, database, Redis or network.
+      - name: Schema 41 rollback guard
+        run: ./deploy/scripts/verify-schema-41-rollback.sh
+
+      - name: Schema 42 rollback and enhancement drain guard
+        run: ./deploy/scripts/verify-schema-42-rollback.sh
+
+      - name: Compose render guard
+        run: ./deploy/scripts/verify-compose-render.sh
+
   # ---------------------------------------------------------------------------
   # S5 T075 — rendered RTL/LTR viewport evidence (SC-010)
   #

@@ -362,12 +362,31 @@ wait_for_completion() {
 # `--no-deps` on the application services keeps Compose from reconciling the
 # edge through the dependency graph; migrate has already run as a one-shot, so
 # the api dependency it satisfies is met.
+#
+# A named schema boundary adds its own gates around the same sequence. The
+# schema-42 boundary additionally proves the database really is quiescent and
+# lands on exactly the expected version on both sides of the migration, because
+# the 3C-B worker refuses schema 41 and the 3C-A application must never see
+# schema 42.
 start_core() {
-  if [ "${1:-}" = schema-41-foundation ]; then
+  local boundary="${1:-}"
+  case "$boundary" in
+    ''|schema-41-foundation|schema-42-enhancement-recovery) ;;
+    *) die "unknown application tier boundary $boundary" ;;
+  esac
+  if [ -n "$boundary" ]; then
     require_tools
     load_environment
     validate_environment
-    require_schema41_release_identity
+    case "$boundary" in
+      schema-41-foundation) require_schema41_release_identity ;;
+      schema-42-enhancement-recovery)
+        require_schema42_release_identity
+        # No way back means no way forward: the 3C-A artifact set is the only
+        # application this release can roll back to, and it cannot be rebuilt here.
+        require_schema41_application_floor
+        ;;
+    esac
     require_absent api
     require_absent worker
     require_no_local_production_workers
@@ -376,13 +395,25 @@ start_core() {
   compose up --detach postgres redis
   wait_for_status postgres healthy
   wait_for_status redis healthy
+  if [ "$boundary" = schema-42-enhancement-recovery ]; then
+    # Removing the api and worker containers proves the known producers are gone;
+    # this proves no work was left claimed behind them.
+    require_no_active_media_claims
+    require_schema_clean_at 41
+  fi
   compose up --detach migrate
   wait_for_completion migrate
+  if [ "$boundary" = schema-42-enhancement-recovery ]; then
+    # G2 sequencing: the API is not started until schema 42 is verified clean, so
+    # no manual enhancement intent can be written before a worker exists that can
+    # execute it.
+    require_schema_clean_at 42
+  fi
   compose up --detach --no-deps api worker frontend
   wait_for_status api healthy
   wait_for_status worker running
   wait_for_status frontend healthy
-  if [ "${1:-}" = schema-41-foundation ]; then
+  if [ -n "$boundary" ]; then
     local expected_worker
     expected_worker="$(service_id worker)" || die "could not inspect production worker topology"
     [ -n "$expected_worker" ] || die "production worker is absent after startup"
@@ -1344,18 +1375,22 @@ require_absent() {
     die "$service container still exists in project $S12_PROJECT; stop and remove it before schema rollback"
 }
 
-# This one-off production rollback targets the canonical production project,
+# A one-off production schema movement targets the canonical production project,
 # database, and protected runtime file. validate_environment supplies the
 # shared project declaration and image-label checks before this narrower gate.
-require_schema41_production_target() {
-  local db_url_target db_url_host db_url_name
-  [ "$APP_ENV" = production ] || die "schema 41 foundation rollback is production-only"
-  [ "$S12_PROJECT" = gradex-production ] || die "schema 41 rollback requires project gradex-production"
+#
+# The label names which boundary is asking. Every assertion is identical for
+# every boundary — that is the point: there is exactly one production target, and
+# a new schema command cannot quietly widen what "production" means.
+require_production_migration_target() {
+  local label="$1" db_url_target db_url_host db_url_name
+  [ "$APP_ENV" = production ] || die "$label rollback is production-only"
+  [ "$S12_PROJECT" = gradex-production ] || die "$label rollback requires project gradex-production"
   [ "$S12_HOST_STATE_DIR" = /home/deploy/gradex-production ] ||
-    die "schema 41 rollback requires the production host state directory"
+    die "$label rollback requires the production host state directory"
   [ "$S12_ENV_FILE" = "$S12_HOST_STATE_DIR/runtime.env" ] ||
-    die "schema 41 rollback requires the production runtime.env"
-  [ "$POSTGRES_DB" = gradex_production ] || die "schema 41 rollback requires the production database"
+    die "$label rollback requires the production runtime.env"
+  [ "$POSTGRES_DB" = gradex_production ] || die "$label rollback requires the production database"
   db_url_target="${DATABASE_URL#*://}"
   [ "$db_url_target" != "$DATABASE_URL" ] || die "production DATABASE_URL is malformed"
   db_url_host="${db_url_target%%/*}"
@@ -1366,14 +1401,80 @@ require_schema41_production_target() {
   [ "$db_url_name" = "$POSTGRES_DB" ] || die "production DATABASE_URL names a different database"
 }
 
+require_schema41_production_target() { require_production_migration_target "schema 41 foundation"; }
+require_schema42_production_target() { require_production_migration_target "schema 42 enhancement recovery"; }
+
 # runtime.env selects the release; the imported manifest binds the images and
 # checksummed tooling. No production Git metadata or history is needed.
 require_schema41_release_identity() {
   require_schema41_production_target
-  require_release_artifact
+  require_release_artifact "$SCHEMA41_BUNDLE_CAPABILITY"
   [ "$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")" = 41 ] ||
     die "selected backend image must target schema 41"
   require_schema41_image_capability
+}
+
+# The same shape for the 3C-B boundary, deliberately not a widening of the
+# schema-41 command: that one is a closed one-release contract and still refuses a
+# schema-42 image, both on its bundle capability and on its version ceiling.
+require_schema42_release_identity() {
+  require_schema42_production_target
+  require_release_artifact "$SCHEMA42_BUNDLE_CAPABILITY"
+  [ "$(image_max_schema_version "$GRADEX_BACKEND_IMAGE")" = 42 ] ||
+    die "selected backend image must target schema 42"
+  require_schema42_image_capability
+}
+
+# PostgreSQL is the authority on the marker. The migration commands check it too;
+# this reads it from the host side so the wrapper never starts an application
+# against a version it did not verify.
+read_schema_state() {
+  local postgres_id state
+  postgres_id="$(service_id postgres)" || die "could not inspect the postgres container"
+  [ -n "$postgres_id" ] || die "postgres must be running to read the schema marker"
+  state="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT version::text || '|' || dirty::text FROM schema_migrations;")" ||
+    die "could not read the schema marker"
+  printf '%s' "$state"
+}
+
+require_schema_clean_at() {
+  local wanted="$1" state schema_version schema_dirty
+  state="$(read_schema_state)"
+  IFS='|' read -r schema_version schema_dirty <<<"$state"
+  [[ "$schema_version" =~ ^[0-9]+$ ]] || die "schema version is invalid: $state"
+  [ "$schema_dirty" = false ] || die "schema is dirty: $state"
+  [ "$schema_version" = "$wanted" ] || die "schema is at version $schema_version, expected a clean $wanted"
+  note "schema marker reads a clean version $wanted"
+}
+
+# A safety gate against an incomplete quiesce, not synchronization. Removing the
+# api and worker containers is still the operational contract; this catches work
+# those containers left claimed, which is the realistic failure.
+require_no_active_media_claims() {
+  local postgres_id claims
+  postgres_id="$(service_id postgres)" || die "could not inspect the postgres container"
+  [ -n "$postgres_id" ] || die "postgres must be running to prove media quiescence"
+  claims="$(docker exec "$postgres_id" psql --no-psqlrc --username gradex --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align --command "SELECT count(*) FROM media_asset_versions WHERE work_claim_token IS NOT NULL;")" ||
+    die "could not count active media claims"
+  [[ "$claims" =~ ^[0-9]+$ ]] || die "active media claim count is invalid: $claims"
+  [ "$claims" = 0 ] ||
+    die "$claims media Asset Version(s) still hold a work claim; let in-flight media settle before moving the schema"
+  note "no media work is claimed"
+}
+
+# The queue-side half of the enhancement drain proof, which the migration binary
+# cannot answer: it holds no Redis client. A dispatched intent whose asynq task is
+# still pending, scheduled, retrying or archived has a dispatch receipt and is
+# therefore invisible to the database gate, so both halves are required.
+#
+# The one-off runs read-only and deletes nothing. A non-zero status means the
+# rollback must not proceed, including when the proof itself could not be taken.
+require_enhancement_drain() {
+  note "proving no schema-42 enhancement work survives in PostgreSQL or Redis"
+  compose run --rm --no-deps migrate gradex-enhancement-drain ||
+    die "enhancement work is not drained; resolve the reported outbox events and queue tasks with an operator decision and retry. Nothing was deleted and the schema was not moved"
 }
 
 # The supervised emergency rollback of the 3C-A foundation migration, and
@@ -1410,8 +1511,49 @@ rollback_schema_41_foundation() {
   note "supervised schema rollback completed; verify the marker reads version=40 dirty=false before selecting the baseline release"
 }
 
+# The supervised 42 -> 41 rollback of the 3C-B manual enhancement recovery
+# release. Like its schema-41 counterpart there is deliberately no generic
+# `migrate-down <steps>` here: this command means exactly 42 -> 41 and nothing
+# else. It never continues to 40 — that is a separate command with a stricter
+# evidence rule — and it does not start any application.
+#
+# The 3C-B candidate backend image stays selected throughout. The 3C-A baseline
+# image contains neither migration 0042 nor the command that reverts it, so it
+# could not perform this rollback; the runtime selection is switched to
+# 98e88fcc1105e8c638bb638d3f1c46630bcc51b2 only after the marker reads a clean 41.
+#
+# Postgres and Redis stay up because the gates need them. No api or worker is
+# started as a side effect: `run --no-deps` starts one container and removes it.
+rollback_schema_42_enhancement_recovery() {
+  require_tools
+  load_environment
+  validate_environment
+  require_schema42_release_identity
+  # Downgrading the schema with no application to put back would strand
+  # production on a database no running image can serve, so the floor is proven
+  # before the schema moves, not after.
+  require_schema41_application_floor
+  require_status postgres healthy
+  # Redis is a hard requirement here, not a convenience: without it the queue
+  # half of the drain proof cannot be taken, and an unprovable gate is a refusal.
+  require_status redis healthy
+  require_absent api
+  require_absent worker
+  require_no_local_production_workers
+  require_schema_clean_at 42
+  require_no_active_media_claims
+  require_enhancement_drain
+
+  note "reverting schema 42 to 41 in project $S12_PROJECT ($APP_ENV) using backend image $GRADEX_BACKEND_IMAGE"
+  compose run --rm --no-deps migrate \
+    gradex-migrate rollback-schema-42 -confirm-production=schema-42-to-41 ||
+    die "the supervised schema 42 to 41 rollback did not complete; read the command output for the real schema marker state, do not force or repair the marker, and do not start the schema-41 application until the marker reads a clean 41"
+  require_schema_clean_at 41
+  note "schema is a clean 41; now select release $SCHEMA41_APPLICATION_FLOOR and start it. This command does not continue to schema 40 and never will"
+}
+
 usage() {
-  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|status|logs [SERVICE]|stop}\n' "$0" >&2
+  printf 'usage: %s {prepare|up|up-core|up-core-schema-41-foundation|up-core-schema-42-enhancement-recovery|up-edge|verify|verify-core|bootstrap-admin|seed-smoke|monitor|monitor-alert-test|open-db-tunnel|close-db-tunnel|backup-init|backup|restore [SNAPSHOT_ID]|verify-restore|apply-release MANIFEST|rollback-schema-41-foundation|rollback-schema-42-enhancement-recovery|enhancement-drain|status|logs [SERVICE]|stop}\n' "$0" >&2
   exit 2
 }
 
@@ -1420,6 +1562,7 @@ case "${1:-}" in
   up) [ "$#" = 1 ] || usage; start_environment ;;
   up-core) [ "$#" = 1 ] || usage; start_core ;;
   up-core-schema-41-foundation) [ "$#" = 1 ] || usage; start_core schema-41-foundation ;;
+  up-core-schema-42-enhancement-recovery) [ "$#" = 1 ] || usage; start_core schema-42-enhancement-recovery ;;
   up-edge) [ "$#" = 1 ] || usage; start_edge ;;
   verify) [ "$#" = 1 ] || usage; verify_environment ;;
   verify-core) [ "$#" = 1 ] || usage; verify_core ;;
@@ -1435,6 +1578,10 @@ case "${1:-}" in
   verify-restore) [ "$#" = 1 ] || usage; verify_restore ;;
   apply-release) shift; apply_release "$@" ;;
   rollback-schema-41-foundation) [ "$#" = 1 ] || usage; rollback_schema_41_foundation ;;
+  rollback-schema-42-enhancement-recovery) [ "$#" = 1 ] || usage; rollback_schema_42_enhancement_recovery ;;
+  # The drain proof on its own, so an operator can read the real counts before
+  # committing to a rollback window. Read-only; it deletes nothing.
+  enhancement-drain) [ "$#" = 1 ] || usage; require_tools; load_environment; validate_environment; require_status postgres healthy; require_status redis healthy; require_enhancement_drain ;;
   status) load_environment; compose --profile restore ps ;;
   logs) load_environment; if [ -n "${2:-}" ]; then compose logs --no-color "$2"; else compose logs --no-color; fi ;;
   stop) load_environment; compose down ;;

@@ -17,7 +17,8 @@ extract() {
 }
 
 for function_name in assert_production_project_scope start_core require_absent \
-  require_schema41_production_target require_schema41_release_identity rollback_schema_41_foundation; do
+  require_production_migration_target require_schema41_production_target \
+  require_schema41_release_identity rollback_schema_41_foundation; do
   definition="$(extract "$function_name")"
   [ -n "$definition" ] || die "missing $function_name in host.sh"
   eval "$definition"
@@ -61,6 +62,9 @@ compose() {
 
 fixture() {
   S12_ROOT="$ROOT"
+  # Declared by release-artifact.sh in a real run; named here so the extracted
+  # identity gate is exercised with the boundary it actually requires.
+  SCHEMA41_BUNDLE_CAPABILITY=SCHEMA41_CAPABILITY=supervised-41-to-40-v1
   S12_PROJECT=gradex-production
   S12_PROJECT_STAGING_DEFAULT=gradex-staging
   S12_PROJECT_DECLARED=declared
