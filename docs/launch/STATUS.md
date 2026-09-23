@@ -1,9 +1,19 @@
 # Gradex Launch Status
 
-> **2026-09-22 Student device-admission candidate:** D-109 supersedes interactive
-> device OTP admission after password login and during legacy adoption. The local
-> candidate preserves two trusted devices and one protected playback lease per
-> Student. Schema 43 adds auditable automatic revocation reasons. Independent
+> **2026-09-23 device release NO-GO remediation:** An independent review rejected
+> the first automatic-device candidate for its missing schema-43 application
+> rollback, live legacy-session adoption risk, and reachable historical OTP
+> routes without retained integration coverage. D-110 records the targeted
+> remediation. The new [schema-43 release plan](RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA43.md)
+> requires a separately tested rollback build, controlled historical-session
+> cutover, live read-only production SHA/schema discovery, and a maintenance
+> window. Re-review and release authority are pending. No production inspection
+> or mutation was performed for this remediation.
+
+> **2026-09-22 historical Student device-admission candidate, superseded by D-110 above:**
+> D-109 superseded interactive device OTP after password login and during legacy
+> adoption. The local candidate preserves two trusted devices and one protected
+> playback lease per Student. Schema 43 adds auditable automatic revocation reasons. Independent
 > review and release gates remain pending; this work has not been deployed.
 
 > **Current release reconciliation — 2026-09-18:** live read-only Hostinger inspection supersedes

@@ -4467,3 +4467,17 @@ implementation review pending. Release hardening in
 Automatic rotation has the distinct `AUTO_REPLACED` device and session revocation reason and records automatic replacement IDs in security evidence. The Account row lock serializes admission and the durable transaction includes eviction, session revocation, new trust, and session binding. Playback lease release for the evicted device follows commit. Manual device management, password recovery, Admin revocation, account suspension, and the one-playback-lease rule retain their prior contracts.
 
 This decision supersedes D-105 only for Student device admission and device OTP after password login or legacy adoption. D-105's playback contract remains in force. Schema 43 adds the revocation reasons; downgrade refuses while automatic-replacement rows remain, preserving audit truth. Independent review is required before release.
+
+## D-110 — Device release requires schema-43 application rollback and historical-session cutover
+
+**Date:** 2026-09-23
+
+**Status:** Targeted remediation candidate; independent re-review and release authorization pending.
+
+**Decision:** The approved schema-42 media baseline at `3383f46d0e9e6379c3bd166d39622c3659ae3d86` remains immutable. Student automatic admission stays limited to two devices and does not change playback concurrency. A separate rollback application, commit `54115fd6029d5d80af63640ac6f0bfe31be22d67`, derives from that baseline and accepts schema 43 while preserving prior application behavior. After `AUTO_REPLACED` evidence exists, normal incident rollback selects that application on unchanged schema 43; 0043 down remains fail-closed.
+
+Before enabling the new API, controlled maintenance must leave zero active `LEGACY_UNBOUND` and `PENDING_DEVICE_TRUST` families and zero outstanding `DEVICE_TRUST_OTP` secrets. The cutover uses scoped canonical family revocation, invalidates device challenges, and records privileged Audit evidence. Transparent legacy adoption and the historical trust/resend endpoints are retired from the new application. An unexpected legacy state remains restricted. Current password login continues to trust a new browser automatically.
+
+Automatic replacement gains explicit `AUTO_DEVICE_REPLACED` Audit evidence. Over-limit corruption remains fail-closed and gains a distinct internal problem code plus `DEVICE_LIMIT_INVARIANT_VIOLATION` Audit evidence. Migration 0043 uses PostgreSQL's `ADD VALUE IF NOT EXISTS`; a dirty migration marker still stops automatic retry. Migrations 0039–0042 and their supervised release tooling are unchanged.
+
+The operating protocol is [the schema-43 device release plan](launch/RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA43.md). It requires live read-only production SHA/schema discovery at release time, pre-staged current and rollback artifacts, verified backup, media-work gates, a maintenance window, and a new independent verdict. No production inspection or mutation occurred during this implementation.

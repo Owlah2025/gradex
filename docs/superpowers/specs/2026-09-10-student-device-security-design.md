@@ -1,6 +1,10 @@
 # Student device security — trusted devices and single protected playback
 
-> Historical design for D-105. D-109 supersedes its interactive device-admission and emailed-OTP rules. Current Student password login and legacy adoption trust the presented browser automatically, rotating the newest trusted slot when full; the one-playback-lease rule below remains unchanged.
+> Historical design for D-105. D-109 superseded interactive device admission;
+> D-110 then retired automatic legacy adoption and old device-OTP routes behind
+> a controlled historical-session cutover. Current password login rotates the
+> newer trusted slot automatically. The one-playback-lease rule below remains
+> unchanged.
 
 **Status:** REMEDIATION APPROVED 2026-09-11; FINAL VERIFICATION PENDING.
 **Branch:** `feature/student-device-security`. **Base:** `ef733f758cf7d58e2689898a70715e2fd2102e24`.
