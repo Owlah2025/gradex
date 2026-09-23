@@ -5,10 +5,11 @@
 > composes the frozen 41 → 42 boundary with device schema 43; the prior schema-38/42
 > draft is superseded. D-111's exact catalogue-import 409 classification is accepted
 > narrowly by the Product Owner. D-112 records the approved conditional 1-hour
-> PostgreSQL RPO and 4-hour operational RTO target. The isolated schema-41 restore
-> passed, and the authorized non-serving artifact staging completed at 16:41 UTC.
-> The evidence is in
-> [`2026-09-23-schema43-artifact-staging.md`](evidence/2026-09-23-schema43-artifact-staging.md).
+> PostgreSQL RPO and 4-hour operational RTO target. The latest isolated restore
+> of snapshot `b7c1089e…` passed in 39 seconds; see the
+> [restore evidence](evidence/2026-09-23-schema41-isolated-restore-verification.md).
+> Authorized non-serving artifact staging completed at 16:41 UTC; see the
+> [staging evidence](evidence/2026-09-23-schema43-artifact-staging.md).
 > Runtime selection remains 98e88 on clean schema 41. The cleanup-capable schema-43
 > image is built from `bb9d71b645fc1afbcf3666c5035c6b8396536ff2`; independent review
 > remains required. Full LG-019 capacity evidence also remains open. No release was
