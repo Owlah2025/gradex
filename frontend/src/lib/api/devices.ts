@@ -17,6 +17,7 @@ export type DeviceTrustState =
   | "TRUSTED"
   | "LEGACY_UNBOUND";
 
+// OTP_REQUIRED and LIMIT_REACHED remain for pre-change session compatibility.
 export type DeviceAdmission = "TRUSTED" | "OTP_REQUIRED" | "LIMIT_REACHED";
 
 export type DeviceChallenge = {
@@ -122,9 +123,8 @@ export function resendDeviceCode(
 /**
  * Binds a session created before device policy existed to this browser.
  *
- * Answers `TRUSTED` when the browser already holds a live trusted record — the
- * Student proved this exact browser once and is not asked again — and otherwise
- * returns the ordinary challenge.
+ * Automatically trusts a new browser, rotating the newer trusted slot when
+ * necessary. The route accepts only a live LEGACY_UNBOUND session.
  */
 export function adoptDevice(locale: "ar" | "en", csrf: string) {
   return authenticatedRequest<SessionDeviceTrust>(

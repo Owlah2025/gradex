@@ -20,8 +20,8 @@ import { useSessionView } from "@/lib/identity/use-session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
 /**
- * Confirms a browser that has signed in but is not yet one of the Student's
- * trusted devices.
+ * Completes a device challenge issued before automatic admission was deployed.
+ * New password logins and legacy adoption never route here.
  *
  * The ordering is deliberate and matches what the server enforces. The password
  * has already been proven; the emailed code proves the mailbox; and only then

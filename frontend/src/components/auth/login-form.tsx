@@ -11,10 +11,7 @@ import { Alert } from "@/components/ui/alert";
 import { createSession } from "@/lib/api/identity";
 import { ProblemError } from "@/lib/api/problem";
 import { validEmail } from "@/lib/identity/validation";
-import {
-  postAuthenticationDestination,
-  withReturnTo,
-} from "@/lib/identity/return-to";
+import { postAuthenticationDestination, withReturnTo } from "@/lib/identity/return-to";
 import { setSession } from "@/lib/identity/session";
 import { useLocale } from "@/lib/i18n/locale-provider";
 
@@ -89,15 +86,6 @@ export function LoginForm() {
       // not sit in memory behind the next screen.
       setFields({ email: fields.email, password: "" });
       setSession(session);
-      // A browser that is not yet one of this Student's trusted devices holds a
-      // session narrowed to exactly device trust, password change, and signing
-      // out. Routing it to the confirmation screen rather than into the
-      // application is the same reasoning as the restricted principal below:
-      // walking into a wall of refusals is the defect this avoids.
-      if (session.device_trust?.state === "PENDING_DEVICE_TRUST") {
-        router.push(withReturnTo("/device-trust", searchParams.get("returnTo")));
-        return;
-      }
       // A restricted principal is routed to the mandatory password-change
       // screen rather than into the application. Signing in successfully and
       // then being refused every screen is the defect this replaces.

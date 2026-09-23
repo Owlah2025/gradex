@@ -12,7 +12,6 @@ import {
   DEVICE_SAME_DEVICE_TEST_SLOT,
   deviceSecurityStudentFor,
 } from "../src/lib/api/e2e-device-students";
-import { readDeviceTrustCodeFor } from "./device-trust";
 
 /**
  * Student device security, proven in real browsers.
@@ -324,9 +323,7 @@ test.describe("Student device management", () => {
     await b.context.close();
   });
 
-	test("a third browser proves the emailed code and replaces only the chosen device", async ({
-		browser,
-	}, testInfo) => {
+	test("a third browser signs in normally and rotates the newer device", async ({ browser }, testInfo) => {
 		const student = deviceSecurityStudentFor(testInfo, DEVICE_LIMIT_TEST_SLOT);
 		const a = await openDevice(browser, student, 0);
 		const b = await openDevice(browser, student, 1);
@@ -335,98 +332,51 @@ test.describe("Student device management", () => {
 		);
 		await b.page.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
 		expect((await bPlayback).status()).toBe(200);
-		await expect(b.page.locator("video")).toBeVisible();
 		const cContext = await browser.newContext({ locale: "en-US" });
 		const cPage = await cContext.newPage();
-		const requestedAt = new Date();
-
+		const deviceCodeRequests: string[] = [];
+		cPage.on("request", (request) => {
+			if (/\/me\/devices\/(trust|adopt)/.test(request.url())) {
+				deviceCodeRequests.push(request.url());
+			}
+		});
 		await cPage.goto("/login");
 		await cPage.locator("#email").fill(student.email);
 		await cPage.locator("#password").fill(STUDENT_PASSWORD);
 		await cPage.locator('button[type="submit"]').click();
-		await cPage.waitForURL(/\/device-trust/, { timeout: 30_000 });
-		await expect(cPage.getByTestId("replaceable-device")).toHaveCount(2);
-
-		// A pending browser may inspect limited overview information required by the
-		// flow, but cannot invoke standalone device removal to churn devices.
-		const pendingOverviewStatus = await cPage.evaluate(async () => {
-			const response = await fetch("/api/v1/me/devices", {
-				credentials: "same-origin",
-				headers: { Accept: "application/json, application/problem+json" },
-			});
-			return response.status;
-		});
-		expect(pendingOverviewStatus).toBe(200);
-
-		const pendingRemovalAttempt = await cPage.evaluate(async (targetDeviceID) => {
-			const sessionRes = await fetch("/api/v1/session", {
-				credentials: "same-origin",
-				headers: { Accept: "application/json" },
-			});
-			const session = (await sessionRes.json()) as { csrf_token: string };
-			const deleteRes = await fetch(`/api/v1/me/devices/${targetDeviceID}`, {
-				method: "DELETE",
-				credentials: "same-origin",
-				headers: {
-					"X-CSRF-Token": session.csrf_token,
-					Accept: "application/json, application/problem+json",
-				},
-			});
-			const body = (await deleteRes.json().catch(() => ({}))) as { code?: string };
-			return { status: deleteRes.status, code: body.code };
-		}, b.deviceID);
-		expect(pendingRemovalAttempt.status).toBe(403);
-		expect(pendingRemovalAttempt.code).toBe("NOT_AUTHORIZED");
-
-		const code = await readDeviceTrustCodeFor(student.email, requestedAt);
-		await cPage.getByTestId("device-code").fill(code);
-		await cPage.locator(`input[name="replace_device_id"][value="${b.deviceID}"]`).check();
-		await cPage.getByTestId("device-trust-submit").click();
 		await cPage.waitForURL(/\/learn\/dashboard/, { timeout: 30_000 });
+		await expect(cPage.getByTestId("device-trust-form")).toHaveCount(0);
+		expect(cPage.url()).not.toContain("/device-trust");
+		expect(deviceCodeRequests).toEqual([]);
 
-		const cDeviceID = await cPage.evaluate(async () => {
-			const response = await fetch("/api/v1/me/devices", {
-				headers: { Accept: "application/json, application/problem+json" },
-			});
+		const overview = await cPage.evaluate(async () => {
+			const response = await fetch("/api/v1/me/devices", { credentials: "same-origin" });
 			if (!response.ok) throw new Error(`device list returned ${response.status}`);
-			const overview = await response.json() as { devices: Array<{ id: string; current_device: boolean }> };
-			return overview.devices.find((device) => device.current_device)?.id ?? "";
+			return response.json() as Promise<{ devices: Array<{ id: string }> }>;
 		});
-		expect(cDeviceID).not.toBe("");
-		expect(cDeviceID).not.toBe(a.deviceID);
-		expect(cDeviceID).not.toBe(b.deviceID);
+		expect(overview.devices).toHaveLength(2);
+		const ids = overview.devices.map((device) => device.id);
+		expect(ids).toContain(a.deviceID);
+		expect(ids).not.toContain(b.deviceID);
 
-		await expect(b.page.locator("video")).toHaveCount(0, { timeout: 15_000 });
-		const bStatus = await b.page.evaluate(async () => {
-			const res = await fetch("/api/v1/me/devices", {
-				credentials: "same-origin",
-				headers: { Accept: "application/json, application/problem+json" },
-			});
-			return res.status;
-		});
-		expect(bStatus).toBe(401);
-
+		await b.page.goto("/en/learn/dashboard");
+		const oldStatus = await b.page.evaluate(async () =>
+			(await fetch("/api/v1/me/devices", { credentials: "same-origin" })).status,
+		);
+		expect(oldStatus).toBe(401);
 		await a.page.goto("/en/learn/dashboard");
-		const aStatus = await a.page.evaluate(async () => {
-			const res = await fetch("/api/v1/me/devices", {
-				credentials: "same-origin",
-				headers: { Accept: "application/json, application/problem+json" },
-			});
-			return res.status;
-		});
-		expect(aStatus).toBe(200);
-
-		const cStatus = await cPage.evaluate(async () => {
-			const res = await fetch("/api/v1/me/devices", {
-				credentials: "same-origin",
-				headers: { Accept: "application/json, application/problem+json" },
-			});
-			return res.status;
-		});
-		expect(cStatus).toBe(200);
-
+		const stableStatus = await a.page.evaluate(async () =>
+			(await fetch("/api/v1/me/devices", { credentials: "same-origin" })).status,
+		);
+		expect(stableStatus).toBe(200);
+		const aPlayback = a.page.waitForResponse(
+			(response) => response.url().includes(PLAYBACK_ROUTE(LESSON_ID)) && response.request().method() === "POST",
+		);
+		await a.page.goto(`/en/learn/courses/${COURSE_ID}/lessons/${LESSON_ID}`);
+		expect((await aPlayback).status()).toBe(200);
 		await a.context.close();
 		await b.context.close();
 		await cContext.close();
 	});
+
 });

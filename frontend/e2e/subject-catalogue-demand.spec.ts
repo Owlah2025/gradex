@@ -12,7 +12,6 @@ import {
   SUBJECT_DEMAND_WITHDRAW_TEST_SLOT,
   type RotatingStudent,
 } from "./rotating-students";
-import { completeDeviceTrustScreen } from "./device-trust";
 import { frontendOrigin } from "../src/lib/api/e2e-ports";
 
 /**
@@ -400,7 +399,7 @@ test("Anonymous Request completes through sign-in and returns to the Subject", a
   await context.close();
 });
 
-test("Anonymous Request survives device trust and returns to the Subject", async ({
+test("Anonymous Request signs in without a device challenge and returns to the Subject", async ({
   browser,
 }, testInfo) => {
   const student = studentFor(testInfo, SUBJECT_DEMAND_UNTRUSTED_AUTH_RETURN_TEST_SLOT);
@@ -421,19 +420,11 @@ test("Anonymous Request survives device trust and returns to the Subject", async
   await page.getByTestId("subject-demand-sign-in").click();
   await expect(page).toHaveURL(/\/login\?returnTo=/);
 
-  const requestedAt = new Date();
   await page.locator("#email").fill(student.email);
   await page.locator("#password").fill(STUDENT_PASSWORD);
   await page.getByRole("button", { name: /sign in|log in/i }).first().click();
 
-  await page.waitForURL((url) => url.pathname === "/device-trust", { timeout: 60_000 });
-  const carried = decodeURIComponent(new URL(page.url()).searchParams.get("returnTo") ?? "");
-  expect(carried.split("?")[0], "device trust must retain the exact Subject route").toBe(
-    subjectPath,
-  );
-  expect(carried, "device trust must retain the demand intent").toContain("request=1");
-
-  await completeDeviceTrustScreen(page, student.email, requestedAt);
+  await expect(page.getByTestId("device-trust-form")).toHaveCount(0);
   await page.waitForURL(
     (url) =>
       decodeURIComponent(url.pathname) === subjectPath &&

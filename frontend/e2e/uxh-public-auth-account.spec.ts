@@ -1,4 +1,3 @@
-import { confirmSeededDevicesFor } from "./device-trust";
 import fs from "fs";
 import path from "path";
 import AxeBuilder from "@axe-core/playwright";
@@ -136,15 +135,8 @@ async function signInStudent(page: Page, email: string, locale: "ar" | "en" = "e
   await page
     .getByRole("button", { name: locale === "ar" ? /تسجيل الدخول/ : /sign in/i })
     .click();
-  // Signing in from a browser Gradex has not confirmed lands on the device
-  // confirmation screen, not on the dashboard. That is the product's own
-  // journey, and this fixture means "a Student who is signed in and past it".
-  await page.waitForURL(/\/learn\/dashboard|\/device-trust/, { timeout: 30_000 });
-  if (/\/device-trust/.test(page.url())) {
-    confirmSeededDevicesFor(email);
-    await page.goto(`/${locale}/learn/dashboard`);
-  }
   await page.waitForURL(/\/learn\/dashboard/, { timeout: 30_000 });
+  await expect(page.getByTestId("device-trust-form")).toHaveCount(0);
 }
 
 /** Everything a reader could actually see on this page. */
@@ -383,16 +375,23 @@ test.describe("UX-H sign-in", () => {
 /* ----------------------------------------------------- role destinations */
 
 test.describe("UX-H where a session lands", () => {
-  test("a Student who signs in reaches the Student surface", async ({
-    browser,
-  }, testInfo) => {
-    const context = await browser.newContext({ locale: "en-US" });
-    await withLocale(context, "en");
-    const page = await context.newPage();
-    await signInStudent(page, studentForJourney(testInfo, 0).email);
-    await expect(page).toHaveURL(/\/en\/learn\/dashboard/);
-    await context.close();
-  });
+  for (const locale of ["en", "ar"] as const) {
+    test(`${locale}: a new Student browser reaches the Student surface without a device code`, async ({
+      browser,
+    }, testInfo) => {
+      const context = await browser.newContext({ locale: locale === "ar" ? "ar-KW" : "en-US" });
+      await withLocale(context, locale);
+      const page = await context.newPage();
+      const deviceCodeRequests: string[] = [];
+      page.on("request", (request) => {
+        if (/\/me\/devices\/(trust|adopt)/.test(request.url())) deviceCodeRequests.push(request.url());
+      });
+      await signInStudent(page, studentForJourney(testInfo, 0).email, locale);
+      await expect(page).toHaveURL(new RegExp(`/${locale}/learn/dashboard`));
+      expect(deviceCodeRequests).toEqual([]);
+      await context.close();
+    });
+  }
 
   for (const [role, principal, destination] of [
     ["Instructor", INSTRUCTOR, /\/en\/instructor\/courses/],

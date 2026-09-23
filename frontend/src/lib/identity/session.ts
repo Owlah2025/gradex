@@ -136,9 +136,8 @@ export function clearSession(): void {
 /**
  * What this browser must do about device trust, if anything.
  *
- * Read from the current session rather than from the view, because it is
- * transient sign-in state rather than something screens render, and because the
- * challenge it carries is only meaningful to the device-trust screen.
+ * Read from the current session rather than the public view. A challenge can
+ * remain on a pre-change session and is only meaningful to the legacy screen.
  */
 export function deviceTrust(): SessionDeviceTrust | null {
   return current?.device_trust ?? null;
