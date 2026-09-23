@@ -21,6 +21,66 @@ type DeviceCutoverCounts struct {
 	UnexpiredOTP    int `json:"unexpired_otp"`
 }
 
+// ExpiredStaffLegacyCleanupCounts separates the narrowly authorized cleanup
+// targets from historical states that require an explicit disposition.
+type ExpiredStaffLegacyCleanupCounts struct {
+	EligibleExpiredLegacy int `json:"eligible_expired_legacy"`
+	NonExpiredLegacy      int `json:"non_expired_legacy"`
+	PendingDeviceTrust    int `json:"pending_device_trust"`
+	UnexpectedRole        int `json:"unexpected_role"`
+}
+
+type expiredStaffLegacySession struct {
+	id                string
+	accountID         string
+	role              string
+	absoluteExpiresAt time.Time
+}
+
+type expiredStaffLegacyCleanupBatch struct {
+	request      ExpiredStaffLegacyCleanupRequest
+	decisionTime time.Time
+	targets      []expiredStaffLegacySession
+}
+
+const expiredStaffLegacyCleanupCountsSQL = `
+	SELECT
+	  count(*) FILTER (WHERE a.role IN ('ADMIN', 'INSTRUCTOR')
+	    AND s.device_trust_state = 'LEGACY_UNBOUND'
+	    AND s.absolute_expires_at <= $1),
+	  count(*) FILTER (WHERE a.role IN ('ADMIN', 'INSTRUCTOR')
+	    AND s.device_trust_state = 'LEGACY_UNBOUND'
+	    AND s.absolute_expires_at > $1),
+	  count(*) FILTER (WHERE a.role IN ('ADMIN', 'INSTRUCTOR')
+	    AND s.device_trust_state = 'PENDING_DEVICE_TRUST'),
+	  count(*) FILTER (WHERE a.role NOT IN ('STUDENT', 'ADMIN', 'INSTRUCTOR'))
+	  FROM sessions s
+	  JOIN accounts a ON a.id = s.account_id
+	 WHERE s.state = 'ACTIVE'
+	   AND s.device_trust_state IN ('LEGACY_UNBOUND', 'PENDING_DEVICE_TRUST')`
+
+const lockExpiredStaffLegacySessionsSQL = `
+	SELECT s.id::text, s.account_id::text, a.role::text, s.absolute_expires_at
+	  FROM sessions s
+	  JOIN accounts a ON a.id = s.account_id
+	 WHERE a.role IN ('ADMIN', 'INSTRUCTOR')
+	   AND s.state = 'ACTIVE'
+	   AND s.device_trust_state = 'LEGACY_UNBOUND'
+	   AND s.absolute_expires_at <= $1
+	 ORDER BY s.account_id, s.id
+	 FOR UPDATE OF s`
+
+const expiredStaffLegacyCleanupAuditSQL = `
+	INSERT INTO audit_events
+	  (actor_role, actor_descriptor, action, module, target_type, target_id,
+	   reason, metadata, correlation_id)
+	 VALUES ('RELEASE_OPERATOR', $1, 'EXPIRED_LEGACY_SESSION_CLEANUP',
+         'IDENTITY_AND_ACCESS', 'SESSION', $2,
+         'One-time cleanup of an expired non-Student legacy session family',
+         jsonb_build_object('account_id', $3::text, 'account_role', $4::text,
+                            'device_trust_state', 'LEGACY_UNBOUND',
+                            'absolute_expires_at', $5::timestamptz), $6)`
+
 type cutoverQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
@@ -48,6 +108,196 @@ func readDeviceCutoverCounts(ctx context.Context, query cutoverQuerier) (DeviceC
 		return DeviceCutoverCounts{}, fmt.Errorf("counting device challenges: %w", err)
 	}
 	return counts, nil
+}
+
+// ReadExpiredStaffLegacyCleanupCounts reports only non-Student historical
+// sessions relevant to the separate, one-time Staff cleanup gate.
+func ReadExpiredStaffLegacyCleanupCounts(
+	ctx context.Context, pool *pgxpool.Pool,
+) (ExpiredStaffLegacyCleanupCounts, error) {
+	decisionTime, err := readDatabaseDecisionTime(ctx, pool)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, err
+	}
+	return readExpiredStaffLegacyCleanupCounts(ctx, pool, decisionTime)
+}
+
+func readExpiredStaffLegacyCleanupCounts(
+	ctx context.Context, query cutoverQuerier, decisionTime time.Time,
+) (ExpiredStaffLegacyCleanupCounts, error) {
+	var counts ExpiredStaffLegacyCleanupCounts
+	err := query.QueryRow(ctx, expiredStaffLegacyCleanupCountsSQL, decisionTime).Scan(&counts.EligibleExpiredLegacy, &counts.NonExpiredLegacy,
+		&counts.PendingDeviceTrust, &counts.UnexpectedRole)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, fmt.Errorf("counting expired Staff legacy sessions: %w", err)
+	}
+	return counts, nil
+}
+
+func readDatabaseDecisionTime(ctx context.Context, query cutoverQuerier) (time.Time, error) {
+	var decisionTime time.Time
+	if err := query.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&decisionTime); err != nil {
+		return time.Time{}, fmt.Errorf("reading database time for Staff cleanup: %w", err)
+	}
+	return decisionTime, nil
+}
+
+type ExpiredStaffLegacyCleanupRequest struct {
+	ExpectedEligible int
+	Operator         string
+	RequestID        string
+}
+
+// ApplyExpiredStaffLegacyCleanup revokes only expired Admin/Instructor
+// LEGACY_UNBOUND families. The table lock prevents a concurrent session write
+// from changing the preflight set while the exact row set and expected count
+// are checked and committed.
+func ApplyExpiredStaffLegacyCleanup(
+	ctx context.Context, pool *pgxpool.Pool, request ExpiredStaffLegacyCleanupRequest,
+) (ExpiredStaffLegacyCleanupCounts, error) {
+	if err := validateExpiredStaffLegacyCleanupRequest(request); err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, err
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, fmt.Errorf("beginning expired Staff cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	actual, batch, err := lockAndCheckExpiredStaffCleanupSet(ctx, tx, request)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, err
+	}
+	if err := commitExpiredStaffCleanup(ctx, tx, batch); err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, err
+	}
+	return actual, nil
+}
+
+func validateExpiredStaffLegacyCleanupRequest(request ExpiredStaffLegacyCleanupRequest) error {
+	if strings.TrimSpace(request.Operator) == "" || strings.TrimSpace(request.RequestID) == "" ||
+		request.ExpectedEligible < 0 {
+		return errors.New("expired Staff cleanup requires an operator, request ID, and nonnegative expected count")
+	}
+	return nil
+}
+
+func lockAndCheckExpiredStaffCleanupSet(
+	ctx context.Context, tx pgx.Tx, request ExpiredStaffLegacyCleanupRequest,
+) (ExpiredStaffLegacyCleanupCounts, expiredStaffLegacyCleanupBatch, error) {
+	decisionTime, err := lockExpiredStaffCleanupWriteSet(ctx, tx)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, expiredStaffLegacyCleanupBatch{}, err
+	}
+	actual, targets, err := readExpiredStaffCleanupSnapshot(ctx, tx, decisionTime)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, expiredStaffLegacyCleanupBatch{}, err
+	}
+	if err := validateExpiredStaffLegacyCleanupState(request, actual, len(targets)); err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, expiredStaffLegacyCleanupBatch{}, err
+	}
+	return actual, expiredStaffLegacyCleanupBatch{
+		request: request, decisionTime: decisionTime, targets: targets,
+	}, nil
+}
+
+func readExpiredStaffCleanupSnapshot(
+	ctx context.Context, tx pgx.Tx, decisionTime time.Time,
+) (ExpiredStaffLegacyCleanupCounts, []expiredStaffLegacySession, error) {
+	targets, err := lockedExpiredStaffLegacySessions(ctx, tx, decisionTime)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, nil, err
+	}
+	actual, err := readExpiredStaffLegacyCleanupCounts(ctx, tx, decisionTime)
+	if err != nil {
+		return ExpiredStaffLegacyCleanupCounts{}, nil, err
+	}
+	return actual, targets, nil
+}
+
+func lockExpiredStaffCleanupWriteSet(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+	if _, err := tx.Exec(ctx, `LOCK TABLE sessions IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return time.Time{}, fmt.Errorf("locking session families for expired Staff cleanup: %w", err)
+	}
+	return readDatabaseDecisionTime(ctx, tx)
+}
+
+func validateExpiredStaffLegacyCleanupState(
+	request ExpiredStaffLegacyCleanupRequest, actual ExpiredStaffLegacyCleanupCounts, targetCount int,
+) error {
+	if actual.NonExpiredLegacy != 0 || actual.PendingDeviceTrust != 0 || actual.UnexpectedRole != 0 {
+		return fmt.Errorf("expired Staff cleanup refused: non_expired_legacy=%d pending_device_trust=%d unexpected_role=%d",
+			actual.NonExpiredLegacy, actual.PendingDeviceTrust, actual.UnexpectedRole)
+	}
+	if actual.EligibleExpiredLegacy != request.ExpectedEligible || targetCount != actual.EligibleExpiredLegacy {
+		return fmt.Errorf("expired Staff cleanup count changed: eligible=%d locked=%d expected=%d",
+			actual.EligibleExpiredLegacy, targetCount, request.ExpectedEligible)
+	}
+	return nil
+}
+
+func revokeExpiredStaffLegacyTargets(
+	ctx context.Context, tx pgx.Tx, batch expiredStaffLegacyCleanupBatch,
+) error {
+	for _, target := range batch.targets {
+		if err := revokeSessionFamily(ctx, tx, target.id, RevokedByAdmin, batch.decisionTime); err != nil {
+			return err
+		}
+		if err := appendExpiredStaffLegacyCleanupAudit(ctx, tx, batch.request, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func commitExpiredStaffCleanup(
+	ctx context.Context, tx pgx.Tx, batch expiredStaffLegacyCleanupBatch,
+) error {
+	if err := revokeExpiredStaffLegacyTargets(ctx, tx, batch); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing expired Staff cleanup: %w", err)
+	}
+	return nil
+}
+
+func lockedExpiredStaffLegacySessions(
+	ctx context.Context, tx pgx.Tx, decisionTime time.Time,
+) ([]expiredStaffLegacySession, error) {
+	rows, err := tx.Query(ctx, lockExpiredStaffLegacySessionsSQL, decisionTime)
+	if err != nil {
+		return nil, fmt.Errorf("locking expired Staff legacy session targets: %w", err)
+	}
+	defer rows.Close()
+	return scanExpiredStaffLegacySessions(rows)
+}
+
+func scanExpiredStaffLegacySessions(rows pgx.Rows) ([]expiredStaffLegacySession, error) {
+	targets := make([]expiredStaffLegacySession, 0)
+	for rows.Next() {
+		var target expiredStaffLegacySession
+		if err := rows.Scan(&target.id, &target.accountID, &target.role, &target.absoluteExpiresAt); err != nil {
+			return nil, fmt.Errorf("scanning expired Staff legacy session target: %w", err)
+		}
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating expired Staff legacy session targets: %w", err)
+	}
+	return targets, nil
+}
+
+func appendExpiredStaffLegacyCleanupAudit(
+	ctx context.Context, tx pgx.Tx, request ExpiredStaffLegacyCleanupRequest,
+	target expiredStaffLegacySession,
+) error {
+	_, err := tx.Exec(ctx, expiredStaffLegacyCleanupAuditSQL,
+		request.Operator, target.id, target.accountID, target.role,
+		target.absoluteExpiresAt, request.RequestID)
+	if err != nil {
+		return fmt.Errorf("auditing expired Staff legacy session cleanup: %w", err)
+	}
+	return nil
 }
 
 func retireOutstandingDeviceOTPsForAccount(ctx context.Context, tx pgx.Tx, accountID string) error {
