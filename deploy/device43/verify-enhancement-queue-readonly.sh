@@ -25,8 +25,12 @@ done
   operation="$1"
   shift
   printf '%s\n' "$operation" >>"$DOCKER_READS_LOG"
+  if [ "${MOCK_INJECT_UNALLOWLISTED:-0}" = 1 ] && [ "$operation" = HGET ]; then
+    printf 'SISMEMBER\n' >>"$DOCKER_READS_LOG"
+  fi
   case "$operation" in
-    # The registry can say absent while completed retention data remains.
+    # This unapproved read remains available in the mock so the explicit
+    # allowlist assertion below, rather than the mock, proves it is rejected.
     SISMEMBER) printf '0\n' ;;
   LRANGE)
     case "$1" in
@@ -82,8 +86,30 @@ for expected in \
   'queue=default state=aggregating total=1 media_enhancement=1'; do
   grep --fixed-strings --line-regexp --quiet "$expected" <<<"$output"
 done
-if grep --extended-regexp --quiet '^(DEL|UNLINK|LTRIM|LREM|ZREM|SREM|FLUSH|EVAL|EVALSHA|SET|HSET|LPUSH|RPUSH)$' "$SCRATCH/redis-commands"; then
-  printf 'enhancement queue verifier issued a Redis write command\n' >&2
+assert_allowlisted_redis_commands() {
+  local operation
+  while IFS= read -r operation; do
+    case "$operation" in
+      HGET|LRANGE|ZRANGE|SMEMBERS) ;;
+      *) printf 'enhancement queue verifier emitted unapproved Redis command: %s\n' "$operation" >&2; return 1 ;;
+    esac
+  done <"$1"
+  [ -s "$1" ] || {
+    printf 'enhancement queue verifier emitted no Redis commands\n' >&2
+    return 1
+  }
+}
+assert_allowlisted_redis_commands "$SCRATCH/redis-commands"
+
+# Prove the allowlist itself is fail-closed even for an unapproved read command.
+if injected_output="$(
+  DOCKER_READS_LOG="$SCRATCH/injected-redis-commands" \
+    MOCK_INJECT_UNALLOWLISTED=1 PATH="$SCRATCH:$PATH" \
+    bash "$ROOT/deploy/device43/inspect-enhancement-queue-readonly.sh"
+  assert_allowlisted_redis_commands "$SCRATCH/injected-redis-commands" 2>&1
+)"; then
+  printf 'allowlist accepted an unapproved Redis command\n' >&2
   exit 1
 fi
+grep --fixed-strings --quiet 'unapproved Redis command: SISMEMBER' <<<"$injected_output"
 printf 'enhancement-queue-readonly verification PASS\n'
