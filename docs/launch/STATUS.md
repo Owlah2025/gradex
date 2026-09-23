@@ -1,12 +1,14 @@
 # Gradex Launch Status
 
-> **2026-09-23 schema-41 release-path re-derivation:** The first live read-only
-> preflight observed release 98e88fcc1105e8c638bb638d3f1c46630bcc51b2 on clean
-> schema 41. Offline planning now composes the frozen 41 → 42 boundary with device
-> schema 43. See the [schema-41-to-43 plan](RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md).
-> The prior schema-38/42 draft is superseded. Re-review and release approval are
-> pending. No production mutation was performed. D-111's E2E classification is
-> proposed and not accepted.
+> **2026-09-23 schema-41-to-43 preparation:** The observed baseline remains release
+> `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` on clean schema 41. The current plan
+> composes the frozen 41 → 42 boundary with device schema 43; the prior schema-38/42
+> draft is superseded. D-111's exact catalogue-import 409 classification is accepted
+> narrowly by the Product Owner. D-112 records the approved conditional 1-hour
+> PostgreSQL RPO and 4-hour operational RTO target. The isolated schema-41 restore
+> passed; full LG-019 capacity evidence and independent review remain open. Only an
+> isolated restore and artifact staging are authorized preparation; no app release,
+> live database, session, or device state has been changed.
 
 > **2026-09-23 device release NO-GO remediation:** An independent review rejected
 > the first automatic-device candidate for its missing schema-43 application
