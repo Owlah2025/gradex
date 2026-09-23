@@ -4482,11 +4482,11 @@ Automatic replacement gains explicit `AUTO_DEVICE_REPLACED` Audit evidence. Over
 
 The first operating draft was superseded after the read-only preflight observed clean schema 41; it must not be executed. The re-derived 41 → 42 → 43 candidate is [the schema-41 device release plan](launch/RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md). It requires the frozen schema-42 boundary, staged current/transition/rollback artifacts, verified backup, complete read-only preflight, maintenance window and new independent verdict. No production mutation occurred during offline reconciliation.
 
-## D-111 — Proposed classification for canonical catalogue-import E2E 409 (not accepted)
+## D-111 — Canonical catalogue-import E2E 409 classification (accepted narrowly)
 
 **Date:** 2026-09-23
 
-**Status:** Proposal only. Product Owner decision pending; this is not a waiver or acceptance.
+**Status:** Accepted by the Product Owner on 2026-09-23 with the narrow classification below. This is not a general E2E waiver.
 
 **Issue:** The canonical catalogue-import E2E returns HTTP 409 with importer.ErrIdentityRebind.
 
@@ -4494,6 +4494,18 @@ The first operating draft was superseded after the read-only preflight observed 
 
 **Relationship to this release:** The failure predates the Student device and schema-43 remediation; it is not introduced by these changes.
 
-**Proposed classification:** PRE_EXISTING_DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT.
+**Accepted classification:** PRE_EXISTING_DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT.
 
-**Scope:** Track and resolve the importer fixture separately. Accepting this classification would cover only the reproduced fixture failure. It would not authorize changing the importer identity-rebind guard or dismissing any future E2E regression.
+**Scope:** Track and resolve this exact importer fixture failure separately. This acceptance does not authorize changing the importer identity-rebind guard, waiving a changed failure signature, or dismissing any future or unrelated E2E regression.
+
+## D-112 — Founder-approved PostgreSQL recovery target for launch
+
+**Date:** 2026-09-23
+
+**Status:** Approved by the Founder for this launch under LG-019.
+
+**Decision:** PostgreSQL recovery uses a one-hour RPO target, conditional on each scheduled hourly backup completing successfully, and a four-hour RTO operational target. The RTO is a launch objective, not a contractual SLA. WAL/PITR is not implemented. A 15-minute PostgreSQL RPO is unsupported and is not an approved launch commitment.
+
+**Evidence required:** The launch uses the latest valid completed encrypted offsite PostgreSQL snapshot, verifies its schema sidecar and database coverage, and requires a successful isolated restore verification tied to that same snapshot before the maintenance window.
+
+**Scope:** This decision does not claim a 15-minute recovery point, continuous point-in-time recovery, or a guaranteed four-hour contractual restoration. If the scheduled backup fails or restore verification does not pass, the launch recovery gate remains blocked.

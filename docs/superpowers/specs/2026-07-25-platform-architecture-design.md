@@ -109,25 +109,28 @@ the current production gate defaults to one active verifier with 500 bounded wai
 measurement does not include Redis, PostgreSQL, TLS, account lookup, or session persistence and does
 not close LG-019; the browser-equivalent external 500-login test remains mandatory.
 
-### 3.4 Provisional recovery targets
+### 3.4 Recovery targets — current decision supersedes the provisional proposal
 
 | Asset or service | Provisional target |
 |---|---|
-| PostgreSQL | RPO no greater than 15 minutes; RTO no greater than 4 hours |
+| PostgreSQL | 1-hour backup-based RPO, conditional on the scheduled hourly backup completing; 4-hour operational RTO target, not a contractual SLA |
 | Source media | Durability posture, not an SLO: versioned durable object storage; successfully completed uploads should not be lost under normal provider failure scenarios |
 | Secondary source-media backup | Backup-copy RPO no greater than 24 hours; recovery RTO no greater than 8 hours |
 | Derived HLS assets | Reproducible from retained source media |
 | Redis | No authoritative durability requirement; queued intent is reconstructed from PostgreSQL |
 | Application deployment | Previous known-good frontend/API/worker versions restorable within 30 minutes |
 
-The repository now defines an hourly systemd provider-backup schedule and a two-hour backup-freshness
-alert threshold. Scheduling is not recovery evidence. When every hourly backup succeeds, it supports
-an approximately one-hour backup-based RPO direction; it does not provide point-in-time recovery.
-There is no implemented and tested PostgreSQL WAL archive/PITR mechanism, so the provisional
-15-minute RPO above is unsupported. PostgreSQL RPO and the provisional four-hour RTO remain unapproved.
+The Founder approved these PostgreSQL targets on 2026-09-23 under
+[D-112](../../DECISIONS.md#d-112--founder-approved-postgresql-recovery-target-for-launch). The hourly
+backup supports the one-hour RPO only when each scheduled backup succeeds. WAL/PITR is not
+implemented. The earlier 15-minute RPO was a provisional proposal, is unsupported, and is not a
+launch commitment. The four-hour RTO is an operational target, not a contractual SLA. The isolated
+schema-41 restore result and transcript are recorded in
+[`2026-09-23-schema41-isolated-restore-verification.md`](../../launch/evidence/2026-09-23-schema41-isolated-restore-verification.md).
 
-The final budget, load-test result, instance sizes, minimum replicas, recovery targets, and restore
-evidence remain blocked on `LG-019`.
+The RPO/RTO decision and the current schema-41 isolated restore evidence are recorded, but the full
+`LG-019` gate remains open for final budget, representative load/resource/session results, instance
+sizing, and minimum-replica evidence.
 
 ### 3.5 Provisional region boundary
 
