@@ -1,0 +1,342 @@
+diff --git a/backend/cmd/api/main.go b/backend/cmd/api/main.go
+index f48e8c3..735fa68 100644
+--- a/backend/cmd/api/main.go
++++ b/backend/cmd/api/main.go
+@@ -297,7 +297,7 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
+ // routes on a missing relation. The floor is therefore the schema that
+ // introduces the table, not the one before it.
+ func requiredSchemaVersion(cfg *config.Config) int64 {
+-	return db.SubjectDemandSignalSchemaVersion
++	return db.AutoDeviceReplacementSchemaVersion
+ }
+ 
+ func buildLearningFoundation(
+diff --git a/backend/cmd/api/schema43_compat_test.go b/backend/cmd/api/schema43_compat_test.go
+new file mode 100644
+index 0000000..ddc8154
+--- /dev/null
++++ b/backend/cmd/api/schema43_compat_test.go
+@@ -0,0 +1,16 @@
++package main
++
++import (
++	"testing"
++
++	"github.com/Owlah2025/gradex/backend/internal/db"
++)
++
++func TestRollbackBuildRequiresSchema43(t *testing.T) {
++	if got := requiredSchemaVersion(nil); got != db.AutoDeviceReplacementSchemaVersion {
++		t.Fatalf("API readiness floor = %d, want schema 43", got)
++	}
++	if db.MaxSchemaVersion != db.AutoDeviceReplacementSchemaVersion {
++		t.Fatalf("rollback build ceiling = %d, want schema 43", db.MaxSchemaVersion)
++	}
++}
+diff --git a/backend/cmd/schema43-rollback-probe/main.go b/backend/cmd/schema43-rollback-probe/main.go
+new file mode 100644
+index 0000000..9148dcd
+--- /dev/null
++++ b/backend/cmd/schema43-rollback-probe/main.go
+@@ -0,0 +1,159 @@
++//go:build integration
++
++// schema43-rollback-probe exercises the previous application behavior against
++// a disposable schema-43 database populated by the current rotation code.
++package main
++
++import (
++	"bytes"
++	"context"
++	"crypto/rand"
++	"errors"
++	"fmt"
++	"os"
++	"time"
++
++	"github.com/jackc/pgx/v5/pgxpool"
++
++	"github.com/Owlah2025/gradex/backend/internal/config"
++	"github.com/Owlah2025/gradex/backend/internal/db"
++	"github.com/Owlah2025/gradex/backend/internal/identity"
++	"github.com/Owlah2025/gradex/backend/internal/outbox"
++)
++
++func main() {
++	if err := run(context.Background()); err != nil {
++		fmt.Fprintln(os.Stderr, "schema43 rollback compatibility:", err)
++		os.Exit(1)
++	}
++	fmt.Println("schema43 rollback compatibility: PASS")
++}
++
++func run(ctx context.Context) error {
++	dsn := os.Getenv("GRADEX_COMPAT_TEST_DSN")
++	accountID := os.Getenv("GRADEX_COMPAT_ACCOUNT_ID")
++	firstDigest := os.Getenv("GRADEX_COMPAT_FIRST_DIGEST")
++	evictedID := os.Getenv("GRADEX_COMPAT_EVICTED_ID")
++	newerID := os.Getenv("GRADEX_COMPAT_NEWER_ID")
++	if dsn == "" || accountID == "" || firstDigest == "" || evictedID == "" || newerID == "" {
++		return errors.New("disposable database and fixture identifiers are required")
++	}
++	pool, err := pgxpool.New(ctx, dsn)
++	if err != nil {
++		return err
++	}
++	defer pool.Close()
++	if err := db.CheckSchemaAtLeast(ctx, pool, db.AutoDeviceReplacementSchemaVersion); err != nil {
++		return fmt.Errorf("schema/readiness: %w", err)
++	}
++	var deviceReason, sessionReason string
++	if err := pool.QueryRow(ctx, `SELECT revocation_reason::text FROM identity_trusted_devices WHERE id=$1::uuid AND account_id=$2::uuid`, evictedID, accountID).Scan(&deviceReason); err != nil {
++		return err
++	}
++	if err := pool.QueryRow(ctx, `SELECT revocation_reason::text FROM sessions WHERE trusted_device_id=$1::uuid AND account_id=$2::uuid LIMIT 1`, evictedID, accountID).Scan(&sessionReason); err != nil {
++		return err
++	}
++	if deviceReason != "AUTO_REPLACED" || sessionReason != "AUTO_REPLACED" {
++		return fmt.Errorf("automatic replacement history was not preserved")
++	}
++	devices, sessions, err := services(pool)
++	if err != nil {
++		return err
++	}
++	overview, err := devices.Overview(ctx, accountID, "", time.Now().UTC())
++	if err != nil || len(overview.Devices) != 2 {
++		return fmt.Errorf("device overview: %v, count=%d", err, len(overview.Devices))
++	}
++	adminOverview, err := devices.AdminOverview(ctx, accountID, time.Now().UTC())
++	if err != nil {
++		return err
++	}
++	foundAuto := false
++	for _, device := range adminOverview.Devices {
++		if device.ID == evictedID && device.RevocationReason == "AUTO_REPLACED" {
++			foundAuto = true
++		}
++	}
++	if !foundAuto {
++		return errors.New("admin device history omitted AUTO_REPLACED")
++	}
++	grant, err := sessions.Login(ctx, identity.LoginRequest{
++		Email:                  "device-student@example.test",
++		Password:               config.NewSecret("correct device login passphrase 9"),
++		RequestID:              "rollback-compat-returning-login",
++		DeviceCredentialDigest: firstDigest,
++		UserAgent:              "Chrome/120.0 (Windows)",
++	})
++	if err != nil || grant.Device == nil || grant.Device.TrustState != identity.DeviceTrustEstablished {
++		return fmt.Errorf("returning Student login: %v", err)
++	}
++	view, err := sessions.Resolve(ctx, identity.SessionResolutionRequest{
++		CredentialDigest:       identity.DigestToken(grant.Credential.Expose()),
++		DeviceCredentialDigest: firstDigest, UseKind: identity.UseReadOnly,
++		RequestID: "rollback-compat-resolve",
++	})
++	if err != nil || view.Session.DeviceTrust != identity.DeviceTrustEstablished {
++		return fmt.Errorf("session resolve: %v", err)
++	}
++	principal := identity.Principal{AccountID: accountID, Role: identity.RoleStudent,
++		Status: identity.StatusActive, CredentialState: identity.CredentialActive}
++	if !identity.AuthorizeSessionDevice(principal, view.Session.DeviceTrust, identity.CapLearningAccess).Allowed {
++		return errors.New("protected learning authorization refused trusted session")
++	}
++	if err := devices.Remove(ctx, identity.RemoveRequest{
++		AccountID: accountID, DeviceID: newerID, RequestID: "rollback-compat-manual-remove",
++	}); err != nil {
++		return fmt.Errorf("manual device removal: %w", err)
++	}
++	overview, err = devices.Overview(ctx, accountID, grant.Device.DeviceID, time.Now().UTC())
++	if err != nil || len(overview.Devices) != 1 {
++		return fmt.Errorf("device overview after removal: %v", err)
++	}
++	_, incomingDigest, err := identity.NewOpaqueCredential()
++	if err != nil {
++		return err
++	}
++	pending, err := sessions.Login(ctx, identity.LoginRequest{
++		Email:                  "device-student@example.test",
++		Password:               config.NewSecret("correct device login passphrase 9"),
++		RequestID:              "rollback-compat-previous-login",
++		DeviceCredentialDigest: incomingDigest,
++		UserAgent:              "Firefox/121.0 (Macintosh)",
++	})
++	if err != nil || pending.Device == nil || pending.Device.Admission != identity.AdmitNewDeviceWithSlot ||
++		pending.Device.Challenge == nil || pending.Session.DeviceTrust != identity.DeviceTrustPending {
++		return fmt.Errorf("previous login behavior was not restored: %v", err)
++	}
++	return nil
++}
++
++func services(pool *pgxpool.Pool) (*identity.DeviceService, *identity.SessionRepository, error) {
++	cfg, err := config.LoadFrom(config.MapLookup(map[string]string{
++		"APP_ENV": "development", "REDIS_ADDR": "localhost:6379",
++		"S3_ENDPOINT": "http://localhost:9000", "S3_BUCKET": "gradex-test",
++	}), config.MapSecretResolver{
++		"DATABASE_URL": "postgres://unused", "S3_ACCESS_KEY": "a",
++		"S3_SECRET_KEY": "b", "PLAYBACK_TOKEN_SECRET": "c",
++	})
++	if err != nil {
++		return nil, nil, err
++	}
++	writer, err := outbox.NewWriter("v1", bytes.Repeat([]byte{0x51}, 32))
++	if err != nil {
++		return nil, nil, err
++	}
++	devices, err := identity.NewDeviceService(identity.DeviceServiceOptions{
++		Pool: pool, Outbox: writer,
++		Policy: identity.DevicePolicy{TrustedDeviceLimit: 2, ReplacementCooldown: 24 * time.Hour},
++		Pepper: config.NewSecret(string(bytes.Repeat([]byte{0x71}, 32))),
++		OTPTTL: 10 * time.Minute, Now: time.Now, Random: rand.Reader,
++	})
++	if err != nil {
++		return nil, nil, err
++	}
++	sessions, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
++		Pool: pool, Settings: cfg.Sessions(), CSRFKey: bytes.Repeat([]byte{0x61}, 32),
++		Now: time.Now, Devices: devices,
++	})
++	return devices, sessions, err
++}
+diff --git a/backend/cmd/worker/main.go b/backend/cmd/worker/main.go
+index 1fd34a2..248685c 100644
+--- a/backend/cmd/worker/main.go
++++ b/backend/cmd/worker/main.go
+@@ -64,11 +64,10 @@ func main() {
+ 	// the same update as its operation token, so stale recovery can record the
+ 	// right failed attempt even if the worker dies before encoding any rung.
+ 	//
+-	// Only this binary needs 42. The API's `requiredSchemaVersion` is unchanged:
+-	// no shipped route reads the new column, and raising it would keep the API
+-	// out of the load balancer for a capability it does not use. The migrate
+-	// command has no floor of its own, so it can still perform 41 -> 42 and no
+-	// bootstrap deadlock is created.
++	// The media worker still requires schema 42 for active attempt kind. This
++	// rollback-compatible build requires schema 43 for the API because device
++	// revocation history may contain AUTO_REPLACED. The worker accepts clean
++	// schema 43 without changing media processing behavior.
+ 	{
+ 		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+ 		err := db.CheckSchemaAtLeast(startupCtx, pool, db.ActiveProcessingKindSchemaVersion)
+diff --git a/backend/internal/db/migrate_integration_test.go b/backend/internal/db/migrate_integration_test.go
+index 11967b7..4aef6df 100644
+--- a/backend/internal/db/migrate_integration_test.go
++++ b/backend/internal/db/migrate_integration_test.go
+@@ -697,9 +697,9 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
+ 		t.Fatalf("active processing kind schema = %d, want one past enhancement foundation %d",
+ 			ActiveProcessingKindSchemaVersion, EnhancementRecoveryFoundationSchemaVersion)
+ 	}
+-	if MaxSchemaVersion != ActiveProcessingKindSchemaVersion {
++	if MaxSchemaVersion != AutoDeviceReplacementSchemaVersion {
+ 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
+-			MaxSchemaVersion, ActiveProcessingKindSchemaVersion)
++			MaxSchemaVersion, AutoDeviceReplacementSchemaVersion)
+ 	}
+ 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
+ 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
+diff --git a/backend/internal/db/migrations/0043_auto_device_replacement.down.sql b/backend/internal/db/migrations/0043_auto_device_replacement.down.sql
+new file mode 100644
+index 0000000..a19b998
+--- /dev/null
++++ b/backend/internal/db/migrations/0043_auto_device_replacement.down.sql
+@@ -0,0 +1,29 @@
++-- PostgreSQL enum values cannot be dropped in place. Refuse downgrade while
++-- rows retain the new reason; rewriting that evidence would falsify the audit.
++DO $$ BEGIN
++    IF EXISTS (SELECT 1 FROM identity_trusted_devices WHERE revocation_reason = 'AUTO_REPLACED')
++       OR EXISTS (SELECT 1 FROM sessions WHERE revocation_reason = 'AUTO_REPLACED') THEN
++        RAISE EXCEPTION 'cannot roll back 0043 while AUTO_REPLACED device evidence exists';
++    END IF;
++END $$;
++
++CREATE TYPE trusted_device_revocation_reason_previous AS ENUM (
++    'STUDENT_REMOVED', 'STUDENT_REPLACED', 'ADMIN_REVOKED',
++    'ADMIN_REVOKED_ALL', 'PASSWORD_RESET', 'SECURITY_RECOVERY',
++    'ACCOUNT_SUSPENDED'
++);
++ALTER TABLE identity_trusted_devices
++    ALTER COLUMN revocation_reason TYPE trusted_device_revocation_reason_previous
++    USING revocation_reason::text::trusted_device_revocation_reason_previous;
++DROP TYPE trusted_device_revocation_reason;
++ALTER TYPE trusted_device_revocation_reason_previous RENAME TO trusted_device_revocation_reason;
++
++CREATE TYPE session_revocation_reason_previous AS ENUM (
++    'LOGOUT', 'LOGOUT_ALL', 'PASSWORD_CHANGE', 'PASSWORD_RESET',
++    'ACCOUNT_SUSPENDED', 'REUSE_DETECTED', 'ADMIN_REVOKED'
++);
++ALTER TABLE sessions
++    ALTER COLUMN revocation_reason TYPE session_revocation_reason_previous
++    USING revocation_reason::text::session_revocation_reason_previous;
++DROP TYPE session_revocation_reason;
++ALTER TYPE session_revocation_reason_previous RENAME TO session_revocation_reason;
+diff --git a/backend/internal/db/migrations/0043_auto_device_replacement.up.sql b/backend/internal/db/migrations/0043_auto_device_replacement.up.sql
+new file mode 100644
+index 0000000..30dd054
+--- /dev/null
++++ b/backend/internal/db/migrations/0043_auto_device_replacement.up.sql
+@@ -0,0 +1,3 @@
++-- Distinguish automatic slot rotation from Student-initiated replacement.
++ALTER TYPE trusted_device_revocation_reason ADD VALUE IF NOT EXISTS 'AUTO_REPLACED';
++ALTER TYPE session_revocation_reason ADD VALUE IF NOT EXISTS 'AUTO_REPLACED';
+diff --git a/backend/internal/db/schema.go b/backend/internal/db/schema.go
+index 4acc1a2..1a5d26b 100644
+--- a/backend/internal/db/schema.go
++++ b/backend/internal/db/schema.go
+@@ -64,7 +64,8 @@ const (
+ 	// version.
+ 	EnhancementRecoveryFoundationSchemaVersion = MediaPlayableFoundationSchemaVersion + 1
+ 	ActiveProcessingKindSchemaVersion          = EnhancementRecoveryFoundationSchemaVersion + 1
+-	MaxSchemaVersion                           = ActiveProcessingKindSchemaVersion
++	AutoDeviceReplacementSchemaVersion         = ActiveProcessingKindSchemaVersion + 1
++	MaxSchemaVersion                           = AutoDeviceReplacementSchemaVersion
+ )
+ 
+ // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
+diff --git a/backend/internal/db/schema_test.go b/backend/internal/db/schema_test.go
+index c5a08db..b761fdc 100644
+--- a/backend/internal/db/schema_test.go
++++ b/backend/internal/db/schema_test.go
+@@ -23,8 +23,8 @@ func TestSchemaConstants(t *testing.T) {
+ 	if ActiveProcessingKindSchemaVersion != EnhancementRecoveryFoundationSchemaVersion+1 {
+ 		t.Fatalf("ActiveProcessingKindSchemaVersion = %d, want 42", ActiveProcessingKindSchemaVersion)
+ 	}
+-	if MaxSchemaVersion != ActiveProcessingKindSchemaVersion {
+-		t.Fatalf("MaxSchemaVersion = %d, want %d", MaxSchemaVersion, ActiveProcessingKindSchemaVersion)
++	if AutoDeviceReplacementSchemaVersion != 43 || MaxSchemaVersion != AutoDeviceReplacementSchemaVersion {
++		t.Fatalf("MaxSchemaVersion = %d, want 43", MaxSchemaVersion)
+ 	}
+ 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
+ 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",
+diff --git a/backend/internal/identity/device.go b/backend/internal/identity/device.go
+index f933d42..e2f9981 100644
+--- a/backend/internal/identity/device.go
++++ b/backend/internal/identity/device.go
+@@ -40,6 +40,7 @@ type DeviceRevocationReason string
+ const (
+ 	DeviceRemovedByStudent  DeviceRevocationReason = "STUDENT_REMOVED"
+ 	DeviceReplacedByStudent DeviceRevocationReason = "STUDENT_REPLACED"
++	DeviceAutoReplaced      DeviceRevocationReason = "AUTO_REPLACED"
+ 	DeviceRevokedByAdmin    DeviceRevocationReason = "ADMIN_REVOKED"
+ 	DeviceRevokedAllByAdmin DeviceRevocationReason = "ADMIN_REVOKED_ALL"
+ 	DeviceRevokedByReset    DeviceRevocationReason = "PASSWORD_RESET"
+@@ -61,7 +62,7 @@ func (r DeviceRevocationReason) startsReplacementCooldown() bool {
+ 
+ func (r DeviceRevocationReason) Valid() bool {
+ 	switch r {
+-	case DeviceRemovedByStudent, DeviceReplacedByStudent, DeviceRevokedByAdmin,
++	case DeviceRemovedByStudent, DeviceReplacedByStudent, DeviceAutoReplaced, DeviceRevokedByAdmin,
+ 		DeviceRevokedAllByAdmin, DeviceRevokedByReset, DeviceRevokedByRecovery,
+ 		DeviceRevokedBySuspend:
+ 		return true
+diff --git a/backend/internal/identity/session.go b/backend/internal/identity/session.go
+index 70f48b3..9120313 100644
+--- a/backend/internal/identity/session.go
++++ b/backend/internal/identity/session.go
+@@ -43,6 +43,7 @@ const (
+ 	RevokedByAccountSuspended RevocationReason = "ACCOUNT_SUSPENDED"
+ 	RevokedByReuseDetected    RevocationReason = "REUSE_DETECTED"
+ 	RevokedByAdmin            RevocationReason = "ADMIN_REVOKED"
++	RevokedByAutoReplacement  RevocationReason = "AUTO_REPLACED"
+ )
+ 
+ // Session is the server-authoritative family record.
