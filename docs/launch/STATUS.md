@@ -6,9 +6,14 @@
 > draft is superseded. D-111's exact catalogue-import 409 classification is accepted
 > narrowly by the Product Owner. D-112 records the approved conditional 1-hour
 > PostgreSQL RPO and 4-hour operational RTO target. The isolated schema-41 restore
-> passed; full LG-019 capacity evidence and independent review remain open. Only an
-> isolated restore and artifact staging are authorized preparation; no app release,
-> live database, session, or device state has been changed.
+> passed, and the authorized non-serving artifact staging completed at 16:41 UTC.
+> The evidence is in
+> [`2026-09-23-schema43-artifact-staging.md`](evidence/2026-09-23-schema43-artifact-staging.md).
+> Runtime selection remains 98e88 on clean schema 41. The cleanup-capable schema-43
+> image is built from `bb9d71b645fc1afbcf3666c5035c6b8396536ff2`; independent review
+> remains required. Full LG-019 capacity evidence also remains open. No release was
+> selected, service restarted, migration run, or live session/device/database state
+> changed.
 
 > **2026-09-23 device release NO-GO remediation:** An independent review rejected
 > the first automatic-device candidate for its missing schema-43 application
