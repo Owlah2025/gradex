@@ -6,7 +6,7 @@
 > draft is superseded. D-111's exact catalogue-import 409 classification is accepted
 > narrowly by the Product Owner. D-112 records the approved conditional 1-hour
 > PostgreSQL RPO and 4-hour operational RTO target. The latest isolated restore
-> of snapshot `b7c1089e…` passed in 39 seconds; see the
+> of snapshot `586f7beda…` passed in 36 seconds; see the
 > [restore evidence](evidence/2026-09-23-schema41-isolated-restore-verification.md).
 > Authorized non-serving artifact staging completed at 16:41 UTC; see the
 > [staging evidence](evidence/2026-09-23-schema43-artifact-staging.md).

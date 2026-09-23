@@ -111,9 +111,9 @@ not close LG-019; the browser-equivalent external 500-login test remains mandato
 
 ### 3.4 Recovery targets — current decision supersedes the provisional proposal
 
-| Asset or service | Provisional target |
+| Asset or service | Target / status |
 |---|---|
-| PostgreSQL | 1-hour backup-based RPO, conditional on the scheduled hourly backup completing; 4-hour operational RTO target, not a contractual SLA |
+| PostgreSQL | Founder-approved under D-112: 1-hour backup-based RPO, conditional on the scheduled hourly backup completing; 4-hour operational RTO target, not a contractual SLA |
 | Source media | Durability posture, not an SLO: versioned durable object storage; successfully completed uploads should not be lost under normal provider failure scenarios |
 | Secondary source-media backup | Backup-copy RPO no greater than 24 hours; recovery RTO no greater than 8 hours |
 | Derived HLS assets | Reproducible from retained source media |
