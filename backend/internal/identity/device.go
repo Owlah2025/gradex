@@ -9,11 +9,11 @@ import (
 
 // Trusted devices.
 //
-// A trusted device is a browser an Account has vouched for once, by email OTP,
+// A trusted device is a browser admitted after password authentication or registration email verification,
 // and which the server thereafter recognizes by an opaque credential it minted
 // itself. It is deliberately *not* an authentication factor: presenting a device
 // credential proves nothing about who is asking and grants no capability. It
-// only answers "is this the browser the Student already vouched for", which is
+// only answers "is this the browser the Student already registered", which is
 // what the two-device policy needs and all it needs.
 //
 // What is deliberately absent is as important as what is here. There is no
@@ -40,6 +40,7 @@ type DeviceRevocationReason string
 const (
 	DeviceRemovedByStudent  DeviceRevocationReason = "STUDENT_REMOVED"
 	DeviceReplacedByStudent DeviceRevocationReason = "STUDENT_REPLACED"
+	DeviceAutoReplaced      DeviceRevocationReason = "AUTO_REPLACED"
 	DeviceRevokedByAdmin    DeviceRevocationReason = "ADMIN_REVOKED"
 	DeviceRevokedAllByAdmin DeviceRevocationReason = "ADMIN_REVOKED_ALL"
 	DeviceRevokedByReset    DeviceRevocationReason = "PASSWORD_RESET"
@@ -61,7 +62,7 @@ func (r DeviceRevocationReason) startsReplacementCooldown() bool {
 
 func (r DeviceRevocationReason) Valid() bool {
 	switch r {
-	case DeviceRemovedByStudent, DeviceReplacedByStudent, DeviceRevokedByAdmin,
+	case DeviceRemovedByStudent, DeviceReplacedByStudent, DeviceAutoReplaced, DeviceRevokedByAdmin,
 		DeviceRevokedAllByAdmin, DeviceRevokedByReset, DeviceRevokedByRecovery,
 		DeviceRevokedBySuspend:
 		return true
@@ -141,30 +142,11 @@ const (
 	// AdmitTrustedDevice means this browser already holds a live trusted record
 	// for this Account. Nothing is challenged and the session is ordinary.
 	AdmitTrustedDevice DeviceAdmission = "TRUSTED"
-	// AdmitNewDeviceWithSlot means a free slot exists; the browser must pass an
-	// email OTP before it is trusted.
+	// Retained for clients holding a pre-change pending device challenge.
 	AdmitNewDeviceWithSlot DeviceAdmission = "OTP_REQUIRED"
-	// AdmitNewDeviceAtLimit means the Account is full. The Student is shown
-	// their devices and must choose one to remove. This is not a login failure.
+	// Retained for clients holding a pre-change at-limit challenge.
 	AdmitNewDeviceAtLimit DeviceAdmission = "LIMIT_REACHED"
 )
-
-// DecideDeviceAdmission is the pure decision, separated from the transaction
-// that acts on it so the ordering can be tested exhaustively.
-//
-// It counts only trusted, live records. A pending record — a device that
-// started a challenge and never finished — is deliberately not counted, or an
-// abandoned login on a library computer would consume a slot the Student never
-// agreed to give it.
-func DecideDeviceAdmission(existing TrustedDevice, found bool, trustedCount int, policy DevicePolicy) DeviceAdmission {
-	if found && existing.State() == DeviceTrusted {
-		return AdmitTrustedDevice
-	}
-	if trustedCount < policy.TrustedDeviceLimit {
-		return AdmitNewDeviceWithSlot
-	}
-	return AdmitNewDeviceAtLimit
-}
 
 // Replacement cooldown.
 

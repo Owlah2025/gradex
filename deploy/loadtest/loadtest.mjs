@@ -230,7 +230,12 @@ function requestParams(name, session, extraHeaders = {}) {
     "User-Agent": "Gradex-LG019-Loadtest/1",
     ...extraHeaders,
   };
-  if (session) headers.Cookie = `${session.cookie_name}=${session.cookie_value}`;
+  if (session) {
+    headers.Cookie = `${session.cookie_name}=${session.cookie_value}`;
+    if (session.device_cookie_name && session.device_cookie_value) {
+      headers.Cookie += `; ${session.device_cookie_name}=${session.device_cookie_value}`;
+    }
+  }
   const timeout = name === "login" || name === "login_bootstrap" ? "60s" : "10s";
   return { headers, redirects: 0, responseType: "text", tags: { name }, timeout };
 }

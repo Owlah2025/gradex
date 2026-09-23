@@ -54,8 +54,7 @@ type deviceHandlers struct {
 
 type deviceTrustBody struct {
 	Code string `json:"code" binding:"required"`
-	// ReplaceDeviceID is supplied only on the third-device path, after the
-	// Student has been shown their devices and picked one to remove.
+	// ReplaceDeviceID remains for completion of pre-change challenges.
 	ReplaceDeviceID string `json:"replace_device_id"`
 }
 
@@ -327,6 +326,8 @@ func writeDeviceError(c *gin.Context, err error) {
 		writeProblem(c, problem.DeviceReplacementCooldown())
 	case errors.Is(err, identity.ErrDeviceUnknown):
 		writeProblem(c, problem.DeviceNotFound())
+	case errors.Is(err, identity.ErrSessionNotUsable):
+		writeProblem(c, problem.NotAuthorized())
 	case errors.Is(err, identity.ErrDeliveryUnavailable):
 		writeProblem(c, problem.TransactionalDeliveryUnavailable())
 	case errors.Is(err, identity.ErrDeviceTrustUnavailable):

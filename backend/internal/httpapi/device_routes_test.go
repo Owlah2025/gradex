@@ -19,6 +19,17 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
+func TestAdoptionRejectsNonLegacySessionAsForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/me/devices/adopt", nil)
+	writeDeviceError(context, identity.ErrSessionNotUsable)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-legacy adoption status = %d, want 403", recorder.Code)
+	}
+}
+
 type fakeDeviceCommands struct {
 	overviewResult      identity.DeviceOverview
 	overviewErr         error

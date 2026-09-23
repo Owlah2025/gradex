@@ -68,12 +68,13 @@ func admissionServiceWithResolver(
 	if err != nil {
 		t.Fatalf("constructing outbox writer: %v", err)
 	}
+	sessions := sessionRepository(t, pool, now)
 	service, err := NewAdmissionService(AdmissionServiceOptions{
 		Pool:            pool,
 		Policies:        policies,
 		Compromised:     compromised,
 		Outbox:          writer,
-		Sessions:        sessionRepository(t, pool, now),
+		Sessions:        sessions,
 		VerificationTTL: time.Hour,
 		EmailOTPTTL:     10 * time.Minute,
 		EmailOTPPepper:  config.NewSecret(strings.Repeat("p", 32)),
@@ -83,6 +84,7 @@ func admissionServiceWithResolver(
 	if err != nil {
 		t.Fatalf("constructing admission service: %v", err)
 	}
+	service.AttachDevices(sessions.devices)
 	return service
 }
 

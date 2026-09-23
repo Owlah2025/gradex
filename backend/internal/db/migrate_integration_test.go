@@ -697,9 +697,12 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("active processing kind schema = %d, want one past enhancement foundation %d",
 			ActiveProcessingKindSchemaVersion, EnhancementRecoveryFoundationSchemaVersion)
 	}
-	if MaxSchemaVersion != ActiveProcessingKindSchemaVersion {
+	if AutoDeviceReplacementSchemaVersion != ActiveProcessingKindSchemaVersion+1 {
+		t.Fatalf("automatic device replacement schema = %d, want 43", AutoDeviceReplacementSchemaVersion)
+	}
+	if MaxSchemaVersion != AutoDeviceReplacementSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, ActiveProcessingKindSchemaVersion)
+			MaxSchemaVersion, AutoDeviceReplacementSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

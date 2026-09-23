@@ -295,9 +295,10 @@ func sessionPolicies(environment config.Environment) map[string]ratelimit.Policy
 // routes read and write it directly. That table arrives in schema 38, so a
 // process serving schema 37 would report ready and then fail every one of those
 // routes on a missing relation. The floor is therefore the schema that
-// introduces the table, not the one before it.
+// introduces the table, not the one before it. Automatic device rotation also
+// writes AUTO_REPLACED, introduced in schema 43; readiness requires that enum.
 func requiredSchemaVersion(cfg *config.Config) int64 {
-	return db.SubjectDemandSignalSchemaVersion
+	return db.AutoDeviceReplacementSchemaVersion
 }
 
 func buildLearningFoundation(

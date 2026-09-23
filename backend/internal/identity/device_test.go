@@ -8,48 +8,25 @@ import (
 
 func trustedAt(t time.Time) *time.Time { return &t }
 
-// A pending record occupies no slot. An abandoned login on a library computer
-// must not consume one of the Student's two devices.
-func TestPendingDevicesDoNotOccupyASlot(t *testing.T) {
-	policy := DevicePolicy{TrustedDeviceLimit: 2, ReplacementCooldown: 24 * time.Hour}
-	pending := TrustedDevice{ID: "pending"}
-	if state := pending.State(); state != DevicePending {
-		t.Fatalf("state = %s, want PENDING", state)
-	}
-	// One trusted device plus this pending one still leaves a slot free.
-	if got := DecideDeviceAdmission(pending, true, 1, policy); got != AdmitNewDeviceWithSlot {
-		t.Fatalf("admission = %s, want OTP_REQUIRED", got)
+func TestDeviceStateFollowsTrustAndRevocation(t *testing.T) {
+	now := time.Now().UTC()
+	for _, entry := range []struct {
+		device TrustedDevice
+		want   TrustedDeviceState
+	}{
+		{TrustedDevice{}, DevicePending},
+		{TrustedDevice{TrustedAt: trustedAt(now)}, DeviceTrusted},
+		{TrustedDevice{TrustedAt: trustedAt(now), RevokedAt: trustedAt(now)}, DeviceRevoked},
+	} {
+		if got := entry.device.State(); got != entry.want {
+			t.Fatalf("device state = %s, want %s", got, entry.want)
+		}
 	}
 }
 
-func TestAdmissionOutcomes(t *testing.T) {
-	policy := DevicePolicy{TrustedDeviceLimit: 2}
-	now := time.Now().UTC()
-	trusted := TrustedDevice{ID: "known", TrustedAt: trustedAt(now)}
-
-	cases := map[string]struct {
-		device       TrustedDevice
-		found        bool
-		trustedCount int
-		want         DeviceAdmission
-	}{
-		"a returning trusted browser is admitted unchanged": {trusted, true, 1, AdmitTrustedDevice},
-		"a new browser with a free slot is challenged":      {TrustedDevice{}, false, 1, AdmitNewDeviceWithSlot},
-		"a new browser at the limit must replace":           {TrustedDevice{}, false, 2, AdmitNewDeviceAtLimit},
-		"the first browser on an empty Account":             {TrustedDevice{}, false, 0, AdmitNewDeviceWithSlot},
-		// A revoked record is not a trusted one, whatever the count says.
-		"a revoked record is not admitted": {
-			TrustedDevice{ID: "gone", TrustedAt: trustedAt(now), RevokedAt: trustedAt(now)},
-			true, 1, AdmitNewDeviceWithSlot,
-		},
-	}
-	for name, testCase := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := DecideDeviceAdmission(testCase.device, testCase.found, testCase.trustedCount, policy)
-			if got != testCase.want {
-				t.Fatalf("admission = %s, want %s", got, testCase.want)
-			}
-		})
+func TestAutomaticReplacementReasonDoesNotStartManualCooldown(t *testing.T) {
+	if !DeviceAutoReplaced.Valid() || DeviceAutoReplaced.startsReplacementCooldown() {
+		t.Fatal("automatic rotation must be auditable without starting manual cooldown")
 	}
 }
 

@@ -96,13 +96,17 @@ func deviceRevocationEventType(reason DeviceRevocationReason) string {
 // revocation the session authority already uses, so a revoked family fails the
 // same Usable() check as any other and needs no new code path at read time.
 func revokeSessionsForDevice(ctx context.Context, tx pgx.Tx, revocation deviceRevocation) (int, error) {
+	sessionReason := "ADMIN_REVOKED"
+	if revocation.Reason == DeviceAutoReplaced {
+		sessionReason = "AUTO_REPLACED"
+	}
 	tag, err := tx.Exec(ctx,
 		`UPDATE sessions
 		    SET state = 'REVOKED',
 		        revoked_at = $2,
-		        revocation_reason = 'ADMIN_REVOKED'
+		        revocation_reason = $3::session_revocation_reason
 		  WHERE trusted_device_id = $1::uuid AND state = 'ACTIVE'`,
-		revocation.DeviceID, revocation.Now,
+		revocation.DeviceID, revocation.Now, sessionReason,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("revoking sessions for trusted device: %w", err)

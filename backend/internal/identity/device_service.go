@@ -124,10 +124,11 @@ type DeviceAdmissionRequest struct {
 
 // DeviceAdmissionResult is what the login transaction learned.
 type DeviceAdmissionResult struct {
-	Admission  DeviceAdmission
-	TrustState SessionDeviceTrust
-	DeviceID   string
-	Challenge  *DeviceChallenge
+	Admission       DeviceAdmission
+	TrustState      SessionDeviceTrust
+	DeviceID        string
+	Challenge       *DeviceChallenge
+	EvictedDeviceID string
 }
 
 // admitInTransaction resolves the browser against this Account's devices and
@@ -136,8 +137,8 @@ type DeviceAdmissionResult struct {
 // It runs inside the login transaction, after the Account row is locked. That
 // lock is what makes the two-device limit a real invariant rather than a
 // hopeful count: two simultaneous logins from two new browsers serialize on the
-// same row, so the second one observes the first one's device and is told the
-// Account is full, instead of both reading "1 trusted" and both inserting.
+// same row, so the second one observes the first admission and rotates the
+// newer slot instead of exceeding the limit.
 func (s *DeviceService) admitInTransaction(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -160,10 +161,12 @@ func (s *DeviceService) admitInTransaction(
 	if err != nil {
 		return DeviceAdmissionResult{}, err
 	}
+	if request.PresentedDigest == "" {
+		return DeviceAdmissionResult{}, fmt.Errorf("%w: no device credential", ErrDeviceTrustUnavailable)
+	}
 
 	now := s.now().UTC()
-	switch DecideDeviceAdmission(existing, found, trustedCount, s.policy) {
-	case AdmitTrustedDevice:
+	if found && existing.State() == DeviceTrusted {
 		if err := touchDevice(ctx, tx, existing.ID, request, now); err != nil {
 			return DeviceAdmissionResult{}, err
 		}
@@ -171,99 +174,10 @@ func (s *DeviceService) admitInTransaction(
 			Admission: AdmitTrustedDevice, TrustState: DeviceTrustEstablished,
 			DeviceID: existing.ID,
 		}, nil
-
-	case AdmitNewDeviceWithSlot:
-		device, challenge, err := s.beginTrust(ctx, tx, request, existing, found, now, "SLOT_AVAILABLE")
-		if err != nil {
-			return DeviceAdmissionResult{}, err
-		}
-		return DeviceAdmissionResult{
-			Admission: AdmitNewDeviceWithSlot, TrustState: DeviceTrustPending,
-			DeviceID: device, Challenge: challenge,
-		}, nil
-
-	default:
-		// The Account is full. The Student still gets a challenge, because the
-		// ordering matters: they prove the mailbox first and only then are
-		// shown their devices and asked to remove one. Reversing that would let
-		// anyone holding a password enumerate the Account's device labels.
-		device, challenge, err := s.beginTrust(ctx, tx, request, existing, found, now, "LIMIT_REACHED")
-		if err != nil {
-			return DeviceAdmissionResult{}, err
-		}
-		if err := appendIdentitySecurityEvent(ctx, tx, securityEventAppend{
-			eventType: "DEVICE_LIMIT_REACHED", accountID: request.AccountID,
-			revision: request.Revision, requestID: request.RequestID,
-			evidence: map[string]any{
-				"schema_version": 1,
-				"trusted_count":  trustedCount,
-				"device_limit":   s.policy.TrustedDeviceLimit,
-			},
-		}); err != nil {
-			return DeviceAdmissionResult{}, err
-		}
-		return DeviceAdmissionResult{
-			Admission: AdmitNewDeviceAtLimit, TrustState: DeviceTrustPending,
-			DeviceID: device, Challenge: challenge,
-		}, nil
 	}
-}
-
-// beginTrust creates or reuses the pending record for this browser and mails it
-// a code.
-func (s *DeviceService) beginTrust(
-	ctx context.Context,
-	tx pgx.Tx,
-	request DeviceAdmissionRequest,
-	existing TrustedDevice,
-	found bool,
-	now time.Time,
-	reason string,
-) (string, *DeviceChallenge, error) {
-	deviceID := existing.ID
-	if found {
-		if err := touchDevice(ctx, tx, deviceID, request, now); err != nil {
-			return "", nil, err
-		}
-	} else {
-		created, err := insertPendingDevice(ctx, tx, request, now)
-		if err != nil {
-			return "", nil, err
-		}
-		deviceID = created
-	}
-
-	otp, err := s.issueDeviceOTP(now)
-	if err != nil {
-		return "", nil, err
-	}
-	if err := supersedeLiveDeviceOTP(ctx, tx, request.AccountID, otp.ChallengeID); err != nil {
-		return "", nil, err
-	}
-	if err := insertDeviceOTPSecret(ctx, tx, request.AccountID, deviceID, otp); err != nil {
-		return "", nil, err
-	}
-	if err := appendIdentitySecurityEvent(ctx, tx, securityEventAppend{
-		eventType: "DEVICE_TRUST_CHALLENGED", accountID: request.AccountID,
-		actionSecretID: otp.ChallengeID, revision: request.Revision,
-		requestID: request.RequestID,
-		evidence: map[string]any{
-			"schema_version": 1,
-			"reason":         reason,
-			"browser_family": DeriveDeviceIdentity(request.UserAgent).BrowserFamily,
-		},
-	}); err != nil {
-		return "", nil, err
-	}
-	if err := s.appendDeviceCodeOutbox(ctx, tx, request, otp); err != nil {
-		return "", nil, err
-	}
-	return deviceID, &DeviceChallenge{
-		ChallengeID:       otp.ChallengeID,
-		MaskedEmail:       MaskEmail(request.Email),
-		ExpiresAt:         otp.ExpiresAt,
-		ResendAvailableAt: otp.ResendAvailableAt(),
-	}, nil
+	return s.admitNewDevice(ctx, tx, request, newDeviceAdmissionState{
+		existing: existing, found: found, trustedCount: trustedCount, now: now,
+	})
 }
 
 func (s *DeviceService) issueDeviceOTP(now time.Time) (IssuedEmailOTP, error) {

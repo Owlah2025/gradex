@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 // Rollout adoption for session families that predate device policy.
@@ -35,20 +33,12 @@ type DeviceAdoptionRequest struct {
 	UserAgent       string
 	SourceAddress   string
 	RequestID       string
-
-	Reservation outbox.ProtectedPayloadReservation
 }
 
-// AdoptSession binds a legacy family to a device, challenging the browser first
-// when it is not already trusted.
+// AdoptSession binds a legacy family through the automatic admission policy.
 //
-// A browser that already holds a live trusted record for this Account is bound
-// immediately and without a code. That is not a shortcut around the policy: the
-// Student proved this exact browser once already, the record is still live, and
-// mailing them a second code to re-prove the same browser would be friction
-// with no security content. A browser that is *not* already trusted goes
-// through the identical admission decision a new login does, including the
-// limit and the replacement flow.
+// Existing browsers are rebound; unknown browsers use the same two-slot
+// rotation as password login. The Account lock covers both decisions.
 func (s *DeviceService) AdoptSession(
 	ctx context.Context,
 	request DeviceAdoptionRequest,
@@ -70,12 +60,15 @@ func (s *DeviceService) AdoptSession(
 		return DeviceAdmissionResult{}, err
 	}
 
+	if err := requireLegacyUnboundSession(ctx, tx, request.AccountID, request.SessionID); err != nil {
+		return DeviceAdmissionResult{}, err
+	}
+
 	result, err := s.admitInTransaction(ctx, tx, DeviceAdmissionRequest{
 		AccountID: request.AccountID, Revision: revision, Role: request.Role,
 		Email: request.Email, Locale: request.Locale,
 		PresentedDigest: request.PresentedDigest, UserAgent: request.UserAgent,
 		SourceAddress: request.SourceAddress, RequestID: request.RequestID,
-		Reservation: request.Reservation,
 	})
 	if err != nil {
 		return DeviceAdmissionResult{}, err
@@ -96,15 +89,33 @@ func (s *DeviceService) AdoptSession(
 			return DeviceAdmissionResult{}, err
 		}
 	}
-	// A legacy family awaiting a code is deliberately left as it is rather than
-	// downgraded to PENDING_DEVICE_TRUST. Downgrading would strip the Student's
-	// ordinary browsing mid-session as a side effect of opening a lesson, and
-	// the family already cannot reach protected learning while unbound — which
-	// is the only thing the downgrade would have added.
 	if err := tx.Commit(ctx); err != nil {
 		return DeviceAdmissionResult{}, fmt.Errorf("committing device adoption: %w", err)
 	}
+	if result.EvictedDeviceID != "" {
+		s.releasePlayback(ctx, request.AccountID, result.EvictedDeviceID)
+	}
 	return result, nil
+}
+
+func requireLegacyUnboundSession(ctx context.Context, tx pgx.Tx, accountID, sessionID string) error {
+	var trustState SessionDeviceTrust
+	err := tx.QueryRow(ctx,
+		`SELECT device_trust_state::text FROM sessions
+		  WHERE id = $1::uuid AND account_id = $2::uuid AND state = 'ACTIVE'
+		  FOR UPDATE`,
+		sessionID, accountID,
+	).Scan(&trustState)
+	if err == pgx.ErrNoRows {
+		return ErrSessionNotUsable
+	}
+	if err != nil {
+		return fmt.Errorf("checking legacy session binding: %w", err)
+	}
+	if trustState != DeviceTrustLegacyUnbound {
+		return ErrSessionNotUsable
+	}
+	return nil
 }
 
 // ResolveTrustState answers what the device state of one live session is,
@@ -203,15 +214,10 @@ func (s *DeviceService) AdoptForSession(
 	if err != nil {
 		return DeviceAdmissionResult{}, err
 	}
-	reservation, err := s.reserveChallengePayload(ctx)
-	if err != nil {
-		return DeviceAdmissionResult{}, err
-	}
 	return s.AdoptSession(ctx, DeviceAdoptionRequest{
 		AccountID: accountID, SessionID: sessionID, Role: contact.role,
 		Email: contact.email, Locale: contact.locale,
 		PresentedDigest: device.CredentialDigest, UserAgent: device.UserAgent,
 		SourceAddress: device.SourceAddress, RequestID: requestID,
-		Reservation: reservation,
 	})
 }

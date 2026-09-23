@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,7 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/auth"
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 // Test-runner-side session issuance.
@@ -42,11 +44,8 @@ type issuedSessionOutput struct {
 
 	// The trusted-device credential this session is bound to.
 	//
-	// A Student who has signed in and confirmed their browser holds two cookies,
-	// and protected learning requires both: the session authenticates, and the
-	// device says which of their browsers is asking. Issuing only the first
-	// would model a browser that has authenticated but not completed device
-	// trust — a real state, but not the one these journeys are about.
+	// A Student session carries both its session cookie and the device cookie
+	// admitted in the same login transaction.
 	DeviceCookieName  string `json:"device_cookie_name"`
 	DeviceCookieValue string `json:"device_cookie_value"`
 	DeviceID          string `json:"device_id"`
@@ -59,6 +58,27 @@ func seededDeviceCredential(email string, slot int) (config.Secret, string) {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("gradex-e2e-device|%s|%d", strings.ToLower(email), slot)))
 	plaintext := base64.RawURLEncoding.EncodeToString(sum[:])
 	return config.NewSecret(plaintext), identity.DigestOpaqueCredential(plaintext)
+}
+
+func newFixtureDeviceService(pool *pgxpool.Pool, cfg *config.Config) (*identity.DeviceService, error) {
+	admission := cfg.Admission()
+	writer, err := outbox.NewWriter(
+		admission.ProtectedPayloadKeyVersion(),
+		[]byte(admission.ProtectedPayloadKey().Expose()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	settings := cfg.StudentDevices()
+	return identity.NewDeviceService(identity.DeviceServiceOptions{
+		Pool: pool, Outbox: writer,
+		Policy: identity.DevicePolicy{
+			TrustedDeviceLimit:  settings.TrustedDeviceLimit(),
+			ReplacementCooldown: settings.ReplacementCooldown(),
+		},
+		Pepper: admission.EmailOTPPepper(), OTPTTL: admission.EmailOTPTTL(),
+		Now: time.Now, Random: rand.Reader,
+	})
 }
 
 func issueSession(ctx context.Context, targetDSN, email, password string, deviceSlot int) (issuedSessionOutput, error) {
@@ -82,11 +102,16 @@ func issueSession(ctx context.Context, targetDSN, email, password string, device
 	}
 	defer pool.Close()
 
+	devices, err := newFixtureDeviceService(pool, cfg)
+	if err != nil {
+		return issuedSessionOutput{}, err
+	}
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
 		Pool:     pool,
 		Settings: cfg.Sessions(),
 		CSRFKey:  []byte(cfg.Sessions().CSRFKey().Expose()),
 		Now:      time.Now,
+		Devices:  devices,
 	})
 	if err != nil {
 		return issuedSessionOutput{}, fmt.Errorf("building session repository: %w", err)
@@ -114,10 +139,7 @@ func issueSession(ctx context.Context, targetDSN, email, password string, device
 
 	deviceID := ""
 	if grant.Session.Role == identity.RoleStudent {
-		deviceID, err = trustSeededDevice(ctx, pool, grant.Session.AccountID, grant.Session.SessionID, deviceDigest)
-		if err != nil {
-			return issuedSessionOutput{}, err
-		}
+		deviceID = grant.Device.DeviceID
 	}
 
 	issued := issuedSessionOutput{
@@ -185,44 +207,6 @@ func trustPendingDevicesFor(ctx context.Context, pool *pgxpool.Pool, email strin
 		return fmt.Errorf("binding narrowed sessions for %s: %w", email, err)
 	}
 	return nil
-}
-
-// trustSeededDevice confirms the browser this session was issued for.
-//
-// It writes the trusted-device record directly rather than driving the email
-// OTP, for the same reason every other fixture in this seeder is written
-// directly: the journey under test starts from a Student who already has a
-// confirmed device, and making each of them prove a mailed code first would
-// make the fixture the test. The device-trust flow itself is covered by its own
-// integration tests and by the device-security browser journey, which does
-// drive the real code.
-//
-// This lives in the seeder — a test-only binary — and there is deliberately no
-// equivalent path in the product.
-func trustSeededDevice(ctx context.Context, pool *pgxpool.Pool, accountID, sessionID, digest string) (string, error) {
-	// Upsert on the live-credential index, so signing the same browser in again
-	// reuses its device record exactly as the product does.
-	var deviceID string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO identity_trusted_devices
-		  (account_id, credential_digest, label, browser_family, platform_family, trusted_at)
-		VALUES ($1::uuid, $2, 'Chrome on Linux', 'Chrome', 'Linux', now())
-		ON CONFLICT (account_id, credential_digest) WHERE revoked_at IS NULL
-		DO UPDATE SET last_seen_at = now(), updated_at = now(),
-		              trusted_at = COALESCE(identity_trusted_devices.trusted_at, now())
-		RETURNING id::text
-	`, accountID, digest).Scan(&deviceID)
-	if err != nil {
-		return "", fmt.Errorf("seeding trusted device for %s: %w", accountID, err)
-	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE sessions
-		   SET trusted_device_id = $2::uuid, device_trust_state = 'TRUSTED'
-		 WHERE id = $1::uuid
-	`, sessionID, deviceID); err != nil {
-		return "", fmt.Errorf("binding seeded session to its device: %w", err)
-	}
-	return deviceID, nil
 }
 
 func encodeIssuedSession(session issuedSessionOutput) ([]byte, error) {

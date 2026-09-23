@@ -322,7 +322,12 @@ function entitledSession(iteration, playback = false) {
 
 function requestParams(name, session, extraHeaders = {}) {
   const headers = { Accept: "application/json", "User-Agent": "Gradex-limited-paid-beta-harness/1", ...extraHeaders };
-  if (session) headers.Cookie = `${session.cookie_name}=${session.cookie_value}`;
+  if (session) {
+    headers.Cookie = `${session.cookie_name}=${session.cookie_value}`;
+    if (session.device_cookie_name && session.device_cookie_value) {
+      headers.Cookie += `; ${session.device_cookie_name}=${session.device_cookie_value}`;
+    }
+  }
   return { headers, redirects: 0, responseType: "text", tags: { name }, timeout: name.includes("login") ? "60s" : "30s" };
 }
 

@@ -5,6 +5,7 @@ package identity
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 const sessionTestPassword = "correct session login passphrase 9"
@@ -38,10 +40,24 @@ func sessionRepository(
 	now time.Time,
 ) *SessionRepository {
 	t.Helper()
+	writer, err := outbox.NewWriter("v1", bytes.Repeat([]byte{0x51}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices, err := NewDeviceService(DeviceServiceOptions{
+		Pool: pool, Outbox: writer,
+		Policy: DevicePolicy{TrustedDeviceLimit: 2, ReplacementCooldown: 24 * time.Hour},
+		Pepper: config.NewSecret(string(bytes.Repeat([]byte{0x71}, 32))),
+		OTPTTL: 10 * time.Minute, Now: func() time.Time { return now }, Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	repository, err := NewSessionRepository(SessionRepositoryOptions{
 		Pool: pool, Settings: sessionTestSettings(t),
 		CSRFKey: bytes.Repeat([]byte{0x61}, 32),
 		Now:     func() time.Time { return now },
+		Devices: devices,
 	})
 	if err != nil {
 		t.Fatalf("constructing session repository: %v", err)
@@ -103,7 +119,8 @@ func loginSession(
 	})
 	grant, err := repository.Login(ctx, LoginRequest{
 		Email: email, Password: config.NewSecret(sessionTestPassword),
-		RequestID: "request-login",
+		RequestID:              "request-login",
+		DeviceCredentialDigest: DigestOpaqueCredential("session-test-device|" + email),
 	})
 	if err != nil {
 		t.Fatalf("logging in: %v", err)

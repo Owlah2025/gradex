@@ -17,17 +17,19 @@ import (
 )
 
 type betaLoadtestStudentSession struct {
-	Index          int    `json:"index"`
-	AccountID      string `json:"account_id"`
-	Email          string `json:"email"`
-	Entitled       bool   `json:"entitled"`
-	CourseID       string `json:"course_id,omitempty"`
-	RevisionID     string `json:"revision_id,omitempty"`
-	LessonID       string `json:"lesson_id,omitempty"`
-	AssetVersionID string `json:"asset_version_id,omitempty"`
-	CookieName     string `json:"cookie_name"`
-	CookieValue    string `json:"cookie_value"`
-	CSRFToken      string `json:"csrf_token"`
+	Index             int    `json:"index"`
+	AccountID         string `json:"account_id"`
+	Email             string `json:"email"`
+	Entitled          bool   `json:"entitled"`
+	CourseID          string `json:"course_id,omitempty"`
+	RevisionID        string `json:"revision_id,omitempty"`
+	LessonID          string `json:"lesson_id,omitempty"`
+	AssetVersionID    string `json:"asset_version_id,omitempty"`
+	CookieName        string `json:"cookie_name"`
+	CookieValue       string `json:"cookie_value"`
+	CSRFToken         string `json:"csrf_token"`
+	DeviceCookieName  string `json:"device_cookie_name"`
+	DeviceCookieValue string `json:"device_cookie_value"`
 }
 
 type betaLoadtestOperatorSession struct {
@@ -73,8 +75,12 @@ func issueBetaLoadtestSessions(ctx context.Context, targetDSN, password, fixture
 		return fmt.Errorf("connecting to beta fixture database: %w", err)
 	}
 	defer pool.Close()
+	devices, err := newFixtureDeviceService(pool, cfg)
+	if err != nil {
+		return err
+	}
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
-		Pool: pool, Settings: cfg.Sessions(), CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now,
+		Pool: pool, Settings: cfg.Sessions(), CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now, Devices: devices,
 	})
 	if err != nil {
 		return fmt.Errorf("building beta session repository: %w", err)
@@ -82,8 +88,9 @@ func issueBetaLoadtestSessions(ctx context.Context, targetDSN, password, fixture
 	manifest := betaLoadtestSessionManifest{SchemaVersion: betaFixtureSchemaVersion, Profile: fixture.Profile, RunID: fixture.RunID}
 	manifest.Students = make([]betaLoadtestStudentSession, 0, len(fixture.Students))
 	for _, student := range fixture.Students {
+		deviceCredential, deviceDigest := seededDeviceCredential(student.Email, 0)
 		grant, err := repository.Login(ctx, identity.LoginRequest{
-			Email: student.Email, Password: config.NewSecret(password), RequestID: fmt.Sprintf("%s-beta-student-%03d", fixture.RunID, student.Index),
+			Email: student.Email, Password: config.NewSecret(password), RequestID: fmt.Sprintf("%s-beta-student-%03d", fixture.RunID, student.Index), DeviceCredentialDigest: deviceDigest,
 		})
 		if err != nil {
 			return fmt.Errorf("issuing beta Student session %d: %w", student.Index, err)
@@ -92,6 +99,7 @@ func issueBetaLoadtestSessions(ctx context.Context, targetDSN, password, fixture
 			Index: student.Index, AccountID: student.AccountID, Email: student.Email, Entitled: student.Entitled,
 			CourseID: student.CourseID, RevisionID: student.RevisionID, LessonID: student.LessonID, AssetVersionID: student.AssetVersionID,
 			CookieName: auth.SessionCookieName, CookieValue: grant.Credential.Expose(), CSRFToken: grant.CSRFToken.Expose(),
+			DeviceCookieName: auth.DeviceCookieName, DeviceCookieValue: deviceCredential.Expose(),
 		})
 	}
 	manifest.Operators = make([]betaLoadtestOperatorSession, 0, len(fixture.Operators))

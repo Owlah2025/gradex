@@ -64,7 +64,8 @@ const (
 	// version.
 	EnhancementRecoveryFoundationSchemaVersion = MediaPlayableFoundationSchemaVersion + 1
 	ActiveProcessingKindSchemaVersion          = EnhancementRecoveryFoundationSchemaVersion + 1
-	MaxSchemaVersion                           = ActiveProcessingKindSchemaVersion
+	AutoDeviceReplacementSchemaVersion         = ActiveProcessingKindSchemaVersion + 1
+	MaxSchemaVersion                           = AutoDeviceReplacementSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

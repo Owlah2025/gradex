@@ -18,12 +18,14 @@ import (
 )
 
 type loadtestSession struct {
-	Index       int    `json:"index"`
-	AccountID   string `json:"account_id"`
-	Email       string `json:"email"`
-	CookieName  string `json:"cookie_name"`
-	CookieValue string `json:"cookie_value"`
-	CSRFToken   string `json:"csrf_token"`
+	Index             int    `json:"index"`
+	AccountID         string `json:"account_id"`
+	Email             string `json:"email"`
+	CookieName        string `json:"cookie_name"`
+	CookieValue       string `json:"cookie_value"`
+	CSRFToken         string `json:"csrf_token"`
+	DeviceCookieName  string `json:"device_cookie_name"`
+	DeviceCookieValue string `json:"device_cookie_value"`
 }
 
 type loadtestSessionManifest struct {
@@ -77,8 +79,12 @@ func issueLoadtestSessions(ctx context.Context, targetDSN, password string) (loa
 		return result, fmt.Errorf("connecting to load-test database: %w", err)
 	}
 	defer pool.Close()
+	devices, err := newFixtureDeviceService(pool, cfg)
+	if err != nil {
+		return result, err
+	}
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
-		Pool: pool, Settings: cfg.Sessions(), CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now,
+		Pool: pool, Settings: cfg.Sessions(), CSRFKey: []byte(cfg.Sessions().CSRFKey().Expose()), Now: time.Now, Devices: devices,
 	})
 	if err != nil {
 		return result, fmt.Errorf("building session repository: %w", err)
@@ -87,9 +93,10 @@ func issueLoadtestSessions(ctx context.Context, targetDSN, password string) (loa
 	result.Sessions = make([]loadtestSession, 0, loadtestActiveStudentCount)
 	for index := 0; index < loadtestActiveStudentCount; index++ {
 		email := loadtestStudentEmail(index)
+		deviceCredential, deviceDigest := seededDeviceCredential(email, 0)
 		grant, err := repository.Login(ctx, identity.LoginRequest{
 			Email: email, Password: config.NewSecret(password),
-			RequestID: fmt.Sprintf("loadtest-session-%04d", index),
+			RequestID: fmt.Sprintf("loadtest-session-%04d", index), DeviceCredentialDigest: deviceDigest,
 		})
 		if err != nil {
 			return loadtestSessionManifest{}, fmt.Errorf("issuing session %d: %w", index, err)
@@ -97,7 +104,8 @@ func issueLoadtestSessions(ctx context.Context, targetDSN, password string) (loa
 		result.Sessions = append(result.Sessions, loadtestSession{
 			Index: index, AccountID: grant.Session.AccountID, Email: email,
 			CookieName: auth.SessionCookieName, CookieValue: grant.Credential.Expose(),
-			CSRFToken: grant.CSRFToken.Expose(),
+			CSRFToken:        grant.CSRFToken.Expose(),
+			DeviceCookieName: auth.DeviceCookieName, DeviceCookieValue: deviceCredential.Expose(),
 		})
 	}
 	return result, nil

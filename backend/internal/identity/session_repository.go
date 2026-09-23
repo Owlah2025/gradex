@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/config"
-	"github.com/Owlah2025/gradex/backend/internal/outbox"
 )
 
 var (
@@ -34,12 +33,8 @@ type SessionRepositoryOptions struct {
 	PasswordVerificationGate *PasswordVerificationGate
 	// Devices decides what device authority a new Student family carries.
 	//
-	// Optional at construction because Instructor-only and fixture wiring have
-	// no use for it, and absent it the repository fails *closed*: a Student
-	// family is created PENDING_DEVICE_TRUST, which grants the self-service set
-	// and nothing else. A deployment that forgets to wire device policy
-	// therefore stops protected learning rather than silently exempting every
-	// Student from the limit.
+	// Optional at construction for Instructor-only and fixture wiring. A
+	// Student login fails closed if device policy is absent.
 	Devices *DeviceService
 }
 
@@ -275,17 +270,8 @@ func (r *SessionRepository) createSession(
 	if err != nil {
 		return SessionGrant{}, err
 	}
-	// The protected-payload nonce is the one fallible entropy read that must
-	// happen before the transaction opens, exactly as registration does it. A
-	// login that cannot reserve one is refused rather than committing a device
-	// challenge whose code could never be mailed.
-	reservation, err := r.reserveDeviceChallengePayload(ctx, candidate)
-	if err != nil {
-		return SessionGrant{}, err
-	}
-
 	writeStarted := time.Now()
-	admission, err := r.persistSession(ctx, request, candidate, pending, reservation)
+	admission, err := r.persistSession(ctx, request, candidate, pending)
 	if err != nil {
 		observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
 		return SessionGrant{}, err
@@ -299,16 +285,6 @@ func (r *SessionRepository) createSession(
 		Session: pending.session, Credential: pending.issued.Credential,
 		CSRFToken: pending.issued.CSRFToken, Device: &admission,
 	}, nil
-}
-
-func (r *SessionRepository) reserveDeviceChallengePayload(
-	ctx context.Context,
-	candidate loginCandidate,
-) (outbox.ProtectedPayloadReservation, error) {
-	if r.devices == nil || candidate.role != RoleStudent {
-		return outbox.ProtectedPayloadReservation{}, nil
-	}
-	return r.devices.reserveChallengePayload(ctx)
 }
 
 type pendingSession struct {
@@ -349,7 +325,6 @@ func (r *SessionRepository) persistSession(
 	request LoginRequest,
 	candidate loginCandidate,
 	pending pendingSession,
-	reservation outbox.ProtectedPayloadReservation,
 ) (DeviceAdmissionResult, error) {
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -362,7 +337,7 @@ func (r *SessionRepository) persistSession(
 	if err := lockLoginCandidate(ctx, tx, candidate); err != nil {
 		return DeviceAdmissionResult{}, err
 	}
-	admission, err := r.admitDevice(ctx, tx, request, candidate, reservation)
+	admission, err := r.admitDevice(ctx, tx, request, candidate)
 	if err != nil {
 		return DeviceAdmissionResult{}, err
 	}
@@ -389,21 +364,20 @@ func (r *SessionRepository) persistSession(
 	if err := tx.Commit(ctx); err != nil {
 		return DeviceAdmissionResult{}, fmt.Errorf("committing login session: %w", err)
 	}
+	if admission.EvictedDeviceID != "" {
+		r.devices.releasePlayback(ctx, candidate.accountID, admission.EvictedDeviceID)
+	}
 	return admission, nil
 }
 
 // admitDevice decides what device authority this new family carries.
 //
-// With no device service wired, a Student family is created pending rather than
-// trusted. That is the fail-closed direction: a misconfigured deployment loses
-// protected learning until it is fixed, instead of quietly handing every
-// Student an unlimited number of devices.
+// Student login refuses to create a session if device policy is not wired.
 func (r *SessionRepository) admitDevice(
 	ctx context.Context,
 	tx pgx.Tx,
 	request LoginRequest,
 	candidate loginCandidate,
-	reservation outbox.ProtectedPayloadReservation,
 ) (DeviceAdmissionResult, error) {
 	if candidate.role != RoleStudent {
 		return DeviceAdmissionResult{
@@ -411,16 +385,14 @@ func (r *SessionRepository) admitDevice(
 		}, nil
 	}
 	if r.devices == nil {
-		return DeviceAdmissionResult{
-			Admission: AdmitNewDeviceWithSlot, TrustState: DeviceTrustPending,
-		}, nil
+		return DeviceAdmissionResult{}, ErrDeviceTrustUnavailable
 	}
 	return r.devices.admitInTransaction(ctx, tx, DeviceAdmissionRequest{
 		AccountID: candidate.accountID, Revision: candidate.revision,
 		Role: candidate.role, Email: candidate.email, Locale: candidate.locale,
 		PresentedDigest: request.DeviceCredentialDigest,
 		UserAgent:       request.UserAgent, SourceAddress: request.SourceAddress,
-		RequestID: request.RequestID, Reservation: reservation,
+		RequestID: request.RequestID,
 	})
 }
 
@@ -474,6 +446,10 @@ func insertSessionFamily(
 	// A new family never writes LEGACY_UNBOUND. That value exists only for rows
 	// the migration found already present, and the schema check keeps
 	// trusted_device_id and the state coherent with each other.
+	if session.Role == RoleStudent &&
+		(admission.TrustState != DeviceTrustEstablished || admission.DeviceID == "") {
+		return ErrDeviceTrustUnavailable
+	}
 	deviceID := ""
 	if admission.TrustState == DeviceTrustEstablished {
 		deviceID = admission.DeviceID
@@ -1229,11 +1205,7 @@ func (r *SessionRepository) IssueSessionInTransaction(
 	if device != nil {
 		admission = *device
 	} else if candidate.role == RoleStudent {
-		// A Student session minted here without a device decision fails closed,
-		// for the same reason a login without device policy does.
-		admission = DeviceAdmissionResult{
-			Admission: AdmitNewDeviceWithSlot, TrustState: DeviceTrustPending,
-		}
+		return SessionGrant{}, ErrDeviceTrustUnavailable
 	}
 	pending.session.DeviceTrust = admission.TrustState
 	if admission.TrustState == DeviceTrustEstablished {
