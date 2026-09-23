@@ -82,7 +82,11 @@ func (r *recordingPlaybackReleaser) Released() []string {
 
 func newDeviceFixture(t *testing.T) *deviceFixture {
 	t.Helper()
-	pool := admissionPool(t)
+	return newDeviceFixtureWithPool(t, admissionPool(t), "device-student@example.test")
+}
+
+func newDeviceFixtureWithPool(t *testing.T, pool *pgxpool.Pool, email string) *deviceFixture {
+	t.Helper()
 	clock := &testClock{now: time.Date(2026, time.September, 10, 9, 0, 0, 0, time.UTC)}
 	releaser := &recordingPlaybackReleaser{}
 
@@ -114,7 +118,7 @@ func newDeviceFixture(t *testing.T) *deviceFixture {
 
 	return &deviceFixture{
 		pool: pool, sessions: sessions, devices: devices,
-		account: insertDeviceAccount(t, pool, "device-student@example.test"),
+		account: insertDeviceAccount(t, pool, email),
 		clock:   clock, playback: releaser,
 	}
 }
@@ -162,9 +166,13 @@ func newBrowser(t *testing.T, userAgent string) *browser {
 }
 
 func (f *deviceFixture) login(t *testing.T, b *browser, requestID string) SessionGrant {
+	return f.loginEmail(t, "device-student@example.test", b, requestID)
+}
+
+func (f *deviceFixture) loginEmail(t *testing.T, email string, b *browser, requestID string) SessionGrant {
 	t.Helper()
 	grant, err := f.sessions.Login(context.Background(), LoginRequest{
-		Email: "device-student@example.test", Password: config.NewSecret(deviceTestPassword),
+		Email: email, Password: config.NewSecret(deviceTestPassword),
 		RequestID: requestID, DeviceCredentialDigest: b.digest,
 		UserAgent: b.userAgent, SourceAddress: "203.0.113.7",
 	})
