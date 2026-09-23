@@ -19,10 +19,10 @@ These floors and ceilings are read from the exact application sources and schema
 | Current recovery | 98e88fcc1105e8c638bb638d3f1c46630bcc51b2 | 38 / 41 | 41 / 41 | Only application for clean 41. |
 | Frozen 3C-B candidate | 3383f46d0e9e6379c3bd166d39622c3659ae3d86 | 38 / 42 | 42 / 42 | Cross only the reviewed 41 → 42 boundary; also serves clean 42. |
 | Previously reviewed device base | f41f9c28d67aa06ec370ba4f1a8c7d1192d5986d | 43 / 43 | 42 / 43 | Preserve and stage as requested; its image predates the separately approved expired-Staff cleanup CLI and must not execute that mode. |
-| Cleanup-capable device candidate | `DEVICE_RELEASE_SHA` (built from the committed remediation source and recorded in the artifact evidence) | 43 / 43 | 42 / 43 | Execute both schema-42 cutover modes and serve after clean 43; device-admission behavior remains the reviewed f41 behavior. |
+| Cleanup-capable device candidate | bb9d71b645fc1afbcf3666c5035c6b8396536ff2 | 43 / 43 | 42 / 43 | Execute both schema-42 cutover modes and serve after clean 43; device-admission behavior remains the reviewed f41 behavior. |
 | Schema-43 application rollback | 54115fd6029d5d80af63640ac6f0bfe31be22d67 | 43 / 43 | 42 / 43 | Restore prior application behavior on unchanged schema 43. |
 
-The operative four-artifact matrix is 98e88 recovery, frozen 3383 transition, `DEVICE_RELEASE_SHA`, and 54115fd rollback; f41f9c28 is preserved as the reviewed behavior base and separately staged. At clean 42, 98e88 is too old and 3383 is the only application safe to serve. One-off Staff/Student cutover and migration commands use the cleanup-capable backend image with `--no-deps`; its API is never started on schema 42 because its readiness floor is 43. The cutover only revokes authorized historical session families and supersedes Student device OTPs using schema-42-compatible values; it does not write `AUTO_REPLACED`. At schema 43, use `DEVICE_RELEASE_SHA` or 54115fd. Dirty schema markers admit no application.
+The operative four-artifact matrix is 98e88 recovery, frozen 3383 transition, cleanup-capable candidate `bb9d71b645fc1afbcf3666c5035c6b8396536ff2`, and 54115fd rollback; f41f9c28 is preserved as the reviewed behavior base and separately staged. At clean 42, 98e88 is too old and 3383 is the only application safe to serve. One-off Staff/Student cutover and migration commands use the cleanup-capable backend image with `--no-deps`; its API is never started on schema 42 because its readiness floor is 43. The cutover only revokes authorized historical session families and supersedes Student device OTPs using schema-42-compatible values; it does not write `AUTO_REPLACED`. At schema 43, use `bb9d71b645fc1afbcf3666c5035c6b8396536ff2` or 54115fd. Dirty schema markers admit no application.
 
 The local schema-42 artifact was built from the exact 3383 commit and exported with release.sh. Its manifest, image archive and tooling checksums verify; the bundle declares SCHEMA42_CAPABILITY=manual-enhancement-v1; labels and IDs agree; backend max-version is 42; 0042 hashes agree; gradex-enhancement-drain exists. The local 98e88 copy matches the previously observed selected SHA and image IDs. The previous live preflight verified the actual 98e88 manifest; staging of 3383, f41f9c28, 54115fd, and the cleanup-capable `DEVICE_RELEASE_SHA` remains part of this preparation.
 
@@ -117,7 +117,7 @@ With all application writers absent and the public-edge guard passing, take a fr
 Set the cleanup-capable schema-43 backend image override (the exact revision is recorded in the artifact matrix) and run a new read-only Staff check:
 
 ~~~bash
-DEVICE_RELEASE_SHA=DEVICE_RELEASE_SHA
+DEVICE_RELEASE_SHA=bb9d71b645fc1afbcf3666c5035c6b8396536ff2
 DEVICE_MANIFEST="$HOST_STATE/releases/$DEVICE_RELEASE_SHA/release.env"
 DEVICE_BACKEND="$(awk -F= '$1 == "GRADEX_BACKEND_IMAGE" {print substr($0,index($0,"=")+1)}' "$DEVICE_MANIFEST")"
 GRADEX_BACKEND_IMAGE="$DEVICE_BACKEND" docker compose \
@@ -224,8 +224,8 @@ No cleanup changes trusted families, trusted devices, or `accounts.session_epoch
 | Dirty 41 | None | Operator recovery only. |
 | Clean 42 before 0043, before or after device cutover | 3383f46 | Keep schema 42 and restore/select the exact 3383 artifact. The completed cutover remains durable and safe for 3383. To return to 41, use only the supervised 42 → 41 command and all drain gates, then select 98e88. |
 | Dirty 42 | None | Operator recovery only; never force a marker. |
-| Clean 43 before traffic | `DEVICE_RELEASE_SHA` or 54115fd | Either schema-43 application can serve. |
-| Clean 43 with AUTO_REPLACED evidence | `DEVICE_RELEASE_SHA` or 54115fd | Keep schema 43; 54115fd restores the previous application behavior. |
+| Clean 43 before traffic | bb9d71b645fc1afbcf3666c5035c6b8396536ff2 or 54115fd | Either schema-43 application can serve. |
+| Clean 43 with AUTO_REPLACED evidence | bb9d71b645fc1afbcf3666c5035c6b8396536ff2 or 54115fd | Keep schema 43; 54115fd restores the previous application behavior. |
 | Dirty 43 | None | Operator recovery only. |
 
 0043 DOWN refuses while AUTO_REPLACED device/session evidence exists. Schema 43 application rollback is not a schema downgrade.
