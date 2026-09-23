@@ -1,5 +1,11 @@
 # Gradex Launch Status
 
+> **2026-09-22 Student device-admission candidate:** D-109 supersedes interactive
+> device OTP admission after password login and during legacy adoption. The local
+> candidate preserves two trusted devices and one protected playback lease per
+> Student. Schema 43 adds auditable automatic revocation reasons. Independent
+> review and release gates remain pending; this work has not been deployed.
+
 > **Current release reconciliation — 2026-09-18:** live read-only Hostinger inspection supersedes
 > the stale schema-37/`4e7ddc` narrative below. Production is running revision
 > `776f02543b105fe428e80627ed52342304dc01f2`, clean schema 38, 15 institutions, and healthy

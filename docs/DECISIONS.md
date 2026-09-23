@@ -4080,7 +4080,7 @@ application-only release.
 
 **Date:** 2026-09-11
 **Status:** Independently reviewed PASS at `e4993d639dbb55dba24404ef9be99d39a1b37e8a`;
-combined-release integration requires its own independent review.
+combined-release integration requires its own independent review. Device admission is superseded by D-109; the playback decision remains in force.
 
 **Decision:** A Student Account may hold at most two trusted browser devices, with a 24-hour
 Student-initiated replacement cooldown, while Admin and Instructor authentication remains unchanged.
@@ -4455,3 +4455,15 @@ deployed *and* before the downgrade runs; that application must never start agai
 **Source:** Phase 3C-B manual enhancement recovery specification and schema-41 foundation contract;
 implementation review pending. Release hardening in
 [RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md](launch/RELEASE_PLAN_2026-09-22_SCHEMA_42_ENHANCEMENT_RECOVERY.md).
+
+## D-109 — Student device admission rotates automatically after password login
+
+**Date:** 2026-09-22
+
+**Status:** Implemented candidate; independent review pending. No production deployment authorized.
+
+**Decision:** Student accounts retain at most two live trusted devices. A successful password login from a new browser immediately trusts its server-issued opaque device credential and binds the new session as `TRUSTED` in the same database transaction. Device admission sends no device OTP or email and presents no challenge, replacement choice, or cooldown. When both slots are full, the most recently trusted existing device is revoked along with its active session families; the oldest trusted device remains. Trust ordering uses `trusted_at` with a deterministic ID tie-breaker, never `last_seen_at`. Login, legacy session adoption, and registration email verification follow the applicable admission or verification rules without a second device code.
+
+Automatic rotation has the distinct `AUTO_REPLACED` device and session revocation reason and records automatic replacement IDs in security evidence. The Account row lock serializes admission and the durable transaction includes eviction, session revocation, new trust, and session binding. Playback lease release for the evicted device follows commit. Manual device management, password recovery, Admin revocation, account suspension, and the one-playback-lease rule retain their prior contracts.
+
+This decision supersedes D-105 only for Student device admission and device OTP after password login or legacy adoption. D-105's playback contract remains in force. Schema 43 adds the revocation reasons; downgrade refuses while automatic-replacement rows remain, preserving audit truth. Independent review is required before release.
