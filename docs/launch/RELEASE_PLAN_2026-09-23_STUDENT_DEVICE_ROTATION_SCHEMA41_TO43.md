@@ -169,6 +169,8 @@ No option silently revokes a non-Student family. No code change is made merely t
 
 0043 DOWN refuses while AUTO_REPLACED device/session evidence exists. Schema 43 application rollback is not a schema downgrade.
 
+After any migration command exits nonzero, query `schema_migrations` read-only and use the observed marker, not the command's exit status, to choose recovery: clean 41 → 98e88, clean 42 (including after the device cutover) → 3383, clean 43 only after verifying both enum labels → f41 or 54115, and any dirty marker → no application/operator recovery. Never force or hand-edit the schema marker and never run generic DOWN.
+
 ## 7. Resumable read-only production preflight
 
 The next preflight must recheck local source/worktree, production hostname/time, selected release manifest, running API/worker/frontend image labels/IDs/status, health/readiness and schema. Clean schema 41 is the expected start and continues preflight. Dirty markers or a different path stop and require rederivation.
