@@ -11,6 +11,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-api ./cmd/api \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-worker ./cmd/worker \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-migrate ./cmd/migrate \
+    && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-device-cutover ./cmd/device-cutover \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gradex-enhancement-drain ./cmd/enhancement-drain
 
 FROM build AS proof-build
@@ -58,6 +59,7 @@ LABEL org.opencontainers.image.revision=$GRADEX_REVISION
 COPY --from=build /out/gradex-api /usr/local/bin/gradex-api
 COPY --from=build /out/gradex-worker /usr/local/bin/gradex-worker
 COPY --from=build /out/gradex-migrate /usr/local/bin/gradex-migrate
+COPY --from=build /out/gradex-device-cutover /usr/local/bin/gradex-device-cutover
 # The read-only enhancement drain proof. It belongs in the runtime image, not the
 # proof image: a supervised 42 -> 41 rollback has to ask Redis and PostgreSQL —
 # both reachable only inside the Compose network — whether any schema-42

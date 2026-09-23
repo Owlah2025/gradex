@@ -28,17 +28,9 @@ export type AuthenticatedSession = {
    */
   password_change_required?: boolean;
   /**
-   * What this browser must do before it holds ordinary Student authority.
-   *
-   * Present only when device policy applies, and it carries no secret: a state,
-   * an admission outcome, and — while a code is outstanding — a challenge
-   * identifier that authenticates nobody and a masked mailbox. The device
-   * credential itself never reaches JavaScript; it lives only in the HttpOnly
-   * `__Host-` cookie the server sets.
-   *
-   * Optional in the type because a response from an older server would omit it.
-   * `deviceTrustState()` treats a missing value as "not applicable", which is
-   * the same behaviour as before the field existed.
+   * The server-derived Student device state. New password logins are TRUSTED;
+   * historical unbound or pending sessions remain restricted until cutover.
+   * The opaque device credential stays in the HttpOnly cookie.
    */
   device_trust?: SessionDeviceTrust;
   csrf_token: string;
@@ -131,16 +123,6 @@ export function setSession(session: AuthenticatedSession): void {
 export function clearSession(): void {
   resolution = "ANONYMOUS";
   publish(null);
-}
-
-/**
- * What this browser must do about device trust, if anything.
- *
- * Read from the current session rather than the public view. A challenge can
- * remain on a pre-change session and is only meaningful to the legacy screen.
- */
-export function deviceTrust(): SessionDeviceTrust | null {
-  return current?.device_trust ?? null;
 }
 
 /** The current session without its secret, or null when signed out. */

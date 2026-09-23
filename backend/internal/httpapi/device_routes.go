@@ -15,14 +15,9 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/requestid"
 )
 
-const deviceRequestBodyLimit int64 = 1024
-
 // deviceCommands is the device authority as the HTTP layer needs it.
 type deviceCommands interface {
 	Overview(ctx context.Context, accountID, currentDeviceID string, now time.Time) (identity.DeviceOverview, error)
-	CompleteTrust(ctx context.Context, request identity.DeviceTrustRequest) (identity.DeviceTrustResult, error)
-	ResendForAccount(ctx context.Context, accountID, userAgent, requestID string) (identity.DeviceChallenge, error)
-	AdoptForSession(ctx context.Context, accountID, sessionID string, device identity.DeviceContext, requestID string) (identity.DeviceAdmissionResult, error)
 	Remove(ctx context.Context, request identity.RemoveRequest) error
 
 	AdminOverview(ctx context.Context, accountID string, now time.Time) (identity.AdminDeviceOverview, error)
@@ -52,12 +47,6 @@ type deviceHandlers struct {
 	logger     *logging.Logger
 }
 
-type deviceTrustBody struct {
-	Code string `json:"code" binding:"required"`
-	// ReplaceDeviceID remains for completion of pre-change challenges.
-	ReplaceDeviceID string `json:"replace_device_id"`
-}
-
 func mountDeviceRoutes(
 	v1 *gin.RouterGroup,
 	foundation *DeviceFoundation,
@@ -85,9 +74,6 @@ func mountDeviceRoutes(
 		requireAuth(authenticator),
 		requireCapability(principals, logger, identity.CapDeviceManagement),
 	)
-	meMutation.POST("/trust", strictJSONMiddleware(func() any { return &deviceTrustBody{} }, deviceRequestBodyLimit), h.trust)
-	meMutation.POST("/trust/resend", h.resend)
-	meMutation.POST("/adopt", h.adopt)
 	meMutation.DELETE("/:deviceId", h.remove)
 
 	adminRead := v1.Group("/admin/students/:accountId/devices",
@@ -117,82 +103,6 @@ func (h *deviceHandlers) overview(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, overview)
-}
-
-// trust completes the emailed challenge for this browser.
-//
-// The device being trusted is not in the body. It is read from the challenge
-// and then proven by the device cookie, so a caller cannot aim somebody else's
-// code at their own browser.
-func (h *deviceHandlers) trust(c *gin.Context) {
-	body := c.MustGet(strictJSONBodyContextKey).(*deviceTrustBody)
-	digest := readDeviceCredential(c.Request)
-	if digest == "" {
-		// No usable device credential means there is nothing this code could
-		// trust. Deliberately answered as an invalid code rather than as a
-		// missing cookie, so the two cannot be told apart by probing.
-		writeProblem(c, problem.ValidationFailed())
-		return
-	}
-	result, err := h.foundation.devices.CompleteTrust(c.Request.Context(), identity.DeviceTrustRequest{
-		AccountID:       c.GetString(ctxUserIDKey),
-		SessionID:       sessionIDFrom(c),
-		PresentedDigest: digest,
-		ChallengeID:     challengeIDFrom(c),
-		Code:            body.Code,
-		ReplaceDeviceID: body.ReplaceDeviceID,
-		RequestID:       requestid.FromContext(c.Request.Context()),
-	})
-	if err != nil {
-		writeDeviceError(c, err)
-		return
-	}
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{
-		"state":             string(identity.DeviceTrustEstablished),
-		"replaced_device":   result.ReplacedDeviceID != "",
-		"revoked_sessions":  result.RevokedSessions,
-		"device_registered": true,
-	})
-}
-
-func (h *deviceHandlers) resend(c *gin.Context) {
-	challenge, err := h.foundation.devices.ResendForAccount(
-		c.Request.Context(), c.GetString(ctxUserIDKey),
-		c.GetHeader("User-Agent"), requestid.FromContext(c.Request.Context()),
-	)
-	if err != nil {
-		writeDeviceError(c, err)
-		return
-	}
-	writeDeviceChallenge(c, http.StatusOK, challenge)
-}
-
-// adopt binds a session that predates device policy to a device.
-func (h *deviceHandlers) adopt(c *gin.Context) {
-	pendingDevice, err := pendingDeviceCredentialFor(c)
-	if err != nil {
-		writeProblem(c, problem.AuthenticationUnavailable())
-		return
-	}
-	result, err := h.foundation.devices.AdoptForSession(
-		c.Request.Context(), c.GetString(ctxUserIDKey), sessionIDFrom(c),
-		deviceContextFrom(c, pendingDevice.digest), requestid.FromContext(c.Request.Context()),
-	)
-	if err != nil {
-		writeDeviceError(c, err)
-		return
-	}
-	pendingDevice.commit(c)
-	c.Header("Cache-Control", "no-store")
-	response := gin.H{
-		"state":     string(result.TrustState),
-		"admission": string(result.Admission),
-	}
-	if result.Challenge != nil {
-		response["challenge"] = deviceChallengeBody(*result.Challenge)
-	}
-	c.JSON(http.StatusOK, response)
 }
 
 // remove ends one of the Student's own devices.
@@ -284,52 +194,18 @@ func (h *deviceHandlers) adminCommand(c *gin.Context) identity.AdminDeviceComman
 	}
 }
 
-// challengeIDFrom reads the challenge this browser is answering.
-//
-// It is a header rather than a body field so the same value can be sent on the
-// resend route, which has no body, and it is not a secret: holding it proves
-// nothing without the mailed code, and the server still checks that it names
-// the Account's one live challenge.
-func challengeIDFrom(c *gin.Context) string {
-	return c.GetHeader("X-Gradex-Device-Challenge")
-}
-
-func deviceChallengeBody(challenge identity.DeviceChallenge) gin.H {
-	return gin.H{
-		"challenge_id":        challenge.ChallengeID,
-		"masked_email":        challenge.MaskedEmail,
-		"expires_at":          challenge.ExpiresAt.UTC().Format(time.RFC3339),
-		"resend_available_at": challenge.ResendAvailableAt.UTC().Format(time.RFC3339),
-	}
-}
-
-func writeDeviceChallenge(c *gin.Context, status int, challenge identity.DeviceChallenge) {
-	c.Header("Cache-Control", "no-store")
-	c.JSON(status, gin.H{"challenge": deviceChallengeBody(challenge)})
-}
-
 // writeDeviceError maps the device authority's vocabulary onto the response
 // classes. The mapping is deliberately explicit rather than defaulting to a
 // specific answer: an unrecognized failure is an internal fault and must not be
 // reported as a policy decision the Student can act on.
 func writeDeviceError(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, identity.ErrOTPInvalid):
-		writeProblem(c, problem.ValidationFailed())
-	case errors.Is(err, identity.ErrOTPAttemptsExhausted):
-		writeProblem(c, problem.RateLimited())
-	case errors.Is(err, identity.ErrOTPResendTooSoon):
-		writeProblem(c, problem.RateLimited())
 	case errors.Is(err, identity.ErrDeviceLimitReached):
 		writeProblem(c, problem.DeviceLimitReached())
 	case errors.Is(err, identity.ErrDeviceReplacementCooldown):
 		writeProblem(c, problem.DeviceReplacementCooldown())
 	case errors.Is(err, identity.ErrDeviceUnknown):
 		writeProblem(c, problem.DeviceNotFound())
-	case errors.Is(err, identity.ErrSessionNotUsable):
-		writeProblem(c, problem.NotAuthorized())
-	case errors.Is(err, identity.ErrDeliveryUnavailable):
-		writeProblem(c, problem.TransactionalDeliveryUnavailable())
 	case errors.Is(err, identity.ErrDeviceTrustUnavailable):
 		writeProblem(c, problem.AuthenticationUnavailable())
 	default:

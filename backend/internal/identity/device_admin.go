@@ -253,6 +253,9 @@ func (s *DeviceService) RevokeAllForSecurityRecovery(
 			return nil, err
 		}
 	}
+	if err := retireOutstandingDeviceOTPsForAccount(ctx, tx, accountID); err != nil {
+		return nil, err
+	}
 	if err := clearReplacementCooldown(ctx, tx, accountID, "", now); err != nil {
 		return nil, err
 	}

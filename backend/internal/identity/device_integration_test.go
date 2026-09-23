@@ -64,13 +64,14 @@ func (c *testClock) Advance(d time.Duration) {
 type recordingPlaybackReleaser struct {
 	mu       sync.Mutex
 	released []string
+	failure  error
 }
 
 func (r *recordingPlaybackReleaser) ReleaseDevice(_ context.Context, _, deviceID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.released = append(r.released, deviceID)
-	return nil
+	return r.failure
 }
 
 func (r *recordingPlaybackReleaser) Released() []string {
@@ -481,79 +482,14 @@ func TestAutoRotationRollbackKeepsDevicesAndPlayback(t *testing.T) {
 		f.deviceIDFor(t, second) != secondID || len(f.playback.Released()) != 0 {
 		t.Fatal("rollback changed durable devices or released playback")
 	}
-}
-
-func TestLegacySessionAdoptsUnknownBrowserWithoutOTP(t *testing.T) {
-	f := newDeviceFixture(t)
-	known := newBrowser(t, "Chrome/120.0 (Windows)")
-	unknown := newBrowser(t, "Firefox/121.0 (Macintosh)")
-	grant := f.login(t, known, "login")
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE sessions SET trusted_device_id = NULL, device_trust_state = 'LEGACY_UNBOUND'
-		  WHERE id = $1::uuid`, grant.Session.SessionID); err != nil {
+	var audits int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_events WHERE action = 'AUTO_DEVICE_REPLACED' AND correlation_id = 'rollback-admission'`).Scan(&audits); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.devices.AdoptForSession(context.Background(), f.account,
-		grant.Session.SessionID, DeviceContext{CredentialDigest: unknown.digest, UserAgent: unknown.userAgent},
-		"adopt")
-	if err != nil || result.TrustState != DeviceTrustEstablished || result.Challenge != nil {
-		t.Fatalf("legacy adoption = %+v, %v", result, err)
+	if audits != 0 {
+		t.Fatal("rollback left automatic replacement audit evidence")
 	}
-	if _, trust := f.sessionState(t, grant.Session.SessionID); trust != string(DeviceTrustEstablished) {
-		t.Fatalf("adopted trust = %s", trust)
-	}
-	assertNoDeviceChallenge(t, f)
-}
-
-func TestLegacyAdoptionAtLimitRotatesNewerDevice(t *testing.T) {
-	f := newDeviceFixture(t)
-	first := newBrowser(t, "Chrome/120.0 (Windows)")
-	second := newBrowser(t, "Safari/604.1 (iPhone)")
-	unknown := newBrowser(t, "Firefox/121.0 (Macintosh)")
-	legacyGrant := f.login(t, first, "login-1")
-	secondGrant := f.login(t, second, "login-2")
-	secondID := f.deviceIDFor(t, second)
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE sessions SET trusted_device_id = NULL, device_trust_state = 'LEGACY_UNBOUND'
-		  WHERE id = $1::uuid`, legacyGrant.Session.SessionID); err != nil {
-		t.Fatal(err)
-	}
-	result, err := f.devices.AdoptForSession(context.Background(), f.account,
-		legacyGrant.Session.SessionID, DeviceContext{CredentialDigest: unknown.digest, UserAgent: unknown.userAgent},
-		"adopt-at-limit")
-	if err != nil || result.EvictedDeviceID != secondID || result.Challenge != nil {
-		t.Fatalf("adoption = %+v, %v", result, err)
-	}
-	if f.trustedCount(t) != 2 {
-		t.Fatalf("trusted count = %d", f.trustedCount(t))
-	}
-	if state, _ := f.sessionState(t, secondGrant.Session.SessionID); state != "REVOKED" {
-		t.Fatalf("evicted session state = %s", state)
-	}
-	resolveGrant(t, f, legacyGrant, unknown)
-	released := f.playback.Released()
-	if len(released) != 1 || released[0] != secondID {
-		t.Fatalf("released leases = %v", released)
-	}
-	assertNoDeviceChallenge(t, f)
-}
-
-func TestTrustedSessionCannotAdoptAnotherDeviceWithoutPassword(t *testing.T) {
-	f := newDeviceFixture(t)
-	first := newBrowser(t, "Chrome/120.0 (Windows)")
-	second := newBrowser(t, "Safari/604.1 (iPhone)")
-	grant := f.login(t, first, "login")
-	_, err := f.devices.AdoptForSession(context.Background(), f.account,
-		grant.Session.SessionID,
-		DeviceContext{CredentialDigest: second.digest, UserAgent: second.userAgent},
-		"illegitimate-adopt")
-	if !errors.Is(err, ErrSessionNotUsable) {
-		t.Fatalf("trusted session adoption = %v", err)
-	}
-	if f.trustedCount(t) != 1 || f.deviceRows(t) != 1 {
-		t.Fatal("trusted session changed device admission without password")
-	}
-	resolveGrant(t, f, grant, first)
 }
 
 func TestTrustedSessionRequiresMatchingDeviceCredential(t *testing.T) {

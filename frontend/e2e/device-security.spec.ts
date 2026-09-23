@@ -54,6 +54,12 @@ async function openDevice(
   return { context, page, deviceID: session.device_id };
 }
 
+test("the retired device-code screen is unavailable", async ({ page }) => {
+  const response = await page.goto("/device-trust");
+  expect(response?.status()).toBe(404);
+  await expect(page.getByTestId("device-trust-form")).toHaveCount(0);
+});
+
 test.describe("Student device security — two devices, one protected playback", () => {
   test("Browser A plays, Browser B is refused, and B plays once A stops", async ({
     browser,
@@ -323,7 +329,7 @@ test.describe("Student device management", () => {
     await b.context.close();
   });
 
-	test("a third browser signs in normally and rotates the newer device", async ({ browser }, testInfo) => {
+	test("third and fourth browsers rotate the newer device without a challenge", async ({ browser }, testInfo) => {
 		const student = deviceSecurityStudentFor(testInfo, DEVICE_LIMIT_TEST_SLOT);
 		const a = await openDevice(browser, student, 0);
 		const b = await openDevice(browser, student, 1);
@@ -358,6 +364,8 @@ test.describe("Student device management", () => {
 		const ids = overview.devices.map((device) => device.id);
 		expect(ids).toContain(a.deviceID);
 		expect(ids).not.toContain(b.deviceID);
+		const thirdDeviceID = ids.find((id) => id !== a.deviceID);
+		expect(thirdDeviceID).toBeDefined();
 
 		await b.page.goto("/en/learn/dashboard");
 		const oldStatus = await b.page.evaluate(async () =>
@@ -369,6 +377,35 @@ test.describe("Student device management", () => {
 			(await fetch("/api/v1/me/devices", { credentials: "same-origin" })).status,
 		);
 		expect(stableStatus).toBe(200);
+
+		const dContext = await browser.newContext({ locale: "en-US" });
+		const dPage = await dContext.newPage();
+		const fourthDeviceCodeRequests: string[] = [];
+		dPage.on("request", (request) => {
+			if (/\/me\/devices\/(trust|adopt)/.test(request.url())) {
+				fourthDeviceCodeRequests.push(request.url());
+			}
+		});
+		await dPage.goto("/login");
+		await dPage.locator("#email").fill(student.email);
+		await dPage.locator("#password").fill(STUDENT_PASSWORD);
+		await dPage.locator('button[type="submit"]').click();
+		await dPage.waitForURL(/\/learn\/dashboard/, { timeout: 30_000 });
+		expect(fourthDeviceCodeRequests).toEqual([]);
+		const fourthOverview = await dPage.evaluate(async () => {
+			const response = await fetch("/api/v1/me/devices", { credentials: "same-origin" });
+			if (!response.ok) throw new Error(`device list returned ${response.status}`);
+			return response.json() as Promise<{ devices: Array<{ id: string }> }>;
+		});
+		expect(fourthOverview.devices).toHaveLength(2);
+		const fourthIDs = fourthOverview.devices.map((device) => device.id);
+		expect(fourthIDs).toContain(a.deviceID);
+		expect(fourthIDs).not.toContain(thirdDeviceID);
+		const thirdStatus = await cPage.evaluate(async () =>
+			(await fetch("/api/v1/me/devices", { credentials: "same-origin" })).status,
+		);
+		expect(thirdStatus).toBe(401);
+
 		const aPlayback = a.page.waitForResponse(
 			(response) => response.url().includes(PLAYBACK_ROUTE(LESSON_ID)) && response.request().method() === "POST",
 		);
@@ -377,6 +414,7 @@ test.describe("Student device management", () => {
 		await a.context.close();
 		await b.context.close();
 		await cContext.close();
+		await dContext.close();
 	});
 
 });

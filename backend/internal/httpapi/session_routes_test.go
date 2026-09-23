@@ -21,6 +21,19 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
+func TestDeviceLimitInvariantHasDistinctSafeProblemCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/session", nil)
+	writeSessionError(context, identity.ErrDeviceLimitInvariantViolation)
+	if recorder.Code != http.StatusInternalServerError ||
+		!strings.Contains(recorder.Body.String(), "DEVICE_LIMIT_INVARIANT_VIOLATION") ||
+		strings.Contains(recorder.Body.String(), "trusted_count") {
+		t.Fatalf("over-limit problem = status %d body %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 type fakeSessionRepository struct {
 	loginGrant  identity.SessionGrant
 	loginErr    error

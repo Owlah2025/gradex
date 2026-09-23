@@ -31,6 +31,32 @@ func TestSchema43UpDownUpFromCurrentPredecessor(t *testing.T) {
 	}
 }
 
+func TestSchema43UpAcceptsExistingLabelsOnCleanPredecessor(t *testing.T) {
+	freshDatabase(t)
+	m := openMigrator(t)
+	pool := openPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	if err := m.Migrate(uint(ActiveProcessingKindSchemaVersion)); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`ALTER TYPE trusted_device_revocation_reason ADD VALUE 'AUTO_REPLACED'`,
+		`ALTER TYPE session_revocation_reason ADD VALUE 'AUTO_REPLACED'`,
+	} {
+		if _, err := pool.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Steps(1); err != nil {
+		t.Fatalf("43 retry-safe up: %v", err)
+	}
+	state, err := ReadSchemaState(ctx, pool)
+	if err != nil || state.Version != AutoDeviceReplacementSchemaVersion || state.Dirty {
+		t.Fatalf("schema after retry-safe up = %+v, err=%v", state, err)
+	}
+}
+
 func TestSchema43DownRefusesAutomaticReplacementEvidence(t *testing.T) {
 	freshDatabase(t)
 	m := openMigrator(t)

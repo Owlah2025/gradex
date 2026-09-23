@@ -274,6 +274,12 @@ func (r *SessionRepository) createSession(
 	admission, err := r.persistSession(ctx, request, candidate, pending)
 	if err != nil {
 		observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)
+		var violation *DeviceLimitInvariantViolation
+		if errors.As(err, &violation) {
+			if auditErr := r.devices.recordLimitInvariantViolation(ctx, candidate.accountID, request.RequestID, violation); auditErr != nil {
+				return SessionGrant{}, errors.Join(err, auditErr)
+			}
+		}
 		return SessionGrant{}, err
 	}
 	observeLoginTiming(ctx, LoginStageSessionWrite, writeStarted)

@@ -373,9 +373,8 @@ func insertDeviceOTPSecret(
 	return nil
 }
 
-// reserveChallengePayload performs the fallible entropy read the encrypted
-// outbox requires, before any transaction opens. Failing here refuses the login
-// rather than committing a challenge whose code could never be mailed.
+// reserveChallengePayload remains for historical challenge helpers. Current
+// Student password login and session resolution never call it.
 func (s *DeviceService) reserveChallengePayload(ctx context.Context) (outbox.ProtectedPayloadReservation, error) {
 	reservation, err := s.outbox.ReserveProtectedPayload(ctx)
 	if err != nil {

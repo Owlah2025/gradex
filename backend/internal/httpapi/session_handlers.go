@@ -199,6 +199,8 @@ func writeSessionError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, identity.ErrAuthenticationFailed):
 		writeProblem(c, problem.AuthenticationFailed())
+	case errors.Is(err, identity.ErrDeviceLimitInvariantViolation):
+		writeProblem(c, problem.DeviceLimitInvariantViolation())
 	case errors.Is(err, identity.ErrSessionReplaced):
 		writeProblem(c, problem.SessionReplaced())
 	case errors.Is(err, identity.ErrSessionReuseDetected):

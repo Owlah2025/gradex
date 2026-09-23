@@ -456,6 +456,14 @@ func DeviceLimitReached() Problem {
 		"Remove one of your trusted devices before adding this one.")
 }
 
+// DeviceLimitInvariantViolation is an internal, auditable policy corruption.
+// It must not invite the Student to remove a device or disclose the count.
+func DeviceLimitInvariantViolation() Problem {
+	return New(http.StatusInternalServerError, "device-limit-invariant-violation",
+		"Sign-in unavailable",
+		"Sign-in could not be completed. Contact support with the request ID.")
+}
+
 // DeviceReplacementCooldown means a device was replaced too recently.
 func DeviceReplacementCooldown() Problem {
 	return New(http.StatusConflict, "device-replacement-cooldown",

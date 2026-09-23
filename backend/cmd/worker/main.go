@@ -64,11 +64,9 @@ func main() {
 	// the same update as its operation token, so stale recovery can record the
 	// right failed attempt even if the worker dies before encoding any rung.
 	//
-	// Only this binary needs 42. The API's `requiredSchemaVersion` is unchanged:
-	// no shipped route reads the new column, and raising it would keep the API
-	// out of the load balancer for a capability it does not use. The migrate
-	// command has no floor of its own, so it can still perform 41 -> 42 and no
-	// bootstrap deadlock is created.
+	// Media workers still require schema 42 for the active attempt kind. The
+	// device-rotation API requires schema 43 because it writes AUTO_REPLACED;
+	// the worker accepts 43 without changing media processing semantics.
 	{
 		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
 		err := db.CheckSchemaAtLeast(startupCtx, pool, db.ActiveProcessingKindSchemaVersion)

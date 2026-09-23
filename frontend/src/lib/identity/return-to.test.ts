@@ -168,21 +168,21 @@ test("an unrestricted principal is routed normally", () => {
   );
 });
 
-test("a Subject destination survives device trust and mandatory password change", () => {
+test("a Subject destination survives recovery and mandatory password change", () => {
   const subject = "/en/subjects/e2e-subject-university/SUB%20100?request=1";
-  const deviceStep = withReturnTo("/device-trust", subject);
-  const afterDevice = new URL(deviceStep, "https://gradex.test").searchParams.get("returnTo");
-  const passwordStep = postAuthenticationDestination("STUDENT", afterDevice, "en", true);
+  const recoveryStep = withReturnTo("/recover", subject);
+  const afterRecovery = new URL(recoveryStep, "https://gradex.test").searchParams.get("returnTo");
+  const passwordStep = postAuthenticationDestination("STUDENT", afterRecovery, "en", true);
   const afterPassword = new URL(passwordStep, "https://gradex.test").searchParams.get("returnTo");
 
   assert.equal(postPasswordChangeDestination("STUDENT", afterPassword, "en"), subject);
 });
 
-test("device trust drops a hostile destination and falls back to the Student dashboard", () => {
-  const deviceStep = withReturnTo("/device-trust", "https://evil.example/steal");
-  const destination = new URL(deviceStep, "https://gradex.test").searchParams.get("returnTo");
+test("recovery drops a hostile destination and falls back to the Student dashboard", () => {
+  const recoveryStep = withReturnTo("/recover", "https://evil.example/steal");
+  const destination = new URL(recoveryStep, "https://gradex.test").searchParams.get("returnTo");
 
-  assert.equal(deviceStep, "/device-trust");
+  assert.equal(recoveryStep, "/recover");
   assert.equal(
     postAuthenticationDestination("STUDENT", destination, "en", false),
     "/en/learn/dashboard",

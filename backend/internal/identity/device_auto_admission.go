@@ -9,6 +9,37 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+var ErrDeviceLimitInvariantViolation = errors.New("trusted device count exceeds policy")
+
+type DeviceLimitInvariantViolation struct {
+	TrustedCount int
+	Limit        int
+}
+
+func (v *DeviceLimitInvariantViolation) Error() string {
+	return fmt.Sprintf("%s: count=%d limit=%d", ErrDeviceLimitInvariantViolation, v.TrustedCount, v.Limit)
+}
+
+func (v *DeviceLimitInvariantViolation) Unwrap() error { return ErrDeviceLimitInvariantViolation }
+
+func (s *DeviceService) recordLimitInvariantViolation(
+	ctx context.Context, accountID, requestID string, violation *DeviceLimitInvariantViolation,
+) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO audit_events
+		  (actor_role, actor_descriptor, action, module, target_type, target_id,
+		   reason, metadata, correlation_id)
+		 VALUES ('SYSTEM', 'gradex-device-policy', 'DEVICE_LIMIT_INVARIANT_VIOLATION',
+		         'IDENTITY_AND_ACCESS', 'ACCOUNT', $1,
+		         'Trusted device count exceeded configured limit',
+		         jsonb_build_object('trusted_count', $2::int, 'device_limit', $3::int), $4)`,
+		accountID, violation.TrustedCount, violation.Limit, requestID)
+	if err != nil {
+		return fmt.Errorf("auditing device-limit invariant violation: %w", err)
+	}
+	return nil
+}
+
 type newDeviceAdmissionState struct {
 	existing     TrustedDevice
 	found        bool
@@ -22,7 +53,9 @@ func (s *DeviceService) admitNewDevice(
 	state newDeviceAdmissionState,
 ) (DeviceAdmissionResult, error) {
 	if state.trustedCount > s.policy.TrustedDeviceLimit {
-		return DeviceAdmissionResult{}, fmt.Errorf("%w: trusted device count exceeds policy", ErrDeviceTrustUnavailable)
+		return DeviceAdmissionResult{}, &DeviceLimitInvariantViolation{
+			TrustedCount: state.trustedCount, Limit: s.policy.TrustedDeviceLimit,
+		}
 	}
 	trustedAt, err := nextDeviceTrustedAt(ctx, tx, request.AccountID, state.now)
 	if err != nil {
@@ -66,10 +99,46 @@ func (s *DeviceService) admitNewDevice(
 	}); err != nil {
 		return DeviceAdmissionResult{}, err
 	}
+	if evictedID != "" {
+		if err := appendAutomaticReplacementAudit(ctx, tx, automaticReplacementAudit{
+			accountID: request.AccountID, evictedID: evictedID, admittedID: deviceID,
+			limit: s.policy.TrustedDeviceLimit, requestID: request.RequestID,
+		}); err != nil {
+			return DeviceAdmissionResult{}, err
+		}
+	}
 	return DeviceAdmissionResult{
 		Admission: AdmitTrustedDevice, TrustState: DeviceTrustEstablished,
 		DeviceID: deviceID, EvictedDeviceID: evictedID,
 	}, nil
+}
+
+type automaticReplacementAudit struct {
+	accountID  string
+	evictedID  string
+	admittedID string
+	limit      int
+	requestID  string
+}
+
+func appendAutomaticReplacementAudit(ctx context.Context, tx pgx.Tx, audit automaticReplacementAudit) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO audit_events
+		  (actor_role, actor_descriptor, action, module, target_type, target_id,
+		   reason, metadata, correlation_id)
+		 VALUES ('SYSTEM', 'gradex-device-policy', 'AUTO_DEVICE_REPLACED',
+		         'IDENTITY_AND_ACCESS', 'TRUSTED_DEVICE', $1,
+		         'Automatic trusted-device slot rotation',
+		         jsonb_build_object('account_id', $2::text,
+		                            'evicted_device_id', $3::text,
+		                            'admitted_device_id', $1::text,
+		                            'device_limit', $4::int,
+		                            'replacement_mode', 'AUTOMATIC'), $5)`,
+		audit.admittedID, audit.accountID, audit.evictedID, audit.limit, audit.requestID)
+	if err != nil {
+		return fmt.Errorf("auditing automatic device replacement: %w", err)
+	}
+	return nil
 }
 
 func automaticDeviceTrustEvidence(deviceID, evictedID string, limit int) map[string]any {

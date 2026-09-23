@@ -105,8 +105,8 @@ func revokeSessionsForDevice(ctx context.Context, tx pgx.Tx, revocation deviceRe
 		    SET state = 'REVOKED',
 		        revoked_at = $2,
 		        revocation_reason = $3::session_revocation_reason
-		  WHERE trusted_device_id = $1::uuid AND state = 'ACTIVE'`,
-		revocation.DeviceID, revocation.Now, sessionReason,
+		  WHERE trusted_device_id = $1::uuid AND account_id = $4::uuid AND state = 'ACTIVE'`,
+		revocation.DeviceID, revocation.Now, sessionReason, revocation.AccountID,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("revoking sessions for trusted device: %w", err)

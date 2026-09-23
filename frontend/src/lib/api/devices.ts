@@ -6,9 +6,7 @@ import { authenticatedRequest } from "./http";
  * Nothing here is a secret. The device credential itself lives in an HttpOnly
  * `__Host-` cookie that JavaScript can never read, and every call below is
  * authorized by the ordinary session cookie — the device credential only tells
- * the server *which* of the Student's browsers is asking. `challenge_id` names
- * a challenge and authenticates nobody: presenting it without the emailed code
- * is exactly as useful as presenting nothing.
+ * the server *which* of the Student's browsers is asking.
  */
 
 export type DeviceTrustState =
@@ -17,20 +15,11 @@ export type DeviceTrustState =
   | "TRUSTED"
   | "LEGACY_UNBOUND";
 
-// OTP_REQUIRED and LIMIT_REACHED remain for pre-change session compatibility.
-export type DeviceAdmission = "TRUSTED" | "OTP_REQUIRED" | "LIMIT_REACHED";
-
-export type DeviceChallenge = {
-  challenge_id: string;
-  masked_email: string;
-  expires_at: string;
-  resend_available_at: string;
-};
+export type DeviceAdmission = "TRUSTED";
 
 export type SessionDeviceTrust = {
   state: DeviceTrustState;
   admission?: DeviceAdmission;
-  challenge?: DeviceChallenge;
 };
 
 /**
@@ -58,13 +47,6 @@ export type DeviceOverview = {
   replacement_ready: boolean;
 };
 
-export type DeviceTrustCompleted = {
-  state: "TRUSTED";
-  replaced_device: boolean;
-  revoked_sessions: number;
-  device_registered: boolean;
-};
-
 export type DeviceRemoved = {
   removed: boolean;
   /** True when the Student removed the browser they are using, which ends it. */
@@ -78,61 +60,6 @@ export function listDevices(locale: "ar" | "en", csrf: string) {
     locale,
     csrf,
   ) as Promise<DeviceOverview>;
-}
-
-/**
- * Completes a device-trust challenge.
- *
- * The device being trusted is not a parameter, and that is deliberate: the
- * server reads it from the challenge and then requires this browser to prove it
- * holds that device's credential. A caller cannot aim a code at a browser it
- * was not mailed for.
- */
-export function trustDevice(
-  challengeID: string,
-  code: string,
-  locale: "ar" | "en",
-  csrf: string,
-  replaceDeviceID?: string,
-) {
-  return authenticatedRequest<DeviceTrustCompleted>(
-    "/me/devices/trust",
-    "POST",
-    locale,
-    csrf,
-    { code, replace_device_id: replaceDeviceID ?? "" },
-    { "X-Gradex-Device-Challenge": challengeID },
-  ) as Promise<DeviceTrustCompleted>;
-}
-
-export function resendDeviceCode(
-  challengeID: string,
-  locale: "ar" | "en",
-  csrf: string,
-) {
-  return authenticatedRequest<{ challenge: DeviceChallenge }>(
-    "/me/devices/trust/resend",
-    "POST",
-    locale,
-    csrf,
-    undefined,
-    { "X-Gradex-Device-Challenge": challengeID },
-  ) as Promise<{ challenge: DeviceChallenge }>;
-}
-
-/**
- * Binds a session created before device policy existed to this browser.
- *
- * Automatically trusts a new browser, rotating the newer trusted slot when
- * necessary. The route accepts only a live LEGACY_UNBOUND session.
- */
-export function adoptDevice(locale: "ar" | "en", csrf: string) {
-  return authenticatedRequest<SessionDeviceTrust>(
-    "/me/devices/adopt",
-    "POST",
-    locale,
-    csrf,
-  ) as Promise<SessionDeviceTrust>;
 }
 
 export function removeDevice(

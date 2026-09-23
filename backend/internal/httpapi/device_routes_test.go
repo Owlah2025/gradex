@@ -19,27 +19,31 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
-func TestAdoptionRejectsNonLegacySessionAsForbidden(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest(http.MethodPost, "/api/v1/me/devices/adopt", nil)
-	writeDeviceError(context, identity.ErrSessionNotUsable)
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("non-legacy adoption status = %d, want 403", recorder.Code)
+func TestRetiredDeviceTrustRoutesAreUnavailable(t *testing.T) {
+	devices := &fakeDeviceCommands{}
+	principal := identity.Principal{
+		AccountID: "student-account-1", Role: identity.RoleStudent,
+		Status: identity.StatusActive, CredentialState: identity.CredentialActive,
+	}
+	authenticator := configurableTestAuth{userID: principal.AccountID, trustState: identity.DeviceTrustPending}
+	router := mountedDeviceTestRouter(t, devices, authenticator, principal)
+	for _, path := range []string{
+		"/api/v1/me/devices/trust",
+		"/api/v1/me/devices/trust/resend",
+		"/api/v1/me/devices/adopt",
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, response.Code)
+		}
 	}
 }
 
 type fakeDeviceCommands struct {
-	overviewResult      identity.DeviceOverview
-	overviewErr         error
-	completeTrustResult identity.DeviceTrustResult
-	completeTrustErr    error
-	resendResult        identity.DeviceChallenge
-	resendErr           error
-	adoptResult         identity.DeviceAdmissionResult
-	adoptErr            error
-	removeErr           error
+	overviewResult identity.DeviceOverview
+	overviewErr    error
+	removeErr      error
 
 	adminOverviewResult identity.AdminDeviceOverview
 	adminOverviewErr    error
@@ -54,18 +58,6 @@ type fakeDeviceCommands struct {
 
 func (f *fakeDeviceCommands) Overview(_ context.Context, _, _ string, _ time.Time) (identity.DeviceOverview, error) {
 	return f.overviewResult, f.overviewErr
-}
-
-func (f *fakeDeviceCommands) CompleteTrust(_ context.Context, _ identity.DeviceTrustRequest) (identity.DeviceTrustResult, error) {
-	return f.completeTrustResult, f.completeTrustErr
-}
-
-func (f *fakeDeviceCommands) ResendForAccount(_ context.Context, _, _, _ string) (identity.DeviceChallenge, error) {
-	return f.resendResult, f.resendErr
-}
-
-func (f *fakeDeviceCommands) AdoptForSession(_ context.Context, _, _ string, _ identity.DeviceContext, _ string) (identity.DeviceAdmissionResult, error) {
-	return f.adoptResult, f.adoptErr
 }
 
 func (f *fakeDeviceCommands) Remove(_ context.Context, request identity.RemoveRequest) error {

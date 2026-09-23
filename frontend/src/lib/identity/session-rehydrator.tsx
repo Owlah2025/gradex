@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { getSession } from "@/lib/api/identity";
-import { adoptDevice } from "@/lib/api/devices";
 import { useLocale } from "@/lib/i18n/locale-provider";
 import { clearSession, setSession } from "./session";
 
@@ -13,8 +12,7 @@ import { clearSession, setSession } from "./session";
  * read, and the CSRF token is deliberately never persisted, so after a reload
  * the browser has authority it cannot see. One resolve call rehydrates both the
  * display state and the memory-only token. This read does not rotate the
- * credential or extend idle expiry. A legacy unbound Student session is
- * adopted through the device-policy endpoint and then resolved again.
+ * credential or extend idle expiry.
  *
  * A failure here means "not signed in" and must stay silent: the resolve route
  * returns the same shape for a missing, expired, revoked, and never-existing
@@ -26,15 +24,7 @@ export function SessionRehydrator() {
   React.useEffect(() => {
     let active = true;
     getSession(locale)
-      .then(async (session) => {
-        if (session.role === "STUDENT" && session.device_trust?.state === "LEGACY_UNBOUND") {
-          try {
-            await adoptDevice(locale, session.csrf_token);
-            session = await getSession(locale);
-          } catch {
-            // Keep ordinary session authority; protected learning remains denied.
-          }
-        }
+      .then((session) => {
         if (active) setSession(session);
       })
       .catch(() => {

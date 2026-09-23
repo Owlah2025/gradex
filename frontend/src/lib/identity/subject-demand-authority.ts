@@ -9,8 +9,8 @@ import type { SessionResolution, SessionView } from "./session";
  * first as the second renders an actionable control to principals the server
  * will refuse. An Instructor and an Admin are both signed in and neither holds
  * CapLearningAccess; a Student mid password-change holds nothing but the change
- * itself; a Student whose browser has not completed device trust is narrowed to
- * device self-service. Each of those would press a button and receive a 403.
+ * itself; a historical pending device session remains restricted until a fresh
+ * password login. Each of those would press a button and receive a 403.
  *
  * # THIS MIRRORS THE SERVER, IT DOES NOT REPLACE IT
  *
