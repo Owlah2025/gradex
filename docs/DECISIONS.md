@@ -4480,4 +4480,20 @@ Before enabling the new API, controlled maintenance must leave zero active `LEGA
 
 Automatic replacement gains explicit `AUTO_DEVICE_REPLACED` Audit evidence. Over-limit corruption remains fail-closed and gains a distinct internal problem code plus `DEVICE_LIMIT_INVARIANT_VIOLATION` Audit evidence. Migration 0043 uses PostgreSQL's `ADD VALUE IF NOT EXISTS`; a dirty migration marker still stops automatic retry. Migrations 0039–0042 and their supervised release tooling are unchanged.
 
-The operating protocol is [the schema-43 device release plan](launch/RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA43.md). It requires live read-only production SHA/schema discovery at release time, pre-staged current and rollback artifacts, verified backup, media-work gates, a maintenance window, and a new independent verdict. No production inspection or mutation occurred during this implementation.
+The first operating draft was superseded after the read-only preflight observed clean schema 41; it must not be executed. The re-derived 41 → 42 → 43 candidate is [the schema-41 device release plan](launch/RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md). It requires the frozen schema-42 boundary, staged current/transition/rollback artifacts, verified backup, complete read-only preflight, maintenance window and new independent verdict. No production mutation occurred during offline reconciliation.
+
+## D-111 — Proposed classification for canonical catalogue-import E2E 409 (not accepted)
+
+**Date:** 2026-09-23
+
+**Status:** Proposal only. Product Owner decision pending; this is not a waiver or acceptance.
+
+**Issue:** The canonical catalogue-import E2E returns HTTP 409 with importer.ErrIdentityRebind.
+
+**Evidence:** Independent review reproduced the same failure on device release f41f9c28d67aa06ec370ba4f1a8c7d1192d5986d and frozen, independently approved schema-42 baseline 3383f46d0e9e6379c3bd166d39622c3659ae3d86.
+
+**Relationship to this release:** The failure predates the Student device and schema-43 remediation; it is not introduced by these changes.
+
+**Proposed classification:** PRE_EXISTING_DETERMINISTIC_FIXTURE_OR_TEST_ENVIRONMENT_DEFECT.
+
+**Scope:** Track and resolve the importer fixture separately. Accepting this classification would cover only the reproduced fixture failure. It would not authorize changing the importer identity-rebind guard or dismissing any future E2E regression.

@@ -1,5 +1,13 @@
 # Gradex Launch Status
 
+> **2026-09-23 schema-41 release-path re-derivation:** The first live read-only
+> preflight observed release 98e88fcc1105e8c638bb638d3f1c46630bcc51b2 on clean
+> schema 41. Offline planning now composes the frozen 41 → 42 boundary with device
+> schema 43. See the [schema-41-to-43 plan](RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md).
+> The prior schema-38/42 draft is superseded. Re-review and release approval are
+> pending. No production mutation was performed. D-111's E2E classification is
+> proposed and not accepted.
+
 > **2026-09-23 device release NO-GO remediation:** An independent review rejected
 > the first automatic-device candidate for its missing schema-43 application
 > rollback, live legacy-session adoption risk, and reachable historical OTP

@@ -1,6 +1,6 @@
-# Student automatic device rotation — schema 43 release plan
+# Student automatic device rotation — superseded schema-43 draft
 
-**State:** local candidate; independent G0 re-review and Product Owner release approval are pending. This is an operating plan, not authorization to run it. No production inspection or mutation was performed while preparing it.
+> **Superseded, do not execute.** The first live read-only preflight observed clean schema 41 on 98e88fcc1105e8c638bb638d3f1c46630bcc51b2. This draft prepared only clean schema 38 or 42. The authoritative offline re-derivation for the observed 41 → 42 → 43 path is [RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md](RELEASE_PLAN_2026-09-23_STUDENT_DEVICE_ROTATION_SCHEMA41_TO43.md). The prior read-only inspection performed no production mutation.
 
 ## Frozen boundary and artifacts
 
