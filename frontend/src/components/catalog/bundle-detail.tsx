@@ -21,6 +21,7 @@ import {
 } from "@/lib/api/access";
 import { ProblemError } from "@/lib/api/problem";
 import { useLocale } from "@/lib/i18n/locale-provider";
+import { openHandoffContext } from "@/lib/browser/external-handoff";
 
 type State = { kind: "loading" } | { kind: "ready"; bundle: PublicBundle } | { kind: "missing" } | { kind: "failed" };
 type PurchaseHistoryState =
@@ -36,6 +37,9 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
   const [history, setHistory] = useState<PurchaseHistoryState>({ kind: "loading" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set only where the browser refused the handoff context; the request has
+  // already succeeded, so the destination is offered as a link instead.
+  const [fallbackURL, setFallbackURL] = useState<string | null>(null);
   const inFlight = useRef(false);
 
   const loadHistory = useCallback(async () => {
@@ -70,10 +74,19 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
     inFlight.current = true;
     setSubmitting(true);
     setError(null);
+    setFallbackURL(null);
+    // Opened synchronously, inside the click, while the user activation that
+    // permits it is still live. Gradex is never navigated away from.
+    const handoff = openHandoffContext();
     try {
       const result = await createStudentBundlePurchaseRequest(bundle.id, routeLocale);
-      window.location.assign(result.whatsapp_url);
+      if (!handoff.complete(result.whatsapp_url)) {
+        setFallbackURL(result.whatsapp_url);
+      }
+      setSubmitting(false);
+      inFlight.current = false;
     } catch {
+      handoff.abandon();
       setError(t.bundles.failed);
       setSubmitting(false);
       inFlight.current = false;
@@ -127,6 +140,21 @@ export function BundleDetail({ idOrSlug, routeLocale }: { idOrSlug: string; rout
                 <PriceDisplay price={bundle.price} locale={routeLocale} className="mt-4" />
                 <p className="mt-4 text-sm leading-6 text-muted-foreground">{t.bundles.paymentBody}</p>
                 {error ? <div className="mt-4"><Alert tone="error" title={error} /></div> : null}
+                {/* Only where the browser refused the handoff context. The request
+                    exists; this offers the same server-built destination to press. */}
+                {fallbackURL ? (
+                  <p className="mt-4 text-sm leading-6">
+                    <a
+                      href={fallbackURL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-primary underline underline-offset-4"
+                      data-testid="bundle-handoff-fallback"
+                    >
+                      {t.bundles.handoffFallback}
+                    </a>
+                  </p>
+                ) : null}
                 {history.kind === "loading" ? (
                   <p
                     className="mt-4 text-sm text-muted-foreground"

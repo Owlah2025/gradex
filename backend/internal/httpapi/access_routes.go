@@ -435,7 +435,7 @@ func (h *accessHandlers) confirmPurchaseRequestPayment(c *gin.Context) {
 			writeProblem(c, problem.New(http.StatusConflict, "course-default-access-expiry-required", "Course access expiry is not configured", "Set the Course access expiry before confirming payment."))
 		case errors.Is(err, access.ErrPurchaseRequestTransition), errors.Is(err, access.ErrDuplicateInvitation):
 			writeProblem(c, problem.New(http.StatusConflict, "purchase-request-state-conflict", "Purchase request cannot be confirmed", "The purchase request is no longer eligible for this action."))
-		case errors.Is(err, access.ErrIneligibleRecipient):
+		case errors.Is(err, access.ErrIneligibleRecipient), errors.Is(err, access.ErrPurchaseRequesterNotEligible):
 			writeProblem(c, problem.New(http.StatusConflict, "ineligible-recipient", "Ineligible recipient", "The recipient account does not satisfy recipient eligibility."))
 		default:
 			writeProblem(c, problem.Internal(""))

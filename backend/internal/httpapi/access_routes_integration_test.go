@@ -36,11 +36,11 @@ func setupAdminAccessAPIServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, s
 	otherStudentID := "10000000-0000-0000-0000-000000000004"
 
 	_, err := p.Exec(ctx, `
-		INSERT INTO accounts (id, normalized_email, email, role, status, display_name) VALUES
-		($1, 'admin-access@example.com', 'admin-access@example.com', 'ADMIN', 'ACTIVE', 'Admin Access User'),
-		($2, 'instructor-access@example.com', 'instructor-access@example.com', 'INSTRUCTOR', 'ACTIVE', 'Instructor Access User'),
-		($3, 'student-access@example.com', 'student-access@example.com', 'STUDENT', 'ACTIVE', 'Student Access User'),
-		($4, 'other-student@example.com', 'other-student@example.com', 'STUDENT', 'ACTIVE', 'Other Student User')
+		INSERT INTO accounts (id, normalized_email, email, role, status, display_name, email_verified_at) VALUES
+		($1, 'admin-access@example.com', 'admin-access@example.com', 'ADMIN', 'ACTIVE', 'Admin Access User', now()),
+		($2, 'instructor-access@example.com', 'instructor-access@example.com', 'INSTRUCTOR', 'ACTIVE', 'Instructor Access User', now()),
+		($3, 'student-access@example.com', 'student-access@example.com', 'STUDENT', 'ACTIVE', 'Student Access User', now()),
+		($4, 'other-student@example.com', 'other-student@example.com', 'STUDENT', 'ACTIVE', 'Other Student User', now())
 	`, adminID, instID, studentID, otherStudentID)
 	if err != nil {
 		t.Fatalf("seeding accounts: %v", err)

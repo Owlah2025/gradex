@@ -4509,3 +4509,41 @@ The first operating draft was superseded after the read-only preflight observed 
 **Evidence required:** The launch uses the latest valid completed encrypted offsite PostgreSQL snapshot, verifies its schema sidecar and database coverage, and requires a successful isolated restore verification tied to that same snapshot before the maintenance window.
 
 **Scope:** This decision does not claim a 15-minute recovery point, continuous point-in-time recovery, or a guaranteed four-hour contractual restoration. If the scheduled backup fails or restore verification does not pass, the launch recovery gate remains blocked.
+
+## D-113 — Admin payment confirmation grants Course access directly
+
+**Date:** 2026-09-24
+
+**Status:** Approved by the Product Owner on 2026-09-24. This is a deliberate business-rule change, not a defect repair.
+
+**Decision:** For externally paid COURSE purchase requests, Admin payment confirmation is the authoritative access-grant operation. Confirmation creates the Enrollment and the ACTIVE Entitlement in the same transaction that records the payment, and moves the request straight from `WAITING_PAYMENT` to `ACCESS_GRANTED`.
+
+Student acceptance is no longer part of the purchase flow. Confirmation issues no Course Access Invitation, and the Student performs no second action after an Admin confirms payment.
+
+Historical invitation-backed access remains supported. Existing `course_access_invitations` rows, their Entitlements, and the Student acceptance endpoint are retained and unchanged, so records created before this decision continue to read and resolve exactly as they did. The Admin invitation flow (S6 course access grant) is untouched; this decision governs the purchase flow only.
+
+**Shape of the change:** The COURSE path now mirrors `confirmBundlePurchaseTx`, which has granted Bundle access this way in production since schema 36. Entitlement provenance for a direct grant is `grant_source = 'PURCHASE_REQUEST'`, `source_purchase_request_id` set, `source_invitation_id` NULL.
+
+**Schema:** Migration 0044 widens three constraints so that shape is representable — `ent_purchase_needs_invitation` becomes `ent_purchase_source_valid`, `ent_bundle_purchase_source_valid` admits `PURCHASE_REQUEST`, and `purchase_requests_transition_coherent` allows a COURSE request to be `ACCESS_GRANTED` without an invitation. It is expand-only: every row shape legal at schema 43 stays legal, and nothing is rewritten, backfilled, or deleted. Its down migration refuses while direct-grant rows exist, because schema 43 cannot represent them.
+
+**Notification:** The existing `access.granted` event and `course-access-granted-v1` template are reused. A `purchase_backed` payload flag selects wording that states the payment was confirmed and access is available, in place of wording that credits an Admin with approving an invitation. The Admin-approval wording is preserved for the Admin invitation flow that still produces it.
+
+**Audit:** `PURCHASE_REQUEST_PAYMENT_CONFIRMED` and `ENTITLEMENT_GRANTED` are both written in the grant transaction. `COURSE_ACCESS_INVITATION_ISSUED` and `PURCHASE_BACKED_INVITATION_ACCEPTED` are no longer emitted on this path because neither event occurs; both remain defined for historical records.
+
+**Authorization:** Unchanged. The route keeps `requireSessionMutationSecurity`, `requireAuth`, and `CapCourseAccessGrant`. The recipient, Course, and price are read from the stored purchase request; the request body carries nothing.
+
+**Recipient resolution:** A request created by the authenticated purchase route carries `requester_account_id` and grants to that Account. A pre-authentication row, which carries only an address, resolves its recipient by `normalized_email` — the same field the retired invitation path used to choose a recipient. Eligibility is revalidated inside the grant transaction in both cases: STUDENT, ACTIVE, verified email. Production held zero such rows at the time of this decision and the anonymous purchase route no longer exists, so no new row of that shape can be created.
+
+**Scope:** This decision does not change the Admin invitation lifecycle, Bundle purchases, entitlement expiry or revocation, or any authorization rule.
+
+## D-114 — Production sales WhatsApp handoff number and separate browsing context
+
+**Date:** 2026-09-24
+
+**Status:** Approved by the Product Owner on 2026-09-24.
+
+**Decision:** The production sales WhatsApp destination is `+201503260733`, normalized to `201503260733` for `SALES_WHATSAPP_NUMBER`. The prior value was a developer test number and is retired from production use. The number remains environment-configured and is not present in the repository; unrelated placeholder numbers in examples, deploy render checks, and test fixtures are unchanged.
+
+**Decision:** The purchase handoff opens WhatsApp in a separate browsing context and never navigates the Gradex document. The context is opened synchronously inside the click, before the purchase request is awaited, because the user activation that permits it does not survive the await. Its opener is severed before navigation. Where the browser refuses the context, the Student is offered the same server-built URL as an explicit `target="_blank" rel="noopener noreferrer"` link; where the request fails, the blank context is closed. This applies to both the Course and Bundle purchase surfaces.
+
+**Unchanged:** The WhatsApp URL and its prefilled message are still built by the backend in `access.WhatsAppHandoffURL`. The message still carries the localized Course or Bundle title, price, Student email, and GRX reference.

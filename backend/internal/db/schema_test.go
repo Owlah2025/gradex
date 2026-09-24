@@ -23,8 +23,12 @@ func TestSchemaConstants(t *testing.T) {
 	if ActiveProcessingKindSchemaVersion != EnhancementRecoveryFoundationSchemaVersion+1 {
 		t.Fatalf("ActiveProcessingKindSchemaVersion = %d, want 42", ActiveProcessingKindSchemaVersion)
 	}
-	if AutoDeviceReplacementSchemaVersion != 43 || MaxSchemaVersion != AutoDeviceReplacementSchemaVersion {
-		t.Fatalf("MaxSchemaVersion = %d, want 43", MaxSchemaVersion)
+	if AutoDeviceReplacementSchemaVersion != 43 {
+		t.Fatalf("AutoDeviceReplacementSchemaVersion = %d, want 43", AutoDeviceReplacementSchemaVersion)
+	}
+	if DirectPurchaseAccessGrantSchemaVersion != AutoDeviceReplacementSchemaVersion+1 ||
+		MaxSchemaVersion != DirectPurchaseAccessGrantSchemaVersion {
+		t.Fatalf("MaxSchemaVersion = %d, want 44", MaxSchemaVersion)
 	}
 	if EnhancementRecoveryFoundationSchemaVersion != MediaPlayableFoundationSchemaVersion+1 {
 		t.Fatalf("EnhancementRecoveryFoundationSchemaVersion = %d, want MediaPlayableFoundationSchemaVersion + 1 (%d)",

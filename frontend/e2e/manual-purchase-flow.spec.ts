@@ -5,12 +5,12 @@ import {
 	installIssuedSession,
   issueRotatingSession,
   queryEmailVerificationAction,
-  queryInvitationToken,
 } from "./rotating-students";
 import {
   completePurchaseConfirmation,
   registerAndVerifyStudent,
   watchForPrematurePurchase,
+  WHATSAPP_STUB,
 } from "./student-journey";
 
 const ADMIN = {
@@ -130,7 +130,7 @@ async function confirmPurchaseInAdminUI(
         new URL(response.url()).pathname,
       ) && response.request().method() === "POST",
   );
-  await row.getByRole("button", { name: /Confirm payment & send invitation/ }).click();
+  await row.getByRole("button", { name: /Confirm payment & grant access/ }).click();
   // Gradex takes no money, so recording a payment as received is a deliberate confirmed step and
   // the confirmation says exactly that.
   const paymentDialog = page.getByTestId("purchase-request-confirm");
@@ -140,11 +140,18 @@ async function confirmPurchaseInAdminUI(
   const confirmationResponse = await confirmation;
   expect(confirmationResponse.status()).toBe(200);
   const confirmationBody = (await confirmationResponse.json()) as {
-    invitation: { id: string };
+    invitation?: { id: string };
+    course_grant?: { entitlement_id: string; disposition: string };
     purchase_request: { reference: string; state: string };
   };
-  expect(confirmationBody.purchase_request.state).toBe("INVITATION_CREATED");
-  await expect(page.getByText("The payment was recorded and the invitation sent.")).toBeVisible();
+  // Confirmation is the grant. There is no invitation and nothing further for
+  // the Student to do.
+  expect(confirmationBody.purchase_request.state).toBe("ACCESS_GRANTED");
+  expect(confirmationBody.invitation).toBeUndefined();
+  expect(confirmationBody.course_grant?.entitlement_id).toBeTruthy();
+  await expect(
+    page.getByText("The payment was recorded and course access was granted."),
+  ).toBeVisible();
   return confirmationBody;
 }
 
@@ -156,7 +163,9 @@ test.describe("Automated manual Course purchase flow", () => {
     const adminContext = await browser.newContext({ locale: "en-US" });
     try {
       // The external handoff is intercepted so CI sends no WhatsApp message.
-      await studentContext.route("https://wa.me/**", (route) => route.abort());
+      await studentContext.route("https://wa.me/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/html", body: WHATSAPP_STUB }),
+      );
       const studentPage = await studentContext.newPage();
       const adminPage = await adminContext.newPage();
       await installAdminSession(adminContext);
@@ -195,17 +204,12 @@ test.describe("Automated manual Course purchase flow", () => {
         adminPage,
         NEW_STUDENT_EMAIL,
       );
-      const invitationToken = queryInvitationToken(confirmed.invitation.id);
-      expect(invitationToken).toBeTruthy();
+      expect(confirmed.course_grant?.disposition).toBe("GRANTED");
 
-      // The invitation context begins with its bearer in a fragment. The
-      // Student is signed out first, so the journey back in is the real one:
-      // the access route refuses an anonymous reader, carries only
-      // invitation_id in returnTo, and never the bearer.
-      //
-      // Signing in with the password is also the assertion that the password
-      // survived verification — proving the emailed code authenticated the
-      // Student without replacing, consuming, or bypassing their credential.
+      // The access exists the moment the Admin confirmed. The Student is not
+      // asked to accept anything, and signing back in lands straight on a
+      // Course they can open. Signing out first keeps the assertion honest: the
+      // access is server-side state, not something this session is holding.
       await studentPage.goto("/en/learn/dashboard");
       await studentPage
         .getByRole("button", { name: /sign out/i })
@@ -213,34 +217,21 @@ test.describe("Automated manual Course purchase flow", () => {
         .click();
       await studentPage.waitForURL((url) => url.pathname === "/login");
 
-      await studentPage.goto(
-        `/en/access?invitation_id=${confirmed.invitation.id}#token=${encodeURIComponent(invitationToken)}`,
-      );
-      await studentPage.waitForURL((url) => url.pathname === "/login");
-      expect(new URL(studentPage.url()).searchParams.get("returnTo")).toContain(
-        `invitation_id=${confirmed.invitation.id}`,
-      );
-      expect(studentPage.url()).not.toContain("token=");
       await studentPage.locator("#email").fill(NEW_STUDENT_EMAIL);
       await studentPage.locator("#password").fill(NEW_STUDENT_PASSWORD);
       // Not `form button`: the password field carries a reveal control, so the
       // form holds more than one.
       await studentPage.locator('form button[type="submit"]').click();
-      await studentPage.waitForURL(
-        (url) =>
-          /\/(en|ar)\/access$/.test(url.pathname) &&
-          url.searchParams.get("invitation_id") === confirmed.invitation.id,
-      );
-      expect(studentPage.url()).not.toContain("token=");
-      await expect(studentPage.getByTestId("accept-invitation")).toBeVisible();
+      await studentPage.waitForURL((url) => /\/(en|ar)\/learn\/dashboard$/.test(url.pathname));
 
-      await studentPage.getByTestId("accept-invitation").click();
-      await studentPage.waitForURL(
-        (url) =>
-          /\/(en|ar)\/learn\/courses\//.test(url.pathname) &&
-          url.pathname.endsWith(`/courses/${COURSE_ID}`),
-      );
-      expect(studentPage.url()).not.toContain("token=");
+      // The purchased Course is already on the dashboard.
+      await expect(studentPage.locator("main")).toContainText("CS101");
+
+      // Nothing anywhere asks the Student to accept an invitation.
+      await studentPage.goto("/en/access");
+      await expect(studentPage.getByTestId("accept-invitation")).toHaveCount(0);
+
+      await studentPage.goto(`/en/learn/courses/${COURSE_ID}`);
       await expect(studentPage.locator("main")).toContainText("CS101");
       const state = queryLearningState(
         queryEmailVerificationAction(NEW_STUDENT_EMAIL).account_id,
@@ -260,7 +251,7 @@ test.describe("Automated manual Course purchase flow", () => {
       );
       await expect(finished).toContainText("Access granted");
       await expect(
-        finished.getByRole("button", { name: /Confirm payment & send invitation/ }),
+        finished.getByRole("button", { name: /Confirm payment & grant access/ }),
       ).toHaveCount(0);
 
       // Course Home is server-authorized; the protected Lesson is now reachable too.
@@ -280,7 +271,9 @@ test.describe("Automated manual Course purchase flow", () => {
     const studentContext = await browser.newContext({ locale: "en-US" });
     const adminContext = await browser.newContext({ locale: "en-US" });
     try {
-      await studentContext.route("https://wa.me/**", (route) => route.abort());
+      await studentContext.route("https://wa.me/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/html", body: WHATSAPP_STUB }),
+      );
       const studentPage = await studentContext.newPage();
       const adminPage = await adminContext.newPage();
       await installAdminSession(adminContext);
@@ -298,15 +291,10 @@ test.describe("Automated manual Course purchase flow", () => {
         adminPage,
         EXISTING_STUDENT.email,
       );
-      await studentPage.goto(
-        `/en/access?invitation_id=${confirmed.invitation.id}#token=${encodeURIComponent(queryInvitationToken(confirmed.invitation.id))}`,
-      );
-      await studentPage.getByTestId("accept-invitation").click();
-      await studentPage.waitForURL(
-        (url) =>
-          /\/(en|ar)\/learn\/courses\//.test(url.pathname) &&
-          url.pathname.endsWith(`/courses/${COURSE_ID}`),
-      );
+      expect(confirmed.invitation).toBeUndefined();
+      // No acceptance, no second step: the Course opens straight away.
+      await studentPage.goto(`/en/learn/courses/${COURSE_ID}`);
+      await expect(studentPage.locator("main")).toContainText("CS101");
       const state = queryLearningState(EXISTING_STUDENT.accountID, COURSE_ID);
       expect(state.entitlement.count).toBe(1);
       expect(state.enrollment.count).toBe(1);
@@ -321,13 +309,15 @@ test.describe("Automated manual Course purchase flow", () => {
     }
   });
 
-  test("Admin cancellation releases a paid invitation request for a fresh purchase intent", async ({
+  test("Admin cancellation releases an unconfirmed request for a fresh purchase intent", async ({
     browser,
   }) => {
     const studentContext = await browser.newContext({ locale: "en-US" });
     const adminContext = await browser.newContext({ locale: "en-US" });
     try {
-      await studentContext.route("https://wa.me/**", (route) => route.abort());
+      await studentContext.route("https://wa.me/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/html", body: WHATSAPP_STUB }),
+      );
       const studentPage = await studentContext.newPage();
       const adminPage = await adminContext.newPage();
       await installAdminSession(adminContext);
@@ -343,10 +333,15 @@ test.describe("Automated manual Course purchase flow", () => {
       const first = await purchaseFromConfirmation(studentPage, {
         email: CANCELLED_PURCHASE_EMAIL,
       });
-      await confirmPurchaseInAdminUI(adminPage, CANCELLED_PURCHASE_EMAIL);
+      // Cancellation withdraws a request that was never paid for. It is not a
+      // way to take back access: confirmation now grants outright, and a
+      // granted request is terminal and refuses cancellation.
+      await adminPage.locator("#purchase-request-search").fill(CANCELLED_PURCHASE_EMAIL);
+      await adminPage.getByRole("button", { name: "Search" }).click();
       const original = adminPage.getByTestId(
         `purchase-request-${first.response.reference}`,
       );
+      await expect(original).toContainText("Waiting for payment");
       const cancellation = adminPage.waitForResponse(
         (response) =>
           /\/api\/v1\/admin\/purchase-requests\/[^/]+\/cancel$/.test(

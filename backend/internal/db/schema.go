@@ -65,7 +65,11 @@ const (
 	EnhancementRecoveryFoundationSchemaVersion = MediaPlayableFoundationSchemaVersion + 1
 	ActiveProcessingKindSchemaVersion          = EnhancementRecoveryFoundationSchemaVersion + 1
 	AutoDeviceReplacementSchemaVersion         = ActiveProcessingKindSchemaVersion + 1
-	MaxSchemaVersion                           = AutoDeviceReplacementSchemaVersion
+	// Widens Entitlement provenance and the COURSE purchase-request lifecycle so
+	// Admin payment confirmation can grant access directly, with no invitation.
+	// Expand-only: every schema-43 row shape remains valid.
+	DirectPurchaseAccessGrantSchemaVersion = AutoDeviceReplacementSchemaVersion + 1
+	MaxSchemaVersion                       = DirectPurchaseAccessGrantSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate

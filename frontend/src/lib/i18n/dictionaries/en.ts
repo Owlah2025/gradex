@@ -551,17 +551,18 @@ export const en = {
       },
       statusDetail: {
         WAITING_PAYMENT: "You confirm the payment once it has arrived outside Gradex.",
-        INVITATION_CREATED: "The student has been invited and has not accepted yet.",
+        INVITATION_CREATED:
+          "An older request that was invited before access became immediate. The student has not accepted yet.",
         ACCESS_GRANTED: "Nothing further is needed.",
         CANCELLED: "This request was withdrawn.",
       },
-      confirm: "Confirm payment & send invitation",
+      confirm: "Confirm payment & grant access",
       confirming: "Confirming…",
       confirmTitle: "Record this payment as received?",
       confirmBody:
-        "An invitation email goes to the student immediately. Gradex does not take or verify money — confirm only if the payment has actually arrived.",
+        "Course access is granted to the student immediately and they are emailed that it is ready. Gradex does not take or verify money — confirm only if the payment has actually arrived.",
       confirmAccept: "Yes, it arrived",
-      confirmed: "The payment was recorded and the invitation sent.",
+      confirmed: "The payment was recorded and course access was granted.",
       bundleConfirm: "Confirm payment & grant Bundle access",
       bundleConfirmBody: "Access to every Course in the saved Bundle snapshot is granted together immediately. Gradex does not take or verify money — confirm only if the payment has actually arrived.",
       bundleConfirmed: "The payment was recorded and all Bundle Course access was granted.",
@@ -1366,6 +1367,7 @@ export const en = {
     stackLabel: "Courses in this Bundle",
     moreCourses: "+{count} more",
     loadFailed: "This Bundle could not be loaded.",
+    handoffFallback: "Open WhatsApp to finish your request",
   },
   learning: {
     dashboardTitle: "Your learning",
@@ -1703,6 +1705,9 @@ export const en = {
       cancel: "Cancel",
       failed:
         "Your request could not be saved. WhatsApp was not opened; try again.",
+      handoffBlocked:
+        "Your request was created. Your browser blocked the WhatsApp window, so open it with the link below.",
+      handoffFallback: "Open WhatsApp to finish your request",
       alreadyActive: "You already have access to this course.",
       notPurchasable: "This course is not available for purchase right now.",
       reusedTitle: "You already have a request for this course",

@@ -15,18 +15,86 @@ function readSource(relative: string): string {
 
 const panel = () => readSource("components/catalog/purchase-action.tsx");
 
+const bundle = () => readSource("components/catalog/bundle-detail.tsx");
+const handoff = () => readSource("lib/browser/external-handoff.ts");
+
 test("WhatsApp is reached from the confirmation and from nowhere else", () => {
   const source = panel();
   // The old form navigated to WhatsApp on the first press of a button labelled
   // "I want to buy", before anything had been confirmed and before any request
-  // existed. There is exactly one navigation now, and it is downstream of the
-  // confirm handler.
-  const navigations = source.match(/window\.location\.assign\(/g) ?? [];
-  assert.equal(navigations.length, 1, "WhatsApp is navigated to from more than one place");
+  // existed. The handoff is still downstream of the confirm handler.
   const confirmBody = source.slice(source.indexOf("async function confirm()"));
-  assert.match(confirmBody, /createStudentPurchaseRequest\(courseId, locale\)[\s\S]*window\.location\.assign\(result\.whatsapp_url\)/);
+  assert.match(
+    confirmBody,
+    /createStudentPurchaseRequest\(courseId, locale\)[\s\S]*handoff\.complete\(result\.whatsapp_url\)/,
+  );
   // The URL is the server's, never assembled here.
   assert.ok(!source.includes("wa.me"), "the panel builds a WhatsApp URL itself");
+});
+
+test("neither purchase surface navigates the Gradex page away", () => {
+  // This is the whole point of the change: pressing "buy" used to replace the
+  // page the Student was reading. Nothing may navigate the current document.
+  for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()]] as const) {
+    assert.ok(
+      !/window\.location\.assign\(/.test(source),
+      `${name} still navigates the Gradex document away`,
+    );
+    assert.ok(!/window\.location\.href\s*=/.test(source), `${name} assigns location.href`);
+    assert.ok(!/location\.replace\(/.test(source), `${name} replaces the Gradex document`);
+  }
+});
+
+test("both purchase surfaces open the handoff context inside the click", () => {
+  // Opening it after the await spends the user activation the popup needs, so
+  // the open must appear before the request in both handlers.
+  for (const [name, source, call] of [
+    ["course panel", panel(), "createStudentPurchaseRequest("],
+    ["bundle detail", bundle(), "createStudentBundlePurchaseRequest("],
+  ] as const) {
+    assert.match(source, /import \{ openHandoffContext \} from "@\/lib\/browser\/external-handoff"/);
+    const openedAt = source.indexOf("openHandoffContext()");
+    const requestedAt = source.indexOf(call);
+    assert.ok(openedAt > 0, `${name} never opens a handoff context`);
+    assert.ok(
+      openedAt < requestedAt,
+      `${name} opens the handoff context after the request, losing user activation`,
+    );
+  }
+});
+
+test("the handoff opens a separate context and severs its opener", () => {
+  const source = handoff();
+  assert.match(source, /window\.open\(""\s*,\s*"_blank"\)/);
+  // `noopener` in the features string makes Chrome return null, so the opener
+  // is severed on the handle instead. Both reach the same end state.
+  assert.ok(!/window\.open\([^)]*noopener/.test(source), "the handle would be discarded by noopener");
+  assert.match(source, /\.opener = null/);
+  const complete = source.slice(source.indexOf("complete(url: string)"));
+  assert.ok(
+    complete.indexOf(".opener = null") < complete.indexOf("location.replace(url)"),
+    "the opener is severed after navigation, leaving the external page a window reference",
+  );
+});
+
+test("a failed request leaves no orphan blank context", () => {
+  for (const [name, source] of [["course panel", panel()], ["bundle detail", bundle()]] as const) {
+    const catchBody = source.slice(source.indexOf("} catch"));
+    assert.ok(catchBody.includes("handoff.abandon()"), `${name} leaves a blank tab open on failure`);
+  }
+  assert.match(handoff(), /abandon\(\)[\s\S]*\.close\(\)/);
+});
+
+test("a blocked popup falls back to a safe explicit link", () => {
+  for (const [name, source, testID] of [
+    ["course panel", panel(), "purchase-handoff-fallback"],
+    ["bundle detail", bundle(), "bundle-handoff-fallback"],
+  ] as const) {
+    assert.ok(source.includes(`data-testid="${testID}"`), `${name} has no fallback link`);
+    const anchor = source.slice(source.indexOf(`data-testid="${testID}"`) - 400, source.indexOf(`data-testid="${testID}"`) + 80);
+    assert.match(anchor, /target="_blank"/, `${name} fallback does not open a new context`);
+    assert.match(anchor, /rel="noopener noreferrer"/, `${name} fallback is not a safe external link`);
+  }
 });
 
 test("an anonymous visitor is sent into the auth journey, not into a request", () => {
@@ -112,6 +180,8 @@ test("both dictionaries carry every purchase message the panel can render", () =
     "failed",
     "alreadyActive",
     "notPurchasable",
+    "handoffBlocked",
+    "handoffFallback",
   ] as const) {
     assert.equal(typeof en.access.purchase[key], "string", `English access.purchase.${key}`);
     assert.equal(typeof ar.access.purchase[key], "string", `Arabic access.purchase.${key}`);

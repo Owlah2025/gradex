@@ -12,6 +12,7 @@ import { formatFils } from "@/lib/formatters/currency";
 import type { PublicPrice } from "@/lib/api/public-catalog";
 import { PriceDisplay } from "./price-display";
 import { withReturnTo } from "@/lib/identity/return-to";
+import { openHandoffContext } from "@/lib/browser/external-handoff";
 
 type Labels = Dictionary["access"]["purchase"];
 
@@ -68,6 +69,10 @@ export function PurchaseAction({
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
+  // Set only when the browser refused the handoff context. The request has
+  // already succeeded at that point, so the Student is given the destination
+  // to press rather than being told the purchase failed.
+  const [fallbackURL, setFallbackURL] = React.useState<string | null>(null);
   // `submitting` is state and does not close the window between two submits
   // dispatched in the same render pass. This does, and it matters: the second
   // one would reach a route that creates operational work.
@@ -95,14 +100,23 @@ export function PurchaseAction({
     setSubmitting(true);
     setError(null);
     setNotice(null);
+    setFallbackURL(null);
+    // Opened here, synchronously, while the click's user activation is still
+    // live — after the await below it would be gone and the popup refused.
+    // Gradex itself is never navigated: this page stays exactly where it is.
+    const handoff = openHandoffContext();
     try {
       const result = await createStudentPurchaseRequest(courseId, locale);
-      // Direct assignment rather than a popup: it preserves the click intent
-      // across the await and is not subject to popup blocking. This is the only
-      // place in the product that navigates to WhatsApp, and it is reached only
-      // from the confirmation press above.
-      window.location.assign(result.whatsapp_url);
+      // The URL is the server's. This only decides where it is opened.
+      if (!handoff.complete(result.whatsapp_url)) {
+        setFallbackURL(result.whatsapp_url);
+        setNotice(labels.handoffBlocked);
+      }
+      setSubmitting(false);
+      inFlight.current = false;
     } catch (caught) {
+      // No destination was ever produced, so the blank context is orphaned.
+      handoff.abandon();
       setError(purchaseMessage(caught, labels));
       setSubmitting(false);
       inFlight.current = false;
@@ -202,6 +216,23 @@ export function PurchaseAction({
       </dl>
 
       <p className="mt-4 text-sm leading-6 text-muted-foreground">{labels.intro}</p>
+
+      {/* Only rendered where the browser refused to open the handoff context.
+          The request already exists, so this is the same destination the
+          context would have been pointed at, offered as an explicit press. */}
+      {fallbackURL ? (
+        <p className="mt-4 text-sm leading-6">
+          <a
+            href={fallbackURL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-primary underline underline-offset-4"
+            data-testid="purchase-handoff-fallback"
+          >
+            {labels.handoffFallback}
+          </a>
+        </p>
+      ) : null}
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Button

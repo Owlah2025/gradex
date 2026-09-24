@@ -183,8 +183,15 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	if request.Template == TemplateCourseInvitation && purchaseBackedInvitation(request.Event) {
+	if request.Template == TemplateCourseInvitation && purchaseBackedEvent(request.Event) {
 		copy = purchaseInvitationCopy(request.Locale)
+	}
+	// The default access-granted wording credits an Admin with approving an
+	// invitation. For a purchase that was granted straight off the payment
+	// confirmation there was no invitation and no approval, so the Student is
+	// told the thing that actually happened instead.
+	if request.Template == TemplateAccessGranted && purchaseBackedEvent(request.Event) {
+		copy = purchaseGrantCopy(request.Locale)
 	}
 	actionURL, needsExpiry, err := r.actionURL(request)
 	if err != nil {
@@ -211,13 +218,39 @@ func (r *Renderer) Render(request RenderRequest) (Message, error) {
 	return Message{From: r.from, Recipient: request.Payload.Destination, ReplyTo: r.replyTo, Subject: copy.Subject, Text: renderText(request.Locale, copy, actionURL, expiry, code), HTML: htmlBody}, nil
 }
 
-func purchaseBackedInvitation(event outbox.Event) bool {
+// purchaseBackedEvent reports the discriminator both purchase-backed templates
+// branch on: the invitation that was issued for a paid request, and the grant
+// that now replaces it.
+func purchaseBackedEvent(event outbox.Event) bool {
 	payload, ok := event.SafePayload.(map[string]any)
 	if !ok {
 		return false
 	}
 	purchaseBacked, _ := payload["purchase_backed"].(bool)
 	return purchaseBacked
+}
+
+// purchaseGrantCopy is what a Student reads when an Admin confirmed their
+// external payment and access was granted in the same operation. It states the
+// two facts that matter — the payment is confirmed, the Course is open — and
+// asks for nothing further, because nothing further is required.
+func purchaseGrantCopy(locale string) localizedTemplate {
+	if locale == "ar" {
+		return localizedTemplate{
+			Subject: "تم تأكيد الدفع وتفعيل وصولك إلى الكورس",
+			Title:   "تم تأكيد الدفع",
+			Body:    "تم تأكيد دفعتك ومُنحك الوصول إلى الكورس. يمكنك البدء الآن من لوحة التعلم، ولا يلزمك أي إجراء آخر.",
+			Action:  "ابدأ الكورس",
+			Footer:  "يظل الوصول خاضعًا لتاريخ الانتهاء المسجل وحالة حسابك.",
+		}
+	}
+	return localizedTemplate{
+		Subject: "Your payment is confirmed and your Course access is active",
+		Title:   "Payment confirmed",
+		Body:    "Your payment has been confirmed and you now have access to the Course. You can start straight away from your learning dashboard — nothing else is needed from you.",
+		Action:  "Start the Course",
+		Footer:  "Your access remains subject to its recorded expiry and account status.",
+	}
 }
 
 func purchaseInvitationCopy(locale string) localizedTemplate {

@@ -156,6 +156,13 @@ export type PurchaseHandoff = {
  * is captured in a route proxy before the browser is fulfilled — Playwright
  * cannot read a response body after that navigation has started.
  */
+/**
+ * Served in place of the real WhatsApp page. The route is intercepted inside
+ * the browser, so CI sends no message; fulfilling rather than aborting lets the
+ * opened context settle on the handoff URL so a test can read it.
+ */
+export const WHATSAPP_STUB = "<!doctype html><title>WhatsApp handoff stub</title>";
+
 export async function completePurchaseConfirmation(page: Page): Promise<PurchaseHandoff> {
   let persistedPayload: PurchaseHandoff["response"] | undefined;
   await page.route("**/api/v1/me/purchase-requests", async (route) => {
@@ -173,15 +180,34 @@ export async function completePurchaseConfirmation(page: Page): Promise<Purchase
       new URL(response.url()).pathname === "/api/v1/me/purchase-requests" &&
       response.request().method() === "POST",
   );
-  const handoff = page.waitForRequest(
-    (request) => request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
+  // WhatsApp now opens in its own browsing context, so the handoff arrives as a
+  // new page rather than as a navigation of this one. Both facts are awaited
+  // together: a page must appear, and the wa.me navigation must belong to it
+  // rather than to the Course page.
+  //
+  // The URL is read off the navigation request instead of the opened page.
+  // wa.me answers a real browser with a redirect to api.whatsapp.com, so the
+  // page's settled URL is not reliably the handoff URL, while the request that
+  // started it always is.
+  const gradexURL = page.url();
+  const opened = page.context().waitForEvent("page");
+  const handoffRequest = page.context().waitForEvent("request", (request) =>
+    request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
   );
-  await page.getByTestId("purchase-request-submit").click({ noWaitAfter: true });
+  await page.getByTestId("purchase-request-submit").click();
   const persistedResponse = await persisted;
   expect(persistedResponse.status()).toBe(201);
-  const handoffRequest = await handoff;
+  const handoffPage = await opened;
+  const handoffURL = (await handoffRequest).url();
+
+  // The Student did not lose the page they were reading.
+  expect(handoffPage).not.toBe(page);
+  expect(page.isClosed()).toBe(false);
+  expect(page.url()).toBe(gradexURL);
+
+  await handoffPage.close();
   expect(persistedPayload).toBeDefined();
-  return { response: persistedPayload!, handoffURL: handoffRequest.url() };
+  return { response: persistedPayload!, handoffURL };
 }
 
 /**
@@ -197,7 +223,9 @@ export function watchForPrematurePurchase(page: Page): { assertQuiet(): void } {
   const violations: string[] = [];
   page.on("request", (request) => {
     const url = request.url();
-    if (url.startsWith("https://wa.me/")) {
+    // Scoped to this page. A wa.me request belonging to the handoff context is
+    // the intended outcome; one on the Course page is the defect this watches.
+    if (url.startsWith("https://wa.me/") && request.frame()?.page() === page) {
       violations.push("navigated to WhatsApp");
     }
     if (

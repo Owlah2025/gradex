@@ -474,16 +474,18 @@ func TestMain(m *testing.M) {
 // detail, and it is never handed to a browser context.
 type learningStateSnapshot struct {
 	Entitlement struct {
-		Found                bool    `json:"found"`
-		Count                int     `json:"count"`
-		ID                   string  `json:"id"`
-		State                string  `json:"state"`
-		GrantSource          string  `json:"grant_source"`
-		SourceInvitationID   *string `json:"source_invitation_id"`
-		AccessEndsAt         string  `json:"access_ends_at"`
-		OriginalAccessEndsAt string  `json:"original_access_ends_at"`
-		RevokedAt            *string `json:"revoked_at"`
-		Revision             int64   `json:"revision"`
+		Found              bool    `json:"found"`
+		Count              int     `json:"count"`
+		ID                 string  `json:"id"`
+		State              string  `json:"state"`
+		GrantSource        string  `json:"grant_source"`
+		SourceInvitationID *string `json:"source_invitation_id"`
+		// A directly granted purchase carries this instead of an invitation.
+		SourcePurchaseRequestID *string `json:"source_purchase_request_id"`
+		AccessEndsAt            string  `json:"access_ends_at"`
+		OriginalAccessEndsAt    string  `json:"original_access_ends_at"`
+		RevokedAt               *string `json:"revoked_at"`
+		Revision                int64   `json:"revision"`
 	} `json:"entitlement"`
 	Enrollment struct {
 		Found     bool   `json:"found"`
@@ -527,6 +529,7 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 	var revokedAt *time.Time
 	err := pool.QueryRow(ctx, `
 		SELECT id::text, state, grant_source, source_invitation_id::text,
+		       source_purchase_request_id::text,
 		       access_ends_at, original_access_ends_at, revoked_at, revision
 		FROM entitlements
 		WHERE student_account_id = $1 AND course_id = $2
@@ -535,6 +538,7 @@ func readLearningStateSnapshot(ctx context.Context, pool *pgxpool.Pool, studentI
 		&snapshot.Entitlement.State,
 		&snapshot.Entitlement.GrantSource,
 		&snapshot.Entitlement.SourceInvitationID,
+		&snapshot.Entitlement.SourcePurchaseRequestID,
 		&accessEndsAt,
 		&originalAccessEndsAt,
 		&revokedAt,

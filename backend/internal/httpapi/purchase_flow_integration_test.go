@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Owlah2025/gradex/backend/internal/access"
@@ -221,83 +223,168 @@ func TestManualPurchaseFlowHTTPAPI_RealPostgreSQL(t *testing.T) {
 		PurchaseRequest struct {
 			State string `json:"state"`
 		} `json:"purchase_request"`
-		Invitation struct {
-			ID string `json:"id"`
-		} `json:"invitation"`
+		Invitation  *struct{} `json:"invitation"`
+		CourseGrant *struct {
+			EntitlementID string `json:"entitlement_id"`
+			CourseID      string `json:"course_id"`
+			Disposition   string `json:"disposition"`
+		} `json:"course_grant"`
 	}
 	if err := json.NewDecoder(confirmed.Body).Decode(&confirmation); err != nil {
 		confirmed.Body.Close()
 		t.Fatalf("decoding confirmation: %v", err)
 	}
 	confirmed.Body.Close()
-	if confirmation.PurchaseRequest.State != "INVITATION_CREATED" || confirmation.Invitation.ID == "" {
-		t.Fatalf("confirmation response = %+v, want linked invitation", confirmation)
+	// Admin confirmation is the grant. The request is terminal immediately and
+	// the response carries the Entitlement, not an invitation to be accepted.
+	if confirmation.PurchaseRequest.State != "ACCESS_GRANTED" {
+		t.Fatalf("confirmation state = %q, want ACCESS_GRANTED", confirmation.PurchaseRequest.State)
 	}
+	if confirmation.Invitation != nil {
+		t.Fatalf("confirmation returned an invitation; Admin confirmation must grant access directly")
+	}
+	if confirmation.CourseGrant == nil || confirmation.CourseGrant.EntitlementID == "" ||
+		confirmation.CourseGrant.CourseID != courseID || confirmation.CourseGrant.Disposition != "GRANTED" {
+		t.Fatalf("confirmation grant = %+v, want a GRANTED Entitlement for the Course", confirmation.CourseGrant)
+	}
+	entitlementID := confirmation.CourseGrant.EntitlementID
 
-	// Repeating the semantic command is idempotent: one invitation and one
-	// invitation-email event remain committed.
-	repeatedConfirmation := purchaseFlowRequest(t, client, confirmURL, adminToken, origin, nil)
-	if repeatedConfirmation.StatusCode != http.StatusOK {
-		repeatedConfirmation.Body.Close()
-		t.Fatalf("repeat confirmation status = %d, want 200", repeatedConfirmation.StatusCode)
-	}
-	repeatedConfirmation.Body.Close()
-	var invitationCount, invitationOutboxCount int
+	// The access exists the moment the Admin confirms: an ACTIVE Entitlement
+	// whose provenance is the purchase request and not an invitation, an
+	// Enrollment, and no invitation row anywhere for this Course and Student.
+	var activeGrants, enrollments, invitations int
+	var grantSource string
+	var sourceInvitation *string
+	var sourcePurchase string
 	if err := pool.QueryRow(ctx, `
 		SELECT
-		  (SELECT count(*) FROM course_access_invitations WHERE id = $1::uuid),
-		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.invitation_issued' AND aggregate_id = $1::uuid)
-	`, confirmation.Invitation.ID).Scan(&invitationCount, &invitationOutboxCount); err != nil {
-		t.Fatalf("counting confirmed invitation: %v", err)
+		  (SELECT count(*) FROM entitlements WHERE id = $1::uuid AND state = 'ACTIVE' AND scope_kind = 'COURSE'),
+		  (SELECT count(*) FROM enrollments WHERE course_id = $2::uuid),
+		  (SELECT count(*) FROM course_access_invitations WHERE course_id = $2::uuid),
+		  (SELECT grant_source FROM entitlements WHERE id = $1::uuid),
+		  (SELECT source_invitation_id::text FROM entitlements WHERE id = $1::uuid),
+		  (SELECT source_purchase_request_id::text FROM entitlements WHERE id = $1::uuid)
+	`, entitlementID, courseID).Scan(&activeGrants, &enrollments, &invitations, &grantSource, &sourceInvitation, &sourcePurchase); err != nil {
+		t.Fatalf("reading granted purchase state: %v", err)
 	}
-	if invitationCount != 1 || invitationOutboxCount != 1 {
-		t.Fatalf("confirmation retry made invitations=%d email-events=%d, want 1/1", invitationCount, invitationOutboxCount)
+	if activeGrants != 1 || enrollments != 1 {
+		t.Fatalf("after confirmation entitlements=%d enrollments=%d, want 1/1", activeGrants, enrollments)
 	}
-
-	acceptanceToken := purchaseInvitationToken(t, ctx, pool, confirmation.Invitation.ID)
-	acceptURL := ts.URL + "/api/v1/me/course-access-invitations/" + confirmation.Invitation.ID + "/accept"
-	acceptBody := []byte(`{"acceptance_token":"` + acceptanceToken + `"}`)
-	otherStudentToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x54}, 32))
-	wrongIdentity := purchaseFlowRequest(t, client, acceptURL, otherStudentToken, origin, acceptBody)
-	if wrongIdentity.StatusCode != http.StatusNotFound {
-		wrongIdentity.Body.Close()
-		t.Fatalf("wrong identity acceptance status = %d, want indistinguishable 404", wrongIdentity.StatusCode)
+	if invitations != 0 {
+		t.Fatalf("confirmation created %d invitations, want none", invitations)
 	}
-	wrongIdentity.Body.Close()
-	var noEntitlement int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE source_invitation_id = $1::uuid`, confirmation.Invitation.ID).Scan(&noEntitlement); err != nil || noEntitlement != 0 {
-		t.Fatalf("wrong identity changed entitlement count=%d err=%v, want zero", noEntitlement, err)
+	if grantSource != "PURCHASE_REQUEST" || sourceInvitation != nil || sourcePurchase != requestID {
+		t.Fatalf("entitlement provenance = %s invitation=%v purchase=%s, want PURCHASE_REQUEST/nil/%s",
+			grantSource, sourceInvitation, sourcePurchase, requestID)
 	}
 
-	accepted := purchaseFlowRequest(t, client, acceptURL, studentToken, origin, acceptBody)
-	if accepted.StatusCode != http.StatusOK {
-		accepted.Body.Close()
-		t.Fatalf("purchase invitation acceptance status = %d, want 200", accepted.StatusCode)
-	}
-	var acceptedBody struct {
-		State    string `json:"state"`
-		CourseID string `json:"course_id"`
-	}
-	if err := json.NewDecoder(accepted.Body).Decode(&acceptedBody); err != nil {
-		accepted.Body.Close()
-		t.Fatalf("decoding acceptance: %v", err)
-	}
-	accepted.Body.Close()
-	if acceptedBody.State != "APPROVED" || acceptedBody.CourseID != courseID {
-		t.Fatalf("purchase acceptance = %+v, want approved invitation for Course", acceptedBody)
-	}
-	var requestState, invitationState string
-	var grantCount int
+	// The Student is told access is ready, not that an invitation is waiting.
+	var grantedEvents, invitationEvents int
+	var purchaseBacked bool
 	if err := pool.QueryRow(ctx, `
 		SELECT
-		  (SELECT state::text FROM purchase_requests WHERE id = $1::uuid),
-		  (SELECT state::text FROM course_access_invitations WHERE id = $2::uuid),
-		  (SELECT count(*) FROM entitlements WHERE source_invitation_id = $2::uuid AND grant_source = 'PURCHASE_REQUEST' AND state = 'ACTIVE')
-	`, requestID, confirmation.Invitation.ID).Scan(&requestState, &invitationState, &grantCount); err != nil {
-		t.Fatalf("reading completed purchase state: %v", err)
+		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.granted' AND aggregate_id = $1::uuid),
+		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.invitation_issued'),
+		  (SELECT COALESCE((safe_payload ->> 'purchase_backed')::boolean, false)
+		     FROM outbox_events WHERE event_type = 'access.granted' AND aggregate_id = $1::uuid)
+	`, entitlementID).Scan(&grantedEvents, &invitationEvents, &purchaseBacked); err != nil {
+		t.Fatalf("reading grant notification: %v", err)
 	}
-	if requestState != "ACCESS_GRANTED" || invitationState != "APPROVED" || grantCount != 1 {
-		t.Fatalf("completed purchase state = request %s invitation %s grants %d, want ACCESS_GRANTED/APPROVED/1", requestState, invitationState, grantCount)
+	if grantedEvents != 1 || invitationEvents != 0 || !purchaseBacked {
+		t.Fatalf("notification granted=%d invitation=%d purchase_backed=%v, want 1/0/true",
+			grantedEvents, invitationEvents, purchaseBacked)
+	}
+
+	// Both halves of what happened are on the record, and neither invitation
+	// event is, because neither happened.
+	var confirmAudits, grantAudits, invitationAudits int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM audit_events WHERE action = 'PURCHASE_REQUEST_PAYMENT_CONFIRMED' AND target_id = $1),
+		  (SELECT count(*) FROM audit_events WHERE action = 'ENTITLEMENT_GRANTED' AND target_id = $2),
+		  (SELECT count(*) FROM audit_events WHERE action IN ('COURSE_ACCESS_INVITATION_ISSUED', 'PURCHASE_BACKED_INVITATION_ACCEPTED'))
+	`, requestID, entitlementID).Scan(&confirmAudits, &grantAudits, &invitationAudits); err != nil {
+		t.Fatalf("reading grant audit: %v", err)
+	}
+	if confirmAudits != 1 || grantAudits != 1 || invitationAudits != 0 {
+		t.Fatalf("audit confirmed=%d granted=%d invitation=%d, want 1/1/0", confirmAudits, grantAudits, invitationAudits)
+	}
+
+	// Repeating the command answers with the same access rather than granting
+	// again or refusing. This is the accidental double-click.
+	repeated := purchaseFlowRequest(t, client, confirmURL, adminToken, origin, nil)
+	if repeated.StatusCode != http.StatusOK {
+		repeated.Body.Close()
+		t.Fatalf("repeat confirmation status = %d, want 200", repeated.StatusCode)
+	}
+	var repeatedBody struct {
+		PurchaseRequest struct {
+			State string `json:"state"`
+		} `json:"purchase_request"`
+		CourseGrant *struct {
+			EntitlementID string `json:"entitlement_id"`
+		} `json:"course_grant"`
+	}
+	if err := json.NewDecoder(repeated.Body).Decode(&repeatedBody); err != nil {
+		repeated.Body.Close()
+		t.Fatalf("decoding repeat confirmation: %v", err)
+	}
+	repeated.Body.Close()
+	if repeatedBody.PurchaseRequest.State != "ACCESS_GRANTED" ||
+		repeatedBody.CourseGrant == nil || repeatedBody.CourseGrant.EntitlementID != entitlementID {
+		t.Fatalf("repeat confirmation = %+v, want the same Entitlement %s", repeatedBody, entitlementID)
+	}
+	var afterRetryEntitlements, afterRetryEnrollments, afterRetryEvents, afterRetryAudits int
+	if err := pool.QueryRow(ctx, `
+		SELECT
+		  (SELECT count(*) FROM entitlements WHERE source_purchase_request_id = $1::uuid),
+		  (SELECT count(*) FROM enrollments WHERE course_id = $2::uuid),
+		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.granted'),
+		  (SELECT count(*) FROM audit_events WHERE action = 'ENTITLEMENT_GRANTED')
+	`, requestID, courseID).Scan(&afterRetryEntitlements, &afterRetryEnrollments, &afterRetryEvents, &afterRetryAudits); err != nil {
+		t.Fatalf("counting after retry: %v", err)
+	}
+	if afterRetryEntitlements != 1 || afterRetryEnrollments != 1 || afterRetryEvents != 1 || afterRetryAudits != 1 {
+		t.Fatalf("retry duplicated state entitlements=%d enrollments=%d events=%d audits=%d, want 1/1/1/1",
+			afterRetryEntitlements, afterRetryEnrollments, afterRetryEvents, afterRetryAudits)
+	}
+
+	// The Student needs no second action: their own access projection already
+	// reports the Course as active, with no invitation to accept.
+	history := purchaseFlowGet(t, client, ts.URL+"/api/v1/me/course-access", studentToken)
+	if history.StatusCode != http.StatusOK {
+		history.Body.Close()
+		t.Fatalf("access history status = %d, want 200", history.StatusCode)
+	}
+	var historyBody struct {
+		Items []struct {
+			CourseID        string `json:"course_id"`
+			HasActiveAccess bool   `json:"has_active_access"`
+			Invitation      *struct {
+				State string `json:"state"`
+			} `json:"invitation"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(history.Body).Decode(&historyBody); err != nil {
+		history.Body.Close()
+		t.Fatalf("decoding access history: %v", err)
+	}
+	history.Body.Close()
+	var found bool
+	for _, item := range historyBody.Items {
+		if item.CourseID != courseID {
+			continue
+		}
+		found = true
+		if !item.HasActiveAccess {
+			t.Fatalf("Student access history reports no active access immediately after confirmation")
+		}
+		if item.Invitation != nil {
+			t.Fatalf("Student access history carries invitation %+v; nothing should be awaiting acceptance", item.Invitation)
+		}
+	}
+	if !found {
+		t.Fatalf("Student access history does not include the purchased Course %s", courseID)
 	}
 
 	// Public eligibility remains server-enforced after any UI state is stale.
@@ -335,16 +422,19 @@ func TestPurchaseInvitationCancellationTerminatesRequestAndAllowsFreshIntent_Rea
 	if err != nil {
 		t.Fatalf("access repository: %v", err)
 	}
+	// A purchase request that reached INVITATION_CREATED before Admin
+	// confirmation began granting access directly. Confirmation no longer
+	// produces this shape, so it is written the way schema 43 wrote it; the
+	// point of the test is that the Admin lifecycle still governs rows already
+	// standing in the table when the behaviour changed.
 	request, err := repo.CreatePurchaseRequest(ctx, access.CreatePurchaseRequestParams{CourseID: courseID, Email: "student-access@example.com", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("creating request: %v", err)
 	}
-	confirmed, err := repo.ConfirmPurchaseRequest(ctx, access.ConfirmPurchaseRequestParams{PurchaseRequestID: request.ID, AdminAccountID: adminID, Locale: "en", Now: time.Now().UTC()})
-	if err != nil {
-		t.Fatalf("confirming payment: %v", err)
-	}
+	historicalInvitationID, historicalToken := seedHistoricalPurchaseInvitation(t, ctx, pool, request.ID, courseID, adminID)
+
 	client := ts.Client()
-	cancelURL := ts.URL + "/api/v1/admin/course-access-invitations/" + confirmed.Invitation.ID + "/cancel"
+	cancelURL := ts.URL + "/api/v1/admin/course-access-invitations/" + historicalInvitationID + "/cancel"
 	cancelled := purchaseFlowRequest(t, client, cancelURL, adminToken, "https://gradex.example", nil)
 	if cancelled.StatusCode != http.StatusOK {
 		cancelled.Body.Close()
@@ -353,14 +443,13 @@ func TestPurchaseInvitationCancellationTerminatesRequestAndAllowsFreshIntent_Rea
 	cancelled.Body.Close()
 	var requestState, invitationState string
 	var grants int
-	if err := pool.QueryRow(ctx, `SELECT (SELECT state FROM purchase_requests WHERE id=$1::uuid), (SELECT state FROM course_access_invitations WHERE id=$2::uuid), (SELECT count(*) FROM entitlements WHERE source_invitation_id=$2::uuid)`, request.ID, confirmed.Invitation.ID).Scan(&requestState, &invitationState, &grants); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT (SELECT state FROM purchase_requests WHERE id=$1::uuid), (SELECT state FROM course_access_invitations WHERE id=$2::uuid), (SELECT count(*) FROM entitlements WHERE source_invitation_id=$2::uuid)`, request.ID, historicalInvitationID).Scan(&requestState, &invitationState, &grants); err != nil {
 		t.Fatalf("reading cancelled state: %v", err)
 	}
 	if requestState != "CANCELLED" || invitationState != "CANCELLED" || grants != 0 {
 		t.Fatalf("cancelled states request=%s invitation=%s grants=%d; want CANCELLED/CANCELLED/0", requestState, invitationState, grants)
 	}
-	token := purchaseInvitationToken(t, ctx, pool, confirmed.Invitation.ID)
-	accept := purchaseFlowRequest(t, client, ts.URL+"/api/v1/me/course-access-invitations/"+confirmed.Invitation.ID+"/accept", studentToken, "https://gradex.example", []byte(`{"acceptance_token":"`+token+`"}`))
+	accept := purchaseFlowRequest(t, client, ts.URL+"/api/v1/me/course-access-invitations/"+historicalInvitationID+"/accept", studentToken, "https://gradex.example", []byte(`{"acceptance_token":"`+historicalToken+`"}`))
 	if accept.StatusCode != http.StatusConflict {
 		accept.Body.Close()
 		t.Fatalf("accepting cancelled purchase invitation status=%d, want 409", accept.StatusCode)
@@ -589,4 +678,48 @@ func purchaseInvitationToken(t *testing.T, ctx context.Context, pool *pgxpool.Po
 		t.Fatal("purchase invitation outbox event carried no acceptance token")
 	}
 	return delivery.VerificationToken
+}
+
+// seedHistoricalPurchaseInvitation writes the schema-43 shape that Admin
+// confirmation used to produce: a PENDING_STUDENT_ACCEPTANCE invitation, its
+// single-use acceptance secret, and the purchase request linked to it in
+// INVITATION_CREATED. Nothing in the product creates this any more, so tests
+// that assert the lifecycle still honours such a row must build it themselves.
+func seedHistoricalPurchaseInvitation(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	requestID, courseID, adminID string,
+) (string, string) {
+	t.Helper()
+	raw := bytes.Repeat([]byte{0x7a}, 32)
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	digest := sha256.Sum256([]byte(token))
+	secretID := uuid.NewString()
+	invitationID := uuid.NewString()
+	now := time.Now().UTC()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO identity_action_secrets (id, account_id, purpose, secret_digest, issued_at, expires_at)
+		VALUES ($1::uuid, NULL, 'COURSE_ACCESS_INVITATION', $2, $3, $4)
+	`, secretID, digest[:], now, now.Add(7*24*time.Hour)); err != nil {
+		t.Fatalf("seeding historical invitation secret: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO course_access_invitations (
+			id, normalized_email, email, course_id, created_by_account_id, state, action_secret_id, created_at
+		) VALUES ($1::uuid, 'student-access@example.com', 'student-access@example.com', $2::uuid, $3::uuid,
+		          'PENDING_STUDENT_ACCEPTANCE', $4::uuid, $5)
+	`, invitationID, courseID, adminID, secretID, now); err != nil {
+		t.Fatalf("seeding historical invitation: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE purchase_requests
+		   SET state = 'INVITATION_CREATED', payment_confirmed_by_account_id = $1::uuid,
+		       payment_confirmed_at = $2, invitation_id = $3::uuid, invitation_created_at = $2,
+		       access_ends_at_snapshot = $4, updated_at = $2
+		 WHERE id = $5::uuid
+	`, adminID, now, invitationID, now.Add(30*24*time.Hour), requestID); err != nil {
+		t.Fatalf("linking historical invitation: %v", err)
+	}
+	return invitationID, token
 }

@@ -2,13 +2,9 @@ package access
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -145,13 +141,26 @@ type ConfirmPurchaseRequestParams struct {
 	AdminAccountID    string
 	Locale            identity.Locale
 	Now               time.Time
-	InvitationTTL     time.Duration
 }
 
 type ConfirmPurchaseRequestResult struct {
 	PurchaseRequest PurchaseRequest `json:"purchase_request"`
-	Invitation      *Invitation     `json:"invitation,omitempty"`
-	BundleGrants    []BundleGrant   `json:"bundle_grants,omitempty"`
+	// Invitation is present only for a historical COURSE request that was
+	// confirmed before Admin confirmation granted access directly. A new COURSE
+	// confirmation reports CourseGrant instead and never creates an invitation.
+	Invitation   *Invitation   `json:"invitation,omitempty"`
+	CourseGrant  *CourseGrant  `json:"course_grant,omitempty"`
+	BundleGrants []BundleGrant `json:"bundle_grants,omitempty"`
+}
+
+// CourseGrant is the access one confirmed COURSE purchase produced. It mirrors
+// BundleGrant so both purchase kinds report a grant in the same shape.
+type CourseGrant struct {
+	CourseID      string `json:"course_id"`
+	EntitlementID string `json:"entitlement_id"`
+	/** GRANTED where this confirmation created the access; PRESERVED where the Student already held it. */
+	Disposition           string    `json:"disposition"`
+	ResultingAccessEndsAt time.Time `json:"resulting_access_ends_at"`
 }
 
 type BundleGrant struct {
@@ -710,11 +719,6 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 	if !locale.Valid() {
 		locale = identity.LocaleArabic
 	}
-	ttl := params.InvitationTTL
-	if ttl <= 0 {
-		ttl = 7 * 24 * time.Hour
-	}
-
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return ConfirmPurchaseRequestResult{}, fmt.Errorf("beginning payment confirmation: %w", err)
@@ -737,7 +741,21 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 	if request.TargetKind != PurchaseTargetCourse {
 		return ConfirmPurchaseRequestResult{}, ErrPurchaseRequestTransition
 	}
+	// Re-confirmation of a request that is already settled. Two shapes reach
+	// here and both answer with what exists rather than refusing: a historical
+	// invitation-backed request, and a directly granted one, which has no
+	// invitation to report and answers with its Entitlement instead.
 	if request.State == PurchaseRequestInvitationCreated || request.State == PurchaseRequestAccessGranted {
+		if request.InvitationID == nil {
+			grant, err := loadPurchaseCourseGrantTx(ctx, tx, request)
+			if err != nil {
+				return ConfirmPurchaseRequestResult{}, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return ConfirmPurchaseRequestResult{}, fmt.Errorf("committing idempotent payment confirmation: %w", err)
+			}
+			return ConfirmPurchaseRequestResult{PurchaseRequest: request, CourseGrant: grant}, nil
+		}
 		invitation, err := getInvitationTx(ctx, tx, request.InvitationID)
 		if err != nil {
 			return ConfirmPurchaseRequestResult{}, err
@@ -777,45 +795,218 @@ func (r *Repository) ConfirmPurchaseRequest(ctx context.Context, params ConfirmP
 		return ConfirmPurchaseRequestResult{}, ErrExpiryRequired
 	}
 
-	invitation, err := r.issuePurchaseInvitationTx(ctx, tx, request, params.AdminAccountID, locale, now, now.Add(ttl))
+	grant, err := r.grantPurchaseCourseTx(ctx, tx, &request, params.AdminAccountID, expiry, now)
 	if err != nil {
 		return ConfirmPurchaseRequestResult{}, err
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE purchase_requests
-		   SET state = 'INVITATION_CREATED', payment_confirmed_by_account_id = $1::uuid,
-		       payment_confirmed_at = $2, invitation_id = $3::uuid, invitation_created_at = $2,
-		       access_ends_at_snapshot = $4, updated_at = $2
-		 WHERE id = $5::uuid
-	`, params.AdminAccountID, now, invitation.ID, expiry, request.ID)
-	if err != nil {
-		return ConfirmPurchaseRequestResult{}, fmt.Errorf("linking payment confirmation to invitation: %w", err)
-	}
-	request.State = PurchaseRequestInvitationCreated
-	request.PaymentConfirmedByAccountID = &params.AdminAccountID
-	request.PaymentConfirmedAt = &now
-	request.InvitationID = &invitation.ID
-	request.InvitationCreatedAt = &now
-	request.AccessEndsAtSnapshot = &expiry
-
-	metadata, _ := json.Marshal(map[string]any{
-		"reference": request.ReferenceCode, "course_id": request.CourseID, "invitation_id": invitation.ID,
-	})
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_events (
-			actor_account_id, actor_role, actor_descriptor, action, module, target_type, target_id, reason, metadata
-		) VALUES (
-			$1::uuid, 'ADMIN', $1, 'PURCHASE_REQUEST_PAYMENT_CONFIRMED',
-			'IDENTITY_AND_ACCESS', 'PURCHASE_REQUEST', $2::uuid,
-			'External/manual payment confirmed and pre-authorized invitation issued', $3
-		)
-	`, params.AdminAccountID, request.ID, metadata); err != nil {
-		return ConfirmPurchaseRequestResult{}, fmt.Errorf("auditing payment confirmation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ConfirmPurchaseRequestResult{}, fmt.Errorf("committing payment confirmation: %w", err)
 	}
-	return ConfirmPurchaseRequestResult{PurchaseRequest: request, Invitation: &invitation}, nil
+	return ConfirmPurchaseRequestResult{PurchaseRequest: request, CourseGrant: grant}, nil
+}
+
+// grantPurchaseCourseTx is the authoritative Course access grant for an
+// externally paid purchase.
+//
+// It is deliberately the same shape as confirmBundlePurchaseTx, which has been
+// granting Bundle access this way in production since 0036: one transaction
+// carries the payment confirmation, the Enrollment, the Entitlement, the
+// request's terminal state, the audit trail, and the notification, so there is
+// no point at which a confirmed payment exists without the access it paid for.
+//
+// The invitation it replaces is not deleted and its acceptance path still
+// works; it is simply no longer how a new purchase reaches an Entitlement.
+func (r *Repository) grantPurchaseCourseTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	request *PurchaseRequest,
+	adminAccountID string,
+	expiry, now time.Time,
+) (*CourseGrant, error) {
+	// The recipient is read from the stored request, never from the caller, and
+	// is revalidated here rather than trusted from creation time: an Account can
+	// be suspended, unverified, or have its role changed between asking to buy
+	// and the Admin confirming. Locked so those changes serialize with the grant.
+	// Every request the product can create today carries the Account that made
+	// it. A row from before authenticated purchasing does not, and the address
+	// it carries is the same one the invitation path used to choose a recipient,
+	// so it selects the Account the same way. No new row of that shape can be
+	// created: the anonymous route no longer exists.
+	var studentAccountID string
+	var role, status string
+	var verifiedAt *time.Time
+	var locale identity.Locale
+	var err error
+	if request.RequesterAccountID != nil {
+		studentAccountID = *request.RequesterAccountID
+		err = tx.QueryRow(ctx, `
+			SELECT id::text, role::text, status::text, email_verified_at, locale
+			  FROM accounts WHERE id = $1::uuid FOR UPDATE
+		`, studentAccountID).Scan(&studentAccountID, &role, &status, &verifiedAt, &locale)
+	} else {
+		err = tx.QueryRow(ctx, `
+			SELECT id::text, role::text, status::text, email_verified_at, locale
+			  FROM accounts WHERE normalized_email = $1 FOR UPDATE
+		`, request.NormalizedEmail).Scan(&studentAccountID, &role, &status, &verifiedAt, &locale)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrPurchaseRequesterNotEligible
+	}
+	// A failure to read the Account is not a statement about the Account. Only
+	// what the row actually says may decide eligibility.
+	if err != nil {
+		return nil, fmt.Errorf("locking purchase grant recipient: %w", err)
+	}
+	if role != "STUDENT" || status != "ACTIVE" || verifiedAt == nil {
+		return nil, ErrPurchaseRequesterNotEligible
+	}
+	if !locale.Valid() {
+		locale = identity.LocaleArabic
+	}
+
+	// Progress is worth keeping even where access later ends, so the Enrollment
+	// is upserted to its existing identity rather than replaced.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO enrollments (id, student_account_id, course_id, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+		ON CONFLICT (student_account_id, course_id) DO UPDATE SET created_at = enrollments.created_at
+	`, uuid.NewString(), studentAccountID, request.CourseID, now); err != nil {
+		return nil, fmt.Errorf("creating purchase enrollment: %w", err)
+	}
+
+	// An Entitlement the Student already holds is never replaced or extended by
+	// a Course purchase: CreateStudentPurchaseRequest refuses to create a request
+	// for a Course that is already accessible, so reaching this with an active
+	// Entitlement means a concurrent grant won the race. Its access is the access
+	// that was asked for, so it is reported as-is.
+	entitlementID := uuid.NewString()
+	tag, err := tx.Exec(ctx, `
+		INSERT INTO entitlements (
+			id, student_account_id, scope_kind, scope_id, course_id, grant_source,
+			source_invitation_id, source_purchase_request_id, original_access_ends_at,
+			access_ends_at, retirement_eligibility_at, state, revision, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'COURSE', $3::uuid, $3::uuid, 'PURCHASE_REQUEST',
+			NULL, $4::uuid, $5, $5, $6, 'ACTIVE', 1, $6, $6
+		)
+		ON CONFLICT (student_account_id, course_id)
+			WHERE state = 'ACTIVE' AND scope_kind = 'COURSE' DO NOTHING
+	`, entitlementID, studentAccountID, request.CourseID, request.ID, expiry, now)
+	if err != nil {
+		return nil, fmt.Errorf("creating purchase entitlement: %w", err)
+	}
+	disposition := "GRANTED"
+	resulting := expiry
+	if tag.RowsAffected() == 0 {
+		if err := tx.QueryRow(ctx, `
+			SELECT id::text, access_ends_at FROM entitlements
+			 WHERE student_account_id = $1::uuid AND course_id = $2::uuid
+			   AND scope_kind = 'COURSE' AND state = 'ACTIVE' FOR UPDATE
+		`, studentAccountID, request.CourseID).Scan(&entitlementID, &resulting); err != nil {
+			return nil, fmt.Errorf("loading concurrent purchase entitlement: %w", err)
+		}
+		disposition = "PRESERVED"
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE purchase_requests
+		   SET state = 'ACCESS_GRANTED', payment_confirmed_by_account_id = $1::uuid,
+		       payment_confirmed_at = $2, access_ends_at_snapshot = $3,
+		       access_granted_at = $2, updated_at = $2
+		 WHERE id = $4::uuid
+	`, adminAccountID, now, expiry, request.ID); err != nil {
+		return nil, fmt.Errorf("completing purchase request: %w", err)
+	}
+	request.State = PurchaseRequestAccessGranted
+	request.PaymentConfirmedByAccountID = &adminAccountID
+	request.PaymentConfirmedAt = &now
+	request.AccessEndsAtSnapshot = &expiry
+	request.AccessGrantedAt = &now
+
+	// Two facts happened and both are recorded, matching the Bundle path: the
+	// Admin confirmed an external payment, and access was granted as a result.
+	// No invitation was issued and none was accepted, so neither of those events
+	// is written here.
+	metadata, _ := json.Marshal(map[string]any{
+		"reference": request.ReferenceCode, "course_id": request.CourseID,
+		"entitlement_id": entitlementID, "disposition": disposition,
+	})
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_events (
+			actor_account_id, actor_role, actor_descriptor, action, module, target_type, target_id, reason, metadata
+		) VALUES
+		($1::uuid, 'ADMIN', $1, 'PURCHASE_REQUEST_PAYMENT_CONFIRMED', 'IDENTITY_AND_ACCESS',
+		 'PURCHASE_REQUEST', $2::uuid, 'External/manual payment confirmed and Course access granted', $3),
+		($1::uuid, 'ADMIN', $1, 'ENTITLEMENT_GRANTED', 'IDENTITY_AND_ACCESS',
+		 'ENTITLEMENT', $4::uuid, 'Course access granted on external payment confirmation', $3)
+	`, adminAccountID, request.ID, metadata, entitlementID); err != nil {
+		return nil, fmt.Errorf("auditing purchase grant: %w", err)
+	}
+
+	title := request.CourseTitleEn
+	if locale == identity.LocaleArabic && request.CourseTitleAr != "" {
+		title = request.CourseTitleAr
+	}
+	event := outbox.Event{
+		ID: uuid.NewString(), Type: "access.granted", SchemaVersion: 1,
+		SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "ENTITLEMENT",
+		AggregateID: entitlementID, AggregateRevision: 1, CorrelationID: uuid.NewString(),
+		SafePayload: map[string]any{
+			"entitlement_id": entitlementID, "student_account_id": studentAccountID,
+			"course_id": request.CourseID, "course_title": title,
+			"purchase_request_id": request.ID,
+			"access_ends_at":      resulting.UTC().Format(time.RFC3339),
+			"locale":              string(locale), "template_contract": "course-access-granted-v1",
+			// Selects the wording that matches what actually happened. Without it
+			// the Student would be told an Admin approved an invitation they never
+			// received. See email.purchaseBackedGrant.
+			"purchase_backed": true,
+		},
+	}
+	if _, err := r.outboxWriter.Append(ctx, tx, event, outbox.NoticeDelivery{
+		Destination: request.NormalizedEmail, Locale: string(locale), TemplateContract: "course-access-granted-v1",
+	}); err != nil {
+		return nil, fmt.Errorf("writing purchase grant notification: %w", err)
+	}
+
+	return &CourseGrant{
+		CourseID: request.CourseID, EntitlementID: entitlementID,
+		Disposition: disposition, ResultingAccessEndsAt: resulting,
+	}, nil
+}
+
+// loadPurchaseCourseGrantTx reports the Entitlement a directly granted request
+// already produced, so a repeated confirmation answers with the same access
+// rather than a conflict.
+func loadPurchaseCourseGrantTx(ctx context.Context, tx pgx.Tx, request PurchaseRequest) (*CourseGrant, error) {
+	var grant CourseGrant
+	grant.CourseID = request.CourseID
+	grant.Disposition = "GRANTED"
+	err := tx.QueryRow(ctx, `
+		SELECT id::text, access_ends_at FROM entitlements
+		 WHERE source_purchase_request_id = $1::uuid AND grant_source = 'PURCHASE_REQUEST'
+		 ORDER BY created_at DESC LIMIT 1
+	`, request.ID).Scan(&grant.EntitlementID, &grant.ResultingAccessEndsAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The request was granted against an Entitlement it did not create — the
+		// concurrent-grant case. Report the access the Student actually holds.
+		if request.RequesterAccountID == nil {
+			return nil, ErrPurchaseRequestTransition
+		}
+		grant.Disposition = "PRESERVED"
+		if err := tx.QueryRow(ctx, `
+			SELECT id::text, access_ends_at FROM entitlements
+			 WHERE student_account_id = $1::uuid AND course_id = $2::uuid
+			   AND scope_kind = 'COURSE' AND state = 'ACTIVE'
+		`, *request.RequesterAccountID, request.CourseID).Scan(&grant.EntitlementID, &grant.ResultingAccessEndsAt); err != nil {
+			return nil, fmt.Errorf("loading granted purchase entitlement: %w", err)
+		}
+		return &grant, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("loading granted purchase entitlement: %w", err)
+	}
+	return &grant, nil
 }
 func (r *Repository) CancelPurchaseRequest(ctx context.Context, params CancelPurchaseRequestParams) (PurchaseRequest, error) {
 	if r == nil || r.pool == nil || r.outboxWriter == nil {
@@ -965,89 +1156,6 @@ func getInvitationForUpdateTx(ctx context.Context, tx pgx.Tx, id *string) (Invit
 	}
 	invitation.ActionSecretID = secretID
 	return invitation, err
-}
-
-// issuePurchaseInvitationTx deliberately emits the exact existing Course
-// invitation email contract. It is transaction-bound to payment confirmation,
-// so a committed confirmation can never be detached from its invitation.
-func (r *Repository) issuePurchaseInvitationTx(
-	ctx context.Context,
-	tx pgx.Tx,
-	request PurchaseRequest,
-	adminAccountID string,
-	locale identity.Locale,
-	now, expiresAt time.Time,
-) (Invitation, error) {
-	var role string
-	recipientLocale := locale
-	err := tx.QueryRow(ctx, "SELECT role, locale FROM accounts WHERE normalized_email = $1", request.NormalizedEmail).Scan(&role, &recipientLocale)
-	if err == nil && role != "STUDENT" {
-		return Invitation{}, ErrIneligibleRecipient
-	}
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Invitation{}, fmt.Errorf("checking purchase recipient: %w", err)
-	}
-	rawBytes := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, rawBytes); err != nil {
-		return Invitation{}, fmt.Errorf("generating purchase invitation secret: %w", err)
-	}
-	token := base64.RawURLEncoding.EncodeToString(rawBytes)
-	digest := sha256.Sum256([]byte(token))
-	secretID := uuid.NewString()
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO identity_action_secrets (id, account_id, purpose, secret_digest, issued_at, expires_at)
-		VALUES ($1::uuid, NULL, 'COURSE_ACCESS_INVITATION', $2, $3, $4)
-	`, secretID, digest[:], now, expiresAt); err != nil {
-		return Invitation{}, fmt.Errorf("creating purchase invitation secret: %w", err)
-	}
-	invitationID := uuid.NewString()
-	var invitation Invitation
-	err = tx.QueryRow(ctx, `
-		INSERT INTO course_access_invitations (
-			id, normalized_email, email, course_id, created_by_account_id, state, action_secret_id, created_at
-		) VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, 'PENDING_STUDENT_ACCEPTANCE', $6::uuid, $7)
-		RETURNING id::text, normalized_email, email, course_id::text, created_by_account_id::text,
-		          state, action_secret_id::text, created_at
-	`, invitationID, request.NormalizedEmail, request.Email, request.CourseID, adminAccountID, secretID, now).Scan(
-		&invitation.ID, &invitation.NormalizedEmail, &invitation.Email, &invitation.CourseID,
-		&invitation.CreatedByAccountID, &invitation.State, &invitation.ActionSecretID, &invitation.CreatedAt,
-	)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && (pgErr.ConstraintName == "cai_one_non_terminal_per_pair" || pgErr.Code == "23505") {
-			return Invitation{}, ErrDuplicateInvitation
-		}
-		return Invitation{}, fmt.Errorf("creating purchase invitation: %w", err)
-	}
-	metadata, _ := json.Marshal(map[string]any{"purchase_reference": request.ReferenceCode, "course_id": request.CourseID})
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO audit_events (
-			actor_account_id, actor_role, actor_descriptor, action, module, target_type, target_id, reason, metadata
-		) VALUES ($1::uuid, 'ADMIN', $1, 'COURSE_ACCESS_INVITATION_ISSUED',
-			'IDENTITY_AND_ACCESS', 'COURSE_ACCESS_INVITATION', $2::uuid,
-			'Purchase-backed Course access invitation created', $3)
-	`, adminAccountID, invitation.ID, metadata); err != nil {
-		return Invitation{}, fmt.Errorf("auditing purchase invitation: %w", err)
-	}
-	event := outbox.Event{
-		ID: uuid.NewString(), Type: "access.invitation_issued", SchemaVersion: 1,
-		SourceModule: "IDENTITY_AND_ACCESS", AggregateType: "COURSE_ACCESS_INVITATION",
-		AggregateID: invitation.ID, AggregateRevision: 1, CorrelationID: uuid.NewString(),
-		SafePayload: map[string]any{
-			"action_secret_id": secretID, "purpose": string(identity.ActionCourseAccessInvitation),
-			"course_id": request.CourseID, "secret_expires_at": expiresAt,
-			"locale": string(recipientLocale), "template_contract": "course-access-invitation-v1",
-			"purchase_backed": true,
-		},
-	}
-	delivery := outbox.VerificationDelivery{
-		Destination: request.NormalizedEmail, Locale: string(recipientLocale),
-		TemplateContract: "course-access-invitation-v1", VerificationToken: token, ExpiresAt: expiresAt,
-	}
-	if _, err := r.outboxWriter.Append(ctx, tx, event, delivery); err != nil {
-		return Invitation{}, fmt.Errorf("writing purchase invitation outbox event: %w", err)
-	}
-	return invitation, nil
 }
 
 // CompletePurchaseInvitationAcceptance performs the exceptional grant path:

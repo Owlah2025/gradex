@@ -638,7 +638,10 @@ function watchForPrematurePurchase(page: Page): { assertQuiet(): void } {
   const violations: string[] = [];
   page.on("request", (request) => {
     const url = request.url();
-    if (url.startsWith("https://wa.me/")) violations.push("navigated to WhatsApp");
+    // Scoped to this page: see the same note in student-journey.ts.
+    if (url.startsWith("https://wa.me/") && request.frame()?.page() === page) {
+      violations.push("navigated to WhatsApp");
+    }
     if (request.method() === "POST" && new URL(url).pathname.endsWith("/purchase-requests")) {
       violations.push(`created a purchase request via ${new URL(url).pathname}`);
     }
@@ -712,7 +715,13 @@ test("WhatsApp opens only after the explicit confirmation, with a server-built h
 }) => {
   await serveCourse(page, "en", { access: SIGNED_IN_NO_ACCESS });
   // The external handoff is intercepted so CI sends no WhatsApp message.
-  await page.route("https://wa.me/**", (route) => route.abort());
+  await page.context().route("https://wa.me/**", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "text/html",
+          body: "<!doctype html><title>WhatsApp handoff stub</title>",
+        }),
+      );
 
   let submitted: unknown;
   await page.route("**/api/v1/me/purchase-requests", async (route) => {
@@ -741,12 +750,23 @@ test("WhatsApp opens only after the explicit confirmation, with a server-built h
   await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
   watch.assertQuiet();
 
-  const handoff = page.waitForRequest(
-    (request) => request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
+  // The handoff opens beside Gradex rather than on top of it. The URL is taken
+  // from the navigation request, which is the handoff destination even when the
+  // real wa.me would redirect onwards.
+  const gradexURL = page.url();
+  const opened = page.context().waitForEvent("page");
+  const handoffRequest = page.context().waitForEvent("request", (request) =>
+    request.isNavigationRequest() && request.url().startsWith("https://wa.me/"),
   );
-  await page.getByTestId("purchase-request-submit").click({ noWaitAfter: true });
-  const handoffRequest = await handoff;
-  expect(handoffRequest.url()).toBe("https://wa.me/15550000000?text=Hello");
+  await page.getByTestId("purchase-request-submit").click();
+  const handoffPage = await opened;
+  expect((await handoffRequest).url()).toBe("https://wa.me/15550000000?text=Hello");
+  // The Course page the Student was reading is still open and unchanged.
+  expect(handoffPage).not.toBe(page);
+  expect(page.isClosed()).toBe(false);
+  expect(page.url()).toBe(gradexURL);
+  await expect(page.getByTestId("purchase-confirmation")).toBeVisible();
+  await handoffPage.close();
 
   // The body carries the Course and nothing else. An address here would decide
   // where Course access is eventually sent, and a price here would be a figure

@@ -7,6 +7,7 @@ import {
   readVerificationCodeFor,
   registerAndVerifyStudent,
   watchForPrematurePurchase,
+  WHATSAPP_STUB,
 } from "./student-journey";
 
 /**
@@ -47,7 +48,9 @@ for (const journey of journeys) {
   test(`the whole acquisition journey stays in ${journey.locale}`, async ({ browser }) => {
     const context = await browser.newContext();
     // The external handoff is intercepted so CI sends no WhatsApp message.
-    await context.route("https://wa.me/**", (route) => route.abort());
+    await context.route("https://wa.me/**", (route) =>
+        route.fulfill({ status: 200, contentType: "text/html", body: WHATSAPP_STUB }),
+      );
     const page = await context.newPage();
     const { locale, dictionary } = journey;
 

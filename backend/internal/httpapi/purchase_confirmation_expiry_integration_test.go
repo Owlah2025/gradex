@@ -175,26 +175,33 @@ func TestConfirmPurchaseRequestRequiresDefaultAccessExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retrying confirmation after configuring expiry: %v", err)
 	}
-	if result.PurchaseRequest.State != access.PurchaseRequestInvitationCreated {
-		t.Fatalf("retried confirmation state = %q, want INVITATION_CREATED", result.PurchaseRequest.State)
+	if result.PurchaseRequest.State != access.PurchaseRequestAccessGranted {
+		t.Fatalf("retried confirmation state = %q, want ACCESS_GRANTED", result.PurchaseRequest.State)
 	}
-	if result.Invitation.ID == "" {
-		t.Fatalf("retried confirmation produced no invitation: %+v", result)
+	if result.CourseGrant == nil || result.CourseGrant.EntitlementID == "" {
+		t.Fatalf("retried confirmation produced no Course grant: %+v", result)
+	}
+	if result.Invitation != nil {
+		t.Fatalf("retried confirmation produced an invitation: %+v", result.Invitation)
 	}
 	if result.PurchaseRequest.AccessEndsAtSnapshot == nil || !result.PurchaseRequest.AccessEndsAtSnapshot.Equal(expiry) {
 		t.Fatalf("access expiry snapshot = %v, want the configured %v", result.PurchaseRequest.AccessEndsAtSnapshot, expiry)
 	}
 
-	var invitationCount, invitationOutboxCount int
+	// The recovery grants access outright; the expiry it snapshots is the one
+	// the Admin just configured, and no invitation stands between the two.
+	var entitlementCount, grantedOutboxCount, invitationCount int
 	if err := pool.QueryRow(ctx, `
 		SELECT
-		  (SELECT count(*) FROM course_access_invitations WHERE id = $1::uuid),
-		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.invitation_issued' AND aggregate_id = $1::uuid)
-	`, result.Invitation.ID).Scan(&invitationCount, &invitationOutboxCount); err != nil {
+		  (SELECT count(*) FROM entitlements WHERE id = $1::uuid AND state = 'ACTIVE'),
+		  (SELECT count(*) FROM outbox_events WHERE event_type = 'access.granted' AND aggregate_id = $1::uuid),
+		  (SELECT count(*) FROM course_access_invitations)
+	`, result.CourseGrant.EntitlementID).Scan(&entitlementCount, &grantedOutboxCount, &invitationCount); err != nil {
 		t.Fatalf("counting retried confirmation effects: %v", err)
 	}
-	if invitationCount != 1 || invitationOutboxCount != 1 {
-		t.Fatalf("retried confirmation made invitations=%d email-events=%d, want 1/1", invitationCount, invitationOutboxCount)
+	if entitlementCount != 1 || grantedOutboxCount != 1 || invitationCount != 0 {
+		t.Fatalf("retried confirmation made entitlements=%d email-events=%d invitations=%d, want 1/1/0",
+			entitlementCount, grantedOutboxCount, invitationCount)
 	}
 }
 
@@ -287,14 +294,15 @@ func TestConfirmPaymentReturnsConflictWhenDefaultExpiryMissing(t *testing.T) {
 		PurchaseRequest struct {
 			State string `json:"state"`
 		} `json:"purchase_request"`
-		Invitation struct {
-			ID string `json:"id"`
-		} `json:"invitation"`
+		CourseGrant *struct {
+			EntitlementID string `json:"entitlement_id"`
+		} `json:"course_grant"`
 	}
 	if err := json.NewDecoder(confirmed.Body).Decode(&confirmation); err != nil {
 		t.Fatalf("decoding retried confirmation: %v", err)
 	}
-	if confirmation.PurchaseRequest.State != "INVITATION_CREATED" || confirmation.Invitation.ID == "" {
-		t.Fatalf("retried confirmation = %+v, want linked invitation", confirmation)
+	if confirmation.PurchaseRequest.State != "ACCESS_GRANTED" ||
+		confirmation.CourseGrant == nil || confirmation.CourseGrant.EntitlementID == "" {
+		t.Fatalf("retried confirmation = %+v, want a granted Entitlement", confirmation)
 	}
 }

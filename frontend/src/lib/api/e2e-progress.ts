@@ -177,6 +177,7 @@ export type LearningStateSnapshot = {
     state: string;
     grant_source: string;
     source_invitation_id: string | null;
+    source_purchase_request_id: string | null;
     access_ends_at: string;
     original_access_ends_at: string;
     revoked_at?: string | null;
@@ -224,11 +225,15 @@ export function parseLearningStateSnapshot(raw: string): LearningStateSnapshot {
   ) {
     throw new Error(`Learning-state query returned an unusable snapshot: ${trimmed.slice(0, 200)}`);
   }
+  // Provenance is one of two things, never neither: the invitation that granted
+  // access historically, or the purchase request that grants it directly now.
+  // Requiring an invitation here would assert the old flow rather than the rule.
   if (
     snapshot.entitlement.found &&
     (!snapshot.entitlement.id ||
       !snapshot.entitlement.grant_source ||
-      !snapshot.entitlement.source_invitation_id)
+      (!snapshot.entitlement.source_invitation_id &&
+        !snapshot.entitlement.source_purchase_request_id))
   ) {
     throw new Error("A found Entitlement is missing identity or grant provenance.");
   }
