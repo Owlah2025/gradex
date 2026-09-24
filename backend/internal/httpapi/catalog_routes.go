@@ -119,6 +119,11 @@ func mountCatalogRoutes(
 		ownedMutationGroup.PATCH("/revisions/:revisionId/lessons/:lessonId", h.updateLesson)
 		ownedMutationGroup.DELETE("/revisions/:revisionId/lessons/:lessonId", h.deleteLesson)
 		ownedMutationGroup.PUT("/revisions/:revisionId/lessons/:lessonId/video", h.setLessonVideo)
+		ownedMutationGroup.PUT(
+			"/revisions/:revisionId/lessons/:lessonId/public-preview",
+			strictJSONMiddleware(func() any { return &lessonPublicPreviewBody{} }, mediaRequestBodyLimit),
+			h.setLessonPublicPreview,
+		)
 		ownedMutationGroup.POST(
 			"/revisions/:revisionId/lessons/:lessonId/video/upload-completions",
 			strictJSONMiddleware(func() any { return &lessonVideoUploadCompletionBody{} }, mediaRequestBodyLimit),

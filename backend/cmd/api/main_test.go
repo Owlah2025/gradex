@@ -637,6 +637,17 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 		"POST /api/v1/media/download-authorizations",
 		"GET /api/v1/media/previews/:id",
 	}
+	// Anonymous Lesson public preview. Pinned because the whole feature is
+	// unreachable if any one of them is dropped, and because the legacy
+	// course-level preview above must keep being mounted alongside them for the
+	// transition rather than being replaced by them.
+	requiredLessonPreviewRoutes := []string{
+		"POST /api/v1/media/courses/:courseId/lessons/:lessonId/preview-authorizations",
+		"GET /api/v1/media/lesson-previews/:previewSession/index.m3u8",
+		"GET /api/v1/media/lesson-previews/:previewSession/renditions/:rendition/index.m3u8",
+		"GET /api/v1/media/courses/:courseID/preview",
+		"PUT /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/public-preview",
+	}
 	mounted := make(map[string]bool)
 	for _, route := range routes {
 		mounted[route.Method+" "+route.Path] = true
@@ -652,6 +663,11 @@ func TestProductionRouterWiringAndMutationSecurity(t *testing.T) {
 	for _, route := range requiredD8Routes {
 		if !mounted[route] {
 			t.Fatalf("production router is missing D8 route %q", route)
+		}
+	}
+	for _, route := range requiredLessonPreviewRoutes {
+		if !mounted[route] {
+			t.Fatalf("production router is missing Lesson preview route %q", route)
 		}
 	}
 	for _, route := range requiredDeviceMutationRoutes {

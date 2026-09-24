@@ -24,6 +24,13 @@ type mediaDeliveryIssuer interface {
 	IssueLessonFileDownload(context.Context, media.LessonFileDownloadRequest) (media.DownloadAuthorization, error)
 	IssuePreview(context.Context, string) (media.PreviewAuthorization, error)
 	IssueCoursePreview(context.Context, string) (media.PreviewAuthorization, error)
+	// Anonymous Lesson public preview. Kept on the same boundary as every other
+	// issuance so the routes cannot construct a second signer, and named
+	// separately from the legacy course preview above because the two are
+	// different contracts serving different media.
+	IssueLessonPreview(context.Context, media.LessonPreviewRequest) (media.LessonPreviewAuthorization, error)
+	IssueLessonPreviewManifest(context.Context, string) (media.PlaybackManifest, error)
+	IssueLessonPreviewRenditionManifest(context.Context, string, string) (media.PlaybackManifest, error)
 }
 
 type adminReviewPlaybackIssuer interface {

@@ -606,6 +606,43 @@ func (h *authoringHandlers) setLessonVideo(c *gin.Context) {
 	c.JSON(http.StatusOK, les)
 }
 
+// lessonPublicPreviewBody is the Instructor's preview intent for one candidate
+// Lesson. It is a required boolean rather than an optional one, so a malformed or
+// absent field is rejected instead of being read as "withdraw".
+type lessonPublicPreviewBody struct {
+	AllowPublicPreview *bool `json:"allow_public_preview" binding:"required"`
+}
+
+// setLessonPublicPreview allows or withdraws anonymous public preview of one
+// candidate Lesson's video.
+//
+// It is candidate-only, which the repository enforces by locking the Course's
+// editable candidate: nothing here can change what the live revision exposes. The
+// flag becomes public only when an Administrator approves the candidate.
+func (h *authoringHandlers) setLessonPublicPreview(c *gin.Context) {
+	accountID := c.GetString(ctxUserIDKey)
+	body := c.MustGet(strictJSONBodyContextKey).(*lessonPublicPreviewBody)
+	les, err := h.repo.SetLessonPublicPreview(c.Request.Context(), catalog.SetLessonPublicPreviewRequest{
+		CourseID:       c.Param("id"),
+		RevisionID:     c.Param("revisionId"),
+		LessonID:       c.Param("lessonId"),
+		OwnerAccountID: accountID,
+		Allow:          *body.AllowPublicPreview,
+	}, accountID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrLessonPreviewNeedsVideo) {
+			// Actionable: the Instructor marked a Lesson previewable that has no
+			// video. Saying so is the point — accepting it and serving nothing would
+			// leave them believing they had published a preview.
+			writeProblem(c, problem.LessonPreviewNeedsVideo())
+			return
+		}
+		h.handleCatalogError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, les)
+}
+
 func (h *authoringHandlers) completeLessonVideoUpload(c *gin.Context) {
 	if h.mediaService == nil {
 		writeProblem(c, problem.DependencyUnavailable())

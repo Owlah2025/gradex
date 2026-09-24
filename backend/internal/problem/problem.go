@@ -123,6 +123,18 @@ func ValidationFailed() Problem {
 		"One or more fields are invalid.")
 }
 
+// LessonPreviewNeedsVideo reports the one authoring state anonymous Lesson
+// preview refuses: a Lesson marked publicly previewable that carries no video.
+//
+// It is reported rather than silently coerced to false. An Instructor who set the
+// control and was told nothing would reasonably believe they had published a
+// preview, and would find out only from a visitor who could not watch it.
+func LessonPreviewNeedsVideo() Problem {
+	return New(http.StatusUnprocessableEntity, "lesson-preview-needs-video",
+		"Lesson has no video to preview",
+		"Add a lesson video before allowing public preview.")
+}
+
 func SubmissionIncomplete(violations ...SubmissionViolation) Problem {
 	p := New(http.StatusUnprocessableEntity, "submission-incomplete",
 		"Course cannot be submitted", "")

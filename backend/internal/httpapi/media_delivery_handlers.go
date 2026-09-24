@@ -80,6 +80,82 @@ func mountMediaDeliveryRoutes(content *gin.RouterGroup, foundation *MediaFoundat
 	protected.GET("/lessons/:lessonId/materials/lab-material", func(c *gin.Context) { h.materialEntry(c, media.KindLabMaterial) })
 	content.GET("/courses/:courseID/preview", h.coursePreview)
 	content.GET("/previews/:id", h.preview)
+	// Anonymous Lesson public preview. These are mounted on the unauthenticated
+	// group deliberately: the whole point is that a visitor with no Account can
+	// watch a Lesson the Instructor published for preview. Authorization is the
+	// server-side chain in loadLessonPreviewTarget, re-proved on every request,
+	// and the capability is a short-lived token in its own signature domain.
+	//
+	// The legacy routes above are left exactly as they are. Production has live
+	// legacy previews and they keep serving; retiring them is a later tranche.
+	// :courseId, matching the existing /courses/:courseId/lessons subtree. The
+	// legacy /courses/:courseID/preview route above uses a different spelling, and
+	// gin refuses two wildcard names in one prefix, so this one has to join the
+	// subtree it actually lives in rather than the legacy route's.
+	content.POST("/courses/:courseId/lessons/:lessonId/preview-authorizations", h.lessonPreviewAuthorization)
+	content.GET("/lesson-previews/:previewSession/index.m3u8", h.lessonPreviewManifest)
+	content.GET("/lesson-previews/:previewSession/renditions/:rendition/index.m3u8", h.lessonPreviewRenditionManifest)
+}
+
+// lessonPreviewAuthorizationResponse is what an anonymous visitor receives. It
+// carries the manifest capability and the identities the player already asked
+// about, and nothing else: no storage key, no signed object URL, no asset state,
+// and no information about Lessons that are not previewable.
+type lessonPreviewAuthorizationResponse struct {
+	PreviewSession string    `json:"preview_session"`
+	ManifestURL    string    `json:"manifest_url"`
+	ExpiresAt      time.Time `json:"expires_at"`
+}
+
+// lessonPreviewAuthorization issues one anonymous preview capability.
+//
+// It shares the existing public preview rate limit, because it is the same kind
+// of boundary: an unauthenticated issuance endpoint that mints a temporary media
+// capability.
+func (h *mediaDeliveryHandlers) lessonPreviewAuthorization(c *gin.Context) {
+	if !h.allowPublicPreview(c) {
+		return
+	}
+	issued, err := h.delivery.IssueLessonPreview(c.Request.Context(), media.LessonPreviewRequest{
+		CourseID: c.Param("courseId"), LessonID: c.Param("lessonId"),
+	})
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		// Inventory-safe: a Lesson that is not previewable, whose video is still
+		// processing, or that does not exist all answer identically, so the response
+		// reveals nothing about a Course's unpublished contents.
+		writeProtectedUnavailable(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.JSON(http.StatusOK, lessonPreviewAuthorizationResponse{
+		PreviewSession: issued.PreviewSession,
+		ManifestURL:    issued.ManifestURL,
+		ExpiresAt:      issued.ExpiresAt,
+	})
+}
+
+func (h *mediaDeliveryHandlers) lessonPreviewManifest(c *gin.Context) {
+	manifest, err := h.delivery.IssueLessonPreviewManifest(c.Request.Context(), c.Param("previewSession"))
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	writePlaybackManifest(c, manifest)
+}
+
+func (h *mediaDeliveryHandlers) lessonPreviewRenditionManifest(c *gin.Context) {
+	manifest, err := h.delivery.IssueLessonPreviewRenditionManifest(
+		c.Request.Context(), c.Param("previewSession"), c.Param("rendition"))
+	if err != nil {
+		logProtectedDeliveryDenial(c, h.logger, err)
+		writeProtectedUnavailable(c)
+		return
+	}
+	writePlaybackManifest(c, manifest)
 }
 
 func (h *mediaDeliveryHandlers) playbackManifest(c *gin.Context) {

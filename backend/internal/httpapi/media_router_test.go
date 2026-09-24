@@ -83,6 +83,21 @@ func (d *refusingDelivery) IssueCoursePreview(context.Context, string) (media.Pr
 	return media.PreviewAuthorization{}, media.ErrProtectedUnavailable
 }
 
+func (d *refusingDelivery) IssueLessonPreview(context.Context, media.LessonPreviewRequest) (media.LessonPreviewAuthorization, error) {
+	d.calls++
+	return media.LessonPreviewAuthorization{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) IssueLessonPreviewManifest(context.Context, string) (media.PlaybackManifest, error) {
+	d.calls++
+	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
+}
+
+func (d *refusingDelivery) IssueLessonPreviewRenditionManifest(context.Context, string, string) (media.PlaybackManifest, error) {
+	d.calls++
+	return media.PlaybackManifest{}, media.ErrProtectedUnavailable
+}
+
 type redirectingDelivery struct {
 	refusingDelivery
 	buyerTag string
