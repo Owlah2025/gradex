@@ -175,3 +175,16 @@ Preview authorization issuance records the minimum: course id, lesson id, asset
 version id, and an anonymous marker. No visitor fingerprinting, no visitor
 identity, no conversion tracking, and no IP retention beyond what the existing
 rate limiter already requires.
+
+## Status
+
+Implemented. The authorization chain and the token domain are in
+`internal/media/delivery_lesson_preview.go`, the authoring mutation in
+`internal/catalog`, the public projection in `internal/catalogpublic`, and the
+three UI surfaces in `frontend/src/components`. The decision is recorded as
+[D-116](DECISIONS.md#d-116--public-preview-becomes-a-lesson-permission-with-the-legacy-course-preview-retained)
+and the operator posture in the
+[runbook](launch/RUNBOOK.md#public-preview--the-lesson-model-and-the-legacy-path).
+
+**Not deployed.** The legacy course-level preview remains live in production and
+is untouched by this work.

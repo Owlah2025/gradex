@@ -227,3 +227,16 @@ That observation must be a real operational event. It is not to be manufactured:
 no synthetic broken video, no deliberately failed FFmpeg run, no production
 `RetryEnhancements` invoked to produce evidence. As of this document 3C-B is
 **deployed, safe, and not yet production-observed**.
+
+## Status
+
+Implemented. The runtime lives in `internal/media/auto_recovery.go`, the linkage
+is wired through `beginEnhancement`, `completeRecoveryAttempt`, `failRecovery` and
+`recoverStalePlayable`, and the reconciler is `runMediaAutoEnhancementRecovery` in
+`cmd/worker`. The decision is recorded as
+[D-115](DECISIONS.md#d-115--automatic-enhancement-recovery-ships-disabled-and-links-intent-to-execution-durably)
+and the operator procedure in the
+[runbook](launch/RUNBOOK.md#phase-3c-c--automatic-enhancement-recovery-implemented-disabled).
+
+**Not enabled in production, and not deployed.** Nothing in this document claims
+otherwise.

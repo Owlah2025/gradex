@@ -4547,3 +4547,51 @@ Historical invitation-backed access remains supported. Existing `course_access_i
 **Decision:** The purchase handoff opens WhatsApp in a separate browsing context and never navigates the Gradex document. The context is opened synchronously inside the click, before the purchase request is awaited, because the user activation that permits it does not survive the await. Its opener is severed before navigation. Where the browser refuses the context, the Student is offered the same server-built URL as an explicit `target="_blank" rel="noopener noreferrer"` link; where the request fails, the blank context is closed. This applies to both the Course and Bundle purchase surfaces.
 
 **Unchanged:** The WhatsApp URL and its prefilled message are still built by the backend in `access.WhatsAppHandoffURL`. The message still carries the localized Course or Bundle title, price, Student email, and GRX reference.
+
+## D-115 — Automatic enhancement recovery ships disabled and links intent to execution durably
+
+**Date:** 2026-09-24
+
+**Status:** Implemented candidate. Independent review required. Not enabled in production, and no production deployment is authorized by this decision.
+
+**Decision:** Phase 3C-C schedules the existing 3C-B manual enhancement recovery automatically, through the same outbox event, the same queue task class, and the same worker execution path. There is no second recovery engine, no second FFmpeg invocation, and no second `READY` proof. The scheduler never takes the media work claim; the execution-time worker remains the only claimant.
+
+**Linkage:** The automatic intent identity **is** the outbox event id. The scheduler row and that event are committed in one transaction, and the worker writes the operation it minted into `executing_operation_id` inside the same transaction that takes the media claim. Attribution is therefore never inferred from time proximity or from the mere existence of an open row for an asset — either of those would let a manual retry, a second worker's operation, or an unrelated stale-recovery terminalization close out an automatic attempt that never ran. A task whose intent no longer matches the row is superseded and is a no-op that claims nothing and charges nothing.
+
+**Durability:** The linkage survives worker crash before and after the claim, Redis loss, duplicate delivery, task retry, process restart, lease expiry and stale recovery. `recoverStalePlayable` reconciles an interrupted automatic execution by its claim token, which is the operation the row was bound to, so an intent cannot remain `EXECUTING` after a crash. Redis is never the source of truth for whether automatic recovery is outstanding.
+
+**Eligibility:** A settled, claim-free `PLAYABLE` video with valid immutable source identity and successful scan or validation provenance, whose logical asset is not retired. There is no settle-age heuristic: a claim-free `PLAYABLE` row is the discriminator, so a healthy progressive `FULL` operation that has reached `PLAYABLE` while still holding its claim is excluded by construction.
+
+**Policy:** Three consecutive automatic failures, with 15-minute, 1-hour and 4-hour backoff, then `NEEDS_OPERATOR`. Deadlines are database timestamps; no schedule is held in any process. A newly committed canonical `video_renditions` row is progress and resets the budget even when the operation later failed, read from canonical database evidence and never from FFmpeg output. Permanent failures — invalid media including a source checksum mismatch, a missing immutable source, contradictory canonical evidence, a violated invariant — reach `NEEDS_OPERATOR` on the first failure and never loop. Claim races, ineligible assets and superseded intents charge nothing.
+
+**Manual override:** `RetryEnhancements` remains available always, including from `NEEDS_OPERATOR` and after the automatic budget is exhausted. A manual claim resets the automatic budget, supersedes any queued automatic task, and blocks an immediate duplicate, in the same transaction as the claim. It deletes no historical evidence.
+
+**Activation:** `MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED` defaults to **false in every environment, including development**. When false the reconciler is not started and nothing is written. It additionally requires schema 45 and fails closed if the flag is set against an earlier schema. It **may not be enabled in production until one legitimate real 3C-B manual `ENHANCEMENT` or `FINALIZATION` operation has been observed end to end in production.** That observation must be a real operational event and is not to be manufactured: no synthetic broken video, no deliberately failed FFmpeg run, and no production `RetryEnhancements` invoked to produce evidence.
+
+**Schema:** Migration 0045 adds `media_auto_enhancement_recovery`, one row per Asset Version, and a nullable `processing_attempts.auto_recovery_intent_id`. The absence of a row means eligible, so repeated scans of an unscheduled asset write nothing. The primary key is the dedupe guarantee. Contradictory states are refused by `maer_state_coherent` rather than by Go. The attribution column is deliberately not a foreign key, because the scheduler row is deleted on success while the attempt evidence must outlive it. The down migration refuses while any intent is outstanding.
+
+**Worker floor:** Unchanged at schema 42. Automatic recovery is a separate capability gate, not a reason to refuse a worker that is serving media correctly.
+
+## D-116 — Public preview becomes a Lesson permission, with the legacy course preview retained
+
+**Date:** 2026-09-24
+
+**Status:** Implemented candidate. Independent review required. Not deployed.
+
+**Decision:** Public preview stops being a separately uploaded course-level MP4 and becomes a permission on a Lesson: zero, one, or many Lessons of a Course may be marked previewable, and an anonymous visitor watches the **same** video asset, the same transcode, the same canonical HLS renditions and the same storage objects a paying Student watches. There is no second upload, no second transcode, and no duplicated media row. Many previewable Lessons is the intended model, not a tolerated edge case.
+
+**Where the permission lives:** `course_lessons.allow_public_preview`, added by migration 0046. It is revision-scoped: edited on a candidate, cloned with the revision, shown to the Administrator as part of the submitted revision, and public only when that revision becomes live. It deliberately does **not** live on `media_assets` or `media_asset_versions`, because a media asset is globally reusable and a permission on it would escape the revision that granted it — marking one Lesson previewable would expose the same video wherever else it was used.
+
+**Video only:** V1 previews the Lesson video. `RESOURCE` and `LAB_MATERIAL` attachments stay entitlement-protected on a previewable Lesson. A Lesson with no video is refused rather than accepted and left serving nothing. `READY` is deliberately not required at authoring time, because a processing video is the normal case while a Course is being built and demanding it would force the Instructor to return and toggle again; public playback fails closed until `READY`.
+
+**Authorization:** Anonymous preview re-proves the whole chain server-side on every request — published and unsuspended Course, live revision, Lesson membership of that revision, the flag, the exact video asset version, non-retired asset, exact-version provenance, `READY`, canonical renditions. Candidate revision data can never satisfy it. `READY`, not `PLAYABLE`: the partial-delivery behaviour entitled Students receive is not extended to anonymous visitors. Every denial is the existing inventory-safe unavailable response.
+
+**Token:** A distinct HMAC signature domain, not a relaxed Student playback token. The separation is structural: neither token verifies in the other's domain. Claims bind course, revision, lesson and asset version, and carry no Student, device, lease or entitlement. Cross-course, cross-revision, cross-lesson and cross-asset replay are denied even with a genuine signature, because each identity is re-proved. TTL is the server-measured trusted duration plus the configured grace, capped at **two hours** rather than inheriting the 12-hour Student ceiling — a preview token is a shared anonymous bearer capability with no lease behind it and nothing that can revoke it mid-stream, which is stated plainly rather than mitigated with DRM.
+
+**Delivery:** Reuses the canonical machinery without exception. It never presigns the original uploaded object, never creates a second master, and never transcodes or copies. Marking a Lesson previewable creates no media asset, version, processing attempt, rendition, or transcode outbox event.
+
+**Legacy compatibility:** Production has live legacy previews and they keep serving. `course_revisions.preview_asset_version_id` is **not** cleared when a Lesson preview goes live; no `PREVIEW` asset, version or rendition is deleted; no existing preview is auto-mapped onto a Lesson; the legacy endpoints remain mounted. A Course whose live revision marks no Lesson previewable keeps exactly the course-level preview experience it has today. Retiring the legacy path is a later, separate tranche after production observation.
+
+**Catalogue:** `has_preview` remains a single boolean on the public card, now derived: true from a live Lesson preview **or** from the legacy course preview. The public curriculum additionally exposes, per section, only the Lessons that are genuinely previewable — never the whole curriculum.
+
+**Analytics:** Preview authorization records course id, lesson id, asset version id and an anonymous marker. No visitor fingerprinting, no persisted visitor identity, and no conversion tracking.

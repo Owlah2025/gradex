@@ -473,6 +473,101 @@ nothing: discarding requested work is an operator decision with its own evidence
 of a downgrade. Never mutate processing evidence to make a gate pass, and never force or
 automatically repair a schema marker after a failed step.
 
+## Phase 3C-C — automatic enhancement recovery (implemented, DISABLED)
+
+3C-C schedules the 3C-B action above automatically. It ships **disabled in every
+environment**, and the operational rule is an activation gate, not a configuration
+preference.
+
+**It may not be enabled in production until one legitimate real 3C-B manual
+`ENHANCEMENT` or `FINALIZATION` operation has been observed end to end in
+production.** That observation must be a real operational event. Do **not**
+manufacture it: no synthetic broken video, no deliberately failed FFmpeg run, and
+no production `RetryEnhancements` invoked in order to produce evidence. As of this
+entry 3C-B is deployed, safe, and **not yet production-observed**, so the gate is
+closed.
+
+### Enablement preconditions
+
+| | |
+|---|---|
+| Flag | `MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED` — default `false`, every environment |
+| Schema | 45 or later. The worker **fails closed** if the flag is set against an earlier schema |
+| Worker media floor | unchanged at 42. Automatic recovery is a separate capability gate |
+| Prerequisite | one observed real 3C-B manual recovery in production |
+
+When the flag is false the reconciler is not started: no candidate query, no
+scheduler row, no outbox intent. Turning it off again stops scheduling; it does not
+delete state, and any intent already queued is superseded rather than executed.
+
+### What it does when enabled
+
+It selects settled, claim-free `PLAYABLE` videos with valid source identity and
+provenance, and commits — in one transaction — a scheduler row and the same
+`media.enhancement_requested` outbox event the Admin action writes. It **never
+takes the media work claim**; the execution-time worker remains the only claimant,
+running the same path, with no second FFmpeg invocation and no second `READY`
+proof.
+
+Three consecutive automatic failures, backing off 15 minutes, 1 hour, then 4
+hours, then `NEEDS_OPERATOR`. A newly committed canonical rendition is progress and
+resets the budget even if the operation later failed. Permanent failures — invalid
+media, checksum mismatch, missing immutable source, contradictory canonical
+evidence — reach `NEEDS_OPERATOR` immediately and never loop.
+
+### Operator actions
+
+Read the state for one asset:
+
+```sql
+SELECT state, consecutive_failures, attempt_number, next_attempt_at,
+       last_failure_category, last_outcome_at
+FROM media_auto_enhancement_recovery
+WHERE asset_version_id = '<asset-version-id>';
+```
+
+`NEEDS_OPERATOR` means automatic recovery has given up and a person must look. The
+manual Admin retry remains available from **every** state, including
+`NEEDS_OPERATOR` and after the budget is exhausted — it is the override. Taking it
+resets the automatic budget, supersedes any queued automatic task, and blocks an
+immediate duplicate. It deletes no historical evidence.
+
+Do not edit `media_auto_enhancement_recovery` by hand to make a gate pass. The row
+is reconciled from the actual linked execution outcome; rewriting it detaches the
+scheduler's belief from what really happened.
+
+Audit evidence is written with a NULL actor and the `SYSTEM` actor role:
+`MEDIA_AUTO_ENHANCEMENT_SCHEDULED` and `MEDIA_AUTO_ENHANCEMENT_EXHAUSTED`.
+
+## Public preview — the Lesson model and the legacy path
+
+Public preview is a permission on a Lesson (`course_lessons.allow_public_preview`,
+schema 46). An anonymous visitor watches the **same** video asset, transcode,
+canonical renditions and storage objects a paying Student watches. Marking a
+Lesson previewable creates no media asset, version, processing attempt, rendition,
+or transcode intent.
+
+**The legacy course-level preview is retained and still serving.** During the
+transition:
+
+- Do **not** clear `course_revisions.preview_asset_version_id`. It stays populated
+  as rollback safety.
+- Do **not** delete any `PREVIEW` asset, version or rendition.
+- Do **not** map an existing course preview onto a Lesson.
+- The legacy endpoints stay mounted.
+
+A Course whose live revision marks no Lesson previewable keeps exactly the
+course-level preview experience it has today. A Course with free Lessons shows them
+in its outline instead. Retiring the legacy path is a **later, separate tranche**
+after production observation, not an operator action.
+
+Anonymous preview requires `READY`, never `PLAYABLE`, and fails closed with the
+ordinary inventory-safe unavailable response. Preview tokens live in their own
+signature domain, carry no Student, device or lease, and expire at the measured
+video duration plus the configured grace, capped at two hours. A preview link is a
+shared bearer capability until it expires and cannot be revoked mid-stream; there
+is no DRM.
+
 ## 7. Health Checks & Verification Sequence
 
 - **Readiness Check**: `GET /readyz` -> returns `200 OK`

@@ -1,40 +1,38 @@
-# Gradex Launch Status
-
-> **2026-09-24 schema 44 → 46 tranche, PARTIAL — baseline repaired, schema and
-> rollback landed, producers not built.** Production is untouched: it remains
-> `0fee657897c939cb679c9d804d184542bb2f692f` on clean schema 44. No deployment,
-> migration, restart, or `RetryEnhancements` invocation occurred, and no production
-> media data was changed. 3C-B remains **deployed, safe, and not yet
-> production-observed**; 3C-C is **not enabled in production**; the Lesson preview
-> redesign is **not deployed**.
+> **2026-09-24 schema 44 → 46 tranche, COMPLETE LOCALLY — NOT DEPLOYED.** Production
+> is untouched: it remains `0fee657897c939cb679c9d804d184542bb2f692f` on clean
+> schema 44. No deployment, migration, restart, or `RetryEnhancements` invocation
+> occurred, and no production media data was changed. 3C-B remains **deployed,
+> safe, and not yet production-observed**. 3C-C is **implemented and disabled in
+> production**. The Lesson preview redesign is **implemented and not deployed**.
 >
-> Local head is `dcbe0db1d3ec560e005941a30f41260763849ef8`. What landed, each part
-> independently verified:
+> What landed, each part independently verified against real layers:
 >
-> - **Baseline gate green** (`469ff77..6fa9b6e`). 24 integration failures across
->   `cmd/migrate`, `internal/db`, `internal/httpapi` and `cmd/api` were root-caused
->   and repaired without weakening a single assertion. The four session/device
->   failures were a **fixture defect, not a product decision**: both fixtures
->   omitted the trusted-device authority that D-109 made mandatory inside the login
->   transaction. The API readiness floor rose to schema 44, which the direct Course
->   grant genuinely requires.
-> - **Design contracts** (`6fa9b6e..bd40216`) —
->   [3C-C intent linkage](../media-auto-enhancement-recovery.md) and the
->   [Lesson preview model](../lesson-public-preview.md).
-> - **Migrations 0045 and 0046** (`bd40216..7e1c266`). Expand-only, no producer,
->   `MaxSchemaVersion` 46. API floor stays 44 and worker media floor stays 42.
+> - **Baseline gate green.** 24 integration failures across `cmd/migrate`,
+>   `internal/db`, `internal/httpapi` and `cmd/api` were root-caused and repaired
+>   without weakening a single assertion. The four session/device failures were a
+>   **fixture defect, not a product decision**. The API readiness floor rose to
+>   schema 44, which the direct Course grant genuinely requires.
+> - **Migrations 0045 and 0046**, expand-only, `MaxSchemaVersion` 46. API floor
+>   stays 44; worker media floor stays 42.
+> - **3C-C automatic enhancement recovery** ([D-115](../DECISIONS.md#d-115--automatic-enhancement-recovery-ships-disabled-and-links-intent-to-execution-durably),
+>   [design](../media-auto-enhancement-recovery.md)). The intent identity is the
+>   outbox event id, committed with the scheduler row; the worker binds the
+>   operation inside the claim transaction. Ships behind
+>   `MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED`, **false in every environment**, and
+>   additionally gated on schema 45.
+> - **Lesson-as-public-preview** ([D-116](../DECISIONS.md#d-116--public-preview-becomes-a-lesson-permission-with-the-legacy-course-preview-retained),
+>   [design](../lesson-public-preview.md)). Anonymous visitors watch the same
+>   canonical renditions a paying Student watches, over a distinct token domain,
+>   `READY` only. The legacy course-level preview is untouched and keeps serving.
 > - **Schema-46 rollback-compatible application artifact**
->   (`7e1c266..dcbe0db`, [`deploy/schema46/`](../../deploy/schema46/README.md)),
->   verified end to end locally.
+>   ([`deploy/schema46/`](../../deploy/schema46/README.md)), derived from
+>   `0fee657`, verified end to end.
 >
-> **Not built:** the 3C-C scheduler/reconciler and its linkage plumbing, and the
-> whole Lesson-preview producer side — authorization, preview token domain,
-> protected HLS delivery, public catalogue projection, authoring, Admin review, and
-> the three frontend surfaces. Those remain open work; nothing in the tree claims
-> otherwise, because neither migration has a producer.
->
-> Fresh schema-44 backup and proven restore evidence remain mandatory before any
-> deployment of this release, and the rollback artifact is not a substitute for it.
+> **Release gates still open.** 3C-C may not be enabled in production until one
+> legitimate real 3C-B manual recovery has been observed end to end, and that
+> observation must not be manufactured. Fresh schema-44 backup and proven restore
+> evidence remain mandatory before any deployment; the rollback artifact is not a
+> substitute for it. Independent review of this tranche has not been performed.
 
 > **2026-09-23 schema-41-to-43 preparation:** The observed baseline remains release
 > `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` on clean schema 41. The current plan
