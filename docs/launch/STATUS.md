@@ -1,5 +1,41 @@
 # Gradex Launch Status
 
+> **2026-09-24 schema 44 → 46 tranche, PARTIAL — baseline repaired, schema and
+> rollback landed, producers not built.** Production is untouched: it remains
+> `0fee657897c939cb679c9d804d184542bb2f692f` on clean schema 44. No deployment,
+> migration, restart, or `RetryEnhancements` invocation occurred, and no production
+> media data was changed. 3C-B remains **deployed, safe, and not yet
+> production-observed**; 3C-C is **not enabled in production**; the Lesson preview
+> redesign is **not deployed**.
+>
+> Local head is `dcbe0db1d3ec560e005941a30f41260763849ef8`. What landed, each part
+> independently verified:
+>
+> - **Baseline gate green** (`469ff77..6fa9b6e`). 24 integration failures across
+>   `cmd/migrate`, `internal/db`, `internal/httpapi` and `cmd/api` were root-caused
+>   and repaired without weakening a single assertion. The four session/device
+>   failures were a **fixture defect, not a product decision**: both fixtures
+>   omitted the trusted-device authority that D-109 made mandatory inside the login
+>   transaction. The API readiness floor rose to schema 44, which the direct Course
+>   grant genuinely requires.
+> - **Design contracts** (`6fa9b6e..bd40216`) —
+>   [3C-C intent linkage](../media-auto-enhancement-recovery.md) and the
+>   [Lesson preview model](../lesson-public-preview.md).
+> - **Migrations 0045 and 0046** (`bd40216..7e1c266`). Expand-only, no producer,
+>   `MaxSchemaVersion` 46. API floor stays 44 and worker media floor stays 42.
+> - **Schema-46 rollback-compatible application artifact**
+>   (`7e1c266..dcbe0db`, [`deploy/schema46/`](../../deploy/schema46/README.md)),
+>   verified end to end locally.
+>
+> **Not built:** the 3C-C scheduler/reconciler and its linkage plumbing, and the
+> whole Lesson-preview producer side — authorization, preview token domain,
+> protected HLS delivery, public catalogue projection, authoring, Admin review, and
+> the three frontend surfaces. Those remain open work; nothing in the tree claims
+> otherwise, because neither migration has a producer.
+>
+> Fresh schema-44 backup and proven restore evidence remain mandatory before any
+> deployment of this release, and the rollback artifact is not a substitute for it.
+
 > **2026-09-23 schema-41-to-43 preparation:** The observed baseline remains release
 > `98e88fcc1105e8c638bb638d3f1c46630bcc51b2` on clean schema 41. The current plan
 > composes the frozen 41 → 42 boundary with device schema 43; the prior schema-38/42
