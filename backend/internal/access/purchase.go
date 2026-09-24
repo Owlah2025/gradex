@@ -994,10 +994,15 @@ func loadPurchaseCourseGrantTx(ctx context.Context, tx pgx.Tx, request PurchaseR
 			return nil, ErrPurchaseRequestTransition
 		}
 		grant.Disposition = "PRESERVED"
+		// Deliberately not filtered to ACTIVE. This reports what a settled
+		// request granted, and that Entitlement may since have been revoked or
+		// run out — which is a fact to report, not a reason to fail a repeated
+		// confirmation with an internal error.
 		if err := tx.QueryRow(ctx, `
 			SELECT id::text, access_ends_at FROM entitlements
 			 WHERE student_account_id = $1::uuid AND course_id = $2::uuid
-			   AND scope_kind = 'COURSE' AND state = 'ACTIVE'
+			   AND scope_kind = 'COURSE'
+			 ORDER BY created_at DESC LIMIT 1
 		`, *request.RequesterAccountID, request.CourseID).Scan(&grant.EntitlementID, &grant.ResultingAccessEndsAt); err != nil {
 			return nil, fmt.Errorf("loading granted purchase entitlement: %w", err)
 		}

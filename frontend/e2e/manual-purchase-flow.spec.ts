@@ -156,7 +156,7 @@ async function confirmPurchaseInAdminUI(
 }
 
 test.describe("Automated manual Course purchase flow", () => {
-  test("new Student persists purchase intent before WhatsApp, registers, accepts once, and enters Course Home", async ({
+  test("new Student persists purchase intent before WhatsApp, registers, and enters Course Home without accepting anything", async ({
     browser,
   }) => {
     const studentContext = await browser.newContext({ locale: "en-US" });
