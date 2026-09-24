@@ -58,6 +58,23 @@ type Section struct {
 	Title       string `json:"title"`
 	Position    int    `json:"position"`
 	LessonCount int    `json:"lesson_count"`
+	// Lessons carries only the Lessons of the LIVE revision that are publicly
+	// previewable. It is deliberately not the whole curriculum: a visitor who has
+	// not paid may see which Lessons they can watch, and nothing more about the
+	// ones they cannot. An empty slice is the ordinary case.
+	Lessons []PreviewableLesson `json:"lessons,omitempty"`
+}
+
+// PreviewableLesson is one Lesson of the live revision whose video an anonymous
+// visitor may watch.
+//
+// It is the identity the preview authorization endpoint needs and nothing else:
+// no storage key, no signed URL, no asset state, and no information about
+// Lessons that are not previewable.
+type PreviewableLesson struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Position int    `json:"position"`
 }
 
 type DetailCourse struct {
@@ -396,6 +413,28 @@ func (r *Repository) projectionQuery(visibility, identifier, suffix string) stri
 					SELECT 1 FROM lineage WHERE lineage.id = ma.preview_origin_revision_id
 				)
 		)
+		-- has_preview is DERIVED during the transition, not migrated.
+		--
+		-- True when the live revision has at least one publicly previewable Lesson
+		-- (the new model), OR when the legacy course-level preview above still
+		-- resolves. Existing catalogue cards keep working without learning anything
+		-- about Lessons, and a Course that has both is reported once rather than
+		-- twice. The legacy arm is not removed when a Lesson preview appears: the
+		-- legacy pointer stays populated as rollback safety, and its retirement is a
+		-- separate later tranche.
+		OR EXISTS (
+			SELECT 1
+			FROM course_sections cs
+			JOIN course_lessons cl ON cl.section_id = cs.id
+			JOIN media_asset_versions lv ON lv.id = cl.video_asset_version_id
+			JOIN media_assets la ON la.id = lv.logical_asset_id
+			WHERE cs.revision_id = cr.id
+			  AND cl.allow_public_preview
+			  AND lv.kind = 'VIDEO'
+			  AND lv.state = 'READY'
+			  AND la.retired_at IS NULL
+			  AND EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = lv.id)
+		)
 		FROM courses c
 		JOIN course_revisions cr ON cr.course_id = c.id
 		JOIN accounts a ON a.id = c.owner_account_id
@@ -501,10 +540,11 @@ func (r *Repository) sections(ctx context.Context, courseID string, arabic bool)
 	}
 	defer rows.Close()
 	sections := make([]Section, 0)
+	sectionIDs := make([]string, 0)
 	found := false
 	for rows.Next() {
 		found = true
-		section, exists, err := scanPublicSection(rows)
+		section, sectionID, exists, err := scanPublicSection(rows)
 		if err != nil {
 			return nil, false, fmt.Errorf("scanning public section: %w", err)
 		}
@@ -512,24 +552,91 @@ func (r *Repository) sections(ctx context.Context, courseID string, arabic bool)
 			continue
 		}
 		sections = append(sections, section)
+		sectionIDs = append(sectionIDs, sectionID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, fmt.Errorf("reading public sections: %w", err)
 	}
+	if len(sections) == 0 {
+		return sections, found, nil
+	}
+	previewable, err := r.previewableLessons(ctx, courseID, arabic)
+	if err != nil {
+		return nil, false, err
+	}
+	for index := range sections {
+		sections[index].Lessons = previewable[sectionIDs[index]]
+	}
 	return sections, found, nil
 }
 
-func scanPublicSection(row interface{ Scan(...any) error }) (Section, bool, error) {
+// previewableLessons lists, per section of the LIVE revision, the Lessons whose
+// video an anonymous visitor may watch.
+//
+// Every condition the public preview resolver later re-proves is applied here
+// too, because a badge offering a preview that the authorization endpoint then
+// refuses is worse than no badge: the Course must be publicly visible, the
+// Lesson must belong to the live revision, the flag must be set, the video must
+// exist, its logical Asset must not be retired, and the media must be READY with
+// canonical renditions. Candidate revision rows cannot appear, because the
+// visibility predicate ties the revision to courses.live_revision_id.
+//
+// READY, not PLAYABLE. A PLAYABLE asset holds an incomplete ladder, and the
+// partial-delivery behaviour that exists for entitled Students is not extended to
+// anonymous visitors.
+func (r *Repository) previewableLessons(
+	ctx context.Context,
+	courseID string,
+	arabic bool,
+) (map[string][]PreviewableLesson, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT cs.id::text, cl.lesson_identity_id::text,
+		       CASE WHEN $1 THEN cl.title_ar ELSE cl.title_en END,
+		       cl.position
+		FROM courses c
+		JOIN course_revisions cr ON cr.course_id = c.id
+		JOIN course_sections cs ON cs.revision_id = cr.id
+		JOIN course_lessons cl ON cl.section_id = cs.id
+		JOIN media_asset_versions mav ON mav.id = cl.video_asset_version_id
+		JOIN media_assets ma ON ma.id = mav.logical_asset_id
+		WHERE `+r.visibility("c", "cr")+` AND c.id = $2::uuid
+		  AND cl.allow_public_preview
+		  AND mav.kind = 'VIDEO'
+		  AND mav.state = 'READY'
+		  AND ma.retired_at IS NULL
+		  AND EXISTS (SELECT 1 FROM video_renditions vr WHERE vr.asset_version_id = mav.id)
+		ORDER BY cs.position, cl.position
+	`, arabic, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("listing publicly previewable lessons: %w", err)
+	}
+	defer rows.Close()
+	previewable := make(map[string][]PreviewableLesson)
+	for rows.Next() {
+		var sectionID string
+		var lesson PreviewableLesson
+		if err := rows.Scan(&sectionID, &lesson.ID, &lesson.Title, &lesson.Position); err != nil {
+			return nil, fmt.Errorf("scanning publicly previewable lesson: %w", err)
+		}
+		previewable[sectionID] = append(previewable[sectionID], lesson)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading publicly previewable lessons: %w", err)
+	}
+	return previewable, nil
+}
+
+func scanPublicSection(row interface{ Scan(...any) error }) (Section, string, bool, error) {
 	var sectionID, title *string
 	var position *int
 	var section Section
 	if err := row.Scan(&sectionID, &title, &position, &section.LessonCount); err != nil {
-		return Section{}, false, err
+		return Section{}, "", false, err
 	}
 	if sectionID == nil {
-		return Section{}, false, nil
+		return Section{}, "", false, nil
 	}
 	section.Title = *title
 	section.Position = *position
-	return section, true, nil
+	return section, *sectionID, true, nil
 }

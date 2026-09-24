@@ -160,19 +160,26 @@ type Section struct {
 }
 
 type Lesson struct {
-	ID                  string       `json:"-"`
-	SectionID           string       `json:"-"`
-	CourseID            string       `json:"course_id"`
-	SectionIdentityID   string       `json:"section_id"`
-	LessonIdentityID    string       `json:"id"`
-	TitleAr             string       `json:"title_ar"`
-	TitleEn             string       `json:"title_en"`
-	Position            int          `json:"position"`
-	VideoAssetVersionID *string      `json:"video_asset_version_id,omitempty"`
-	VideoAssetState     *string      `json:"video_asset_state,omitempty"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
-	Files               []LessonFile `json:"files"`
+	ID                  string  `json:"-"`
+	SectionID           string  `json:"-"`
+	CourseID            string  `json:"course_id"`
+	SectionIdentityID   string  `json:"section_id"`
+	LessonIdentityID    string  `json:"id"`
+	TitleAr             string  `json:"title_ar"`
+	TitleEn             string  `json:"title_en"`
+	Position            int     `json:"position"`
+	VideoAssetVersionID *string `json:"video_asset_version_id,omitempty"`
+	VideoAssetState     *string `json:"video_asset_state,omitempty"`
+	// AllowPublicPreview is revision-scoped intent: an Instructor sets it on a
+	// candidate, it is cloned with the rest of the revision, an Administrator sees
+	// it on the submitted revision, and it only becomes public when that revision
+	// becomes live. It is authorization metadata for the Lesson VIDEO only —
+	// Resource and Lab Material attachments stay entitlement-protected whatever
+	// its value.
+	AllowPublicPreview bool         `json:"allow_public_preview"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
+	Files              []LessonFile `json:"files"`
 }
 
 type LessonFile struct {

@@ -677,15 +677,22 @@ func (r *Repository) CreateCandidate(
 
 			for _, les := range sec.Lessons {
 				var newLesID string
+				// The preview flag is cloned with the rest of the Lesson. It is
+				// revision-scoped, so a candidate must start from exactly what the
+				// revision it is based on declared — dropping it here would silently
+				// withdraw preview from every Course whose Instructor opened a new
+				// candidate, and forcing it true would publish something nobody asked
+				// for.
 				err = tx.QueryRow(ctx, `
 					INSERT INTO course_lessons (
 						section_id, course_id, section_identity_id, lesson_identity_id,
-						title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+						title_ar, title_en, position, video_asset_version_id,
+						allow_public_preview, created_at, updated_at
 					) VALUES (
 						$1::uuid, $2::uuid, $3::uuid, $4::uuid,
-						$5, $6, $7, $8, $9, $9
+						$5, $6, $7, $8, $9, $10, $10
 					) RETURNING id
-				`, newSecID, courseID, sec.SectionIdentityID, les.LessonIdentityID, les.TitleAr, les.TitleEn, les.Position, les.VideoAssetVersionID, now).Scan(&newLesID)
+				`, newSecID, courseID, sec.SectionIdentityID, les.LessonIdentityID, les.TitleAr, les.TitleEn, les.Position, les.VideoAssetVersionID, les.AllowPublicPreview, now).Scan(&newLesID)
 				if err != nil {
 					return fmt.Errorf("cloning lesson %s: %w", les.ID, err)
 				}
@@ -987,7 +994,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	lesQuery := `
 		SELECT cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id,
 		       cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id,
-		       mav.state::text, cl.created_at, cl.updated_at
+		       mav.state::text, cl.allow_public_preview, cl.created_at, cl.updated_at
 		FROM course_lessons cl
 		LEFT JOIN media_asset_versions mav ON mav.id = cl.video_asset_version_id
 		WHERE cl.section_id = ANY($1::uuid[])
@@ -1002,7 +1009,7 @@ func loadRevisionGraphBatch(ctx context.Context, q queryExecer, rev *CourseRevis
 	lessonsBySectionID := make(map[string][]Lesson)
 	for lRows.Next() {
 		var l Lesson
-		if err := lRows.Scan(&l.ID, &l.SectionID, &l.CourseID, &l.SectionIdentityID, &l.LessonIdentityID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.VideoAssetState, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		if err := lRows.Scan(&l.ID, &l.SectionID, &l.CourseID, &l.SectionIdentityID, &l.LessonIdentityID, &l.TitleAr, &l.TitleEn, &l.Position, &l.VideoAssetVersionID, &l.VideoAssetState, &l.AllowPublicPreview, &l.CreatedAt, &l.UpdatedAt); err != nil {
 			lRows.Close()
 			return err
 		}
@@ -1413,10 +1420,10 @@ func (r *Repository) AddLesson(
 		query := `
 			INSERT INTO course_lessons (section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, created_at, updated_at)
 			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $8)
-			RETURNING id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id, created_at, updated_at
+			RETURNING id, section_id, course_id, section_identity_id, lesson_identity_id, title_ar, title_en, position, video_asset_version_id, allow_public_preview, created_at, updated_at
 		`
 		err = tx.QueryRow(ctx, query, secID, req.CourseID, secIdentityID, lesIdentityID, req.TitleAr, req.TitleEn, pos, now).Scan(
-			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.AllowPublicPreview, &les.CreatedAt, &les.UpdatedAt,
 		)
 		if err != nil {
 			return fmt.Errorf("inserting lesson: %w", err)
@@ -1474,10 +1481,10 @@ func (r *Repository) UpdateLesson(
 			FROM course_sections cs
 			WHERE cl.section_id = cs.id AND cs.revision_id = $5::uuid
 			  AND cl.lesson_identity_id = $6::uuid
-			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.created_at, cl.updated_at
+			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.allow_public_preview, cl.created_at, cl.updated_at
 		`
 		err = tx.QueryRow(ctx, query, req.TitleAr, req.TitleEn, req.Position, now, rev.ID, req.LessonID).Scan(
-			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.AllowPublicPreview, &les.CreatedAt, &les.UpdatedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCourseNotFound
@@ -1586,10 +1593,10 @@ func (r *Repository) SetLessonVideo(
 			FROM course_sections cs
 			WHERE cl.section_id = cs.id AND cs.revision_id = $3::uuid
 			  AND cl.lesson_identity_id = $4::uuid
-			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.created_at, cl.updated_at
+			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.allow_public_preview, cl.created_at, cl.updated_at
 		`
 		err = tx.QueryRow(ctx, query, req.VideoAssetVersionID, now, rev.ID, req.LessonID).Scan(
-			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.CreatedAt, &les.UpdatedAt,
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID, &les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.AllowPublicPreview, &les.CreatedAt, &les.UpdatedAt,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCourseNotFound
@@ -1606,6 +1613,119 @@ func (r *Repository) SetLessonVideo(
 		})
 	})
 
+	if err != nil {
+		return nil, err
+	}
+	return &les, nil
+}
+
+// SetLessonPublicPreviewRequest asks for anonymous public preview of one
+// candidate Lesson's video to be allowed or withdrawn.
+type SetLessonPublicPreviewRequest struct {
+	CourseID       string
+	RevisionID     string
+	LessonID       string
+	OwnerAccountID string
+	Allow          bool
+}
+
+// ErrLessonPreviewNeedsVideo means a Lesson was marked publicly previewable while
+// carrying no video. It is rejected rather than accepted and left serving
+// nothing: an Instructor who marked a Lesson previewable should be told it has no
+// video, not left believing they published something.
+var ErrLessonPreviewNeedsVideo = errors.New("lesson public preview requires a lesson video")
+
+// SetLessonPublicPreview sets course_lessons.allow_public_preview on a CANDIDATE
+// revision.
+//
+// It is candidate-only by construction: LockCandidate refuses any revision that
+// is not the Course's editable candidate, so this cannot change what the live
+// revision exposes. The flag becomes public only when an Administrator approves
+// the candidate and it becomes live.
+//
+// The video is required, but READY is deliberately NOT required. A video that is
+// still processing is the normal case while an Instructor is building a Course,
+// and demanding READY here would mean the Instructor had to come back and toggle
+// the control again once processing finished — which is exactly the kind of step
+// people forget, leaving a Course published with no preview they believed they had
+// asked for. Public playback fails closed until the video is READY, so the
+// intent is safe to record early; nothing is exposed by recording it.
+func (r *Repository) SetLessonPublicPreview(
+	ctx context.Context,
+	req SetLessonPublicPreviewRequest,
+	actorDescriptor string,
+) (*Lesson, error) {
+	if req.CourseID == "" || req.RevisionID == "" || req.LessonID == "" || req.OwnerAccountID == "" {
+		return nil, ErrCourseNotFound
+	}
+
+	var les Lesson
+	err := r.ExecTx(ctx, func(tx pgx.Tx) error {
+		courseRow, err := r.LockCourse(ctx, tx, req.CourseID)
+		if err != nil {
+			return err
+		}
+		if courseRow.OwnerAccountID != req.OwnerAccountID {
+			return ErrCourseNotFound
+		}
+		if err := r.checkOwnerActive(ctx, tx, req.OwnerAccountID); err != nil {
+			return err
+		}
+		rev, err := r.LockCandidate(ctx, tx, req.CourseID, req.RevisionID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		// The video requirement is enforced in the same statement that writes the
+		// flag, against the row being written, so there is no window in which a
+		// Lesson could lose its video between the check and the write.
+		query := `
+			UPDATE course_lessons cl
+			SET allow_public_preview = $1, updated_at = $2
+			FROM course_sections cs
+			WHERE cl.section_id = cs.id AND cs.revision_id = $3::uuid
+			  AND cl.lesson_identity_id = $4::uuid
+			  AND ($1 = false OR cl.video_asset_version_id IS NOT NULL)
+			RETURNING cl.id, cl.section_id, cl.course_id, cl.section_identity_id, cl.lesson_identity_id, cl.title_ar, cl.title_en, cl.position, cl.video_asset_version_id, cl.allow_public_preview, cl.created_at, cl.updated_at
+		`
+		err = tx.QueryRow(ctx, query, req.Allow, now, rev.ID, req.LessonID).Scan(
+			&les.ID, &les.SectionID, &les.CourseID, &les.SectionIdentityID, &les.LessonIdentityID,
+			&les.TitleAr, &les.TitleEn, &les.Position, &les.VideoAssetVersionID, &les.AllowPublicPreview,
+			&les.CreatedAt, &les.UpdatedAt,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Either the Lesson is not in this candidate revision, or it has no video
+			// and preview was requested. Distinguish them, because the second is an
+			// actionable authoring error and the first is not.
+			var hasLesson bool
+			if probeErr := tx.QueryRow(ctx, `
+				SELECT true FROM course_lessons cl
+				JOIN course_sections cs ON cs.id = cl.section_id
+				WHERE cs.revision_id = $1::uuid AND cl.lesson_identity_id = $2::uuid
+			`, rev.ID, req.LessonID).Scan(&hasLesson); probeErr != nil {
+				return ErrCourseNotFound
+			}
+			return ErrLessonPreviewNeedsVideo
+		}
+		if err != nil {
+			return fmt.Errorf("setting lesson public preview: %w", err)
+		}
+		action := "LESSON_PUBLIC_PREVIEW_WITHDRAWN"
+		reason := "Lesson public preview withdrawn from the candidate revision"
+		if req.Allow {
+			action = "LESSON_PUBLIC_PREVIEW_ALLOWED"
+			reason = "Lesson public preview allowed on the candidate revision"
+		}
+		return writeInstructorAudit(ctx, tx, instructorAuditRequest{
+			accountID: req.OwnerAccountID, actorDescriptor: actorDescriptor,
+			action: action, targetType: "LESSON", targetID: les.LessonIdentityID,
+			reason: reason, metadata: map[string]any{
+				"course_id": req.CourseID, "revision_id": rev.ID,
+				"allow_public_preview": req.Allow,
+			},
+		})
+	})
 	if err != nil {
 		return nil, err
 	}
