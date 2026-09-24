@@ -474,12 +474,13 @@ type Config struct {
 	maxUploadSizeBytes  int64
 	playbackTokenSecret Secret
 
-	ffmpegBinaryPath          string
-	ffprobeBinaryPath         string
-	mediaProcessingTimeout    time.Duration
-	mediaTranscodeConcurrency int
-	mediaOperatingMode        MediaOperatingMode
-	mediaScannerMode          MediaScannerMode
+	ffmpegBinaryPath                    string
+	ffprobeBinaryPath                   string
+	mediaProcessingTimeout              time.Duration
+	mediaTranscodeConcurrency           int
+	mediaAutoEnhancementRecoveryEnabled bool
+	mediaOperatingMode                  MediaOperatingMode
+	mediaScannerMode                    MediaScannerMode
 
 	authFakeMode        bool
 	salesWhatsAppNumber string
@@ -562,10 +563,16 @@ func (c *Config) PlaybackURLExpiry() time.Duration { return c.playbackURLExpiry 
 func (c *Config) MaxUploadSizeBytes() int64        { return c.maxUploadSizeBytes }
 func (c *Config) PlaybackTokenSecret() Secret      { return c.playbackTokenSecret }
 
-func (c *Config) FFmpegBinaryPath() string               { return c.ffmpegBinaryPath }
-func (c *Config) FFprobeBinaryPath() string              { return c.ffprobeBinaryPath }
-func (c *Config) MediaProcessingTimeout() time.Duration  { return c.mediaProcessingTimeout }
-func (c *Config) MediaTranscodeConcurrency() int         { return c.mediaTranscodeConcurrency }
+func (c *Config) FFmpegBinaryPath() string              { return c.ffmpegBinaryPath }
+func (c *Config) FFprobeBinaryPath() string             { return c.ffprobeBinaryPath }
+func (c *Config) MediaProcessingTimeout() time.Duration { return c.mediaProcessingTimeout }
+func (c *Config) MediaTranscodeConcurrency() int        { return c.mediaTranscodeConcurrency }
+
+// MediaAutoEnhancementRecoveryEnabled reports whether the 3C-C automatic
+// enhancement recovery reconciler may run. It defaults to false everywhere.
+func (c *Config) MediaAutoEnhancementRecoveryEnabled() bool {
+	return c.mediaAutoEnhancementRecoveryEnabled
+}
 func (c *Config) MediaOperatingMode() MediaOperatingMode { return c.mediaOperatingMode }
 func (c *Config) MediaScannerMode() MediaScannerMode     { return c.mediaScannerMode }
 
@@ -692,8 +699,13 @@ func LoadFrom(lookup Lookup, resolver SecretResolver) (*Config, error) {
 		ffprobeBinaryPath:         p.str("FFPROBE_BINARY_PATH", "ffprobe"),
 		mediaProcessingTimeout:    p.duration("MEDIA_PROCESSING_TIMEOUT", 15*time.Minute),
 		mediaTranscodeConcurrency: int(p.integer("MEDIA_TRANSCODE_CONCURRENCY", 2)),
-		mediaOperatingMode:        MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
-		mediaScannerMode:          MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
+		// Phase 3C-C automatic enhancement recovery. False in EVERY environment,
+		// including development: it may not be enabled in production until one
+		// legitimate real 3C-B manual recovery has been observed end to end, and a
+		// development default of true would make that rule easy to forget.
+		mediaAutoEnhancementRecoveryEnabled: p.boolean("MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED", false),
+		mediaOperatingMode:                  MediaOperatingMode(p.str("MEDIA_OPERATING_MODE", string(MediaOperatingModeScanner))),
+		mediaScannerMode:                    MediaScannerMode(p.str("MEDIA_SCANNER_MODE", string(MediaScannerModeUnavailable))),
 
 		authFakeMode:        p.boolean("AUTH_FAKE_MODE", false),
 		salesWhatsAppNumber: p.str("SALES_WHATSAPP_NUMBER", ""),

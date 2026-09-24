@@ -77,6 +77,28 @@ func main() {
 		}
 	}
 
+	// Phase 3C-C automatic enhancement recovery is a SEPARATE capability gate, not
+	// a reason to raise the media floor. The base floor stays at 42: a worker
+	// serving media correctly on 42 must not be refused for a capability it is not
+	// configured to use.
+	//
+	// When the flag IS set, schema 45 is required and the check fails closed. A
+	// worker that started anyway would look like automatic recovery was running
+	// while no candidate could ever be scheduled, which is worse than not starting.
+	autoRecoveryStateAvailable := false
+	{
+		startupCtx, cancel := context.WithTimeout(ctx, cfg.ReadinessTimeout())
+		err := db.CheckSchemaAtLeast(startupCtx, pool, db.AutoEnhancementRecoverySchemaVersion)
+		cancel()
+		switch {
+		case err == nil:
+			autoRecoveryStateAvailable = true
+		case cfg.MediaAutoEnhancementRecoveryEnabled():
+			exitWorker(logger, "media_auto_recovery_schema_check", logging.ErrorClassOf(err))
+			return
+		}
+	}
+
 	storageClient, err := storage.New(ctx, storage.Options{
 		Endpoint:        cfg.S3Endpoint(),
 		PresignEndpoint: cfg.S3PresignEndpoint(),
@@ -143,6 +165,17 @@ func main() {
 				Active: observation.Active, Limit: observation.Limit, Outcome: observation.Outcome,
 			})
 		},
+		AutoRecoveryStateAvailable:     autoRecoveryStateAvailable,
+		AutoEnhancementRecoveryEnabled: cfg.MediaAutoEnhancementRecoveryEnabled(),
+		ObserveAutoRecovery: func(observation media.AutoRecoveryObservation) {
+			logger.MediaAutoRecovery(logging.MediaAutoRecoveryEvent{
+				Phase: string(observation.Phase), AssetVersionID: observation.AssetVersionID,
+				IntentID: observation.IntentID, OperationID: observation.OperationID,
+				AttemptNumber: observation.AttemptNumber, ConsecutiveFailures: observation.Failures,
+				FailureCategory:      observation.FailureCategory,
+				NextAttemptInSeconds: int(observation.NextAttemptIn / time.Second),
+			})
+		},
 	})
 	if err != nil {
 		exitWorker(logger, "media_worker_build", logging.ErrorClassOf(err))
@@ -207,6 +240,17 @@ func main() {
 		defer close(mediaRecoveryDone)
 		runMediaRecovery(ctx, worker, logger)
 	}()
+	// Sibling of the stale-media recovery loop above, and started ONLY when the
+	// flag and the schema both permit it. When it is not started nothing about
+	// automatic recovery runs: no candidate query, no scheduler write, no outbox
+	// intent.
+	autoRecoveryDone := make(chan struct{})
+	go func() {
+		defer close(autoRecoveryDone)
+		if worker.AutoEnhancementRecoveryEnabled() {
+			runMediaAutoEnhancementRecovery(ctx, worker, logger)
+		}
+	}()
 	emailDispatcherDone := make(chan struct{})
 	go func() {
 		defer close(emailDispatcherDone)
@@ -220,6 +264,7 @@ func main() {
 	server.Shutdown()
 	<-dispatcherDone
 	<-mediaRecoveryDone
+	<-autoRecoveryDone
 	<-emailDispatcherDone
 	<-thumbnailCleanupDone
 	logger.WorkerLifecycle(logging.WorkerStopped)
@@ -321,6 +366,33 @@ func runMediaDispatcher(ctx context.Context, dispatcher *media.Dispatcher, logge
 		if _, err := dispatcher.DispatchPending(ctx, 50); err != nil {
 			logger.WorkerFailed(logging.WorkerFailureEvent{
 				Operation: "media_outbox_dispatch", ErrorClass: logging.ErrorClassOf(err), RetryCount: -1, MaxRetry: -1,
+			})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// runMediaAutoEnhancementRecovery is the 3C-C reconciler: a worker-local sibling
+// of runMediaRecovery, on the same interval and batch size, because the work it
+// does is the same shape — a bounded scan of durable database state that
+// converges whether one worker runs it or several do.
+//
+// It is never the source of correctness. Every decision it makes is a
+// compare-and-set against state 0045 owns, so a second reconciler on another
+// worker produces one intent rather than two, and a reconciler that dies mid-pass
+// loses nothing.
+func runMediaAutoEnhancementRecovery(ctx context.Context, worker *media.Worker, logger *logging.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		if _, err := worker.ScheduleAutoEnhancementRecovery(ctx, 25); err != nil && !errors.Is(err, context.Canceled) {
+			logger.WorkerFailed(logging.WorkerFailureEvent{
+				Operation: "media_auto_enhancement_recovery", ErrorClass: logging.ErrorClassOf(err),
+				RetryCount: -1, MaxRetry: -1,
 			})
 		}
 		select {

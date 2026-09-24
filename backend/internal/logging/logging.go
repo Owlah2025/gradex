@@ -383,6 +383,43 @@ func (l *Logger) WorkerTranscode(ev WorkerTranscodeEvent) {
 	l.slog.Info("media_transcode", attrs...)
 }
 
+// MediaAutoRecoveryEvent is safe telemetry for the 3C-C automatic enhancement
+// recovery runtime. Every field is an identity or a closed classification: there
+// is deliberately no storage key, signed URL, checksum, token, or raw error text,
+// because this stream describes media the operator may not be entitled to see.
+type MediaAutoRecoveryEvent struct {
+	Phase                string
+	AssetVersionID       string
+	IntentID             string
+	OperationID          string
+	AttemptNumber        int
+	ConsecutiveFailures  int
+	FailureCategory      string
+	NextAttemptInSeconds int
+}
+
+func (l *Logger) MediaAutoRecovery(ev MediaAutoRecoveryEvent) {
+	attrs := []any{
+		slog.String("phase", Sanitize(ev.Phase)),
+		slog.String("asset_version_id", Sanitize(ev.AssetVersionID)),
+		slog.Int("attempt_number", ev.AttemptNumber),
+		slog.Int("consecutive_failures", ev.ConsecutiveFailures),
+	}
+	if ev.IntentID != "" {
+		attrs = append(attrs, slog.String("auto_recovery_intent_id", Sanitize(ev.IntentID)))
+	}
+	if ev.OperationID != "" {
+		attrs = append(attrs, slog.String("operation_id", Sanitize(ev.OperationID)))
+	}
+	if ev.FailureCategory != "" {
+		attrs = append(attrs, slog.String("failure_category", Sanitize(ev.FailureCategory)))
+	}
+	if ev.NextAttemptInSeconds > 0 {
+		attrs = append(attrs, slog.Int("next_attempt_in_seconds", ev.NextAttemptInSeconds))
+	}
+	l.slog.Info("media_auto_enhancement_recovery", attrs...)
+}
+
 // WorkerFailureEvent identifies a failed worker operation. ErrorClass is a
 // type or a closed classification, never raw error text; task IDs remain
 // stable across Asynq retries and provide correlation without exposing job
