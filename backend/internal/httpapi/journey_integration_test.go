@@ -63,9 +63,16 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	if err != nil {
 		t.Fatalf("loading journey settings: %v", err)
 	}
+	// The trusted-device authority is wired the way cmd/api wires it. Proving a
+	// verification code authenticates the Student in the activating transaction,
+	// and AuthenticateVerifiedAccount refuses to mint a Student session without
+	// device admission, so the journey cannot reach an activated session at all
+	// without it. See testDeviceAuthority.
+	journeyDevices := testDeviceAuthority(t, pool)
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
 		Pool: pool, Settings: journeyConfig.Sessions(),
 		CSRFKey: bytes.Repeat([]byte{0x61}, 32), Now: time.Now,
+		Devices: journeyDevices,
 	})
 	if err != nil {
 		t.Fatalf("constructing session repository: %v", err)
@@ -133,6 +140,12 @@ func realJourneyRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	if err != nil {
 		t.Fatalf("constructing recovery foundation: %v", err)
 	}
+	// cmd/api attaches the same authority to all three after construction,
+	// because the device service and the session authority are mutually
+	// dependent. Registration verification and password recovery both admit or
+	// revoke devices, so neither may hold a nil authority here.
+	admissionFoundation.AttachDevices(journeyDevices)
+	recoveryFoundation.AttachDevices(journeyDevices)
 
 	sessionFoundation, err := NewSessionFoundation(SessionFoundationOptions{
 		PublicOrigin:        "https://gradex.example",

@@ -311,7 +311,7 @@ func TestBundleConfirmationFailureRollsBackEveryGrant(t *testing.T) {
 	}
 }
 
-func TestCourseConfirmationStillRequiresStudentInvitationAcceptance(t *testing.T) {
+func TestCourseConfirmationGrantsAccessDirectlyAndStaysDistinctFromBundle(t *testing.T) {
 	_, pool, adminID, _, courseID, _, _ := setupAdminAccessAPIServer(t)
 	ctx := context.Background()
 	const revisionID = "25000000-0000-0000-0000-000000000001"
@@ -347,15 +347,81 @@ func TestCourseConfirmationStillRequiresStudentInvitationAcceptance(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if confirmed.PurchaseRequest.State != access.PurchaseRequestInvitationCreated || confirmed.Invitation == nil || len(confirmed.BundleGrants) != 0 {
-		t.Fatalf("Course confirmation changed semantics: %#v", confirmed)
+	// Admin payment confirmation IS the grant for a COURSE purchase. It reaches
+	// ACCESS_GRANTED in one step, creates no invitation, and produces exactly one
+	// CourseGrant. The Student is never asked to accept an invitation for
+	// something they have already paid for.
+	if confirmed.PurchaseRequest.State != access.PurchaseRequestAccessGranted {
+		t.Fatalf("Course confirmation state = %q, want %q: %#v",
+			confirmed.PurchaseRequest.State, access.PurchaseRequestAccessGranted, confirmed)
 	}
-	var entitlements int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM entitlements WHERE student_account_id=$1::uuid AND course_id=$2::uuid`, bundlePurchaseStudentID, courseID).Scan(&entitlements); err != nil {
+	if confirmed.Invitation != nil || confirmed.PurchaseRequest.InvitationID != nil {
+		t.Fatalf("direct Course grant created an invitation: %#v", confirmed)
+	}
+	if confirmed.CourseGrant == nil || confirmed.CourseGrant.CourseID != courseID ||
+		confirmed.CourseGrant.EntitlementID == "" || confirmed.CourseGrant.Disposition != "GRANTED" {
+		t.Fatalf("direct Course grant = %#v", confirmed.CourseGrant)
+	}
+	// The Bundle result set stays empty. A COURSE confirmation and a BUNDLE
+	// confirmation are separate contracts, and this test is the boundary between
+	// them: a COURSE grant must never arrive through the Bundle path.
+	if len(confirmed.BundleGrants) != 0 {
+		t.Fatalf("Course confirmation produced %d Bundle grants", len(confirmed.BundleGrants))
+	}
+
+	// The durable side is the part that actually gives access: exactly one
+	// ACTIVE COURSE Entitlement whose provenance is the purchase request and not
+	// an invitation, one enrollment, and no invitation row anywhere.
+	var entitlements, enrollments, invitations, directProvenance int
+	var grantSource, entitlementState string
+	if err := pool.QueryRow(ctx, `
+		SELECT (SELECT count(*) FROM entitlements WHERE student_account_id=$1::uuid AND course_id=$2::uuid),
+		       (SELECT count(*) FROM enrollments WHERE student_account_id=$1::uuid AND course_id=$2::uuid),
+		       (SELECT count(*) FROM course_access_invitations WHERE course_id=$2::uuid),
+		       (SELECT count(*) FROM entitlements
+		         WHERE student_account_id=$1::uuid AND course_id=$2::uuid
+		           AND source_purchase_request_id=$3::uuid AND source_invitation_id IS NULL),
+		       (SELECT grant_source FROM entitlements WHERE student_account_id=$1::uuid AND course_id=$2::uuid),
+		       (SELECT state::text FROM entitlements WHERE student_account_id=$1::uuid AND course_id=$2::uuid)
+	`, bundlePurchaseStudentID, courseID, request.ID).Scan(
+		&entitlements, &enrollments, &invitations, &directProvenance, &grantSource, &entitlementState,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if entitlements != 0 {
-		t.Fatalf("Course confirmation granted %d entitlements before Student acceptance", entitlements)
+	if entitlements != 1 || enrollments != 1 || invitations != 0 || directProvenance != 1 {
+		t.Fatalf("direct grant durable state: entitlements=%d enrollments=%d invitations=%d direct_provenance=%d",
+			entitlements, enrollments, invitations, directProvenance)
+	}
+	if grantSource != "PURCHASE_REQUEST" || entitlementState != "ACTIVE" {
+		t.Fatalf("direct grant Entitlement grant_source=%q state=%q", grantSource, entitlementState)
+	}
+
+	// Confirming again is idempotent, not a second grant. An Administrator who
+	// double-submits must not duplicate the Entitlement or silently extend the
+	// access window, and must be told about the access the Student actually
+	// holds rather than receiving a conflict they cannot act on.
+	repeated, err := repo.ConfirmPurchaseRequest(ctx, access.ConfirmPurchaseRequestParams{
+		PurchaseRequestID: request.ID, AdminAccountID: adminID, Now: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("repeating a granted COURSE confirmation: %v", err)
+	}
+	if repeated.PurchaseRequest.State != access.PurchaseRequestAccessGranted || repeated.Invitation != nil ||
+		repeated.CourseGrant == nil || repeated.CourseGrant.EntitlementID != confirmed.CourseGrant.EntitlementID {
+		t.Fatalf("repeated confirmation = %#v, want the same Entitlement %q",
+			repeated, confirmed.CourseGrant.EntitlementID)
+	}
+	if !repeated.CourseGrant.ResultingAccessEndsAt.Equal(confirmed.CourseGrant.ResultingAccessEndsAt) {
+		t.Fatalf("repeated confirmation moved access from %s to %s",
+			confirmed.CourseGrant.ResultingAccessEndsAt, repeated.CourseGrant.ResultingAccessEndsAt)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM entitlements WHERE student_account_id=$1::uuid AND course_id=$2::uuid`,
+		bundlePurchaseStudentID, courseID).Scan(&entitlements); err != nil {
+		t.Fatal(err)
+	}
+	if entitlements != 1 {
+		t.Fatalf("repeated confirmation produced %d entitlements", entitlements)
 	}
 }
 

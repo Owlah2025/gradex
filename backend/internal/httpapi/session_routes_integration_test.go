@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -24,11 +25,43 @@ import (
 	"github.com/Owlah2025/gradex/backend/internal/config"
 	"github.com/Owlah2025/gradex/backend/internal/identity"
 	"github.com/Owlah2025/gradex/backend/internal/logging"
+	"github.com/Owlah2025/gradex/backend/internal/outbox"
 	"github.com/Owlah2025/gradex/backend/internal/problem"
 	"github.com/Owlah2025/gradex/backend/internal/ratelimit"
 )
 
 const httpSessionPassword = "correct session login passphrase 9"
+
+// testDeviceAuthority is the trusted-device authority a Student session cannot
+// be created without.
+//
+// D-109 made device admission part of the login transaction: a successful
+// password login trusts the browser's credential and binds the new family as
+// TRUSTED in the same transaction. SessionRepository.admitDevice therefore fails
+// closed with ErrDeviceTrustUnavailable when no device authority is wired, and
+// insertSessionFamily refuses a Student family that carries no established
+// trust. That is deliberate — a Student session with no device binding would
+// reach protected playback with nothing to bind the lease to — so a fixture that
+// omits the authority is not testing a relaxed configuration, it is testing a
+// configuration production refuses to run. cmd/api wires exactly this through
+// AttachDevices; these routers wire it at construction.
+func testDeviceAuthority(t *testing.T, pool *pgxpool.Pool) *identity.DeviceService {
+	t.Helper()
+	writer, err := outbox.NewWriter("test-v1", bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatalf("constructing device outbox writer: %v", err)
+	}
+	devices, err := identity.NewDeviceService(identity.DeviceServiceOptions{
+		Pool: pool, Outbox: writer,
+		Policy: identity.DevicePolicy{TrustedDeviceLimit: 2, ReplacementCooldown: 24 * time.Hour},
+		Pepper: config.NewSecret(string(bytes.Repeat([]byte{0x71}, 32))),
+		OTPTTL: 10 * time.Minute, Now: time.Now, Random: rand.Reader,
+	})
+	if err != nil {
+		t.Fatalf("constructing device authority: %v", err)
+	}
+	return devices
+}
 
 func realSessionRouter(t *testing.T, pool *pgxpool.Pool) *gin.Engine {
 	t.Helper()
@@ -57,6 +90,7 @@ func realSessionRouterWithScreening(
 	repository, err := identity.NewSessionRepository(identity.SessionRepositoryOptions{
 		Pool: pool, Settings: cfg.Sessions(),
 		CSRFKey: bytes.Repeat([]byte{0x61}, 32), Now: time.Now,
+		Devices: testDeviceAuthority(t, pool),
 	})
 	if err != nil {
 		t.Fatalf("constructing session repository: %v", err)
