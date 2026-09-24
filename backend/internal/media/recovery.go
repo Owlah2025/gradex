@@ -196,6 +196,9 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 	}
 	defer tx.Rollback(ctx)
 	var work staleWork
+	// autoRecovered is filled in only when a stale PLAYABLE claim turned out to be
+	// a linked automatic recovery execution. It is emitted after the commit.
+	var autoRecovered AutoRecoveryObservation
 	// leaseStillLive is computed by PostgreSQL inside this transaction, against
 	// the row this statement has just locked. Reading the timestamp out and
 	// comparing it in Go would reintroduce the worker clock as the authority for
@@ -237,12 +240,15 @@ func (w *Worker) recoverOne(ctx context.Context, assetVersionID string) (bool, e
 			return false, err
 		}
 	} else if work.state == StatePlayable {
-		if err := w.recoverStalePlayable(ctx, tx, work); err != nil {
+		if err := w.recoverStalePlayable(ctx, tx, work, &autoRecovered); err != nil {
 			return false, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("committing stale media recovery: %w", err)
+	}
+	if autoRecovered.Phase != "" {
+		w.observeAutoRecovery(autoRecovered)
 	}
 	if (work.state == StateProcessing || work.state == StatePlayable) && work.token != nil {
 		// Data correctness no longer depends on this prefix: the recovered
@@ -370,14 +376,15 @@ func (w *Worker) recoverStaleProcessing(ctx context.Context, tx pgx.Tx, work sta
 	})
 }
 
-func (w *Worker) recoverStalePlayable(ctx context.Context, tx pgx.Tx, work staleWork) error {
+func (w *Worker) recoverStalePlayable(ctx context.Context, tx pgx.Tx, work staleWork, observed *AutoRecoveryObservation) error {
 	if work.token == nil || work.processingKind == nil {
 		return errors.New("claimed PLAYABLE operation lacks durable processing kind")
 	}
 	operationID := *work.token
+	attribution := w.autoRecoveryAttribution()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason)
-		VALUES ($1::uuid,$2,'FAILED',$3::media_processing_attempt_kind,0,'worker lease expired before processing completion')
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason`+attribution.column+`)
+		VALUES ($1::uuid,$2,'FAILED',$3::media_processing_attempt_kind,0,'worker lease expired before processing completion'`+attribution.value+`)
 		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
 	`, work.id, operationID, *work.processingKind); err != nil {
 		return fmt.Errorf("recording interrupted processing attempt: %w", err)
@@ -391,6 +398,32 @@ func (w *Worker) recoverStalePlayable(ctx context.Context, tx pgx.Tx, work stale
 		WHERE id=$1::uuid AND state='PLAYABLE'
 	`, work.id); err != nil {
 		return fmt.Errorf("clearing claim for interrupted playable: %w", err)
+	}
+	// This is the crash-survival edge of the linkage. The worker that took the
+	// claim is gone, so it will never report its own outcome — but the claim token
+	// IS the operation id the scheduler row was bound to, so the interrupted
+	// automatic attempt is still attributable here, in the same transaction that
+	// terminalises it. Without this an automatic intent would stay EXECUTING
+	// forever after a crash.
+	//
+	// WORKER_INTERRUPTED is a budgeted category, so this charges an attempt unless
+	// the operation had already committed a new canonical rung, which counts as
+	// progress and resets the budget instead.
+	if w.autoRecoveryStateAvailable {
+		observation, err := reconcileAutoRecoveryFailure(ctx, tx, autoRecoveryOutcome{
+			assetVersionID: work.id, operationID: operationID,
+			category: failureWorkerInterrupted,
+		})
+		if err != nil {
+			return err
+		}
+		if observation.Phase != "" {
+			// Handed back to recoverOne so it is emitted after the commit. It is not
+			// stashed on the Worker: several recoveries can be in flight, and shared
+			// mutable telemetry state would be both a data race and a way to report
+			// one asset's outcome against another's.
+			*observed = observation
+		}
 	}
 	return nil
 }

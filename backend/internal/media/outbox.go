@@ -39,14 +39,48 @@ func appendTranscodeWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer
 	return nil
 }
 
+// enhancementSchedule is one enhancement intent. Manual work supplies only the
+// Asset Version and keeps the existing behaviour byte for byte; automatic work
+// additionally supplies the intent identity, which is also the event id, so the
+// scheduler row and the event that carries it share one committed identity.
+type enhancementSchedule struct {
+	assetVersionID       string
+	eventID              string
+	correlation          string
+	availableAt          *time.Time
+	autoRecoveryIntentID string
+}
+
 func appendEnhancementWork(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, assetVersionID string) error {
-	eventID := uuid.NewString()
-	work := EnhancementWork{AssetVersionID: assetVersionID}
+	return appendEnhancementWorkAt(ctx, tx, writer, enhancementSchedule{assetVersionID: assetVersionID})
+}
+
+func appendEnhancementWorkAt(ctx context.Context, tx pgx.Tx, writer *outbox.Writer, schedule enhancementSchedule) error {
+	eventID := schedule.eventID
+	if eventID == "" {
+		eventID = uuid.NewString()
+	}
+	// Manual correlation stays the event id. The already-deployed 3C-B path
+	// writes it that way, and changing it would alter live behaviour to gain
+	// nothing that the automatic correlation below does not already give.
+	correlation := schedule.correlation
+	if correlation == "" {
+		correlation = eventID
+	}
+	work := EnhancementWork{
+		AssetVersionID:       schedule.assetVersionID,
+		AutoRecoveryIntentID: schedule.autoRecoveryIntentID,
+	}
+	safe := map[string]any{"asset_version_id": schedule.assetVersionID}
+	if schedule.autoRecoveryIntentID != "" {
+		safe["auto_recovery_intent_id"] = schedule.autoRecoveryIntentID
+	}
 	_, err := writer.Append(ctx, tx, outbox.Event{
 		ID: eventID, Type: "media.enhancement_requested", SchemaVersion: 1,
 		SourceModule: mediaSourceModule, AggregateType: "MEDIA_ASSET_VERSION",
-		AggregateID: assetVersionID, AggregateRevision: 1, CorrelationID: eventID,
-		SafePayload: map[string]any{"asset_version_id": assetVersionID},
+		AggregateID: schedule.assetVersionID, AggregateRevision: 1, CorrelationID: correlation,
+		AvailableAt: schedule.availableAt,
+		SafePayload: safe,
 	}, work)
 	if err != nil {
 		return fmt.Errorf("writing media enhancement outbox intent: %w", err)

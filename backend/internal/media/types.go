@@ -200,6 +200,16 @@ type ScanWork struct {
 // worker execution rather than queue creation.
 type EnhancementWork struct {
 	AssetVersionID string `json:"asset_version_id"`
+	// AutoRecoveryIntentID is the automatic recovery intent that asked for this
+	// work, and is also the id of the outbox event that carries it.
+	//
+	// It is optional, and omitted entirely for manual work. That is what keeps
+	// the already-deployed 3C-B payload shape valid: a task carrying only
+	// asset_version_id decodes to an empty intent here and is manual by
+	// definition, which is exactly what it is. Automatic work always carries it,
+	// and the worker refuses an intent the authoritative scheduler row no longer
+	// names rather than treating an unrecognised one as manual.
+	AutoRecoveryIntentID string `json:"auto_recovery_intent_id,omitempty"`
 }
 
 type TranscodeWork struct {

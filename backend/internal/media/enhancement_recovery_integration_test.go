@@ -347,7 +347,7 @@ func TestExpiredEnhancementClaimRecordsKindAndClosesRollbackFloor(t *testing.T) 
 			f, worker, versionID := seedPlayableEnhancementAsset(t, []string{"1080p"})
 			operationID := uuid.NewString()
 			var store *mockStorageClient
-			if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID); err != nil || !claimed {
+			if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID, ""); err != nil || !claimed {
 				t.Fatalf("beginEnhancement claimed=%t err=%v", claimed, err)
 			}
 			if committedRung {
@@ -423,7 +423,7 @@ func TestFinalizationCrashClassification(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f, worker, versionID := seedPlayableEnhancementAsset(t, []string{"1080p", "720p", "480p", "240p"})
 			operationID := uuid.NewString()
-			if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID); err != nil || !claimed {
+			if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID, ""); err != nil || !claimed {
 				t.Fatalf("beginEnhancement claimed=%t err=%v", claimed, err)
 			}
 			kind := "ENHANCEMENT"
@@ -470,7 +470,7 @@ func TestFailedEnhancementCleanupPreservesCanonicalOutput(t *testing.T) {
 	store := newMockStorageClient()
 	worker.process = &mockCleanerProcessor{store: store}
 	operationID := uuid.NewString()
-	if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID); err != nil || !claimed {
+	if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID, ""); err != nil || !claimed {
 		t.Fatalf("beginEnhancement claimed=%t err=%v", claimed, err)
 	}
 	prefix := processingOutputPrefix(versionID, operationID)
@@ -502,7 +502,7 @@ func TestLostEnhancementClaimCannotPersistOrFinalize(t *testing.T) {
 	t.Run("canonical persistence", func(t *testing.T) {
 		f, worker, versionID := seedPlayableEnhancementAsset(t, []string{"1080p"})
 		operationID := uuid.NewString()
-		if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID); err != nil || !claimed {
+		if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID, ""); err != nil || !claimed {
 			t.Fatalf("beginEnhancement claimed=%t err=%v", claimed, err)
 		}
 		expireLease(t, f, versionID)
@@ -522,7 +522,7 @@ func TestLostEnhancementClaimCannotPersistOrFinalize(t *testing.T) {
 	t.Run("READY finalization", func(t *testing.T) {
 		f, worker, versionID := seedPlayableEnhancementAsset(t, []string{"1080p", "720p", "480p", "240p"})
 		operationID := uuid.NewString()
-		if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID); err != nil || !claimed {
+		if _, claimed, err := worker.beginEnhancement(f.ctx, versionID, operationID, ""); err != nil || !claimed {
 			t.Fatalf("beginEnhancement claimed=%t err=%v", claimed, err)
 		}
 		if err := worker.beginFinalization(f.ctx, versionID, operationID); err != nil {

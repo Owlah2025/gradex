@@ -31,6 +31,18 @@ type Worker struct {
 	now               func() time.Time
 	transcodeGate     *concurrencyGate
 	observeTranscode  TranscodeObserver
+
+	// autoRecoveryStateAvailable is true when the database is at schema 45 or
+	// later, so media_auto_enhancement_recovery exists. The media worker's base
+	// floor stays at 42, so this is a separate capability rather than a startup
+	// requirement: a worker serving media correctly on 42 must not be refused for
+	// a capability it does not use.
+	autoRecoveryStateAvailable bool
+	// autoRecoveryEnabled is MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED. It defaults
+	// to false in every environment and is only ever true where it has been set
+	// deliberately.
+	autoRecoveryEnabled   bool
+	observeAutoRecoveryFn AutoRecoveryObserver
 }
 
 // TranscodePhase identifies the bounded lifecycle observations emitted around
@@ -65,6 +77,14 @@ type WorkerOptions struct {
 	TranscodeConcurrency int
 	ObserveTranscode     TranscodeObserver
 	Now                  func() time.Time
+
+	// AutoRecoveryStateAvailable reports that the schema carries the automatic
+	// recovery state 0045 introduces.
+	AutoRecoveryStateAvailable bool
+	// AutoEnhancementRecoveryEnabled is the feature flag. False everywhere unless
+	// set deliberately; tests set it explicitly.
+	AutoEnhancementRecoveryEnabled bool
+	ObserveAutoRecovery            AutoRecoveryObserver
 }
 
 func NewWorker(options WorkerOptions) (*Worker, error) {
@@ -105,10 +125,22 @@ func NewWorker(options WorkerOptions) (*Worker, error) {
 	if concurrency < 0 {
 		return nil, errors.New("media transcode concurrency must be positive")
 	}
+	// Fail closed rather than silently doing nothing. Someone who set the flag
+	// against a schema that cannot hold the scheduler state has made a deployment
+	// mistake, and a worker that started anyway would look like automatic recovery
+	// was running when no candidate could ever be scheduled.
+	if options.AutoEnhancementRecoveryEnabled && !options.AutoRecoveryStateAvailable {
+		return nil, fmt.Errorf(
+			"%w: automatic enhancement recovery requires schema %d or later",
+			ErrValidation, 45)
+	}
 	return &Worker{
 		db: options.DB, scanner: options.Scanner, process: options.Process, outbox: options.Outbox,
 		processingTimeout: timeout, workLeaseDuration: lease, now: now,
 		transcodeGate: newConcurrencyGate(concurrency), observeTranscode: options.ObserveTranscode,
+		autoRecoveryStateAvailable: options.AutoRecoveryStateAvailable,
+		autoRecoveryEnabled:        options.AutoEnhancementRecoveryEnabled,
+		observeAutoRecoveryFn:      options.ObserveAutoRecovery,
 	}, nil
 }
 
@@ -197,8 +229,12 @@ func (w *Worker) handleEnhancementTask(ctx context.Context, task *asynq.Task) er
 	}
 	processingCtx, cancel := context.WithTimeout(ctx, w.processingTimeout)
 	defer cancel()
-	err := w.RetryEnhancements(processingCtx, work.AssetVersionID)
-	if errors.Is(err, ErrEnhancementNotEligible) || errors.Is(err, ErrEnhancementActive) {
+	err := w.RetryEnhancementsForIntent(processingCtx, work.AssetVersionID, work.AutoRecoveryIntentID)
+	// A superseded intent is acknowledged rather than retried. Retrying it would
+	// mean re-delivering a task the authoritative scheduler row has already
+	// replaced, which can never succeed and would keep the queue busy denying it.
+	if errors.Is(err, ErrEnhancementNotEligible) || errors.Is(err, ErrEnhancementActive) ||
+		errors.Is(err, ErrEnhancementIntentSuperseded) {
 		return nil
 	}
 	return err
@@ -530,6 +566,14 @@ func (w *Worker) Transcode(ctx context.Context, assetVersionID, operationID stri
 // carries only the Asset Version; claim, source proof, ladder planning and
 // operation identity are all decided against current database/storage truth.
 func (w *Worker) RetryEnhancements(ctx context.Context, assetVersionID string) error {
+	return w.RetryEnhancementsForIntent(ctx, assetVersionID, "")
+}
+
+// RetryEnhancementsForIntent executes one recovery intent. An empty intent id is
+// manual work — the Admin action, and every task written before 3C-C — and a
+// present one is an automatic intent whose identity must still be authoritative
+// when the claim is taken.
+func (w *Worker) RetryEnhancementsForIntent(ctx context.Context, assetVersionID, intentID string) error {
 	operationID := ""
 	started := false
 	err := w.transcodeGate.run(ctx, func() error {
@@ -539,7 +583,7 @@ func (w *Worker) RetryEnhancements(ctx context.Context, assetVersionID string) e
 			Phase: TranscodeStarted, OperationID: operationID,
 			Active: w.transcodeGate.Active(), Limit: w.transcodeGate.Limit(),
 		})
-		return w.retryEnhancements(ctx, assetVersionID, operationID)
+		return w.retryEnhancements(ctx, assetVersionID, operationID, intentID)
 	})
 	if started {
 		w.notifyTranscode(TranscodeObservation{
@@ -551,13 +595,20 @@ func (w *Worker) RetryEnhancements(ctx context.Context, assetVersionID string) e
 	return err
 }
 
-func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operationID string) error {
+func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operationID, intentID string) error {
 	processor, ok := w.process.(EnhancementProcessor)
 	if !ok {
 		return fmt.Errorf("%w: enhancement processor capability is unavailable", ErrUnavailable)
 	}
-	target, claimed, err := w.beginEnhancement(ctx, assetVersionID, operationID)
+	target, claimed, err := w.beginEnhancement(ctx, assetVersionID, operationID, intentID)
 	if err != nil || !claimed {
+		// Nothing ran, so nothing is charged. The intent goes back to BACKOFF with
+		// its budget untouched rather than sitting SCHEDULED until its lease
+		// expires — a claim race, or an asset that stopped being eligible, is not
+		// an automatic failure.
+		if intentID != "" && autoRecoveryFailureIsBenign(errOrBenign(err)) {
+			w.releaseIntentAfterBenignOutcome(ctx, assetVersionID, intentID)
+		}
 		return err
 	}
 	probe, err := processor.ProbeExpected(ctx, target.object)
@@ -595,7 +646,7 @@ func (w *Worker) retryEnhancements(ctx context.Context, assetVersionID, operatio
 
 type enhancementTarget struct{ object ObjectVersion }
 
-func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operationID string) (enhancementTarget, bool, error) {
+func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operationID, intentID string) (enhancementTarget, bool, error) {
 	tx, err := w.db.Begin(ctx)
 	if err != nil {
 		return enhancementTarget{}, false, fmt.Errorf("beginning enhancement claim: %w", err)
@@ -653,10 +704,75 @@ func (w *Worker) beginEnhancement(ctx context.Context, assetVersionID, operation
 	if claimed.RowsAffected() != 1 {
 		return target, false, nil
 	}
+	// The intent and the execution are bound in the SAME transaction that took the
+	// claim. So the scheduler row can never name an operation that failed to
+	// acquire the claim, and an automatic claim can never be taken without being
+	// attributable — which is what makes every later outcome reconcilable without
+	// inferring anything from timing.
+	if intentID != "" {
+		if !w.autoRecoveryStateAvailable {
+			return target, false, fmt.Errorf(
+				"%w: automatic enhancement intent requires the schema-45 recovery state", ErrValidation)
+		}
+		if err := linkAutoRecoveryExecution(ctx, tx, assetVersionID, operationID, intentID); err != nil {
+			return target, false, err
+		}
+	} else if w.autoRecoveryStateAvailable {
+		// Manual claim: the operator override. Resets the automatic budget and
+		// supersedes any automatic task still queued, in the same transaction as
+		// the claim so the two can never disagree.
+		if err := overrideAutoRecoveryForManualClaim(ctx, tx, assetVersionID); err != nil {
+			return target, false, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return enhancementTarget{}, false, fmt.Errorf("committing enhancement claim: %w", err)
 	}
+	if intentID != "" {
+		w.observeAutoRecovery(AutoRecoveryObservation{
+			Phase: AutoRecoveryExecutionLinked, AssetVersionID: assetVersionID,
+			IntentID: intentID, OperationID: operationID,
+		})
+	} else if w.autoRecoveryStateAvailable {
+		w.observeAutoRecovery(AutoRecoveryObservation{
+			Phase: AutoRecoveryManualOverride, AssetVersionID: assetVersionID, OperationID: operationID,
+		})
+	}
 	return target, true, nil
+}
+
+// errOrBenign maps "claimed nothing, reported nothing" onto the benign
+// classification. beginEnhancement returns (false, nil) for a lost claim race,
+// which is the same non-event as ErrEnhancementActive.
+func errOrBenign(err error) error {
+	if err == nil {
+		return ErrEnhancementActive
+	}
+	return err
+}
+
+// releaseIntentAfterBenignOutcome returns an unstarted automatic intent to
+// BACKOFF. It runs in its own transaction because the claim transaction has
+// already rolled back, and a failure to release is logged rather than escalated:
+// the intent lease is the backstop, so the worst case is one delayed retry.
+func (w *Worker) releaseIntentAfterBenignOutcome(ctx context.Context, assetVersionID, intentID string) {
+	if !w.autoRecoveryStateAvailable {
+		return
+	}
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	if err := releaseAutoRecoveryIntent(ctx, tx, assetVersionID, intentID); err != nil {
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return
+	}
+	w.observeAutoRecovery(AutoRecoveryObservation{
+		Phase: AutoRecoveryIntentReleased, AssetVersionID: assetVersionID, IntentID: intentID,
+	})
 }
 
 func (w *Worker) beginFinalization(ctx context.Context, assetVersionID, operationID string) error {
@@ -723,9 +839,10 @@ func (w *Worker) completeRecoveryAttempt(ctx context.Context, assetVersionID, op
 	if err := verifyCanonicalRecoveryLadder(ctx, tx, assetVersionID, result.ExpectedRenditions, result.TrustedDurationMS); err != nil {
 		return err
 	}
+	attribution := w.autoRecoveryAttribution()
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, output_prefix, rendition_count, trusted_duration_ms)
-		VALUES ($1::uuid, $2, 'SUCCEEDED', $3::media_processing_attempt_kind, NULLIF($4, ''), $5, $6)
+		INSERT INTO processing_attempts (asset_version_id, operation_id, state, attempt_kind, output_prefix, rendition_count, trusted_duration_ms`+attribution.column+`)
+		VALUES ($1::uuid, $2, 'SUCCEEDED', $3::media_processing_attempt_kind, NULLIF($4, ''), $5, $6`+attribution.value+`)
 		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
 	`, assetVersionID, operationID, attemptKind, outputPrefix, renditionCount, result.TrustedDurationMS); err != nil {
 		return fmt.Errorf("recording successful recovery attempt: %w", err)
@@ -752,8 +869,23 @@ func (w *Worker) completeRecoveryAttempt(ctx context.Context, assetVersionID, op
 	if updated.RowsAffected() != 1 {
 		return ErrConcurrentModification
 	}
+	// READY closes automatic recovery for this Asset Version. It can never be a
+	// candidate again — eligibility requires PLAYABLE — so an outstanding row
+	// would be a false claim. The evidence of what happened stays in
+	// processing_attempts and in the audit log, which is exactly why the
+	// attribution column is not a foreign key to the row being deleted here.
+	if w.autoRecoveryStateAvailable {
+		if err := closeAutoRecoveryOnReady(ctx, tx, assetVersionID); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing recovered media ready state: %w", err)
+	}
+	if w.autoRecoveryStateAvailable {
+		w.observeAutoRecovery(AutoRecoveryObservation{
+			Phase: AutoRecoveryReady, AssetVersionID: assetVersionID, OperationID: operationID,
+		})
 	}
 	return nil
 }
@@ -819,7 +951,11 @@ func (w *Worker) failRecovery(ctx context.Context, assetVersionID, operationID s
 	if spent {
 		return nil
 	}
-	if err := recordFailedProcessingAttempt(ctx, tx, processingFailure{assetVersionID: assetVersionID, operationID: operationID, cause: cause, category: processingFailureCategory(cause), attemptKind: attemptKind}); err != nil {
+	category := processingFailureCategory(cause)
+	if err := recordFailedProcessingAttempt(ctx, tx, processingFailure{
+		assetVersionID: assetVersionID, operationID: operationID, cause: cause,
+		category: category, attemptKind: attemptKind, attribution: w.autoRecoveryAttribution(),
+	}); err != nil {
 		return err
 	}
 	updated, err := tx.Exec(ctx, `
@@ -828,15 +964,32 @@ func (w *Worker) failRecovery(ctx context.Context, assetVersionID, operationID s
 		  work_lease_expires_at=NULL, last_failure_category=$3
 		WHERE id=$1::uuid AND state='PLAYABLE' AND work_claim_token=$2 AND work_lease_expires_at > now()
 		  AND active_processing_attempt_kind=$4::media_processing_attempt_kind
-	`, assetVersionID, operationID, processingFailureCategory(cause), attemptKind)
+	`, assetVersionID, operationID, category, attemptKind)
 	if err != nil {
 		return fmt.Errorf("clearing enhancement claim after failure: %w", err)
 	}
 	if updated.RowsAffected() != 1 {
 		return ErrConcurrentModification
 	}
+	// Reconciled from the ACTUAL linked outcome, keyed by the operation this
+	// failure belongs to. A manual operation matches no scheduler row, and neither
+	// does a superseded or another worker's operation, so none of them can charge
+	// or clear an automatic budget.
+	observation := AutoRecoveryObservation{}
+	if w.autoRecoveryStateAvailable && !autoRecoveryFailureIsBenign(cause) {
+		observation, err = reconcileAutoRecoveryFailure(ctx, tx, autoRecoveryOutcome{
+			assetVersionID: assetVersionID, operationID: operationID, category: category,
+			permanent: autoRecoveryFailureIsPermanent(cause, category),
+		})
+		if err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing enhancement failure: %w", err)
+	}
+	if observation.Phase != "" {
+		w.observeAutoRecovery(observation)
 	}
 	_, _ = w.CleanupAttemptSafe(ctx, assetVersionID, operationID)
 	return cause
@@ -1661,6 +1814,11 @@ type processingFailure struct {
 	cause          error
 	category       failureCategory
 	attemptKind    string
+	// attribution names the automatic recovery intent this attempt executed, when
+	// the schema can hold it. It is resolved from the authoritative link inside
+	// the INSERT, because processing_attempts is append-only and the value cannot
+	// be added afterwards.
+	attribution autoRecoveryAttribution
 }
 
 func recordFailedProcessingAttempt(ctx context.Context, tx pgx.Tx, failure processingFailure) error {
@@ -1671,8 +1829,8 @@ func recordFailedProcessingAttempt(ctx context.Context, tx pgx.Tx, failure proce
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO processing_attempts (
-			asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason
-		) VALUES ($1::uuid, $2, 'FAILED', $3::media_processing_attempt_kind, 0, $4)
+			asset_version_id, operation_id, state, attempt_kind, rendition_count, error_reason`+failure.attribution.column+`
+		) VALUES ($1::uuid, $2, 'FAILED', $3::media_processing_attempt_kind, 0, $4`+failure.attribution.value+`)
 		ON CONFLICT (asset_version_id, operation_id) DO NOTHING
 	`, failure.assetVersionID, failure.operationID, attemptKind, reason); err != nil {
 		return fmt.Errorf("recording processing failure: %w", err)
