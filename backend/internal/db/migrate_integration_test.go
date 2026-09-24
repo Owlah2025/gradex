@@ -700,9 +700,13 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 	if AutoDeviceReplacementSchemaVersion != ActiveProcessingKindSchemaVersion+1 {
 		t.Fatalf("automatic device replacement schema = %d, want 43", AutoDeviceReplacementSchemaVersion)
 	}
-	if MaxSchemaVersion != AutoDeviceReplacementSchemaVersion {
+	if DirectPurchaseAccessGrantSchemaVersion != AutoDeviceReplacementSchemaVersion+1 {
+		t.Fatalf("direct purchase access grant schema = %d, want one past automatic device replacement %d",
+			DirectPurchaseAccessGrantSchemaVersion, AutoDeviceReplacementSchemaVersion)
+	}
+	if MaxSchemaVersion != DirectPurchaseAccessGrantSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, AutoDeviceReplacementSchemaVersion)
+			MaxSchemaVersion, DirectPurchaseAccessGrantSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",
@@ -1939,17 +1943,107 @@ func TestCourseAccessGrantSchemaInvariants(t *testing.T) {
 		 VALUES ($1, 'COURSE', $2, $2, 'MANUAL_INVITATION', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
 		adminAccountID, courseID,
 	)
-	assertConstraintViolation(t, pool, ctx, "ent_purchase_needs_invitation",
-		`INSERT INTO entitlements
-		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
-		 VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', NULL, now() + interval '1 day', now() + interval '1 day', now())`,
-		adminAccountID, courseID,
-	)
+	// 0044 replaced ent_purchase_needs_invitation with ent_purchase_source_valid.
+	// The rule is no longer "a purchase Entitlement needs an invitation"; it is
+	// "a purchase Entitlement carries exactly one provenance". Both directions
+	// are asserted, because the whole point of the constraint is that the
+	// lineage of a granted Entitlement is never ambiguous and never absent.
+	assertCourseAccessGrantPurchaseProvenance(t, pool, ctx, adminAccountID, courseID, invID1)
 
 	// 5. Verification that courses.default_access_ends_at column exists.
 	if _, err := pool.Exec(ctx, `UPDATE courses SET default_access_ends_at = now() + interval '30 days' WHERE id = $1`, courseID); err != nil {
 		t.Fatalf("updating default_access_ends_at: %v", err)
 	}
+}
+
+// assertCourseAccessGrantPurchaseProvenance pins the schema-44 provenance
+// contract for grant_source = 'PURCHASE_REQUEST'. It is a separate helper only
+// because it needs a real purchase_requests row, which the surrounding
+// constraint assertions do not.
+func assertCourseAccessGrantPurchaseProvenance(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	ctx context.Context,
+	adminAccountID string,
+	courseID string,
+	invitationID string,
+) {
+	t.Helper()
+
+	// Neither provenance: still refused, exactly as schema 43 refused it, but
+	// now by name ent_purchase_source_valid.
+	assertConstraintViolation(t, pool, ctx, "ent_purchase_source_valid",
+		`INSERT INTO entitlements
+		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, source_purchase_request_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		 VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', NULL, NULL, now() + interval '1 day', now() + interval '1 day', now())`,
+		adminAccountID, courseID,
+	)
+
+	// A directly granted COURSE purchase request: payment confirmation and the
+	// expiry snapshot are mandatory, the invitation is not. This row is the
+	// shape 0044 exists to permit, so the insert must succeed.
+	var directRequestID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO purchase_requests
+		  (reference_code, target_kind, course_id, email, normalized_email, requester_account_id,
+		   course_title_ar, course_title_en, price_minor_units, currency, state,
+		   payment_confirmed_by_account_id, payment_confirmed_at, access_ends_at_snapshot, access_granted_at)
+		VALUES ('PR-S44-DIRECT', 'COURSE', $1, 'Direct@Example.com', 'direct@example.com', $2,
+		        'دورة', 'Course', 1000, 'KWD', 'ACCESS_GRANTED',
+		        $2, now(), now() + interval '1 day', now())
+		RETURNING id::text
+	`, courseID, adminAccountID).Scan(&directRequestID); err != nil {
+		t.Fatalf("creating a directly granted COURSE purchase request: %v", err)
+	}
+
+	// Both provenances at once: refused. "Exactly one" is the contract, so a row
+	// claiming to come from an invitation and from a purchase request is not a
+	// harmless over-specification, it is an unreadable lineage.
+	assertConstraintViolation(t, pool, ctx, "ent_purchase_source_valid",
+		`INSERT INTO entitlements
+		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, source_purchase_request_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		 VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', $3::uuid, $4::uuid, now() + interval '1 day', now() + interval '1 day', now())`,
+		adminAccountID, courseID, invitationID, directRequestID,
+	)
+
+	// The direct grant itself: accepted. Without this the constraint could be
+	// satisfied by refusing everything.
+	var directEntitlementID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO entitlements
+		  (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, source_purchase_request_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', NULL, $3::uuid, now() + interval '1 day', now() + interval '1 day', now())
+		RETURNING id::text
+	`, adminAccountID, courseID, directRequestID).Scan(&directEntitlementID); err != nil {
+		t.Fatalf("schema 44 refused a direct purchase-backed Entitlement: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM entitlements WHERE id = $1::uuid", directEntitlementID); err != nil {
+		t.Fatalf("clearing the direct purchase Entitlement fixture: %v", err)
+	}
+
+	// The historical invitation-backed shape stays legal: 0044 widens, it does
+	// not migrate live access onto a new representation.
+	var invitedEntitlementID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO entitlements
+		  (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, source_purchase_request_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		VALUES ($1, 'COURSE', $2, $2, 'PURCHASE_REQUEST', $3::uuid, NULL, now() + interval '1 day', now() + interval '1 day', now())
+		RETURNING id::text
+	`, adminAccountID, courseID, invitationID).Scan(&invitedEntitlementID); err != nil {
+		t.Fatalf("schema 44 refused a historical invitation-backed purchase Entitlement: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM entitlements WHERE id = $1::uuid", invitedEntitlementID); err != nil {
+		t.Fatalf("clearing the invitation-backed Entitlement fixture: %v", err)
+	}
+
+	// A grant source that is neither purchase kind still may not carry a
+	// purchase request. 0044 widened PURCHASE_REQUEST only.
+	assertConstraintViolation(t, pool, ctx, "ent_bundle_purchase_source_valid",
+		`INSERT INTO entitlements
+		   (student_account_id, scope_kind, scope_id, course_id, grant_source, source_invitation_id, source_purchase_request_id, original_access_ends_at, access_ends_at, retirement_eligibility_at)
+		 VALUES ($1, 'COURSE', $2, $2, 'MANUAL_INVITATION', $3::uuid, $4::uuid, now() + interval '1 day', now() + interval '1 day', now())`,
+		adminAccountID, courseID, invitationID, directRequestID,
+	)
 }
 
 func TestPre0015EntitlementMigrationAndConstraints(t *testing.T) {
