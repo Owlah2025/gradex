@@ -260,6 +260,12 @@ func instructorAuditScenarios() map[string]instructorAuditScenario {
 		}, status: http.StatusOK, action: "LESSON_UPDATED", targetType: "LESSON"},
 		http.MethodDelete + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId":    {prepare: prepareAuditLesson, body: emptyAuditBody, status: http.StatusNoContent, action: "LESSON_DELETED", targetType: "LESSON"},
 		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video": {prepare: prepareAuditLesson, body: func(f *privilegedAuditFixture) string { return fmt.Sprintf(`{"video_asset_version_id":%q}`, f.videoID) }, status: http.StatusOK, action: "LESSON_VIDEO_ATTACHED", targetType: "LESSON"},
+		// Offering a Lesson free is publication, so it leaves the same auditable
+		// trace every other candidate mutation does. The Lesson needs its video
+		// first: the route refuses to open a Lesson that has nothing to show.
+		http.MethodPut + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/public-preview": {prepare: prepareAuditLessonWithVideo, body: func(*privilegedAuditFixture) string {
+			return `{"allow_public_preview":true}`
+		}, status: http.StatusOK, action: "LESSON_PUBLIC_PREVIEW_ALLOWED", targetType: "LESSON"},
 		http.MethodPost + " /api/v1/courses/:id/revisions/:revisionId/lessons/:lessonId/video/upload-completions": {prepare: prepareAuditLessonVideoUpload, body: func(f *privilegedAuditFixture) string {
 			return fmt.Sprintf(
 				`{"asset_version_id":%q,"provider_event_id":%q,"storage_object_key":%q,"storage_object_version":"fixture-v1","content_type":"video/mp4","size_bytes":1024,"sha256_hex":%q}`,
@@ -556,6 +562,19 @@ func prepareAuditLesson(t *testing.T, f *privilegedAuditFixture) {
 		t.Fatalf("creating audit lesson: %v", err)
 	}
 	f.lessonID = lesson.LessonIdentityID
+}
+
+// prepareAuditLessonWithVideo gives the audited Lesson the video the public
+// preview route requires before it will open it.
+func prepareAuditLessonWithVideo(t *testing.T, f *privilegedAuditFixture) {
+	t.Helper()
+	prepareAuditLesson(t, f)
+	if _, err := f.repo.SetLessonVideo(f.ctx, catalog.NewDBAssetVersionValidator(f.pool), catalog.SetVideoRequest{
+		CourseID: f.courseID, RevisionID: f.revisionID, LessonID: f.lessonID,
+		VideoAssetVersionID: f.videoID, OwnerAccountID: f.instructorID,
+	}, f.instructorID); err != nil {
+		t.Fatalf("attaching the audited Lesson video: %v", err)
+	}
 }
 
 func prepareAuditLessonVideoUpload(t *testing.T, f *privilegedAuditFixture) {
