@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Owlah2025/gradex/backend/internal/db"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
@@ -130,7 +131,7 @@ func TestDirectPurchaseGrantMigrationWidensWithoutLosingHistoricalShapes(t *test
 	// 6. Rolling back underneath live direct-grant data is refused rather than
 	//    silently dropping access that schema 43 cannot represent.
 	pool.Close()
-	downErr := migrator.Steps(-1)
+	downErr := migrator.Migrate(uint(db.AutoDeviceReplacementSchemaVersion))
 	if downErr == nil {
 		t.Fatalf("0044 rolled back while a direct purchase entitlement existed")
 	}
@@ -147,7 +148,7 @@ func TestDirectPurchaseGrantMigrationRollsBackWhenUnused(t *testing.T) {
 	pool, migrator := freshDirectGrantDatabase(t, ctx)
 	pool.Close()
 
-	if err := migrator.Steps(-1); err != nil {
+	if err := migrator.Migrate(uint(db.AutoDeviceReplacementSchemaVersion)); err != nil {
 		t.Fatalf("rolling back an unused 0044: %v", err)
 	}
 	verify, err := pgxpool.New(ctx, directGrantDSN)
@@ -207,8 +208,16 @@ func freshDirectGrantDatabase(t *testing.T, ctx context.Context) (*pgxpool.Pool,
 		t.Fatalf("opening migrator: %v", err)
 	}
 	t.Cleanup(func() { _, _ = m.Close() })
-	if err := m.Up(); err != nil {
-		t.Fatalf("migrating up: %v", err)
+	// Staged at EXACTLY 44, not at the head. These tests assert the 0044
+	// boundary, and a head-staged fixture retargets itself onto whichever
+	// migration landed last — which is how the schema-41 and schema-42 rollback
+	// fixtures came to be staged at 43 and 44 while still asserting 41 and 42.
+	if err := m.Migrate(uint(db.DirectPurchaseAccessGrantSchemaVersion)); err != nil {
+		t.Fatalf("staging schema 44: %v", err)
+	}
+	if version, dirty, err := m.Version(); err != nil || version != uint(db.DirectPurchaseAccessGrantSchemaVersion) || dirty {
+		t.Fatalf("staged schema = version=%d dirty=%t err=%v, want clean %d",
+			version, dirty, err, db.DirectPurchaseAccessGrantSchemaVersion)
 	}
 	pool, err := pgxpool.New(ctx, directGrantDSN)
 	if err != nil {

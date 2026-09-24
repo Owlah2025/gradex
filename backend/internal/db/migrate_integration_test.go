@@ -704,9 +704,17 @@ func TestMaxSchemaVersionTracksCurrentSchema(t *testing.T) {
 		t.Fatalf("direct purchase access grant schema = %d, want one past automatic device replacement %d",
 			DirectPurchaseAccessGrantSchemaVersion, AutoDeviceReplacementSchemaVersion)
 	}
-	if MaxSchemaVersion != DirectPurchaseAccessGrantSchemaVersion {
+	if AutoEnhancementRecoverySchemaVersion != DirectPurchaseAccessGrantSchemaVersion+1 {
+		t.Fatalf("automatic enhancement recovery schema = %d, want one past the direct purchase grant %d",
+			AutoEnhancementRecoverySchemaVersion, DirectPurchaseAccessGrantSchemaVersion)
+	}
+	if LessonPublicPreviewSchemaVersion != AutoEnhancementRecoverySchemaVersion+1 {
+		t.Fatalf("lesson public preview schema = %d, want one past automatic enhancement recovery %d",
+			LessonPublicPreviewSchemaVersion, AutoEnhancementRecoverySchemaVersion)
+	}
+	if MaxSchemaVersion != LessonPublicPreviewSchemaVersion {
 		t.Fatalf("MaxSchemaVersion = %d, want current schema %d",
-			MaxSchemaVersion, DirectPurchaseAccessGrantSchemaVersion)
+			MaxSchemaVersion, LessonPublicPreviewSchemaVersion)
 	}
 	if MailpitEmailSchemaVersion != EmailActivationSchemaVersion+1 {
 		t.Fatalf("Mailpit email schema = %d, want one past email activation %d",

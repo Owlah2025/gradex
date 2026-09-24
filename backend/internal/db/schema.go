@@ -69,7 +69,16 @@ const (
 	// Admin payment confirmation can grant access directly, with no invitation.
 	// Expand-only: every schema-43 row shape remains valid.
 	DirectPurchaseAccessGrantSchemaVersion = AutoDeviceReplacementSchemaVersion + 1
-	MaxSchemaVersion                       = DirectPurchaseAccessGrantSchemaVersion
+	// Phase 3C-C: durable automatic enhancement recovery state, plus nullable
+	// attribution on processing attempts. Representation and scheduler state
+	// only; the producer ships disabled behind
+	// MEDIA_AUTO_ENHANCEMENT_RECOVERY_ENABLED in every environment.
+	AutoEnhancementRecoverySchemaVersion = DirectPurchaseAccessGrantSchemaVersion + 1
+	// Revision-scoped Lesson public preview intent. One nullable-by-default
+	// BOOLEAN on course_lessons; the legacy course-level preview pointer, its
+	// PREVIEW assets and its renditions are untouched and keep serving.
+	LessonPublicPreviewSchemaVersion = AutoEnhancementRecoverySchemaVersion + 1
+	MaxSchemaVersion                 = LessonPublicPreviewSchemaVersion
 )
 
 // schemaMigrationsTable is golang-migrate's bookkeeping table. cmd/migrate
