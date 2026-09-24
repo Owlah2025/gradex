@@ -24,6 +24,10 @@
 >   [design](../lesson-public-preview.md)). Anonymous visitors watch the same
 >   canonical renditions a paying Student watches, over a distinct token domain,
 >   `READY` only. The legacy course-level preview is untouched and keeps serving.
+>   Proven end to end on the media stack: the `lesson-public-preview` journey runs
+>   a real upload and transcode, an Instructor offer, an Admin approval, and a
+>   browser with no cookies decoding real frames. The full media-authoring suite is
+>   8/8.
 > - **Schema-46 rollback-compatible application artifact**
 >   ([`deploy/schema46/`](../../deploy/schema46/README.md)), derived from
 >   `0fee657`, verified end to end.

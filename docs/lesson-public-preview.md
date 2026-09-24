@@ -186,5 +186,13 @@ three UI surfaces in `frontend/src/components`. The decision is recorded as
 and the operator posture in the
 [runbook](launch/RUNBOOK.md#public-preview--the-lesson-model-and-the-legacy-path).
 
+It is proven end to end by `frontend/e2e/media-authoring/lesson-public-preview.spec.ts`
+on the media stack — real MinIO, a real worker, real ffmpeg — from an Instructor
+offering a Lesson free to a browser with no cookies decoding real frames. That
+journey is what caught the one defect the integration suite could not see: the
+issued manifest URL named a path the router did not serve, which produced a valid
+authorization, an attached player, and a video that never started, with no error
+anywhere to read.
+
 **Not deployed.** The legacy course-level preview remains live in production and
 is untouched by this work.
